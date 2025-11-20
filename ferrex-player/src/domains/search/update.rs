@@ -6,7 +6,9 @@ use std::time::Instant;
 
 use super::messages::Message;
 use super::types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy};
-use crate::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use crate::common::messages::{
+    CrossDomainEvent, DomainMessage, DomainUpdateResult,
+};
 use crate::domains::ui::{messages as ui_messages, windows::focus};
 use crate::infra::constants::layout::search as search_layout;
 use crate::state::State;
@@ -80,12 +82,15 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             state.domains.search.state.clear();
 
             let navigation_task =
-                Task::perform(async move { event }, |event| DomainMessage::Event(event));
+                Task::perform(async move { event }, |event| {
+                    DomainMessage::Event(event)
+                });
             DomainUpdateResult::task(Task::batch([
                 navigation_task,
-                Task::done(DomainMessage::Ui(ui_messages::Message::CloseSearchWindow)),
+                Task::done(DomainMessage::Ui(
+                    ui_messages::Message::CloseSearchWindow,
+                )),
             ]))
-        }
         }
 
         Message::LoadMore => {
@@ -132,9 +137,13 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             let selected_media = {
                 let search_state = &mut state.domains.search.state;
 
-                let result = if let Some(selected) = search_state.get_selected().cloned() {
+                let result = if let Some(selected) =
+                    search_state.get_selected().cloned()
+                {
                     Some(selected)
-                } else if let Some(first) = search_state.results.first().cloned() {
+                } else if let Some(first) =
+                    search_state.results.first().cloned()
+                {
                     search_state.selected_index = Some(0);
                     Some(first)
                 } else {
@@ -150,7 +159,9 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
                 let mut result = handle_select_result(state, media_ref);
                 result.task = Task::batch([
                     result.task,
-                    Task::done(DomainMessage::Ui(ui_messages::Message::CloseSearchWindow)),
+                    Task::done(DomainMessage::Ui(
+                        ui_messages::Message::CloseSearchWindow,
+                    )),
                 ]);
                 result
             } else {
@@ -167,7 +178,9 @@ pub fn update(state: &mut State, message: Message) -> DomainUpdateResult {
             } else {
                 {
                     let search_state = &mut state.domains.search.state;
-                    if search_state.selected_index.is_none() && !search_state.results.is_empty() {
+                    if search_state.selected_index.is_none()
+                        && !search_state.results.is_empty()
+                    {
                         search_state.selected_index = Some(0);
                     }
                     search_state.escape_pending = true;
@@ -441,8 +454,8 @@ fn scroll_selected_into_view(state: &mut State) -> Task<DomainMessage> {
     }
 
     let row_pitch = row_height + row_spacing;
-    let mut content_height =
-        row_height * (total as f32) + row_spacing * (total.saturating_sub(1) as f32);
+    let mut content_height = row_height * (total as f32)
+        + row_spacing * (total.saturating_sub(1) as f32);
 
     if search_state.total_results > 0 {
         content_height += row_spacing + search_layout::RESULTS_FOOTER_HEIGHT;

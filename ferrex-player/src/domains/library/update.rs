@@ -54,11 +54,7 @@ pub fn update_library(
                 super::update_handlers::library_loaded::handle_libraries_loaded(
                     state, result,
                 );
-            let domain_tasks = Task::batch(vec![
-                task.map(DomainMessage::Library),
-                state.schedule_check_scroll_stopped(),
-            ]);
-            DomainUpdateResult::task(domain_tasks)
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
         Message::LoadLibraries => {
@@ -213,12 +209,36 @@ pub fn update_library(
         Message::DemoSizingApplied(result) => {
             state.domains.library.state.demo_controls.is_updating = false;
             match result {
-                Ok(status) => apply_demo_status(state, status),
+                Ok(status) => {
+                    // Update UI/control state from returned status
+                    apply_demo_status(state, status.clone());
+
+                    // After resetting demo data, trigger fresh scans for all
+                    // registered demo libraries so the user can explore the
+                    // new seed without restarting the server.
+                    let mut tasks: Vec<Task<Message>> = Vec::new();
+                    for lib in status.libraries {
+                        tasks.push(
+                            super::update_handlers::scan_updates::handle_scan_library(
+                                state,
+                                lib.library_id,
+                            ),
+                        );
+                    }
+
+                    if tasks.is_empty() {
+                        DomainUpdateResult::task(Task::none())
+                    } else {
+                        DomainUpdateResult::task(
+                            Task::batch(tasks).map(DomainMessage::Library),
+                        )
+                    }
+                }
                 Err(err) => {
                     state.domains.library.state.demo_controls.error = Some(err);
+                    DomainUpdateResult::task(Task::none())
                 }
             }
-            DomainUpdateResult::task(Task::none())
         }
 
         Message::FetchScanMetrics => {
@@ -570,120 +590,50 @@ pub fn update_library(
 
         // Media events from server
         Message::MediaDiscovered(references) => {
-            if references.is_empty() {
-                return DomainUpdateResult::task(Task::none());
-            }
+            use super::update_handlers::media_events::{
+                apply_media_discovered, build_children_changed_events,
+            };
 
-            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
-            let mut inline_additions: HashMap<LibraryID, Vec<Media>> =
-                HashMap::new();
+            let outcome = apply_media_discovered(state, references);
 
-            for media in references {
-                let Some(library_id) = media_library_id(&media) else {
-                    log::warn!("Discovered media missing library id; skipping");
-                    continue;
-                };
-
-                if let Some(request) = image_request_for_media(&media) {
-                    state
-                        .domains
-                        .metadata
-                        .state
-                        .image_service
-                        .flag_flip_once(&request);
-                }
-
-                let inline_candidate = match &media {
-                    Media::Movie(_) | Media::Series(_) => Some(media.clone()),
-                    _ => None,
-                };
-
-                let media_uuid = media.media_id().to_uuid();
-
-                match state
-                    .domains
-                    .library
-                    .state
-                    .repo_accessor
-                    .upsert(media, &library_id)
-                {
-                    Ok(()) => {
-                        touched_libraries.insert(library_id);
-                        if let Some(candidate) = inline_candidate {
-                            inline_additions
-                                .entry(library_id)
-                                .or_default()
-                                .push(candidate);
-                        }
-                    }
-                    Err(err) => {
-                        log::error!(
-                            "Failed to upsert discovered media {} in library {}: {}",
-                            media_uuid,
-                            library_id,
-                            err
-                        );
-                    }
-                }
-            }
-
-            let inline_updated =
-                apply_discovered_media_to_tabs(state, &inline_additions);
-            let refreshed = mark_tabs_after_media_changes(
+            // Inline additions only for Movies/Series in the active grid
+            let inline_updated = apply_discovered_media_to_tabs(
                 state,
-                &touched_libraries,
+                &outcome.inline_additions,
+            );
+
+            mark_tabs_after_media_changes(
+                state,
+                &outcome.touched_libraries,
                 &inline_updated,
             );
 
-            let should_trigger = !inline_updated.is_empty() || refreshed;
-            let task = if should_trigger {
-                state.schedule_check_scroll_stopped()
-            } else {
-                Task::none()
-            };
+            // Build targeted UI events for series/season children
+            let ui_events = build_children_changed_events(
+                &outcome.affected_series,
+                &outcome.affected_seasons,
+            );
 
-            DomainUpdateResult::task(task)
+            DomainUpdateResult::with_events(Task::none(), ui_events)
         }
 
         Message::MediaUpdated(media) => {
-            let Some(library_id) = media_library_id(&media) else {
-                log::warn!("Updated media missing library id; skipping");
-                return DomainUpdateResult::task(Task::none());
+            use super::update_handlers::media_events::{
+                apply_media_updated, build_children_changed_events,
             };
 
-            let media_uuid = media.media_id().to_uuid();
+            // Apply update to repo and collect affected parents
+            let outcome = apply_media_updated(state, media);
 
-            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+            refresh_tabs_for_libraries(state, &outcome.touched_libraries);
 
-            match state
-                .domains
-                .library
-                .state
-                .repo_accessor
-                .upsert(media, &library_id)
-            {
-                Ok(()) => {
-                    touched_libraries.insert(library_id);
-                }
-                Err(err) => {
-                    log::error!(
-                        "Failed to apply media update {} in library {}: {}",
-                        media_uuid,
-                        library_id,
-                        err
-                    );
-                }
-            }
+            // Build targeted UI events for series/season children
+            let ui_events = build_children_changed_events(
+                &outcome.affected_series,
+                &outcome.affected_seasons,
+            );
 
-            let refreshed =
-                refresh_tabs_for_libraries(state, &touched_libraries);
-            let task = if refreshed {
-                state.schedule_check_scroll_stopped()
-            } else {
-                Task::none()
-            };
-
-            DomainUpdateResult::task(task)
+            DomainUpdateResult::with_events(Task::none(), ui_events)
         }
 
         Message::MediaDeleted(id) => {
@@ -713,15 +663,8 @@ pub fn update_library(
                 }
             }
 
-            let refreshed =
-                refresh_tabs_for_libraries(state, &touched_libraries);
-            let task = if refreshed {
-                state.schedule_check_scroll_stopped()
-            } else {
-                Task::none()
-            };
-
-            DomainUpdateResult::task(task)
+            refresh_tabs_for_libraries(state, &touched_libraries);
+            DomainUpdateResult::task(Task::none())
         }
 
         // Note: _EmitCrossDomainEvent variant has been removed

@@ -428,6 +428,8 @@ struct ScanRunState {
     quiescence_started_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
     item_states: HashMap<String, ScanItemState>,
+    // Count of successful indexed media per folder path
+    index_successes_by_folder: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -545,6 +547,7 @@ impl ScanRun {
                 quiescence_started_at: None,
                 last_error: None,
                 item_states: HashMap::new(),
+                index_successes_by_folder: HashMap::new(),
             }),
             tx,
             inner: Arc::downgrade(&inner),
@@ -615,6 +618,132 @@ impl ScanRun {
         for frame in frames {
             self.emit_frame(frame.event, frame.payload).await;
         }
+    }
+
+    /// Record an index outcome (success/failure) for a given media file path.
+    /// Successful outcomes are attributed to the parent folder of the file and
+    /// used to verify folder-level scan completion reflects actual matches.
+    async fn record_index_outcome(&self, file_path_norm: &str, success: bool) {
+        if !success {
+            return;
+        }
+
+        let file_path = std::path::Path::new(file_path_norm);
+        let mut state = self.state.lock().await;
+
+        // Gather scanned folder paths
+        let mut scanned: Vec<String> = Vec::new();
+        for item in state.item_states.values() {
+            if let Some(path) = &item.path_key {
+                scanned.push(path.clone());
+            }
+        }
+
+        if scanned.is_empty() {
+            return;
+        }
+
+        // Find the deepest scanned ancestor of the file
+        let mut best: Option<String> = None;
+        for folder in &scanned {
+            let folder_path = std::path::Path::new(folder);
+            if file_path.starts_with(folder_path) {
+                match &best {
+                    Some(current) => {
+                        if folder.len() > current.len() {
+                            best = Some(folder.clone());
+                        }
+                    }
+                    None => best = Some(folder.clone()),
+                }
+            }
+        }
+
+        // If nothing matches, bail (should be rare)
+        let Some(mut chosen) = best else {
+            tracing::debug!(
+                target: "scan::state",
+                scan = %self.scan_id,
+                library = %self.library_id,
+                path = %file_path_norm,
+                "no scanned ancestor found for indexed file"
+            );
+            return;
+        };
+
+        // Helper: identify non-entity folders to skip (seasons/extras)
+        let is_non_entity_folder = |name: &str| {
+            let lower = name.to_ascii_lowercase();
+            // Extras-like
+            if lower == "extras"
+                || lower == "featurettes"
+                || lower == "behind the scenes"
+                || lower == "specials"
+                || lower == "special"
+            {
+                return true;
+            }
+            // Season-like
+            if lower.starts_with("season ") {
+                return true;
+            }
+            // S01, S1, s1 etc.
+            if lower.len() >= 2 && lower.starts_with('s') {
+                let rest = &lower[1..];
+                if rest.chars().all(|c| c.is_ascii_digit()) {
+                    return true;
+                }
+            }
+            false
+        };
+
+        // If the deepest scanned folder is season/extras-like, walk up to a scanned parent
+        // that looks like an entity root (movie/series folder).
+        if let Some(name) = std::path::Path::new(&chosen)
+            .file_name()
+            .and_then(|s| s.to_str())
+        {
+            if is_non_entity_folder(name) {
+                let mut cur = std::path::Path::new(&chosen).parent();
+                while let Some(dir) = cur {
+                    if let Some(dir_str) = dir.to_str() {
+                        if scanned.iter().any(|s| s == dir_str) {
+                            // Check if this parent is still non-entity; if so, continue walking up
+                            let parent_name = dir
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("");
+                            if !is_non_entity_folder(parent_name) {
+                                chosen = dir_str.to_string();
+                                break;
+                            }
+                        }
+                    }
+                    cur = dir.parent();
+                }
+            }
+        }
+
+        // Credit the chosen entity root folder
+        let entry = state
+            .index_successes_by_folder
+            .entry(chosen.clone())
+            .or_insert(0);
+        *entry = entry.saturating_add(1);
+
+        // Treat this as activity so quiescence waits for indexing to settle
+        state.current_path = Some(chosen.clone());
+        state.path_key = Some(chosen.clone());
+        state.last_activity_at = Some(chrono::Utc::now());
+
+        tracing::debug!(
+            target: "scan::state",
+            scan = %self.scan_id,
+            library = %self.library_id,
+            file = %file_path_norm,
+            credited_folder = %chosen,
+            "credited match to entity root folder"
+        );
     }
 
     async fn pause(
@@ -1094,11 +1223,31 @@ impl ScanRun {
                             (Some(_), None) => true,
                             _ => true,
                         };
+
                         if no_new_activity {
-                            frame = state.handle_state_event(
-                                ScanStateEvent::QuiescenceComplete,
-                                now,
-                            );
+                            // Final pass: demote unmatched root items before completing.
+                            let demoted = state
+                                .demote_completed_without_index_matches(now);
+                            if demoted > 0 {
+                                // Emit updated progress and extend quiescence window
+                                let progress = state.build_payload();
+                                frame = Some(QueuedFrame {
+                                    event: ScanEventKind::Progress,
+                                    payload: progress,
+                                });
+                                tracing::info!(
+                                    target: "scan::summary",
+                                    scan = %state.scan_id,
+                                    library = %state.library_id,
+                                    demoted,
+                                    "demoted unmatched root folders prior to completion"
+                                );
+                            } else {
+                                frame = state.handle_state_event(
+                                    ScanStateEvent::QuiescenceComplete,
+                                    now,
+                                );
+                            }
                         }
                     }
                 }
@@ -1206,6 +1355,43 @@ impl ScanRun {
             .unwrap_or_else(|| Duration::from_secs(0))
             >= guard.min_interval;
 
+        let (root_completed, root_total) = {
+            let state = self.state.lock().await;
+            // Build set of scanned paths
+            let mut scanned_paths: HashSet<String> = HashSet::new();
+            for item in state.item_states.values() {
+                if let Some(p) = &item.path_key {
+                    scanned_paths.insert(p.clone());
+                }
+            }
+            let is_root = |path: &str| {
+                let mut cur = std::path::Path::new(path).parent();
+                while let Some(dir) = cur {
+                    if let Some(dir_str) = dir.to_str() {
+                        if scanned_paths.contains(dir_str) {
+                            return false;
+                        }
+                    }
+                    cur = dir.parent();
+                }
+                true
+            };
+
+            let mut roots_total = 0u64;
+            let mut roots_completed = 0u64;
+            for item in state.item_states.values() {
+                if let Some(p) = &item.path_key {
+                    if is_root(p) {
+                        roots_total += 1;
+                        if matches!(item.status, ScanItemStatus::Completed) {
+                            roots_completed += 1;
+                        }
+                    }
+                }
+            }
+            (roots_completed, roots_total)
+        };
+
         if force
             || interval_elapsed
             || advanced_items >= guard.item_step
@@ -1221,6 +1407,8 @@ impl ScanRun {
                 retrying = payload.retrying_items.unwrap_or(0),
                 dead_lettered = payload.dead_lettered_items.unwrap_or(0),
                 pct = pct,
+                root_completed = root_completed,
+                root_total = root_total,
                 path = ?payload.current_path,
                 "scan progress"
             );
@@ -1524,6 +1712,91 @@ impl ScanRunState {
             }
             ScanPhase::Initializing => None,
         }
+    }
+
+    fn demote_completed_without_index_matches(
+        &mut self,
+        now: DateTime<Utc>,
+    ) -> usize {
+        let mut to_demote: Vec<(String, Option<String>)> = Vec::new();
+
+        // Build a set of all tracked folder paths to detect root-level items
+        let mut scanned_paths: HashSet<String> = HashSet::new();
+        for item in self.item_states.values() {
+            if let Some(p) = &item.path_key {
+                scanned_paths.insert(p.clone());
+            }
+        }
+
+        // Helper to check whether a scanned path has any scanned ancestor
+        let is_root_item = |path: &str| -> bool {
+            let mut cur = std::path::Path::new(path).parent();
+            while let Some(dir) = cur {
+                if let Some(dir_str) = dir.to_str() {
+                    if scanned_paths.contains(dir_str) {
+                        return false;
+                    }
+                }
+                cur = dir.parent();
+            }
+            true
+        };
+
+        for (idempotency, item) in self.item_states.iter() {
+            if !matches!(item.status, ScanItemStatus::Completed) {
+                continue;
+            }
+            let Some(path) = item.path_key.as_ref() else {
+                continue;
+            };
+            // Only demote root-level scanned folders based on matching status
+            if !is_root_item(path) {
+                continue;
+            }
+            let success_count = self
+                .index_successes_by_folder
+                .get(path)
+                .cloned()
+                .unwrap_or(0);
+            if success_count == 0 {
+                to_demote.push((idempotency.clone(), Some(path.clone())));
+            }
+        }
+
+        let mut changed = 0usize;
+        let mut last_path: Option<String> = None;
+        for (idempotency, path) in to_demote {
+            let updated = self.update_item_status(
+                &idempotency,
+                None,
+                ScanItemStatus::DeadLettered,
+                now,
+                path.clone(),
+                Some("no_root_match".to_string()),
+            );
+            if updated {
+                tracing::info!(
+                    target: "scan::state",
+                    scan = %self.scan_id,
+                    library = %self.library_id,
+                    idempotency = %idempotency,
+                    path = ?path,
+                    "demoted folder completion due to zero indexed media"
+                );
+                changed += 1;
+                if let Some(p) = path {
+                    last_path = Some(p);
+                }
+            }
+        }
+
+        if changed > 0 {
+            self.current_path = last_path.clone();
+            self.path_key = last_path;
+            self.last_activity_at = Some(now);
+        }
+
+        changed
     }
 
     fn build_payload(&mut self) -> ScanProgressEvent {
@@ -1954,10 +2227,31 @@ impl ScanRunAggregatorInner {
     }
 
     async fn handle_scan_event(&self, event: ScanEvent) {
-        if let ScanEvent::Indexed(outcome) = event
-            && let Err(err) = self.handle_indexed_outcome(*outcome).await
-        {
-            warn!("failed to process indexed outcome: {err}");
+        if let ScanEvent::Indexed(outcome) = event {
+            let outcome = *outcome;
+            let ok = self.handle_indexed_outcome(outcome.clone()).await.is_ok();
+
+            // Attribute index outcome to any active runs for this library
+            let runs: Vec<Arc<ScanRun>> = {
+                let guard = self.runs.read().await;
+                guard
+                    .values()
+                    .filter(|r| r.library_id() == outcome.library_id)
+                    .cloned()
+                    .collect()
+            };
+
+            for run in runs {
+                run.record_index_outcome(&outcome.path_norm, ok).await;
+            }
+
+            if !ok {
+                warn!(
+                    library = %outcome.library_id,
+                    path = %outcome.path_norm,
+                    "failed to process indexed outcome: missing media reference"
+                );
+            }
         }
     }
 

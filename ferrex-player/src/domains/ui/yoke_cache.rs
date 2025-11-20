@@ -37,6 +37,15 @@ impl<Y> YokeCache<Y> {
         inner.lru.clear();
     }
 
+    /// Remove a specific cached item by id, if present
+    pub fn remove(&self, id: &Uuid) {
+        let mut inner = self.inner.write();
+        inner.map.remove(id);
+        if let Some(pos) = inner.lru.iter().position(|x| x == id) {
+            inner.lru.remove(pos);
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.inner.read().map.len()
     }

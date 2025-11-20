@@ -1,3 +1,4 @@
+use crate::domains::metadata::demand_planner::DemandSnapshot;
 #[cfg(feature = "demo")]
 use crate::domains::ui::update_handlers::demo_controls;
 use crate::{
@@ -28,9 +29,7 @@ use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 use std::time::Instant;
 
-/// Check if user has PIN - returns a task that sends a Settings message
 fn check_user_has_pin() -> DomainUpdateResult {
-    // Send message to Settings domain to check if user has PIN
     DomainUpdateResult::task(Task::done(DomainMessage::Settings(
         crate::domains::settings::messages::Message::CheckUserHasPin,
     )))
@@ -73,10 +72,8 @@ pub fn update_ui(
         ui::Message::SetDisplayMode(display_mode) => {
             state.domains.ui.state.display_mode = display_mode;
 
-            // NEW ARCHITECTURE: Activate appropriate tab in TabManager
             match display_mode {
                 DisplayMode::Curated => {
-                    // Activate the All tab with scroll restoration
                     state.tab_manager.set_active_tab_with_scroll(
                         crate::domains::ui::tabs::TabId::All,
                         &mut state.domains.ui.state.scroll_manager,
@@ -93,14 +90,11 @@ pub fn update_ui(
                     // Show all libraries in curated view
                     state.domains.ui.state.current_library_id = None;
 
-                    // Update AllViewModel for curated view
-                    //state.all_view_model.set_library_filter(None);
                 }
                 DisplayMode::Library => {
                     // Show current library
                     let library_id = state.domains.ui.state.current_library_id;
 
-                    // Activate the library tab if we have a library selected
                     if let Some(lib_id) = library_id {
                         state.tab_manager.set_active_tab_with_scroll(
                             crate::domains::ui::tabs::TabId::Library(lib_id),
@@ -112,6 +106,72 @@ pub fn update_ui(
                             state.domains.ui.state.sort_order,
                         );
                         log::info!("Tab activated: Library({}) (Library mode)", lib_id);
+
+                        if let Some(handle) =
+                            state.domains.metadata.state.planner_handle.as_ref()
+                        {
+                            if let crate::domains::ui::tabs::TabState::Library(
+                                lib_state,
+                            ) = state.tab_manager.active_tab()
+                            {
+                                let now = std::time::Instant::now();
+                                let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+                                let vr =
+                                    lib_state.grid_state.visible_range.clone();
+                                if let Some(slice) =
+                                    lib_state.cached_index_ids.get(vr)
+                                {
+                                    visible_ids
+                                        .extend(slice.iter().copied());
+                                }
+                                let pr = lib_state.grid_state
+                                    .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                                let mut prefetch_ids: Vec<uuid::Uuid> =
+                                    Vec::new();
+                                if let Some(slice) =
+                                    lib_state.cached_index_ids.get(pr)
+                                {
+                                    prefetch_ids
+                                        .extend(slice.iter().copied());
+                                }
+                                prefetch_ids
+                                    .retain(|id| !visible_ids.contains(id));
+                                let br = lib_state.grid_state.get_background_range(
+                                    crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                                    crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                                );
+                                let mut background_ids: Vec<uuid::Uuid> =
+                                    Vec::new();
+                                if let Some(slice) =
+                                    lib_state.cached_index_ids.get(br)
+                                {
+                                    background_ids
+                                        .extend(slice.iter().copied());
+                                }
+                                background_ids.retain(|id| {
+                                    !visible_ids.contains(id)
+                                        && !prefetch_ids.contains(id)
+                                });
+                                let poster_kind = match lib_state.library_type {
+                                    LibraryType::Movies => {
+                                        Some(PosterKind::Movie)
+                                    }
+                                    LibraryType::Series => {
+                                        Some(PosterKind::Series)
+                                    }
+                                };
+                                handle.send(DemandSnapshot {
+                                    visible_ids,
+                                    prefetch_ids,
+                                    background_ids,
+                                    timestamp: now,
+                                    context: None,
+                                    poster_kind,
+                                });
+                            }
+                        }
+
+                        return DomainUpdateResult::task(Task::none());
                     }
 
                     // Update AllViewModel with library filter
@@ -129,12 +189,28 @@ pub fn update_ui(
             // NEW ARCHITECTURE: Also refresh the active tab
             state.tab_manager.refresh_active_tab();
 
-            // Ensure all domains (including Search) switch to global scope
-            DomainUpdateResult::with_events(Task::none(), vec![CrossDomainEvent::LibrarySelectAll])
-            
+            // Only broadcast scope changes appropriate to the selected mode.
+            // - Curated: tell other domains we're in the global (all libraries) scope.
+            // - Library: do NOT emit LibrarySelectAll here or it will immediately
+            //   reset selection back to All and flip the tab, causing a flicker.
+            match display_mode {
+                DisplayMode::Curated => {
+                    DomainUpdateResult::with_events(
+                        Task::none(),
+                        vec![CrossDomainEvent::LibrarySelectAll],
+                    )
+                }
+                DisplayMode::Library => {
+                    // Library scope is set via SelectLibraryAndMode/LibrarySelected flow.
+                    // Emitting LibrarySelectAll here would clobber selection.
+                    DomainUpdateResult::task(Task::none())
+                }
+                _ => DomainUpdateResult::task(Task::none()),
+            }
+
         }
         ui::Message::SelectLibraryAndMode(library_id) => {
-            // NEW ARCHITECTURE: Activate the library tab in TabManager with scroll restoration
+
             state.tab_manager.set_active_tab_with_scroll(
                 crate::domains::ui::tabs::TabId::Library(library_id),
                 &mut state.domains.ui.state.scroll_manager,
@@ -222,12 +298,46 @@ pub fn update_ui(
             // Ensure the grid reflects the new sort right away
             state.tab_manager.refresh_active_tab();
 
-            // Then request server-provided filtered indices (movies-only) asynchronously
-            let check_task = state.schedule_check_scroll_stopped();
+
             let fetch_task = Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             ));
-            DomainUpdateResult::task(Task::batch(vec![check_task, fetch_task]))
+            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+                if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+                    let now = std::time::Instant::now();
+                    let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+                    let vr = lib_state.grid_state.visible_range.clone();
+                    if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+                        visible_ids.extend(slice.iter().copied());
+                    }
+                    let pr = lib_state
+                        .grid_state
+                        .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                    let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+                    if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+                        prefetch_ids.extend(slice.iter().copied());
+                    }
+                    prefetch_ids.retain(|id| !visible_ids.contains(id));
+                    let br = lib_state.grid_state.get_background_range(
+                        crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                        crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                    );
+                    let mut background_ids: Vec<uuid::Uuid> = Vec::new();
+                    if let Some(slice) = lib_state.cached_index_ids.get(br) {
+                        background_ids.extend(slice.iter().copied());
+                    }
+                    background_ids.retain(|id| {
+                        !visible_ids.contains(id)
+                            && !prefetch_ids.contains(id)
+                    });
+                    let poster_kind = match lib_state.library_type {
+                        LibraryType::Movies => Some(PosterKind::Movie),
+                        LibraryType::Series => Some(PosterKind::Series),
+                    };
+                    handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
+                }
+            }
+            DomainUpdateResult::task(fetch_task)
         }
         ui::Message::ToggleSortOrder => {
             // Toggle sort order and refresh the active tab immediately so the grid stays visible.
@@ -243,12 +353,46 @@ pub fn update_ui(
             // Keep the current grid populated while we fetch filtered indices
             state.tab_manager.refresh_active_tab();
 
-            // Then kick off filtered indices request (movies-only)
-            let check_task = state.schedule_check_scroll_stopped();
+
             let fetch_task = Task::done(DomainMessage::Ui(
                 ui::Message::RequestFilteredPositions,
             ));
-            DomainUpdateResult::task(Task::batch(vec![check_task, fetch_task]))
+            if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+                if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+                    let now = std::time::Instant::now();
+                    let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+                    let vr = lib_state.grid_state.visible_range.clone();
+                    if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+                        visible_ids.extend(slice.iter().copied());
+                    }
+                    let pr = lib_state
+                        .grid_state
+                        .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                    let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+                    if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+                        prefetch_ids.extend(slice.iter().copied());
+                    }
+                    prefetch_ids.retain(|id| !visible_ids.contains(id));
+                    let br = lib_state.grid_state.get_background_range(
+                        crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                        crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                    );
+                    let mut background_ids: Vec<uuid::Uuid> = Vec::new();
+                    if let Some(slice) = lib_state.cached_index_ids.get(br) {
+                        background_ids.extend(slice.iter().copied());
+                    }
+                    background_ids.retain(|id| {
+                        !visible_ids.contains(id)
+                            && !prefetch_ids.contains(id)
+                    });
+                    let poster_kind = match lib_state.library_type {
+                        LibraryType::Movies => Some(PosterKind::Movie),
+                        LibraryType::Series => Some(PosterKind::Series),
+                    };
+                    handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
+                }
+            }
+            DomainUpdateResult::task(fetch_task)
         }
         ui::Message::ApplyFilteredPositions(library_id, cache_key, positions) => {
             // Apply server-provided positions directly to the active library tab.
@@ -263,12 +407,50 @@ pub fn update_ui(
                 lib_state.apply_sorted_positions(&positions, Some(cache_key));
                 applied = true;
             }
-            let task = if applied {
-                state.schedule_check_scroll_stopped()
+            if applied {
+                if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+                    if let crate::domains::ui::tabs::TabState::Library(lib_state) = state.tab_manager.active_tab() {
+                        let now = std::time::Instant::now();
+                        let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+                        let vr = lib_state.grid_state.visible_range.clone();
+                        if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+                            visible_ids.extend(slice.iter().copied());
+                        }
+                        let pr = lib_state
+                            .grid_state
+                            .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+                        let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+                        if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+                            prefetch_ids.extend(slice.iter().copied());
+                        }
+                        prefetch_ids.retain(|id| !visible_ids.contains(id));
+                        let br = lib_state.grid_state.get_background_range(
+                            crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                            crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+                        );
+                        let mut background_ids: Vec<uuid::Uuid> =
+                            Vec::new();
+                        if let Some(slice) =
+                            lib_state.cached_index_ids.get(br)
+                        {
+                            background_ids.extend(slice.iter().copied());
+                        }
+                        background_ids.retain(|id| {
+                            !visible_ids.contains(id)
+                                && !prefetch_ids.contains(id)
+                        });
+                        let poster_kind = match lib_state.library_type {
+                            LibraryType::Movies => Some(PosterKind::Movie),
+                            LibraryType::Series => Some(PosterKind::Series),
+                        };
+                        handle.send(DemandSnapshot { visible_ids, prefetch_ids, background_ids, timestamp: now, context: None, poster_kind });
+                    }
+                }
+
+                DomainUpdateResult::task(Task::none())
             } else {
-                Task::none()
-            };
-            DomainUpdateResult::task(task)
+                DomainUpdateResult::task(Task::none())
+            }
         }
         ui::Message::RequestFilteredPositions => {
             // Build a FilterIndicesRequest from current UI filters (Phase 1: movies only)
@@ -447,12 +629,7 @@ pub fn update_ui(
                 applied = true;
             }
             // Do not refresh here; keep applied positions intact.
-            let task = if applied {
-                state.schedule_check_scroll_stopped()
-            } else {
-                Task::none()
-            };
-            DomainUpdateResult::task(task)
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::SortedIndexFailed(err) => {
             log::warn!("Sorted index fetch failed: {}", err);
@@ -573,100 +750,9 @@ pub fn update_ui(
                 super::update_handlers::scroll_updates::handle_tab_grid_scrolled(state, viewport);
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
-        ui::Message::CheckScrollStopped => {
-            let force = state.domains.ui.state.force_scroll_stop_check;
-            state.domains.ui.state.force_scroll_stop_check = false;
-
-            let mut should_process = force;
-            if !should_process {
-                if let Some(last_time) = state.domains.ui.state.last_scroll_time {
-                    let elapsed = last_time.elapsed();
-                    should_process = elapsed
-                        >= std::time::Duration::from_millis(
-                            crate::infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
-                        );
-                    if should_process {
-                        log::info!("Scroll STOPPED after {:.0}ms", elapsed.as_millis());
-                    }
-                } else {
-                    should_process = true;
-                }
-            }
-
-            if !should_process {
-                return DomainUpdateResult::task(Task::none());
-            }
-
-            state.domains.ui.state.scroll_stopped_time =
-                Some(std::time::Instant::now());
-
-            // Chunked promotion: center-first ordering, 4 per wave with slight jitter
-            let visible_items = state.tab_manager.get_active_tab_visible_items();
-            let len = visible_items.len();
-            if len == 0 {
-                return DomainUpdateResult::task(Task::none());
-            }
-
-            let center = len / 2;
-            let mut ordered: Vec<(usize, MediaType, uuid::Uuid)> = visible_items
-                .into_iter()
-                .enumerate()
-                .map(|(i, id)| (i, id.media_type(), id.to_uuid()))
-                .collect();
-            ordered.sort_by_key(|(i, _t, _u)| i.abs_diff(center));
-
-            let chunk_size: usize = 4; // visible limit
-            let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
-            for (chunk_idx, chunk) in ordered.chunks(chunk_size).enumerate() {
-                let payload: Vec<(MediaType, uuid::Uuid)> =
-                    chunk.iter().map(|(_, t, u)| (*t, *u)).collect();
-                let base_ms = 30u64 * (chunk_idx as u64);
-                // Small jitter 0-20ms
-                let jitter_ms: u64 = (rand::random::<u8>() as u64) % 21;
-                let delay_ms = base_ms + jitter_ms;
-
-                let task = Task::perform(
-                    async move { tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await },
-                    move |_| DomainMessage::Ui(ui::Message::PromoteVisibleChunk(payload.clone())),
-                );
-                tasks.push(task);
-            }
-
-            DomainUpdateResult::task(Task::batch(tasks))
-        }
-        ui::Message::PromoteVisibleChunk(items) => {
-            if let Some(image_service) =
-                crate::infra::service_registry::get_image_service()
-            {
-                let mut count = 0usize;
-                for (media_type, uuid) in items.into_iter() {
-                    let request = match media_type {
-                        MediaType::Movie => ImageRequest::poster(
-                            uuid,
-                            PosterKind::Movie,
-                            PosterSize::Standard,
-                        ),
-                        MediaType::Series => ImageRequest::poster(
-                            uuid,
-                            PosterKind::Series,
-                            PosterSize::Standard,
-                        ),
-                        MediaType::Season => ImageRequest::poster(
-                            uuid,
-                            PosterKind::Season,
-                            PosterSize::Standard,
-                        ),
-                        MediaType::Episode => {
-                            ImageRequest::episode_still(uuid, EpisodeStillSize::Standard)
-                        }
-                    }
-                    .with_priority(Priority::Visible);
-                    image_service.get().request_image(request);
-                    count += 1;
-                }
-                log::trace!("Promoted {} items in chunk", count);
-            }
-            DomainUpdateResult::task(Task::none())
+        ui::Message::KineticScroll(inner) => {
+            let task = super::kinetic_scroll::update::update(state, inner);
+            DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         ui::Message::DetailViewScrolled(viewport) => DomainUpdateResult::task(
             super::update_handlers::scroll_updates::handle_detail_view_scrolled(state, viewport)
@@ -742,7 +828,7 @@ pub fn update_ui(
                     library_id,
                 );
 
-            DomainUpdateResult::task(state.schedule_check_scroll_stopped())
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::NavigateBack => {
             // Navigate to the previous view in history
@@ -845,11 +931,7 @@ pub fn update_ui(
                                     library_id,
                                 );
 
-                            let combined = Task::batch(vec![
-                                scroll_task,
-                                state.schedule_check_scroll_stopped(),
-                            ]);
-                            return DomainUpdateResult::task(combined);
+                            return DomainUpdateResult::task(scroll_task);
                         }
                         _ => {
                             // Detail views don't have scrollable content in current implementation
@@ -1282,7 +1364,7 @@ pub fn update_ui(
             state.tab_manager.refresh_active_tab();
             log::info!("TabManager: All tabs refreshed with sorted data from MediaStore");
 
-            DomainUpdateResult::task(state.schedule_check_scroll_stopped())
+            DomainUpdateResult::task(Task::none())
         }
         ui::Message::UpdateViewModelFilters => {
             // Lightweight update - just change filters without re-reading from MediaStore
@@ -1528,24 +1610,518 @@ fn handle_carousel_navigation(
     state: &mut State,
     message: CarouselMessage,
 ) -> Task<ui::Message> {
+    use crate::domains::metadata::demand_planner::{
+        DemandContext, DemandRequestKind, DemandSnapshot,
+    };
+    use ferrex_core::player_prelude::{PosterKind, PosterSize};
+
     match message {
         CarouselMessage::Next(carousel_id) => {
-            // Carousel state not tracked in current state
-            log::debug!("Carousel {} scrolled right", carousel_id);
+            log::debug!("Carousel {} next", carousel_id);
+            if carousel_id == "show_seasons" {
+                if let Some(cs) =
+                    state.domains.ui.state.show_seasons_carousel.as_mut()
+                {
+                    cs.next_page();
+                    // Smoothly scroll to the computed offset
+                    let scroll_task = scroll_to::<ui::Message>(
+                        cs.scrollable_id.clone(),
+                        cs.get_scroll_offset(),
+                    );
+
+                    // Emit snapshot for visible seasons
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeriesDetail {
+                            series_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            if let Ok(seasons) = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_series_seasons(&series_id)
+                            {
+                                let total = seasons.len();
+                                let vr = cs.get_visible_range();
+                                let mut visible_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| vr.contains(i))
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let prefetch_start = vr.end.min(total);
+                                let prefetch_end = (prefetch_start
+                                    + cs.items_per_page)
+                                    .min(total);
+                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| {
+                                        *i >= prefetch_start
+                                            && *i < prefetch_end
+                                    })
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let mut background_ids: Vec<uuid::Uuid> =
+                                    seasons
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| {
+                                            !vr.contains(i)
+                                                && !(*i >= prefetch_start
+                                                    && *i < prefetch_end)
+                                        })
+                                        .map(|(_, s)| s.id.to_uuid())
+                                        .collect();
+                                prefetch_ids
+                                    .retain(|id| !visible_ids.contains(id));
+                                background_ids.retain(|id| {
+                                    !visible_ids.contains(id)
+                                        && !prefetch_ids.contains(id)
+                                });
+
+                                handle.send(DemandSnapshot {
+                                    visible_ids,
+                                    prefetch_ids,
+                                    background_ids,
+                                    timestamp: std::time::Instant::now(),
+                                    context: None,
+                                    poster_kind: Some(PosterKind::Season),
+                                });
+                            }
+                        }
+                    }
+
+                    return scroll_task;
+                }
+            } else if carousel_id == "season_episodes" {
+                if let Some(cs) =
+                    state.domains.ui.state.season_episodes_carousel.as_mut()
+                {
+                    cs.next_page();
+                    let scroll_task = scroll_to::<ui::Message>(
+                        cs.scrollable_id.clone(),
+                        cs.get_scroll_offset(),
+                    );
+
+                    // Emit snapshot for visible episodes with still overrides
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeasonDetail {
+                            season_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            let episodes = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_season_episodes(&season_id)
+                                .unwrap_or_default();
+                            let total = episodes.len();
+                            let vr = cs.get_visible_range();
+                            let mut visible_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| vr.contains(i))
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let prefetch_start = vr.end.min(total);
+                            let prefetch_end =
+                                (prefetch_start + cs.items_per_page).min(total);
+                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    *i >= prefetch_start && *i < prefetch_end
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let mut background_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    !vr.contains(i)
+                                        && !(*i >= prefetch_start
+                                            && *i < prefetch_end)
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            prefetch_ids.retain(|id| !visible_ids.contains(id));
+                            background_ids.retain(|id| {
+                                !visible_ids.contains(id)
+                                    && !prefetch_ids.contains(id)
+                            });
+
+                            let mut context = DemandContext::default();
+                            for id in visible_ids
+                                .iter()
+                                .chain(prefetch_ids.iter())
+                                .chain(background_ids.iter())
+                            {
+                                context.override_request(
+                                    *id,
+                                    DemandRequestKind::EpisodeStill {
+                                        size: EpisodeStillSize::Standard,
+                                    },
+                                );
+                            }
+
+                            handle.send(DemandSnapshot {
+                                visible_ids,
+                                prefetch_ids,
+                                background_ids,
+                                timestamp: std::time::Instant::now(),
+                                context: Some(context),
+                                poster_kind: None,
+                            });
+                        }
+                    }
+
+                    return scroll_task;
+                }
+            }
             Task::none()
         }
         CarouselMessage::Previous(carousel_id) => {
-            // Carousel state not tracked in current state
-            log::debug!("Carousel {} scrolled left", carousel_id);
+            log::debug!("Carousel {} previous", carousel_id);
+            if carousel_id == "show_seasons" {
+                if let Some(cs) =
+                    state.domains.ui.state.show_seasons_carousel.as_mut()
+                {
+                    cs.previous_page();
+                    let scroll_task = scroll_to::<ui::Message>(
+                        cs.scrollable_id.clone(),
+                        cs.get_scroll_offset(),
+                    );
+
+                    // Emit snapshot for visible seasons
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeriesDetail {
+                            series_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            if let Ok(seasons) = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_series_seasons(&series_id)
+                            {
+                                let total = seasons.len();
+                                let vr = cs.get_visible_range();
+                                let mut visible_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| vr.contains(i))
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let prefetch_start = vr.end.min(total);
+                                let prefetch_end = (prefetch_start
+                                    + cs.items_per_page)
+                                    .min(total);
+                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| {
+                                        *i >= prefetch_start
+                                            && *i < prefetch_end
+                                    })
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let mut background_ids: Vec<uuid::Uuid> =
+                                    seasons
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| {
+                                            !vr.contains(i)
+                                                && !(*i >= prefetch_start
+                                                    && *i < prefetch_end)
+                                        })
+                                        .map(|(_, s)| s.id.to_uuid())
+                                        .collect();
+                                prefetch_ids
+                                    .retain(|id| !visible_ids.contains(id));
+                                background_ids.retain(|id| {
+                                    !visible_ids.contains(id)
+                                        && !prefetch_ids.contains(id)
+                                });
+
+                                handle.send(DemandSnapshot {
+                                    visible_ids,
+                                    prefetch_ids,
+                                    background_ids,
+                                    timestamp: std::time::Instant::now(),
+                                    context: None,
+                                    poster_kind: Some(PosterKind::Season),
+                                });
+                            }
+                        }
+                    }
+
+                    return scroll_task;
+                }
+            } else if carousel_id == "season_episodes" {
+                if let Some(cs) =
+                    state.domains.ui.state.season_episodes_carousel.as_mut()
+                {
+                    cs.previous_page();
+                    let scroll_task = scroll_to::<ui::Message>(
+                        cs.scrollable_id.clone(),
+                        cs.get_scroll_offset(),
+                    );
+
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeasonDetail {
+                            season_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            let episodes = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_season_episodes(&season_id)
+                                .unwrap_or_default();
+                            let total = episodes.len();
+                            let vr = cs.get_visible_range();
+                            let mut visible_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| vr.contains(i))
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let prefetch_start = vr.end.min(total);
+                            let prefetch_end =
+                                (prefetch_start + cs.items_per_page).min(total);
+                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    *i >= prefetch_start && *i < prefetch_end
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let mut background_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    !vr.contains(i)
+                                        && !(*i >= prefetch_start
+                                            && *i < prefetch_end)
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            prefetch_ids.retain(|id| !visible_ids.contains(id));
+                            background_ids.retain(|id| {
+                                !visible_ids.contains(id)
+                                    && !prefetch_ids.contains(id)
+                            });
+
+                            let mut context = DemandContext::default();
+                            for id in visible_ids
+                                .iter()
+                                .chain(prefetch_ids.iter())
+                                .chain(background_ids.iter())
+                            {
+                                context.override_request(
+                                    *id,
+                                    DemandRequestKind::EpisodeStill {
+                                        size: EpisodeStillSize::Standard,
+                                    },
+                                );
+                            }
+
+                            handle.send(DemandSnapshot {
+                                visible_ids,
+                                prefetch_ids,
+                                background_ids,
+                                timestamp: std::time::Instant::now(),
+                                context: Some(context),
+                                poster_kind: None,
+                            });
+                        }
+                    }
+
+                    return scroll_task;
+                }
+            }
             Task::none()
         }
         CarouselMessage::Scrolled(section_id, viewport) => {
-            // Handle carousel scroll events
             log::debug!(
-                "Carousel {} scrolled to viewport: {:?}",
+                "Carousel {} scrolled: offset={:?}",
                 section_id,
-                viewport
+                viewport.absolute_offset()
             );
+            if section_id == "show_seasons" {
+                if let Some(cs) =
+                    state.domains.ui.state.show_seasons_carousel.as_mut()
+                {
+                    cs.scroll_position = viewport.absolute_offset().x;
+                    cs.update_visible_range_from_scroll();
+
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeriesDetail {
+                            series_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            if let Ok(seasons) = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_series_seasons(&series_id)
+                            {
+                                let total = seasons.len();
+                                let vr = cs.get_visible_range();
+                                let mut visible_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| vr.contains(i))
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let prefetch_start = vr.end.min(total);
+                                let prefetch_end = (prefetch_start
+                                    + cs.items_per_page)
+                                    .min(total);
+                                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(i, _)| {
+                                        *i >= prefetch_start
+                                            && *i < prefetch_end
+                                    })
+                                    .map(|(_, s)| s.id.to_uuid())
+                                    .collect();
+                                let mut background_ids: Vec<uuid::Uuid> =
+                                    seasons
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| {
+                                            !vr.contains(i)
+                                                && !(*i >= prefetch_start
+                                                    && *i < prefetch_end)
+                                        })
+                                        .map(|(_, s)| s.id.to_uuid())
+                                        .collect();
+                                prefetch_ids
+                                    .retain(|id| !visible_ids.contains(id));
+                                background_ids.retain(|id| {
+                                    !visible_ids.contains(id)
+                                        && !prefetch_ids.contains(id)
+                                });
+
+                                handle.send(DemandSnapshot {
+                                    visible_ids,
+                                    prefetch_ids,
+                                    background_ids,
+                                    timestamp: std::time::Instant::now(),
+                                    context: None,
+                                    poster_kind: Some(PosterKind::Season),
+                                });
+                            }
+                        }
+                    }
+                }
+            } else if section_id == "season_episodes" {
+                if let Some(cs) =
+                    state.domains.ui.state.season_episodes_carousel.as_mut()
+                {
+                    cs.scroll_position = viewport.absolute_offset().x;
+                    cs.update_visible_range_from_scroll();
+
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        if let crate::domains::ui::ViewState::SeasonDetail {
+                            season_id,
+                            ..
+                        } = state.domains.ui.state.view
+                        {
+                            let episodes = state
+                                .domains
+                                .ui
+                                .state
+                                .repo_accessor
+                                .get_season_episodes(&season_id)
+                                .unwrap_or_default();
+                            let total = episodes.len();
+                            let vr = cs.get_visible_range();
+                            let mut visible_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| vr.contains(i))
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let prefetch_start = vr.end.min(total);
+                            let prefetch_end =
+                                (prefetch_start + cs.items_per_page).min(total);
+                            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    *i >= prefetch_start && *i < prefetch_end
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            let mut background_ids: Vec<uuid::Uuid> = episodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| {
+                                    !vr.contains(i)
+                                        && !(*i >= prefetch_start
+                                            && *i < prefetch_end)
+                                })
+                                .map(|(_, e)| e.id.to_uuid())
+                                .collect();
+                            prefetch_ids.retain(|id| !visible_ids.contains(id));
+                            background_ids.retain(|id| {
+                                !visible_ids.contains(id)
+                                    && !prefetch_ids.contains(id)
+                            });
+
+                            let mut context = DemandContext::default();
+                            for id in visible_ids
+                                .iter()
+                                .chain(prefetch_ids.iter())
+                                .chain(background_ids.iter())
+                            {
+                                context.override_request(
+                                    *id,
+                                    DemandRequestKind::EpisodeStill {
+                                        size: EpisodeStillSize::Standard,
+                                    },
+                                );
+                            }
+
+                            handle.send(DemandSnapshot {
+                                visible_ids,
+                                prefetch_ids,
+                                background_ids,
+                                timestamp: std::time::Instant::now(),
+                                context: Some(context),
+                                poster_kind: None,
+                            });
+                        }
+                    }
+                }
+            }
             Task::none()
         }
     }

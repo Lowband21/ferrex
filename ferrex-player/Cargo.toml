@@ -11,9 +11,19 @@ categories.workspace = true
 description = "Cross-platform desktop player for Ferrex with a focus on performance, cutting edge features, and media compatibility"
 
 [dependencies]
-ferrex-core = { path = "../ferrex-core", default-features = false, features = ["rkyv"] }
-ferrex-model = { path = "../ferrex-model", features = ["serde", "rkyv", "chrono"] }
-ferrex-contracts = { path = "../ferrex-contracts", features = ["serde", "rkyv", "chrono"] }
+ferrex-core = { path = "../ferrex-core", default-features = false, features = [
+  "rkyv",
+] }
+ferrex-model = { path = "../ferrex-model", features = [
+  "serde",
+  "rkyv",
+  "chrono",
+] }
+ferrex-contracts = { path = "../ferrex-contracts", features = [
+  "serde",
+  "rkyv",
+  "chrono",
+] }
 
 # Iced
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
@@ -22,9 +32,12 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features 
   "canvas",
   "advanced",
   "wgpu",
-  "web-colors",
+  #"wayland-hack",
+  #"web-colors",
   "batch",
-  #"lazy",
+  "lazy",
+  "crisp",
+  #"prefer_10bit",
 ] }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
   "image",
@@ -41,8 +54,8 @@ lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git"
 ] }
 
 # Unified video abstraction based on subwave
-subwave_unified = { git = "https://github.com/Lowband21/Subwave.git" }
-subwave_core = { git = "https://github.com/Lowband21/Subwave.git" }
+subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
+subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
 
 # Async runtime
 tokio.workspace = true
@@ -142,9 +155,8 @@ default = []
 iced_tester = ["iced/tester"]
 hot = ["iced/hot"]
 demo = ["ferrex-core/demo"]
+gpu-tests = []
 
-# Optional: turn on additional iced_aw widgets used for UI polish
-# (kept off by default to minimize compile time and risk).
 aw-polish = [
   "iced_aw/drop_down",
   "iced_aw/spinner",
@@ -171,10 +183,10 @@ profiling-stats = ["dep:hdrhistogram"]
 [dev-dependencies]
 # Testing framework
 rand.workspace = true
-#iced = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
-#  "debug",
-#] }
-iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git" }
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
+  "wgpu",
+] }
+iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
 
 # Performance benchmarking
 # criterion = { version = "^0.7", features = ["html_reports"] }
@@ -182,13 +194,3 @@ iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git" }
 #[[bench]]
 #name = "grid_rendering_bench"
 #harness = false
-
-# [patch."https://github.com/Lowband21/iced-ferrex.git"]
-# iced = { path = "../../iced_ferrex" }
-# iced_core = { path = "../../iced_ferrex/core" }
-# iced_graphics = { path = "../../iced_ferrex/graphics" }
-# iced_renderer = { path = "../../iced_ferrex/renderer" }
-# iced_runtime = { path = "../../iced_ferrex/runtime" }
-# iced_widget = { path = "../../iced_ferrex/widget" }
-# iced_wgpu = { path = "../../iced_ferrex/wgpu" }
-# iced_winit = { path = "../../iced_ferrex/winit" }

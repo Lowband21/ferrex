@@ -8,6 +8,7 @@ use env_logger::{Builder, Target};
 use iced::window;
 use iced::{Font, Task, Theme};
 use iced_aw::ICED_AW_FONT_BYTES;
+use iced_wgpu::{self, wgpu, wgpu::Backends};
 use log::LevelFilter;
 
 fn init_logger() {
@@ -50,6 +51,10 @@ fn main() -> iced::Result {
 
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
+
+    // iced_wgpu::graphics::set_surface_strategy(
+    //     iced_wgpu::graphics::SurfaceStrategy::Prefer10BitSdr,
+    // );
 
     let config = AppConfig::from_environment();
     let server_url = config.server_url().to_string();
@@ -105,17 +110,26 @@ fn main() -> iced::Result {
                             .unwrap_or(false)
                             && stored_auth.user.preferences.auto_login_enabled;
 
-                        log::info!("[Auth] Auto-login enabled: {}", auto_login_enabled);
+                        log::info!(
+                            "[Auth] Auto-login enabled: {}",
+                            auto_login_enabled
+                        );
 
                         if auto_login_enabled {
                             // Apply the stored auth
-                            match auth_service.apply_stored_auth(stored_auth).await {
+                            match auth_service
+                                .apply_stored_auth(stored_auth)
+                                .await
+                            {
                                 Ok(()) => {
                                     log::info!("[Auth] Auto-login successful");
                                     Ok::<Option<bool>, String>(Some(true))
                                 }
                                 Err(e) => {
-                                    log::error!("[Auth] Failed to apply stored auth: {}", e);
+                                    log::error!(
+                                        "[Auth] Failed to apply stored auth: {}",
+                                        e
+                                    );
                                     Ok::<Option<bool>, String>(Some(false))
                                 }
                             }
@@ -136,28 +150,39 @@ fn main() -> iced::Result {
             },
             |result| match result {
                 Ok(Some(true)) => {
-                    log::info!("[Auth] Auto-login enabled, sending CheckAuthStatus");
-                    DomainMessage::Auth(domains::auth::messages::Message::CheckAuthStatus)
+                    log::info!(
+                        "[Auth] Auto-login enabled, sending CheckAuthStatus"
+                    );
+                    DomainMessage::Auth(
+                        domains::auth::messages::Message::CheckAuthStatus,
+                    )
                 }
                 Ok(Some(false)) | Ok(None) => {
-                    log::info!("[Auth] Auto-login disabled or no stored auth, sending LoadUsers");
-                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
+                    log::info!(
+                        "[Auth] Auto-login disabled or no stored auth, sending LoadUsers"
+                    );
+                    DomainMessage::Auth(
+                        domains::auth::messages::Message::LoadUsers,
+                    )
                 }
                 Err(e) => {
                     log::error!("[Auth] Error during auth check: {}", e);
-                    DomainMessage::Auth(domains::auth::messages::Message::LoadUsers)
+                    DomainMessage::Auth(
+                        domains::auth::messages::Message::LoadUsers,
+                    )
                 }
             },
         );
 
-        // Note: Library loading will happen after authentication
         (state, auth_task)
     };
 
-    let mut settings = iced::Settings::default();
-    settings.id = Some("ferrex-player".to_string()); // pick the same name as your .desktop file
-    settings.antialiasing = true;
-    settings.default_font = Font::MONOSPACE;
+    let settings = iced::Settings {
+        id: Some("ferrex-player".to_string()),
+        antialiasing: false,
+        default_font: Font::MONOSPACE,
+        ..Default::default()
+    };
 
     iced::daemon::<State, DomainMessage, Theme, iced_wgpu::Renderer>(
         move || {
@@ -177,7 +202,6 @@ fn main() -> iced::Result {
                 .windows
                 .set(crate::domains::ui::windows::WindowKind::Main, main_id);
 
-            // Batch auth + open main
             let boot = Task::batch([
                 auth_task,
                 open.map(|_| DomainMessage::NoOp),
@@ -211,4 +235,3 @@ fn main() -> iced::Result {
     })
     .run()
 }
-

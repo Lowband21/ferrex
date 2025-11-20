@@ -115,7 +115,8 @@ pub enum AuthenticationFlow {
     /// Pre-auth login screen collecting username/password when no user list is available
     PreAuthLogin {
         username: String,
-        password: crate::domains::auth::security::secure_credential::SecureCredential,
+        password:
+            crate::domains::auth::security::secure_credential::SecureCredential,
         show_password: bool,
         remember_device: bool,
         error: Option<String>,

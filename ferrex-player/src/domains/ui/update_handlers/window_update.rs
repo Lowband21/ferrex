@@ -1,6 +1,9 @@
 use iced::{Size, Task};
 
+use crate::domains::metadata::demand_planner::DemandSnapshot;
+use crate::infra::api_types::LibraryType;
 use crate::{domains::ui::messages::Message, state::State};
+use ferrex_core::player_prelude::PosterKind;
 
 #[cfg_attr(
     any(
@@ -49,6 +52,56 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<Message> {
             size.height,
             uuid,
         );
+
+    // Emit snapshot for active library tab after columns update.
+    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+        if let crate::domains::ui::tabs::TabState::Library(lib_state) =
+            state.tab_manager.active_tab()
+        {
+            let now = std::time::Instant::now();
+            let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+            let vr = lib_state.grid_state.visible_range.clone();
+            if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+                visible_ids.extend(slice.iter().copied());
+            }
+
+            let pr = lib_state
+                .grid_state
+                .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+            let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+            if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+                prefetch_ids.extend(slice.iter().copied());
+            }
+
+            prefetch_ids.retain(|id| !visible_ids.contains(id));
+            let br = lib_state.grid_state.get_background_range(
+                crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+            );
+            let mut background_ids: Vec<uuid::Uuid> = Vec::new();
+            if let Some(slice) = lib_state.cached_index_ids.get(br) {
+                background_ids.extend(slice.iter().copied());
+            }
+            background_ids.retain(|id| {
+                !visible_ids.contains(id) && !prefetch_ids.contains(id)
+            });
+
+            let poster_kind = match lib_state.library_type {
+                LibraryType::Movies => Some(PosterKind::Movie),
+                LibraryType::Series => Some(PosterKind::Series),
+            };
+
+            let snapshot = DemandSnapshot {
+                visible_ids,
+                prefetch_ids,
+                background_ids,
+                timestamp: now,
+                context: None,
+                poster_kind,
+            };
+            handle.send(snapshot);
+        }
+    }
 
     Task::none()
 }

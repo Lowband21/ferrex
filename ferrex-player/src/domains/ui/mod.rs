@@ -4,6 +4,7 @@
 
 pub mod background_state;
 pub mod components;
+pub mod kinetic_scroll;
 pub mod messages;
 pub mod scroll_manager;
 pub mod tabs;
@@ -17,6 +18,9 @@ pub mod views;
 pub mod widgets;
 pub mod windows;
 pub mod yoke_cache;
+
+// Re-export primary Kinetic type for convenience in other modules
+pub use kinetic_scroll::KineticScroller;
 
 use self::views::carousel::CarouselState;
 use crate::{
@@ -76,13 +80,8 @@ pub struct UIDomainState {
 
     pub current_library_id: Option<LibraryID>,
 
-    pub last_scroll_position: f32,
-    pub scroll_stopped_time: Option<Instant>,
-    pub last_scroll_time: Option<Instant>,
-    pub last_check_task_created: Option<Instant>,
+    pub last_prefetch_tick: Option<Instant>,
     pub scroll_manager: ScrollPositionManager,
-    /// Force the next scroll-stop check even if recent scroll activity continues.
-    pub force_scroll_stop_check: bool,
 
     // Background and visual state
     pub background_shader_state: BackgroundShaderState,
@@ -112,6 +111,9 @@ pub struct UIDomainState {
 
     // Keep UI alive while poster flip animations are running
     pub poster_anim_active_until: Option<std::time::Instant>,
+
+    // Kinetic grid scrolling controller
+    pub kinetic_scroll: kinetic_scroll::KineticScroller,
 }
 
 impl UIDomainState {}
@@ -174,6 +176,16 @@ impl UIDomain {
             }
             CrossDomainEvent::RequestLibraryRefresh => {
                 // This is for actual data refresh, not just filter changes
+                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+            }
+            CrossDomainEvent::SeriesChildrenChanged(series_id) => {
+                // Invalidate cached yoke for the series and refresh
+                self.state.series_yoke_cache.remove(&series_id.to_uuid());
+                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+            }
+            CrossDomainEvent::SeasonChildrenChanged(season_id) => {
+                // Invalidate cached yoke for the season and refresh
+                self.state.season_yoke_cache.remove(&season_id.to_uuid());
                 Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
             }
             CrossDomainEvent::RequestViewModelRefresh => {

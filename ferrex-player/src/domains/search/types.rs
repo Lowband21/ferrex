@@ -1,7 +1,7 @@
 //! Search domain types and state management
 
-use ferrex_core::LibraryID;
 use ferrex_core::query::types::SearchField;
+use ferrex_model::LibraryID;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

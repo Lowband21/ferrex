@@ -2,6 +2,9 @@ use iced::Task;
 use rkyv::option::ArchivedOption;
 
 use super::super::views::carousel::CarouselState;
+use crate::infra::constants::layout::carousel::{
+    HORIZONTAL_PADDING_TOTAL, ITEM_SPACING,
+};
 use crate::{
     domains::ui::{ViewState, messages::Message, types, views::grid::macros},
     state::State,
@@ -19,6 +22,7 @@ use ferrex_core::{
             Priority, ProfileSize,
         },
         media_id::MediaID,
+        util_types::ImageSize,
     },
 };
 
@@ -233,7 +237,29 @@ pub fn handle_view_movie_details(
             }
 
             // Preload primary cast portraits for the carousel
-            for cast_member in movie_details.cast.iter().take(12) {
+            // Order: pictured cast first (preserve original importance), then others
+            // Stagger direction: left-to-right by enqueueing rightmost first
+            // Determine count dynamically from viewport and card size (+ small buffer),
+            // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
+            let (card_w, _) = ImageSize::Profile.dimensions();
+            let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
+            let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
+            let visible = (((state.window_size.width - lr_padding)
+                / (card_w + spacing))
+                .floor()
+                .max(1.0)) as usize;
+            let prefetch_cap = 24usize; // safety cap
+            let prefetch_count = (visible + 3).min(prefetch_cap); // small buffer for smoothness
+            let pictured_cast: Vec<_> = movie_details
+                .cast
+                .iter()
+                .filter(|c| {
+                    matches!(c.profile_media_id, ArchivedOption::Some(_))
+                })
+                .take(prefetch_count)
+                .collect();
+
+            for cast_member in pictured_cast.into_iter().rev() {
                 let person_uuid = match &cast_member.profile_media_id {
                     ArchivedOption::Some(uuid) => *uuid,
                     ArchivedOption::None => continue,
@@ -377,7 +403,29 @@ pub fn handle_view_series(
             }
 
             // Prefetch lead cast portraits for the detail view carousel
-            for cast_member in details.cast.iter().take(12) {
+            // Order: pictured cast first (preserve original importance), then others
+            // Stagger direction: left-to-right by enqueueing rightmost first
+            // Determine count dynamically from viewport and card size (+ small buffer),
+            // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
+            let (card_w, _) = ImageSize::Profile.dimensions();
+            let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
+            let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
+            let visible = (((state.window_size.width - lr_padding)
+                / (card_w + spacing))
+                .floor()
+                .max(1.0)) as usize;
+            let prefetch_cap = 24usize; // safety cap
+            let prefetch_count = (visible + 3).min(prefetch_cap); // small buffer for smoothness
+            let pictured_cast: Vec<_> = details
+                .cast
+                .iter()
+                .filter(|c| {
+                    matches!(c.profile_media_id, ArchivedOption::Some(_))
+                })
+                .take(prefetch_count)
+                .collect();
+
+            for cast_member in pictured_cast.into_iter().rev() {
                 let person_uuid = match &cast_member.profile_media_id {
                     ArchivedOption::Some(uuid) => *uuid,
                     ArchivedOption::None => continue,
@@ -415,6 +463,72 @@ pub fn handle_view_series(
         let mut cs = CarouselState::new(total_seasons);
         cs.update_items_per_page(state.window_size.width);
         state.domains.ui.state.show_seasons_carousel = Some(cs);
+
+        // After constructing the carousel, emit a demand snapshot for visible seasons
+        if let (Some(handle), Some(cs)) = (
+            state.domains.metadata.state.planner_handle.as_ref(),
+            state.domains.ui.state.show_seasons_carousel.as_ref(),
+        ) {
+            if let Ok(seasons) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_series_seasons(&series_id)
+            {
+                let total = seasons.len();
+                let visible_range = cs.get_visible_range();
+
+                // Visible IDs from current window
+                let mut visible_ids: Vec<uuid::Uuid> = seasons
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| visible_range.contains(idx))
+                    .map(|(_, s)| s.id.to_uuid())
+                    .collect();
+
+                // Prefetch next window worth of items
+                let prefetch_start = visible_range.end.min(total);
+                let prefetch_end =
+                    (prefetch_start + cs.items_per_page).min(total);
+                let mut prefetch_ids: Vec<uuid::Uuid> = seasons
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| {
+                        *idx >= prefetch_start && *idx < prefetch_end
+                    })
+                    .map(|(_, s)| s.id.to_uuid())
+                    .collect();
+
+                // Background = remaining
+                let mut background_ids: Vec<uuid::Uuid> = seasons
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| {
+                        !visible_range.contains(idx)
+                            && !(*idx >= prefetch_start && *idx < prefetch_end)
+                    })
+                    .map(|(_, s)| s.id.to_uuid())
+                    .collect();
+
+                // Deduplicate defensively
+                prefetch_ids.retain(|id| !visible_ids.contains(id));
+                background_ids.retain(|id| {
+                    !visible_ids.contains(id) && !prefetch_ids.contains(id)
+                });
+
+                handle.send(
+                    crate::domains::metadata::demand_planner::DemandSnapshot {
+                        visible_ids,
+                        prefetch_ids,
+                        background_ids,
+                        timestamp: std::time::Instant::now(),
+                        context: None,
+                        poster_kind: Some(PosterKind::Season),
+                    },
+                );
+            }
+        }
 
         state
             .domains
@@ -523,6 +637,90 @@ pub fn handle_view_season(
         );
         ep_cs.update_items_per_page(state.window_size.width);
         state.domains.ui.state.season_episodes_carousel = Some(ep_cs);
+
+        // After constructing the episodes carousel, emit a demand snapshot for visible episodes
+        if let (Some(handle), Some(cs)) = (
+            state.domains.metadata.state.planner_handle.as_ref(),
+            state.domains.ui.state.season_episodes_carousel.as_ref(),
+        ) {
+            let episodes = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_season_episodes(&season.id())
+                .unwrap_or_else(|_| Vec::new());
+
+            let total = episodes.len();
+            let visible_range = cs.get_visible_range();
+
+            // Build context overrides for episode stills
+            let mut context = crate::domains::metadata::demand_planner::DemandContext::default();
+
+            // Visible IDs from current window
+            let mut visible_ids: Vec<uuid::Uuid> = episodes
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| visible_range.contains(idx))
+                .map(|(_, e)| e.id.to_uuid())
+                .collect();
+
+            // Prefetch next window worth of items
+            let prefetch_start = visible_range.end.min(total);
+            let prefetch_end = (prefetch_start + cs.items_per_page).min(total);
+            let mut prefetch_ids: Vec<uuid::Uuid> = episodes
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| {
+                    *idx >= prefetch_start && *idx < prefetch_end
+                })
+                .map(|(_, e)| e.id.to_uuid())
+                .collect();
+
+            // Background = remaining
+            let mut background_ids: Vec<uuid::Uuid> = episodes
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| {
+                    !visible_range.contains(idx)
+                        && !(*idx >= prefetch_start && *idx < prefetch_end)
+                })
+                .map(|(_, e)| e.id.to_uuid())
+                .collect();
+
+            // Deduplicate defensively
+            prefetch_ids.retain(|id| !visible_ids.contains(id));
+            background_ids.retain(|id| {
+                !visible_ids.contains(id) && !prefetch_ids.contains(id)
+            });
+
+            // Add overrides for all episode IDs we are demanding
+            use crate::domains::metadata::demand_planner::DemandRequestKind;
+            use ferrex_core::player_prelude::EpisodeStillSize;
+            for id in visible_ids
+                .iter()
+                .chain(prefetch_ids.iter())
+                .chain(background_ids.iter())
+            {
+                context.override_request(
+                    *id,
+                    DemandRequestKind::EpisodeStill {
+                        size: EpisodeStillSize::Standard,
+                    },
+                );
+            }
+
+            handle.send(
+                crate::domains::metadata::demand_planner::DemandSnapshot {
+                    visible_ids,
+                    prefetch_ids,
+                    background_ids,
+                    timestamp: std::time::Instant::now(),
+                    context: Some(context),
+                    poster_kind: None,
+                },
+            );
+        }
 
         state
             .domains

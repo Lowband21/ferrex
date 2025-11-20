@@ -9,7 +9,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subs: Vec<Subscription<DomainMessage>> = Vec::new();
 
     subs.push(
-        iced::window::close_events().map(|id| DomainMessage::Ui(UiMessage::RawWindowClosed(id))),
+        iced::window::close_events()
+            .map(|id| DomainMessage::Ui(UiMessage::RawWindowClosed(id))),
     );
 
     // If the main window Id is not known yet (single-window mode),
@@ -31,7 +32,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 iced::window::Event::Moved(position) if id == tracked_id => {
                     DomainMessage::Ui(UiMessage::WindowMoved(Some(position)))
                 }
-                iced::window::Event::Opened { position, .. } if id == tracked_id => {
+                iced::window::Event::Opened { position, .. }
+                    if id == tracked_id =>
+                {
                     DomainMessage::Ui(UiMessage::WindowMoved(position))
                 }
                 iced::window::Event::Resized(size) if id == tracked_id => {

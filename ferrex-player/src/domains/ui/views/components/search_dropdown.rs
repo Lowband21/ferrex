@@ -1,7 +1,8 @@
 //! Search dropdown overlay component
 
 use iced::widget::{
-    Id as TextInputId, Space, button, column, container, row, scrollable, text, text_input,
+    Id as TextInputId, Space, button, column, container, row, scrollable, text,
+    text_input,
 };
 use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
@@ -30,7 +31,8 @@ enum ResultsLayout {
     profiling::function
 )]
 pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
-    let dropdown_content = build_results_content(state, ResultsLayout::Dropdown)?;
+    let dropdown_content =
+        build_results_content(state, ResultsLayout::Dropdown)?;
 
     // Use Stack to layer backdrop and dropdown
     use iced::widget::Stack;
@@ -81,18 +83,14 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
 
     let title = if search_state.query.is_empty() {
         "Search your library".to_owned()
-pub fn view_search_window(state: &State) -> Element<'_, Message> {
-    let search_state = &state.domains.search.state;
-
-    let title = if search_state.query.is_empty() {
-        "Search your library".to_owned()
     } else {
         format!("Results for \"{}\"", search_state.query)
     };
 
     let subtitle = if search_state.is_searching {
         "Searching...".to_owned()
-    } else if search_state.results.is_empty() && !search_state.query.is_empty() {
+    } else if search_state.results.is_empty() && !search_state.query.is_empty()
+    {
         "No matches yet - try a different phrase".to_owned()
     } else if search_state.total_results > 0 {
         format!(
@@ -124,7 +122,9 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     .padding(Padding::from([12.0, 16.0]))
     .width(Length::Fill)
     .style(|_theme: &Theme| container::Style {
-        background: Some(iced::Background::Color(MediaServerTheme::SOFT_GREY_DARK)),
+        background: Some(iced::Background::Color(
+            MediaServerTheme::SOFT_GREY_DARK,
+        )),
         border: iced::Border {
             color: Color::from_rgb(0.2, 0.2, 0.25),
             width: 1.0,
@@ -165,7 +165,9 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
         .padding(Padding::from([12.0, 16.0]))
         .width(Length::Fill)
         .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(MediaServerTheme::SOFT_GREY_MEDIUM)),
+            background: Some(iced::Background::Color(
+                MediaServerTheme::SOFT_GREY_MEDIUM,
+            )),
             border: iced::Border {
                 color: MediaServerTheme::ACCENT_BLUE,
                 width: 1.0,
@@ -179,36 +181,37 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
             ..Default::default()
         });
 
-    let results = build_results_content(state, ResultsLayout::Window).unwrap_or_else(|| {
-        container(
-            column![
-                text("Start typing to search your library").size(18),
-                text("We'll surface your best matches in real-time.")
-                    .size(14)
-                    .color(Color::from_rgb(0.7, 0.7, 0.75)),
-            ]
-            .spacing(8)
+    let results = build_results_content(state, ResultsLayout::Window)
+        .unwrap_or_else(|| {
+            container(
+                column![
+                    text("Start typing to search your library").size(18),
+                    text("We'll surface your best matches in real-time.")
+                        .size(14)
+                        .color(Color::from_rgb(0.7, 0.7, 0.75)),
+                ]
+                .spacing(8)
+                .width(Length::Fill)
+                .align_x(Alignment::Center),
+            )
             .width(Length::Fill)
-            .align_x(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgba(
-                0.1, 0.1, 0.13, 0.65,
-            ))),
-            border: iced::Border {
-                color: Color::from_rgba(0.2, 0.2, 0.3, 0.4),
-                width: 1.0,
-                radius: 12.0.into(),
-            },
-            shadow: iced::Shadow::default(),
-            ..Default::default()
-        })
-        .into()
-    });
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    0.1, 0.1, 0.13, 0.65,
+                ))),
+                border: iced::Border {
+                    color: Color::from_rgba(0.2, 0.2, 0.3, 0.4),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                shadow: iced::Shadow::default(),
+                ..Default::default()
+            })
+            .into()
+        });
 
     container(
         column![header, input_panel, results]
@@ -220,7 +223,9 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .style(|_theme: &Theme| container::Style {
-        background: Some(iced::Background::Color(MediaServerTheme::SURFACE_DIM)),
+        background: Some(iced::Background::Color(
+            MediaServerTheme::SURFACE_DIM,
+        )),
         border: iced::Border {
             color: Color::from_rgb(0.08, 0.08, 0.1),
             width: 1.0,
@@ -236,7 +241,10 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element<'_, Message>> {
+fn build_results_content(
+    state: &State,
+    layout: ResultsLayout,
+) -> Option<Element<'_, Message>> {
     let search_state = &state.domains.search.state;
 
     let is_window = matches!(layout, ResultsLayout::Window);
@@ -282,11 +290,8 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
     } else if search_state.results.is_empty() {
         results_column = results_column.push(
             container(
-                text(format!("No results for \"{}\"", search_state.query)).size(if is_window {
-                    16
-                } else {
-                    14
-                }),
+                text(format!("No results for \"{}\"", search_state.query))
+                    .size(if is_window { 16 } else { 14 }),
             )
             .padding(Padding::from([12.0, if is_window { 20.0 } else { 16.0 }]))
             .width(Length::Fill),
@@ -307,7 +312,11 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
             .enumerate()
         {
             let is_selected = search_state.selected_index == Some(index);
-            results_column = results_column.push(view_search_result(result, is_selected, layout));
+            results_column = results_column.push(view_search_result(
+                result,
+                is_selected,
+                layout,
+            ));
         }
 
         if !is_window
@@ -316,10 +325,17 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
         {
             results_column = results_column.push(
                 button(
-                    container(text("Load More").size(if is_window { 15 } else { 14 }))
-                        .padding(Padding::from([12.0, if is_window { 18.0 } else { 16.0 }]))
-                        .width(Length::Fill)
-                        .center_x(Length::Fill),
+                    container(text("Load More").size(if is_window {
+                        15
+                    } else {
+                        14
+                    }))
+                    .padding(Padding::from([
+                        12.0,
+                        if is_window { 18.0 } else { 16.0 },
+                    ]))
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
                 )
                 .on_press(DomainMessage::Search(
                     crate::domains::search::messages::Message::LoadMore,
@@ -342,7 +358,10 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
                     ))
                     .size(if is_window { 13 } else { 12 }),
                 )
-                .padding(Padding::from([8.0, if is_window { 18.0 } else { 16.0 }]))
+                .padding(Padding::from([
+                    8.0,
+                    if is_window { 18.0 } else { 16.0 },
+                ]))
                 .width(Length::Fill)
                 .center_x(Length::Fill),
             );
@@ -355,7 +374,9 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
                 let scrollable_view = scrollable(results_column);
 
                 let scrollable_view = if is_window {
-                    scrollable_view.id(crate::domains::search::types::SEARCH_RESULTS_SCROLL_ID)
+                    scrollable_view.id(
+                        crate::domains::search::types::SEARCH_RESULTS_SCROLL_ID,
+                    )
                 } else {
                     scrollable_view
                 };
@@ -384,9 +405,9 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
         .style(move |_theme: &Theme| {
             if is_window {
                 container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.08, 0.08, 0.1, 0.88,
-                    ))),
+                    background: Some(iced::Background::Color(
+                        Color::from_rgba(0.08, 0.08, 0.1, 0.88),
+                    )),
                     border: iced::Border {
                         color: Color::from_rgba(0.2, 0.25, 0.35, 0.6),
                         width: 1.0,
@@ -401,9 +422,9 @@ fn build_results_content(state: &State, layout: ResultsLayout) -> Option<Element
                 }
             } else {
                 container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.1, 0.1, 0.1, 0.98,
-                    ))),
+                    background: Some(iced::Background::Color(
+                        Color::from_rgba(0.1, 0.1, 0.1, 0.98),
+                    )),
                     border: iced::Border {
                         color: Color::from_rgb(0.3, 0.3, 0.3),
                         width: 1.0,
@@ -457,9 +478,11 @@ fn view_search_result(
             content_row = content_row.push(text_column);
 
             if cfg!(debug_assertions) {
-                content_row = content_row
-                    .push(Space::new().width(Length::Fill))
-                    .push(text(format!("{:.0}%", result.match_score * 100.0)).size(11));
+                content_row =
+                    content_row.push(Space::new().width(Length::Fill)).push(
+                        text(format!("{:.0}%", result.match_score * 100.0))
+                            .size(11),
+                    );
             }
 
             button(
@@ -467,12 +490,16 @@ fn view_search_result(
                     .padding(Padding::from([8.0, 16.0]))
                     .width(Length::Fill)
                     .style(move |_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(background_color)),
+                        background: Some(iced::Background::Color(
+                            background_color,
+                        )),
                         ..Default::default()
                     }),
             )
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SelectResult(result.media_ref.clone()),
+                crate::domains::search::messages::Message::SelectResult(
+                    result.media_ref.clone(),
+                ),
             ))
             .style(ButtonStyle::Text.style())
             .width(Length::Fill)
@@ -491,7 +518,8 @@ fn view_search_result(
                 MediaServerTheme::BORDER_COLOR
             };
 
-            let mut text_column = column![text(&result.title).size(17)].spacing(6);
+            let mut text_column =
+                column![text(&result.title).size(17)].spacing(6);
 
             if let Some(subtitle) = &result.subtitle {
                 text_column = text_column.push(
@@ -504,7 +532,8 @@ fn view_search_result(
             let mut metadata_row = row![].spacing(8);
 
             if let Some(year) = result.year {
-                metadata_row = metadata_row.push(metadata_badge(year.to_string()));
+                metadata_row =
+                    metadata_row.push(metadata_badge(year.to_string()));
             }
 
             metadata_row = metadata_row.push(metadata_badge(
@@ -524,9 +553,9 @@ fn view_search_result(
                     .center_x(Length::Fixed(48.0))
                     .center_y(Length::Fixed(48.0))
                     .style(|_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgba(
-                            0.2, 0.2, 0.24, 0.65,
-                        ))),
+                        background: Some(iced::Background::Color(
+                            Color::from_rgba(0.2, 0.2, 0.24, 0.65,)
+                        )),
                         border: iced::Border {
                             color: Color::from_rgba(0.35, 0.35, 0.45, 0.4),
                             width: 1.0,
@@ -563,7 +592,9 @@ fn view_search_result(
                     }),
             )
             .on_press(DomainMessage::Search(
-                crate::domains::search::messages::Message::SelectResult(result.media_ref.clone()),
+                crate::domains::search::messages::Message::SelectResult(
+                    result.media_ref.clone(),
+                ),
             ))
             .style(ButtonStyle::Text.style())
             .width(Length::Fill)
@@ -715,11 +746,9 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     column![
         header,
         input_row,
-        container(
-            scrollable(results_column).direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::default()
-            ))
-        )
+        container(scrollable(results_column).direction(
+            scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+        ))
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(Padding::from([0.0, 20.0]))

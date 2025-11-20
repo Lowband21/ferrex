@@ -53,6 +53,8 @@ pub struct ImageFor {
     progress_color: Option<Color>,
     // Optimization: Cache to avoid repeated lookups
     cached_data: Option<CachedImageData>,
+    // If true, do not enqueue a network request on cache miss.
+    skip_request: bool,
 }
 
 impl ImageFor {
@@ -71,15 +73,15 @@ impl ImageFor {
             size: ImageSize::Poster,
             image_type: ImageType::Movie,
             radius: crate::infra::constants::layout::poster::CORNER_RADIUS,
-            width: Length::Fixed(200.0),
-            height: Length::Fixed(300.0),
+            width: Length::Fixed(185.0),
+            height: Length::Fixed(278.0),
             // Might want to use a different default icon
             placeholder_icon: Icon::FileArchive,
             placeholder_text: None,
             priority: Priority::Preload,
             image_index: 0,
-            // Default; callers (views) should set from UI state
-            animation: AnimationBehavior::constant(PosterAnimationType::flip()),
+            // Default: flip on first display, fade on subsequent displays
+            animation: AnimationBehavior::flip_then_fade(),
             theme_color: None,
             is_hovered: false,
             on_play: None,
@@ -87,6 +89,7 @@ impl ImageFor {
             progress: None,
             progress_color: None,
             cached_data: None,
+            skip_request: false,
         }
     }
 
@@ -95,7 +98,7 @@ impl ImageFor {
         // Update dimensions based on size
         let (w, h) = match size {
             ImageSize::Thumbnail => (150.0, 225.0),
-            ImageSize::Poster => (200.0, 300.0),
+            ImageSize::Poster => (185.0, 278.0),
             ImageSize::Backdrop => (400.0, 225.0),
             ImageSize::Full => (300.0, 450.0),
             ImageSize::Profile => (120.0, 180.0),
@@ -218,6 +221,13 @@ impl ImageFor {
         self.progress_color = Some(color);
         self
     }
+
+    /// If set, the image widget will not enqueue a fetch on cache miss and
+    /// will render only a placeholder. Useful when metadata lacks a poster.
+    pub fn skip_request(mut self, skip: bool) -> Self {
+        self.skip_request = skip;
+        self
+    }
 }
 
 /// Helper function to create an image widget
@@ -231,6 +241,13 @@ pub fn image_for(media_id: Uuid) -> ImageFor {
 thread_local! {
     static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infra::service_registry::ImageServiceHandle>> = const { std::cell::RefCell::new(None) };
 }
+
+// Track which requests have already emitted a planner coverage warning to avoid spamming logs
+static PLANNER_WARNED: once_cell::sync::Lazy<
+    std::sync::Mutex<std::collections::HashSet<u64>>,
+> = once_cell::sync::Lazy::new(|| {
+    std::sync::Mutex::new(std::collections::HashSet::new())
+});
 
 impl<'a> From<ImageFor> for Element<'a, Message> {
     fn from(mut image: ImageFor) -> Self {
@@ -338,23 +355,23 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                         shader = shader.on_click(click_msg);
                     }
 
-                    // Add a tiny random jitter to animation start so rows don't animate in lockstep
-                    let (selected_animation, load_time_opt) = match loaded_at {
+                    // Add a tiny random jitter to animation selection so rows don't animate in lockstep.
+                    // We intentionally do NOT set an explicit load_time on the shader here; the
+                    // batched renderer will start the animation when the texture is actually in the atlas.
+                    let selected_animation = match loaded_at {
                         Some(load_time) => {
                             let jitter_ms: u64 = (random::<u8>() as u64) % 21; // 0-20ms
                             let jittered = load_time
                                 + std::time::Duration::from_millis(jitter_ms);
-                            (
-                                animation_behavior.select(Some(jittered)),
-                                Some(jittered),
-                            )
+                            animation_behavior.select(Some(jittered))
                         }
-                        None => (PosterAnimationType::None, None),
+                        // If we lack a timestamp, prefer at least a fade over none.
+                        None => PosterAnimationType::Fade {
+                            duration: std::time::Duration::from_millis(
+                                crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
+                            ),
+                        },
                     };
-
-                    if let Some(load_time) = load_time_opt {
-                        shader = shader.with_load_time(load_time);
-                    }
 
                     shader = shader.with_animation(selected_animation);
 
@@ -378,7 +395,52 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
                     ))]
                     profiling::scope!("image_for::CacheMiss");
 
-                    image_service.get().request_image(request);
+                    if !image.skip_request {
+                        image_service.get().request_image(request);
+                    } else {
+                        // Hardening: warn if no planner snapshot appears to cover this request shortly
+                        // We check again after a short delay to reduce false positives during transitions
+                        let maybe_handle =
+                            service_registry::get_image_service();
+                        if let Some(svc) = maybe_handle {
+                            // Only schedule if not already loaded/loading/queued
+                            if !svc.get().is_loaded(&request)
+                                && !svc.get().is_loading(&request)
+                                && !svc.get().is_queued(&request)
+                            {
+                                let req = request.clone();
+                                let req_hash = request_hash;
+                                // schedule delayed check
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(
+                                        std::time::Duration::from_millis(300),
+                                    );
+                                    if let Some(svc) =
+                                        service_registry::get_image_service()
+                                    {
+                                        if !svc.get().is_loaded(&req)
+                                            && !svc.get().is_loading(&req)
+                                            && !svc.get().is_queued(&req)
+                                        {
+                                            // Deduplicate warnings per request
+                                            if let Ok(mut set) =
+                                                PLANNER_WARNED.lock()
+                                            {
+                                                if set.insert(req_hash) {
+                                                    log::warn!(
+                                                        "ImageFor(skip_request=true): no planner snapshot detected for id={:?} size={:?} type={:?}. Did the view emit DemandSnapshot?",
+                                                        req.media_id,
+                                                        req.size,
+                                                        req.image_type
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
 
                     create_loading_placeholder(
                         bounds,
@@ -390,7 +452,12 @@ impl<'a> From<ImageFor> for Element<'a, Message> {
             }
         } else {
             // Service not initialized, show loading state
-            create_loading_placeholder(bounds, image.radius, image.theme_color, request_hash)
+            create_loading_placeholder(
+                bounds,
+                image.radius,
+                image.theme_color,
+                request_hash,
+            )
         }
     }
 }
@@ -430,20 +497,21 @@ fn create_shader_from_cached<'a>(
         shader = shader.on_click(click_msg);
     }
 
-    // Apply load-time aware animation selection
-    let (selected_animation, load_time_opt) = match loaded_at {
+    // Apply load-time aware animation selection, but defer actual animation start
+    // to the batched renderer (GPU upload time).
+    let selected_animation = match loaded_at {
         Some(load_time) => {
             let jitter_ms: u64 = (random::<u8>() as u64) % 21; // 0-20ms
-            let jittered =
-                load_time + std::time::Duration::from_millis(jitter_ms);
-            (animation.select(Some(jittered)), Some(jittered))
+            let jittered = load_time + std::time::Duration::from_millis(jitter_ms);
+            animation.select(Some(jittered))
         }
-        None => (PosterAnimationType::None, None),
+        // If we lack a timestamp, prefer at least a fade over none.
+        None => PosterAnimationType::Fade {
+            duration: std::time::Duration::from_millis(
+                crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
+            ),
+        },
     };
-
-    if let Some(load_time) = load_time_opt {
-        shader = shader.with_load_time(load_time);
-    }
 
     shader = shader.with_animation(selected_animation);
 
@@ -503,6 +571,11 @@ pub trait ImageForExt {
 
 impl ImageForExt for MovieReference {
     fn image_for(&self) -> ImageFor {
+        // Temporary diagnostics: register a human-readable title for media_id
+        crate::infra::image_log::register_media_title(
+            self.id.to_uuid(),
+            &self.title.to_string(),
+        );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Film)
             .image_type(ImageType::Movie)
@@ -511,6 +584,11 @@ impl ImageForExt for MovieReference {
 
 impl ImageForExt for SeriesReference {
     fn image_for(&self) -> ImageFor {
+        // Temporary diagnostics: register a human-readable title for media_id
+        crate::infra::image_log::register_media_title(
+            self.id.to_uuid(),
+            &self.title.to_string(),
+        );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Tv)
             .image_type(ImageType::Series)
@@ -519,6 +597,11 @@ impl ImageForExt for SeriesReference {
 
 impl ImageForExt for SeasonReference {
     fn image_for(&self) -> ImageFor {
+        // Temporary diagnostics: register a simple season label
+        crate::infra::image_log::register_media_title(
+            self.id.to_uuid(),
+            &format!("Season {}", self.season_number.value()),
+        );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Tv)
             .image_type(ImageType::Season)
@@ -527,6 +610,15 @@ impl ImageForExt for SeasonReference {
 
 impl ImageForExt for EpisodeReference {
     fn image_for(&self) -> ImageFor {
+        // Optional: register episode label (not typically used for posters)
+        crate::infra::image_log::register_media_title(
+            self.id.to_uuid(),
+            &format!(
+                "S{}E{}",
+                self.season_number.value(),
+                self.episode_number.value()
+            ),
+        );
         image_for(self.id.to_uuid())
             .placeholder(Icon::FileImage)
             .image_type(ImageType::Episode)

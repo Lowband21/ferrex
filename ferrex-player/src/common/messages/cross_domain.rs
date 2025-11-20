@@ -156,13 +156,18 @@ pub fn handle_event(
             // Restore scroll state for the global context (all libraries)
             let scroll_task = state.restore_library_scroll_state(None);
 
+            // Broadcast the event to all domains (e.g., UI switches to Curated)
+            let broadcast = state
+                .domains
+                .handle_event(CrossDomainEvent::LibrarySelectAll);
+
             Task::batch(vec![
                 scroll_task,
+                broadcast,
+                // Update the library domain directly without re-emitting events
                 Task::done(DomainMessage::Library(
                     library::messages::Message::SelectLibrary(None),
                 )),
-                // Notify UI to update view models
-                // [MediaStoreNotifier] RefreshViewModels no longer needed here
             ])
         }
         CrossDomainEvent::LibraryChanged(library_id) => {
@@ -171,6 +176,22 @@ pub fn handle_event(
             state
                 .domains
                 .handle_event(CrossDomainEvent::LibraryChanged(library_id))
+        }
+        CrossDomainEvent::SeriesChildrenChanged(series_id) => {
+            // Forward to domains (UI domain will invalidate caches/refresh)
+            state
+                .domains
+                .handle_event(CrossDomainEvent::SeriesChildrenChanged(
+                    series_id,
+                ))
+        }
+        CrossDomainEvent::SeasonChildrenChanged(season_id) => {
+            // Forward to domains (UI domain will invalidate caches/refresh)
+            state
+                .domains
+                .handle_event(CrossDomainEvent::SeasonChildrenChanged(
+                    season_id,
+                ))
         }
         CrossDomainEvent::LibraryUpdated => {
             log::info!("[CrossDomain] Library updated");

@@ -21,7 +21,7 @@ use crate::domains::{player, ui};
 use crate::state::State;
 use ferrex_core::player_prelude::{BackdropKind, BackdropSize, ImageRequest};
 use iced::widget::{Space, Stack, column, container, scrollable};
-use iced::{Element, Font, Length};
+use iced::{Element, Font, Length, Theme};
 
 #[cfg_attr(
     any(
@@ -31,16 +31,21 @@ use iced::{Element, Font, Length};
     ),
     profiling::function
 )]
-pub fn view(state: &State, window_id: iced::window::Id) -> Element<'_, DomainMessage> {
+pub fn view(
+    state: &State,
+    window_id: iced::window::Id,
+) -> Element<'_, DomainMessage, Theme, iced::Renderer> {
     // Dedicated Search window content
     if state
         .windows
         .get(crate::domains::ui::windows::WindowKind::Search)
         .is_some_and(|id| id == window_id)
     {
-        return crate::domains::ui::views::components::view_search_window(state);
+        return crate::domains::ui::views::components::view_search_window(
+            state,
+        );
     }
-    let view = iced::debug::time("ferrex-player::view");
+    // debug timing disabled in tests to simplify renderer unification
     // Check for first-run setup
     // Check authentication state
     if !state.is_authenticated {
@@ -256,7 +261,6 @@ pub fn view(state: &State, window_id: iced::window::Id) -> Element<'_, DomainMes
         content_with_header
     };
 
-    view.finish();
     result
 }
 

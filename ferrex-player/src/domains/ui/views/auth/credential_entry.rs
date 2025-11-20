@@ -201,10 +201,7 @@ pub fn view_pre_auth_login<'a>(
     error: Option<&'a str>,
     loading: bool,
 ) -> Element<'a, DomainMessage> {
-    let mut content = column![
-        title("Sign in"),
-        spacing(),
-    ];
+    let mut content = column![title("Sign in"), spacing(),];
 
     if let Some(err) = error {
         content = content.push(error_message(err));
@@ -214,7 +211,9 @@ pub fn view_pre_auth_login<'a>(
     // Username input
     content = content.push(
         text_input("Username", username)
-            .on_input(|s| DomainMessage::Auth(auth::Message::PreAuthUpdateUsername(s)))
+            .on_input(|s| {
+                DomainMessage::Auth(auth::Message::PreAuthUpdateUsername(s))
+            })
             .id(ids::auth_pre_auth_username())
             .padding(12)
             .size(16)
@@ -226,7 +225,9 @@ pub fn view_pre_auth_login<'a>(
     // Password input
     content = content.push(
         text_input("Password", password.as_str())
-            .on_input(|s| DomainMessage::Auth(auth::Message::UpdateCredential(s)))
+            .on_input(|s| {
+                DomainMessage::Auth(auth::Message::UpdateCredential(s))
+            })
             .on_submit(DomainMessage::Auth(auth::Message::PreAuthSubmit))
             .secure(!show_password)
             .id(ids::auth_pre_auth_password())
@@ -241,12 +242,16 @@ pub fn view_pre_auth_login<'a>(
     content = content.push(
         row![
             checkbox("Show password", show_password)
-                .on_toggle(|_| DomainMessage::Auth(auth::Message::PreAuthTogglePasswordVisibility))
+                .on_toggle(|_| DomainMessage::Auth(
+                    auth::Message::PreAuthTogglePasswordVisibility
+                ))
                 .size(16)
                 .spacing(8),
             Space::new().width(Length::Fixed(16.0)),
             checkbox("Remember this device", remember_device)
-                .on_toggle(|_| DomainMessage::Auth(auth::Message::PreAuthToggleRememberDevice))
+                .on_toggle(|_| DomainMessage::Auth(
+                    auth::Message::PreAuthToggleRememberDevice
+                ))
                 .size(16)
                 .spacing(8),
         ]

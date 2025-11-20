@@ -74,10 +74,6 @@ pub fn handle_database_cleared(
             state.domains.ui.state.hovered_media_id = None;
             state.domains.ui.state.error_message = None;
 
-            // Reset scroll positions
-            state.domains.ui.state.last_scroll_position = 0.0;
-            state.domains.ui.state.scroll_stopped_time = None;
-
             // Reset TabManager tabs
             //state.tab_manager.clear();
 

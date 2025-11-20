@@ -475,7 +475,8 @@ impl Pipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            // sRGB texture so sampling returns linear values for composition
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
@@ -625,31 +626,99 @@ fn load_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm, // Match rounded_image_shader format
+        // Use sRGB so sampling yields linear values in shader
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
         usage: wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
 
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &image_data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
-            rows_per_image: Some(height),
-        },
-        wgpu::Extent3d {
+    // wgpu requires bytes_per_row to be COPY_BYTES_PER_ROW_ALIGNMENT-aligned
+    // when copying multiple rows. Pad rows if necessary.
+    let bytes_per_pixel: u32 = 4;
+    let row_stride = (width * bytes_per_pixel) as usize;
+    let padded_row_stride =
+        crate::infra::render::row_padding::compute_padded_stride(
+            width,
+            bytes_per_pixel,
+        );
+
+    if padded_row_stride == row_stride {
+        log::debug!(
+            "Background upload: {}x{} RGBA, row_bytes={}, bytes_per_row={}, rows_per_image={}, extent=({}, {}, 1)",
             width,
             height,
-            depth_or_array_layers: 1,
-        },
-    );
+            row_stride,
+            row_stride,
+            height,
+            width,
+            height
+        );
+        debug_assert!(
+            height == 1
+                || row_stride % (wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
+                    == 0,
+            "Multi-row upload without padding should be aligned",
+        );
+        // Already aligned; we can upload directly
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &image_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((width * bytes_per_pixel) as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    } else {
+        log::debug!(
+            "Background upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={}, rows_per_image={}, extent=({}, {}, 1)",
+            width,
+            height,
+            row_stride,
+            padded_row_stride,
+            height,
+            width,
+            height
+        );
+        // Create a padded buffer and copy each row with padding
+        let (padded, padded_row_stride) =
+            crate::infra::render::row_padding::pad_rows_rgba(
+                &image_data,
+                width,
+                height,
+            );
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &padded,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_stride as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
 
     let aspect_ratio = width as f32 / height as f32;
     Some((Arc::new(texture), aspect_ratio))

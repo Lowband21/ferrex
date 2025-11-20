@@ -12,7 +12,11 @@ use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::{Component, Path as FsPath, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::fs::File;
+use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct ImageQuery {
@@ -25,6 +29,11 @@ pub struct ImageQuery {
     /// Quality hint 0-100 (future use)
     quality: Option<u8>,
 }
+
+// Simple counters for image responses on this process
+static IMAGE_RESP_200: AtomicU64 = AtomicU64::new(0);
+static IMAGE_RESP_304: AtomicU64 = AtomicU64::new(0);
+static IMAGE_RESP_404: AtomicU64 = AtomicU64::new(0);
 
 /// Serve cached images as streamed bytes with proper HTTP caching
 /// Path format: /images/{type}/{id}/{category}/{index}
@@ -40,7 +49,8 @@ pub async fn serve_image_handler(
     Query(query): Query<ImageQuery>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    info!(
+    let t_start = std::time::Instant::now();
+    debug!(
         "Image request: type={}, id={}, category={}, index={}, size={:?}, w={:?}, fmt={:?}, quality={:?}",
         media_type,
         media_id,
@@ -83,28 +93,31 @@ pub async fn serve_image_handler(
     };
 
     let mut ready_path: Option<PathBuf> = None;
+    let mut found_image_id: Option<Uuid> = None;
     let mut served_variant: Option<String> = None;
 
-    for variant in plan.ensure_variants.iter() {
-        let mut attempt_params = params.clone();
-        attempt_params.variant = Some(variant.clone());
-        match state
-            .image_service()
-            .ensure_variant_async(&attempt_params)
-            .await
-        {
-            Ok(Some(path)) => {
+    // Single ensure attempt using the plan's lookup variant.
+    let mut attempt_params = params.clone();
+    attempt_params.variant = plan.lookup_variant.clone();
+    match state
+        .image_service()
+        .ensure_variant_async(&attempt_params)
+        .await
+    {
+        Ok(report) => {
+            if found_image_id.is_none() {
+                found_image_id = report.image_id;
+            }
+            if let Some(path) = report.ready_path {
                 ready_path = Some(path);
-                served_variant = Some(variant.clone());
-                break;
+                served_variant = attempt_params.variant.clone();
             }
-            Ok(None) => continue,
-            Err(e) => {
-                error!(
-                    "ensure_variant_async failed for variant {}: {}",
-                    variant, e
-                );
-            }
+        }
+        Err(e) => {
+            error!(
+                "ensure_variant_async failed for variant {:?}: {}",
+                attempt_params.variant, e
+            );
         }
     }
 
@@ -118,11 +131,23 @@ pub async fn serve_image_handler(
             }),
         )
     } else {
-        match state
-            .image_service()
-            .pick_best_available(&params, plan.target_width)
-            .await
-        {
+        let pick_result = if let Some(image_id) = found_image_id {
+            state
+                .image_service()
+                .pick_best_available_for_image(
+                    image_id,
+                    plan.target_width,
+                    params.variant.as_deref(),
+                )
+                .await
+        } else {
+            state
+                .image_service()
+                .pick_best_available(&params, plan.target_width)
+                .await
+        };
+
+        match pick_result {
             Ok(Some((fallback_path, fallback_variant))) => {
                 (fallback_path, fallback_variant)
             }
@@ -134,6 +159,7 @@ pub async fn serve_image_handler(
                     category_kind.as_str(),
                     index
                 );
+                IMAGE_RESP_404.fetch_add(1, Ordering::Relaxed);
                 return Err(StatusCode::NOT_FOUND);
             }
             Err(e) => {
@@ -144,32 +170,155 @@ pub async fn serve_image_handler(
     };
 
     let mut fetch_attempted = false;
-    let (meta, data, resolved_path) = loop {
+    loop {
         let normalized =
             normalize_image_path(&image_path, state.config().cache_root());
 
         match tokio::fs::metadata(&normalized).await {
-            Ok(meta) => match tokio::fs::read(&normalized).await {
-                Ok(bytes) => break (meta, bytes, normalized),
-                Err(e)
-                    if e.kind() == ErrorKind::NotFound && !fetch_attempted =>
+            Ok(meta) => {
+                let file_size = meta.len();
+                let modified = match meta.modified() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!("No modified time for {:?}: {}", image_path, e);
+                        std::time::SystemTime::UNIX_EPOCH
+                    }
+                };
+                let last_modified = fmt_http_date(modified);
+
+                // Weak ETag based on size and mtime
+                let secs = modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                    .as_secs();
+                let etag_value = format!("W/\"{}-{}\"", file_size, secs);
+
+                // Conditional requests: If-None-Match / If-Modified-Since
+                if let Some(if_none_match) = headers
+                    .get(header::IF_NONE_MATCH)
+                    .and_then(|v| v.to_str().ok())
+                    && if_none_match.split(',').any(|t| t.trim() == etag_value)
                 {
-                    fetch_attempted = true;
-                    match redownload_variant(&state, &params, &served_variant)
-                        .await
+                    let elapsed = t_start.elapsed().as_millis().to_string();
+                    let resp = Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, &etag_value)
+                        .header(header::LAST_MODIFIED, &last_modified)
+                        .header(
+                            header::CACHE_CONTROL,
+                            "public, max-age=604800, immutable",
+                        )
+                        .header(
+                            "X-Variant-Requested",
+                            requested_header_value.as_str(),
+                        )
+                        .header("X-Variant-Served", served_variant.as_str())
+                        .header("X-Serve-Latency-Ms", elapsed)
+                        .body(Body::empty())
+                        .unwrap();
+                    IMAGE_RESP_304.fetch_add(1, Ordering::Relaxed);
+                    return Ok::<_, StatusCode>(resp);
+                }
+
+                if let Some(if_modified_since) = headers
+                    .get(header::IF_MODIFIED_SINCE)
+                    .and_then(|v| v.to_str().ok())
+                    && let Ok(since_time) = parse_http_date(if_modified_since)
+                    && modified <= since_time
+                {
+                    let elapsed = t_start.elapsed().as_millis().to_string();
+                    let resp = Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, &etag_value)
+                        .header(header::LAST_MODIFIED, &last_modified)
+                        .header(
+                            header::CACHE_CONTROL,
+                            "public, max-age=604800, immutable",
+                        )
+                        .header(
+                            "X-Variant-Requested",
+                            requested_header_value.as_str(),
+                        )
+                        .header("X-Variant-Served", served_variant.as_str())
+                        .header("X-Serve-Latency-Ms", elapsed)
+                        .body(Body::empty())
+                        .unwrap();
+                    IMAGE_RESP_304.fetch_add(1, Ordering::Relaxed);
+                    return Ok::<_, StatusCode>(resp);
+                }
+
+                // Determine content type based on file extension
+                let content_type = match normalized
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_lowercase())
+                    .as_deref()
+                {
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("png") => "image/png",
+                    Some("webp") => "image/webp",
+                    Some("avif") => "image/avif",
+                    _ => "image/jpeg",
+                };
+
+                // Stream file to avoid buffering entire image in memory
+                match File::open(&normalized).await {
+                    Ok(file) => {
+                        let stream = ReaderStream::new(file);
+                        let body = Body::from_stream(stream);
+                        let elapsed = t_start.elapsed().as_millis().to_string();
+                        let resp = Response::builder()
+                            .status(StatusCode::OK)
+                            .header(header::CONTENT_TYPE, content_type)
+                            .header(
+                                header::CONTENT_LENGTH,
+                                file_size.to_string(),
+                            )
+                            .header(header::ETAG, etag_value)
+                            .header(header::LAST_MODIFIED, last_modified)
+                            .header(
+                                header::CACHE_CONTROL,
+                                "public, max-age=604800, immutable",
+                            )
+                            .header("X-Variant-Served", served_variant.as_str())
+                            .header(
+                                "X-Variant-Requested",
+                                requested_header_value.as_str(),
+                            )
+                            .header("X-Serve-Latency-Ms", elapsed)
+                            .body(body)
+                            .unwrap();
+                        IMAGE_RESP_200.fetch_add(1, Ordering::Relaxed);
+                        return Ok::<_, StatusCode>(resp);
+                    }
+                    Err(e)
+                        if e.kind() == ErrorKind::NotFound
+                            && !fetch_attempted =>
                     {
-                        Ok(new_path) => {
-                            image_path = new_path;
-                            continue;
+                        fetch_attempted = true;
+                        match redownload_variant(
+                            &state,
+                            &params,
+                            &served_variant,
+                        )
+                        .await
+                        {
+                            Ok(new_path) => {
+                                image_path = new_path;
+                                continue;
+                            }
+                            Err(status) => return Err(status),
                         }
-                        Err(status) => return Err(status),
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to open image file for streaming {:?}: {}",
+                            normalized, e
+                        );
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
                     }
                 }
-                Err(e) => {
-                    error!("Failed to read image file {:?}: {}", normalized, e);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
-                }
-            },
+            }
             Err(e) if e.kind() == ErrorKind::NotFound && !fetch_attempted => {
                 fetch_attempted = true;
                 match redownload_variant(&state, &params, &served_variant).await
@@ -186,88 +335,7 @@ pub async fn serve_image_handler(
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
         }
-    };
-
-    // Determine content type based on file extension or metadata
-    let content_type = match resolved_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_lowercase())
-        .as_deref()
-    {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("webp") => "image/webp",
-        Some("avif") => "image/avif",
-        _ => "image/jpeg",
-    };
-
-    let file_size = meta.len();
-    let modified = match meta.modified() {
-        Ok(t) => t,
-        Err(e) => {
-            warn!("No modified time for {:?}: {}", image_path, e);
-            std::time::SystemTime::UNIX_EPOCH
-        }
-    };
-    let last_modified = fmt_http_date(modified);
-
-    // Weak ETag based on size and mtime
-    let secs = modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-        .as_secs();
-    let etag_value = format!("W/\"{}-{}\"", file_size, secs);
-
-    // Conditional requests: If-None-Match / If-Modified-Since
-    if let Some(if_none_match) = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        && if_none_match.split(',').any(|t| t.trim() == etag_value)
-    {
-        return Ok::<_, StatusCode>(
-            Response::builder()
-                .status(StatusCode::NOT_MODIFIED)
-                .header(header::ETAG, etag_value)
-                .header(header::LAST_MODIFIED, last_modified)
-                .header(header::CACHE_CONTROL, "public, max-age=86400")
-                .header("X-Variant-Requested", requested_header_value.as_str())
-                .header("X-Variant-Served", served_variant.as_str())
-                .body(Body::empty())
-                .unwrap(),
-        );
     }
-
-    if let Some(if_modified_since) = headers
-        .get(header::IF_MODIFIED_SINCE)
-        .and_then(|v| v.to_str().ok())
-        && let Ok(since_time) = parse_http_date(if_modified_since)
-        && modified <= since_time
-    {
-        return Ok::<_, StatusCode>(
-            Response::builder()
-                .status(StatusCode::NOT_MODIFIED)
-                .header(header::ETAG, etag_value)
-                .header(header::LAST_MODIFIED, last_modified)
-                .header(header::CACHE_CONTROL, "public, max-age=86400")
-                .header("X-Variant-Requested", requested_header_value.as_str())
-                .header("X-Variant-Served", served_variant.as_str())
-                .body(Body::empty())
-                .unwrap(),
-        );
-    }
-
-    let resp = Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, data.len().to_string())
-        .header(header::ETAG, etag_value)
-        .header(header::LAST_MODIFIED, last_modified)
-        .header(header::CACHE_CONTROL, "public, max-age=86400")
-        .header("X-Variant-Served", served_variant)
-        .header("X-Variant-Requested", requested_header_value.as_str());
-
-    Ok::<_, StatusCode>(resp.body(Body::from(data)).unwrap())
 }
 
 async fn redownload_variant(
@@ -299,6 +367,7 @@ async fn redownload_variant(
                 params.index,
                 served_variant
             );
+            IMAGE_RESP_404.fetch_add(1, Ordering::Relaxed);
             Err(StatusCode::NOT_FOUND)
         }
         Err(e) => {
@@ -404,6 +473,16 @@ fn determine_variant_plan(
             }
             _ => {
                 if is_recognized_tmdb_variant(&normalized) {
+                    // Normalize non-canonical poster size requests to reduce upstream 404s
+                    if matches!(category, MediaImageKind::Poster)
+                        && normalized == "w300"
+                    {
+                        return variant_plan_exact(
+                            "w342".to_string(),
+                            Some(trimmed.to_string()),
+                        );
+                    }
+
                     return variant_plan_exact(
                         normalized,
                         Some(trimmed.to_string()),
@@ -441,9 +520,10 @@ fn auto_plan_for_category(
         ),
         MediaImageKind::Backdrop => build_variant_plan(
             label,
-            Some("w1280"),
-            &["w780", "w1280", "original"],
-            Some(1280),
+            // Prefer full-quality backdrops for now
+            Some("original"),
+            &["original"],
+            None,
         ),
         MediaImageKind::Thumbnail => build_variant_plan(
             label,

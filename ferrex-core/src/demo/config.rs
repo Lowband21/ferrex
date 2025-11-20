@@ -20,6 +20,11 @@ pub struct DemoSeedOptions {
     pub skip_metadata_probe: bool,
     /// Allow zero-length files without failing validation.
     pub allow_zero_length_files: bool,
+    /// Optional default language (BCP-47, e.g. "en-US" or "en").
+    pub language: Option<String>,
+    /// Optional default region for movie popularity (ISO-3166-1 alpha-2, e.g. "US").
+    /// For TV, this will be used as a post-filter on origin_country when available.
+    pub region: Option<String>,
 }
 
 impl Default for DemoSeedOptions {
@@ -35,6 +40,8 @@ impl Default for DemoSeedOptions {
                     seasons_per_series: None,
                     episodes_per_season: None,
                     allow_deviations: None,
+                    language: None,
+                    region: None,
                 },
                 DemoLibraryOptions {
                     library_type: LibraryType::Series,
@@ -44,12 +51,16 @@ impl Default for DemoSeedOptions {
                     seasons_per_series: Some((1, 2)),
                     episodes_per_season: Some((4, 6)),
                     allow_deviations: None,
+                    language: None,
+                    region: None,
                 },
             ],
             allow_deviations: false,
             deviation_rate: 0.15,
             skip_metadata_probe: true,
             allow_zero_length_files: true,
+            language: None,
+            region: None,
         }
     }
 }
@@ -91,6 +102,20 @@ impl DemoSeedOptions {
         if let Ok(flag) = std::env::var("FERREX_DEMO_ZERO_LENGTH") {
             opts.allow_zero_length_files =
                 matches_ignore_ascii_case(&flag, ["1", "true", "yes"]);
+        }
+
+        if let Ok(lang) = std::env::var("FERREX_DEMO_LANGUAGE") {
+            let trimmed = lang.trim().to_string();
+            if !trimmed.is_empty() {
+                opts.language = Some(trimmed);
+            }
+        }
+
+        if let Ok(region) = std::env::var("FERREX_DEMO_REGION") {
+            let trimmed = region.trim().to_ascii_uppercase();
+            if !trimmed.is_empty() {
+                opts.region = Some(trimmed);
+            }
         }
 
         if let Ok(count) = std::env::var("FERREX_DEMO_MOVIE_COUNT")
@@ -138,6 +163,10 @@ pub struct DemoLibraryOptions {
     pub episodes_per_season: Option<(u16, u16)>,
     /// Override per-library deviations.
     pub allow_deviations: Option<bool>,
+    /// Optional per-library language override.
+    pub language: Option<String>,
+    /// Optional per-library region override (movies TMDB param; TV used for filtering).
+    pub region: Option<String>,
 }
 
 impl Default for DemoLibraryOptions {
@@ -150,6 +179,8 @@ impl Default for DemoLibraryOptions {
             seasons_per_series: Some((1, 1)),
             episodes_per_season: Some((4, 6)),
             allow_deviations: None,
+            language: None,
+            region: None,
         }
     }
 }

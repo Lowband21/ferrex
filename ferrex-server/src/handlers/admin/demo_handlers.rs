@@ -4,22 +4,23 @@ use axum::response::Json;
 use crate::demo::DemoSizeOverrides;
 use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
-use ferrex_core::api::types::{DemoResetRequest, DemoStatus};
+use ferrex_core::api::types::{ApiResponse, DemoResetRequest, DemoStatus};
 
 pub async fn status(
     State(state): State<AppState>,
-) -> AppResult<Json<DemoStatus>> {
+) -> AppResult<Json<ApiResponse<DemoStatus>>> {
     let Some(coordinator) = state.demo().clone() else {
         return Err(AppError::not_found("demo mode is not enabled"));
     };
 
-    Ok(Json(coordinator.describe().await))
+    let status = coordinator.describe().await;
+    Ok(Json(ApiResponse::success(status)))
 }
 
 pub async fn reset(
     State(state): State<AppState>,
     maybe_body: Option<Json<DemoResetRequest>>,
-) -> AppResult<Json<DemoStatus>> {
+) -> AppResult<Json<ApiResponse<DemoStatus>>> {
     let Some(coordinator) = state.demo().clone() else {
         return Err(AppError::not_found("demo mode is not enabled"));
     };
@@ -33,5 +34,6 @@ pub async fn reset(
             AppError::internal(format!("failed to reset demo data: {}", err))
         })?;
 
-    Ok(Json(coordinator.describe().await))
+    let status = coordinator.describe().await;
+    Ok(Json(ApiResponse::success(status)))
 }

@@ -6,10 +6,8 @@ use axum::{
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::{
-        auth::domain::{
-            services::{
-                AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
-            },
+        auth::domain::services::{
+            AuthenticationError, PasswordChangeActor, PasswordChangeRequest,
         },
         user::{User, UserUpdateRequest},
     },

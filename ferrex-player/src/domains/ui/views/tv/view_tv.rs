@@ -1,3 +1,4 @@
+use crate::domains::media::selectors;
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::infra::api_types::{
@@ -223,159 +224,17 @@ pub fn view_series_detail<'a>(
         );
     }
 
-    //// Play button row - use series progress service to find appropriate episode
-    //use crate::domains::media::services::SeriesProgressService;
-
-    //let media_store = state.domains.media.state.media_store.clone();
-    //let service = SeriesProgressService::new(media_store);
-    //let watch_state = state.domains.media.state.user_watch_state.as_ref();
-
-    //// Get next episode to continue and first episode for play from beginning
-    //let next_episode_info = service.get_next_episode_for_series(&series_id, watch_state);
-
-    //// Also get the very first episode for "Play from Beginning" option
-    //let first_episode = {
-    //    let first_season = seasons
-    //        .iter()
-    //        .find(|season| season.season_number.value() == 1)
-    //        .or_else(|| seasons.first());
-
-    //    if let Some(season) = first_season {
-    //        let episodes = state
-    //            .domains
-    //            .media
-    //            .state
-    //            .query_service
-    //            .get_episodes_for_season(&season.id);
-    //        episodes.into_iter().next()
-    //    } else {
-    //        None
-    //    }
-    //};
-
-    //// Calculate series progress percentage
-    //let series_progress = service.get_series_progress(&series_id, watch_state);
-    //let unwatched_count = service.get_unwatched_count(&series_id, watch_state);
-
-    /*
-    // Build button row based on watch state
-    let mut buttons = vec![];
-
-    if let Some((next_episode, resume_position)) = next_episode_info {
-        // Determine if this is a continuation or fresh start
-        let is_in_progress = resume_position.is_some() || series_progress > 0.0;
-
-        let primary_label = if is_in_progress {
-            if let Some(pos) = resume_position {
-                format!(
-                    "Continue S{:02}E{:02}",
-                    next_episode.season_number.value(),
-                    next_episode.episode_number.value()
-                )
-            } else {
-                format!(
-                    "Continue S{:02}E{:02}",
-                    next_episode.season_number.value(),
-                    next_episode.episode_number.value()
-                )
-            }
-        } else {
-            "Play".to_string()
-        };
-
-        // Primary action button
-        buttons.push(
-            button(
-                row![
-                    icon_text(Icon::Play),
-                    Space::new().width(8),
-                    text(primary_label).size(16)
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([10, 20])
-            .on_press(Message::PlaySeriesNextEpisode(series_id.clone()))
-            .style(theme::Button::Primary.style())
-            .into(),
+    // Play button: play first in-progress or first unwatched episode in the series
+    if let Some(next_ep_id) =
+        selectors::select_next_episode_for_series(state, series_id)
+    {
+        let button_row = components::create_action_button_row(
+            Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
+            vec![],
         );
-
-        // Add "Play from Beginning" if we're not already at the beginning
-        if is_in_progress
-            && first_episode.is_some()
-            && first_episode
-                .as_ref()
-                .map(|e| e.id != next_episode.id)
-                .unwrap_or(false)
-        {
-            if let Some(first_ep) = first_episode {
-                let series_details = series_ref.details.as_series();
-                let legacy_file = crate::infra::api_types::episode_reference_to_legacy(
-                    &first_ep,
-                    series_details,
-                );
-                buttons.push(
-                    button(
-                        row![
-                            icon_text(Icon::SkipBack),
-                            Space::new().width(8),
-                            text("Play from Beginning").size(16)
-                        ]
-                        .align_y(iced::Alignment::Center),
-                    )
-                    .padding([10, 20])
-                    .on_press(Message::PlayMediaWithId(
-                        legacy_file,
-                        MediaID::Episode(first_ep.id.clone()),
-                    ))
-                    .style(theme::Button::Secondary.style())
-                    .into(),
-                );
-            }
-        }
-    } else if let Some(first_ep) = first_episode {
-        // No watch state, just show Play button for first episode
-        let series_details = series_ref.details.as_series();
-        let legacy_file = crate::infra::api_types::episode_reference_to_legacy(
-            &first_ep,
-            series_details,
-        );
-        buttons.push(
-            button(
-                row![
-                    icon_text(Icon::Play),
-                    Space::new().width(8),
-                    text("Play").size(16)
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([10, 20])
-            .on_press(Message::PlayMediaWithId(
-                legacy_file,
-                MediaID::Episode(first_ep.id.clone()),
-            ))
-            .style(theme::Button::Primary.style())
-            .into(),
-        );
-    }
-
-    // Add progress info if available
-    if series_progress > 0.0 {
-        details = details.push(
-            text(format!(
-                "{} unwatched episodes • {:.0}% complete",
-                unwatched_count,
-                series_progress * 100.0
-            ))
-            .size(14)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
-    }
-
-    // Add button row if we have buttons
-    if !buttons.is_empty() {
         details = details.push(Space::new().height(10));
-        details = details.push(row(buttons).spacing(10).align_y(iced::Alignment::Center));
-    }*/
+        details = details.push(button_row);
+    }
 
     // Description
     if let Some(desc) = description {
@@ -450,7 +309,9 @@ pub fn view_series_detail<'a>(
                                 },
                                 size: Medium,
                                 on_click: Message::ViewSeason(s.series_id, s.id),
-                                on_play: Message::ViewSeason(s.series_id, s.id),
+                                // Important: prevent early ButtonPressed play from propagating across views
+                                // to avoid accidental episode autoplay when navigating to a season.
+                                on_play: Message::NoOp,
                                 hover_icon: lucide_icons::Icon::List,
                                 is_hovered: false,
                             }
@@ -579,7 +440,7 @@ pub fn view_season_detail<'a>(
 
     // Poster element
     let mut poster = image_for(season.id.to_uuid())
-        .size(ImageSize::Full)
+        .size(ImageSize::Poster)
         .image_type(ImageType::Season)
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
@@ -613,6 +474,18 @@ pub fn view_season_detail<'a>(
             .size(16)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     );
+
+    // Play button: play first in-progress or first unwatched episode in this season
+    if let Some(next_ep_id) =
+        selectors::select_next_episode_for_season(state, *season_id)
+    {
+        let button_row = components::create_action_button_row(
+            Message::PlayMediaWithId(MediaID::Episode(next_ep_id)),
+            vec![],
+        );
+        details = details.push(Space::new().height(10));
+        details = details.push(button_row);
+    }
 
     // Overview
     if let Some(season_details) = season.details()
@@ -807,6 +680,7 @@ pub fn view_episode_detail<'a>(
     // Episode still image
     let still_element: Element<Message> = image_for(episode.id.to_uuid())
         .size(ImageSize::Thumbnail)
+        .image_type(ImageType::Episode)
         .width(Length::Fixed(640.0))
         .height(Length::Fixed(360.0))
         .priority(Priority::Visible)

@@ -12,6 +12,9 @@ use ferrex_core::api::types::{
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
     StartScanRequest,
 };
+use ferrex_core::database::traits::ImageLookupParams;
+use ferrex_core::domain::media::image::MediaImageKind;
+use ferrex_core::types::ids::{MovieID, SeriesID};
 use ferrex_core::types::{LibraryID, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
@@ -355,13 +358,26 @@ pub async fn media_events_sse_handler(
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let receiver = state.scan_control().subscribe_media_events();
-    let stream = BroadcastStream::new(receiver).filter_map(|item| match item {
-        Ok(event) => media_event_to_sse(event).map(Ok),
-        Err(err) => {
-            warn!("media event broadcast error: {err}");
-            None
+
+    // Stream media events, but ensure primary poster availability for new movies/series
+    let stream = async_stream::stream! {
+        let mut live = BroadcastStream::new(receiver);
+        use tokio_stream::StreamExt;
+
+        while let Some(item) = live.next().await {
+            match item {
+                Ok(event) => {
+                    let event = maybe_prepare_and_refresh(&state, event).await;
+                    if let Some(sse) = media_event_to_sse(event) {
+                        yield Ok::<Event, Infallible>(sse);
+                    }
+                }
+                Err(err) => {
+                    warn!("media event broadcast error: {err}");
+                }
+            }
         }
-    });
+    };
 
     Sse::new(stream).keep_alive(default_keep_alive())
 }
@@ -381,6 +397,66 @@ fn media_event_to_sse(event: MediaEvent) -> Option<Event> {
 
     encode_media_event(&event)
         .map(|data| Event::default().event(name).data(data))
+}
+
+async fn maybe_prepare_primary_poster(state: &AppState, event: &MediaEvent) {
+    use tokio::time::{Duration, timeout};
+
+    // Only gate on new Movie/Series where a poster is expected
+    let (media_type, media_id) = match event {
+        MediaEvent::MovieAdded { movie } => ("movie", movie.id.0),
+        MediaEvent::SeriesAdded { series } => ("series", series.id.0),
+        _ => return,
+    };
+
+    let params = ImageLookupParams {
+        media_type: media_type.to_string(),
+        media_id: media_id.to_string(),
+        image_type: MediaImageKind::Poster,
+        index: 0,
+        // TMDB canonical near-300 width for fast grid display
+        variant: Some("w342".to_string()),
+    };
+
+    // Block briefly to ensure availability; fall through on timeout/errors
+    let image_service = state.image_service();
+    let fut = image_service.get_or_download_variant(&params);
+    let _ = timeout(Duration::from_secs(5), fut).await;
+}
+
+async fn maybe_prepare_and_refresh(
+    state: &AppState,
+    event: MediaEvent,
+) -> MediaEvent {
+    // Ensure image readiness first
+    maybe_prepare_primary_poster(state, &event).await;
+
+    // Reload the reference to include any freshly computed theme_color
+    match event {
+        MediaEvent::MovieAdded { movie } => {
+            let uow = state.unit_of_work();
+            match uow
+                .media_refs
+                .get_movie_reference(&MovieID(movie.id.0))
+                .await
+            {
+                Ok(updated) => MediaEvent::MovieAdded { movie: updated },
+                Err(_) => MediaEvent::MovieAdded { movie },
+            }
+        }
+        MediaEvent::SeriesAdded { series } => {
+            let uow = state.unit_of_work();
+            match uow
+                .media_refs
+                .get_series_reference(&SeriesID(series.id.0))
+                .await
+            {
+                Ok(updated) => MediaEvent::SeriesAdded { series: updated },
+                Err(_) => MediaEvent::SeriesAdded { series },
+            }
+        }
+        other => other,
+    }
 }
 
 fn encode_media_event(event: &MediaEvent) -> Option<String> {

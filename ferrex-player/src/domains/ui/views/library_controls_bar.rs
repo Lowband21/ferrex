@@ -73,8 +73,9 @@ pub fn view_library_controls_bar<'a>(
         current_order,
         active_filter_count,
         is_filter_open,
+        item_count,
     ))
-    .padding([0, 20])
+    .padding([0, 0])
     .width(Length::Fill)
     .align_y(iced::Alignment::Center);
 

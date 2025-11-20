@@ -18,21 +18,37 @@ pub fn library_sort_filter_menu<'a>(
     current_order: SortOrder,
     active_filter_count: usize,
     is_filter_panel_open: bool,
+    item_count: usize,
 ) -> Element<'a, Message> {
     let sort_item = build_sort_menu(current_sort, current_order);
     let filter_item =
         build_filter_menu(active_filter_count, is_filter_panel_open);
 
     let menu_bar = MenuBar::new(vec![sort_item, filter_item])
-        .spacing(8.0)
-        .padding([0.0, 4.0])
-        .height(Length::Fixed(36.0))
+        .spacing(0.0)
+        .height(Length::Fill)
         .close_on_item_click(true);
 
-    container(row![menu_bar, Space::new().width(Length::Fill)])
-        .align_y(Alignment::Center)
-        .height(Length::Fixed(36.0))
-        .into()
+    let count_button = button(
+        container(
+            row![text(item_count.to_string()).size(14),]
+                .align_y(Alignment::Center),
+        )
+        .padding(0)
+        .center_y(Length::Fill),
+    )
+    .on_press(Message::NoOp)
+    .style(theme::Button::HeaderMenuSecondary.style())
+    .height(Length::Fill);
+
+    container(row![
+        menu_bar,
+        Space::new().width(Length::Fill),
+        count_button,
+    ])
+    .align_y(Alignment::Center)
+    .height(Length::Fill)
+    .into()
 }
 
 fn build_sort_menu(
@@ -74,18 +90,18 @@ fn build_sort_menu(
             ]
             .align_y(Alignment::Center),
         )
-        .padding([0, 12])
-        .height(Length::Fill),
+        .padding(0)
+        .center_y(Length::Fill),
     )
-    .style(theme::Button::Secondary.style())
-    .height(Length::Fixed(36.0));
+    .style(theme::Button::HeaderMenuSecondary.style())
+    .height(Length::Fill);
 
     Item::with_menu(
         sort_button,
         Menu::new(sort_items)
             .max_width(220.0)
-            .spacing(4.0)
-            .offset(8.0),
+            .spacing(0.0)
+            .offset(0.0),
     )
 }
 
@@ -100,9 +116,9 @@ fn build_filter_menu(
     };
 
     let button_style = if is_filter_panel_open || active_filter_count > 0 {
-        theme::Button::Primary.style()
+        theme::Button::HeaderMenuPrimary.style()
     } else {
-        theme::Button::Secondary.style()
+        theme::Button::HeaderMenuSecondary.style()
     };
 
     let filter_items = vec![
@@ -121,18 +137,18 @@ fn build_filter_menu(
             ]
             .align_y(Alignment::Center),
         )
-        .padding([0, 12])
-        .height(Length::Fill),
+        .padding(0)
+        .center_y(Length::Fill),
     )
     .style(button_style)
-    .height(Length::Fixed(36.0));
+    .height(Length::Fill);
 
     Item::with_menu(
         filter_button,
         Menu::new(filter_items)
             .max_width(200.0)
-            .spacing(4.0)
-            .offset(8.0),
+            .spacing(0.0)
+            .offset(0.0),
     )
 }
 
@@ -144,7 +160,7 @@ fn menu_item(
     Item::new(
         button(menu_row(label, icon))
             .on_press(message)
-            .style(theme::Button::Secondary.style()),
+            .style(theme::Button::HeaderMenuSecondary.style()),
     )
 }
 

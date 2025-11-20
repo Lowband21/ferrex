@@ -115,6 +115,20 @@ impl DemoCoordinator {
     ) -> Result<Self> {
         let root = resolve_root(&options, config);
 
+        // In demo mode, scope caches under the demo root so demo runs are
+        // fully self-contained and writable even in constrained environments.
+        config.cache.root = root.join("cache");
+        config.cache.transcode = config.cache.root.join("transcode");
+        config.cache.thumbnails = config.cache.root.join("thumbnails");
+
+        // Ensure cache directories exist and normalize to absolute paths
+        config
+            .ensure_directories()
+            .context("failed to create demo cache directories")?;
+        config
+            .normalize_paths()
+            .context("failed to normalize demo cache paths")?;
+
         std::fs::create_dir_all(&root)
             .context("failed to create demo root directory")?;
 

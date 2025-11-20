@@ -1,5 +1,6 @@
 use super::messages::Message;
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
+use crate::domains::ui::messages as ui;
 use crate::state::State;
 use iced::Task;
 
@@ -103,11 +104,19 @@ pub fn update_metadata(
         }
         Message::ImageLoaded(_, items) => todo!(),
         Message::UnifiedImageLoaded(request, handle) => {
-            let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle);
-            DomainUpdateResult::task(task.map(DomainMessage::Metadata))
+            let meta_task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle)
+                .map(DomainMessage::Metadata);
+            // Nudge UI to render promptly to avoid coalesced updates
+            let ui_nudge =
+                Task::done(DomainMessage::Ui(ui::Message::UpdateTransitions));
+            DomainUpdateResult::task(Task::batch(vec![meta_task, ui_nudge]))
         }
         Message::UnifiedImageLoadFailed(request, error) => {
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_load_failed(state, request, error);
+            DomainUpdateResult::task(task.map(DomainMessage::Metadata))
+        }
+        Message::UnifiedImageCancelled(request) => {
+            let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_cancelled(state, request);
             DomainUpdateResult::task(task.map(DomainMessage::Metadata))
         }
         Message::NoOp => {

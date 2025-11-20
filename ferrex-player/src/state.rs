@@ -10,7 +10,7 @@ use crate::{
         auth::{AuthDomainState, AuthManager},
         library::LibraryDomainState,
         media::MediaDomainState,
-        metadata::{image_service::UnifiedImageService, MetadataDomainState},
+        metadata::{MetadataDomainState, image_service::UnifiedImageService},
         player::PlayerDomain,
         search::SearchDomain,
         settings::SettingsDomainState,
@@ -25,6 +25,7 @@ use crate::{
         user_management::UserManagementDomainState,
     },
     infra::{
+        ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
         constants::animation::{
@@ -39,7 +40,6 @@ use crate::{
             streaming::StreamingApiAdapter,
             user_management::UserAdminApiAdapter,
         },
-        ServiceBuilder,
         widgets::poster::poster_animation_types::PosterAnimationType,
     },
 };
@@ -106,7 +106,8 @@ impl State {
             Accessor::new(media_repo.clone());
 
         let api_client = ApiClient::new(server_url.clone());
-        let (image_service, _receiver) = UnifiedImageService::new(16);
+
+        let (image_service, _receiver) = UnifiedImageService::new(8);
 
         // Create service builder/toggles first (used by multiple domains)
         let service_builder = ServiceBuilder::new();
@@ -171,12 +172,8 @@ impl State {
             hovered_media_id: None,
             theme_color_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
             current_library_id: None,
-            last_scroll_position: 0.0,
-            scroll_stopped_time: None,
-            last_scroll_time: None,
-            last_check_task_created: None,
+            last_prefetch_tick: None,
             scroll_manager: crate::domains::ui::scroll_manager::ScrollPositionManager::default(),
-            force_scroll_stop_check: false,
             background_shader_state:
                 crate::domains::ui::background_state::BackgroundShaderState::default(),
             search_query: String::new(),
@@ -193,6 +190,7 @@ impl State {
             show_clear_database_confirm: false,
             navigation_history: Vec::new(),
             poster_anim_active_until: None,
+            kinetic_scroll: crate::domains::ui::kinetic_scroll::KineticScroller::new(),
         };
 
         // Create settings service adapter
@@ -316,13 +314,6 @@ impl State {
     /// Get the active tab ID
     pub fn active_tab_id(&self) -> TabId {
         self.tab_manager.active_tab_id()
-    }
-
-    /// Schedule a `CheckScrollStopped` message and force it to run even without recent scroll input.
-    pub fn schedule_check_scroll_stopped(&mut self) -> Task<DomainMessage> {
-        self.domains.ui.state.force_scroll_stop_check = true;
-        Task::done(crate::domains::ui::messages::Message::CheckScrollStopped)
-            .map(DomainMessage::Ui)
     }
 }
 

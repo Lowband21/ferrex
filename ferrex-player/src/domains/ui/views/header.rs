@@ -72,13 +72,12 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 row(left_section_items).align_y(iced::Alignment::Center);
 
             // Center section left empty to keep layout balanced
-            let center_section = container(
-                Space::new().width(Length::Shrink).height(HEIGHT),
-            )
-            .width(Length::Shrink)
-            .height(HEIGHT)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center);
+            let center_section =
+                container(Space::new().width(Length::Shrink).height(HEIGHT))
+                    .width(Length::Shrink)
+                    .height(HEIGHT)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center);
 
             // Right section - Controls
             let search_button = button(
@@ -180,11 +179,11 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     // Top layer: left and right sections
                     row![
                         container(left_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fill),
                         container(right_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                     ]
                     .width(Length::Fill)
@@ -232,11 +231,12 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
 
-            let center_section = container(Space::new().width(Length::Shrink).height(HEIGHT))
-                .width(Length::Shrink)
-                .height(HEIGHT)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center);
+            let center_section =
+                container(Space::new().width(Length::Shrink).height(HEIGHT))
+                    .width(Length::Shrink)
+                    .height(HEIGHT)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Center);
 
             // Right section - same controls as library view
             let search_button = button(
@@ -317,11 +317,11 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     // Top layer: left and right sections
                     row![
                         container(left_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fill),
                         container(right_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                     ]
                     .width(Length::Fill)
@@ -460,11 +460,11 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     // Top layer: left and right sections
                     row![
                         container(left_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fill),
                         container(right_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                     ]
                     .width(Length::Fill)
@@ -545,11 +545,11 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                 .push(
                     row![
                         container(left_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fill),
                         container(right_section)
-                            .padding([0, 15])
+                            .padding([0, 0])
                             .align_y(iced::alignment::Vertical::Center),
                     ]
                     .width(Length::Fill)
@@ -611,7 +611,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     container(left_section)
                         .width(Length::Fill)
                         .height(HEIGHT)
-                        .padding([0, 20])
+                        .padding([0, 0])
                         .align_x(iced::alignment::Horizontal::Left)
                         .align_y(iced::alignment::Vertical::Center),
                 )
@@ -671,7 +671,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, Message> {
                     container(left_section)
                         .width(Length::Fill)
                         .height(HEIGHT)
-                        .padding([0, 20])
+                        .padding([0, 0])
                         .align_x(iced::alignment::Horizontal::Left)
                         .align_y(iced::alignment::Vertical::Center),
                 )
@@ -707,7 +707,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
         // Check if "All" tab is active
         let is_all_active = state.tab_manager.active_tab_id() == TabId::All;
         let all_button_style = if is_all_active {
-            theme::Button::Primary.style()
+            theme::Button::HeaderTabActive.style()
         } else {
             theme::Button::HeaderIcon.style()
         };
@@ -741,7 +741,7 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, Message> {
             let is_active =
                 state.tab_manager.active_tab_id() == TabId::Library(id);
             let button_style = if is_active {
-                theme::Button::Primary.style()
+                theme::Button::HeaderTabActive.style()
             } else {
                 theme::Button::HeaderIcon.style()
             };

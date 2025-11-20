@@ -167,10 +167,6 @@ enum DbCommand {
 
 #[derive(ClapArgs, Debug, Clone)]
 struct ConfigInitArgs {
-    /// Path to write the generated ferrex configuration
-    #[arg(long, default_value = "config/ferrex.toml")]
-    config_path: PathBuf,
-
     /// Path to write the companion .env file
     #[arg(long, default_value = ".env")]
     env_path: PathBuf,
@@ -186,11 +182,7 @@ struct ConfigInitArgs {
 
 #[derive(ClapArgs, Debug, Clone)]
 struct ConfigCheckArgs {
-    /// Explicit path to ferrex.toml
-    #[arg(long)]
-    config_path: Option<PathBuf>,
-
-    /// Explicit path to .env file
+    /// Optional path to a .env file to load before checking
     #[arg(long)]
     env_file: Option<PathBuf>,
 
@@ -211,7 +203,6 @@ async fn main() -> anyhow::Result<()> {
         match command {
             Command::Config(ConfigCommand::Init(args)) => {
                 let options = InitOptions {
-                    config_path: args.config_path.clone(),
                     env_path: args.env_path.clone(),
                     force: args.force,
                     non_interactive: args.non_interactive,
@@ -221,7 +212,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Command::Config(ConfigCommand::Check(args)) => {
                 let options = CheckOptions {
-                    config_path: args.config_path.clone(),
+                    config_path: None,
                     env_path: args.env_file.clone(),
                     tls_cert_path: args.cert.clone(),
                     tls_key_path: args.key.clone(),
@@ -336,14 +327,6 @@ async fn load_runtime_config(
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    if let Some(path) = config.metadata.config_path.as_ref() {
-        info!(path = %path.display(), "loaded configuration file");
-    } else {
-        info!(
-            "proceeding without ferrex.toml (environment-only configuration)"
-        );
-    }
-
     if config.metadata.env_file_loaded {
         info!("loaded .env file");
     }
@@ -360,7 +343,7 @@ async fn load_runtime_config(
                 info!(path = %path.display(), "rate limiter config loaded from file")
             }
             RateLimitSource::FileInline(path) => {
-                info!(path = %path.display(), "rate limiter config loaded inline from ferrex.toml")
+                info!(path = %path.display(), "rate limiter config loaded inline from file")
             }
         }
     }
@@ -378,7 +361,6 @@ async fn load_runtime_config(
         }
     }
 
-    info!("Server configuration loaded");
     let queue_cfg = &config.scanner.orchestrator.queue;
     let budget_cfg = &config.scanner.orchestrator.budget;
     info!(
@@ -545,10 +527,15 @@ async fn wire_app_resources(
         .expect("Failed to initialize thumbnail service"),
     );
 
-    let image_service = Arc::new(ImageService::new(
+    let download_concurrency = std::env::var("IMAGE_DOWNLOAD_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(12);
+    let image_service = Arc::new(ImageService::new_with_concurrency(
         unit_of_work.media_files_read.clone(),
         unit_of_work.images.clone(),
         config.cache_root().to_path_buf(),
+        download_concurrency,
     ));
 
     let orchestrator = Arc::new(

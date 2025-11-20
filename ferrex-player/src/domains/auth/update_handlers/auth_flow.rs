@@ -143,7 +143,11 @@ pub fn handle_users_loaded(
                         username: String::new(),
                         password: SecureCredential::new(String::new()),
                         show_password: false,
-                        remember_device: state.domains.auth.state.auto_login_enabled,
+                        remember_device: state
+                            .domains
+                            .auth
+                            .state
+                            .auto_login_enabled,
                         error: None,
                         loading: false,
                     };
@@ -638,7 +642,9 @@ pub fn handle_auth_flow_update_credential(
         }
 
         // Allow PreAuthLogin password input to update via the same message
-        AuthenticationFlow::PreAuthLogin { password, error, .. } => {
+        AuthenticationFlow::PreAuthLogin {
+            password, error, ..
+        } => {
             *password = SecureCredential::new(input);
             *error = None;
         }
@@ -710,8 +716,9 @@ pub fn handle_pre_auth_update_username(
     username: String,
 ) -> Task<auth::Message> {
     use crate::domains::auth::types::AuthenticationFlow;
-    if let AuthenticationFlow::PreAuthLogin { username: u, error, .. } =
-        &mut state.domains.auth.state.auth_flow
+    if let AuthenticationFlow::PreAuthLogin {
+        username: u, error, ..
+    } = &mut state.domains.auth.state.auth_flow
     {
         *u = username;
         *error = None;
@@ -737,8 +744,9 @@ pub fn handle_pre_auth_toggle_remember_device(
     state: &mut State,
 ) -> Task<auth::Message> {
     use crate::domains::auth::types::AuthenticationFlow;
-    if let AuthenticationFlow::PreAuthLogin { remember_device, .. } =
-        &mut state.domains.auth.state.auth_flow
+    if let AuthenticationFlow::PreAuthLogin {
+        remember_device, ..
+    } = &mut state.domains.auth.state.auth_flow
     {
         *remember_device = !*remember_device;
         state.domains.auth.state.auto_login_enabled = *remember_device;
@@ -826,9 +834,9 @@ pub fn handle_auth_flow_auth_result(
                     remember_device: true,
                     ..
                 } => !auth_result.device_has_pin,
-                AuthenticationFlow::PreAuthLogin { remember_device, .. } => {
-                    *remember_device && !auth_result.device_has_pin
-                }
+                AuthenticationFlow::PreAuthLogin {
+                    remember_device, ..
+                } => *remember_device && !auth_result.device_has_pin,
                 _ => false,
             };
 
@@ -887,7 +895,11 @@ pub fn handle_auth_flow_auth_result(
                         }
                     }
                 }
-                AuthenticationFlow::PreAuthLogin { error: view_error, loading, .. } => {
+                AuthenticationFlow::PreAuthLogin {
+                    error: view_error,
+                    loading,
+                    ..
+                } => {
                     *view_error = Some(error);
                     *loading = false;
                 }

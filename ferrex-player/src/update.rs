@@ -63,8 +63,7 @@ pub fn update(
     state: &mut State,
     message: DomainMessage,
 ) -> Task<DomainMessage> {
-    let update = iced::debug::time("ferrex-player::update");
-    // Mark the beginning of a new frame for profiling
+
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
@@ -206,7 +205,6 @@ pub fn update(
         ));
     }
 
-    update.finish();
     // Batch all tasks together
     Task::batch(tasks)
 }

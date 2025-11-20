@@ -201,6 +201,7 @@ pub fn movie_reference_card_with_state<'a>(
         .animation(state.domains.ui.state.default_widget_animation)
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
+        .skip_request(true)
         .is_hovered(is_hovered)
         .on_play(Message::PlayMediaWithId(media_id))
         .on_click(Message::ViewDetails(media_id));
@@ -396,6 +397,12 @@ pub fn series_reference_card_with_state<'a>(
         Priority::Preload
     };
 
+    // Determine if we have a poster_path; if absent, skip fetching and render placeholder
+    let has_poster_path = details_opt
+        .as_series()
+        .and_then(|d| d.poster_path.as_ref())
+        .is_some();
+
     // Create image with scroll tier
     let mut img = image_for(series_id.to_uuid())
         .size(ImageSize::Poster)
@@ -407,6 +414,7 @@ pub fn series_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
+        .skip_request(true)
         .on_play(Message::PlaySeriesNextEpisode(series_id))
         .on_click(Message::ViewTvShow(series_id));
 
@@ -572,144 +580,7 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
     ),
     profiling::function
 )]
-pub fn episode_reference_card_with_state<'a, Episode: MediaOps + EpisodeLike>(
-    episode: &'a Episode,
-    is_hovered: bool,
-    state: Option<&'a State>,
-    _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
-) -> Element<'a, Message> {
-    let episode_id = episode.id.as_uuid();
-
-    // Extract episode name from details if available
-    let (episode_name, has_details) = episode
-        .details()
-        .map(|details| (details.name.as_str(), true))
-        .unwrap_or(("", false));
-
-    // Format season and episode numbers
-    let season_episode = format!(
-        "S{:02}E{:02}",
-        episode.season_number.value(),
-        episode.episode_number.value()
-    );
-
-    // Episode cards are typically wider (thumbnail format)
-    let width = 240.0;
-    let height = 135.0; // 16:9 aspect ratio
-    let radius = 4.0;
-
-    // Get watch progress for this episode
-    let watch_progress = state.and_then(|s| {
-        s.domains
-            .media
-            .state
-            .get_media_progress(&MediaID::Episode(episode.id.clone()))
-    });
-
-    // Create image element
-    let mut image_element = image_for(MediaID::Episode(episode.id.clone()))
-        .size(ImageSize::Thumbnail)
-        .rounded(radius)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .placeholder(lucide_icons::Icon::Play)
-        .priority(if is_hovered {
-            Priority::Visible
-        } else {
-            Priority::Preload
-        });
-
-    // Add watch progress - default to unwatched (0.0) if no watch state
-    let progress = watch_progress.unwrap_or(0.0);
-    image_element = image_element.progress(progress);
-
-    // Create the poster button
-    let poster_button = button(image_element)
-        .on_press(Message::PlayMediaWithId(
-            episode.file.clone(),
-            MediaID::Episode(episode.id.clone()),
-        ))
-        .padding(0)
-        .style(theme::Button::MediaCard.style());
-
-    /*
-    // Add hover overlay if needed
-    let poster_with_overlay: Element<'_, Message> = if is_hovered {
-        use crate::hover_overlay;
-        let overlay = hover_overlay!(
-            width,
-            height,
-            radius,
-            {
-                center: (lucide_icons::Icon::Play, Message::PlayMediaWithId(
-                    episode.file.clone(),
-                    MediaID::Episode(episode.id.clone())
-                )),
-                top_left: (lucide_icons::Icon::Circle, Message::NoOp),
-                bottom_left: (lucide_icons::Icon::Pencil, Message::NoOp),
-                bottom_right: (lucide_icons::Icon::EllipsisVertical, Message::NoOp),
-            }
-        );
-
-        Stack::new().push(poster_button).push(overlay).into()
-    } else {
-        poster_button.into()
-    }; */
-
-    // Truncate episode name if too long
-    let truncated_name = if episode_name.is_empty() {
-        String::new()
-    } else {
-        truncate_text(episode_name, 30)
-    };
-
-    // Create text content with three lines
-    let text_content = column![
-        // Line 1: Episode title (always visible)
-        text(format!("Episode {}", episode.episode_number.value()))
-            .size(14)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        // Line 2: Episode name (with fade animation)
-        container(text(truncated_name).size(12).color(if has_details {
-            theme::MediaServerTheme::TEXT_SECONDARY
-        } else {
-            // Start with transparent color for fade-in effect
-            iced::Color::from_rgba(
-                theme::MediaServerTheme::TEXT_SECONDARY.r,
-                theme::MediaServerTheme::TEXT_SECONDARY.g,
-                theme::MediaServerTheme::TEXT_SECONDARY.b,
-                0.0,
-            )
-        }))
-        .height(Length::Fixed(16.0)), // Reserve space even when empty
-        // Line 3: Season/Episode format
-        text(season_episode)
-            .size(11)
-            .color(theme::MediaServerTheme::TEXT_DIMMED)
-    ]
-    .spacing(2);
-
-    // Complete card
-    let card_content = column![
-        image_element,
-        container(text_content)
-            .padding(5)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(65.0)) // Slightly taller for 3 lines
-            .clip(true)
-    ]
-    .spacing(5);
-
-    // Wrap in mouse area
-    mouse_area(
-        container(card_content)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(height + 70.0)),
-    )
-    .on_enter(Message::MediaHovered(episode_id))
-    .on_exit(Message::MediaUnhovered(episode_id))
-    .into()
-}
+// NOTE: Removed stale episode card builder that used an outdated image_for API
 */
 
 // Take str instead?

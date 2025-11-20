@@ -32,8 +32,7 @@ pub async fn browse_media_root(
     let configured_root =
         state.config().media.root.clone().ok_or_else(|| {
             AppError::bad_request(
-                "Media root is not configured. Set `media.root` in ferrex.toml \
-                 or provide MEDIA_ROOT in the environment before browsing.",
+                "Media root is not configured. Set MEDIA_ROOT in the environment before browsing.",
             )
         })?;
 

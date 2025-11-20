@@ -25,7 +25,6 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct InitOptions {
-    pub config_path: PathBuf,
     pub env_path: PathBuf,
     pub force: bool,
     pub non_interactive: bool,
@@ -40,31 +39,19 @@ pub struct CheckOptions {
 }
 
 pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
-    ensure_writable(&opts.config_path, opts.force)?;
     ensure_writable(&opts.env_path, opts.force)?;
 
-    if let Some(dir) = opts.config_path.parent() {
-        fs::create_dir_all(dir).with_context(|| {
-            format!("failed to create directory {}", dir.display())
-        })?;
-    }
     if let Some(dir) = opts.env_path.parent() {
         fs::create_dir_all(dir).with_context(|| {
             format!("failed to create directory {}", dir.display())
         })?;
     }
 
-    let existing_file_config = load_existing_file_config(&opts.config_path)?;
     let existing_env = load_env_map(&opts.env_path)?;
 
-    let dev_mode_default = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.dev_mode)
-        .or_else(|| {
-            existing_env
-                .get("DEV_MODE")
-                .and_then(|value| parse_bool(value))
-        })
+    let dev_mode_default = existing_env
+        .get("DEV_MODE")
+        .and_then(|value| parse_bool(value))
         .unwrap_or(true);
 
     let mut dev_mode = dev_mode_default;
@@ -80,10 +67,8 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         .get("SERVER_HOST")
         .cloned()
         .filter(|value| !value.trim().is_empty());
-    let server_host_default = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.server.host.clone())
-        .or(env_server_host.clone())
+    let server_host_default = env_server_host
+        .clone()
         .unwrap_or_else(|| "0.0.0.0".to_string());
     let server_host: String = if opts.non_interactive {
         server_host_default.clone()
@@ -97,9 +82,9 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .context("prompt failed")?
     };
 
-    let server_port_default = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.server.port)
+    let server_port_default = existing_env
+        .get("SERVER_PORT")
+        .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(if dev_mode { 3000 } else { 443 });
     let server_port: u16 = if opts.non_interactive {
         server_port_default
@@ -117,10 +102,7 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .expect("validated port to parse")
     };
 
-    let default_media_root = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.media.root.clone())
-        .or(None);
+    let default_media_root = existing_env.get("MEDIA_ROOT").map(PathBuf::from);
 
     let media_root: Option<PathBuf> = if opts.non_interactive {
         default_media_root.clone()
@@ -159,26 +141,17 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .ok()
             .filter(|value| !value.trim().is_empty());
 
-    let database_url_existing = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.database.url.clone());
+    let database_url_existing: Option<String> = None;
     let env_database_url_host = existing_env.get("DATABASE_URL").cloned();
-    let env_database_url_container =
-        existing_env.get("DATABASE_URL_CONTAINER").cloned();
+    // No separate container DSN; use DATABASE_HOST_CONTAINER to override host in containers
 
     let mut db_host_default = existing_env
         .get("DATABASE_HOST")
         .cloned()
-        .or_else(|| existing_env.get("POSTGRES_HOST_LOCAL").cloned())
         .unwrap_or_else(|| "localhost".to_string());
     let mut db_port_default = existing_env
         .get("DATABASE_PORT")
         .and_then(|value| value.parse::<u16>().ok())
-        .or_else(|| {
-            existing_env
-                .get("POSTGRES_PORT")
-                .and_then(|v| v.parse().ok())
-        })
         .unwrap_or(5432);
     let mut db_user_default = existing_env
         .get("DATABASE_USER")
@@ -253,57 +226,20 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .context("prompt failed")?
     };
 
-    let db_internal_host_default = existing_env
-        .get("DATABASE_INTERNAL_HOST")
+    let db_container_host_default = existing_env
+        .get("DATABASE_HOST_CONTAINER")
         .cloned()
-        .or_else(|| existing_env.get("POSTGRES_INTERNAL_HOST").cloned())
         .unwrap_or_else(|| "db".to_string());
-    let db_internal_port_default = existing_env
-        .get("DATABASE_INTERNAL_PORT")
-        .and_then(|value| value.parse::<u16>().ok())
-        .or_else(|| {
-            existing_env
-                .get("POSTGRES_INTERNAL_PORT")
-                .and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(5432);
-
-    let db_internal_host = existing_env
-        .get("DATABASE_INTERNAL_HOST")
-        .cloned()
-        .unwrap_or(db_internal_host_default);
-    let db_internal_port = existing_env
-        .get("DATABASE_INTERNAL_PORT")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(db_internal_port_default);
 
     let database_url_host_default = format!(
         "postgresql://{}@{}:{}/{}",
         db_user, db_host, db_port, db_name
     );
-    let database_url_container_default = format!(
-        "postgresql://{}@{}:{}/{}",
-        db_user, db_internal_host, db_internal_port, db_name
-    );
-
     let database_url_host = managed_database_url_host
         .clone()
         .or(env_database_url_host.clone())
         .or(existing_env.get("DATABASE_URL").cloned())
         .unwrap_or_else(|| database_url_host_default.clone());
-
-    let database_url_container = managed_database_url
-        .clone()
-        .or(env_database_url_container.clone())
-        .or_else(|| {
-            database_url_existing
-                .clone()
-                .or(Some(database_url_host.clone()))
-                .and_then(|url| {
-                    derive_internal_connection_url(&url, &db_internal_host)
-                })
-        })
-        .unwrap_or_else(|| database_url_container_default.clone());
 
     let managed_redis_url = std::env::var("FERREX_CONFIG_INIT_REDIS_URL")
         .ok()
@@ -320,9 +256,7 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .ok()
             .filter(|value| !value.trim().is_empty());
 
-    let existing_redis_url = existing_file_config
-        .as_ref()
-        .and_then(|cfg| cfg.redis.as_ref().map(|r| r.url.clone()));
+    let existing_redis_url: Option<String> = None;
     let env_redis_url_host = existing_env.get("REDIS_URL").cloned();
     let env_redis_url_container =
         existing_env.get("REDIS_URL_CONTAINER").cloned();
@@ -361,29 +295,32 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
                 .and_then(|url| derive_internal_connection_url(url, "cache"))
         });
 
-    let existing_cors = existing_file_config
-        .as_ref()
-        .map(|cfg| cfg.cors.clone())
-        .unwrap_or_default();
     let default_origins =
-        existing_cors.allowed_origins.clone().unwrap_or_else(|| {
+        if let Some(raw) = existing_env.get("CORS_ALLOWED_ORIGINS") {
+            raw.split(',')
+                .filter_map(|s| {
+                    let t = s.trim();
+                    if t.is_empty() {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    }
+                })
+                .collect()
+        } else {
             vec![
                 "http://localhost:5173".to_string(),
                 "https://localhost:5173".to_string(),
                 "http://localhost:3000".to_string(),
                 "https://localhost:3000".to_string(),
             ]
-        });
-    let default_methods = existing_cors
-        .allowed_methods
-        .clone()
-        .unwrap_or_else(default_cors_methods);
-    let default_headers = existing_cors
-        .allowed_headers
-        .clone()
-        .unwrap_or_else(default_cors_headers);
-    let allow_credentials_default =
-        existing_cors.allow_credentials.unwrap_or(false);
+        };
+    let default_methods = default_cors_methods();
+    let default_headers = default_cors_headers();
+    let allow_credentials_default = existing_env
+        .get("CORS_ALLOW_CREDENTIALS")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
 
     let cors_origins: Vec<String> = if opts.non_interactive {
         default_origins.clone()
@@ -416,13 +353,10 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .context("prompt failed")?
     };
 
-    let existing_security = existing_file_config
-        .as_ref()
-        .map(|cfg| cfg.security.clone())
-        .unwrap_or_default();
-
-    let enforce_https_default =
-        existing_security.enforce_https.unwrap_or(!dev_mode);
+    let enforce_https_default = existing_env
+        .get("ENFORCE_HTTPS")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(!dev_mode);
     let enforce_https = if opts.non_interactive {
         enforce_https_default
     } else {
@@ -433,8 +367,9 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             .context("prompt failed")?
     };
 
-    let trust_proxy_default = existing_security
-        .trust_proxy_headers
+    let trust_proxy_default = existing_env
+        .get("TRUST_PROXY_HEADERS")
+        .and_then(|v| parse_bool(v))
         .unwrap_or(enforce_https);
     let trust_proxy_headers = if enforce_https && !opts.non_interactive {
         Confirm::new()
@@ -448,37 +383,35 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         trust_proxy_default
     };
 
-    let hsts_max_age = existing_security
-        .hsts
-        .max_age
+    let hsts_max_age = existing_env
+        .get("HSTS_MAX_AGE")
+        .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(if enforce_https { 31_536_000 } else { 0 });
-    let hsts_include_subdomains =
-        existing_security.hsts.include_subdomains.unwrap_or(false);
-    let hsts_preload = existing_security.hsts.preload.unwrap_or(false);
+    let hsts_include_subdomains = existing_env
+        .get("HSTS_INCLUDE_SUBDOMAINS")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
+    let hsts_preload = existing_env
+        .get("HSTS_PRELOAD")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
 
-    let existing_cache = existing_file_config
-        .as_ref()
-        .map(|cfg| cfg.cache.clone())
-        .unwrap_or_default();
-    let cache_root = existing_cache
-        .root
+    let cache_root = existing_env
+        .get("CACHE_DIR")
+        .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("./cache"));
-    let cache_transcode = existing_cache
-        .transcode
+    let cache_transcode = existing_env
+        .get("TRANSCODE_CACHE_DIR")
+        .map(PathBuf::from)
         .unwrap_or_else(|| cache_root.join("transcode"));
-    let cache_thumbnails = existing_cache
-        .thumbnails
+    let cache_thumbnails = existing_env
+        .get("THUMBNAIL_CACHE_DIR")
+        .map(PathBuf::from)
         .unwrap_or_else(|| cache_root.join("thumbnails"));
 
-    let existing_ffmpeg = existing_file_config
-        .as_ref()
-        .map(|cfg| cfg.ffmpeg.clone())
-        .unwrap_or_default();
+    let existing_ffmpeg = super::sources::FileFfmpegConfig::default();
 
-    let auth_defaults = existing_file_config
-        .as_ref()
-        .map(|cfg| cfg.auth.clone())
-        .unwrap_or_default();
+    let auth_defaults = super::sources::FileAuthConfig::default();
     let auth_password_pepper = auth_defaults
         .password_pepper
         .clone()
@@ -495,13 +428,13 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         .or(existing_env.get("FERREX_SETUP_TOKEN").cloned())
         .or_else(|| Some(generate_secret(48)));
 
-    let file_config = FileConfig {
+    let _file_config = FileConfig {
         server: FileServerConfig {
             host: Some(server_host.clone()),
             port: Some(server_port),
         },
         database: FileDatabaseConfig {
-            url: Some(database_url_container.clone()),
+            url: None,
             ..Default::default()
         },
         redis: redis_url_host
@@ -536,23 +469,12 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
             token_key: Some(auth_token_key.clone()),
             setup_token: setup_token.clone(),
         },
-        rate_limiter: existing_file_config
-            .as_ref()
-            .and_then(|cfg| cfg.rate_limiter.clone()),
-        scanner: existing_file_config
-            .as_ref()
-            .and_then(|cfg| cfg.scanner.clone()),
+        rate_limiter: None,
+        scanner: None,
         dev_mode: Some(dev_mode),
     };
 
-    let toml = toml::to_string(&file_config)
-        .context("failed to serialize configuration")?;
-    fs::write(&opts.config_path, toml).with_context(|| {
-        format!(
-            "failed to write configuration to {}",
-            opts.config_path.display()
-        )
-    })?;
+    // No TOML file written; environment-only configuration.
 
     fs::create_dir_all(&cache_root)
         .context("failed to create cache directory")?;
@@ -568,16 +490,26 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
     writeln!(env_file, "DEV_MODE={}", dev_mode)?;
     writeln!(env_file, "SERVER_HOST={}", server_host)?;
     writeln!(env_file, "SERVER_PORT={}", server_port)?;
+    writeln!(env_file, "ENFORCE_HTTPS={}", enforce_https)?;
+    writeln!(env_file, "TRUST_PROXY_HEADERS={}", trust_proxy_headers)?;
+    writeln!(env_file, "HSTS_MAX_AGE={}", hsts_max_age)?;
+    writeln!(
+        env_file,
+        "HSTS_INCLUDE_SUBDOMAINS={}",
+        hsts_include_subdomains
+    )?;
+    writeln!(env_file, "HSTS_PRELOAD={}", hsts_preload)?;
 
     write_env_entry(
         &mut env_file,
         "DATABASE_URL",
         Some(database_url_host.as_str()),
     )?;
-    write_env_entry(
-        &mut env_file,
-        "DATABASE_URL_CONTAINER",
-        Some(database_url_container.as_str()),
+    // Container override host (Compose will set DATABASE_HOST from this inside the container)
+    writeln!(
+        env_file,
+        "DATABASE_HOST_CONTAINER={}",
+        db_container_host_default
     )?;
 
     let media_root_string =
@@ -588,8 +520,7 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
     writeln!(env_file, "DATABASE_PORT={}", db_port)?;
     writeln!(env_file, "DATABASE_NAME={}", db_name)?;
     writeln!(env_file, "DATABASE_USER={}", db_user)?;
-    writeln!(env_file, "DATABASE_INTERNAL_HOST={}", db_internal_host)?;
-    writeln!(env_file, "DATABASE_INTERNAL_PORT={}", db_internal_port)?;
+    // No internal host/port variables; use DATABASE_HOST_CONTAINER instead
 
     write_env_entry(&mut env_file, "REDIS_URL", redis_url_host.as_deref())?;
     write_env_entry(
@@ -606,18 +537,7 @@ pub async fn run_config_init(opts: &InitOptions) -> Result<()> {
         setup_token.as_deref(),
     )?;
 
-    let ferrex_config_path = opts.config_path.display().to_string();
-    write_env_entry(
-        &mut env_file,
-        "FERREX_CONFIG_PATH",
-        Some(ferrex_config_path.as_str()),
-    )?;
-
-    println!(
-        "Configuration written to {} and environment secrets saved to {}",
-        opts.config_path.display(),
-        opts.env_path.display()
-    );
+    println!("Environment saved to {}", opts.env_path.display());
     println!("Run `ferrex-server config check` before starting the server.");
 
     Ok(())
@@ -740,7 +660,7 @@ fn write_env_entry(
 
 pub async fn run_config_check(opts: &CheckOptions) -> Result<()> {
     let loader = ConfigLoader::with_options(ConfigLoaderOptions {
-        config_path: opts.config_path.clone(),
+        config_path: None,
         env_file: opts.env_path.clone(),
     });
 

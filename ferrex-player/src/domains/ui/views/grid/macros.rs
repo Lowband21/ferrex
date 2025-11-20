@@ -396,21 +396,18 @@ macro_rules! media_card {
             AnimationType::FadeIn | AnimationType::FadeScale => PosterAnimationType::Fade {
                 duration: animation_config.duration
             },
-            _ => PosterAnimationType::None,
+            // For unsupported poster-shader animations (SlideIn, ScaleIn, etc.),
+            // prefer opacity over none for the primary animation.
+            _ => PosterAnimationType::Fade { duration: animation_config.duration },
         };
 
         // Create the main image/poster element using image_for
         let image_element: Element<'_, $crate::domains::ui::messages::Message> = {
             use $crate::domains::ui::widgets::image_for;
 
-            // Determine image size based on card size
-            let image_size = match card_size {
-                CardSize::Small => ferrex_core::player_prelude::ImageSize::Thumbnail,
-                CardSize::Medium => ferrex_core::player_prelude::ImageSize::Poster,
-                CardSize::Large => ferrex_core::player_prelude::ImageSize::Full,
-                CardSize::Wide => ferrex_core::player_prelude::ImageSize::Backdrop,
-                CardSize::Custom(_, _) => ferrex_core::player_prelude::ImageSize::Poster,
-            };
+            // Determine requested image category from macro parameter (Poster/Backdrop/Thumbnail/Profile/Full)
+            // Width/height continue to follow card_size; this only controls the server fetch category.
+            let image_size = ferrex_core::player_prelude::ImageSize::$image_type;
 
             //// Map priority if provided
             let priority = ferrex_core::player_prelude::Priority::Preload;
@@ -419,6 +416,7 @@ macro_rules! media_card {
             // Create the image widget
             let mut img = image_for($id)
                 .size(image_size)
+                .image_type(ferrex_core::player_prelude::ImageType::$card_type)
                 .radius(radius)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(height))
@@ -433,6 +431,7 @@ macro_rules! media_card {
                     }
                 }).unwrap_or(lucide_icons::Icon::Image))
                 .priority(priority)
+                .skip_request(true)
                 .is_hovered(is_hovered)
                 .on_play($play_msg)
                 .on_click($click_msg);

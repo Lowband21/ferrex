@@ -19,6 +19,7 @@ use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
 };
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -60,7 +61,7 @@ fn library_loading() -> Element<'static, Message> {
     profiling::function
 )]
 pub fn view_library(state: &State) -> Element<'_, Message> {
-    let view_library = iced::debug::time("view::view_library");
+    // debug timing disabled in tests to simplify renderer unification
 
     if state.loading {
         // Loading state
@@ -135,14 +136,28 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                             .library_type
                         {
                             LibraryType::Movies => {
-                                // Compute a small prefetch set and preload their textures into the atlas
+                                // Preload textures for visible rows and a small prefetch window
+                                let visible_range =
+                                    lib_state.grid_state.visible_range.clone();
                                 let preload_range = lib_state.grid_state.get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
-                                let ids_slice = lib_state
+                                let mut ids: Vec<Uuid> = Vec::new();
+                                if let Some(slice) = lib_state
+                                    .cached_index_ids
+                                    .get(visible_range.clone())
+                                {
+                                    ids.extend(slice.iter().copied());
+                                }
+                                if let Some(slice) = lib_state
                                     .cached_index_ids
                                     .get(preload_range)
-                                    .unwrap_or(&[]);
+                                {
+                                    ids.extend(slice.iter().copied());
+                                }
+                                // Deduplicate
+                                ids.sort_unstable();
+                                ids.dedup();
                                 let handles = collect_cached_handles_for_media(
-                                    ids_slice.iter().copied(),
+                                    ids.into_iter(),
                                     ImageType::Movie,
                                     ImageSize::Poster,
                                 );
@@ -161,13 +176,26 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                                 column![preloader, grid].into()
                             }
                             LibraryType::Series => {
+                                let visible_range =
+                                    lib_state.grid_state.visible_range.clone();
                                 let preload_range = lib_state.grid_state.get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
-                                let ids_slice = lib_state
+                                let mut ids: Vec<Uuid> = Vec::new();
+                                if let Some(slice) = lib_state
+                                    .cached_index_ids
+                                    .get(visible_range.clone())
+                                {
+                                    ids.extend(slice.iter().copied());
+                                }
+                                if let Some(slice) = lib_state
                                     .cached_index_ids
                                     .get(preload_range)
-                                    .unwrap_or(&[]);
+                                {
+                                    ids.extend(slice.iter().copied());
+                                }
+                                ids.sort_unstable();
+                                ids.dedup();
                                 let handles = collect_cached_handles_for_media(
-                                    ids_slice.iter().copied(),
+                                    ids.into_iter(),
                                     ImageType::Series,
                                     ImageSize::Poster,
                                 );
@@ -216,7 +244,6 @@ pub fn view_library(state: &State) -> Element<'_, Message> {
                     .height(Length::Fill),
             );
 
-            view_library.finish();
             main_content.into()
         }
     }

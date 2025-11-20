@@ -23,12 +23,33 @@ pub fn application(
     let config = Arc::new(config);
 
     let boot_config = Arc::clone(&config);
-    fn view_adapter(state: &State) -> Element<'_, DomainMessage> {
-        let id = state
+    fn view_adapter(
+        state: &State,
+    ) -> Element<'_, DomainMessage, Theme, iced::Renderer> {
+        if let Some(id) = state
             .windows
             .get(crate::domains::ui::windows::WindowKind::Main)
-            .unwrap_or_default();
-        view::view(state, id)
+        {
+            view::view(state, id)
+        } else {
+            // Fallback while main window id is not known yet:
+            // - If not authenticated, render the auth view so tests can proceed.
+            // - Otherwise, render an empty container until window id is set.
+            if !state.is_authenticated {
+                crate::domains::ui::views::auth::view_auth(
+                    &state.domains.auth.state.auth_flow,
+                    state.domains.auth.state.user_permissions.as_ref(),
+                )
+                .map(DomainMessage::from)
+            } else {
+                iced::widget::container(
+                    iced::widget::Space::new()
+                        .width(iced::Length::Fill)
+                        .height(iced::Length::Fill),
+                )
+                .into()
+            }
+        }
     }
 
     iced::application(
@@ -75,12 +96,30 @@ pub fn application_with_presets(
     let config = Arc::new(config);
     let boot_config = Arc::clone(&config);
 
-    fn view_adapter(state: &State) -> Element<'_, DomainMessage> {
-        let id = state
+    fn view_adapter(
+        state: &State,
+    ) -> Element<'_, DomainMessage, Theme, iced::Renderer> {
+        if let Some(id) = state
             .windows
             .get(crate::domains::ui::windows::WindowKind::Main)
-            .unwrap_or_default();
-        view::view(state, id)
+        {
+            view::view(state, id)
+        } else {
+            if !state.is_authenticated {
+                crate::domains::ui::views::auth::view_auth(
+                    &state.domains.auth.state.auth_flow,
+                    state.domains.auth.state.user_permissions.as_ref(),
+                )
+                .map(DomainMessage::from)
+            } else {
+                iced::widget::container(
+                    iced::widget::Space::new()
+                        .width(iced::Length::Fill)
+                        .height(iced::Length::Fill),
+                )
+                .into()
+            }
+        }
     }
 
     iced::application(

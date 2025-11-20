@@ -169,6 +169,21 @@ impl VirtualGridState {
         self.visible_range.end..end
     }
 
+    /// Get items that fall into the trailing background window beyond the preload range.
+    pub fn get_background_range(
+        &self,
+        preload_rows: usize,
+        background_rows: usize,
+    ) -> Range<usize> {
+        let preload_items = preload_rows * self.columns;
+        let background_items = background_rows * self.columns;
+        let preload_end =
+            (self.visible_range.end + preload_items).min(self.total_items);
+        let background_end =
+            (preload_end + background_items).min(self.total_items);
+        preload_end..background_end
+    }
+
     /// Update columns on window resize
     pub fn resize(&mut self, width: f32) {
         log::debug!("Resize: updating columns for width {}", width);

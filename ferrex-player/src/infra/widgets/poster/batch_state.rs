@@ -16,9 +16,10 @@ use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
 use iced::{Color, Point, Rectangle as LayoutRect};
 use iced_wgpu::primitive::{
-    buffer_manager::InstanceBufferManager, PrepareContext, PrimitiveBatchState, RenderContext,
+    PrepareContext, PrimitiveBatchState, RenderContext,
+    buffer_manager::InstanceBufferManager,
 };
-use iced_wgpu::{core, wgpu, AtlasRegion};
+use iced_wgpu::{AtlasRegion, core, wgpu};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -35,7 +36,8 @@ pub struct PosterInstance {
     pub mouse_pos_and_padding: [f32; 4],
     pub progress_color_and_padding: [f32; 4],
     pub atlas_uvs: [f32; 4],
-    pub atlas_layer_and_padding: [f32; 4],
+    pub atlas_layer: i32,
+    pub _pad_atlas_layer: [i32; 3],
 }
 
 /// Batched primitive metadata captured during encoding.
@@ -62,7 +64,11 @@ pub struct PendingPrimitive {
 struct Globals {
     transform: [f32; 16],
     scale_factor: f32,
-    _padding: [f32; 7],
+    // Whether atlas samples are already linear (sRGB texture implies GPU decode)
+    atlas_is_srgb: f32,
+    // Whether the render target is sRGB (GPU will encode on write)
+    target_is_srgb: f32,
+    _padding: [f32; 5],
 }
 
 /// Handles instanced draws for batched posters.
@@ -80,6 +86,8 @@ pub struct PosterBatchState {
     sampler: Arc<wgpu::Sampler>,
     uploads_this_frame: u32,
     loaded_times: HashMap<u64, Instant>,
+    // Avoid log flooding: remember last layer we logged per instance id
+    logged_layers: HashMap<u64, i32>,
 }
 
 impl PosterBatchState {
@@ -129,7 +137,7 @@ impl PosterBatchState {
             wgpu::VertexAttribute {
                 offset: 128,
                 shader_location: 8,
-                format: wgpu::VertexFormat::Float32x4,
+                format: wgpu::VertexFormat::Sint32,
             },
         ];
 
@@ -274,7 +282,8 @@ impl PrimitiveBatchState for PosterBatchState {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX
+                            | wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -304,6 +313,9 @@ impl PrimitiveBatchState for PosterBatchState {
         let sampler =
             Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("Rounded Image Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 mipmap_filter: wgpu::FilterMode::Linear,
@@ -324,6 +336,7 @@ impl PrimitiveBatchState for PosterBatchState {
             sampler,
             uploads_this_frame: 0,
             loaded_times: HashMap::new(),
+            logged_layers: HashMap::new(),
         }
     }
 
@@ -344,6 +357,34 @@ impl PrimitiveBatchState for PosterBatchState {
                 let was_cached = atlas_region.is_some();
 
                 if !was_cached {
+                    // Diagnostic: log computed row/padded stride for non-256-aligned widths
+                    if log::log_enabled!(log::Level::Debug) {
+                        let dims = image_cache.measure_image(&pending.handle);
+                        let width = dims.width;
+                        let height = dims.height;
+                        if width > 0 && height > 0 {
+                            let row_bytes = width as usize * 4;
+                            let align =
+                                wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+                            let padded = if row_bytes == 0 {
+                                0
+                            } else {
+                                ((row_bytes + align - 1) / align) * align
+                            };
+                            if row_bytes % align != 0 {
+                                log::debug!(
+                                    "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
+                                    width,
+                                    height,
+                                    row_bytes,
+                                    padded,
+                                    align,
+                                    width,
+                                    height
+                                );
+                            }
+                        }
+                    }
                     if self.uploads_this_frame >= MAX_UPLOADS_PER_FRAME {
                         self.push_placeholder(&pending);
                         continue;
@@ -364,7 +405,13 @@ impl PrimitiveBatchState for PosterBatchState {
 
                 let mut load_time_ref: Option<Instant> = pending.load_time;
 
-                if pending.animation != PosterAnimationType::None {
+                // Only record a GPU-based start time for real textures/animations.
+                // Skip placeholders so the flip starts when the actual atlas upload completes.
+                if !matches!(
+                    pending.animation,
+                    PosterAnimationType::None
+                        | PosterAnimationType::PlaceholderSunken
+                ) {
                     let entry = self.loaded_times.entry(pending.id);
 
                     load_time_ref = match (pending.load_time, entry) {
@@ -384,6 +431,27 @@ impl PrimitiveBatchState for PosterBatchState {
                             Some(instant)
                         }
                     };
+                }
+
+                // Log atlas layer once per id or on change to avoid flooding
+                let layer_i32 = region.layer as i32;
+                let should_log = match self.logged_layers.get(&pending.id) {
+                    None => true,
+                    Some(prev) => *prev != layer_i32,
+                };
+                if should_log {
+                    log::debug!(
+                        "PosterBatch: id={} atlas_layer={} (cached={}, uploads_this_frame={}), uv_min=({:.6},{:.6}) uv_max=({:.6},{:.6})",
+                        pending.id,
+                        layer_i32,
+                        was_cached,
+                        self.uploads_this_frame,
+                        region.uv_min[0],
+                        region.uv_min[1],
+                        region.uv_max[0],
+                        region.uv_max[1]
+                    );
+                    self.logged_layers.insert(pending.id, layer_i32);
                 }
 
                 let instance = create_batch_instance(
@@ -438,10 +506,26 @@ impl PrimitiveBatchState for PosterBatchState {
             return;
         }
 
+        // Consider renderer present-time encode for non-sRGB surfaces
+        let target_is_srgb =
+            if wgpu::TextureFormat::is_srgb(&self.surface_format) {
+                1.0
+            } else if iced_wgpu::graphics::color::GAMMA_CORRECTION {
+                // Renderer will encode to sRGB on present when gamma-correct composition is enabled
+                1.0
+            } else {
+                0.0
+            };
+
+        // Atlas is sRGB under gamma-correct composition; keep in sync with presentation
+        let atlas_is_srgb = target_is_srgb;
+
         let globals = Globals {
             transform: context.viewport.projection().into(),
             scale_factor: context.scale_factor,
-            _padding: [0.0; 7],
+            atlas_is_srgb,
+            target_is_srgb,
+            _padding: [0.0; 5],
         };
 
         if self.globals_buffer.is_none() {

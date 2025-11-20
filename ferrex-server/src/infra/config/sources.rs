@@ -163,7 +163,6 @@ pub struct EnvConfig {
     pub rate_limits: Option<RateLimitSpec>,
     pub scanner_config_path: Option<PathBuf>,
     pub scanner_config_json: Option<String>,
-    pub config_path: Option<PathBuf>,
 }
 
 impl EnvConfig {
@@ -234,8 +233,7 @@ impl EnvConfig {
         env_config.scanner_config_json =
             std::env::var("SCANNER_CONFIG_JSON").ok();
 
-        env_config.config_path =
-            std::env::var("FERREX_CONFIG_PATH").ok().map(PathBuf::from);
+        // No external config path; environment-only
 
         env_config
     }

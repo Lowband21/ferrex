@@ -2,9 +2,13 @@ use dashmap::DashMap;
 use ferrex_core::player_prelude::ImageRequest;
 use iced::widget::image::Handle;
 use priority_queue::PriorityQueue;
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 // Maximum number of retry attempts for failed images
 const MAX_RETRY_ATTEMPTS: u8 = 5;
@@ -26,6 +30,9 @@ pub struct ImageEntry {
     pub state: LoadState,
     pub last_accessed: Instant,
     pub loaded_at: Option<Instant>,
+    pub requested_at: Option<Instant>,
+    pub loading_started_at: Option<Instant>,
+    pub first_displayed_at: Option<Instant>,
     pub retry_count: u8,
     pub last_failure: Option<Instant>,
     pub first_display_hint: Option<FirstDisplayHint>,
@@ -46,7 +53,13 @@ pub struct UnifiedImageService {
     load_sender: mpsc::UnboundedSender<()>,
 
     // Maximum concurrent loads
-    max_concurrent: usize,
+    max_concurrent: Arc<AtomicUsize>,
+
+    // Cancellation handles for in-flight downloads
+    inflight_cancellers: Arc<DashMap<ImageRequest, oneshot::Sender<()>>>,
+
+    // Rolling telemetry for latency and depth tracking
+    telemetry: Arc<Telemetry>,
 }
 
 // Minimum delay between retry attempts for transient (e.g., 404) failures
@@ -70,10 +83,17 @@ impl UnifiedImageService {
             queue: Arc::new(Mutex::new(PriorityQueue::new())),
             loading: Arc::new(DashMap::new()),
             load_sender,
-            max_concurrent,
+            max_concurrent: Arc::new(AtomicUsize::new(max_concurrent)),
+            inflight_cancellers: Arc::new(DashMap::new()),
+            telemetry: Arc::new(Telemetry::default()),
         };
 
         (service, load_receiver)
+    }
+
+    /// Maximum allowed concurrent loads for the unified image service.
+    pub fn max_concurrent(&self) -> usize {
+        self.max_concurrent.load(Ordering::SeqCst)
     }
 
     pub fn get(&self, request: &ImageRequest) -> Option<Handle> {
@@ -120,9 +140,31 @@ impl UnifiedImageService {
             _ => return None,
         };
 
-        entry.last_accessed = Instant::now();
-        let hint = entry.first_display_hint.take();
-        Some((handle, entry.loaded_at, hint))
+        let now = Instant::now();
+        entry.last_accessed = now;
+
+        // If this is the first time the UI consumes this texture,
+        // record it and provide a one-time flip by default (unless set explicitly).
+        let mut newly_displayed_duration = None;
+        let default_first_hint = if entry.first_displayed_at.is_none() {
+            entry.first_displayed_at = Some(now);
+            if let Some(loaded_at) = entry.loaded_at {
+                newly_displayed_duration =
+                    Some(now.saturating_duration_since(loaded_at));
+            }
+            Some(FirstDisplayHint::FlipOnce)
+        } else {
+            None
+        };
+        let loaded_at = entry.loaded_at;
+        let hint = entry.first_display_hint.take().or(default_first_hint);
+        drop(entry);
+
+        if let Some(duration) = newly_displayed_duration {
+            self.telemetry.record_display_latency(duration);
+        }
+
+        Some((handle, loaded_at, hint))
     }
 
     pub fn request_image(&self, request: ImageRequest) {
@@ -162,15 +204,31 @@ impl UnifiedImageService {
                 return;
             }
 
-            // Throttle repeated retries for transient 404 responses
-            if is_failed
-                && let Some(last_failure) = entry.last_failure
-                && now.duration_since(last_failure) < RETRY_THROTTLE
-            {
-                entry.last_accessed = now;
-                return;
+            // Throttle repeated retries
+            // - For 404s: exponential backoff (750ms, 1500ms, 3000ms, 6000ms, 8000ms max)
+            // - For other failures: keep legacy throttle
+            if is_failed && let Some(last_failure) = entry.last_failure {
+                let throttle = if is_failed_404 {
+                    // retry_count reflects the count before this request; cap growth
+                    let exp = entry.retry_count.min(4) as u32; // 2^0..2^4
+                    let base_ms: u64 = 750;
+                    let backoff_ms = base_ms.saturating_mul(1u64 << exp);
+                    std::cmp::min(backoff_ms, 8_000)
+                } else {
+                    RETRY_THROTTLE.as_millis() as u64
+                };
+                if now.duration_since(last_failure)
+                    < std::time::Duration::from_millis(throttle)
+                {
+                    entry.last_accessed = now;
+                    return;
+                }
             }
 
+            // Record first time we saw a request for this image
+            if entry.requested_at.is_none() {
+                entry.requested_at = Some(now);
+            }
             entry.last_accessed = now;
         }
 
@@ -179,19 +237,50 @@ impl UnifiedImageService {
             return;
         }
 
-        // Add to queue or upgrade priority
+        // Add to queue or adjust priority
         if let Ok(mut queue) = self.queue.lock() {
-            let new_priority = request.priority.weight();
+            // If this image previously failed, demote its priority to the back
+            // of the queue to avoid starving fresh images. Use an even lower
+            // priority than Background where possible.
+            let is_failed_entry = self
+                .cache
+                .get(&request)
+                .map(|entry| matches!(entry.state, LoadState::Failed(_)))
+                .unwrap_or(false);
+
+            // Normal priorities are 1..=3; use 0 for failed retries to push
+            // them behind everything else.
+            let requested_priority = request.priority.weight();
+            let effective_priority: u8 = if is_failed_entry {
+                0
+            } else {
+                requested_priority
+            };
 
             if let Some(&existing_priority) = queue.get_priority(&request) {
-                // Image already queued - upgrade priority if new is higher
-                if new_priority > existing_priority {
+                // If we have a failed entry, force a demotion to the lowest
+                // effective priority so it doesn't jump the line. Otherwise
+                // only upgrade if the caller requested a higher priority.
+                if is_failed_entry {
+                    if existing_priority != effective_priority {
+                        queue.change_priority(&request, effective_priority);
+                        match self.load_sender.send(()) {
+                            Ok(_) => log::debug!(
+                                "Sent wake-up signal for failed-request demotion"
+                            ),
+                            Err(e) => log::error!(
+                                "Failed to send wake-up signal: {:?}",
+                                e
+                            ),
+                        }
+                    }
+                } else if requested_priority > existing_priority {
                     /*
                     log::debug!("Upgrading priority for {:?} from {} to {} ({})",
-                               request.media_id, existing_priority, new_priority,
-                               if new_priority == 3 { "VISIBLE" } else if new_priority == 2 { "PRELOAD" } else { "BACKGROUND" });
+                               request.media_id, existing_priority, requested_priority,
+                               if requested_priority == 3 { "VISIBLE" } else if requested_priority == 2 { "PRELOAD" } else { "BACKGROUND" });
                      */
-                    queue.change_priority(&request, new_priority);
+                    queue.change_priority(&request, requested_priority);
                     // Send wake-up signal to notify loader of priority change
                     match self.load_sender.send(()) {
                         Ok(_) => log::debug!(
@@ -205,12 +294,13 @@ impl UnifiedImageService {
                 }
             } else {
                 // New request - add to queue
-                queue.push(request.clone(), new_priority);
+                queue.push(request.clone(), effective_priority);
                 // Send wake-up signal to notify loader of new request
                 match self.load_sender.send(()) {
                     Ok(_) => log::debug!(
-                        "Sent wake-up signal for new request: {:?}",
-                        request
+                        "Sent wake-up signal for new request: {:?} (priority {})",
+                        request,
+                        effective_priority
                     ),
                     Err(e) => {
                         log::error!("Failed to send wake-up signal: {:?}", e)
@@ -221,21 +311,38 @@ impl UnifiedImageService {
     }
 
     pub fn mark_loading(&self, request: &ImageRequest) {
-        self.loading
-            .insert(request.clone(), std::time::Instant::now());
-        let existing_hint = self
+        let now = std::time::Instant::now();
+        self.loading.insert(request.clone(), now);
+        let (
+            existing_hint,
+            existing_retry_count,
+            existing_last_failure,
+            existing_requested_at,
+            existing_first_displayed,
+        ) = self
             .cache
             .get(request)
-            .map(|entry| entry.first_display_hint)
-            .unwrap_or(None);
+            .map(|entry| {
+                (
+                    entry.first_display_hint,
+                    entry.retry_count,
+                    entry.last_failure,
+                    entry.requested_at,
+                    entry.first_displayed_at,
+                )
+            })
+            .unwrap_or((None, 0, None, Some(now), None));
         self.cache.insert(
             request.clone(),
             ImageEntry {
                 state: LoadState::Loading,
-                last_accessed: std::time::Instant::now(),
+                last_accessed: now,
                 loaded_at: None,
-                retry_count: 0,
-                last_failure: None,
+                requested_at: existing_requested_at.or(Some(now)),
+                loading_started_at: Some(now),
+                first_displayed_at: existing_first_displayed,
+                retry_count: existing_retry_count,
+                last_failure: existing_last_failure,
                 first_display_hint: existing_hint,
             },
         );
@@ -245,11 +352,23 @@ impl UnifiedImageService {
         self.loading.remove(request);
         let now = std::time::Instant::now();
 
-        let existing_hint = self
-            .cache
-            .get(request)
-            .map(|entry| entry.first_display_hint)
-            .unwrap_or(None);
+        let (
+            existing_hint,
+            prev_requested,
+            prev_loading_started,
+            prev_first_displayed,
+        ) = {
+            if let Some(entry) = self.cache.get(request) {
+                (
+                    entry.first_display_hint,
+                    entry.requested_at,
+                    entry.loading_started_at,
+                    entry.first_displayed_at,
+                )
+            } else {
+                (None, None, None, None)
+            }
+        };
 
         //log::debug!("mark_loaded called for {:?}", request.media_id);
         //log::debug!("  - Setting loaded_at to: {:?}", now);
@@ -260,11 +379,20 @@ impl UnifiedImageService {
                 state: LoadState::Loaded(handle),
                 last_accessed: now,
                 loaded_at: Some(now),
+                requested_at: prev_requested,
+                loading_started_at: prev_loading_started,
+                first_displayed_at: prev_first_displayed,
                 retry_count: 0,
                 last_failure: None,
                 first_display_hint: existing_hint,
             },
         );
+        self.clear_inflight_cancel(request);
+
+        if let Some(started) = prev_loading_started {
+            self.telemetry
+                .record_load_duration(now.saturating_duration_since(started));
+        }
     }
 
     pub fn mark_failed(&self, request: &ImageRequest, error: String) {
@@ -289,6 +417,9 @@ impl UnifiedImageService {
                         state: LoadState::Failed(error.clone()),
                         last_accessed: now,
                         loaded_at: None,
+                        requested_at: Some(now),
+                        loading_started_at: Some(now),
+                        first_displayed_at: None,
                         retry_count,
                         last_failure: Some(now),
                         first_display_hint: None,
@@ -324,6 +455,7 @@ impl UnifiedImageService {
                 if is_404 { " [404]" } else { "" }
             );
         }
+        self.clear_inflight_cancel(request);
     }
 
     pub fn flag_flip_once(&self, request: &ImageRequest) {
@@ -338,6 +470,9 @@ impl UnifiedImageService {
                 state: LoadState::Loading,
                 last_accessed: Instant::now(),
                 loaded_at: None,
+                requested_at: Some(Instant::now()),
+                loading_started_at: Some(Instant::now()),
+                first_displayed_at: None,
                 retry_count: 0,
                 last_failure: None,
                 first_display_hint: Some(FirstDisplayHint::FlipOnce),
@@ -345,22 +480,91 @@ impl UnifiedImageService {
         );
     }
 
+    pub fn mark_cancelled(&self, request: &ImageRequest) {
+        self.loading.remove(request);
+        self.cache.remove(request);
+        self.clear_inflight_cancel(request);
+    }
+
     pub fn get_next_request(&self) -> Option<ImageRequest> {
         let mut queue = self.queue.lock().ok()?;
 
-        if self.loading.len() > self.max_concurrent {
+        // Enforce concurrency cap strictly
+        if self.loading.len() >= self.max_concurrent.load(Ordering::SeqCst) {
             return None;
         }
 
-        if let Some((request, _priority)) = queue.pop() {
-            if !self.loading.contains_key(&request) {
-                Some(request)
-            } else {
-                None
+        // Strategy:
+        // 1) Prefer first-attempts (retry_count == 0) that are not loading.
+        // 2) If any first-attempts exist in queue or are currently loading,
+        //    do not schedule retries yet; keep slot idle until the first wave completes.
+        // 3) Otherwise, allow a retry request.
+
+        let mut popped: Vec<(ImageRequest, u8)> =
+            Vec::with_capacity(queue.len());
+        let mut fresh_candidate: Option<(ImageRequest, u8)> = None;
+        let mut retry_candidate: Option<(ImageRequest, u8)> = None;
+        let mut any_fresh_in_queue = false;
+
+        while let Some((request, prio)) = queue.pop() {
+            let is_loading = self.loading.contains_key(&request);
+            let retry_count_opt = self
+                .cache
+                .get(&request)
+                .map(|entry| entry.retry_count)
+                .unwrap_or(0);
+            let is_fresh = retry_count_opt == 0;
+
+            if is_fresh {
+                any_fresh_in_queue = true;
             }
-        } else {
-            None
+
+            if !is_loading {
+                if is_fresh && fresh_candidate.is_none() {
+                    fresh_candidate = Some((request.clone(), prio));
+                    // Do not reinsert the selected candidate
+                } else if !is_fresh && retry_candidate.is_none() {
+                    retry_candidate = Some((request.clone(), prio));
+                    popped.push((request, prio));
+                } else {
+                    popped.push((request, prio));
+                }
+            } else {
+                popped.push((request, prio));
+            }
         }
+
+        // Check if any first-attempts are currently loading
+        let mut any_fresh_in_loading = false;
+        for entry in self.loading.iter() {
+            let req = entry.key();
+            if let Some(cache_entry) = self.cache.get(req) {
+                if cache_entry.retry_count == 0 {
+                    any_fresh_in_loading = true;
+                    break;
+                }
+            }
+        }
+
+        // Reinsert all retained items
+        for (req, prio) in popped.drain(..) {
+            queue.push(req, prio);
+        }
+
+        if let Some((req, _prio)) = fresh_candidate {
+            return Some(req);
+        }
+
+        if any_fresh_in_queue || any_fresh_in_loading {
+            // Hold off on retries until the first wave completes
+            return None;
+        }
+
+        if let Some((req, _prio)) = retry_candidate {
+            return Some(req);
+        }
+
+        None
     }
 
     pub fn cleanup_stale_entries(&self, max_age: std::time::Duration) {
@@ -384,5 +588,215 @@ impl UnifiedImageService {
             self.cache.remove(&key);
             self.loading.remove(&key);
         }
+    }
+
+    /// Returns the current number of queued requests (not counting those already loading).
+    pub fn queue_len(&self) -> usize {
+        if let Ok(queue) = self.queue.lock() {
+            queue.len()
+        } else {
+            0
+        }
+    }
+
+    // === PR1 support APIs for Planner (snapshots and helpers) ===
+
+    /// Immutable snapshot of the service state for planning purposes.
+    pub fn snapshot_state(&self) -> ServiceStateSnapshot {
+        // Loaded set: entries in cache with Loaded state
+        let mut loaded = std::collections::HashSet::new();
+        for entry in self.cache.iter() {
+            if matches!(entry.state, LoadState::Loaded(_)) {
+                loaded.insert(entry.key().clone());
+            }
+        }
+
+        // Loading set
+        let mut loading = std::collections::HashSet::new();
+        for entry in self.loading.iter() {
+            loading.insert(entry.key().clone());
+        }
+
+        // Queued set (best-effort)
+        let mut queued = std::collections::HashSet::new();
+        if let Ok(queue) = self.queue.lock() {
+            // Iterate items; clone keys
+            for (k, _p) in queue.iter() {
+                queued.insert(k.clone());
+            }
+        }
+
+        let in_flight = self.loading.len();
+        let queue_depth = self.queue_len();
+        self.telemetry.record_state(in_flight, queue_depth);
+
+        ServiceStateSnapshot {
+            loaded,
+            loading,
+            queued,
+            in_flight,
+            queue_depth,
+        }
+    }
+
+    /// Helper: check if a request is already loaded.
+    pub fn is_loaded(&self, request: &ImageRequest) -> bool {
+        self.cache
+            .get(request)
+            .map(|e| matches!(e.state, LoadState::Loaded(_)))
+            .unwrap_or(false)
+    }
+
+    /// Helper: check if a request is currently loading.
+    pub fn is_loading(&self, request: &ImageRequest) -> bool {
+        self.loading.contains_key(request)
+    }
+
+    /// Helper: get the timestamp when a request entered the loading state.
+    pub fn loading_started_at(
+        &self,
+        request: &ImageRequest,
+    ) -> Option<Instant> {
+        self.loading.get(request).map(|entry| *entry.value())
+    }
+
+    /// Helper: check if a request is queued.
+    pub fn is_queued(&self, request: &ImageRequest) -> bool {
+        if let Ok(queue) = self.queue.lock() {
+            queue.get_priority(request).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Adjust maximum concurrent loads (PR4; defined early for completeness).
+    pub fn set_max_concurrent(&self, n: usize) {
+        self.max_concurrent.store(n.max(1), Ordering::SeqCst);
+    }
+
+    /// Register a cancellation sender for an in-flight request.
+    pub fn register_inflight_cancel(
+        &self,
+        request: &ImageRequest,
+        sender: oneshot::Sender<()>,
+    ) {
+        self.inflight_cancellers.insert(request.clone(), sender);
+    }
+
+    /// Clear a cancellation handle once the in-flight operation completes.
+    pub fn clear_inflight_cancel(&self, request: &ImageRequest) {
+        self.inflight_cancellers.remove(request);
+    }
+
+    /// Request cancellation of an in-flight download; returns true if a signal was sent.
+    pub fn cancel_inflight(&self, request: &ImageRequest) -> bool {
+        if let Some((_, sender)) = self.inflight_cancellers.remove(request) {
+            let _ = sender.send(());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a request from the pending queue.
+    pub fn remove_from_queue(&self, request: &ImageRequest) -> bool {
+        if let Ok(mut queue) = self.queue.lock() {
+            queue.remove(request).is_some()
+        } else {
+            false
+        }
+    }
+}
+
+/// Read-only snapshot of the unified image service state for planning/diffing.
+#[derive(Debug, Clone)]
+pub struct ServiceStateSnapshot {
+    pub loaded: std::collections::HashSet<ImageRequest>,
+    pub loading: std::collections::HashSet<ImageRequest>,
+    pub queued: std::collections::HashSet<ImageRequest>,
+    pub in_flight: usize,
+    pub queue_depth: usize,
+}
+
+#[derive(Debug, Default)]
+struct Telemetry {
+    load_ms: Mutex<VecDeque<u64>>,
+    display_ms: Mutex<VecDeque<u64>>,
+    max_queue_depth: AtomicUsize,
+    max_in_flight: AtomicUsize,
+}
+
+impl Telemetry {
+    const WINDOW: usize = 128;
+
+    fn push(data: &mut VecDeque<u64>, value: u64) {
+        data.push_back(value);
+        if data.len() > Self::WINDOW {
+            data.pop_front();
+        }
+    }
+
+    fn record_load_duration(&self, duration: std::time::Duration) {
+        let value = duration.as_millis() as u64;
+        if let Ok(mut data) = self.load_ms.lock() {
+            Self::push(&mut data, value);
+        }
+    }
+
+    fn record_display_latency(&self, duration: std::time::Duration) {
+        let value = duration.as_millis() as u64;
+        if let Ok(mut data) = self.display_ms.lock() {
+            Self::push(&mut data, value);
+            Self::maybe_warn("loaded→first_display", &data, 250, 600);
+        }
+    }
+
+    fn record_state(&self, in_flight: usize, queue_depth: usize) {
+        self.max_in_flight.fetch_max(in_flight, Ordering::Relaxed);
+        let previous = self
+            .max_queue_depth
+            .fetch_max(queue_depth, Ordering::Relaxed);
+        if queue_depth > previous {
+            log::info!(
+                "Poster pipeline queue depth high watermark: {} (in-flight={})",
+                queue_depth,
+                in_flight
+            );
+        }
+    }
+
+    fn maybe_warn(
+        metric: &str,
+        data: &VecDeque<u64>,
+        median_warn_ms: u64,
+        p95_warn_ms: u64,
+    ) {
+        if data.len() < 8 {
+            return;
+        }
+
+        let mut sorted: Vec<u64> = data.iter().copied().collect();
+        sorted.sort_unstable();
+
+        let median = Self::percentile(&sorted, 0.5);
+        let p95 = Self::percentile(&sorted, 0.95);
+
+        if median > median_warn_ms || p95 > p95_warn_ms {
+            log::warn!(
+                "Poster pipeline latency ({}) median={}ms p95={}ms (sample={})",
+                metric,
+                median,
+                p95,
+                sorted.len()
+            );
+        }
+    }
+
+    fn percentile(sorted: &[u64], pct: f64) -> u64 {
+        if sorted.is_empty() {
+            return 0;
+        }
+        let rank = ((sorted.len() as f64 - 1.0) * pct).round() as usize;
+        sorted[rank.min(sorted.len() - 1)]
     }
 }

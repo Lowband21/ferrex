@@ -335,6 +335,9 @@ pub enum CrossDomainEvent {
 
     // Additional library events
     LibraryChanged(LibraryID), // Library selection changed
+    // Children updates for series/season detail views
+    SeriesChildrenChanged(ferrex_core::player_prelude::SeriesID),
+    SeasonChildrenChanged(ferrex_core::player_prelude::SeasonID),
 
     // NOTE: Device management events moved to direct Settings messages in Task 2.9
 

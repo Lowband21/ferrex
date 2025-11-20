@@ -53,7 +53,7 @@ pub mod animation {
 
     /// Duration of the texture opacity cross-fade (milliseconds)
     /// Quick fade for transitioning from placeholder to actual poster
-    pub const TEXTURE_FADE_DURATION_MS: u64 = 300;
+    pub const TEXTURE_FADE_DURATION_MS: u64 = 800;
 
     /// Default poster animation selection
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,12 +109,14 @@ pub mod virtual_grid {
                 + animation::EFFECT_PADDING);
 
     /// Number of rows above the viewport to include in the visible/preload window
-    pub const PREFETCH_ROWS_ABOVE: usize = 2;
+    pub const PREFETCH_ROWS_ABOVE: usize = 1;
     // Number of rows below the viewport to include in the visible/preload window
-    pub const PREFETCH_ROWS_BELOW: usize = 2;
+    pub const PREFETCH_ROWS_BELOW: usize = 1;
+    /// Additional rows beyond the preload window to treat as low-priority background work
+    pub const BACKGROUND_ROWS_BELOW: usize = 0;
 
     /// Keep-alive duration after scroll (ms) to allow placeholder->texture swaps to complete
-    pub const KEEP_ALIVE_AFTER_SCROLL_MS: u64 = 200;
+    pub const KEEP_ALIVE_AFTER_SCROLL_MS: u64 = 5000;
 }
 
 /// Player controls layout constants
@@ -172,7 +174,8 @@ pub mod search {
     const INPUT_PANEL_VERTICAL_PADDING: f32 = 12.0 * 2.0;
 
     /// Total rendered height of the input/search controls block
-    pub const INPUT_PANEL_HEIGHT: f32 = INPUT_BUTTON_HEIGHT + INPUT_PANEL_VERTICAL_PADDING;
+    pub const INPUT_PANEL_HEIGHT: f32 =
+        INPUT_BUTTON_HEIGHT + INPUT_PANEL_VERTICAL_PADDING;
 
     /// Effective viewport height available for the scrollable results area
     pub const RESULTS_VIEWPORT_HEIGHT: f32 = WINDOW_HEIGHT
@@ -185,7 +188,8 @@ pub mod search {
     const RESULT_VERTICAL_PADDING: f32 = 14.0 * 2.0;
 
     /// Height of a single result row (without inter-row spacing)
-    pub const RESULT_ROW_HEIGHT: f32 = RESULT_ICON_SIZE + RESULT_VERTICAL_PADDING;
+    pub const RESULT_ROW_HEIGHT: f32 =
+        RESULT_ICON_SIZE + RESULT_VERTICAL_PADDING;
 
     /// Spacing applied between result rows within the column layout
     pub const RESULT_ROW_SPACING: f32 = 6.0;
@@ -248,6 +252,16 @@ pub mod detail {
     pub const POSTER_METADATA_GAP: f32 = 37.5;
     /// Vertical offset applied to metadata blocks relative to poster bottom
     pub const METADATA_OFFSET: f32 = 150.0;
+}
+
+/// Carousel layout constants (e.g., cast carousels)
+pub mod carousel {
+    /// Spacing between items in horizontal carousels (pixels)
+    pub const ITEM_SPACING: f32 = 15.0;
+
+    /// Total horizontal padding applied around carousel content (left + right)
+    /// Matches container padding([5, 10]) => 10 per side = 20 total
+    pub const HORIZONTAL_PADDING_TOTAL: f32 = 20.0;
 }
 
 /// Header constants

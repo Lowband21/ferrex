@@ -1,6 +1,7 @@
 use crate::common::ui_utils::icon_text;
 use crate::domains::ui::messages::Message;
 use crate::domains::ui::widgets::image_for;
+use crate::infra::constants::layout::carousel::ITEM_SPACING;
 use crate::infra::constants::poster::CORNER_RADIUS;
 use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
 use crate::{domains::ui::theme, state::State};
@@ -36,9 +37,23 @@ pub fn create_cast_scrollable(
     content = content.push(container(text("Cast").size(24)).padding([0, 10]));
 
     // Create a horizontal scrollable row for cast
-    let mut cast_row = row![].spacing(15);
+    let mut cast_row = row![].spacing(ITEM_SPACING);
 
-    for actor in cast.iter().take(cast.len().max(15)) {
+    // Display order: actors with profile images first (preserving original
+    // importance/order), followed by actors without images. This ensures
+    // placeholders appear at the end of the carousel.
+    for actor in cast
+        .iter()
+        .filter(|a| matches!(a.profile_media_id, ArchivedOption::Some(_)))
+    {
+        let cast_card = create_cast_card(actor);
+        cast_row = cast_row.push(cast_card);
+    }
+
+    for actor in cast
+        .iter()
+        .filter(|a| matches!(a.profile_media_id, ArchivedOption::None))
+    {
         let cast_card = create_cast_card(actor);
         cast_row = cast_row.push(cast_card);
     }

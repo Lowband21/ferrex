@@ -3,6 +3,7 @@
 use ferrex_core::player_prelude::{
     LibraryID, MediaQueryBuilder, MediaWithStatus, SearchField,
 };
+use ferrex_model::{MediaDetailsOption, TmdbDetails};
 use std::sync::Arc;
 
 use crate::infra::api_types::{Media, MovieReference, SeriesReference};
@@ -32,9 +33,7 @@ impl SearchService {
         ),
         profiling::function
     )]
-    pub fn new(
-        api_service: Option<Arc<dyn ApiService>>,
-    ) -> Self {
+    pub fn new(api_service: Option<Arc<dyn ApiService>>) -> Self {
         Self { api_service }
     }
 
@@ -730,12 +729,10 @@ impl SearchService {
                             .map(|date| date.year())
                     })
                 }),
-                poster_url: match &movie.details {
-                    ferrex_core::MediaDetailsOption::Details(
-                        ferrex_core::TmdbDetails::Movie(details),
-                    ) => details.poster_path.clone(),
-                    _ => None,
-                },
+                poster_url: movie
+                    .details
+                    .as_movie()
+                    .and_then(|details| details.poster_path.clone()),
                 match_score: 1.0, // Server results assumed to be relevant
                 match_field: SearchField::All,
                 library_id: Some(movie.file.library_id),

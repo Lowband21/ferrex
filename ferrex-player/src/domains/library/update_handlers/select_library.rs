@@ -20,10 +20,9 @@ pub fn handle_select_library(
         )
     } else {
         log::info!("Selected 'All' libraries - showing all content");
-        // Emit LibrarySelectAll event to notify other domains
-        DomainUpdateResult::with_events(
-            Task::none(),
-            vec![CrossDomainEvent::LibrarySelectAll],
-        )
+        // Do not echo LibrarySelectAll here to avoid feedback loops.
+        // The CrossDomain mediator updates library state and broadcasts
+        // LibrarySelectAll to interested domains when appropriate.
+        DomainUpdateResult::task(Task::none())
     }
 }

@@ -1,9 +1,9 @@
-use once_cell::sync::Lazy;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+use tracing::error;
 use url::Url;
 
 use super::{
@@ -18,14 +18,6 @@ use super::{
     validation::{self, ConfigGuardRailError, ConfigWarnings},
 };
 use crate::infra::constants::{DEFAULT_PASSWORD_PEPPER, DEFAULT_TOKEN_KEY};
-
-static DEFAULT_CONFIG_LOCATIONS: Lazy<Vec<PathBuf>> = Lazy::new(|| {
-    vec![
-        PathBuf::from("ferrex.toml"),
-        PathBuf::from("config/ferrex.toml"),
-        PathBuf::from("config/server.toml"),
-    ]
-});
 
 #[derive(Debug, Default, Clone)]
 pub struct ConfigLoaderOptions {
@@ -47,25 +39,51 @@ impl ConfigLoader {
         Self { options }
     }
 
-    pub fn with_config_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
-        self.options.config_path = Some(path.into());
-        self
-    }
-
-    pub fn with_env_file<P: Into<PathBuf>>(mut self, path: P) -> Self {
+    pub fn with_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
         self.options.env_file = Some(path.into());
         self
     }
 
     pub fn load(&self) -> Result<ConfigLoad, ConfigLoadError> {
-        let env_file_loaded = match &self.options.env_file {
-            Some(path) => dotenvy::from_path(path).map(|_| true).or_else(
+        // Load .env with the following precedence:
+        // 1) Explicit file path provided via options.env_file
+        // 2) $FERREX_CONFIG_DIR/.env when FERREX_CONFIG_DIR is set
+        // 3) Default dotenv discovery from current working directory
+        let env_file_loaded = match (
+            &self.options.env_file,
+            std::env::var("FERREX_CONFIG_DIR"),
+        ) {
+            // Explicit .env path
+            (Some(path), _) => dotenvy::from_path(path).map(|_| true).or_else(
                 |err| match err {
                     dotenvy::Error::Io(_) => Ok(false),
                     _ => Err(err),
                 },
             )?,
-            None => {
+            // Config directory provided via environment; resolve to <dir>/.env
+            (None, Ok(dir)) => {
+                let candidate = {
+                    let p = Path::new(&dir);
+                    // If the provided path is a directory (or does not exist yet but looks like a dir),
+                    // look for a .env inside it. Otherwise, assume the path is already a file.
+                    if p.is_dir() {
+                        p.join(".env")
+                    } else {
+                        p.to_path_buf()
+                    }
+                };
+                dotenvy::from_path(&candidate)
+                    .map(|_| true)
+                    .or_else(|err| match err {
+                        dotenvy::Error::Io(e) => {
+                            error!("{}", e);
+                            Ok(false)
+                        }
+                        _ => Err(err),
+                    })?
+            }
+            // Fallback: dotenv discovery from CWD
+            (None, Err(_)) => {
                 dotenvy::dotenv().map(|_| true).or_else(|err| match err {
                     dotenvy::Error::Io(_) => Ok(false),
                     _ => Err(err),
@@ -75,8 +93,7 @@ impl ConfigLoader {
 
         let env_config = EnvConfig::gather();
 
-        let (file_config, config_path, config_present) =
-            self.load_file_config(&env_config)?;
+        let (file_config, config_path, config_present) = (None, None, false);
 
         let (config, warnings) = self.compose_config(
             file_config,
@@ -91,52 +108,10 @@ impl ConfigLoader {
 
     fn load_file_config(
         &self,
-        env_config: &EnvConfig,
+        _env_config: &EnvConfig,
     ) -> Result<(Option<FileConfig>, Option<PathBuf>, bool), ConfigLoadError>
     {
-        let mut source = ConfigPathSource::default();
-
-        if let Some(explicit) = &self.options.config_path {
-            source.explicit = Some(explicit.clone());
-        } else if let Some(from_env) = &env_config.config_path {
-            source.env = Some(from_env.clone());
-        }
-
-        if source.is_empty() {
-            source.default = DEFAULT_CONFIG_LOCATIONS
-                .iter()
-                .find(|candidate| candidate.exists())
-                .cloned();
-        }
-
-        let resolved = source.resolved_path();
-
-        if let Some((path, provenance)) = resolved {
-            if !path.exists() {
-                if provenance.is_explicit() {
-                    return Err(ConfigLoadError::MissingConfig { path });
-                }
-                return Ok((None, None, false));
-            }
-
-            let contents = fs::read_to_string(&path).map_err(|err| {
-                ConfigLoadError::Io {
-                    path: path.clone(),
-                    source: err,
-                }
-            })?;
-            let file_config: FileConfig =
-                toml::from_str(&contents).map_err(|err| {
-                    ConfigLoadError::Parse {
-                        path: path.clone(),
-                        source: err,
-                    }
-                })?;
-
-            Ok((Some(file_config), Some(path), true))
-        } else {
-            Ok((None, None, false))
-        }
+        Ok((None, None, false))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -150,12 +125,7 @@ impl ConfigLoader {
     ) -> Result<(Config, ConfigWarnings), ConfigLoadError> {
         let mut warnings = ConfigWarnings::default();
 
-        if !config_present {
-            warnings.push_with_hint(
-                "No ferrex.toml detected; falling back to environment variables",
-                "Run `ferrex-server config init` to scaffold a configuration file",
-            );
-        }
+        // No file-based config; environment-only configuration.
 
         let file = file_config.unwrap_or_default();
         let FileConfig {
@@ -298,45 +268,11 @@ impl ConfigLoader {
             setup_token: env.setup_token.or(file_auth.setup_token),
         };
 
-        let (scanner, scanner_source) = if let Some(scanner) = file_scanner {
-            let path = config_path
-                .clone()
-                .unwrap_or_else(|| PathBuf::from("ferrex.toml"));
-            (scanner, ScannerConfigSource::File(path))
-        } else {
-            ScannerConfig::load_from_env().map_err(ConfigLoadError::Scanner)?
-        };
+        let (scanner, scanner_source) =
+            ScannerConfig::load_from_env().map_err(ConfigLoadError::Scanner)?;
 
         let (rate_limiter, rate_limit_source) =
-            if let Some(file_spec) = file_rate_limiter {
-                if let Some(config_path) = config_path.as_ref() {
-                    if let Some(path) = file_spec.path {
-                        let spec = RateLimitSpec::Path(path);
-                        let (config, source) = spec
-                            .load_from_file(config_path)
-                            .map_err(ConfigLoadError::RateLimiter)?;
-                        let settings = RateLimiterSettings {
-                            config,
-                            source: source.clone(),
-                        };
-                        (Some(settings), Some(source))
-                    } else if let Some(raw) = file_spec.inline_json {
-                        let spec = RateLimitSpec::Inline(raw);
-                        let (config, source) = spec
-                            .load_from_file(config_path)
-                            .map_err(ConfigLoadError::RateLimiter)?;
-                        let settings = RateLimiterSettings {
-                            config,
-                            source: source.clone(),
-                        };
-                        (Some(settings), Some(source))
-                    } else {
-                        (None, None)
-                    }
-                } else {
-                    (None, None)
-                }
-            } else if let Some(env_spec) = env.rate_limits {
+            if let Some(env_spec) = env.rate_limits {
                 let (config, source) = env_spec
                     .load_from_env()
                     .map_err(ConfigLoadError::RateLimiter)?;
@@ -350,7 +286,7 @@ impl ConfigLoader {
             };
 
         let metadata = ConfigMetadata {
-            config_path,
+            config_path: None,
             env_file_loaded,
             scanner_source,
             rate_limit_source,
@@ -519,20 +455,6 @@ impl ConfigLoader {
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
-    #[error("configuration file missing: {path}")]
-    MissingConfig { path: PathBuf },
-    #[error("failed to read configuration {path}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse configuration {path}")]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: toml::de::Error,
-    },
     #[error("invalid database URL")]
     InvalidDatabaseUrl {
         #[source]
@@ -560,47 +482,7 @@ pub enum ConfigLoadError {
     EnvFile(#[from] dotenvy::Error),
 }
 
-#[derive(Debug, Default)]
-struct ConfigPathSource {
-    explicit: Option<PathBuf>,
-    env: Option<PathBuf>,
-    default: Option<PathBuf>,
-}
-
-impl ConfigPathSource {
-    fn is_empty(&self) -> bool {
-        self.explicit.is_none() && self.env.is_none() && self.default.is_none()
-    }
-
-    fn resolved_path(&self) -> Option<(PathBuf, ConfigPathProvenance)> {
-        if let Some(path) = &self.explicit {
-            return Some((path.clone(), ConfigPathProvenance::Explicit));
-        }
-        if let Some(path) = &self.env {
-            return Some((path.clone(), ConfigPathProvenance::Env));
-        }
-        if let Some(path) = &self.default {
-            return Some((path.clone(), ConfigPathProvenance::Default));
-        }
-        None
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConfigPathProvenance {
-    Explicit,
-    Env,
-    Default,
-}
-
-impl ConfigPathProvenance {
-    fn is_explicit(self) -> bool {
-        matches!(
-            self,
-            ConfigPathProvenance::Explicit | ConfigPathProvenance::Env
-        )
-    }
-}
+// File-based config resolution removed; environment-only configuration is used.
 
 fn default_cors_origins() -> Vec<String> {
     vec![

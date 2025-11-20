@@ -261,35 +261,99 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
 
     #[cfg(feature = "demo")]
     let tasks = {
-        let mut tasks = vec![auth_task];
-
         if config.demo_mode {
+            // In demo mode, prefer stored auth when available and permitted, else
+            // fall back to authenticating with the configured demo credentials.
             let auth_service = state.domains.auth.state.auth_service.clone();
             let (username, password) = config.demo_credentials.clone();
-            log::info!(
-                "[Demo] Attempting automatic demo login as {}",
-                username
-            );
-            tasks.push(Task::perform(
+            vec![Task::perform(
                 async move {
-                    auth_service
-                        .authenticate_device(
-                            username.to_string(),
-                            password.to_string(),
-                            true,
-                        )
-                        .await
-                        .map_err(|err| err.to_string())
+                    log::info!(
+                        "[Demo] Demo mode boot: checking stored auth first"
+                    );
+                    match auth_service.load_from_keychain().await {
+                        Ok(Some(stored_auth)) => {
+                            let enabled = auth_service
+                                .is_auto_login_enabled(&stored_auth.user.id)
+                                .await
+                                .unwrap_or(false)
+                                && stored_auth
+                                    .user
+                                    .preferences
+                                    .auto_login_enabled;
+                            if enabled {
+                                match auth_service
+                                    .apply_stored_auth(stored_auth)
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        log::info!(
+                                            "[Demo] Applied stored auth; proceeding to CheckAuthStatus"
+                                        );
+                                        DomainMessage::Auth(
+                                            auth_messages::Message::CheckAuthStatus,
+                                        )
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "[Demo] Failed to apply stored auth: {} — trying demo credentials",
+                                            e
+                                        );
+                                        let result = auth_service
+                                            .authenticate_device(
+                                                username.to_string(),
+                                                password.to_string(),
+                                                true,
+                                            )
+                                            .await
+                                            .map_err(|err| err.to_string());
+                                        DomainMessage::Auth(
+                                            auth_messages::Message::AuthResult(
+                                                result,
+                                            ),
+                                        )
+                                    }
+                                }
+                            } else {
+                                log::info!(
+                                    "[Demo] Auto-login disabled; authenticating demo user"
+                                );
+                                let result = auth_service
+                                    .authenticate_device(
+                                        username.to_string(),
+                                        password.to_string(),
+                                        true,
+                                    )
+                                    .await
+                                    .map_err(|err| err.to_string());
+                                DomainMessage::Auth(
+                                    auth_messages::Message::AuthResult(result),
+                                )
+                            }
+                        }
+                        Ok(None) | Err(_) => {
+                            log::info!(
+                                "[Demo] No valid stored auth; authenticating demo user"
+                            );
+                            let result = auth_service
+                                .authenticate_device(
+                                    username.to_string(),
+                                    password.to_string(),
+                                    true,
+                                )
+                                .await
+                                .map_err(|err| err.to_string());
+                            DomainMessage::Auth(
+                                auth_messages::Message::AuthResult(result),
+                            )
+                        }
+                    }
                 },
-                |result| {
-                    DomainMessage::Auth(auth_messages::Message::AuthResult(
-                        result,
-                    ))
-                },
-            ));
+                |msg| msg,
+            )]
+        } else {
+            vec![auth_task]
         }
-
-        tasks
     };
 
     #[cfg(not(feature = "demo"))]

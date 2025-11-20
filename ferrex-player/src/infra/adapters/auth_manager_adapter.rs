@@ -211,15 +211,28 @@ impl AuthService for AuthManagerAdapter {
         &self,
         stored_auth: StoredAuth,
     ) -> RepositoryResult<()> {
-        self.manager
-            .apply_stored_auth(stored_auth)
-            .await
-            .map_err(|e| {
-                RepositoryError::QueryFailed(format!(
+        match self.manager.apply_stored_auth(stored_auth).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // If credentials are invalid against the current server, also clear stale user cache
+                // so the UI doesn't present users from a previous server instance.
+                let msg = e.to_string();
+                if msg.contains("Invalid credentials") {
+                    if let Err(clear_err) =
+                        self.manager.clear_current_server_user_cache().await
+                    {
+                        warn!(
+                            "[Auth] Failed to clear stale user cache: {}",
+                            clear_err
+                        );
+                    }
+                }
+                Err(RepositoryError::QueryFailed(format!(
                     "Apply stored auth failed: {}",
                     e
-                ))
-            })
+                )))
+            }
+        }
     }
 
     async fn is_auto_login_enabled(

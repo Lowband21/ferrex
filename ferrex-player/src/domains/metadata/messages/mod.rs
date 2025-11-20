@@ -21,6 +21,7 @@ pub enum Message {
     ImageLoaded(String, Result<Vec<u8>, String>), // cache_key, result
     UnifiedImageLoaded(ImageRequest, iced::widget::image::Handle),
     UnifiedImageLoadFailed(ImageRequest, String),
+    UnifiedImageCancelled(ImageRequest),
 
     NoOp,
 }
@@ -36,6 +37,9 @@ impl Message {
             Message::UnifiedImageLoaded(_, _) => "Metadata::UnifiedImageLoaded",
             Message::UnifiedImageLoadFailed(_, _) => {
                 "Metadata::UnifiedImageLoadFailed"
+            }
+            Message::UnifiedImageCancelled(_) => {
+                "Metadata::UnifiedImageCancelled"
             }
             //Message::MediaOrganized(_, _) => "Metadata::MediaOrganized",
             Message::SeriesSortingCompleted(_) => {
@@ -80,6 +84,10 @@ impl std::fmt::Debug for Message {
                 .debug_tuple("Metadata::UnifiedImageLoadFailed")
                 .field(req)
                 .field(err)
+                .finish(),
+            Self::UnifiedImageCancelled(req) => f
+                .debug_tuple("Metadata::UnifiedImageCancelled")
+                .field(req)
                 .finish(),
             //Self::MediaOrganized(files, shows) => write!(
             //    f,

@@ -17,8 +17,8 @@ use argon2::password_hash::SaltString;
 use argon2::{Argon2, Params};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use crate::domains::auth::dto::UserListItemDto;
+use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use uuid::Uuid;
 
 const AUTH_CACHE_FILE: &str = "auth_cache.enc";
@@ -72,14 +72,42 @@ pub struct AuthStorage {
 impl AuthStorage {
     /// Create a new auth storage instance
     pub fn new() -> Result<Self> {
-        let proj_dirs = ProjectDirs::from("", "ferrex", "media-player")
-            .ok_or_else(|| {
+        // Use a distinct app name for demo runs so that demo and prod
+        // keychain caches are isolated and never conflict.
+        let app_name = if Self::is_demo_mode_enabled() {
+            "ferrex-player-demo"
+        } else {
+            "ferrex-player"
+        };
+
+        let proj_dirs =
+            ProjectDirs::from("", "ferrex", app_name).ok_or_else(|| {
                 anyhow::anyhow!("Unable to determine config directory")
             })?;
 
         let cache_path = proj_dirs.data_dir().join(AUTH_CACHE_FILE);
 
         Ok(Self { cache_path })
+    }
+
+    /// Detect whether demo mode is enabled using the same environment/CLI
+    /// checks used by the runtime bootstrap.
+    fn is_demo_mode_enabled_env() -> bool {
+        let env_value = std::env::var("FERREX_PLAYER_DEMO_MODE")
+            .or_else(|_| std::env::var("FERREX_DEMO_MODE"))
+            .unwrap_or_default();
+        matches!(
+            env_value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    }
+
+    fn is_demo_mode_enabled() -> bool {
+        if Self::is_demo_mode_enabled_env() {
+            return true;
+        }
+        // CLI fallback
+        std::env::args().any(|arg| arg == "--demo")
     }
 
     fn device_key_path(&self) -> PathBuf {
@@ -223,9 +251,47 @@ impl AuthStorage {
             .join("users_cache.json")
     }
 
+    fn server_hash(base_url: &str) -> String {
+        let normalized = base_url.trim().trim_end_matches('/').to_lowercase();
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(normalized.as_bytes());
+        let digest = hasher.finalize();
+        let mut out = String::with_capacity(digest.len() * 2);
+        for b in digest {
+            use std::fmt::Write as _;
+            let _ = write!(&mut out, "{:02x}", b);
+        }
+        out
+    }
+
+    fn users_cache_path_for_server(&self, base_url: &str) -> PathBuf {
+        let server_dir = self
+            .cache_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("servers")
+            .join(Self::server_hash(base_url));
+        server_dir.join("users_cache.json")
+    }
+
     /// Load locally cached user summaries for offline user selection
     pub async fn load_user_summaries(&self) -> Result<Vec<UserListItemDto>> {
         let path = self.users_cache_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let data = tokio::fs::read_to_string(&path).await?;
+        let users: Vec<UserListItemDto> = serde_json::from_str(&data)?;
+        Ok(users)
+    }
+
+    /// Load cached user summaries scoped to a specific server base URL
+    pub async fn load_user_summaries_for_server(
+        &self,
+        base_url: &str,
+    ) -> Result<Vec<UserListItemDto>> {
+        let path = self.users_cache_path_for_server(base_url);
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -248,6 +314,48 @@ impl AuthStorage {
         Ok(())
     }
 
+    /// Save cached user summaries scoped to a specific server base URL
+    pub async fn save_user_summaries_for_server(
+        &self,
+        base_url: &str,
+        users: &[UserListItemDto],
+    ) -> Result<()> {
+        let path = self.users_cache_path_for_server(base_url);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let data = serde_json::to_string_pretty(users)?;
+        tokio::fs::write(&path, data).await?;
+        Ok(())
+    }
+
+    /// Clear locally cached user summaries to avoid stale user selection
+    pub async fn clear_user_summaries(&self) -> Result<()> {
+        let path = self.users_cache_path();
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
+            log::info!("Cleared cached user summaries at {:?}", path);
+        }
+        Ok(())
+    }
+
+    /// Clear cached user summaries for a specific server base URL
+    pub async fn clear_user_summaries_for_server(
+        &self,
+        base_url: &str,
+    ) -> Result<()> {
+        let path = self.users_cache_path_for_server(base_url);
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
+            log::info!(
+                "Cleared cached user summaries for server {} at {:?}",
+                base_url,
+                path
+            );
+        }
+        Ok(())
+    }
+
     /// Upsert a single user summary into the cache
     pub async fn upsert_user_summary(
         &self,
@@ -260,6 +368,24 @@ impl AuthStorage {
             users.push(summary.clone());
         }
         self.save_user_summaries(&users).await
+    }
+
+    /// Upsert a single user summary into the cache for a specific server
+    pub async fn upsert_user_summary_for_server(
+        &self,
+        base_url: &str,
+        summary: &UserListItemDto,
+    ) -> Result<()> {
+        let mut users = self
+            .load_user_summaries_for_server(base_url)
+            .await
+            .unwrap_or_default();
+        if let Some(existing) = users.iter_mut().find(|u| u.id == summary.id) {
+            *existing = summary.clone();
+        } else {
+            users.push(summary.clone());
+        }
+        self.save_user_summaries_for_server(base_url, &users).await
     }
 
     /// Derive encryption key from device fingerprint using Argon2

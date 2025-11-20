@@ -98,14 +98,38 @@ impl DeviceIdentity {
     }
 
     fn config_path() -> AuthResult<PathBuf> {
-        let proj_dirs = ProjectDirs::from("", "ferrex", "media-player")
-            .ok_or_else(|| {
+        // Use a distinct app name under demo mode so device identity does not
+        // collide with the production profile.
+        let app_name = if is_demo_mode_enabled() {
+            "ferrex-player-demo"
+        } else {
+            "ferrex-player"
+        };
+        let proj_dirs =
+            ProjectDirs::from("", "ferrex", app_name).ok_or_else(|| {
                 AuthError::Storage(StorageError::InitFailed(
                     "Unable to determine config directory".to_string(),
                 ))
             })?;
         Ok(proj_dirs.config_dir().join("device.json"))
     }
+}
+
+fn is_demo_mode_enabled_env() -> bool {
+    let env_value = std::env::var("FERREX_PLAYER_DEMO_MODE")
+        .or_else(|_| std::env::var("FERREX_DEMO_MODE"))
+        .unwrap_or_default();
+    matches!(
+        env_value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
+}
+
+fn is_demo_mode_enabled() -> bool {
+    if is_demo_mode_enabled_env() {
+        return true;
+    }
+    std::env::args().any(|arg| arg == "--demo")
 }
 
 #[derive(Debug, Serialize)]
@@ -938,7 +962,14 @@ impl AuthManager {
             has_pin: device_status.has_pin,
             last_login: Some(chrono::Utc::now()),
         };
-        if let Err(e) = self.auth_storage.upsert_user_summary(&summary).await {
+        if let Err(e) = self
+            .auth_storage
+            .upsert_user_summary_for_server(
+                self.api_client.base_url(),
+                &summary,
+            )
+            .await
+        {
             warn!("Failed to persist user summary: {}", e);
         }
 
@@ -1017,7 +1048,8 @@ impl AuthManager {
         );
 
         // Authenticated endpoint; user is inferred from the session
-        let status_path = format!("{}?device_id={}", v1::auth::device::STATUS, device_id);
+        let status_path =
+            format!("{}?device_id={}", v1::auth::device::STATUS, device_id);
 
         let status: DeviceAuthStatus =
             self.api_client.get(&status_path).await.map_err(|e| {
@@ -1042,7 +1074,11 @@ impl AuthManager {
         &self,
         user_id: Uuid,
     ) -> Option<DeviceAuthStatus> {
-        if let Ok(users) = self.auth_storage.load_user_summaries().await {
+        if let Ok(users) = self
+            .auth_storage
+            .load_user_summaries_for_server(self.api_client.base_url())
+            .await
+        {
             if let Some(u) = users.into_iter().find(|u| u.id == user_id) {
                 return Some(DeviceAuthStatus {
                     device_registered: true,
@@ -1060,7 +1096,11 @@ impl AuthManager {
         user_id: Uuid,
         status: &DeviceAuthStatus,
     ) {
-        if let Ok(mut users) = self.auth_storage.load_user_summaries().await {
+        if let Ok(mut users) = self
+            .auth_storage
+            .load_user_summaries_for_server(self.api_client.base_url())
+            .await
+        {
             let mut updated = false;
             for u in users.iter_mut() {
                 if u.id == user_id {
@@ -1070,7 +1110,14 @@ impl AuthManager {
                 }
             }
             if updated {
-                if let Err(e) = self.auth_storage.save_user_summaries(&users).await {
+                if let Err(e) = self
+                    .auth_storage
+                    .save_user_summaries_for_server(
+                        self.api_client.base_url(),
+                        &users,
+                    )
+                    .await
+                {
                     warn!("Failed to update cached user summaries: {}", e);
                 }
             }
@@ -1240,25 +1287,55 @@ impl AuthManager {
 
         let users: Vec<UserListItemDto> = if has_auth {
             // Use authenticated endpoint and update local cache
-            let fetched: Vec<UserListItemDto> = self
-                .api_client
-                .get(v1::users::LIST_AUTH)
+            let fetched: Vec<UserListItemDto> =
+                self.api_client.get(v1::users::LIST_AUTH).await.map_err(
+                    |e| {
+                        AuthError::Network(NetworkError::RequestFailed(
+                            e.to_string(),
+                        ))
+                    },
+                )?;
+            if let Err(e) = self
+                .auth_storage
+                .save_user_summaries_for_server(
+                    self.api_client.base_url(),
+                    &fetched,
+                )
                 .await
-                .map_err(|e| {
-                    AuthError::Network(NetworkError::RequestFailed(e.to_string()))
-                })?;
-            if let Err(e) = self.auth_storage.save_user_summaries(&fetched).await {
+            {
                 warn!("Failed to save user summaries: {}", e);
             }
             fetched
         } else {
-            // Do not perform unauthenticated network calls; return cached summaries
-            match self.auth_storage.load_user_summaries().await {
-                Ok(users) => users,
-                Err(e) => {
-                    warn!("Failed to load cached user summaries: {}", e);
+            // When unauthenticated, proactively check server setup status.
+            // If the server needs setup, cached users are certainly stale; clear and return empty
+            match self.check_setup_status().await {
+                Ok(true) => {
+                    if let Err(e) = self
+                        .auth_storage
+                        .clear_user_summaries_for_server(
+                            self.api_client.base_url(),
+                        )
+                        .await
+                    {
+                        warn!("Failed to clear cached user summaries: {}", e);
+                    }
                     Vec::new()
                 }
+                // Server reachable and not in setup: do not show cached users; prompt login
+                Ok(false) => Vec::new(),
+                // Network error: fall back to cached summaries (offline hints)
+                Err(_) => match self
+                    .auth_storage
+                    .load_user_summaries_for_server(self.api_client.base_url())
+                    .await
+                {
+                    Ok(users) => users,
+                    Err(e) => {
+                        warn!("Failed to load cached user summaries: {}", e);
+                        Vec::new()
+                    }
+                },
             }
         };
 
@@ -1281,6 +1358,21 @@ impl AuthManager {
                 AuthError::Network(NetworkError::RequestFailed(e.to_string()))
             })?;
         Ok(status.needs_setup)
+    }
+
+    /// Clear the user cache for the current server base URL
+    pub async fn clear_current_server_user_cache(&self) -> AuthResult<()> {
+        self.auth_storage
+            .clear_user_summaries_for_server(self.api_client.base_url())
+            .await
+            .map_err(|e| {
+                AuthError::Storage(StorageError::WriteFailed(
+                    std::io::Error::other(format!(
+                        "Failed to clear server-scoped user cache: {}",
+                        e
+                    )),
+                ))
+            })
     }
 
     /// Derive a deterministic client-side PIN proof (PHC string) scoped to the provided salt.

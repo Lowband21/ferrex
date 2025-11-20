@@ -63,11 +63,26 @@ pub async fn generate_plan(
             "Generating TMDB-backed demo library"
         );
 
+        // Resolve effective language/region (per-library override falls back to global setting)
+        let effective_language = library_option
+            .language
+            .as_deref()
+            .or(options.language.as_deref());
+        let effective_region = library_option
+            .region
+            .as_deref()
+            .or(options.region.as_deref());
+
         let structure = match library_option.library_type {
             LibraryType::Movies => {
                 let count = library_option.movie_count.unwrap_or(12).max(1);
                 generator
-                    .generate_movies(&root_path, count, None, None)
+                    .generate_movies(
+                        &root_path,
+                        count,
+                        effective_language,
+                        effective_region,
+                    )
                     .await?
             }
             LibraryType::Series => {
@@ -80,7 +95,8 @@ pub async fn generate_plan(
                     .generate_series(
                         &root_path,
                         count,
-                        None,
+                        effective_language,
+                        effective_region,
                         seasons.0..=seasons.1,
                         episodes.0..=episodes.1,
                     )

@@ -4,8 +4,8 @@
 struct Globals {
     transform: mat4x4<f32>,  // 64 bytes
     scale_factor: f32,       // 4 bytes
-    _padding1: f32,          // 4 bytes padding
-    _padding2: f32,          // 4 bytes padding
+    atlas_is_srgb: f32,      // 4 bytes (1.0 if atlas texture is sRGB)
+    target_is_srgb: f32,     // 4 bytes (1.0 if render target is sRGB)
     _padding3: f32,          // 4 bytes padding
     _padding4: vec4<f32>,    // 16 bytes padding - total struct is 96 bytes
 }
@@ -22,7 +22,7 @@ struct VertexInput {
     @location(5) mouse_pos_and_padding: vec4<f32>,       // mouse_position.xy, unused, unused
     @location(6) progress_color_and_padding: vec4<f32>,  // progress_color.rgb, unused
     @location(7) atlas_uvs: vec4<f32>,                   // atlas_uv_min.xy, atlas_uv_max.xy
-    @location(8) atlas_layer_and_padding: vec4<f32>,     // atlas_layer, unused, unused, unused
+    @location(8) atlas_layer: i32,    // atlas layer index (as vertex attribute)
 }
 
 struct VertexOutput {
@@ -40,7 +40,8 @@ struct VertexOutput {
     @location(10) mouse_position: vec2<f32>,    // Mouse position (normalized 0-1)
     @location(11) progress: f32,                // Progress percentage
     @location(12) progress_color: vec3<f32>,    // Progress bar color
-    @location(13) atlas_layer: f32,             // Atlas texture array layer
+    // Pass layer as float varying for wider backend compatibility
+    @location(13) layer: f32,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -117,7 +118,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let progress_color = input.progress_color_and_padding.xyz;
     let atlas_uv_min = input.atlas_uvs.xy;
     let atlas_uv_max = input.atlas_uvs.zw;
-    let atlas_layer = input.atlas_layer_and_padding.x;
 
     // Generate quad vertex position (0,0) to (1,1)
     let vertex_pos = vertex_position(input.vertex_index);
@@ -215,8 +215,8 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.progress = progress;
     output.progress_color = progress_color;
 
-    // Pass atlas layer
-    output.atlas_layer = atlas_layer;
+    // Pass atlas layer as float varying; cast in fragment when sampling
+    output.layer = f32(input.atlas_layer);
 
     return output;
 }
@@ -558,27 +558,35 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // For backface, use theme color with stronger dimming
     if input.is_backface > 0.5 {
-        linear_rgb = input.theme_color * 0.5;
+        linear_rgb = input.theme_color; // * 0.5;
     } else {
         // Front face: build cross-fade from dimmed placeholder to texture
         // Invalid UVs are now signaled by out-of-range coordinates (negative or > 1.0)
         let uv = input.tex_coord;
-        let placeholder_rgb = input.theme_color * 0.5;
+        let placeholder_rgb = input.theme_color; // * 0.5;
         let uv_oob = any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0));
         if uv_oob {
             // No valid texture, use placeholder only
             linear_rgb = placeholder_rgb;
             alpha = 1.0;
         } else {
-            // Valid UVs - sample the poster texture from atlas
+            // Valid UVs - sample the poster texture from atlas. Use explicit LOD 0 to
+            // avoid derivative/LOD issues on some drivers when indexing arrays.
             let sampled_color = textureSample(
                 atlas_texture,
                 atlas_sampler,
                 uv,
-                i32(input.atlas_layer)
+                i32(input.layer)
             );
-            // Atlas uses Rgba8UnormSrgb: GPU converts sRGB to linear when sampling
-            linear_rgb = sampled_color.rgb;
+            // If atlas is sRGB, GPU returns linear; otherwise decode here
+            let tex_rgb = sampled_color.rgb;
+            linear_rgb = select(
+                // atlas_is_srgb == 0.0 -> decode sRGB to linear
+                srgb_to_linear(tex_rgb),
+                // atlas_is_srgb == 1.0 -> already linear
+                tex_rgb,
+                globals.atlas_is_srgb > 0.5,
+            );
             alpha = sampled_color.a;
         }
     }
@@ -658,6 +666,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }
             }
         }
+        // Convert premultiplied -> non-premultiplied for standard blending
+        if final_color.a > 0.0001 {
+            final_color = vec4<f32>(final_color.rgb / final_color.a, final_color.a);
+        }
+        // If render target is not sRGB, encode here; sRGB targets will be encoded by the GPU
+        if globals.target_is_srgb <= 0.5 {
+            final_color = vec4<f32>(linear_to_srgb(final_color.rgb), final_color.a);
+        }
+
         return final_color;
     }
 
@@ -805,5 +822,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
+    // Convert premultiplied -> non-premultiplied for standard blending
+    if final_color.a > 0.0001 {
+        final_color = vec4<f32>(final_color.rgb / final_color.a, final_color.a);
+    }
+    // If render target is not sRGB, encode here; sRGB targets will be encoded by the GPU
+    if globals.target_is_srgb <= 0.5 {
+        final_color = vec4<f32>(linear_to_srgb(final_color.rgb), final_color.a);
+    }
     return final_color;
 }

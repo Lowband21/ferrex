@@ -3,6 +3,7 @@
 //! Contains all media playback-related state and logic moved from the monolithic State
 
 pub mod messages;
+pub mod selectors;
 pub mod update;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};

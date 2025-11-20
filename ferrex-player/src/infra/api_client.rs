@@ -187,7 +187,12 @@ impl ApiClient {
         let response = request.send().await?;
 
         match response.status() {
-            StatusCode::OK => {
+            status if status.is_success() => {
+                if status == StatusCode::NO_CONTENT {
+                    return Err(anyhow::anyhow!(
+                        "Empty response from server (204 No Content)"
+                    ));
+                }
                 let api_response: ApiResponse<T> = response.json().await?;
                 match api_response.data {
                     Some(data) => Ok(data),
@@ -248,7 +253,12 @@ impl ApiClient {
         let response = request.send().await?;
 
         match response.status() {
-            StatusCode::OK => {
+            status if status.is_success() => {
+                if status == StatusCode::NO_CONTENT {
+                    return Err(anyhow::anyhow!(
+                        "Empty response from server (204 No Content)"
+                    ));
+                }
                 let api_response: ApiResponse<T> = response.json().await?;
                 match api_response.data {
                     Some(data) => Ok(data),
@@ -534,12 +544,38 @@ impl ApiClient {
         let request = self
             .build_request(request)
             .await
-            .header("Accept", "image/avif,image/webp,image/*;q=0.9,*/*;q=0.8");
+            // Prefer faster-to-decode formats on client; avoid AVIF for now
+            .header("Accept", "image/webp,image/*;q=0.9,*/*;q=0.8")
+            // Avoid compressed transfer encodings for ranged/partial hazards.
+            .header("Accept-Encoding", "identity");
 
         let response = request.send().await?;
         match response.status() {
             StatusCode::OK => {
+                // Capture expected content length (if any) for diagnostics
+                let cl = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<usize>().ok());
+                let encoding = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_ENCODING)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
                 let bytes = response.bytes().await?;
+                if let Some(expected) = cl {
+                    if expected != bytes.len() {
+                        log::warn!(
+                            "[ApiClient] Content-Length mismatch for {}: header={} actual={} encoding={:?}",
+                            url,
+                            expected,
+                            bytes.len(),
+                            encoding
+                        );
+                    }
+                }
                 Ok(bytes.to_vec())
             }
             StatusCode::UNAUTHORIZED => {

@@ -13,13 +13,17 @@ use iced_wgpu::AtlasRegion;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+const ATLAS_SIZE: f32 = 2048.0;
+
 /// Global uniform data (viewport transform)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub(crate) struct Globals {
     pub(crate) transform: [f32; 16], // 4x4 matrix = 64 bytes
     pub(crate) scale_factor: f32,    // 4 bytes
-    pub(crate) _padding: [f32; 7], // Padding to make total 96 bytes (28 bytes padding)
+    pub(crate) atlas_is_srgb: f32,   // 4 bytes
+    pub(crate) target_is_srgb: f32,  // 4 bytes
+    pub(crate) _padding: [f32; 5], // Padding to make total 96 bytes (20 bytes padding)
 }
 
 /// Instance data for each poster
@@ -43,8 +47,10 @@ pub(crate) struct Instance {
     pub(crate) progress_color_and_padding: [f32; 4],
     // vec4: atlas_uv_min.xy, atlas_uv_max.xy
     pub(crate) atlas_uvs: [f32; 4],
-    // vec4: atlas_layer, unused, unused, unused
-    pub(crate) atlas_layer_and_padding: [f32; 4],
+    // i32: atlas texture layer index (flat)
+    pub(crate) atlas_layer: i32,
+    // padding to keep 16-byte alignment and conservative stride
+    pub(crate) _pad_atlas_layer: [i32; 3],
 }
 
 /// Pipeline state (immutable after creation)
@@ -122,7 +128,8 @@ impl Pipeline {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX
+                            | wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -225,11 +232,11 @@ impl Pipeline {
                     shader_location: 7,
                     format: wgpu::VertexFormat::Float32x4,
                 },
-                // atlas_layer_and_padding: vec4
+                // atlas_layer: i32
                 wgpu::VertexAttribute {
                     offset: 128,
                     shader_location: 8,
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Sint32,
                 },
             ],
         };
@@ -319,12 +326,26 @@ pub(crate) fn create_batch_instance(
     progress_color: Color,
 ) -> batch_state::PosterInstance {
     // Extract UV coordinates and layer from the atlas entry
-    let (uv_min, uv_max, layer) = if let Some(region) = atlas_region {
+    let (mut uv_min, mut uv_max, layer) = if let Some(region) = atlas_region {
         (region.uv_min, region.uv_max, region.layer)
     } else {
         // Use out-of-range UVs to signal placeholder/invalid to the shader.
         ([-1.0, -1.0], [-1.0, -1.0], 0)
     };
+
+    // Apply a half-texel inset to avoid sampling neighboring atlas allocations when
+    // using linear filtering.
+    if uv_min[0] >= 0.0
+        && uv_min[1] >= 0.0
+        && uv_max[0] <= 1.0
+        && uv_max[1] <= 1.0
+    {
+        let half_texel = 0.5 / ATLAS_SIZE;
+        uv_min[0] += half_texel;
+        uv_min[1] += half_texel;
+        uv_max[0] -= half_texel;
+        uv_max[1] -= half_texel;
+    }
 
     // Calculate animation state
 
@@ -436,6 +457,10 @@ pub(crate) fn create_batch_instance(
     };
 
     // Create instance data
+    // Convert colors to linear once to avoid redundant conversions
+    let [theme_r, theme_g, theme_b, _] = theme_color.into_linear();
+    let [prog_r, prog_g, prog_b, _] = progress_color.into_linear();
+
     PosterInstance {
         position_and_size: [
             poster_position[0],
@@ -449,12 +474,7 @@ pub(crate) fn create_batch_instance(
             rotation_y,
             animation_progress,
         ],
-        theme_color_zdepth: [
-            theme_color.r,
-            theme_color.g,
-            theme_color.b,
-            z_depth,
-        ],
+        theme_color_zdepth: [theme_r, theme_g, theme_b, z_depth],
         scale_shadow_glow_type: [
             scale,
             shadow_intensity,
@@ -473,14 +493,10 @@ pub(crate) fn create_batch_instance(
             0.0,
             0.0,
         ],
-        progress_color_and_padding: [
-            progress_color.r,
-            progress_color.g,
-            progress_color.b,
-            0.0,
-        ],
+        progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
         atlas_uvs: [uv_min[0], uv_min[1], uv_max[0], uv_max[1]],
-        atlas_layer_and_padding: [layer as f32, 0.0, 0.0, 0.0],
+        atlas_layer: layer as i32,
+        _pad_atlas_layer: [0, 0, 0],
     }
 }
 
@@ -544,6 +560,10 @@ pub fn create_placeholder_instance(
     let show_border = 1.0; // Always show border
 
     // Create instance data
+    // Convert colors to linear once to avoid redundant conversions
+    let [theme_r, theme_g, theme_b, _] = theme_color.into_linear();
+    let [prog_r, prog_g, prog_b, _] = progress_color.into_linear();
+
     PosterInstance {
         position_and_size: [
             poster_position[0],
@@ -557,12 +577,7 @@ pub fn create_placeholder_instance(
             rotation_y,
             animation_progress,
         ],
-        theme_color_zdepth: [
-            theme_color.r,
-            theme_color.g,
-            theme_color.b,
-            z_depth,
-        ],
+        theme_color_zdepth: [theme_r, theme_g, theme_b, z_depth],
         scale_shadow_glow_type: [scale, shadow_intensity, border_glow, 0.0],
         hover_overlay_border_progress: [
             0.0,
@@ -571,13 +586,9 @@ pub fn create_placeholder_instance(
             progress.unwrap_or(-1.0),
         ],
         mouse_pos_and_padding: [0.0, 0.0, 0.0, 0.0],
-        progress_color_and_padding: [
-            progress_color.r,
-            progress_color.g,
-            progress_color.b,
-            0.0,
-        ],
+        progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
-        atlas_layer_and_padding: [0.0, 0.0, 0.0, 0.0],
+        atlas_layer: 0,
+        _pad_atlas_layer: [0, 0, 0],
     }
 }

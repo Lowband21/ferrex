@@ -87,3 +87,18 @@ pub fn handle_unified_image_load_failed(
 
     Task::none()
 }
+
+/// Handle a cancellation signal from the image loader.
+pub fn handle_unified_image_cancelled(
+    state: &mut State,
+    request: ImageRequest,
+) -> Task<Message> {
+    log::trace!("Unified image load cancelled: {:?}", request);
+    state
+        .domains
+        .metadata
+        .state
+        .image_service
+        .mark_cancelled(&request);
+    Task::none()
+}

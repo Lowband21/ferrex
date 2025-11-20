@@ -1,10 +1,13 @@
 use std::time::{Duration, Instant};
 
+use crate::domains::metadata::demand_planner::DemandSnapshot;
+use crate::infra::api_types::LibraryType;
 use crate::{
     domains::ui::{messages::Message, tabs::TabState},
     infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state::State,
 };
+use ferrex_core::player_prelude::PosterKind;
 use ferrex_core::player_prelude::{MediaID, MediaIDLike};
 use iced::{Task, widget::scrollable::Viewport};
 
@@ -99,8 +102,7 @@ pub fn handle_tab_grid_scrolled(
         viewport.absolute_offset().y
     );
 
-    // Track scroll position and timing
-    let current_position = viewport.absolute_offset().y;
+    // Track timing for planner snapshots and yoke prefetch throttling
     let now = Instant::now();
 
     // Keep UI rendering alive briefly after scroll to allow poster placeholders to swap to textures
@@ -116,25 +118,69 @@ pub fn handle_tab_grid_scrolled(
         *ui_until = Some(ui_until.map(|u| u.max(until)).unwrap_or(until));
     }
 
-    // Reset scroll stopped time when actively scrolling
-    state.domains.ui.state.scroll_stopped_time = None;
-    state.domains.ui.state.last_scroll_position = current_position;
-    state.domains.ui.state.last_scroll_time = Some(now);
+    // Emit a planner snapshot for the active library tab (visible + prefetch)
+    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+        if let crate::domains::ui::tabs::TabState::Library(lib_state) =
+            state.tab_manager.active_tab()
+        {
+            let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+            let vr = lib_state.grid_state.visible_range.clone();
+            if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+                visible_ids.extend(slice.iter().copied());
+            }
 
-    // Rate-limit task creation: only create a new task if enough time has passed
-    // This prevents flooding the subscription channel during rapid scrolling
-    let should_create_task = state
+            let pr = lib_state
+                .grid_state
+                .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+            let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+            if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+                prefetch_ids.extend(slice.iter().copied());
+            }
+
+            // Deduplicate
+            prefetch_ids.retain(|id| !visible_ids.contains(id));
+            let br = lib_state.grid_state.get_background_range(
+                crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
+            );
+            let mut background_ids: Vec<uuid::Uuid> = Vec::new();
+            if let Some(slice) = lib_state.cached_index_ids.get(br) {
+                background_ids.extend(slice.iter().copied());
+            }
+            background_ids.retain(|id| {
+                !visible_ids.contains(id) && !prefetch_ids.contains(id)
+            });
+
+            let poster_kind = match lib_state.library_type {
+                LibraryType::Movies => Some(PosterKind::Movie),
+                LibraryType::Series => Some(PosterKind::Series),
+            };
+
+            let snapshot = DemandSnapshot {
+                visible_ids,
+                prefetch_ids,
+                background_ids,
+                timestamp: now,
+                context: None,
+                poster_kind,
+            };
+            handle.send(snapshot);
+        }
+    }
+
+    // Rate-limit yoke prefetch work to avoid hammering the repo accessor
+    let should_prefetch = state
         .domains
         .ui
         .state
-        .last_check_task_created
+        .last_prefetch_tick
         .map(|last| {
             last.elapsed() >= Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS / 2)
         })
         .unwrap_or(true);
 
-    if should_create_task {
-        state.domains.ui.state.last_check_task_created = Some(now);
+    if should_prefetch {
+        state.domains.ui.state.last_prefetch_tick = Some(now);
 
         // PoC yoke prefetch: limit frequency by the same gating used for debounced task creation
         // Prefetch only currently visible items to keep changes minimal
@@ -214,17 +260,9 @@ pub fn handle_tab_grid_scrolled(
             }
         }
 
-        Task::perform(
-            async move {
-                tokio::time::sleep(Duration::from_millis(
-                    SCROLL_STOP_DEBOUNCE_MS,
-                ))
-                .await;
-            },
-            |_| Message::CheckScrollStopped,
-        )
+        Task::none()
     } else {
-        // Too soon since last task creation, skip to avoid channel overflow
+        // Too soon since last prefetch pass, skip to avoid redundant work
         Task::none()
     }
 }

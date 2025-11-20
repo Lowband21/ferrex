@@ -584,7 +584,7 @@ impl ScrollStateExt for crate::state::State {
             library_id
         );
 
-        self.schedule_check_scroll_stopped()
+        Task::none()
     }
 
     // ViewModel-specific implementations

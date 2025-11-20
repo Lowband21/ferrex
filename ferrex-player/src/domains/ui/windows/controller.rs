@@ -14,8 +14,11 @@ fn search_window_size() -> iced::Size {
 fn search_window_position(state: &State) -> window::Position {
     if let Some(origin) = state.window_position {
         let width = state.window_size.width;
-        let x = origin.x + (width - layout::search::WINDOW_WIDTH).max(0.0) / 2.0;
-        let y = origin.y + layout::header::HEIGHT + layout::search::WINDOW_VERTICAL_OFFSET;
+        let x =
+            origin.x + (width - layout::search::WINDOW_WIDTH).max(0.0) / 2.0;
+        let y = origin.y
+            + layout::header::HEIGHT
+            + layout::search::WINDOW_VERTICAL_OFFSET;
         window::Position::Specific(Point::new(x, y))
     } else {
         window::Position::Centered
@@ -35,7 +38,10 @@ fn search_window_settings(state: &State) -> window::Settings {
     }
 }
 
-pub fn open_search(state: &mut State, seed: Option<String>) -> DomainUpdateResult {
+pub fn open_search(
+    state: &mut State,
+    seed: Option<String>,
+) -> DomainUpdateResult {
     state.domains.search.state.set_mode(SearchMode::Dropdown);
 
     if let Some(existing_id) = state.windows.get(WindowKind::Search) {
@@ -59,7 +65,10 @@ pub fn open_search(state: &mut State, seed: Option<String>) -> DomainUpdateResul
 
     if let Some(seed) = seed {
         tasks.push(
-            super::super::update_handlers::search_updates::update_search_query(state, seed).task,
+            super::super::update_handlers::search_updates::update_search_query(
+                state, seed,
+            )
+            .task,
         );
     }
 
@@ -67,12 +76,17 @@ pub fn open_search(state: &mut State, seed: Option<String>) -> DomainUpdateResul
     state.windows.set(WindowKind::Search, id);
     state.search_window_id = Some(id);
 
-    tasks.push(open.map(|opened| DomainMessage::Ui(ui::Message::SearchWindowOpened(opened))));
+    tasks.push(open.map(|opened| {
+        DomainMessage::Ui(ui::Message::SearchWindowOpened(opened))
+    }));
 
     DomainUpdateResult::task(Task::batch(tasks))
 }
 
-pub fn on_search_opened(_state: &mut State, id: window::Id) -> DomainUpdateResult {
+pub fn on_search_opened(
+    _state: &mut State,
+    id: window::Id,
+) -> DomainUpdateResult {
     let focus_input = super::focus::focus_search_window_input();
     let focus_window = window::gain_focus(id);
     let set_top = window::set_level(id, window::Level::AlwaysOnTop);
@@ -111,7 +125,10 @@ pub fn close_search(state: &mut State) -> DomainUpdateResult {
     }
 }
 
-pub fn on_raw_window_closed(state: &mut State, id: window::Id) -> DomainUpdateResult {
+pub fn on_raw_window_closed(
+    state: &mut State,
+    id: window::Id,
+) -> DomainUpdateResult {
     let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
     if let Some(kind) = state.windows.remove_by_id(id) {
         if matches!(kind, WindowKind::Main) {

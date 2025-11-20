@@ -13,7 +13,8 @@ impl MediaServerTheme {
     pub const BACKGROUND_DARK: Color = Color::from_rgb(0.1, 0.1, 0.10);
     //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.31, 0.094, 0.333);
     //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.20, 0.05, 0.30);
-    pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.12, 0.05, 0.16);
+    // pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.12, 0.05, 0.16);
+    pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.01, 0.01, 0.01);
     pub const ACCENT_BLUE: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
     pub const ACCENT_BLUE_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
     pub const ACCENT_BLUE_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
@@ -24,8 +25,8 @@ impl MediaServerTheme {
     pub const BORDER_COLOR: Color = Color::from_rgb(0.2, 0.2, 0.2); // #333333
 
     // Soft grays for backgrounds - with subtle blue tint
-    pub const SOFT_GREY_DARK: Color = Color::from_rgb(0.05, 0.05, 0.08); // Much darker for contrast
-    pub const SOFT_GREY_LIGHT: Color = Color::from_rgb(0.20, 0.20, 0.25); // Much lighter for visible gradient
+    pub const SOFT_GREY_DARK: Color = Color::from_rgb(0.01, 0.01, 0.02); // Much darker for contrast
+    pub const SOFT_GREY_LIGHT: Color = Color::from_rgb(0.06, 0.05, 0.07); // Much lighter for visible gradient
     pub const SOFT_GREY_MEDIUM: Color = Color::from_rgb(0.10, 0.10, 0.12); // Medium with blue tint
 
     // Text colors
@@ -247,6 +248,11 @@ pub enum Button {
     Icon,
     PlayOverlay,
     HeaderIcon,
+    // Active tab in header: primary color but square corners
+    HeaderTabActive,
+    // Menu triggers in library header: square corners
+    HeaderMenuPrimary,
+    HeaderMenuSecondary,
     DetailAction,
     BackdropControl,
     Disabled,
@@ -331,6 +337,116 @@ impl Button {
                         radius: 8.0.into(),
                     },
                     shadow,
+                    snap: false,
+                }
+            },
+            Button::HeaderTabActive => |_, status| {
+                let (background, shadow) = match status {
+                    button::Status::Active => (
+                        MediaServerTheme::ACCENT_BLUE,
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    button::Status::Hovered => (
+                        MediaServerTheme::ACCENT_BLUE_HOVER,
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 16.0,
+                        },
+                    ),
+                    button::Status::Pressed => (
+                        Color::from_rgb(0.0, 0.4, 0.8),
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    _ => (MediaServerTheme::ACCENT_BLUE, Shadow::default()),
+                };
+
+                button::Style {
+                    text_color: MediaServerTheme::TEXT_PRIMARY,
+                    background: Some(Background::Color(background)),
+                    border: Border {
+                        color: background,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    shadow,
+                    snap: false,
+                }
+            },
+            Button::HeaderMenuPrimary => |_, status| {
+                let (background, shadow) = match status {
+                    button::Status::Active => (
+                        MediaServerTheme::ACCENT_BLUE,
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    button::Status::Hovered => (
+                        MediaServerTheme::ACCENT_BLUE_HOVER,
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 16.0,
+                        },
+                    ),
+                    button::Status::Pressed => (
+                        Color::from_rgb(0.0, 0.4, 0.8),
+                        Shadow {
+                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 8.0,
+                        },
+                    ),
+                    _ => (MediaServerTheme::ACCENT_BLUE, Shadow::default()),
+                };
+
+                button::Style {
+                    text_color: MediaServerTheme::TEXT_PRIMARY,
+                    background: Some(Background::Color(background)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    shadow: Shadow::default(),
+                    snap: false,
+                }
+            },
+            Button::HeaderMenuSecondary => |_, status| {
+                let (background, border_color) = match status {
+                    button::Status::Active => (
+                        MediaServerTheme::CARD_BG,
+                        MediaServerTheme::BORDER_COLOR,
+                    ),
+                    button::Status::Hovered => (
+                        MediaServerTheme::CARD_HOVER,
+                        MediaServerTheme::ACCENT_BLUE,
+                    ),
+                    _ => (
+                        MediaServerTheme::CARD_BG,
+                        MediaServerTheme::BORDER_COLOR,
+                    ),
+                };
+
+                button::Style {
+                    text_color: MediaServerTheme::TEXT_PRIMARY,
+                    background: Some(Background::Color(background)),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    shadow: Shadow::default(),
                     snap: false,
                 }
             },

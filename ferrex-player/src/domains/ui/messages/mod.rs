@@ -69,10 +69,9 @@ pub enum Message {
 
     // Scrolling
     TabGridScrolled(scrollable::Viewport), // Unified scroll message for tab system
-    CheckScrollStopped,                    // Check if scrolling has stopped
     DetailViewScrolled(scrollable::Viewport), // Scroll events in detail views
-    // Image promotion chunk (center-first batches with small delays)
-    PromoteVisibleChunk(Vec<(MediaType, Uuid)>),
+    // Kinetic grid scrolling (arrow keys)
+    KineticScroll(crate::domains::ui::kinetic_scroll::messages::KineticMessage),
 
     // Window events
     WindowResized(Size),
@@ -253,9 +252,8 @@ impl Message {
 
             // Scrolling
             Self::TabGridScrolled(_) => "UI::TabGridScrolled",
-            Self::CheckScrollStopped => "UI::CheckScrollStopped",
             Self::DetailViewScrolled(_) => "UI::DetailViewScrolled",
-            Self::PromoteVisibleChunk(_) => "UI::PromoteVisibleChunk",
+            Self::KineticScroll(_) => "UI::KineticScroll",
 
             // Window events
             Self::WindowResized(_) => "UI::WindowResized",
@@ -494,10 +492,10 @@ impl std::fmt::Debug for Message {
             Self::TabGridScrolled(viewport) => {
                 write!(f, "UI::TabGridScrolled({:?})", viewport)
             }
-            Self::CheckScrollStopped => write!(f, "UI::CheckScrollStopped"),
             Self::DetailViewScrolled(viewport) => {
                 write!(f, "UI::DetailViewScrolled({:?})", viewport)
             }
+            Self::KineticScroll(_) => write!(f, "UI::KineticScroll"),
             Self::MediaHovered(_) => write!(f, "UI::MediaHovered"),
             Self::MediaUnhovered(_) => write!(f, "UI::MediaUnhovered"),
             Self::NavigateBack => write!(f, "UI::NavigateBack"),
@@ -507,7 +505,9 @@ impl std::fmt::Debug for Message {
             }
             Self::ExecuteSearch => write!(f, "UI::ExecuteSearch"),
             Self::OpenSearchWindow => write!(f, "UI::OpenSearchWindow"),
-            Self::OpenSearchWindowWithSeed(_) => write!(f, "UI::OpenSearchWindowWithSeed"),
+            Self::OpenSearchWindowWithSeed(_) => {
+                write!(f, "UI::OpenSearchWindowWithSeed")
+            }
             Self::SearchWindowOpened(_) => write!(f, "UI::SearchWindowOpened"),
             Self::FocusSearchWindow => write!(f, "UI::FocusSearchWindow"),
             Self::FocusSearchInput => write!(f, "UI::FocusSearchInput"),
@@ -556,9 +556,6 @@ impl std::fmt::Debug for Message {
                 ),
                 Err(e) => write!(f, "UI::DevicesLoaded(Err: {})", e),
             },
-            Self::PromoteVisibleChunk(items) => {
-                write!(f, "UI::PromoteVisibleChunk(len={})", items.len())
-            }
             Self::RevokeDevice(device_id) => {
                 write!(f, "UI::RevokeDevice({})", device_id)
             }
