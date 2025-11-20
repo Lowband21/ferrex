@@ -139,12 +139,12 @@ fn apply_test_stubs(state: &mut State) {
     use crate::infra::services::auth::AuthService;
     use crate::infra::services::settings::SettingsService;
     use crate::infra::testing::stubs::{
-        TestApiService, TestAuthService, TestSettingsService,
+        StubAuthService, TestApiService, TestSettingsService,
     };
 
     let api_stub: Arc<TestApiService> =
         Arc::new(TestApiService::new(state.server_url.clone()));
-    let auth_stub: Arc<TestAuthService> = Arc::new(TestAuthService::new());
+    let auth_stub: Arc<StubAuthService> = Arc::new(StubAuthService::new());
     let settings_stub: Arc<TestSettingsService> =
         Arc::new(TestSettingsService::with_default_device());
 

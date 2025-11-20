@@ -1,6 +1,8 @@
 //! Authentication domain
 //!
-//! Contains all authentication-related state and logic moved from the monolithic State
+//! Contains auth-related UI state and testing helpers. The runtime app uses the
+//! `infra::services::auth::AuthService` trait (implemented by `AuthManager`) to
+//! talk to the server, which is the authority for authentication.
 
 pub mod dto;
 pub mod errors;
@@ -9,9 +11,9 @@ pub mod manager;
 pub mod messages;
 pub mod permissions;
 pub mod security;
-pub mod service;
 pub mod state_types;
 pub mod storage;
+pub mod testkit;
 pub mod types;
 pub mod update;
 pub mod update_handlers;
@@ -25,7 +27,7 @@ use iced::Task;
 pub use dto::*;
 pub use errors::*;
 pub use manager::AuthManager;
-pub use service::AuthService;
+pub use testkit::MockAuthService;
 pub use types::AuthenticationFlow;
 
 pub struct AuthDomainState {

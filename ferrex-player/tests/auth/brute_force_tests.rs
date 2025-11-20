@@ -1,6 +1,6 @@
 //! Brute force protection tests
 //!
-//! Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+//! Requirements:
 //! - 5 failed attempts trigger lockout
 //! - Lockout expires after timeout
 //! - Rate limiting on failed attempts

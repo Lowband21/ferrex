@@ -61,7 +61,7 @@ pub use mocks::{
     DomainMock, MockBuilder, MockHandle, MockRegistry, MockService, SimpleMock,
 };
 pub use recorder::{Operation, OperationType, StateSnapshot, TestRecorder};
-pub use stubs::{TestApiService, TestAuthService, TestSettingsService};
+pub use stubs::{StubAuthService, TestApiService, TestSettingsService};
 pub use time::{
     SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider,
 };

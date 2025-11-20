@@ -1,16 +1,16 @@
 // First-run experience tests
 //
-// Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+// Requirements:
 // - First user becomes admin automatically
 // - Subsequent users are standard users
 // - System exits first-run mode after admin creation
 
-use ferrex_player::domains::auth::service::AuthService;
+use ferrex_player::domains::auth::MockAuthService;
 
 #[tokio::test]
 async fn first_user_becomes_admin_automatically() {
     // RED: This test should fail until we implement the logic
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Verify initial state - system should be in first run
     assert!(
@@ -61,7 +61,7 @@ async fn first_user_becomes_admin_automatically() {
 
 #[tokio::test]
 async fn second_user_does_not_get_admin_automatically() {
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create first user (becomes admin)
     let _first_user = auth
@@ -109,7 +109,7 @@ async fn second_user_does_not_get_admin_automatically() {
 
 #[tokio::test]
 async fn cannot_create_user_with_duplicate_username() {
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create first user
     let _first_user = auth
@@ -128,7 +128,9 @@ async fn cannot_create_user_with_duplicate_username() {
     );
 
     match result.unwrap_err() {
-        ferrex_player::domains::auth::AuthError::UserAlreadyExists(username) => {
+        ferrex_player::domains::auth::AuthError::UserAlreadyExists(
+            username,
+        ) => {
             assert_eq!(username, "testuser");
         }
         other => panic!("Expected UserAlreadyExists error, got: {:?}", other),

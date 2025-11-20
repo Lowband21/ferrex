@@ -1,6 +1,6 @@
 //! Auto-login tests
 //!
-//! Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+//! Requirements:
 //! - Auto-login is device-specific
 //! - Manual logout disables auto-login
 //! - Another user login disables auto-login
@@ -25,7 +25,11 @@ async fn auto_login_is_device_specific() {
     // Authenticate and enable auto-login on device1
     let session1 = helper
         .auth_service
-        .authenticate_with_device(user_id, "password".to_string(), device1.clone())
+        .authenticate_with_device(
+            user_id,
+            "password".to_string(),
+            device1.clone(),
+        )
         .await
         .expect("Authentication should succeed");
 
@@ -78,7 +82,11 @@ async fn manual_logout_disables_auto_login() {
 
     let session = helper
         .auth_service
-        .authenticate_with_device(user_id, "password".to_string(), device.clone())
+        .authenticate_with_device(
+            user_id,
+            "password".to_string(),
+            device.clone(),
+        )
         .await
         .expect("Authentication should succeed");
 
@@ -127,7 +135,11 @@ async fn another_user_login_disables_auto_login() {
     // User1 enables auto-login
     let session1 = helper
         .auth_service
-        .authenticate_with_device(user1_id, "password1".to_string(), device.clone())
+        .authenticate_with_device(
+            user1_id,
+            "password1".to_string(),
+            device.clone(),
+        )
         .await
         .expect("User1 auth should succeed");
 
@@ -153,7 +165,11 @@ async fn another_user_login_disables_auto_login() {
     // User2 logs in on same device
     let _session2 = helper
         .auth_service
-        .authenticate_with_device(user2_id, "password2".to_string(), device.clone())
+        .authenticate_with_device(
+            user2_id,
+            "password2".to_string(),
+            device.clone(),
+        )
         .await
         .expect("User2 auth should succeed");
 

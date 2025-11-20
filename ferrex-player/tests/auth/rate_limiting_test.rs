@@ -1,17 +1,16 @@
-// Rate Limiting Tests - Following TDD Red-Green-Refactor
+// Rate Limiting Tests
 //
-// From USER_MANAGEMENT_REQUIREMENTS.md:
-// "### PIN Security
+// Requirements:
 // - Rate limiting on failed attempts
 // - Temporary lockout after repeated failures
 // - Falls back to password requirement"
 
-use ferrex_player::domains::auth::service::AuthService;
+use ferrex_player::domains::auth::{AuthError, MockAuthService};
 
 #[tokio::test]
 async fn rate_limiting_on_failed_pin_attempts() {
     // Requirement: Rate limiting and lockout on failed PIN attempts
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create user
     let user_id = auth
@@ -38,9 +37,13 @@ async fn rate_limiting_on_failed_pin_attempts() {
         .await
         .expect("Admin auth should succeed");
 
-    auth.setup_pin(regular_user_id, "1234".to_string(), Some(admin_session.clone()))
-        .await
-        .expect("PIN setup should succeed");
+    auth.setup_pin(
+        regular_user_id,
+        "1234".to_string(),
+        Some(admin_session.clone()),
+    )
+    .await
+    .expect("PIN setup should succeed");
 
     // Make admin session active for PIN auth
     auth.set_admin_session_active(user_id).await;
@@ -50,7 +53,11 @@ async fn rate_limiting_on_failed_pin_attempts() {
     // Try wrong PIN 4 times (threshold before lockout)
     for i in 1..=4 {
         let result = auth
-            .authenticate_with_pin(regular_user_id, format!("000{}", i), device.clone())
+            .authenticate_with_pin(
+                regular_user_id,
+                format!("000{}", i),
+                device.clone(),
+            )
             .await;
 
         assert!(result.is_err(), "Wrong PIN should fail");
@@ -58,13 +65,18 @@ async fn rate_limiting_on_failed_pin_attempts() {
         // Should not be locked yet
         assert!(
             !auth.is_account_locked(regular_user_id).await,
-            "Account should not be locked after {} attempts", i
+            "Account should not be locked after {} attempts",
+            i
         );
     }
 
     // 5th wrong attempt should trigger temporary lockout
     let result = auth
-        .authenticate_with_pin(regular_user_id, "0005".to_string(), device.clone())
+        .authenticate_with_pin(
+            regular_user_id,
+            "0005".to_string(),
+            device.clone(),
+        )
         .await;
 
     assert!(result.is_err(), "Wrong PIN should fail");
@@ -77,20 +89,31 @@ async fn rate_limiting_on_failed_pin_attempts() {
 
     // Even correct PIN should fail during lockout
     let result = auth
-        .authenticate_with_pin(regular_user_id, "1234".to_string(), device.clone())
+        .authenticate_with_pin(
+            regular_user_id,
+            "1234".to_string(),
+            device.clone(),
+        )
         .await;
 
     assert!(result.is_err(), "PIN auth should fail during lockout");
     match result.unwrap_err() {
-        ferrex_player::domains::auth::AuthError::AccountLocked => {},
+        AuthError::AccountLocked => {}
         other => panic!("Expected AccountLocked error, got: {:?}", other),
     }
 
     // But password should still work (fallback requirement)
     let session = auth
-        .authenticate_with_password(regular_user_id, "regular_pass".to_string(), device)
+        .authenticate_with_password(
+            regular_user_id,
+            "regular_pass".to_string(),
+            device,
+        )
         .await
         .expect("Password auth should work even during PIN lockout");
 
-    assert!(!session.is_admin, "Regular user session should not be admin");
+    assert!(
+        !session.is_admin,
+        "Regular user session should not be admin"
+    );
 }

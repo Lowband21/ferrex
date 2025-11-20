@@ -1,16 +1,16 @@
 // Session management tests
 //
-// Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+// Requirements:
 // - Users can have multiple active devices (no fixed limit)
 // - Session invalidation on logout
 // - Device-based sessions with no fixed expiration
 
-use ferrex_player::domains::auth::service::AuthService;
+use ferrex_player::domains::auth::MockAuthService;
 
 #[tokio::test]
 async fn user_can_have_multiple_active_sessions() {
     // Requirement: Users can have multiple active devices
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create a user
     let user_id = auth
@@ -23,7 +23,11 @@ async fn user_can_have_multiple_active_sessions() {
     for i in 0..5 {
         let device = format!("device_{}", i);
         let session = auth
-            .authenticate_with_password(user_id, "password".to_string(), device.clone())
+            .authenticate_with_password(
+                user_id,
+                "password".to_string(),
+                device.clone(),
+            )
             .await
             .expect("Authentication should succeed");
         sessions.push(session);
@@ -45,7 +49,7 @@ async fn user_can_have_multiple_active_sessions() {
 
 #[tokio::test]
 async fn session_invalidated_on_logout() {
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     let user_id = auth
         .create_user("user".to_string(), "password".to_string())
@@ -71,7 +75,7 @@ async fn session_invalidated_on_logout() {
 
 #[tokio::test]
 async fn sessions_are_device_specific() {
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     let user_id = auth
         .create_user("user".to_string(), "password".to_string())
@@ -80,12 +84,20 @@ async fn sessions_are_device_specific() {
 
     // Create sessions on different devices
     let session1 = auth
-        .authenticate_with_password(user_id, "password".to_string(), "device1".to_string())
+        .authenticate_with_password(
+            user_id,
+            "password".to_string(),
+            "device1".to_string(),
+        )
         .await
         .expect("Auth should succeed");
 
     let session2 = auth
-        .authenticate_with_password(user_id, "password".to_string(), "device2".to_string())
+        .authenticate_with_password(
+            user_id,
+            "password".to_string(),
+            "device2".to_string(),
+        )
         .await
         .expect("Auth should succeed");
 

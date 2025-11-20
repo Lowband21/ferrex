@@ -1,16 +1,16 @@
 // Device trust management tests
 //
-// Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+// Requirements:
 // - Device trust expires after 30 days
 // - Admin always requires password on untrusted devices
 // - Device-specific trust management
 
-use ferrex_player::domains::auth::service::AuthService;
+use ferrex_player::domains::auth::MockAuthService;
 
 #[tokio::test]
 async fn device_trust_expires_after_30_days() {
     // Requirement: Device trust expires after 30 days
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create a user and authenticate
     let user_id = auth
@@ -49,7 +49,7 @@ async fn device_trust_expires_after_30_days() {
 #[tokio::test]
 async fn admin_requires_password_on_untrusted_device() {
     // Critical security requirement: Admin cannot use PIN on unrecognized devices
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create admin (first user)
     let admin_id = auth
@@ -95,7 +95,9 @@ async fn admin_requires_password_on_untrusted_device() {
 
     match result.unwrap_err() {
         ferrex_player::domains::auth::AuthError::AdminRequiresPassword => {}
-        other => panic!("Expected AdminRequiresPassword error, got: {:?}", other),
+        other => {
+            panic!("Expected AdminRequiresPassword error, got: {:?}", other)
+        }
     }
 
     // But password authentication should work
@@ -110,7 +112,7 @@ async fn admin_requires_password_on_untrusted_device() {
 
 #[tokio::test]
 async fn device_can_be_revoked() {
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create admin and user
     let admin_id = auth

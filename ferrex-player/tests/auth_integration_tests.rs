@@ -5,11 +5,11 @@
 
 // Basic auth functionality tests
 mod auth_basic {
-    use ferrex_player::domains::auth::service::AuthService;
+    use ferrex_player::domains::auth::MockAuthService;
 
     #[tokio::test]
     async fn test_device_trust_and_pin_auth() {
-        let auth = AuthService::new();
+        let auth = MockAuthService::new();
 
         // Create admin user (first user)
         let admin_id = auth
@@ -98,12 +98,12 @@ mod refresh_token_integration {
 
 // Previously pending tests - now implemented
 mod completed_tests {
-    use ferrex_player::domains::auth::service::AuthService;
+    use ferrex_player::domains::auth::MockAuthService;
 
     #[tokio::test]
     async fn auto_login_device_specific() {
         // Auto-login functionality is device-specific
-        let auth = AuthService::new();
+        let auth = MockAuthService::new();
 
         // Create a user
         let user_id = auth
@@ -140,7 +140,7 @@ mod completed_tests {
     #[tokio::test]
     async fn user_deletion_cascades_sessions() {
         // User deletion should cascade to sessions and other data
-        let auth = AuthService::new();
+        let auth = MockAuthService::new();
 
         // Create admin (first user)
         let admin_id = auth

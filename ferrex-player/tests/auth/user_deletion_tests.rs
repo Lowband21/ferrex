@@ -1,6 +1,6 @@
 //! User deletion cascade tests
 //!
-//! Requirements from USER_MANAGEMENT_REQUIREMENTS.md:
+//! Requirements:
 //! - User deletion invalidates all sessions
 //! - Trusted devices are removed
 //! - Auto-login is disabled
@@ -28,13 +28,21 @@ async fn user_deletion_invalidates_all_sessions() {
     // Create multiple sessions for the user
     let session1 = helper
         .auth_service
-        .authenticate_with_device(user_id, "user_pass".to_string(), "device1".to_string())
+        .authenticate_with_device(
+            user_id,
+            "user_pass".to_string(),
+            "device1".to_string(),
+        )
         .await
         .expect("Authentication should succeed");
 
     let session2 = helper
         .auth_service
-        .authenticate_with_device(user_id, "user_pass".to_string(), "device2".to_string())
+        .authenticate_with_device(
+            user_id,
+            "user_pass".to_string(),
+            "device2".to_string(),
+        )
         .await
         .expect("Authentication should succeed");
 
@@ -186,7 +194,9 @@ async fn only_admin_can_delete_users() {
 
     match result.unwrap_err() {
         ferrex_player::domains::auth::AuthError::InsufficientPermissions => {}
-        other => panic!("Expected InsufficientPermissions error, got: {:?}", other),
+        other => {
+            panic!("Expected InsufficientPermissions error, got: {:?}", other)
+        }
     }
 
     // User2 should still exist

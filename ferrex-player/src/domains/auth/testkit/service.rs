@@ -1,20 +1,29 @@
-//! Production AuthService implementation
+//! In-memory reference AuthService used by tests
 //!
-//! This is the real authentication service that contains the business logic.
-//! Unlike test mocks, this implements actual requirements.
+//! This module provides a deterministic, in-memory implementation of the
+//! authentication business rules for integration/unit tests. It is not wired
+//! into the runtime application; the production path authenticates against the
+//! server via `infra::services::auth::AuthService` and `AuthManager`.
+//!
+//! Notes:
+//! - State is intentionally in-memory and ephemeral. The server remains the authority for identity,
+//!   device trust, PIN, and tokens.
+//! - Password/PIN verification here is simplified for testing to unblock
+//!   UI/flow validation. The production code uses server-side verification.
 
 use crate::domains::auth::errors::{AuthError, AuthResult, DeviceError};
-use chrono::Utc;
+
 use ferrex_core::player_prelude::{
     DeviceRegistration, Platform, Role, User, UserPermissions, UserPreferences,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
+
+use chrono::Utc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-pub struct SessionToken {
+pub struct MockSessionToken {
     pub user_id: Uuid,
     pub token: String,
     pub is_admin: bool,
@@ -22,9 +31,9 @@ pub struct SessionToken {
 }
 
 #[derive(Debug, Clone)]
-struct UserPin {
+struct MockUserPin {
     user_id: Uuid,
-    pin_hash: String, // TODO: Properly hash PINs
+    pin_hash: String,
 }
 
 #[derive(Debug, Clone)]
@@ -35,12 +44,10 @@ struct FailedAttempts {
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-pub struct AuthService {
-    // In-memory store for now, but this could be
-    // replaced with a database connection in the future
+pub struct MockAuthService {
     users: Arc<RwLock<Vec<User>>>,
-    user_pins: Arc<RwLock<Vec<UserPin>>>,
-    active_sessions: Arc<RwLock<Vec<SessionToken>>>,
+    user_pins: Arc<RwLock<Vec<MockUserPin>>>,
+    active_sessions: Arc<RwLock<Vec<MockSessionToken>>>,
     device_registrations: Arc<RwLock<Vec<DeviceRegistration>>>,
 
     admin_session_active: Arc<RwLock<Option<Uuid>>>,
@@ -52,13 +59,13 @@ pub struct AuthService {
     time_offset: Arc<RwLock<chrono::Duration>>,
 }
 
-impl Default for AuthService {
+impl Default for MockAuthService {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AuthService {
+impl MockAuthService {
     pub fn new() -> Self {
         Self {
             users: Arc::new(RwLock::new(Vec::new())),
@@ -89,7 +96,8 @@ impl AuthService {
         users.is_empty()
     }
 
-    // TODO: Why are we ignoring the password?
+    // Test-only simplification: password is not persisted/verified here as in
+    // production; server-side validation is exercised by `AuthManager`.
     pub async fn create_user(
         &self,
         username: String,
@@ -186,7 +194,7 @@ impl AuthService {
         &self,
         user_id: Uuid,
         password: String,
-    ) -> AuthResult<SessionToken> {
+    ) -> AuthResult<MockSessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
@@ -224,7 +232,7 @@ impl AuthService {
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0; // First user (index 0) is admin
 
-        let session = SessionToken {
+        let session = MockSessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
@@ -254,7 +262,7 @@ impl AuthService {
         user_id: Uuid,
         password: String,
         device_id: String,
-    ) -> AuthResult<SessionToken> {
+    ) -> AuthResult<MockSessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
@@ -305,7 +313,7 @@ impl AuthService {
             }
         }
 
-        let session = SessionToken {
+        let session = MockSessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
@@ -353,7 +361,7 @@ impl AuthService {
     pub async fn attempt_auto_login(
         &self,
         device_id: String,
-    ) -> AuthResult<SessionToken> {
+    ) -> AuthResult<MockSessionToken> {
         let auto_login = self.auto_login_enabled.read().await;
 
         // Find any user with auto-login enabled for this device
@@ -371,7 +379,7 @@ impl AuthService {
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0;
 
-        let session = SessionToken {
+        let session = MockSessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
@@ -411,7 +419,7 @@ impl AuthService {
         &self,
         user_id: Uuid,
         pin: String,
-        admin_session: Option<SessionToken>,
+        admin_session: Option<MockSessionToken>,
     ) -> AuthResult<()> {
         // Check if user exists
         let users = self.users.read().await;
@@ -437,7 +445,7 @@ impl AuthService {
         }
 
         // Store the PIN
-        let user_pin = UserPin {
+        let user_pin = MockUserPin {
             user_id,
             pin_hash: pin, // TODO: Properly hash PIN
         };
@@ -523,7 +531,7 @@ impl AuthService {
         user_id: Uuid,
         password: String,
         device_id: String,
-    ) -> AuthResult<SessionToken> {
+    ) -> AuthResult<MockSessionToken> {
         // Don't check account lock status - password is the fallback mechanism
         let users = self.users.read().await;
         let user = users
@@ -551,7 +559,7 @@ impl AuthService {
             .ok_or(AuthError::UserNotFound(user_id))?;
         let is_admin = user_index == 0;
 
-        let session = SessionToken {
+        let session = MockSessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
@@ -583,7 +591,7 @@ impl AuthService {
         user_id: Uuid,
         pin: String,
         device_id: String,
-    ) -> AuthResult<SessionToken> {
+    ) -> AuthResult<MockSessionToken> {
         // Check if account is locked
         if self.is_account_locked(user_id).await {
             return Err(AuthError::AccountLocked);
@@ -628,7 +636,7 @@ impl AuthService {
         self.clear_failed_attempts(user_id).await;
 
         // Create session
-        let session = SessionToken {
+        let session = MockSessionToken {
             user_id,
             token: format!("session_{}", Uuid::new_v4()),
             is_admin,
@@ -648,7 +656,7 @@ impl AuthService {
     pub async fn revoke_device(
         &self,
         device_id: String,
-        admin_session: SessionToken,
+        admin_session: MockSessionToken,
     ) -> AuthResult<()> {
         // Verify admin session
         if !admin_session.is_admin {
@@ -690,7 +698,7 @@ impl AuthService {
     }
 
     /// Check if a session is valid
-    pub async fn is_session_valid(&self, session: &SessionToken) -> bool {
+    pub async fn is_session_valid(&self, session: &MockSessionToken) -> bool {
         let sessions = self.active_sessions.read().await;
         sessions.iter().any(|s| s.token == session.token)
     }
@@ -702,7 +710,10 @@ impl AuthService {
     }
 
     /// Get all active sessions for a user
-    pub async fn get_user_sessions(&self, user_id: Uuid) -> Vec<SessionToken> {
+    pub async fn get_user_sessions(
+        &self,
+        user_id: Uuid,
+    ) -> Vec<MockSessionToken> {
         let sessions = self.active_sessions.read().await;
         sessions
             .iter()
@@ -715,7 +726,7 @@ impl AuthService {
     ///
     /// Business Rule: Normal logout (app closure) keeps auto-login enabled
     /// Use logout_manual() for explicit user logout that disables auto-login
-    pub async fn logout(&self, session: SessionToken) -> AuthResult<()> {
+    pub async fn logout(&self, session: MockSessionToken) -> AuthResult<()> {
         let mut sessions = self.active_sessions.write().await;
         sessions.retain(|s| s.token != session.token);
 
@@ -736,7 +747,10 @@ impl AuthService {
     /// Manual logout - user explicitly chooses to logout
     ///
     /// Business Rule: Manual logout disables auto-login for the device
-    pub async fn logout_manual(&self, session: SessionToken) -> AuthResult<()> {
+    pub async fn logout_manual(
+        &self,
+        session: MockSessionToken,
+    ) -> AuthResult<()> {
         // First do normal logout
         self.logout(session.clone()).await?;
 
@@ -752,7 +766,7 @@ impl AuthService {
     /// Get the device associated with a session
     pub async fn get_session_device(
         &self,
-        session: &SessionToken,
+        session: &MockSessionToken,
     ) -> Option<String> {
         let sessions = self.active_sessions.read().await;
         sessions
@@ -827,7 +841,7 @@ impl AuthService {
     pub async fn delete_user(
         &self,
         user_id: Uuid,
-        admin_session: SessionToken,
+        admin_session: MockSessionToken,
     ) -> AuthResult<()> {
         // Verify admin permissions
         if !admin_session.is_admin {

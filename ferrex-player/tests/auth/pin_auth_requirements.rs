@@ -1,15 +1,15 @@
 // PIN Authentication Requirements Tests
 //
-// Tests for PIN authentication rules from USER_MANAGEMENT_REQUIREMENTS.md:
+// Requirements:
 // - Standard users can only use PIN if admin has authenticated in session
 // - PIN setup requires admin session for standard users
 
-use ferrex_player::domains::auth::service::AuthService;
+use ferrex_player::domains::auth::{AuthError, MockAuthService};
 
 #[tokio::test]
 async fn standard_user_pin_requires_active_admin_session() {
     // Requirement: Standard users can only use PIN after admin has authenticated
-    let auth = AuthService::new();
+    let auth = MockAuthService::new();
 
     // Create admin (first user)
     let admin_id = auth
@@ -43,10 +43,15 @@ async fn standard_user_pin_requires_active_admin_session() {
         .authenticate_with_pin(user_id, "1234".to_string(), device.clone())
         .await;
 
-    assert!(result.is_err(), "Standard user should NOT authenticate with PIN without admin session");
+    assert!(
+        result.is_err(),
+        "Standard user should NOT authenticate with PIN without admin session"
+    );
     match result.unwrap_err() {
-        ferrex_player::domains::auth::AuthError::AdminSessionRequired => {},
-        other => panic!("Expected AdminSessionRequired error, got: {:?}", other),
+        AuthError::AdminSessionRequired => {}
+        other => {
+            panic!("Expected AdminSessionRequired error, got: {:?}", other)
+        }
     }
 
     // TEST: With admin session active, standard user CAN use PIN

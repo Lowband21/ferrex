@@ -1,24 +1,30 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use crate::{
+    domains::auth::{
+        dto::UserListItemDto,
+        manager::{AutoLoginScope, DeviceAuthStatus, PlayerAuthResult},
+        storage::StoredAuth,
+    },
+    infra::{
+        repository::{RepositoryError, RepositoryResult},
+        services::auth::AuthService,
+    },
+};
+
+use ferrex_core::{
+    domain::users::auth::domain::value_objects::SessionScope,
+    player_prelude::{AuthToken, Role, User, UserPermissions, UserPreferences},
+};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
-use ferrex_core::player_prelude::{
-    AuthToken, Role, User, UserPermissions, UserPreferences,
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
 };
 use uuid::Uuid;
 
-use crate::domains::auth::dto::UserListItemDto;
-use crate::domains::auth::manager::{
-    AutoLoginScope, DeviceAuthStatus, PlayerAuthResult,
-};
-use crate::domains::auth::storage::StoredAuth;
-use crate::infra::repository::{RepositoryError, RepositoryResult};
-use crate::infra::services::auth::AuthService;
-
 #[derive(Debug, Clone)]
-pub struct TestAuthService {
+pub struct StubAuthService {
     inner: Arc<RwLock<InnerAuthState>>,
 }
 
@@ -36,13 +42,13 @@ struct InnerAuthState {
     auth_token: Option<AuthToken>,
 }
 
-impl Default for TestAuthService {
+impl Default for StubAuthService {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TestAuthService {
+impl StubAuthService {
     pub fn new() -> Self {
         let admin_id = Uuid::now_v7();
         let demo_admin = User {
@@ -153,6 +159,7 @@ impl TestAuthService {
             .collect()
     }
 
+    #[allow(unused)]
     fn permissions_for(&self, user_id: &Uuid) -> Option<UserPermissions> {
         self.inner
             .read()
@@ -212,7 +219,7 @@ impl InnerAuthState {
 }
 
 #[async_trait]
-impl AuthService for TestAuthService {
+impl AuthService for StubAuthService {
     async fn login(
         &self,
         username: String,
