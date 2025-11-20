@@ -433,6 +433,25 @@ impl ApiService for ApiClientAdapter {
         self.client.get_token().await
     }
 
+    async fn fetch_playback_ticket(
+        &self,
+        media_id: &str,
+    ) -> RepositoryResult<String> {
+        #[derive(Debug, Deserialize)]
+        struct PlaybackTicketResponse {
+            access_token: String,
+            #[allow(dead_code)]
+            expires_in: i64,
+        }
+
+        let path = replace_param(v1::stream::PLAYBACK_TICKET, "{id}", media_id);
+        self.client
+            .get::<PlaybackTicketResponse>(&path)
+            .await
+            .map(|r| r.access_token)
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
     async fn create_library(
         &self,
         request: CreateLibraryRequest,

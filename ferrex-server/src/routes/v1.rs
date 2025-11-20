@@ -227,6 +227,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             v1::stream::REPORT_PROGRESS,
             post(stream_handlers::report_progress_handler),
         )
+        .route(
+            v1::stream::PLAYBACK_TICKET,
+            get(stream_handlers::playback_ticket_handler),
+        )
         // Sync session endpoints
         // Unimplemented
         //.route(

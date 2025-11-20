@@ -67,6 +67,26 @@ impl StreamingApiService for StreamingApiAdapter {
     async fn get_master_playlist(&self, media_id: &str) -> Result<String> {
         let stream_path =
             utils::replace_param(v1::stream::PLAY, "{id}", media_id);
-        Ok(self.client.build_url(&stream_path))
+        let base = self.client.build_url(&stream_path);
+        // Attach a short-lived playback ticket for HLS clients
+        #[derive(serde::Deserialize)]
+        struct PlaybackTicketResponse {
+            access_token: String,
+            expires_in: i64,
+        }
+        let ticket_path =
+            utils::replace_param(v1::stream::PLAYBACK_TICKET, "{id}", media_id);
+        match self
+            .client
+            .get::<PlaybackTicketResponse>(&ticket_path)
+            .await
+        {
+            Ok(resp) => Ok(format!(
+                "{}?access_token={}",
+                base,
+                urlencoding::encode(&resp.access_token)
+            )),
+            Err(_) => Ok(base),
+        }
     }
 }

@@ -45,6 +45,8 @@ pub enum Message {
 
     // External player control
     PlayExternal,
+    // Internal: set resolved stream URL and trigger playback
+    SetStreamUrl(String),
 
     // UI control
     ShowControls,
@@ -131,6 +133,7 @@ impl fmt::Debug for Message {
 
             // External player control
             Message::PlayExternal => write!(f, "PlayExternal"),
+            Message::SetStreamUrl(_) => write!(f, "SetStreamUrl(<redacted>)"),
 
             // UI control
             Message::ShowControls => write!(f, "ShowControls"),

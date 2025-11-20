@@ -1,14 +1,18 @@
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::Response,
 };
+use chrono::Utc;
+use ferrex_core::api::types::ApiResponse;
+use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
 use ferrex_core::{
     domain::{users::user::User, watch::UpdateProgressRequest},
     types::MediaType,
 };
 use serde::Deserialize;
+use serde::Serialize;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -22,16 +26,44 @@ pub struct ProgressReport {
 }
 
 /// Stream media with automatic progress tracking.
+#[derive(Debug, Deserialize)]
+pub struct StreamAuthQuery {
+    #[serde(default)]
+    access_token: Option<String>,
+}
+
 pub async fn stream_with_progress_handler(
     State(state): State<AppState>,
     Path(media_id): Path<Uuid>,
     headers: HeaderMap,
+    Query(query): Query<StreamAuthQuery>,
 ) -> Result<Response, (StatusCode, String)> {
-    // NOTE: Authentication is temporarily disabled here until the GStreamer
-    // souphttpsrc extra-headers hook is wired to forward the Bearer token from
-    // the player. Re-enable once the pipeline sends the Authorization header.
     debug!("stream request");
     debug!("Requested media ID: {}", media_id);
+
+    // Accept either Authorization: Bearer <token> header or an
+    // access_token query parameter for clients that cannot set headers.
+    let token_opt = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| query.access_token.clone());
+
+    if let Some(token) = token_opt {
+        // Validate token; reject unauthorized/expired sessions and enforce scope
+        match state.auth_service().validate_session_token(&token).await {
+            Ok(validated) => match validated.scope {
+                SessionScope::Full | SessionScope::Playback => {}
+            },
+            Err(err) => {
+                warn!("Stream token validation failed: {:?}", err);
+                return Err((StatusCode::UNAUTHORIZED, "Invalid token".into()));
+            }
+        }
+    } else {
+        return Err((StatusCode::UNAUTHORIZED, "Missing token".into()));
+    }
 
     // Fetch media metadata
     let media_file = state
@@ -158,6 +190,48 @@ pub async fn stream_with_progress_handler(
         .header("Connection", "keep-alive")
         .body(axum::body::Body::from_stream(stream))
         .expect("failed to build OK response"))
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlaybackTicketResponse {
+    pub access_token: String,
+    pub expires_in: i64,
+}
+
+/// Issue a short-lived playback token suitable for query-string embedding.
+pub async fn playback_ticket_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Extension(device_session_id): Extension<Option<Uuid>>,
+    Path(media_id): Path<Uuid>,
+) -> Result<axum::Json<ApiResponse<PlaybackTicketResponse>>, (StatusCode, String)>
+{
+    // Optionally ensure the requested media exists to avoid issuing tokens for unknown items
+    if state
+        .unit_of_work()
+        .media_files_read
+        .get_by_id(&media_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .is_none()
+    {
+        return Err((StatusCode::NOT_FOUND, "Media not found".into()));
+    }
+    // Lifetime: 6 hours — long enough for extended playback/seeks
+    let lifetime = chrono::Duration::hours(6);
+    let token = state
+        .auth_service()
+        .issue_playback_session(user.id, device_session_id, lifetime)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let expires_in = (token.expires_at() - Utc::now()).num_seconds().max(0);
+    let body = PlaybackTicketResponse {
+        access_token: token.as_str().to_string(),
+        expires_in,
+    };
+
+    Ok(axum::Json(ApiResponse::success(body)))
 }
 
 /// Report playback progress during streaming

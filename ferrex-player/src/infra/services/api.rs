@@ -202,6 +202,12 @@ pub trait ApiService: Send + Sync + Debug {
 
     /// Get the current authentication token
     async fn get_token(&self) -> Option<AuthToken>;
+
+    /// Fetch a short-lived playback ticket (scoped token) for a media item
+    async fn fetch_playback_ticket(
+        &self,
+        media_id: &str,
+    ) -> RepositoryResult<String>;
 }
 
 // Domain-specific scan API DTOs are defined in ferrex_core::api::scan

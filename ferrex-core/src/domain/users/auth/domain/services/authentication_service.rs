@@ -1205,4 +1205,34 @@ impl AuthenticationService {
         }
         Ok(())
     }
+
+    /// Issue a short-lived playback-only session token for embedding in stream URLs.
+    /// No refresh token is created; the token is persisted in the session store with
+    /// `SessionScope::Playback` and the provided lifetime.
+    pub async fn issue_playback_session(
+        &self,
+        user_id: Uuid,
+        device_session_id: Option<Uuid>,
+        lifetime: Duration,
+    ) -> Result<SessionToken, AuthenticationError> {
+        let session_token = SessionToken::generate(lifetime).map_err(|_| {
+            AuthenticationError::DatabaseError(anyhow::anyhow!(
+                "failed to generate session token",
+            ))
+        })?;
+
+        let session_hash = self.crypto.hash_token(session_token.as_str());
+        self.session_store
+            .insert_session(
+                user_id,
+                device_session_id,
+                SessionScope::Playback,
+                &session_hash,
+                session_token.created_at(),
+                session_token.expires_at(),
+            )
+            .await?;
+
+        Ok(session_token)
+    }
 }

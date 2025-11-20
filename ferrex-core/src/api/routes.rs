@@ -119,6 +119,7 @@ pub mod v1 {
 
     pub mod stream {
         pub const PLAY: &str = v1_path!("/stream/{id}");
+        pub const PLAYBACK_TICKET: &str = v1_path!("/stream/{id}/ticket");
         pub const REPORT_PROGRESS: &str =
             v1_path!("/stream/{media_type}/{id}/progress");
     }

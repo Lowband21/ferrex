@@ -893,36 +893,56 @@ pub fn update_player(
             };
             state.is_hdr_content = is_hdr_content;
 
-            // Build streaming URL from server_url and encoded media id
+            // Build secure streaming URL with access_token query (minimal secure handoff)
+            let server_url = app_state.server_url.clone();
             let media_id_string = media.id.to_string();
-            let encoded_media_id = urlencoding::encode(&media_id_string);
-            let video_url = format!(
-                "{}/api/v1/stream/{}",
-                app_state.server_url, encoded_media_id
-            );
+            let api = app_state.api_service.clone();
+            DomainUpdateResult::task(Task::perform(
+                async move {
+                    // URL-encode path component
+                    let encoded_media_id =
+                        urlencoding::encode(&media_id_string);
+                    let base = format!(
+                        "{}/api/v1/stream/{}",
+                        server_url, encoded_media_id
+                    );
 
-            match url::Url::parse(&video_url) {
-                Ok(url) => {
-                    state.current_url = Some(url);
-                    app_state.domains.ui.state.view =
-                        ui::types::ViewState::LoadingVideo { url: video_url };
-                    app_state.domains.ui.state.error_message = None;
-                    // Immediately trigger internal player load (non-HLS path)
-                    DomainUpdateResult::task(
-                        crate::domains::player::video::load_video(app_state)
-                            .map(DomainMessage::Player),
-                    )
-                }
-                Err(e) => {
-                    app_state.domains.ui.state.error_message =
-                        Some(format!("Invalid URL: {}", e));
-                    app_state.domains.ui.state.view =
-                        ui::types::ViewState::VideoError {
-                            message: format!("Invalid URL: {}", e),
+                    // Request a short-lived playback ticket via authenticated API
+                    let token_opt: Option<String> =
+                        match api.fetch_playback_ticket(&media_id_string).await
+                        {
+                            Ok(token) => Some(token),
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to fetch playback ticket: {}",
+                                    e
+                                );
+                                None
+                            }
                         };
-                    DomainUpdateResult::task(Task::none())
-                }
-            }
+
+                    // Attach token if present
+                    let final_url = if let Some(token) = token_opt {
+                        format!(
+                            "{}?access_token={}",
+                            base,
+                            urlencoding::encode(&token)
+                        )
+                    } else {
+                        base
+                    };
+                    Ok::<String, String>(final_url)
+                },
+                |url| match url {
+                    Ok(u) => DomainMessage::Player(Message::SetStreamUrl(u)),
+                    Err(e) => {
+                        log::error!("Failed to construct stream URL: {}", e);
+                        DomainMessage::Player(Message::SetStreamUrl(
+                            String::new(),
+                        ))
+                    }
+                },
+            ))
         }
 
         // External MPV player messages
@@ -1113,6 +1133,42 @@ pub fn update_player(
         }
 
         Message::PlayExternal => start_external_mpv_with_current_url(app_state),
+
+        // Accept resolved URL and kick off playback
+        Message::SetStreamUrl(video_url) => {
+            if video_url.is_empty() {
+                // Should not happen; guard to avoid parsing panics
+                app_state.domains.ui.state.error_message =
+                    Some("Failed to resolve stream URL".to_string());
+                app_state.domains.ui.state.view =
+                    ui::types::ViewState::VideoError {
+                        message: "Failed to resolve stream URL".to_string(),
+                    };
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            match url::Url::parse(&video_url) {
+                Ok(url) => {
+                    state.current_url = Some(url);
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::LoadingVideo { url: video_url };
+                    app_state.domains.ui.state.error_message = None;
+                    DomainUpdateResult::task(
+                        crate::domains::player::video::load_video(app_state)
+                            .map(DomainMessage::Player),
+                    )
+                }
+                Err(e) => {
+                    app_state.domains.ui.state.error_message =
+                        Some(format!("Invalid URL: {}", e));
+                    app_state.domains.ui.state.view =
+                        ui::types::ViewState::VideoError {
+                            message: format!("Invalid URL: {}", e),
+                        };
+                    DomainUpdateResult::task(Task::none())
+                }
+            }
+        }
     }
 }
 
@@ -1154,6 +1210,20 @@ fn start_external_mpv_with_current_url(
         .as_ref()
         .map(|u| u.to_string())
         .unwrap_or_default();
+
+    if url.is_empty() {
+        // URL not ready yet (e.g., tokenization async); retry shortly
+        log::info!(
+            "External MPV requested before stream URL resolved; retrying..."
+        );
+        return DomainUpdateResult::task(Task::perform(
+            async {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100))
+                    .await;
+            },
+            |_| DomainMessage::Player(Message::PlayExternal),
+        ));
+    }
 
     // Stop internal playback if running before handoff
     state.stop_native_playback();
