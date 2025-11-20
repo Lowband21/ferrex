@@ -1,3 +1,5 @@
+#![cfg(feature = "database")]
+
 use std::cmp;
 use std::sync::Arc;
 

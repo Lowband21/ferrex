@@ -34,15 +34,9 @@ chrono.workspace = true
 
 # UUID generation
 uuid.workspace = true
-
-# Database
-surrealdb = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }
 redis = { workspace = true, optional = true }
 ipnetwork = { workspace = true, optional = true }
-
-# File system
-walkdir.workspace = true
 
 # Media processing
 ffmpeg-next = { workspace = true, optional = true }
@@ -71,9 +65,6 @@ tmdb-api.workspace = true
 # Concurrency
 rayon.workspace = true
 
-# Fuzzy matching
-fuzzy-matcher = "0.3"
-
 # Random number generation
 rand.workspace = true
 
@@ -82,7 +73,6 @@ ordered-float = "^5"
 
 # File watching
 notify = { version = "^7", optional = true }
-notify-debouncer-full = { version = "^0.4", package = "notify-debouncer-full", optional = true }
 
 # Image processing
 image = { workspace = true, optional = true }
@@ -95,7 +85,6 @@ base64.workspace = true
 hmac = "0.12"
 hex = "0.4"
 password-hash = "^0.5"
-notify-debouncer-mini = "0.7.0"
 num_cpus = "1.17.0"
 constant_time_eq = "0.4.2"
 tokio-util.workspace = true
@@ -105,12 +94,12 @@ default = ["ffmpeg", "database", "compat", "scan-runtime"]
 ffmpeg = ["dep:ffmpeg-next"]
 database = [
     "dep:sqlx",
-    "dep:surrealdb",
+
     "dep:redis",
     "dep:ipnetwork",
     "dep:image",
     "dep:notify",
-    "dep:notify-debouncer-full",
+
 ]
 compat = []
 demo = []

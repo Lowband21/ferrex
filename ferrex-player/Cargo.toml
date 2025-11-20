@@ -120,8 +120,6 @@ bytemuck = { version = "^1.23", features = ["derive"] }
 # Advanced caching and concurrency
 dashmap.workspace = true
 priority-queue = "^2.5.0"
-moka = { version = "^0.12", features = ["future"] }
-rayon.workspace = true
 rand.workspace = true
 base64 = "^0.22"
 num_cpus = "^1"
@@ -150,7 +148,6 @@ tracy-client = { version = "^0.18", default-features = false, optional = true }
 hdrhistogram = { version = "^7.5", optional = true }
 parking_lot = { version = "^0.12" }
 memory-stats = { version = "^1.2", optional = true }
-bytes = "^1.10.1"
 yoke = "^0.8"
 
 [features]

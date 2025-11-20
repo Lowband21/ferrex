@@ -44,7 +44,6 @@ chrono = { version = "^0.4", default-features = false, features = ["alloc", "std
 # HTTP/Web
 axum = { version = "^0.8.6", features = ["ws", "macros"] }
 axum-server = { version = "^0.7", features = ["tls-rustls"] }
-axum-extra = { version = "^0.10", features = ["typed-header"] }
 tower = { version = "^0.5", features = ["util"] }
 tower-http = { version = "^0.6", features = ["fs", "cors", "trace"] }
 reqwest = { version = "^0.12", features = ["json", "stream"] }
@@ -73,9 +72,6 @@ ipnetwork = "^0.20"
 
 # Media processing
 ffmpeg-next = "^8.0"
-
-# File system
-walkdir = "^2.5"
 
 # Image processing
 image = "^0.25"
@@ -117,9 +113,6 @@ mockall = "^0.13"
 rayon = "^1.11"
 dashmap = "^6.1"
 
-# Fuzzy matching
-fuzzy-matcher = "^0.3"
-
 # Authentication
 jsonwebtoken = "^9.3"
 argon2 = "^0.5.3"
@@ -133,12 +126,6 @@ opt-level = 3
 opt-level = 1
 
 [profile.dev.package."*"]
-opt-level = 3
-
-[profile.dev.package.ferrex-player]
-opt-level = 2
-
-[profile.release.package.ferrex-player]
 opt-level = 3
 
 # Documentation settings
