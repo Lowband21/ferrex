@@ -122,6 +122,7 @@ hyper = "^1.7"
 axum-test = "^18"
 tower = { workspace = true, features = ["util"] }
 serde_json.workspace = true
+rcgen = "^0.12"
 
 [features]
 # Enable long-running external end-to-end HTTP tests

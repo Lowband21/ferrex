@@ -73,7 +73,7 @@ start *args:
 
 # Interactive config init (host-native by default).
 
-# Writes config/ferrex.toml and config/.env on the host via volume mounts.
+# Writes config/.env on the host via volume mounts.
 [no-cd]
 init-config args="" FERREX_INIT_SKIP_BUILD="0" FERREX_INIT_MODE="host":
     FERREX_INIT_MODE={{ FERREX_INIT_MODE }} utils/init-config.sh {{ args }}
@@ -87,12 +87,12 @@ config-tailnet from_dir="config" to_dir="config/tailnet" args="":
     bash utils/make-tailnet-config.sh --from {{ from_dir }} --to {{ to_dir }} {{ args }}
 
 [no-cd]
-show-setup-token config_file="config/ferrex.toml":
-    if [ ! -f {{ config_file }} ]; then \
-        echo "Config missing: {{ config_file }}. Run: just init-config" >&2; \
+show-setup-token env_file="config/.env":
+    if [ ! -f {{ env_file }} ]; then \
+        echo "Env missing: {{ env_file }}. Run: just init-config" >&2; \
         exit 1; \
     else \
-        utils/show-setup-token.sh {{ config_file }}; \
+        utils/show-setup-token.sh {{ env_file }}; \
     fi
 
 [no-cd]
@@ -107,31 +107,13 @@ check-config profile="release" args="" wild="1":
     FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db cache
     # Always build with the requested linker mode; BuildKit will reuse cache.
     docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
-    if [ -d "$PWD/config/secrets" ]; then \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -v "$PWD/config/secrets":/run/ferrex-secrets:ro \
-        -e FERREX_APP_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e DATABASE_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e POSTGRES_PASSWORD_FILE=/run/ferrex-secrets/postgres_superuser_password \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        config check --config-path /app/config/ferrex.toml --env-file /app/config/.env.runtime {{ args }}; \
-    else \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        config check --config-path /app/config/ferrex.toml --env-file /app/config/.env.runtime {{ args }}; \
-    fi
+    docker run --rm \
+      --network ferrex_default \
+      --env-file "$PWD/config/.env" \
+      -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
+      -v "$PWD/config":/app/config \
+      ferrex/server:local \
+      config check --env-file /app/config/.env {{ args }}
 
 [no-cd]
 db-preflight profile="release" args="" wild="1":
@@ -139,31 +121,13 @@ db-preflight profile="release" args="" wild="1":
     docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server >/dev/null 2>&1 || true
     FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db
     docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
-    if [ -d "$PWD/config/secrets" ]; then \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -v "$PWD/config/secrets":/run/ferrex-secrets:ro \
-        -e FERREX_APP_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e DATABASE_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e POSTGRES_PASSWORD_FILE=/run/ferrex-secrets/postgres_superuser_password \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        db preflight {{ args }}; \
-    else \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        db preflight {{ args }}; \
-    fi
+    docker run --rm \
+      --network ferrex_default \
+      --env-file "$PWD/config/.env" \
+      -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
+      -v "$PWD/config":/app/config \
+      ferrex/server:local \
+      db preflight {{ args }}
 
 [no-cd]
 db-migrate profile="release" args="" wild="1":
@@ -171,31 +135,13 @@ db-migrate profile="release" args="" wild="1":
     docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server >/dev/null 2>&1 || true
     FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db
     docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
-    if [ -d "$PWD/config/secrets" ]; then \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -v "$PWD/config/secrets":/run/ferrex-secrets:ro \
-        -e FERREX_APP_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e DATABASE_PASSWORD_FILE=/run/ferrex-secrets/ferrex_app_password \
-        -e POSTGRES_PASSWORD_FILE=/run/ferrex-secrets/postgres_superuser_password \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        db migrate {{ args }}; \
-    else \
-      docker run --rm \
-        --network ferrex_default \
-        -v "$PWD/config":/app/config \
-        -e DATABASE_HOST="${POSTGRES_INTERNAL_HOST:-db}" \
-        -e DATABASE_PORT="${POSTGRES_INTERNAL_PORT:-5432}" \
-        -e DATABASE_NAME="${FERREX_DB:-ferrex}" \
-        -e DATABASE_USER="${FERREX_APP_USER:-ferrex_app}" \
-        ferrex/server:local \
-        db migrate {{ args }}; \
-    fi
+    docker run --rm \
+      --network ferrex_default \
+      --env-file "$PWD/config/.env" \
+      -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
+      -v "$PWD/config":/app/config \
+      ferrex/server:local \
+      db migrate {{ args }}
 
 #######################
 # Development shortcuts
@@ -414,12 +360,16 @@ fixp-dirty package="ferrex-core": fmt
 
 # Run
 [no-cd]
-run-player PROFILE="release":
+run-player PROFILE="priority":
     cargo run -p ferrex-player --profile {{ PROFILE }}
 
 [no-cd]
 run-player-release:
     cargo run --release -p ferrex-player
+
+[no-cd]
+run-player-demo PROFILE="release":
+    cargo run -p ferrex-player --profile {{ PROFILE }} --features demo -- --demo
 
 [no-cd]
 run-server:
@@ -428,6 +378,10 @@ run-server:
 [no-cd]
 run-server-release:
     cargo run --release -p ferrex-server
+
+[no-cd]
+run-server-demo:
+    cargo run --release -p ferrex-server --features demo -- --demo
 
 # sqlx
 [no-cd]
@@ -551,7 +505,7 @@ bench_caching PROFILE="release":
         "{{ BASE }} {{ WILD }} RUSTC_WRAPPER=sccache cargo build --profile {{ PROFILE }}"
 
 [no-cd]
-bench_caching_incr PROFILE="release" FILE=INCR_FILE:
+bench-caching-incr PROFILE="release" FILE=INCR_FILE:
     mkdir -p {{ RESULTS_DIR }}
     # Benchmarking with vs without sccaching after incremental changes
     @hyperfine --setup "{{ BASE }} {{ WILD }} cargo build --profile {{ PROFILE }}" --prepare "touch {{ FILE }}" --warmup 1 \
@@ -559,9 +513,21 @@ bench_caching_incr PROFILE="release" FILE=INCR_FILE:
         "{{ BASE }} {{ WILD }} cargo build --profile {{ PROFILE }}" \ "{{ BASE }} {{ WILD }} RUSTC_WRAPPER=sccache cargo build --profile {{ PROFILE }}"
 
 [no-cd]
-bench_commands:
+bench-commands:
     mkdir -p {{ RESULTS_DIR }}
     hyperfine --prepare 'cargo clean' --runs 3 --export-json {{ RESULTS_DIR }}/commands_dev.json \
         "cargo check" \
         "cargo build" \
         "cargo test --no-run"
+
+# Packaging
+[no-cd]
+package-windows target="x86_64-pc-windows-gnu" profile="release" gst_root="" out_dir=".":
+    # For MinGW builds, set gst_root or GST_MINGW_ROOT to .../gstreamer/1.0/mingw_x86_64
+    GST_MINGW_ROOT={{ gst_root }} utils/package-windows.sh --target {{ target }} --profile {{ profile }} --out {{ out_dir }}
+
+[no-cd]
+package-windows-msvc profile="release" gst_root="" out_dir=".":
+    # For MSVC builds, gst_root or GST_MSVC_ROOT must point to .../gstreamer/1.0/msvc_x86_64
+    if [ -z "{{ gst_root }}" ]; then echo "Set gst_root to MSVC GStreamer root (..../gstreamer/1.0/msvc_x86_64)"; exit 1; fi
+    GST_MSVC_ROOT={{ gst_root }} utils/package-windows.sh --target x86_64-pc-windows-msvc --profile {{ profile }} --out {{ out_dir }}

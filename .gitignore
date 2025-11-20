@@ -26,6 +26,9 @@ config/*
 dist/
 build/
 out/
+dist-windows/
+build-windows/lib/
+build-windows/bin/
 
 # Logs
 *.log
@@ -84,3 +87,6 @@ pgsock/*
 # Bacon (rust code reloader) artifacts
 .bacon-locations
 .bacon.socket
+
+# Local Deps
+vendor/

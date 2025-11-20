@@ -30,7 +30,7 @@ pub enum ProviderError {
 
 // async_trait removed - unused
 use tmdb_api::{
-    client::{reqwest::ReqwestExecutor, Client},
+    client::{Client, reqwest::ReqwestExecutor},
     movie::{
         alternative_titles::{
             MovieAlternativeTitles, MovieAlternativeTitlesResult,

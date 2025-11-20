@@ -38,13 +38,15 @@ ferrex-server --demo
 # or env
 FERREX_DEMO_MODE=1 ferrex-server
 ```
-Optional env overrides (in-progress implementation):
+Optional env overrides:
 - `FERREX_DEMO_ROOT=/tmp/ferrex-demo` – fixed root path.
 - `FERREX_DEMO_OPTIONS='{...json...}'` – complete JSON configuration (see **Configuration** below).
 - `FERREX_DEMO_USERNAME` / `FERREX_DEMO_PASSWORD` – override default credentials.
 - `FERREX_DEMO_ALLOW_DEVIATIONS`, `FERREX_DEMO_DEVIATION_RATE` – adjust imperfect-structure behavior.
 - `FERREX_DEMO_MOVIE_COUNT`, `FERREX_DEMO_SERIES_COUNT` – quick sizing shortcuts.
 - `TMDB_API_KEY=<key>` – **required**; without it demo mode will fail to generate structures.
+- `FERREX_DEMO_LANGUAGE` – default language code for TMDB requests (e.g. `en-US`, `en`).
+- `FERREX_DEMO_REGION` – default region code for TMDB movie popularity (e.g. `US`). For TV, this is used as a best‑effort filter on `origin_country`.
 
 ### Player
 Requires demo feature. Opt-in via env or CLI flag:
@@ -67,23 +69,30 @@ Demo generation is driven by `DemoSeedOptions`:
   - `seasons_per_series`: `(min,max)` inclusive range.
   - `episodes_per_season`: `(min,max)` inclusive range.
   - `allow_deviations`: override global deviation flag.
+  - `language`: optional language override for this library (e.g. `en-US`).
+  - `region`: optional region override (movies TMDB param; for TV used as a post-filter by origin country).
 - `allow_deviations`: inject imperfect structures (missing episodes, odd folders).
 - `deviation_rate`: 0.0–1.0 probability applied across deviations.
 - `skip_metadata_probe`: skip FFmpeg metadata extraction (default `true`).
 - `allow_zero_length_files`: relax size validation for fake files (default `true`).
+- `language`: optional default language for all libraries (used when a library does not override).
+- `region`: optional default region for all libraries (used when a library does not override).
 
 Minimal JSON example:
 ```json
 {
   "allow_deviations": true,
   "deviation_rate": 0.25,
+  "language": "en-US",
+  "region": "US",
   "libraries": [
-    { "library_type": "Movies", "movie_count": 20 },
+    { "library_type": "Movies", "movie_count": 20, "language": "en-US", "region": "US" },
     {
       "library_type": "Series",
       "series_count": 5,
       "seasons_per_series": [1,3],
-      "episodes_per_season": [6,10]
+      "episodes_per_season": [6,10],
+      "language": "en-US"
     }
   ]
 }

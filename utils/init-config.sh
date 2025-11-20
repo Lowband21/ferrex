@@ -36,16 +36,7 @@ relative_to_root() {
 CONFIG_DIR_INPUT="${FERREX_CONFIG_DIR:-$ROOT_DIR/config}"
 CONFIG_DIR="$(resolve_path "$CONFIG_DIR_INPUT")"
 ENV_FILE="$CONFIG_DIR/.env"
-CONFIG_FILE="$CONFIG_DIR/ferrex.toml"
-
-if [ -n "${FERREX_RUNTIME_ENV_FILE:-}" ]; then
-  RUNTIME_ENV_FILE="$(resolve_path "${FERREX_RUNTIME_ENV_FILE}")"
-else
-  RUNTIME_ENV_FILE="$CONFIG_DIR/.env.runtime"
-fi
 ENV_FILE_DISPLAY="$(relative_to_root "$ENV_FILE")"
-RUNTIME_ENV_FILE_DISPLAY="$(relative_to_root "$RUNTIME_ENV_FILE")"
-CONFIG_FILE_DISPLAY="$(relative_to_root "$CONFIG_FILE")"
 IMAGE="${FERREX_INIT_IMAGE:-ferrex/server:local}"
 DOCKERFILE="${FERREX_INIT_DOCKERFILE:-docker/Dockerfile.prod}"
 ENABLE_WILD="${FERREX_ENABLE_WILD:-1}"
@@ -99,18 +90,10 @@ if ! ferrex_require_python; then
   exit 1
 fi
 
-# Container user mapping (used only in docker mode)
 RUN_AS_USER="${FERREX_INIT_RUN_AS_USER:-$(id -u):$(id -g)}"
 
 mkdir -p "$CONFIG_DIR"
 touch "$ENV_FILE"
-
-SECRETS_DIR="$CONFIG_DIR/secrets"
-POSTGRES_PASSWORD_SECRET_FILE="$SECRETS_DIR/postgres_superuser_password"
-FERREX_APP_PASSWORD_SECRET_FILE="$SECRETS_DIR/ferrex_app_password"
-SECRETS_DIR_DISPLAY="$(relative_to_root "$SECRETS_DIR")"
-POSTGRES_PASSWORD_SECRET_FILE_DISPLAY="$(relative_to_root "$POSTGRES_PASSWORD_SECRET_FILE")"
-FERREX_APP_PASSWORD_SECRET_FILE_DISPLAY="$(relative_to_root "$FERREX_APP_PASSWORD_SECRET_FILE")"
 
 if [ "$FERREX_INIT_MODE" = "docker" ]; then
   if [ "${FERREX_INIT_SKIP_BUILD:-0}" = "1" ]; then
@@ -205,38 +188,6 @@ with path.open('w', encoding='utf-8') as fh:
 PY
 }
 
-sanitize_runtime_env() {
-  local source="$1"
-  local target="$2"
-  local exclude_regex='^(POSTGRES_PASSWORD|POSTGRES_PASSWORD_SECRET_FILE|POSTGRES_PASSWORD_FILE|POSTGRES_USER|POSTGRES_HOST_LOCAL|POSTGRES_INTERNAL_HOST|POSTGRES_PORT|POSTGRES_INTERNAL_PORT|DATABASE_ADMIN_URL|FERREX_APP_PASSWORD|FERREX_APP_PASSWORD_SECRET_FILE|FERREX_APP_PASSWORD_FILE|FERREX_SECRETS_DIR|DATABASE_PASSWORD|DATABASE_PASSWORD_FILE|DATABASE_URL|DATABASE_URL_CONTAINER|DATABASE_URL_HOST)='
-
-  if [ ! -f "$source" ]; then
-    rm -f "$target"
-    return
-  fi
-
-  mkdir -p "$(dirname "$target")"
-
-  {
-    echo "# Auto-generated runtime environment (excludes superuser credentials)"
-    while IFS= read -r line || [ -n "$line" ]; do
-      if [[ -z "$line" ]]; then
-        echo "$line"
-        continue
-      fi
-      case "$line" in
-        \#*)
-          echo "$line"
-          continue
-        ;;
-      esac
-      if [[ "$line" =~ $exclude_regex ]]; then
-        continue
-      fi
-      echo "$line"
-    done < "$source"
-  } > "$target"
-}
 
 generate_password() {
   if ferrex_detect_python; then
@@ -354,112 +305,75 @@ maybe_prompt_database_reset() {
 
 POSTGRES_USER=${POSTGRES_USER:-postgres}
 POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:-"--auth-host=scram-sha-256 --auth-local=scram-sha-256"}
-FERREX_DB=${FERREX_DB:-ferrex}
-FERREX_APP_USER=${FERREX_APP_USER:-ferrex_app}
 MEDIA_ROOT=${MEDIA_ROOT:-/media}
-POSTGRES_HOST_LOCAL=${POSTGRES_HOST_LOCAL:-localhost}
-POSTGRES_PORT=${POSTGRES_PORT:-5432}
-POSTGRES_INTERNAL_HOST_DEFAULT="db"
-POSTGRES_INTERNAL_PORT=${POSTGRES_INTERNAL_PORT:-5432}
-REDIS_URL_HOST=${REDIS_URL_HOST:-redis://127.0.0.1:6379}
-REDIS_URL_CONTAINER_DEFAULT="redis://cache:6379"
-
-# In tailscale mode, services share the tailscale network namespace and must use 127.0.0.1
-if [ "${FERREX_INIT_TAILSCALE:-0}" = "1" ]; then
-  POSTGRES_INTERNAL_HOST="127.0.0.1"
-  REDIS_URL_CONTAINER="redis://127.0.0.1:6379"
-else
-  POSTGRES_INTERNAL_HOST="${POSTGRES_INTERNAL_HOST:-$POSTGRES_INTERNAL_HOST_DEFAULT}"
-  REDIS_URL_CONTAINER="${REDIS_URL_CONTAINER:-$REDIS_URL_CONTAINER_DEFAULT}"
-fi
 SERVER_HOST=${SERVER_HOST:-0.0.0.0}
 SERVER_PORT=${SERVER_PORT:-3000}
+
+# Canonical DB vars
+DATABASE_NAME=${DATABASE_NAME:-${FERREX_DB:-ferrex}}
+DATABASE_USER=${DATABASE_USER:-${FERREX_APP_USER:-ferrex_app}}
+DATABASE_HOST=${DATABASE_HOST:-localhost}
+DATABASE_PORT=${DATABASE_PORT:-5432}
+
+# Container override vars
+if [ "${FERREX_INIT_TAILSCALE:-0}" = "1" ]; then
+  DATABASE_HOST_CONTAINER=${DATABASE_HOST_CONTAINER:-127.0.0.1}
+  REDIS_URL_CONTAINER=${REDIS_URL_CONTAINER:-redis://127.0.0.1:6379}
+else
+  DATABASE_HOST_CONTAINER=${DATABASE_HOST_CONTAINER:-db}
+  REDIS_URL_CONTAINER=${REDIS_URL_CONTAINER:-redis://cache:6379}
+fi
+
+# Redis defaults
+REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379}
 FERREX_SERVER_URL_DEFAULT="http://localhost:${SERVER_PORT}"
 SERVER_HOST_INITIAL="$SERVER_HOST"
 
 set_env_var FERREX_CONFIG_DIR "$CONFIG_DIR"
-set_env_var FERREX_RUNTIME_ENV_FILE "$RUNTIME_ENV_FILE"
 set_env_var POSTGRES_USER "$POSTGRES_USER"
 set_env_var POSTGRES_INITDB_ARGS "$POSTGRES_INITDB_ARGS"
-set_env_var FERREX_DB "$FERREX_DB"
-set_env_var FERREX_APP_USER "$FERREX_APP_USER"
 set_env_var MEDIA_ROOT "$MEDIA_ROOT"
-set_env_var POSTGRES_HOST_LOCAL "$POSTGRES_HOST_LOCAL"
-set_env_var POSTGRES_INTERNAL_HOST "$POSTGRES_INTERNAL_HOST"
-set_env_var POSTGRES_PORT "$POSTGRES_PORT"
-set_env_var POSTGRES_INTERNAL_PORT "$POSTGRES_INTERNAL_PORT"
-set_env_var REDIS_URL "$REDIS_URL_HOST"
-set_env_var REDIS_URL_CONTAINER "$REDIS_URL_CONTAINER"
 set_env_var SERVER_HOST "$SERVER_HOST"
 set_env_var SERVER_PORT "$SERVER_PORT"
 set_env_var FERREX_SERVER_URL "$FERREX_SERVER_URL_DEFAULT"
-set_env_var FERREX_SECRETS_DIR "$SECRETS_DIR"
-set_env_var POSTGRES_PASSWORD_SECRET_FILE "$POSTGRES_PASSWORD_SECRET_FILE"
-set_env_var POSTGRES_PASSWORD_FILE "$POSTGRES_PASSWORD_SECRET_FILE"
-set_env_var FERREX_APP_PASSWORD_SECRET_FILE "$FERREX_APP_PASSWORD_SECRET_FILE"
-set_env_var FERREX_APP_PASSWORD_FILE "$FERREX_APP_PASSWORD_SECRET_FILE"
-set_env_var DATABASE_PASSWORD_FILE "$FERREX_APP_PASSWORD_SECRET_FILE"
-set_env_var DATABASE_HOST "$POSTGRES_HOST_LOCAL"
-set_env_var DATABASE_PORT "$POSTGRES_PORT"
-set_env_var DATABASE_NAME "$FERREX_DB"
-set_env_var DATABASE_USER "$FERREX_APP_USER"
-set_env_var DATABASE_INTERNAL_HOST "$POSTGRES_INTERNAL_HOST"
-set_env_var DATABASE_INTERNAL_PORT "$POSTGRES_INTERNAL_PORT"
-
-write_secret_file() {
-  local path="$1"
-  local value="$2"
-
-  mkdir -p "$(dirname "$path")"
-  local original_umask
-  original_umask=$(umask)
-  umask 0077
-  printf '%s\n' "$value" > "$path"
-  umask "$original_umask"
-  # Allow containers that drop root (e.g., postgres) to read the secrets while
-  # keeping write access restricted to the host user.
-  chmod 0644 "$path" >/dev/null 2>&1 || true
-}
+set_env_var REDIS_URL "$REDIS_URL"
+set_env_var REDIS_URL_CONTAINER "$REDIS_URL_CONTAINER"
+set_env_var DATABASE_HOST "$DATABASE_HOST"
+set_env_var DATABASE_PORT "$DATABASE_PORT"
+set_env_var DATABASE_NAME "$DATABASE_NAME"
+set_env_var DATABASE_USER "$DATABASE_USER"
+set_env_var DATABASE_HOST_CONTAINER "$DATABASE_HOST_CONTAINER"
 
 prompt_password POSTGRES_PASSWORD "Postgres superuser"
-prompt_password FERREX_APP_PASSWORD "Ferrex application"
-
-write_secret_file "$POSTGRES_PASSWORD_SECRET_FILE" "$POSTGRES_PASSWORD"
-write_secret_file "$FERREX_APP_PASSWORD_SECRET_FILE" "$FERREX_APP_PASSWORD"
+prompt_password DATABASE_PASSWORD "Application database"
 
 set_env_var POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
-set_env_var FERREX_APP_PASSWORD "$FERREX_APP_PASSWORD"
-set_env_var DATABASE_PASSWORD "$FERREX_APP_PASSWORD"
+set_env_var DATABASE_PASSWORD "$DATABASE_PASSWORD"
+set_env_var FERREX_APP_PASSWORD "$DATABASE_PASSWORD"
 
-echo "Secret files stored in $SECRETS_DIR_DISPLAY:"
-echo "  - Superuser password: $POSTGRES_PASSWORD_SECRET_FILE_DISPLAY"
-echo "  - Application password: $FERREX_APP_PASSWORD_SECRET_FILE_DISPLAY"
-
-DATABASE_URL_HOST="postgresql://${FERREX_APP_USER}:${FERREX_APP_PASSWORD}@${POSTGRES_HOST_LOCAL}:${POSTGRES_PORT}/${FERREX_DB}"
-DATABASE_URL_CONTAINER="postgresql://${FERREX_APP_USER}:${FERREX_APP_PASSWORD}@${POSTGRES_INTERNAL_HOST}:${POSTGRES_INTERNAL_PORT}/${FERREX_DB}"
+DATABASE_URL_HOST="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+DATABASE_URL_CONTAINER="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST_CONTAINER}:${DATABASE_PORT}/${DATABASE_NAME}"
 set_env_var DATABASE_URL "$DATABASE_URL_HOST"
-set_env_var DATABASE_URL_CONTAINER "$DATABASE_URL_CONTAINER"
 
+# Provide hints for the server-side generator
 export FERREX_CONFIG_INIT_DATABASE_URL="$DATABASE_URL_CONTAINER"
 export FERREX_CONFIG_INIT_HOST_DATABASE_URL="$DATABASE_URL_HOST"
 export FERREX_CONFIG_INIT_REDIS_URL="$REDIS_URL_CONTAINER"
-export FERREX_CONFIG_INIT_HOST_REDIS_URL="$REDIS_URL_HOST"
+export FERREX_CONFIG_INIT_HOST_REDIS_URL="$REDIS_URL"
 
-unset FERREX_APP_PASSWORD
+unset DATABASE_PASSWORD
 unset POSTGRES_PASSWORD
-
-echo "Configuration secrets stored in $ENV_FILE_DISPLAY. Back up this file securely."
 
 SHOULD_RUN_WIZARD=true
 FORCE_FLAG=""
-if [ -f "$CONFIG_FILE" ]; then
+if [ -f "$ENV_FILE" ]; then
   if [ "${FERREX_INIT_FORCE_CONFIG:-0}" = "1" ]; then
     FORCE_FLAG="--force"
   elif [ "${FERREX_INIT_NON_INTERACTIVE:-0}" = "1" ]; then
     SHOULD_RUN_WIZARD=false
   else
     local_resp=""
-    read -p "$CONFIG_FILE_DISPLAY already exists. Re-run interactive wizard to overwrite/update it? [y/N] " local_resp || true
+    read -p "$ENV_FILE_DISPLAY already exists. Re-run interactive wizard to overwrite/update it? [y/N] " local_resp || true
     local_resp=${local_resp:-n}
     if [[ ! "$local_resp" =~ ^[Yy]$ ]]; then
       SHOULD_RUN_WIZARD=false
@@ -498,7 +412,7 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
       -e FERREX_CONFIG_INIT_REDIS_URL="$FERREX_CONFIG_INIT_REDIS_URL" \
       -e FERREX_CONFIG_INIT_HOST_REDIS_URL="$FERREX_CONFIG_INIT_HOST_REDIS_URL" \
       "$IMAGE" \
-      config init --config-path /app/config/ferrex.toml --env-path /app/config/.env.generated $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
+      config init --env-path /app/config/.env.generated $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
   else
     if ! command -v cargo >/dev/null 2>&1; then
       echo "Error: cargo is required for host-native init (install Rust toolchain) or set FERREX_INIT_MODE=docker." >&2
@@ -512,7 +426,7 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
       FERREX_CONFIG_INIT_REDIS_URL="$FERREX_CONFIG_INIT_REDIS_URL" \
       FERREX_CONFIG_INIT_HOST_REDIS_URL="$FERREX_CONFIG_INIT_HOST_REDIS_URL" \
       cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p ferrex-server -- \
-        config init --config-path "$CONFIG_FILE" --env-path "$ENV_TMP" $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
+        config init --env-path "$ENV_TMP" $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
   fi
 
   if [ -f "$ENV_TMP" ]; then
@@ -558,78 +472,25 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
 
   echo "Configuration wizard complete."
 
+  # Use values we just wrote to env to compute server URL
   SERVER_PORT_ACTUAL="$SERVER_PORT"
-  if ferrex_detect_python; then
-    if ! SERVER_PORT_ACTUAL=$(ferrex_python - "$CONFIG_FILE" <<'PY'
-import sys
-try:
-    import tomllib
-except ModuleNotFoundError:  # python <3.11 without stdlib toml parser
-    import tomli as tomllib  # type: ignore[import-not-found]
-
-path = sys.argv[1]
-with open(path, 'rb') as handle:
-    data = tomllib.load(handle)
-print(data.get('server', {}).get('port', 3000))
-PY
-    ); then
-      SERVER_PORT_ACTUAL="$SERVER_PORT"
-    fi
-  fi
-  SERVER_PORT_ACTUAL="${SERVER_PORT_ACTUAL//$'\n'/}"
-  if [ -z "$SERVER_PORT_ACTUAL" ]; then
-    SERVER_PORT_ACTUAL="$SERVER_PORT"
-  fi
-
-  if grep -q "enforce_https = true" "$CONFIG_FILE"; then
+  if [ "${ENFORCE_HTTPS:-false}" = "true" ]; then
     set_env_var FERREX_SERVER_URL "https://localhost:${SERVER_PORT_ACTUAL}"
   else
     set_env_var FERREX_SERVER_URL "http://localhost:${SERVER_PORT_ACTUAL}"
   fi
-
-  if [ ! -s "$CONFIG_FILE" ]; then
-    echo "Error: ferrex-server produced an empty config at $CONFIG_FILE" >&2
-    exit 1
-  fi
-  set_env_var FERREX_CONFIG_PATH "config/ferrex.toml"
 else
-  echo "Skipping config wizard; existing $CONFIG_FILE_DISPLAY preserved."
+  echo "Skipping config wizard; existing $ENV_FILE_DISPLAY preserved."
 fi
 
-sanitize_runtime_env "$ENV_FILE" "$RUNTIME_ENV_FILE"
-
-SETUP_TOKEN_VALUE=""
-if ferrex_detect_python; then
-  SETUP_TOKEN_VALUE="$(
-    ferrex_python - "$CONFIG_FILE" <<'PY'
-import sys
-from pathlib import Path
-try:
-    import tomllib
-except ModuleNotFoundError:  # python <3.11 without stdlib toml parser
-    import tomli as tomllib  # type: ignore[import-not-found]
-
-config_path = Path(sys.argv[1])
-if not config_path.exists():
-    raise SystemExit(0)
-
-with config_path.open('rb') as handle:
-    data = tomllib.load(handle)
-
-token = (data.get('auth') or {}).get('setup_token') or ''
-print(token)
-PY
-  )"
-fi
-
-SETUP_TOKEN_VALUE="$(printf '%s' "$SETUP_TOKEN_VALUE" | tr -d '\r\n')"
+SETUP_TOKEN_VALUE="${FERREX_SETUP_TOKEN:-}"
 if [ -n "$SETUP_TOKEN_VALUE" ]; then
-  echo "Setup token stored in $CONFIG_FILE_DISPLAY ([auth].setup_token):"
+  echo "Setup token stored in $ENV_FILE_DISPLAY (FERREX_SETUP_TOKEN):"
   echo "  $SETUP_TOKEN_VALUE"
   echo "Re-run 'just show-setup-token' later if you need to display it again."
 fi
 
-echo "Runtime environment stored at $RUNTIME_ENV_FILE_DISPLAY (superuser credentials excluded)."
+
 
 cat <<'EOF'
 

@@ -63,7 +63,6 @@ pub fn update(
     state: &mut State,
     message: DomainMessage,
 ) -> Task<DomainMessage> {
-
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",

@@ -1,7 +1,7 @@
 use axum::{
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension, Json,
 };
 use ferrex_core::{
     api::types::{ApiResponse, users_admin::AdminUserInfo},

@@ -20,7 +20,7 @@
 //!
 //! These endpoints handle the initial setup flow when no admin user exists.
 
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
     api::types::ApiResponse,

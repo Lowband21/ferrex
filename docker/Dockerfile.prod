@@ -6,6 +6,9 @@ ARG BUILD_PROFILE=priority
 ARG ENABLE_WILD=1
 # Ensure cargo-installed tools resolve during RUN instructions.
 ENV PATH="/usr/local/cargo/bin:${PATH}"
+ENV SQLX_OFFLINE=true
+# Keep build artifacts in a predictable, container-local directory regardless of host config
+ENV CARGO_TARGET_DIR=/app/target
 
 # Build dependencies for ffmpeg bindings and general build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,8 +44,17 @@ RUN set -eux; \
     else \
         export RUSTFLAGS=""; \
     fi; \
-    cargo build --profile "${BUILD_PROFILE}" -p ferrex-server; \
-    cp "target/${BUILD_PROFILE}/ferrex-server" /tmp/ferrex-server
+    export SQLX_OFFLINE=true; \
+    # Map Cargo profile name to the corresponding directory name
+    PROFILE_DIR="${BUILD_PROFILE}"; \
+    if [ "${BUILD_PROFILE}" = "dev" ]; then PROFILE_DIR="debug"; fi; \
+    cargo build --profile "${BUILD_PROFILE}" -p ferrex-server --bin ferrex-server; \
+    BIN_PATH=""; \
+    if [ -f "${CARGO_TARGET_DIR}/${PROFILE_DIR}/ferrex-server" ]; then BIN_PATH="${CARGO_TARGET_DIR}/${PROFILE_DIR}/ferrex-server"; \
+    elif [ -f "${CARGO_TARGET_DIR}/${PROFILE_DIR}/ferrex_server" ]; then BIN_PATH="${CARGO_TARGET_DIR}/${PROFILE_DIR}/ferrex_server"; \
+    else BIN_PATH="$(find "${CARGO_TARGET_DIR}" -maxdepth 4 -type f \( -name ferrex-server -o -name ferrex_server \) | head -n1)"; fi; \
+    if [ -z "$BIN_PATH" ] || [ ! -f "$BIN_PATH" ]; then echo "ferrex-server binary not found after build" >&2; exit 1; fi; \
+    cp "$BIN_PATH" /tmp/ferrex-server
 
 # Runtime stage
 FROM debian:trixie-slim AS runtime

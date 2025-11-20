@@ -126,8 +126,7 @@ PY
 
 CONFIG_DIR_RAW="${CONFIG_DIR_OVERRIDE:-$ROOT_DIR/config}"
 CONFIG_DIR="$(resolve_path "$CONFIG_DIR_RAW")"
-ENV_FILE="$CONFIG_DIR/.env.runtime"
-CONFIG_FILE="$CONFIG_DIR/ferrex.toml"
+ENV_FILE="$CONFIG_DIR/.env"
 
 mkdir -p "$CONFIG_DIR"
 
@@ -163,7 +162,6 @@ force_init_needed() {
   [[ "$FORCE_INIT" -eq 1 ]] && return 0
   [[ "$FORCE_DB_RESET" -eq 1 ]] && return 0
   [[ ! -s "$ENV_FILE" ]] && return 0
-  [[ ! -s "$CONFIG_FILE" ]] && return 0
   return 1
 }
 
@@ -189,28 +187,7 @@ source "$ENV_FILE"
 set +a
 
 export FERREX_CONFIG_DIR="${FERREX_CONFIG_DIR:-$CONFIG_DIR}"
-export FERREX_RUNTIME_ENV_FILE="${FERREX_RUNTIME_ENV_FILE:-$CONFIG_DIR/.env.runtime}"
-
-if [[ ! -s "$FERREX_RUNTIME_ENV_FILE" ]]; then
-  echo "Runtime environment file $FERREX_RUNTIME_ENV_FILE missing; regenerating via init-config..."
-  run_bootstrap
-
-  if [[ ! -s "$ENV_FILE" ]]; then
-    echo "Configuration file $ENV_FILE is missing or empty after regeneration attempt." >&2
-    exit 1
-  fi
-
-  set -a
-  source "$ENV_FILE"
-  set +a
-
-  export FERREX_RUNTIME_ENV_FILE="${FERREX_RUNTIME_ENV_FILE:-$CONFIG_DIR/.env.runtime}"
-
-  if [[ ! -s "$FERREX_RUNTIME_ENV_FILE" ]]; then
-    echo "Runtime environment file $FERREX_RUNTIME_ENV_FILE is still missing after regeneration attempt." >&2
-    exit 1
-  fi
-fi
+export FERREX_ENV_FILE="$ENV_FILE"
 
 config_basename="$(basename "$FERREX_CONFIG_DIR")"
 config_slug="$(printf '%s' "$config_basename" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"

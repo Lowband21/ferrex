@@ -2,14 +2,14 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "Usage: show-setup-token.sh <config-path>" >&2
+  echo "Usage: show-setup-token.sh <env-file>" >&2
   exit 1
 fi
 
-CONFIG_PATH="$1"
+ENV_FILE="$1"
 
-if [[ ! -f "$CONFIG_PATH" ]]; then
-  echo "Config missing: $CONFIG_PATH. Run: just init-config" >&2
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Env missing: $ENV_FILE. Run: just init-config" >&2
   exit 1
 fi
 
@@ -20,25 +20,29 @@ if ! ferrex_require_python; then
   exit 1
 fi
 
-if ! SETUP_TOKEN="$(ferrex_python - "$CONFIG_PATH" <<'PY'
+if ! SETUP_TOKEN="$(ferrex_python - "$ENV_FILE" <<'PY'
 import sys
 from pathlib import Path
-try:
-    import tomllib
-except ModuleNotFoundError:  # python <3.11 without stdlib toml parser
-    import tomli as tomllib  # type: ignore[import-not-found]
 
-config_path = Path(sys.argv[1]).expanduser()
-if not config_path.exists():
-    print(f"{config_path} does not exist", file=sys.stderr)
+path = Path(sys.argv[1]).expanduser()
+if not path.exists():
+    print(f"{path} does not exist", file=sys.stderr)
     raise SystemExit(1)
 
-with config_path.open('rb') as handle:
-    data = tomllib.load(handle)
+token = ''
+with path.open('r', encoding='utf-8') as fh:
+    for raw in fh:
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('FERREX_SETUP_TOKEN='):
+            token = line.split('=', 1)[1]
+            if token.startswith('"') and token.endswith('"'):
+                token = token[1:-1]
+            break
 
-token = (data.get('auth') or {}).get('setup_token')
-if not token or not str(token).strip():
-    print(f"No setup token configured in {config_path.resolve()}", file=sys.stderr)
+if not token:
+    print(f"No FERREX_SETUP_TOKEN configured in {path}", file=sys.stderr)
     raise SystemExit(1)
 
 print(token)
@@ -47,4 +51,4 @@ PY
   exit 1
 fi
 
-printf '[auth].setup_token from %s:\n%s\n' "$CONFIG_PATH" "$SETUP_TOKEN"
+printf 'FERREX_SETUP_TOKEN from %s:\n%s\n' "$ENV_FILE" "$SETUP_TOKEN"

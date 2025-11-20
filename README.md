@@ -11,18 +11,18 @@ Self‑hosters and all forms of technology enthusiasts who want a fluid and reli
 ## Getting Started:
 
 - Install Docker + Docker Compose, Rust toolchain, and `just`.
-- From the repository root run `just start`. This bootstraps configuration, creates strong Postgres credentials inside `config/secrets/`, wires Docker secrets for the database, and launches Postgres, Redis, and the Ferrex server.
+- From the repository root run `just start`. This bootstraps configuration, generates strong Postgres credentials into `config/.env`, and launches Postgres, Redis, and the Ferrex server.
   - Use `just start --mode tailscale` to include the Tailscale sidecar.
   - For a clean separation between local and Tailnet configs:
     - Prepare a Tailnet config directory: `just config-tailnet from_dir="config" to_dir="config/tailnet"`
     - Start with: `just start --mode tailscale --config-dir config/tailnet`
     - Local mode continues to use `config/` (DB host `db`), while Tailnet uses `config/tailnet/` (DB host `127.0.0.1`).
-  - Use `just start --config-dir config/prod` to generate an alternate configuration directory with isolated secrets.
-  - Use `just start --profile dev` to build and launch with the unoptimized development Cargo profile, or use the `priority` profile to enable optimizations on workspace packages but not dependencies. Particularly useful for ferrex-player as Iced performs poorly without build optimization.
+  - Use `just start --config-dir config/prod` to generate an alternate configuration directory with its own `config/.env`.
+  - Use `just start --profile dev` to build and launch with the unoptimized development Cargo profile, or use the `priority` profile to enable optimizations on workspace packages but not dependencies. Particularly useful for ferrex-player as Iced performs noticeably worse without build optimization.
   - Add `just start --rust-log 'sqlx=trace,ferrex=debug'` (or any [`RUST_LOG`](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) filter) to adjust container logging without editing config files.
   - Pass `just start --clean` to discard stale containers before restarting the stack.
 - To regenerate config without starting the stack run `just init-config` (interactive) or `just config` (non-interactive), then `just start` to launch.
-- Review `config/ferrex.toml` for server settings and keep `config/.env` + `config/secrets/` backed up; they contain the non-secret metadata and the Docker secret files that power the stack.
+- Review `config/.env` for all server settings; keep it backed up as it contains generated passwords.
 
 ## Architecture:
 
