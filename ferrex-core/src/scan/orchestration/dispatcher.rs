@@ -733,7 +733,7 @@ where
 
         if let Err(err) = self
             .events
-            .publish_scan_event(ScanEvent::Indexed(outcome))
+            .publish_scan_event(ScanEvent::Indexed(Box::new(outcome)))
             .await
         {
             return self.handle_media_error(err);

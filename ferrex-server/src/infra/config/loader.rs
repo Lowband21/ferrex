@@ -240,17 +240,17 @@ impl ConfigLoader {
                 .cors_allowed_origins
                 .clone()
                 .or(file_cors.allowed_origins.clone())
-                .unwrap_or_else(|| default_cors_origins()),
+                .unwrap_or_else(default_cors_origins),
             allowed_methods: env
                 .cors_allowed_methods
                 .clone()
                 .or(file_cors.allowed_methods.clone())
-                .unwrap_or_else(|| default_cors_methods()),
+                .unwrap_or_else(default_cors_methods),
             allowed_headers: env
                 .cors_allowed_headers
                 .clone()
                 .or(file_cors.allowed_headers.clone())
-                .unwrap_or_else(|| default_cors_headers()),
+                .unwrap_or_else(default_cors_headers),
             allow_credentials: env
                 .cors_allow_credentials
                 .or(file_cors.allow_credentials)
@@ -304,8 +304,7 @@ impl ConfigLoader {
                 .unwrap_or_else(|| PathBuf::from("ferrex.toml"));
             (scanner, ScannerConfigSource::File(path))
         } else {
-            ScannerConfig::load_from_env()
-                .map_err(|err| ConfigLoadError::Scanner(err))?
+            ScannerConfig::load_from_env().map_err(ConfigLoadError::Scanner)?
         };
 
         let (rate_limiter, rate_limit_source) =
@@ -315,7 +314,7 @@ impl ConfigLoader {
                         let spec = RateLimitSpec::Path(path);
                         let (config, source) = spec
                             .load_from_file(config_path)
-                            .map_err(|err| ConfigLoadError::RateLimiter(err))?;
+                            .map_err(ConfigLoadError::RateLimiter)?;
                         let settings = RateLimiterSettings {
                             config,
                             source: source.clone(),
@@ -325,7 +324,7 @@ impl ConfigLoader {
                         let spec = RateLimitSpec::Inline(raw);
                         let (config, source) = spec
                             .load_from_file(config_path)
-                            .map_err(|err| ConfigLoadError::RateLimiter(err))?;
+                            .map_err(ConfigLoadError::RateLimiter)?;
                         let settings = RateLimiterSettings {
                             config,
                             source: source.clone(),
@@ -340,7 +339,7 @@ impl ConfigLoader {
             } else if let Some(env_spec) = env.rate_limits {
                 let (config, source) = env_spec
                     .load_from_env()
-                    .map_err(|err| ConfigLoadError::RateLimiter(err))?;
+                    .map_err(ConfigLoadError::RateLimiter)?;
                 let settings = RateLimiterSettings {
                     config,
                     source: source.clone(),
@@ -399,10 +398,10 @@ impl ConfigLoader {
             return Ok(Some(url));
         }
 
-        if let Some(path) = env.database_url_file.as_ref() {
-            if let Some(url) = Self::read_secret_file(path)? {
-                return Ok(Some(url));
-            }
+        if let Some(path) = env.database_url_file.as_ref()
+            && let Some(url) = Self::read_secret_file(path)?
+        {
+            return Ok(Some(url));
         }
 
         if let Some(ref stored_url) = file_database.url {
@@ -413,14 +412,13 @@ impl ConfigLoader {
             let mut parsed = Url::parse(trimmed).map_err(|source| {
                 ConfigLoadError::InvalidDatabaseUrl { source }
             })?;
-            if parsed.password().is_none() {
-                if let Some(password) =
+            if parsed.password().is_none()
+                && let Some(password) =
                     self.resolve_database_password(env, file_database)?
-                {
-                    parsed.set_password(Some(&password)).map_err(|_| {
-                        ConfigLoadError::InvalidDatabasePassword
-                    })?;
-                }
+            {
+                parsed
+                    .set_password(Some(&password))
+                    .map_err(|_| ConfigLoadError::InvalidDatabasePassword)?;
             }
             return Ok(Some(parsed.to_string()));
         }
@@ -483,10 +481,10 @@ impl ConfigLoader {
         .into_iter()
         .flatten()
         {
-            if let Some(secret) = Self::read_secret_file(path)? {
-                if !secret.is_empty() {
-                    return Ok(Some(secret));
-                }
+            if let Some(secret) = Self::read_secret_file(path)?
+                && !secret.is_empty()
+            {
+                return Ok(Some(secret));
             }
         }
 

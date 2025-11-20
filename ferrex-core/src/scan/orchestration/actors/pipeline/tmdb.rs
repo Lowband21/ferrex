@@ -1,8 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -11,40 +13,47 @@ use regex::Regex;
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
-use crate::database::ports::media_files::MediaFilesWritePort;
-use crate::database::ports::media_references::MediaReferencesRepository;
-use crate::error::{MediaError, Result};
-use crate::image::MediaImageKind;
-use crate::image::records::MediaImageVariantKey;
-use crate::image_service::{ImageService, TmdbImageSize};
-use crate::orchestration::actors::messages::ParentDescriptors;
-use crate::orchestration::job::{
-    ImageFetchJob, ImageFetchPriority, ImageFetchSource,
+use crate::{
+    database::ports::{
+        media_files::MediaFilesWritePort,
+        media_references::MediaReferencesRepository,
+    },
+    error::{MediaError, Result},
+    image::{MediaImageKind, records::MediaImageVariantKey},
+    image_service::{ImageService, tmdb_image_size::TmdbImageSize},
+    orchestration::{
+        actors::messages::ParentDescriptors,
+        job::{ImageFetchJob, ImageFetchPriority, ImageFetchSource},
+        series::{
+            SeriesFolderClues, SeriesLocator, clean_series_title,
+            collapse_whitespace,
+        },
+    },
+    providers::{ProviderError, TmdbApiProvider},
+    traits::prelude::MediaIDLike,
+    tv_parser::TvParser,
+    types::{
+        details::{
+            AlternativeTitle, CastMember, CollectionInfo, ContentRating,
+            CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
+            EpisodeDetails, ExternalIds, GenreInfo, Keyword,
+            MediaDetailsOption, NetworkInfo, PersonExternalIds,
+            ProductionCompany, ProductionCountry, RelatedMediaRef,
+            ReleaseDateEntry, ReleaseDatesByCountry, SeasonDetails,
+            SpokenLanguage, TmdbDetails, Translation, Video,
+        },
+        files::{MediaFile, MediaFileMetadata, ParsedMediaInfo},
+        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        image::MediaImages,
+        library::LibraryType,
+        media::{
+            EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+        },
+        numbers::{EpisodeNumber, SeasonNumber},
+        titles::{MovieTitle, SeriesTitle},
+        urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike},
+    },
 };
-use crate::orchestration::series::{
-    SeriesFolderClues, SeriesLocator, clean_series_title, collapse_whitespace,
-};
-use crate::providers::{ProviderError, TmdbApiProvider};
-use crate::traits::prelude::MediaIDLike;
-use crate::tv_parser::TvParser;
-use crate::types::details::{
-    AlternativeTitle, CastMember, CollectionInfo, ContentRating, CrewMember,
-    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, ExternalIds,
-    GenreInfo, Keyword, MediaDetailsOption, NetworkInfo, PersonExternalIds,
-    ProductionCompany, ProductionCountry, RelatedMediaRef, ReleaseDateEntry,
-    ReleaseDatesByCountry, SeasonDetails, SpokenLanguage, TmdbDetails,
-    Translation, Video,
-};
-use crate::types::files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
-use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
-use crate::types::image::MediaImages;
-use crate::types::library::LibraryType;
-use crate::types::media::{
-    EpisodeReference, MovieReference, SeasonReference, SeriesReference,
-};
-use crate::types::numbers::{EpisodeNumber, SeasonNumber};
-use crate::types::titles::{MovieTitle, SeriesTitle};
-use crate::types::urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike};
 use tmdb_api::{
     common::release_date::ReleaseDateKind,
     movie::{
@@ -1078,8 +1087,8 @@ impl TmdbMetadataActor {
             self.media_refs.store_movie_reference(&movie_ref).await?;
 
             let mut image_jobs = Vec::new();
-            if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
-                &movie_ref.details
+            if let MediaDetailsOption::Details(details) = &movie_ref.details
+                && let TmdbDetails::Movie(details) = details.as_ref()
             {
                 self.queue_image_job(
                     command.job.library_id,
@@ -1343,7 +1352,9 @@ impl TmdbMetadataActor {
             title: MovieTitle::new(tmdb_details.inner.title.clone()).map_err(
                 |e| MediaError::Internal(format!("Invalid movie title: {e}")),
             )?,
-            details: MediaDetailsOption::Details(TmdbDetails::Movie(enhanced)),
+            details: MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(
+                enhanced,
+            ))),
             endpoint: MovieURL::from_string(format!(
                 "/stream/{actual_file_id}"
             )),
@@ -1467,8 +1478,8 @@ impl TmdbMetadataActor {
             }
         };
 
-        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
-            &series_ref.details
+        if let MediaDetailsOption::Details(details) = &series_ref.details
+            && let TmdbDetails::Series(details) = details.as_ref()
         {
             self.queue_image_job(
                 command.job.library_id,
@@ -1503,8 +1514,8 @@ impl TmdbMetadataActor {
             .await?;
         }
 
-        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) =
-            &season_ref.details
+        if let MediaDetailsOption::Details(details) = &season_ref.details
+            && let TmdbDetails::Season(details) = details.as_ref()
         {
             self.queue_image_job(
                 command.job.library_id,
@@ -1531,25 +1542,34 @@ impl TmdbMetadataActor {
             .await?;
 
         match &episode_ref.details {
-            MediaDetailsOption::Details(TmdbDetails::Episode(details)) => {
-                if let Some(still) = details
-                    .still_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    self.queue_image_job(
-                        command.job.library_id,
-                        "episode",
-                        episode_ref.id.0,
-                        MediaImageKind::Thumbnail,
-                        0,
-                        Some(still),
-                        true,
-                        ImageFetchPriority::Backdrop,
-                        &mut image_jobs,
-                    )
-                    .await?;
+            MediaDetailsOption::Details(details) => {
+                if let TmdbDetails::Episode(details) = details.as_ref() {
+                    if let Some(still) = details
+                        .still_path
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        self.queue_image_job(
+                            command.job.library_id,
+                            "episode",
+                            episode_ref.id.0,
+                            MediaImageKind::Thumbnail,
+                            0,
+                            Some(still),
+                            true,
+                            ImageFetchPriority::Backdrop,
+                            &mut image_jobs,
+                        )
+                        .await?;
+                    } else {
+                        self.queue_local_episode_thumbnail(
+                            command.job.library_id,
+                            &episode_ref,
+                            &mut image_jobs,
+                        )
+                        .await?;
+                    }
                 } else {
                     self.queue_local_episode_thumbnail(
                         command.job.library_id,
@@ -1857,7 +1877,9 @@ impl TmdbMetadataActor {
             library_id,
             tmdb_id,
             title,
-            details: MediaDetailsOption::Details(TmdbDetails::Series(enhanced)),
+            details: MediaDetailsOption::Details(Box::new(
+                TmdbDetails::Series(enhanced),
+            )),
             endpoint: SeriesURL::from_string(format!("/series/{}", tmdb_id)),
             discovered_at: Utc::now(),
             created_at: Utc::now(),
@@ -2019,9 +2041,9 @@ impl TmdbMetadataActor {
 
         let endpoint = SeasonURL::from_string(endpoint_path.clone());
         let details = match details_opt {
-            Some(details) => {
-                MediaDetailsOption::Details(TmdbDetails::Season(details))
-            }
+            Some(details) => MediaDetailsOption::Details(Box::new(
+                TmdbDetails::Season(details),
+            )),
             None => MediaDetailsOption::Endpoint(endpoint_path.clone()),
         };
 
@@ -2139,9 +2161,9 @@ impl TmdbMetadataActor {
         };
 
         let details = match episode_details {
-            Some(details) => {
-                MediaDetailsOption::Details(TmdbDetails::Episode(details))
-            }
+            Some(details) => MediaDetailsOption::Details(Box::new(
+                TmdbDetails::Episode(details),
+            )),
             None => MediaDetailsOption::Endpoint(format!(
                 "/episode/lookup/{}",
                 actual_file_id

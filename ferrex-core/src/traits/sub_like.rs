@@ -56,7 +56,7 @@ impl MovieLike for MovieReference {
 
     fn details(&self) -> Option<&EnhancedMovieDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 TmdbDetails::Movie(enhanced_movie_details) => {
                     Some(enhanced_movie_details)
                 }
@@ -94,7 +94,7 @@ impl MovieLike for ArchivedMovieReference {
 
     fn details(&self) -> Option<&ArchivedEnhancedMovieDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 ArchivedTmdbDetails::Movie(enhanced_movie_details) => {
                     Some(enhanced_movie_details)
                 }
@@ -116,11 +116,7 @@ pub trait SeriesLike: MediaOps {
     fn num_seasons(&self) -> u32 {
         let details_opt = self.details();
         if let Some(details) = details_opt {
-            if let Some(num_seasons) = details.num_seasons() {
-                num_seasons
-            } else {
-                0
-            }
+            details.num_seasons().unwrap_or_default()
         } else {
             0
         }
@@ -136,7 +132,7 @@ impl SeriesLike for SeriesReference {
     }
     fn details(&self) -> Option<&EnhancedSeriesDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
-            details.to_series_details()
+            details.as_ref().to_series_details()
         } else {
             None
         }
@@ -153,7 +149,7 @@ impl SeriesLike for ArchivedSeriesReference {
 
     fn details(&self) -> Option<&ArchivedEnhancedSeriesDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 ArchivedTmdbDetails::Series(series_details) => {
                     Some(series_details)
                 }
@@ -186,7 +182,7 @@ impl SeasonLike for SeasonReference {
 
     fn details(&self) -> Option<&SeasonDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 TmdbDetails::Season(season_details) => Some(season_details),
                 _ => None,
             }
@@ -202,7 +198,7 @@ impl SeasonLike for ArchivedSeasonReference {
 
     fn details(&self) -> Option<&ArchivedSeasonDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 ArchivedTmdbDetails::Season(season_details) => {
                     Some(season_details)
                 }
@@ -233,7 +229,7 @@ impl EpisodeLike for EpisodeReference {
 
     fn details(&self) -> Option<&EpisodeDetails> {
         if let MediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 TmdbDetails::Episode(episode_details) => Some(episode_details),
                 _ => None,
             }
@@ -253,7 +249,7 @@ impl EpisodeLike for ArchivedEpisodeReference {
 
     fn details(&self) -> Option<&ArchivedEpisodeDetails> {
         if let ArchivedMediaDetailsOption::Details(details) = &self.details {
-            match details {
+            match details.as_ref() {
                 ArchivedTmdbDetails::Episode(episode_details) => {
                     Some(episode_details)
                 }

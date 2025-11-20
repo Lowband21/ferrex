@@ -106,7 +106,7 @@ impl PostgresMediaRepository {
     fn convert_filters(
         filters: MediaFilters,
     ) -> (MediaFileFilter, MediaFileSort, Page) {
-        let mut filter = MediaFileFilter {
+        let filter = MediaFileFilter {
             library_id: filters.library_id,
             ..MediaFileFilter::default()
         };

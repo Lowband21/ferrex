@@ -2046,7 +2046,7 @@ impl ScanRunAggregatorInner {
 
     async fn handle_scan_event(&self, event: ScanEvent) {
         if let ScanEvent::Indexed(outcome) = event
-            && let Err(err) = self.handle_indexed_outcome(outcome).await
+            && let Err(err) = self.handle_indexed_outcome(*outcome).await
         {
             warn!("failed to process indexed outcome: {err}");
         }

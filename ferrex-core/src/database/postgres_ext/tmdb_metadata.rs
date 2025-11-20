@@ -69,9 +69,8 @@ impl<'a> TmdbMetadataRepository<'a> {
             upsert_tmdb_movie_reference(&mut tx, movie, actual_file_id).await?
         };
 
-        if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) =
-            &movie.details
-        {
+        if let MediaDetailsOption::Details(details) = &movie.details {
+            if let TmdbDetails::Movie(details) = details.as_ref() {
             persist_movie_metadata(
                 &mut tx,
                 target_movie_id,
@@ -79,6 +78,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 details,
             )
             .await?;
+            }
         } else if movie.tmdb_id != 0 {
             // TMDB id present but no metadata; ensure relations removed
             purge_movie_metadata(&mut tx, target_movie_id).await?;
@@ -105,9 +105,8 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let target_series_id = upsert_series_reference(&mut tx, series).await?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Series(details)) =
-            &series.details
-        {
+        if let MediaDetailsOption::Details(details) = &series.details {
+            if let TmdbDetails::Series(details) = details.as_ref() {
             persist_series_metadata(
                 &mut tx,
                 target_series_id,
@@ -115,6 +114,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 details,
             )
             .await?;
+            }
         } else if series.tmdb_id != 0 {
             purge_series_metadata(&mut tx, target_series_id).await?;
         }
@@ -140,9 +140,8 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let season_id = upsert_season_reference(&mut tx, season).await?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Season(details)) =
-            &season.details
-        {
+        if let MediaDetailsOption::Details(details) = &season.details {
+            if let TmdbDetails::Season(details) = details.as_ref() {
             persist_season_metadata(
                 &mut tx,
                 season_id,
@@ -150,6 +149,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 details,
             )
             .await?;
+            }
         } else {
             purge_season_metadata(&mut tx, season_id).await?;
         }
@@ -208,9 +208,8 @@ impl<'a> TmdbMetadataRepository<'a> {
             ))
         })?;
 
-        if let MediaDetailsOption::Details(TmdbDetails::Episode(details)) =
-            &episode.details
-        {
+        if let MediaDetailsOption::Details(details) = &episode.details {
+            if let TmdbDetails::Episode(details) = details.as_ref() {
             persist_episode_metadata(
                 &mut tx,
                 insert_id,
@@ -218,6 +217,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 details,
             )
             .await?;
+            }
         } else {
             purge_episode_metadata(&mut tx, insert_id).await?;
         }
@@ -255,7 +255,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 ))
             })?,
             details: details
-                .map(|d| MediaDetailsOption::Details(TmdbDetails::Movie(d)))
+                .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(d))))
                 .unwrap_or_else(|| {
                     MediaDetailsOption::Endpoint(format!("/movie/{}", movie_id))
                 }),
@@ -292,7 +292,7 @@ impl<'a> TmdbMetadataRepository<'a> {
                 ))
             })?,
             details: details
-                .map(|d| MediaDetailsOption::Details(TmdbDetails::Series(d)))
+                .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Series(d))))
                 .unwrap_or_else(|| {
                     MediaDetailsOption::Endpoint(format!(
                         "/series/{}",
@@ -325,7 +325,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let details = load_season_details(self.pool, season_id).await?;
         let details_option = details
-            .map(|d| MediaDetailsOption::Details(TmdbDetails::Season(d)))
+            .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Season(d))))
             .unwrap_or_else(|| {
                 MediaDetailsOption::Endpoint(format!("/media/{}", season_id))
             });
@@ -366,7 +366,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let details = load_episode_details(self.pool, episode_id).await?;
         let details_option = details
-            .map(|d| MediaDetailsOption::Details(TmdbDetails::Episode(d)))
+            .map(|d| MediaDetailsOption::Details(Box::new(TmdbDetails::Episode(d))))
             .unwrap_or_else(|| {
                 MediaDetailsOption::Endpoint(format!("/media/{}", episode_id))
             });

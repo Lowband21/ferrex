@@ -270,9 +270,19 @@ fix: fmt
     cargo clippy --fix --all-targets --all-features --workspace --message-format short
 
 [no-cd]
+fixp package="ferrex-core": fmt
+    cargo fix -p {{ package }} --edition-idioms --all-targets --all-features --message-format short
+    cargo clippy -p {{ package }} --fix --all-targets --all-features --workspace --message-format short
+
+[no-cd]
 fix-dirty: fmt
     cargo fix --edition-idioms --all-targets --all-features --workspace --message-format short --allow-dirty --allow-staged
     cargo clippy --fix --all-targets --all-features --workspace --message-format short --allow-dirty --allow-staged
+
+[no-cd]
+fixp-dirty package="ferrex-core": fmt
+    cargo fix -p {{ package }} --edition-idioms --all-targets --all-features --message-format short --allow-dirty --allow-staged
+    cargo clippy -p {{ package }} --fix --all-targets --all-features --workspace --message-format short --allow-dirty --allow-staged
 
 # Run
 [no-cd]

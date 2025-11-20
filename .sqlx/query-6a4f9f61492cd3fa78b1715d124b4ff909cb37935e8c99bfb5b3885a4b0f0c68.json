@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE orchestrator_jobs SET state='deferred', available_at = NOW() + INTERVAL '60 seconds' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a4f9f61492cd3fa78b1715d124b4ff909cb37935e8c99bfb5b3885a4b0f0c68"
+}

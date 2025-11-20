@@ -152,7 +152,7 @@ pub enum ScanEvent {
     // Pipeline progression events
     MediaAnalyzed(super::actors::pipeline::MediaAnalyzed),
     MediaReadyForIndex(super::actors::pipeline::MediaReadyForIndex),
-    Indexed(super::actors::pipeline::IndexingOutcome),
+    Indexed(Box<super::actors::pipeline::IndexingOutcome>),
 }
 
 #[async_trait]

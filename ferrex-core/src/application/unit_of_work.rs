@@ -328,7 +328,7 @@ impl AppUnitOfWorkBuilder {
         self.libraries = Some(libraries);
 
         let media_refs: Arc<dyn MediaReferencesRepository> =
-            Arc::new(PostgresMediaReferencesRepository::new(db.clone()));
+            Arc::new(PostgresMediaReferencesRepository::new(pool.clone()));
         self.media_refs = Some(media_refs);
 
         let media_repo = Arc::new(PostgresMediaRepository::new(pool.clone()));
@@ -336,11 +336,11 @@ impl AppUnitOfWorkBuilder {
         self.media_files_write = Some(media_repo.clone());
 
         let images: Arc<dyn ImageRepository> =
-            Arc::new(PostgresImageRepository::new(db.clone()));
+            Arc::new(PostgresImageRepository::new(pool.clone()));
         self.images = Some(images);
 
         let query: Arc<dyn QueryRepository> =
-            Arc::new(PostgresQueryRepository::new(db.clone()));
+            Arc::new(PostgresQueryRepository::new(pool.clone()));
         self.query = Some(query);
 
         let users: Arc<dyn UsersRepository> =

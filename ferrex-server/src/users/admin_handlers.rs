@@ -40,7 +40,6 @@ pub struct RegisterAdminSessionRequest {
 }
 
 /// Response for user list with role info lives in ferrex-core::api_types::users_admin::AdminUserInfo
-
 /// Query parameters for filtering users
 #[derive(Debug, Deserialize)]
 pub struct UserFilters {
@@ -53,14 +52,13 @@ pub struct UserFilters {
 /// List all users (admin only)
 pub async fn list_all_users(
     State(state): State<AppState>,
-    Extension(admin): Extension<User>, // Already validated by admin_middleware
+    Extension(_admin): Extension<User>, // Already validated by admin_middleware
     Query(filters): Query<UserFilters>,
 ) -> AppResult<Json<ApiResponse<Vec<AdminUserInfo>>>> {
     // Get all users from database
     let mut users = state.unit_of_work().users.get_all_users().await?;
 
     // We'll filter by role after fetching role info
-
     if let Some(search) = &filters.search {
         let search_lower = search.to_lowercase();
         users.retain(|u| {
@@ -149,7 +147,7 @@ pub async fn assign_user_roles(
     // Use the role assignment endpoint from role_handlers
 
     let handler_state = state.clone();
-    let result = role_handlers::assign_user_roles_handler(
+    let _ = role_handlers::assign_user_roles_handler(
         State(handler_state),
         Path(user_id),
         Extension(admin.clone()),
@@ -248,7 +246,7 @@ pub async fn remove_admin_session(
 /// Get user sessions (admin only)
 pub async fn get_user_sessions_admin(
     State(state): State<AppState>,
-    Extension(admin): Extension<User>,
+    Extension(_admin): Extension<User>,
     Path(user_id): Path<Uuid>,
 ) -> AppResult<Json<ApiResponse<Vec<ferrex_core::user::UserSession>>>> {
     // Verify user exists

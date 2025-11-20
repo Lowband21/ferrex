@@ -78,6 +78,7 @@ pub enum Message {
     ExternalPlaybackUpdate { position: f64, duration: f64 },
     ExternalPlaybackEnded,
     PollExternalMpv,
+    ProgressHeartbeat,
 }
 
 impl fmt::Debug for Message {
@@ -168,22 +169,8 @@ impl fmt::Debug for Message {
             Message::ExternalPlaybackStarted => {
                 write!(f, "ExternalPlaybackStarted")
             }
-            Message::ExternalPlaybackUpdate { position, duration } => {
-                write!(
-                    f,
-                    "ExternalPlaybackUpdate {{ position: {}, duration: {} }}",
-                    position, duration
-                )
-            }
-            Message::ExternalPlaybackEnded => {
-                write!(f, "ExternalPlaybackEnded")
-            }
-            Message::PollExternalMpv => write!(f, "PollExternalMpv"),
+            Message::ProgressHeartbeat => write!(f, "ProgressHeartbeat"),
 
-            // External MPV player messages
-            Message::ExternalPlaybackStarted => {
-                write!(f, "ExternalPlaybackStarted")
-            }
             Message::ExternalPlaybackUpdate { position, duration } => {
                 write!(
                     f,

@@ -192,7 +192,7 @@ impl MovieReference {
     /// Get rating if available
     pub fn rating(&self) -> Option<f32> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie.vote_average,
                 TmdbDetails::Series(series) => series.vote_average,
                 TmdbDetails::Episode(episode) => episode.vote_average,
@@ -205,7 +205,7 @@ impl MovieReference {
     /// Get genres if available
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => Some(
                     movie
                         .genres
@@ -255,7 +255,7 @@ impl SeriesReference {
     /// Get release/air year if available
     pub fn year(&self) -> Option<u16> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie
                     .release_date
                     .as_ref()
@@ -284,7 +284,7 @@ impl SeriesReference {
     /// Get rating if available
     pub fn rating(&self) -> Option<f32> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie.vote_average,
                 TmdbDetails::Series(series) => series.vote_average,
                 TmdbDetails::Episode(episode) => episode.vote_average,
@@ -297,7 +297,7 @@ impl SeriesReference {
     /// Get genres if available
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => Some(
                     movie
                         .genres
@@ -343,7 +343,7 @@ impl SeasonReference {
     /// Get release/air year if available
     pub fn year(&self) -> Option<u16> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie
                     .release_date
                     .as_ref()
@@ -372,7 +372,7 @@ impl SeasonReference {
     /// Get rating if available
     pub fn rating(&self) -> Option<f32> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie.vote_average,
                 TmdbDetails::Series(series) => series.vote_average,
                 TmdbDetails::Episode(episode) => episode.vote_average,
@@ -385,7 +385,7 @@ impl SeasonReference {
     /// Get genres if available
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => Some(
                     movie
                         .genres
@@ -431,7 +431,7 @@ impl EpisodeReference {
     /// Get release/air year if available
     pub fn year(&self) -> Option<u16> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie
                     .release_date
                     .as_ref()
@@ -460,7 +460,7 @@ impl EpisodeReference {
     /// Get rating if available
     pub fn rating(&self) -> Option<f32> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie.vote_average,
                 TmdbDetails::Series(series) => series.vote_average,
                 TmdbDetails::Episode(episode) => episode.vote_average,
@@ -473,7 +473,7 @@ impl EpisodeReference {
     /// Get genres if available
     pub fn genres(&self) -> Option<Vec<&str>> {
         match &self.details {
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => Some(
                     movie
                         .genres
@@ -604,9 +604,12 @@ impl Playable for EpisodeReference {
 impl Browsable for SeriesReference {
     fn child_count(&self) -> Option<usize> {
         match &self.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                details.number_of_episodes.map(|n| n as usize)
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Series(details) => {
+                    details.number_of_episodes.map(|n| n as usize)
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -619,9 +622,12 @@ impl Browsable for SeriesReference {
 impl Browsable for SeasonReference {
     fn child_count(&self) -> Option<usize> {
         match &self.details {
-            MediaDetailsOption::Details(TmdbDetails::Season(details)) => {
-                Some(details.episode_count as usize)
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Season(details) => {
+                    Some(details.episode_count as usize)
+                }
+                _ => None,
+            },
             _ => None,
         }
     }

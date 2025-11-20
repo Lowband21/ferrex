@@ -1,21 +1,14 @@
 use crate::{
     error::Result,
-    image::{
-        MediaImageKind,
-        records::{MediaImageVariantKey, MediaImageVariantRecord},
-    },
+    image::MediaImageKind,
     query::types::{MediaQuery, MediaWithStatus},
     rbac::{Permission, Role, UserPermissions},
     sync_session::{Participant, PlaybackState, SyncSession},
     types::{
         details::LibraryReference,
         files::{MediaFile, MediaFileMetadata},
-        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
-        library::{Library, LibraryType},
-        media::{
-            EpisodeReference, Media, MovieReference, SeasonReference,
-            SeriesReference,
-        },
+        ids::LibraryID,
+        library::Library,
     },
     user::User,
     watch_status::{InProgressItem, UpdateProgressRequest, UserWatchState},
@@ -364,215 +357,10 @@ pub trait MediaDatabaseTrait: Send + Sync {
     async fn delete_library(&self, id: &str) -> Result<()>;
     async fn update_library_last_scan(&self, id: &LibraryID) -> Result<()>;
 
-    // New reference type methods
-    async fn store_movie_reference(&self, movie: &MovieReference)
-    -> Result<()>;
-    async fn store_series_reference(
-        &self,
-        series: &SeriesReference,
-    ) -> Result<()>;
-    async fn store_season_reference(
-        &self,
-        season: &SeasonReference,
-    ) -> Result<Uuid>;
-
-    // Series lookup methods
-    async fn get_series_by_tmdb_id(
-        &self,
-        library_id: LibraryID,
-        tmdb_id: u64,
-    ) -> Result<Option<SeriesReference>>;
-    async fn find_series_by_name(
-        &self,
-        library_id: LibraryID,
-        name: &str,
-    ) -> Result<Option<SeriesReference>>;
-    async fn store_episode_reference(
-        &self,
-        episode: &EpisodeReference,
-    ) -> Result<()>;
-
-    async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>>;
-    async fn get_series_references(&self) -> Result<Vec<SeriesReference>>;
-    async fn get_series_seasons(
-        &self,
-        series_id: &SeriesID,
-    ) -> Result<Vec<SeasonReference>>;
-    async fn get_season_episodes(
-        &self,
-        season_id: &SeasonID,
-    ) -> Result<Vec<EpisodeReference>>;
-
-    // Individual reference retrieval
-    async fn get_movie_reference(&self, id: &MovieID)
-    -> Result<MovieReference>;
-    async fn get_series_reference(
-        &self,
-        id: &SeriesID,
-    ) -> Result<SeriesReference>;
-    async fn get_season_reference(
-        &self,
-        id: &SeasonID,
-    ) -> Result<SeasonReference>;
-    async fn get_episode_reference(
-        &self,
-        id: &EpisodeID,
-    ) -> Result<EpisodeReference>;
-
-    // Bulk reference retrieval methods for performance
-    async fn get_library_media_references(
-        &self,
-        library_id: LibraryID,
-        library_type: LibraryType,
-    ) -> Result<Vec<Media>>;
-    async fn get_library_series(
-        &self,
-        library_id: &LibraryID,
-    ) -> Result<Vec<SeriesReference>>;
-    async fn get_library_seasons(
-        &self,
-        library_id: &LibraryID,
-    ) -> Result<Vec<SeasonReference>>;
-    async fn get_library_episodes(
-        &self,
-        library_id: &LibraryID,
-    ) -> Result<Vec<EpisodeReference>>;
-    async fn get_movie_references_bulk(
-        &self,
-        ids: &[&MovieID],
-    ) -> Result<Vec<MovieReference>>;
-
-    /// Lookup a movie reference by its media file path
-    async fn get_movie_reference_by_path(
-        &self,
-        path: &str,
-    ) -> Result<Option<MovieReference>>;
-    async fn get_series_references_bulk(
-        &self,
-        ids: &[&SeriesID],
-    ) -> Result<Vec<SeriesReference>>;
-    async fn get_season_references_bulk(
-        &self,
-        ids: &[&SeasonID],
-    ) -> Result<Vec<SeasonReference>>;
-    async fn get_episode_references_bulk(
-        &self,
-        ids: &[&EpisodeID],
-    ) -> Result<Vec<EpisodeReference>>;
-
-    // TMDB ID updates
-    async fn update_movie_tmdb_id(
-        &self,
-        id: &MovieID,
-        tmdb_id: u64,
-    ) -> Result<()>;
-    async fn update_series_tmdb_id(
-        &self,
-        id: &SeriesID,
-        tmdb_id: u64,
-    ) -> Result<()>;
-
     // Library management
     async fn list_library_references(&self) -> Result<Vec<LibraryReference>>;
     async fn get_library_reference(&self, id: Uuid)
     -> Result<LibraryReference>;
-
-    // Image management methods
-    async fn create_image(&self, tmdb_path: &str) -> Result<ImageRecord>;
-    async fn get_image_by_tmdb_path(
-        &self,
-        tmdb_path: &str,
-    ) -> Result<Option<ImageRecord>>;
-    async fn get_image_by_hash(
-        &self,
-        hash: &str,
-    ) -> Result<Option<ImageRecord>>;
-    async fn update_image_metadata(
-        &self,
-        image_id: Uuid,
-        hash: &str,
-        size: i32,
-        width: i32,
-        height: i32,
-        format: &str,
-    ) -> Result<()>;
-
-    // Image variant management
-    async fn create_image_variant(
-        &self,
-        image_id: Uuid,
-        variant: &str,
-        file_path: &str,
-        size: i32,
-        width: Option<i32>,
-        height: Option<i32>,
-    ) -> Result<ImageVariant>;
-    async fn get_image_variant(
-        &self,
-        image_id: Uuid,
-        variant: &str,
-    ) -> Result<Option<ImageVariant>>;
-    async fn get_image_variants(
-        &self,
-        image_id: Uuid,
-    ) -> Result<Vec<ImageVariant>>;
-
-    // Media image linking
-    async fn link_media_image(
-        &self,
-        media_type: &str,
-        media_id: Uuid,
-        image_id: Uuid,
-        image_type: MediaImageKind,
-        order_index: i32,
-        is_primary: bool,
-    ) -> Result<()>;
-    async fn get_media_images(
-        &self,
-        media_type: &str,
-        media_id: Uuid,
-    ) -> Result<Vec<MediaImage>>;
-    async fn get_media_primary_image(
-        &self,
-        media_type: &str,
-        media_id: Uuid,
-        image_type: MediaImageKind,
-    ) -> Result<Option<MediaImage>>;
-
-    // Combined lookup for image serving
-    async fn lookup_image_variant(
-        &self,
-        params: &ImageLookupParams,
-    ) -> Result<Option<(ImageRecord, Option<ImageVariant>)>>;
-
-    async fn upsert_media_image_variant(
-        &self,
-        record: &MediaImageVariantRecord,
-    ) -> Result<MediaImageVariantRecord>;
-    async fn mark_media_image_variant_cached(
-        &self,
-        key: &MediaImageVariantKey,
-        width: Option<i32>,
-        height: Option<i32>,
-        content_hash: Option<&str>,
-        theme_color: Option<&str>,
-    ) -> Result<MediaImageVariantRecord>;
-    async fn list_media_image_variants(
-        &self,
-        media_type: &str,
-        media_id: Uuid,
-    ) -> Result<Vec<MediaImageVariantRecord>>;
-
-    async fn update_media_theme_color(
-        &self,
-        media_type: &str,
-        media_id: Uuid,
-        theme_color: Option<&str>,
-    ) -> Result<()>;
-
-    // Cleanup and maintenance
-    async fn cleanup_orphaned_images(&self) -> Result<u32>;
-    async fn get_image_cache_stats(&self) -> Result<HashMap<String, u64>>;
 
     // Scan state management
     async fn create_scan_state(&self, scan_state: &ScanState) -> Result<()>;

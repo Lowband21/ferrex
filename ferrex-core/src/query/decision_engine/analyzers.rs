@@ -263,7 +263,7 @@ mod tests {
             tmdb_id: 123,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: if has_details {
-                MediaDetailsOption::Details(TmdbDetails::Movie(
+                MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(
                     EnhancedMovieDetails {
                         id: 123,
                         title: "Test Movie".to_string(),
@@ -301,7 +301,7 @@ mod tests {
                         similar: Vec::new(),
                         original_title: None,
                     },
-                ))
+                )))
             } else {
                 MediaDetailsOption::Endpoint("/movie/123".to_string())
             },

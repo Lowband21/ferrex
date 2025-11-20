@@ -8,9 +8,7 @@ use ferrex_core::database::traits::{
     FolderProcessingStatus, FolderScanFilters, MediaDatabaseTrait,
     MediaProcessingStatus,
 };
-use ferrex_core::error::MediaError;
-use ferrex_core::player_prelude::MediaIDLike;
-use ferrex_core::types::{LibraryID, MediaDetailsOption, MovieID};
+use ferrex_core::types::LibraryID;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -265,39 +263,6 @@ async fn folder_inventory_filters_are_bound(pool: PgPool) -> Result<()> {
         MediaDatabaseTrait::get_folders_needing_scan(&db, &filters).await?;
     assert_eq!(stale.len(), 1);
     assert_eq!(stale[0].folder_path, "/fixture/library/a/pending");
-
-    Ok(())
-}
-
-#[sqlx::test(
-    migrator = "ferrex_core::MIGRATOR",
-    fixtures(
-        path = "../fixtures",
-        scripts("test_libraries", "media_processing_base")
-    )
-)]
-async fn movie_reference_hydration_uses_repository(pool: PgPool) -> Result<()> {
-    let db = PostgresDatabase::from_pool(pool.clone());
-    let movies = MediaDatabaseTrait::get_all_movie_references(&db).await?;
-
-    let fixture_movie = movies
-        .into_iter()
-        .find(|movie| {
-            movie.id
-                == MovieID(fixture_media_file(
-                    "44444444-4444-4444-4444-444444444444",
-                ))
-        })
-        .ok_or_else(|| MediaError::NotFound("fixture movie missing".into()))?;
-
-    assert_eq!(
-        fixture_movie.file.id,
-        fixture_media_file("11111111-1111-1111-1111-111111111111")
-    );
-    assert_eq!(fixture_movie.file.library_id, fixture_library_id());
-    assert!(
-        matches!(fixture_movie.details, MediaDetailsOption::Endpoint(endpoint) if endpoint.contains(&fixture_movie.id.to_uuid().to_string()))
-    );
 
     Ok(())
 }

@@ -270,11 +270,10 @@ impl FilenameParser {
         cleaned = edition_regex.replace(&cleaned, "").to_string();
 
         // Now remove any remaining content in parentheses (but be careful about nested or unmatched)
-        // This regex handles nested parentheses better
+        let paren_regex = Regex::new(r"\([^()]*\)").unwrap();
         while cleaned.contains('(') || cleaned.contains(')') {
             let old_len = cleaned.len();
-            cleaned = Regex::new(r"\([^()]*\)")
-                .unwrap()
+            cleaned = paren_regex
                 .replace_all(&cleaned, " ")
                 .to_string();
             // Also remove any lone parentheses

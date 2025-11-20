@@ -1,7 +1,5 @@
 pub mod folder_inventory;
 pub mod processing_status;
-pub mod query;
-pub mod query_optimized;
 pub mod rbac;
 pub mod sync_sessions;
 pub mod tmdb_metadata;

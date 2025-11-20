@@ -12,7 +12,7 @@ pub use traits::MediaDatabaseTrait;
 use crate::error::Result;
 use crate::query::complexity_guard::QueryComplexityGuard;
 use crate::query::types::{MediaQuery, MediaWithStatus};
-use crate::types::ids::{LibraryID, MovieID, SeriesID};
+use crate::types::ids::LibraryID;
 use std::{fmt, sync::Arc};
 
 #[derive(Clone)]
@@ -219,79 +219,5 @@ impl MediaDatabase {
         } else {
             Ok(())
         }
-    }
-
-    // Wrapper methods that invalidate cache after modifications
-
-    /// Store a movie reference and invalidate related caches
-    pub async fn store_movie_reference_with_cache_invalidation(
-        &self,
-        movie: &crate::types::media::MovieReference,
-    ) -> Result<()> {
-        // Store the movie
-        self.backend.store_movie_reference(movie).await?;
-
-        // Invalidate query cache
-        self.invalidate_query_cache().await?;
-
-        Ok(())
-    }
-
-    /// Store a series reference and invalidate related caches
-    pub async fn store_series_reference_with_cache_invalidation(
-        &self,
-        series: &crate::types::media::SeriesReference,
-    ) -> Result<()> {
-        // Store the series
-        self.backend.store_series_reference(series).await?;
-
-        // Invalidate query cache
-        self.invalidate_query_cache().await?;
-
-        Ok(())
-    }
-
-    /// Delete media and invalidate related caches
-    pub async fn delete_media_with_cache_invalidation(
-        &self,
-        id: &str,
-    ) -> Result<()> {
-        // Delete the media
-        self.backend.delete_media(id).await?;
-
-        // Invalidate query cache
-        self.invalidate_query_cache().await?;
-
-        Ok(())
-    }
-
-    /// Update movie TMDB ID and invalidate related caches
-    pub async fn update_movie_tmdb_id_with_cache_invalidation(
-        &self,
-        id: &MovieID,
-        tmdb_id: u64,
-    ) -> Result<()> {
-        // Update the movie
-        self.backend.update_movie_tmdb_id(id, tmdb_id).await?;
-
-        // Invalidate query cache
-        self.invalidate_query_cache().await?;
-
-        Ok(())
-    }
-
-    /// Update series TMDB ID and invalidate related caches
-    pub async fn update_series_tmdb_id_with_cache_invalidation(
-        &self,
-        id: &SeriesID,
-        tmdb_id: u64,
-    ) -> Result<()> {
-        // Update the series
-        self.backend.update_series_tmdb_id(id, tmdb_id).await?;
-
-        // Invalidate query cache
-        self.invalidate_query_cache().await?;
-
-        Ok(())
     }
 }

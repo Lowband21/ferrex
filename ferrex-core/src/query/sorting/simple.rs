@@ -118,15 +118,17 @@ fn get_release_date(media: &Media) -> Option<NaiveDate> {
 
     match media {
         Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                parse(&details.release_date)
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Movie(d) => parse(&d.release_date),
+                _ => None,
+            },
             _ => None,
         },
         Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                parse(&details.first_air_date)
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Series(d) => parse(&d.first_air_date),
+                _ => None,
+            },
             _ => None,
         },
         _ => None,
@@ -136,15 +138,17 @@ fn get_release_date(media: &Media) -> Option<NaiveDate> {
 fn get_rating(media: &Media) -> Option<f32> {
     match media {
         Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                details.vote_average
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Movie(d) => d.vote_average,
+                _ => None,
+            },
             _ => None,
         },
         Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                details.vote_average
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Series(d) => d.vote_average,
+                _ => None,
+            },
             _ => None,
         },
         _ => None,
@@ -154,9 +158,10 @@ fn get_rating(media: &Media) -> Option<f32> {
 fn get_runtime(media: &Media) -> Option<u32> {
     match media {
         Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                details.runtime
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Movie(d) => d.runtime,
+                _ => None,
+            },
             _ => None,
         },
         _ => None,
@@ -166,15 +171,17 @@ fn get_runtime(media: &Media) -> Option<u32> {
 fn get_popularity(media: &Media) -> Option<f32> {
     match media {
         Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => {
-                details.popularity
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Movie(d) => d.popularity,
+                _ => None,
+            },
             _ => None,
         },
         Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                details.popularity
-            }
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Series(d) => d.popularity,
+                _ => None,
+            },
             _ => None,
         },
         _ => None,
@@ -216,23 +223,27 @@ fn get_resolution(media: &Media) -> Option<u32> {
 fn get_content_rating(media: &Media) -> Option<String> {
     match media {
         Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(TmdbDetails::Movie(details)) => details
-                .content_rating
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string()),
-            _ => None,
-        },
-        Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(TmdbDetails::Series(details)) => {
-                details
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Movie(d) => d
                     .content_rating
                     .as_ref()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-            }
+                    .map(|s| s.to_string()),
+                _ => None,
+            },
+            _ => None,
+        },
+        Media::Series(s) => match &s.details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
+                TmdbDetails::Series(d) => d
+                    .content_rating
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                _ => None,
+            },
             _ => None,
         },
         _ => None,

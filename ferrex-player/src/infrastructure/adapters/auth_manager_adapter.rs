@@ -7,6 +7,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::domains::auth::manager::{AuthManager, AutoLoginScope};
+use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::auth::AuthService;
@@ -36,6 +37,28 @@ impl AuthService for AuthManagerAdapter {
             .await
             .map_err(|e| {
                 RepositoryError::QueryFailed(format!("Login failed: {}", e))
+            })
+    }
+
+    async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>> {
+        let fingerprint = generate_hardware_fingerprint()
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Hardware fingerprint failed: {}",
+                    e
+                ))
+            })?;
+
+        self.manager
+            .auth_storage()
+            .load_auth(&fingerprint)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Load from keychain failed: {}",
+                    e
+                ))
             })
     }
 
@@ -164,15 +187,6 @@ impl AuthService for AuthManagerAdapter {
                     e
                 ))
             })
-    }
-
-    async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>> {
-        self.manager.load_from_keychain().await.map_err(|e| {
-            RepositoryError::QueryFailed(format!(
-                "Load from keychain failed: {}",
-                e
-            ))
-        })
     }
 
     async fn apply_stored_auth(

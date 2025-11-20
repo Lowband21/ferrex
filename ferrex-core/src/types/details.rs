@@ -769,14 +769,14 @@ pub trait MediaDetailsOptionLike {
 #[rkyv(derive(Debug, PartialEq, Eq))]
 pub enum MediaDetailsOption {
     Endpoint(String),
-    Details(TmdbDetails),
+    Details(Box<TmdbDetails>),
 }
 
 impl MediaDetailsOptionLike for MediaDetailsOption {
     fn get_release_year(&self) -> Option<u16> {
         match self {
             MediaDetailsOption::Endpoint(_) => None,
-            MediaDetailsOption::Details(details) => match details {
+            MediaDetailsOption::Details(details) => match details.as_ref() {
                 TmdbDetails::Movie(movie) => movie
                     .release_date
                     .as_ref()
@@ -792,7 +792,7 @@ impl MediaDetailsOptionLike for ArchivedMediaDetailsOption {
     fn get_release_year(&self) -> Option<u16> {
         match self {
             ArchivedMediaDetailsOption::Endpoint(_) => None,
-            ArchivedMediaDetailsOption::Details(details) => match details {
+            ArchivedMediaDetailsOption::Details(details) => match details.as_ref() {
                 ArchivedTmdbDetails::Movie(movie) => movie
                     .release_date
                     .as_ref()

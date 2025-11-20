@@ -197,10 +197,7 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
 
     async fn save(&self, session: &DeviceSession) -> Result<Option<Uuid>> {
         let status = status_to_db(session.status());
-        let failed_attempts: i16 = session
-            .failed_attempts()
-            .try_into()
-            .context("failed attempts exceeds database representation")?;
+        let failed_attempts: i16 = session.failed_attempts().into();
 
         sqlx::query!(
                 r#"
