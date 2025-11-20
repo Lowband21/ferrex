@@ -49,8 +49,8 @@ pub async fn create_sync_session_handler(
 
     // Store in database
     state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .create_sync_session(&session)
         .await
         .map_err(|e| AppError::internal(format!("Failed to create sync session: {}", e)))?;
@@ -73,8 +73,8 @@ pub async fn join_sync_session_handler(
 ) -> AppResult<Json<JoinSyncSessionResponse>> {
     // Get session from database
     let mut session = state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .get_sync_session_by_code(&room_code)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?
@@ -103,8 +103,8 @@ pub async fn join_sync_session_handler(
 
     // Update database
     state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .add_sync_participant(session.id, &participant)
         .await
         .map_err(|e| AppError::internal(format!("Failed to add participant: {}", e)))?;
@@ -138,8 +138,8 @@ pub async fn leave_sync_session_handler(
 ) -> AppResult<Json<()>> {
     // Get session from database
     let mut session = state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .get_sync_session(session_id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?
@@ -150,8 +150,8 @@ pub async fn leave_sync_session_handler(
 
     // Update database
     state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .remove_sync_participant(session_id, user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to remove participant: {}", e)))?;
@@ -164,16 +164,16 @@ pub async fn leave_sync_session_handler(
         if let Some(new_host) = session.participants.first() {
             session.host_id = new_host.user_id;
             state
-                .db
-                .backend()
+                .unit_of_work
+                .sync_sessions
                 .update_sync_session(session_id, &session)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to update session: {}", e)))?;
         } else {
             // No participants left, end session
             state
-                .db
-                .backend()
+                .unit_of_work
+                .sync_sessions
                 .end_sync_session(session_id)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to end session: {}", e)))?;
@@ -191,8 +191,8 @@ pub async fn get_sync_session_state_handler(
 ) -> AppResult<Json<PlaybackState>> {
     // Get session from database
     let session = state
-        .db
-        .backend()
+        .unit_of_work
+        .sync_sessions
         .get_sync_session(session_id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get sync session: {}", e)))?

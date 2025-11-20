@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO auth_sessions (\n                id,\n                user_id,\n                device_session_id,\n                session_token_hash,\n                created_at,\n                expires_at,\n                last_activity,\n                ip_address,\n                user_agent,\n                metadata\n            )\n            VALUES (\n                $1,\n                $2,\n                NULL,\n                $3,\n                $4,\n                $5,\n                $6,\n                $7::text::inet,\n                $8,\n                $9\n            )\n            ON CONFLICT (id) DO UPDATE\n            SET last_activity = EXCLUDED.last_activity,\n                expires_at = EXCLUDED.expires_at,\n                ip_address = EXCLUDED.ip_address,\n                user_agent = EXCLUDED.user_agent,\n                metadata = EXCLUDED.metadata,\n                revoked = false,\n                revoked_at = NULL,\n                revoked_reason = NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d3236c695d12dd118744a48537931f54f7c7d6763530fa247d367bce477d106"
+}

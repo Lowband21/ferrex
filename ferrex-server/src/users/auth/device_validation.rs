@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use ferrex_core::database::postgres::PostgresDatabase;
-
 use crate::infra::{
     app_state::AppState,
     errors::{AppError, AppResult},
@@ -32,12 +30,7 @@ pub struct DeviceTrustQuery {
 
 /// Helper function to get the database pool
 fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
-    state
-        .db
-        .as_any()
-        .downcast_ref::<PostgresDatabase>()
-        .ok_or_else(|| AppError::internal("Database not available".to_string()))
-        .map(|db| db.pool())
+    Ok(state.postgres.pool())
 }
 
 /// Device trust validation response
@@ -89,7 +82,7 @@ pub async fn validate_device_trust(
             ads.created_at,
             ads.trusted_until,
             ads.last_activity as last_seen,
-            CASE WHEN ads.status = 'revoked' THEN true ELSE false END as revoked
+            ads.status
         FROM auth_device_sessions ads
         WHERE ads.id = $1 
             AND ads.user_id = $2
@@ -104,14 +97,23 @@ pub async fn validate_device_trust(
 
     let status = match device_record {
         Some(record) => {
-            // Check if device is revoked
-            if record.revoked.unwrap_or(false) {
+            let device_status = record.status.as_deref().unwrap_or("pending");
+
+            if device_status == "revoked" {
                 DeviceTrustStatus {
                     is_trusted: false,
                     trusted_until: None,
                     device_name: Some(record.device_name),
                     registered_at: Some(record.created_at),
                     reason: Some("Device has been revoked".to_string()),
+                }
+            } else if device_status != "trusted" {
+                DeviceTrustStatus {
+                    is_trusted: false,
+                    trusted_until: None,
+                    device_name: Some(record.device_name),
+                    registered_at: Some(record.created_at),
+                    reason: Some("Device is not trusted".to_string()),
                 }
             }
             // Check if device trust has expired
@@ -166,11 +168,11 @@ pub async fn validate_device_trust(
             } else {
                 // Device exists but has no active trust session
                 DeviceTrustStatus {
-                    is_trusted: false,
+                    is_trusted: true,
                     trusted_until: None,
                     device_name: Some(record.device_name),
                     registered_at: Some(record.created_at),
-                    reason: Some("No active trust session".to_string()),
+                    reason: None,
                 }
             }
         }

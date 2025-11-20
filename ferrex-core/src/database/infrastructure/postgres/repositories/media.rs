@@ -1,15 +1,75 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use async_trait::async_trait;
+use sqlx::{PgPool, Postgres, QueryBuilder, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
+use crate::database::ports::media_files::{
+    MediaFileFilter, MediaFileSort, MediaFileSortField, MediaFilesReadPort, MediaFilesWritePort,
+    Page, SortDirection, UpsertOutcome,
+};
 use crate::database::traits::{MediaFilters, MediaStats};
 use crate::{LibraryID, MediaError, MediaFile, MediaFileMetadata, Result};
 
 #[derive(Clone, Debug)]
 pub struct PostgresMediaRepository {
     pool: PgPool,
+}
+
+#[async_trait]
+impl MediaFilesReadPort for PostgresMediaRepository {
+    async fn get_by_id(&self, id: &Uuid) -> Result<Option<MediaFile>> {
+        self.get_media(id).await
+    }
+
+    async fn get_by_path(&self, path: &str) -> Result<Option<MediaFile>> {
+        self.get_media_by_path(path).await
+    }
+
+    async fn exists_by_path(&self, path: &str) -> Result<bool> {
+        self.file_exists(path).await
+    }
+
+    async fn list(
+        &self,
+        filter: MediaFileFilter,
+        sort: MediaFileSort,
+        page: Page,
+    ) -> Result<Vec<MediaFile>> {
+        self.list_media_with(filter, sort, page).await
+    }
+
+    async fn stats(&self, filter: MediaFileFilter) -> Result<MediaStats> {
+        self.stats_with_filter(filter).await
+    }
+}
+
+#[async_trait]
+impl MediaFilesWritePort for PostgresMediaRepository {
+    async fn upsert(&self, file: MediaFile) -> Result<UpsertOutcome> {
+        self.upsert_media(file).await
+    }
+
+    async fn upsert_batch(&self, files: Vec<MediaFile>) -> Result<Vec<UpsertOutcome>> {
+        self.upsert_media_batch(files).await
+    }
+
+    async fn delete_by_id(&self, id: Uuid) -> Result<()> {
+        self.delete_media_by_id(id).await
+    }
+
+    async fn delete_by_path(&self, library_id: LibraryID, path: &str) -> Result<()> {
+        self.delete_media_by_path(library_id, path).await
+    }
+
+    async fn update_technical_metadata(
+        &self,
+        id: Uuid,
+        metadata: &MediaFileMetadata,
+    ) -> Result<()> {
+        self.update_technical_metadata_by_id(id, metadata).await
+    }
 }
 
 impl PostgresMediaRepository {
@@ -21,25 +81,167 @@ impl PostgresMediaRepository {
         &self.pool
     }
 
-    pub async fn store_media(&self, media_file: MediaFile) -> Result<Uuid> {
+    fn default_sort() -> MediaFileSort {
+        MediaFileSort::descending(MediaFileSortField::DiscoveredAt)
+    }
+
+    fn map_sort_field(field: MediaFileSortField) -> &'static str {
+        match field {
+            MediaFileSortField::DiscoveredAt => "discovered_at",
+            MediaFileSortField::CreatedAt => "created_at",
+            MediaFileSortField::FileSize => "file_size",
+            MediaFileSortField::Filename => "LOWER(filename)",
+        }
+    }
+
+    fn convert_filters(filters: MediaFilters) -> (MediaFileFilter, MediaFileSort, Page) {
+        let mut filter = MediaFileFilter::default();
+        filter.library_id = filters.library_id;
+
+        let mut sort = Self::default_sort();
+        if let Some(order) = filters.order_by.as_deref() {
+            let lowered = order.to_ascii_lowercase();
+            let (field, direction) = if lowered.contains("filename") {
+                (
+                    MediaFileSortField::Filename,
+                    lowered
+                        .contains("desc")
+                        .then_some(SortDirection::Descending),
+                )
+            } else if lowered.contains("file_size") {
+                (
+                    MediaFileSortField::FileSize,
+                    lowered
+                        .contains("desc")
+                        .then_some(SortDirection::Descending),
+                )
+            } else if lowered.contains("created_at") {
+                (
+                    MediaFileSortField::CreatedAt,
+                    lowered
+                        .contains("desc")
+                        .then_some(SortDirection::Descending),
+                )
+            } else if lowered.contains("discovered_at") {
+                (
+                    MediaFileSortField::DiscoveredAt,
+                    lowered
+                        .contains("desc")
+                        .then_some(SortDirection::Descending),
+                )
+            } else {
+                (sort.field, None)
+            };
+
+            sort.field = field;
+            if let Some(dir) = direction {
+                sort.direction = dir;
+            }
+        }
+
+        let requested_limit = filters.limit.unwrap_or(100).max(1).min(500) as u32;
+        let page = Page {
+            limit: requested_limit,
+            offset: 0,
+        };
+
+        (filter, sort, page)
+    }
+
+    fn apply_filter(builder: &mut QueryBuilder<Postgres>, filter: &MediaFileFilter) {
+        if let Some(library) = filter.library_id {
+            builder.push(" AND library_id = ");
+            builder.push_bind(library.as_uuid());
+        }
+
+        if let Some(prefix) = &filter.path_prefix {
+            builder.push(" AND file_path LIKE ");
+            builder.push_bind(format!("{}%", prefix));
+        }
+
+        if !filter.extension_in.is_empty() {
+            let lowered: Vec<String> = filter
+                .extension_in
+                .iter()
+                .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+                .collect();
+            builder.push(" AND LOWER(split_part(filename, '.', -1)) = ANY(");
+            builder.push_bind(lowered);
+            builder.push(")");
+        }
+
+        if let Some(min_size) = filter.min_size {
+            builder.push(" AND file_size >= ");
+            builder.push_bind(min_size as i64);
+        }
+
+        if let Some(max_size) = filter.max_size {
+            builder.push(" AND file_size <= ");
+            builder.push_bind(max_size as i64);
+        }
+
+        if let Some(after) = filter.discovered_after {
+            builder.push(" AND discovered_at >= ");
+            builder.push_bind(after);
+        }
+
+        if let Some(before) = filter.discovered_before {
+            builder.push(" AND discovered_at <= ");
+            builder.push_bind(before);
+        }
+
+        if let Some(after) = filter.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(after);
+        }
+
+        if let Some(before) = filter.created_before {
+            builder.push(" AND created_at <= ");
+            builder.push_bind(before);
+        }
+    }
+
+    fn hydrate_media_file(row: &PgRow) -> Result<MediaFile> {
+        let technical_metadata: Option<serde_json::Value> = row.try_get("technical_metadata")?;
+        let media_file_metadata = technical_metadata
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| MediaError::Internal(format!("Failed to deserialize metadata: {}", e)))?;
+
+        Ok(MediaFile {
+            id: row.try_get("id")?,
+            path: PathBuf::from(row.try_get::<String, _>("file_path")?),
+            filename: row.try_get("filename")?,
+            size: row.try_get::<i64, _>("file_size")? as u64,
+            discovered_at: row.try_get("discovered_at")?,
+            created_at: row.try_get("created_at")?,
+            media_file_metadata,
+            library_id: LibraryID(row.try_get("library_id")?),
+        })
+    }
+
+    pub async fn upsert_media(&self, media_file: MediaFile) -> Result<UpsertOutcome> {
         let mut tx = self
             .pool()
             .begin()
             .await
             .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
 
-        let actual_id = self
-            .store_media_file_in_transaction(&mut tx, &media_file)
+        let outcome = self
+            .upsert_media_in_transaction(&mut tx, &media_file)
             .await?;
 
         tx.commit()
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to commit transaction: {}", e)))?;
 
-        Ok(actual_id)
+        Ok(outcome)
     }
 
-    pub async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<Uuid>> {
+    pub async fn upsert_media_batch(
+        &self,
+        media_files: Vec<MediaFile>,
+    ) -> Result<Vec<UpsertOutcome>> {
         if media_files.is_empty() {
             return Ok(Vec::new());
         }
@@ -50,14 +252,14 @@ impl PostgresMediaRepository {
             .await
             .map_err(|e| MediaError::Internal(format!("Transaction failed: {}", e)))?;
 
-        let mut ids = Vec::new();
+        let mut outcomes = Vec::with_capacity(media_files.len());
         const CHUNK_SIZE: usize = 100;
         for chunk in media_files.chunks(CHUNK_SIZE) {
             for media_file in chunk {
-                let actual_id = self
-                    .store_media_file_in_transaction(&mut tx, media_file)
+                let outcome = self
+                    .upsert_media_in_transaction(&mut tx, media_file)
                     .await?;
-                ids.push(actual_id);
+                outcomes.push(outcome);
             }
         }
 
@@ -65,8 +267,17 @@ impl PostgresMediaRepository {
             MediaError::Internal(format!("Failed to commit batch transaction: {}", e))
         })?;
 
-        tracing::info!("Batch stored {} media files", ids.len());
-        Ok(ids)
+        tracing::info!("Batch stored {} media files", outcomes.len());
+        Ok(outcomes)
+    }
+
+    pub async fn store_media(&self, media_file: MediaFile) -> Result<Uuid> {
+        Ok(self.upsert_media(media_file).await?.id)
+    }
+
+    pub async fn store_media_batch(&self, media_files: Vec<MediaFile>) -> Result<Vec<Uuid>> {
+        let outcomes = self.upsert_media_batch(media_files).await?;
+        Ok(outcomes.into_iter().map(|outcome| outcome.id).collect())
     }
 
     pub async fn get_media(&self, uuid: &Uuid) -> Result<Option<MediaFile>> {
@@ -142,113 +353,91 @@ impl PostgresMediaRepository {
     }
 
     pub async fn list_media(&self, filters: MediaFilters) -> Result<Vec<MediaFile>> {
-        let mut query = "SELECT id, library_id, file_path, filename, file_size, discovered_at, created_at, technical_metadata, parsed_info FROM media_files".to_string();
-        let mut conditions = Vec::new();
+        let (filter, sort, page) = Self::convert_filters(filters);
+        self.list_media_with(filter, sort, page).await
+    }
 
-        if let Some(media_type) = &filters.media_type {
-            conditions.push(format!("parsed_info->>'media_type' = '{}'", media_type));
-        }
+    pub async fn list_media_with(
+        &self,
+        filter: MediaFileFilter,
+        sort: MediaFileSort,
+        page: Page,
+    ) -> Result<Vec<MediaFile>> {
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "SELECT id, library_id, file_path, filename, file_size, discovered_at, created_at, technical_metadata, parsed_info FROM media_files WHERE 1=1",
+        );
 
-        if let Some(show_name) = &filters.show_name {
-            conditions.push(format!(
-                "parsed_info->>'show' = '{}'",
-                show_name.replace("'", "''")
-            ));
-        }
+        Self::apply_filter(&mut builder, &filter);
 
-        if let Some(season) = filters.season {
-            conditions.push(format!("(parsed_info->>'season')::int = {}", season));
-        }
+        builder.push(" ORDER BY ");
+        builder.push(Self::map_sort_field(sort.field));
+        builder.push(match sort.direction {
+            SortDirection::Ascending => " ASC",
+            SortDirection::Descending => " DESC",
+        });
 
-        if let Some(library_id) = filters.library_id {
-            conditions.push(format!("library_id = '{}'", library_id.as_uuid()));
-        }
+        builder.push(", id ASC");
 
-        if !conditions.is_empty() {
-            query.push_str(" WHERE ");
-            query.push_str(&conditions.join(" AND "));
-        }
+        builder.push(" LIMIT ");
+        builder.push_bind(page.limit as i64);
+        builder.push(" OFFSET ");
+        builder.push_bind(page.offset as i64);
 
-        if let Some(order_by) = filters.order_by {
-            query.push_str(" ORDER BY ");
-            query.push_str(&order_by);
-        } else {
-            query.push_str(" ORDER BY discovered_at DESC");
-        }
-
-        if let Some(limit) = filters.limit {
-            query.push_str(&format!(" LIMIT {}", limit));
-        }
-
-        let rows = sqlx::query(&query)
+        let rows = builder
+            .build()
             .fetch_all(self.pool())
             .await
             .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
-        let mut media_files = Vec::new();
-        for row in rows {
-            let technical_metadata: Option<serde_json::Value> =
-                row.try_get("technical_metadata").ok();
-            let media_file_metadata = technical_metadata
-                .map(serde_json::from_value)
-                .transpose()
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to deserialize metadata: {}", e))
-                })?;
-
-            media_files.push(MediaFile {
-                id: row.try_get("id")?,
-                path: PathBuf::from(row.try_get::<String, _>("file_path")?),
-                filename: row.try_get("filename")?,
-                size: row.try_get::<i64, _>("file_size")? as u64,
-                discovered_at: row.try_get("discovered_at")?,
-                created_at: row.try_get("created_at")?,
-                media_file_metadata,
-                library_id: LibraryID(row.try_get("library_id")?),
-            });
-        }
-
-        Ok(media_files)
+        rows.into_iter()
+            .map(|row| Self::hydrate_media_file(&row))
+            .collect()
     }
 
     pub async fn get_stats(&self) -> Result<MediaStats> {
-        let total_row = sqlx::query!(
-            "SELECT COUNT(*) as count, COALESCE(SUM(file_size), 0) as total_size FROM media_files"
-        )
-        .fetch_one(self.pool())
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        self.stats_with_filter(MediaFileFilter::default()).await
+    }
 
-        let type_rows = sqlx::query!(
-            r#"
-            SELECT
-                CASE
-                    WHEN parsed_info->>'media_type' IS NOT NULL THEN parsed_info->>'media_type'
-                    ELSE 'unknown'
-                END as media_type,
-                COUNT(*) as count
-            FROM media_files
-            GROUP BY parsed_info->>'media_type'
-            "#
-        )
-        .fetch_all(self.pool())
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+    pub async fn stats_with_filter(&self, filter: MediaFileFilter) -> Result<MediaStats> {
+        let mut totals_builder = QueryBuilder::<Postgres>::new(
+            "SELECT COUNT(*) as count, COALESCE(SUM(file_size), 0) as total_size FROM media_files WHERE 1=1",
+        );
+        Self::apply_filter(&mut totals_builder, &filter);
+
+        let total_row = totals_builder
+            .build()
+            .fetch_one(self.pool())
+            .await
+            .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+
+        let mut type_builder = QueryBuilder::<Postgres>::new(
+            "SELECT COALESCE(parsed_info->>'media_type', 'unknown') as media_type, COUNT(*) as count FROM media_files WHERE 1=1",
+        );
+        Self::apply_filter(&mut type_builder, &filter);
+        type_builder.push(" GROUP BY COALESCE(parsed_info->>'media_type', 'unknown')");
+
+        let type_rows = type_builder
+            .build()
+            .fetch_all(self.pool())
+            .await
+            .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
         let mut by_type = HashMap::new();
         for row in type_rows {
+            let media_type: Option<String> = row.try_get("media_type").ok();
+            let count: i64 = row.try_get("count").unwrap_or(0);
             by_type.insert(
-                row.media_type.unwrap_or_else(|| "unknown".to_string()),
-                row.count.unwrap_or(0) as u64,
+                media_type.unwrap_or_else(|| "unknown".to_string()),
+                count as u64,
             );
         }
 
+        let total_files: i64 = total_row.try_get("count").unwrap_or(0);
+        let total_size: i64 = total_row.try_get("total_size").unwrap_or(0);
+
         Ok(MediaStats {
-            total_files: total_row.count.unwrap_or(0) as u64,
-            total_size: total_row
-                .total_size
-                .and_then(|size| size.to_string().parse::<u64>().ok())
-                .unwrap_or(0),
+            total_files: total_files as u64,
+            total_size: total_size as u64,
             by_type,
         })
     }
@@ -265,16 +454,32 @@ impl PostgresMediaRepository {
         Ok(count.unwrap_or(0) > 0)
     }
 
-    pub async fn delete_media(&self, id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
-
-        sqlx::query!("DELETE FROM media_files WHERE id = $1", uuid)
+    pub async fn delete_media_by_id(&self, id: Uuid) -> Result<()> {
+        sqlx::query!("DELETE FROM media_files WHERE id = $1", id)
             .execute(self.pool())
             .await
             .map_err(|e| MediaError::Internal(format!("Delete failed: {}", e)))?;
 
         Ok(())
+    }
+
+    pub async fn delete_media_by_path(&self, library_id: LibraryID, path: &str) -> Result<()> {
+        sqlx::query!(
+            "DELETE FROM media_files WHERE library_id = $1 AND file_path = $2",
+            library_id.as_uuid(),
+            path
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| MediaError::Internal(format!("Delete by path failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    pub async fn delete_media(&self, id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+        self.delete_media_by_id(uuid).await
     }
 
     pub async fn get_all_media(&self) -> Result<Vec<MediaFile>> {
@@ -288,7 +493,14 @@ impl PostgresMediaRepository {
     ) -> Result<()> {
         let uuid = Uuid::parse_str(media_id)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
+        self.update_technical_metadata_by_id(uuid, metadata).await
+    }
 
+    pub async fn update_technical_metadata_by_id(
+        &self,
+        id: Uuid,
+        metadata: &MediaFileMetadata,
+    ) -> Result<()> {
         let metadata_json = serde_json::to_value(metadata).map_err(|e| {
             MediaError::InvalidMedia(format!("Failed to serialize metadata: {}", e))
         })?;
@@ -296,7 +508,7 @@ impl PostgresMediaRepository {
         sqlx::query!(
             "UPDATE media_files SET technical_metadata = $1, updated_at = NOW() WHERE id = $2",
             metadata_json,
-            uuid
+            id
         )
         .execute(self.pool())
         .await
@@ -305,11 +517,11 @@ impl PostgresMediaRepository {
         Ok(())
     }
 
-    async fn store_media_file_in_transaction(
+    async fn upsert_media_in_transaction(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         media_file: &MediaFile,
-    ) -> Result<Uuid> {
+    ) -> Result<UpsertOutcome> {
         let library_check = sqlx::query!(
             "SELECT id FROM libraries WHERE id = $1",
             media_file.library_id.as_uuid()
@@ -341,7 +553,7 @@ impl PostgresMediaRepository {
 
         let file_path_str = media_file.path.to_string_lossy().to_string();
 
-        let actual_id = sqlx::query_scalar!(
+        let record = sqlx::query!(
             r#"
             INSERT INTO media_files (
                 id, library_id, file_path, filename, file_size, created_at,
@@ -354,7 +566,7 @@ impl PostgresMediaRepository {
                 technical_metadata = EXCLUDED.technical_metadata,
                 parsed_info = EXCLUDED.parsed_info,
                 updated_at = NOW()
-            RETURNING id
+            RETURNING id, (xmax = 0) as inserted
             "#,
             media_file.id,
             media_file.library_id.as_uuid(),
@@ -369,6 +581,9 @@ impl PostgresMediaRepository {
         .await
         .map_err(|e| MediaError::Internal(format!("Failed to store media file: {}", e)))?;
 
+        let actual_id = record.id;
+        let created = record.inserted.unwrap_or(false);
+
         if actual_id != media_file.id {
             tracing::info!(
                 "Media file path {} already existed with ID {}, using existing ID instead of {}",
@@ -378,6 +593,9 @@ impl PostgresMediaRepository {
             );
         }
 
-        Ok(actual_id)
+        Ok(UpsertOutcome {
+            id: actual_id,
+            created,
+        })
     }
 }

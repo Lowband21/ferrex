@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::database::MediaDatabase;
+use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::metadata::MetadataExtractor;
 use crate::orchestration::job::{
     ImageFetchJob, IndexUpsertJob, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
@@ -153,6 +154,36 @@ impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
             scan_reason: _,
         } = job;
 
+        #[cfg(feature = "demo")]
+        if crate::demo::policy().map_or(false, |policy| policy.skip_metadata_probe)
+            && crate::demo::is_demo_library(&library_id)
+        {
+            let mut context_obj: Map<String, Value> = match context {
+                Value::Object(map) => map,
+                Value::Null => Map::new(),
+                other => {
+                    let mut map = Map::new();
+                    map.insert("raw_context".into(), other);
+                    map
+                }
+            };
+            context_obj.insert("demo_mode".into(), Value::Bool(true));
+            context_obj.insert(
+                "note".into(),
+                Value::String("metadata probe skipped in demo mode".into()),
+            );
+
+            return Ok(MediaAnalyzed {
+                library_id,
+                path_norm,
+                fingerprint,
+                analyzed_at: Utc::now(),
+                streams_json: serde_json::json!({ "demo": true }),
+                thumbnails: Vec::new(),
+                context: Value::Object(context_obj),
+            });
+        }
+
         let library_type = Self::infer_library_type(&context);
         let path_for_probe = path_norm.clone();
         let extraction = tokio::task::spawn_blocking(move || {
@@ -229,38 +260,46 @@ impl MetadataActor for DefaultMetadataActor {
     }
 }
 
-#[derive(Debug)]
 pub struct DefaultIndexerActor {
-    db: Arc<MediaDatabase>,
+    media_refs: Arc<dyn MediaReferencesRepository>,
+}
+
+impl fmt::Debug for DefaultIndexerActor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DefaultIndexerActor")
+            .finish_non_exhaustive()
+    }
 }
 
 impl DefaultIndexerActor {
-    pub fn new(db: Arc<MediaDatabase>) -> Self {
-        Self { db }
+    pub fn new(media_refs: Arc<dyn MediaReferencesRepository>) -> Self {
+        Self { media_refs }
     }
 
     async fn hydrate_media(&self, uuid: Uuid) -> Result<Option<Media>> {
-        let backend = self.db.backend();
-
-        match backend.get_movie_reference(&MovieID(uuid)).await {
+        match self.media_refs.get_movie_reference(&MovieID(uuid)).await {
             Ok(movie) => return Ok(Some(Media::Movie(movie))),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => return Err(err),
         }
 
-        match backend.get_series_reference(&SeriesID(uuid)).await {
+        match self.media_refs.get_series_reference(&SeriesID(uuid)).await {
             Ok(series) => return Ok(Some(Media::Series(series))),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => return Err(err),
         }
 
-        match backend.get_season_reference(&SeasonID(uuid)).await {
+        match self.media_refs.get_season_reference(&SeasonID(uuid)).await {
             Ok(season) => return Ok(Some(Media::Season(season))),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => return Err(err),
         }
 
-        match backend.get_episode_reference(&EpisodeID(uuid)).await {
+        match self
+            .media_refs
+            .get_episode_reference(&EpisodeID(uuid))
+            .await
+        {
             Ok(episode) => return Ok(Some(Media::Episode(episode))),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => return Err(err),

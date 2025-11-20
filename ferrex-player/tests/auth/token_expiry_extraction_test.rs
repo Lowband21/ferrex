@@ -35,8 +35,11 @@ async fn test_token_expiry_extraction() {
         let token = AuthToken {
             access_token: token_str.clone(),
             refresh_token: String::new(),
-            expires_in: 0, // This should be updated based on JWT
-        };
+            expires_in: 0, // This should be updated based on JWT,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    };
         
         // The AuthManager should extract ~3600 seconds from this token
         println!("Created token expiring in ~3600 seconds");
@@ -55,7 +58,10 @@ async fn test_token_expiry_extraction() {
             access_token: token_str.clone(),
             refresh_token: String::new(),
             expires_in: 0,
-        };
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    };
         
         println!("Created token expiring in ~300 seconds");
         
@@ -72,7 +78,10 @@ async fn test_token_expiry_extraction() {
             access_token: token_str.clone(),
             refresh_token: String::new(),
             expires_in: 0,
-        };
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    };
         
         println!("Created token expiring in ~30 seconds");
         
@@ -89,7 +98,10 @@ async fn test_token_expiry_extraction() {
             access_token: token_str.clone(),
             refresh_token: String::new(),
             expires_in: 0,
-        };
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    };
         
         println!("Created already expired token");
         

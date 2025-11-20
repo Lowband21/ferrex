@@ -14,7 +14,7 @@ use crate::orchestration::actors::pipeline::{
 };
 use crate::orchestration::correlation::CorrelationCache;
 use crate::orchestration::events::{
-    DomainEvent, EventBus, JobEvent, JobEventPayload, stable_path_key,
+    JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
 };
 use crate::orchestration::job::{
     EnqueueRequest, FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
@@ -95,7 +95,7 @@ impl fmt::Debug for DispatcherActors {
 pub struct DefaultJobDispatcher<Q, E, C>
 where
     Q: QueueService + Send + Sync + 'static,
-    E: EventBus + Send + Sync + 'static,
+    E: ScanEventBus + Send + Sync + 'static,
     C: ScanCursorRepository + Send + Sync + 'static,
 {
     queue: Arc<Q>,
@@ -108,7 +108,7 @@ where
 impl<Q, E, C> fmt::Debug for DefaultJobDispatcher<Q, E, C>
 where
     Q: QueueService + Send + Sync + 'static,
-    E: EventBus + Send + Sync + 'static,
+    E: ScanEventBus + Send + Sync + 'static,
     C: ScanCursorRepository + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -125,7 +125,7 @@ where
 impl<Q, E, C> DefaultJobDispatcher<Q, E, C>
 where
     Q: QueueService + Send + Sync + 'static,
-    E: EventBus + Send + Sync + 'static,
+    E: ScanEventBus + Send + Sync + 'static,
     C: ScanCursorRepository + Send + Sync + 'static,
 {
     pub fn new(
@@ -369,7 +369,7 @@ where
         for media in &discovered {
             if let Err(err) = self
                 .events
-                .publish_domain(DomainEvent::MediaFileDiscovered(media.clone()))
+                .publish_scan_event(ScanEvent::MediaFileDiscovered(media.clone()))
                 .await
             {
                 // Continue discovering other items; collect error for admin visibility.
@@ -428,7 +428,7 @@ where
 
         if let Err(err) = self
             .events
-            .publish_domain(DomainEvent::FolderScanCompleted(summary.clone()))
+            .publish_scan_event(ScanEvent::FolderScanCompleted(summary.clone()))
             .await
         {
             return self.handle_media_error(err);
@@ -438,7 +438,7 @@ where
         for child in &children {
             if let Err(err) = self
                 .events
-                .publish_domain(DomainEvent::FolderDiscovered {
+                .publish_scan_event(ScanEvent::FolderDiscovered {
                     library_id: child.library_id,
                     folder_path: child.folder_path_norm.clone(),
                     parent: child.parent.clone(),
@@ -500,7 +500,7 @@ where
 
         if let Err(err) = self
             .events
-            .publish_domain(DomainEvent::MediaAnalyzed(analyzed.clone()))
+            .publish_scan_event(ScanEvent::MediaAnalyzed(analyzed.clone()))
             .await
         {
             return self.handle_media_error(err);
@@ -594,7 +594,7 @@ where
 
         if let Err(err) = self
             .events
-            .publish_domain(DomainEvent::MediaReadyForIndex(ready.clone()))
+            .publish_scan_event(ScanEvent::MediaReadyForIndex(ready.clone()))
             .await
         {
             return self.handle_media_error(err);
@@ -671,7 +671,7 @@ where
 
         if let Err(err) = self
             .events
-            .publish_domain(DomainEvent::Indexed(outcome))
+            .publish_scan_event(ScanEvent::Indexed(outcome))
             .await
         {
             return self.handle_media_error(err);
@@ -697,7 +697,7 @@ where
 impl<Q, E, C> JobDispatcher for DefaultJobDispatcher<Q, E, C>
 where
     Q: QueueService + Send + Sync + 'static,
-    E: EventBus + Send + Sync + 'static,
+    E: ScanEventBus + Send + Sync + 'static,
     C: ScanCursorRepository + Send + Sync + 'static,
 {
     async fn dispatch(&self, lease: &JobLease) -> DispatchStatus {
@@ -993,7 +993,7 @@ mod tests {
     async fn folder_scan_dispatch_enqueues_follow_up_work(pool: PgPool) {
         let (dispatcher, queue, events, cursors, _correlations) = dispatcher_fixture(&pool).await;
         let mut job_rx = events.subscribe();
-        let mut domain_rx = events.subscribe_domain();
+        let mut domain_rx = events.subscribe_scan();
 
         let lease = lease_for_payload(JobPayload::FolderScan(FolderScanJob {
             library_id: FIXTURE_LIB_A,
@@ -1038,7 +1038,7 @@ mod tests {
                 }
             }
             while let Ok(event) = domain_rx.try_recv() {
-                if matches!(event, DomainEvent::MediaFileDiscovered(_)) {
+                if matches!(event, ScanEvent::MediaFileDiscovered(_)) {
                     saw_discovered = true;
                 }
             }

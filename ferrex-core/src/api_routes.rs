@@ -128,6 +128,11 @@ pub mod v1 {
             pub const SEED: &str = v1_path!("/admin/dev/seed");
         }
 
+        pub mod demo {
+            pub const STATUS: &str = v1_path!("/admin/demo/status");
+            pub const RESET: &str = v1_path!("/admin/demo/reset");
+        }
+
         pub mod sessions {
             pub const REGISTER: &str = v1_path!("/admin/sessions/register");
             pub const REMOVE: &str = v1_path!("/admin/sessions/{device_id}");

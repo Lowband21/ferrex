@@ -1077,6 +1077,9 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::Message> {
                         access_token: token.access_token,
                         refresh_token: token.refresh_token,
                         expires_in: 900,
+                        session_id: None,
+                        device_session_id: None,
+                        user_id: None,
                     })
             },
             |result| match result {
@@ -1111,7 +1114,10 @@ pub fn handle_setup_complete(
     let auth_token = ferrex_core::user::AuthToken {
         access_token,
         refresh_token,
-        expires_in: 900, // 15 minutes default
+        expires_in: 900, // 15 minutes default,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
 
     Task::perform(

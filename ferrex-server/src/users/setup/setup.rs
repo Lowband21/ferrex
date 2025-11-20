@@ -22,7 +22,12 @@
 
 use axum::{extract::State, Json};
 use chrono::{DateTime, Duration, Utc};
-use ferrex_core::{api_types::ApiResponse, rbac::roles, user::AuthToken};
+use ferrex_core::{
+    api_types::ApiResponse,
+    auth::domain::services::{AuthenticationError, TokenBundle},
+    rbac::roles,
+    user::AuthToken,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -175,15 +180,15 @@ pub async fn check_setup_status(
 
     // Get user and library counts
     let users = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
     let libraries = state
-        .db
-        .backend()
+        .unit_of_work
+        .libraries
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
@@ -263,6 +268,8 @@ pub async fn create_initial_admin(
     let user_service = UserService::new(&state);
     // Ensure the built-in 'admin' role exists before assignment
     user_service.ensure_admin_role_exists().await?;
+    let password_clone = request.password.clone();
+
     let user = user_service
         .create_user(CreateUserParams {
             username: request.username,
@@ -274,8 +281,8 @@ pub async fn create_initial_admin(
 
     // Assign admin role
     let admin_role = state
-        .db
-        .backend()
+        .unit_of_work
+        .rbac
         .get_all_roles()
         .await
         .map_err(|e| AppError::internal(format!("Failed to load roles: {}", e)))?
@@ -287,10 +294,13 @@ pub async fn create_initial_admin(
         .assign_role(user.id, admin_role.id, user.id)
         .await?;
 
-    // Generate tokens
-    let auth_token = user_service
-        .generate_auth_tokens(user.id, Some("Ferrex Setup".to_string()))
-        .await?;
+    // Generate tokens via authentication service
+    let token_bundle = state
+        .auth_service
+        .authenticate_with_password(&user.username, &password_clone)
+        .await
+        .map_err(auth_error_to_app)?;
+    let auth_token = bundle_to_auth_token(token_bundle);
 
     info!(
         "Initial admin user created: {} ({}) from IP: {}",
@@ -309,15 +319,15 @@ async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus>
     let needs_setup = user_service.needs_setup().await?;
 
     let users = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
     let libraries = state
-        .db
-        .backend()
+        .unit_of_work
+        .libraries
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
@@ -328,4 +338,43 @@ async fn check_setup_status_internal(state: &AppState) -> AppResult<SetupStatus>
         user_count: users.len(),
         library_count: libraries.len(),
     })
+}
+
+fn auth_error_to_app(err: AuthenticationError) -> AppError {
+    match err {
+        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+            AppError::unauthorized("Invalid credentials".to_string())
+        }
+        AuthenticationError::TooManyFailedAttempts => {
+            AppError::rate_limited("Too many failed authentication attempts".to_string())
+        }
+        AuthenticationError::SessionExpired => {
+            AppError::unauthorized("Session expired".to_string())
+        }
+        AuthenticationError::DeviceNotFound | AuthenticationError::DeviceNotTrusted => {
+            AppError::forbidden("Device not eligible for authentication".to_string())
+        }
+        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+        AuthenticationError::DatabaseError(e) => {
+            AppError::internal(format!("Authentication failed: {e}"))
+        }
+    }
+}
+
+fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {
+    let expires_in = bundle
+        .session_token
+        .expires_at()
+        .signed_duration_since(Utc::now())
+        .num_seconds()
+        .max(0) as u32;
+
+    AuthToken {
+        access_token: bundle.session_token.as_str().to_string(),
+        refresh_token: bundle.refresh_token.as_str().to_string(),
+        expires_in,
+        session_id: Some(bundle.session_record_id),
+        device_session_id: bundle.device_session_id,
+        user_id: Some(bundle.user_id),
+    }
 }

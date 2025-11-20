@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,6 +13,8 @@ use tracing::{debug, warn};
 
 use crate::MediaIDLike;
 use crate::TvParser;
+use crate::database::ports::media_files::MediaFilesWritePort;
+use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::image::records::MediaImageVariantKey;
 use crate::image_service::{ImageService, TmdbImageSize};
 use crate::orchestration::actors::messages::ParentDescriptors;
@@ -34,7 +37,7 @@ use crate::types::media::{EpisodeReference, MovieReference, SeasonReference, Ser
 use crate::types::numbers::{EpisodeNumber, SeasonNumber};
 use crate::types::titles::{MovieTitle, SeriesTitle};
 use crate::types::urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL, UrlLike};
-use crate::{LibraryID, LibraryType, MediaDatabase, MediaError, Result};
+use crate::{LibraryID, LibraryType, MediaError, MediaImageKind, Result};
 use tmdb_api::{
     common::release_date::ReleaseDateKind,
     movie::{
@@ -65,11 +68,17 @@ static MOVIE_FILENAME_YEAR_DOT_PATTERN: Lazy<Regex> = Lazy::new(|| {
 const SEASON_NOT_FOUND_PREFIX: &str = "season_not_found";
 const EPISODE_NOT_FOUND_PREFIX: &str = "episode_not_found";
 
-#[derive(Debug)]
 pub struct TmdbMetadataActor {
-    db: Arc<MediaDatabase>,
+    media_refs: Arc<dyn MediaReferencesRepository>,
+    media_files_write: Arc<dyn MediaFilesWritePort>,
     tmdb: Arc<TmdbApiProvider>,
     image_service: Arc<ImageService>,
+}
+
+impl fmt::Debug for TmdbMetadataActor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TmdbMetadataActor").finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -83,12 +92,14 @@ struct EpisodeContextInfo {
 
 impl TmdbMetadataActor {
     pub fn new(
-        db: Arc<MediaDatabase>,
+        media_refs: Arc<dyn MediaReferencesRepository>,
+        media_files_write: Arc<dyn MediaFilesWritePort>,
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
     ) -> Self {
         Self {
-            db,
+            media_refs,
+            media_files_write,
             tmdb,
             image_service,
         }
@@ -239,7 +250,7 @@ impl TmdbMetadataActor {
         library_id: LibraryID,
         media_type: &str,
         media_id: Uuid,
-        image_type: &str,
+        image_type: MediaImageKind,
         order_index: i32,
         tmdb_path: Option<&str>,
         is_primary: bool,
@@ -255,13 +266,13 @@ impl TmdbMetadataActor {
                 media_type,
                 media_id,
                 tmdb_path,
-                image_type,
+                image_type.clone(),
                 order_index,
                 is_primary,
             )
             .await?;
 
-        for size in TmdbImageSize::recommended_for_type(image_type) {
+        for size in TmdbImageSize::recommended_for_kind(&image_type) {
             jobs.push(ImageFetchJob {
                 library_id,
                 source: ImageFetchSource::Tmdb {
@@ -270,7 +281,7 @@ impl TmdbMetadataActor {
                 key: MediaImageVariantKey {
                     media_type: media_type.to_string(),
                     media_id,
-                    image_type: image_type.to_string(),
+                    image_type: image_type.clone(),
                     order_index,
                     variant: size.as_str().to_string(),
                 },
@@ -290,7 +301,14 @@ impl TmdbMetadataActor {
         let image_key = format!("local/episode/{}/thumbnail.jpg", episode.file.id);
 
         self.image_service
-            .link_to_media("episode", episode.id.0, &image_key, "thumbnail", 0, true)
+            .link_to_media(
+                "episode",
+                episode.id.0,
+                &image_key,
+                MediaImageKind::Thumbnail,
+                0,
+                true,
+            )
             .await?;
 
         jobs.push(ImageFetchJob {
@@ -302,7 +320,7 @@ impl TmdbMetadataActor {
             key: MediaImageVariantKey {
                 media_type: "episode".to_string(),
                 media_id: episode.id.0,
-                image_type: "thumbnail".to_string(),
+                image_type: MediaImageKind::Thumbnail,
                 order_index: 0,
                 variant: "original".to_string(),
             },
@@ -351,7 +369,7 @@ impl TmdbMetadataActor {
                 library_id,
                 "person",
                 person_uuid,
-                "cast",
+                MediaImageKind::Cast,
                 member.image_slot as i32,
                 Some(path),
                 member.image_slot == 0,
@@ -971,7 +989,7 @@ impl TmdbMetadataActor {
                 )
                 .await?;
 
-            self.db.backend().store_movie_reference(&movie_ref).await?;
+            self.media_refs.store_movie_reference(&movie_ref).await?;
 
             let mut image_jobs = Vec::new();
             if let MediaDetailsOption::Details(TmdbDetails::Movie(details)) = &movie_ref.details {
@@ -979,7 +997,7 @@ impl TmdbMetadataActor {
                     command.job.library_id,
                     "movie",
                     movie_ref.id.0,
-                    "poster",
+                    MediaImageKind::Poster,
                     0,
                     details.poster_path.as_deref(),
                     true,
@@ -991,7 +1009,7 @@ impl TmdbMetadataActor {
                     command.job.library_id,
                     "movie",
                     movie_ref.id.0,
-                    "backdrop",
+                    MediaImageKind::Backdrop,
                     0,
                     details.backdrop_path.as_deref(),
                     true,
@@ -1163,7 +1181,8 @@ impl TmdbMetadataActor {
             media_file.media_file_metadata = Some(meta.clone());
         }
 
-        let actual_file_id = self.db.backend().store_media(media_file.clone()).await?;
+        let upsert = self.media_files_write.upsert(media_file.clone()).await?;
+        let actual_file_id = upsert.id;
         media_file.id = actual_file_id;
 
         let movie_id = MovieID::new();
@@ -1277,7 +1296,7 @@ impl TmdbMetadataActor {
             theme_color: None,
         };
 
-        self.db.backend().store_movie_reference(&movie_ref).await?;
+        self.media_refs.store_movie_reference(&movie_ref).await?;
 
         Self::annotate_context(&mut command.analyzed.context, 0);
 
@@ -1341,7 +1360,7 @@ impl TmdbMetadataActor {
                 command.job.library_id,
                 "series",
                 series_ref.id.0,
-                "poster",
+                MediaImageKind::Poster,
                 0,
                 details.poster_path.as_deref(),
                 true,
@@ -1353,7 +1372,7 @@ impl TmdbMetadataActor {
                 command.job.library_id,
                 "series",
                 series_ref.id.0,
-                "backdrop",
+                MediaImageKind::Backdrop,
                 0,
                 details.backdrop_path.as_deref(),
                 true,
@@ -1371,7 +1390,7 @@ impl TmdbMetadataActor {
                 command.job.library_id,
                 "season",
                 season_ref.id.0,
-                "poster",
+                MediaImageKind::Poster,
                 0,
                 details.poster_path.as_deref(),
                 true,
@@ -1397,7 +1416,7 @@ impl TmdbMetadataActor {
                         command.job.library_id,
                         "episode",
                         episode_ref.id.0,
-                        "thumbnail",
+                        MediaImageKind::Thumbnail,
                         0,
                         Some(still),
                         true,
@@ -1457,7 +1476,7 @@ impl TmdbMetadataActor {
         parent: Option<&ParentDescriptors>,
         excluded_tmdb_ids: &HashSet<u64>,
     ) -> Result<SeriesReference> {
-        let locator = SeriesLocator::new(self.db.backend());
+        let locator = SeriesLocator::new(self.media_refs.clone());
         if let Some(existing) = locator
             .find_existing_series(library_id, parent, &info.series.normalized_title)
             .await?
@@ -1507,8 +1526,7 @@ impl TmdbMetadataActor {
             }
 
             if let Some(existing) = self
-                .db
-                .backend()
+                .media_refs
                 .get_series_by_tmdb_id(library_id, tmdb_id)
                 .await?
                 && (existing.tmdb_id == 0 || !excluded_tmdb_ids.contains(&existing.tmdb_id))
@@ -1518,14 +1536,10 @@ impl TmdbMetadataActor {
 
             let mut series_ref = self.build_series_reference(library_id, tmdb_id).await?;
 
-            self.db
-                .backend()
-                .store_series_reference(&series_ref)
-                .await?;
+            self.media_refs.store_series_reference(&series_ref).await?;
 
             if let Some(stored) = self
-                .db
-                .backend()
+                .media_refs
                 .get_series_by_tmdb_id(library_id, tmdb_id)
                 .await?
             {
@@ -1549,7 +1563,7 @@ impl TmdbMetadataActor {
             info.series.raw_title
         );
         let stub = self.build_series_stub(library_id, info, parent)?;
-        self.db.backend().store_series_reference(&stub).await?;
+        self.media_refs.store_series_reference(&stub).await?;
         Ok(stub)
     }
 
@@ -1752,8 +1766,7 @@ impl TmdbMetadataActor {
         season_number: u32,
     ) -> Result<SeasonReference> {
         if let Some(existing) = self
-            .db
-            .backend()
+            .media_refs
             .get_series_seasons(&series_ref.id)
             .await?
             .into_iter()
@@ -1794,11 +1807,7 @@ impl TmdbMetadataActor {
             .build_season_reference(library_id, series_ref, season_number_u8, season_details)
             .await?;
 
-        let actual_id = self
-            .db
-            .backend()
-            .store_season_reference(&season_ref)
-            .await?;
+        let actual_id = self.media_refs.store_season_reference(&season_ref).await?;
 
         if season_ref.id.to_uuid() != actual_id {
             season_ref.id = SeasonID(actual_id);
@@ -1882,7 +1891,8 @@ impl TmdbMetadataActor {
             media_file.media_file_metadata = Some(meta);
         }
 
-        let actual_file_id = self.db.backend().store_media(media_file.clone()).await?;
+        let upsert = self.media_files_write.upsert(media_file.clone()).await?;
+        let actual_file_id = upsert.id;
         media_file.id = actual_file_id;
 
         let episode_number_u8 = u8::try_from(info.episode_number).map_err(|_| {
@@ -1977,8 +1987,7 @@ impl TmdbMetadataActor {
             created_at: file_created_at,
         };
 
-        self.db
-            .backend()
+        self.media_refs
             .store_episode_reference(&episode_ref)
             .await?;
 

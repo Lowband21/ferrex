@@ -14,7 +14,7 @@ use crate::orchestration::{
     config::OrchestratorConfig,
     correlation::CorrelationCache,
     dispatcher::{DispatchStatus, JobDispatcher},
-    events::{DomainEvent, EventBus, JobEvent, JobEventPayload, stable_path_key},
+    events::{JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key},
     job::{DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload, JobPriority, ScanReason},
     lease::{DequeueRequest, LeaseRenewal, QueueSelector},
     queue::{LeaseExpiryScanner, QueueService},
@@ -33,7 +33,7 @@ pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 pub struct OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     config: OrchestratorConfig,
@@ -53,7 +53,7 @@ where
 impl<Q, E, B> fmt::Debug for OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -96,7 +96,7 @@ where
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     pub fn new(
@@ -220,11 +220,11 @@ pub enum OrchestratorCommand {
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     fn spawn_domain_event_router(&self) {
-        let mut domain_rx = self.events().subscribe_domain();
+        let mut domain_rx = self.events().subscribe_scan();
         let queue = self.queue();
         let events = self.events();
         let correlations = self.correlations.clone();
@@ -247,7 +247,7 @@ where
                         break;
                     }
                     evt = domain_rx.recv() => match evt {
-                        Ok(DomainEvent::FolderDiscovered { library_id, folder_path, parent, reason }) => {
+                        Ok(ScanEvent::FolderDiscovered { library_id, folder_path, parent, reason }) => {
                             // Build FolderScan job from event and enqueue
                             let encoded_parent = match serde_json::to_string(&parent) {
                                 Ok(s) => s,
@@ -931,7 +931,7 @@ where
 impl<Q, E, B> OrchestratorRuntime<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     pub async fn submit_library_command(
@@ -977,7 +977,7 @@ impl fmt::Debug for OrchestratorRuntimeHandle {
 pub struct OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     config: OrchestratorConfig,
@@ -991,7 +991,7 @@ where
 impl<Q, E, B> fmt::Debug for OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1020,7 +1020,7 @@ where
 impl<Q, E, B> OrchestratorRuntimeBuilder<Q, E, B>
 where
     Q: QueueService + LeaseExpiryScanner + 'static,
-    E: EventBus + JobEventStream + crate::orchestration::runtime::DomainEventStream + 'static,
+    E: ScanEventBus + JobEventStream + crate::orchestration::runtime::ScanEventStream + 'static,
     B: WorkloadBudget + 'static,
 {
     pub fn new(config: OrchestratorConfig) -> Self {

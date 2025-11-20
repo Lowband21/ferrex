@@ -12,7 +12,7 @@ use uuid::Uuid;
 /// - Real-time notifications
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum DomainEvent {
+pub enum AuthEvent {
     /// A new device was registered
     DeviceRegistered {
         session_id: Uuid,
@@ -104,7 +104,7 @@ pub enum DomainEvent {
     },
 }
 
-impl DomainEvent {
+impl AuthEvent {
     /// Get the timestamp of the event
     pub fn timestamp(&self) -> DateTime<Utc> {
         match self {
@@ -162,3 +162,6 @@ impl DomainEvent {
         }
     }
 }
+
+#[cfg(feature = "compat")]
+pub type DomainEvent = AuthEvent;

@@ -135,8 +135,8 @@ pub async fn get_folder_inventory(
 ) -> Result<Json<FolderInventoryResponse>, StatusCode> {
     // Fetch all folders for the library
     let all_folders = state
-        .db
-        .backend()
+        .unit_of_work
+        .folder_inventory
         .get_folder_inventory(LibraryID(library_id))
         .await
         .map_err(|e| {
@@ -197,8 +197,8 @@ pub async fn get_scan_progress(
 ) -> Result<Json<ScanProgressResponse>, StatusCode> {
     // Fetch all folders for the library
     let folders = state
-        .db
-        .backend()
+        .unit_of_work
+        .folder_inventory
         .get_folder_inventory(LibraryID(library_id))
         .await
         .map_err(|e| {

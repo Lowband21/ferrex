@@ -1,23 +1,35 @@
 use anyhow::{Context, Result};
-use ferrex_core::MediaDatabase;
+use ferrex_core::database::ports::media_files::MediaFilesReadPort;
 use ffmpeg_next as ffmpeg;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use uuid::Uuid;
 
-#[derive(Debug)]
 pub struct ThumbnailService {
     cache_dir: PathBuf,
-    db: Arc<MediaDatabase>,
+    media_files: Arc<dyn MediaFilesReadPort>,
+}
+
+impl fmt::Debug for ThumbnailService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThumbnailService")
+            .field("cache_dir", &self.cache_dir)
+            .field("media_files_repo", &"dyn MediaFilesReadPort")
+            .finish()
+    }
 }
 
 impl ThumbnailService {
-    pub fn new(cache_dir: PathBuf, db: Arc<MediaDatabase>) -> Result<Self> {
+    pub fn new(cache_dir: PathBuf, media_files: Arc<dyn MediaFilesReadPort>) -> Result<Self> {
         // Initialize ffmpeg
         ffmpeg::init().context("Failed to initialize ffmpeg")?;
 
-        Ok(Self { cache_dir, db })
+        Ok(Self {
+            cache_dir,
+            media_files,
+        })
     }
 
     /// Get the path to a cached thumbnail
@@ -84,11 +96,10 @@ impl ThumbnailService {
 
         // Get media file path from database
         let media = self
-            .db
-            .backend()
-            .get_media(media_id)
+            .media_files
+            .get_by_id(media_id)
             .await
-            .context("Failed to get media from database")?
+            .context("Failed to get media from repository")?
             .ok_or_else(|| anyhow::anyhow!("Media not found"))?;
 
         let video_path = media.path.to_string_lossy().to_string();

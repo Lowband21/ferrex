@@ -155,7 +155,7 @@ pub async fn require_permission_async(
         perms.clone()
     } else {
         // Load permissions from database
-        match state.db.backend().get_user_permissions(user.id).await {
+        match state.unit_of_work.rbac.get_user_permissions(user.id).await {
             Ok(perms) => {
                 request.extensions_mut().insert(perms.clone());
                 perms

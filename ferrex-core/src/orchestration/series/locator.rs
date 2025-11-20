@@ -1,29 +1,31 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
-use crate::database::traits::MediaDatabaseTrait;
+use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::orchestration::actors::messages::ParentDescriptors;
 use crate::orchestration::series::clean_series_title;
 use crate::types::media::SeriesReference;
 use crate::{LibraryID, Result};
 
 /// Helper responsible for locating existing series references using canonical hints.
-pub struct SeriesLocator<'a> {
-    backend: &'a dyn MediaDatabaseTrait,
+#[derive(Clone)]
+pub struct SeriesLocator {
+    media_refs: Arc<dyn MediaReferencesRepository>,
 }
 
-impl<'a> fmt::Debug for SeriesLocator<'a> {
+impl fmt::Debug for SeriesLocator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let backend_type = std::any::type_name_of_val(self.backend);
+        let backend_type = std::any::type_name_of_val(self.media_refs.as_ref());
         f.debug_struct("SeriesLocator")
             .field("backend_type", &backend_type)
             .finish()
     }
 }
 
-impl<'a> SeriesLocator<'a> {
-    pub fn new(backend: &'a dyn MediaDatabaseTrait) -> Self {
-        Self { backend }
+impl SeriesLocator {
+    pub fn new(media_refs: Arc<dyn MediaReferencesRepository>) -> Self {
+        Self { media_refs }
     }
 
     /// Attempt to find an existing series using the parent descriptors and a fallback title.
@@ -35,7 +37,7 @@ impl<'a> SeriesLocator<'a> {
     ) -> Result<Option<SeriesReference>> {
         if let Some(desc) = descriptors
             && let Some(id) = desc.series_id
-            && let Ok(series) = self.backend.get_series_reference(&id).await
+            && let Ok(series) = self.media_refs.get_series_reference(&id).await
         {
             return Ok(Some(series));
         }
@@ -46,7 +48,11 @@ impl<'a> SeriesLocator<'a> {
                 continue;
             }
 
-            if let Some(existing) = self.backend.find_series_by_name(library_id, &title).await? {
+            if let Some(existing) = self
+                .media_refs
+                .find_series_by_name(library_id, &title)
+                .await?
+            {
                 return Ok(Some(existing));
             }
         }

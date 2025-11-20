@@ -36,6 +36,10 @@ pub struct Config {
     // Development settings
     pub dev_mode: bool,
 
+    // Authentication secrets (pepper for Argon2 + HMAC key for tokens)
+    pub auth_password_pepper: String,
+    pub auth_token_key: String,
+
     /// Scanner/orchestrator settings used to tune queue depth, concurrency,
     /// and maintenance behaviour.
     #[serde(default)]
@@ -83,6 +87,11 @@ impl Config {
                 .unwrap_or_else(|_| "false".to_string())
                 .parse()
                 .unwrap_or(false),
+
+            auth_password_pepper: env::var("AUTH_PASSWORD_PEPPER")
+                .unwrap_or_else(|_| "change-me-password-pepper".to_string()),
+            auth_token_key: env::var("AUTH_TOKEN_KEY")
+                .unwrap_or_else(|_| "change-me-hmac-key".to_string()),
 
             scanner,
         })

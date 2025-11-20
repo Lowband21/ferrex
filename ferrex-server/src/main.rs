@@ -7,7 +7,7 @@
 //! Ferrex Server is a comprehensive media streaming solution that provides:
 //!
 //! - **Media Streaming**: Simple direct streaming with transcoding on the way
-//! - **User Management**: JWT-based authentication with session tracking
+//! - **User Management**: Opaque session tokens with refresh rotation and device tracking
 //! - **Watch Progress**: Automatic progress tracking and "continue watching" features
 //! - **Synchronized Playback**: Real-time synchronized viewing sessions via WebSocket (Soon)
 //! - **Library Management**: Automatic media scanning and metadata enrichment
@@ -31,10 +31,17 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
-use ferrex_core::{
-    LibraryActorConfig, LibraryReference, MediaDatabase,
-    auth::domain::services::create_authentication_service, database::PostgresDatabase,
+use ferrex_core::database::ports::media_files::{
+    MediaFileFilter, MediaFileSort, MediaFileSortField, Page, SortDirection,
 };
+use ferrex_core::{
+    LibraryActorConfig, LibraryReference,
+    application::unit_of_work::AppUnitOfWork,
+    auth::{AuthCrypto, domain::services::create_authentication_service},
+    database::PostgresDatabase,
+};
+#[cfg(feature = "demo")]
+use ferrex_server::demo::{DemoCoordinator, derive_demo_database_url};
 use ferrex_server::{
     infra::{
         app_state::AppState,
@@ -81,6 +88,11 @@ struct Args {
     /// Server host (overrides config)
     #[arg(long, env = "SERVER_HOST")]
     host: Option<String>,
+
+    /// Enable demo mode with synthetic media, demo database, and default user
+    #[cfg(feature = "demo")]
+    #[arg(long, env = "FERREX_DEMO_MODE", default_value_t = false)]
+    demo: bool,
 }
 
 fn derive_database_url_from_env() -> Option<String> {
@@ -112,6 +124,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(host) = args.host {
         config.server_host = host;
     }
+
+    #[cfg(feature = "demo")]
+    let mut demo_coordinator: Option<Arc<DemoCoordinator>> = None;
 
     tracing_subscriber::registry()
         .with(
@@ -146,10 +161,17 @@ async fn main() -> anyhow::Result<()> {
     config.normalize_paths()?;
     info!("Cache directories prepared");
 
-    let config = Arc::new(config);
+    let tmdb_provider = Arc::new(ferrex_core::providers::TmdbApiProvider::new());
+
+    #[cfg(feature = "demo")]
+    if args.demo {
+        let coordinator = DemoCoordinator::bootstrap(&mut config, tmdb_provider.clone()).await?;
+        demo_coordinator = Some(Arc::new(coordinator));
+        info!("Demo mode enabled - synthetic media tree prepared");
+    }
 
     // Create database instance based on configuration
-    let (database_url, url_source) = match config
+    let (mut database_url, mut url_source) = match config
         .database_url
         .as_deref()
         .map(str::trim)
@@ -167,6 +189,13 @@ async fn main() -> anyhow::Result<()> {
         },
     };
 
+    #[cfg(feature = "demo")]
+    if demo_coordinator.is_some() {
+        database_url = derive_demo_database_url(&database_url)?;
+        url_source = "demo";
+        config.database_url = Some(database_url.clone());
+    }
+
     if !(database_url.starts_with("postgres://") || database_url.starts_with("postgresql://")) {
         error!("Only PostgreSQL database URLs are supported");
         return Err(anyhow::anyhow!(
@@ -176,8 +205,10 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Connecting to PostgreSQL via {}", url_source);
 
+    let config = Arc::new(config);
     let with_cache = config.redis_url.is_some();
-    let db = match MediaDatabase::new_postgres(&database_url, with_cache).await {
+
+    let postgres_backend = match PostgresDatabase::new(&database_url).await {
         Ok(database) => {
             info!("Successfully connected to PostgreSQL");
             Arc::new(database)
@@ -188,10 +219,25 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Err(e) = db.backend().initialize_schema().await {
+    if let Err(e) = postgres_backend.initialize_schema().await {
         warn!("Failed to initialize database schema: {}", e);
     }
     info!("Database initialized successfully");
+
+    let unit_of_work = Arc::new(
+        AppUnitOfWork::from_postgres(postgres_backend.clone())
+            .expect("Failed to compose AppUnitOfWork from Postgres backend"),
+    );
+    let postgres_pool = postgres_backend.pool().clone();
+
+    #[cfg(feature = "demo")]
+    if let Some(coordinator) = &demo_coordinator {
+        let seeded = coordinator.sync_database(unit_of_work.clone()).await?;
+        info!(
+            demo_library_count = seeded.len(),
+            "Demo libraries synchronised"
+        );
+    }
 
     // TMDB integration handled via ferrex_core providers and orchestrator
     let tmdb_api_key = std::env::var("TMDB_API_KEY").ok();
@@ -201,28 +247,32 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let thumbnail_service = Arc::new(
-        ThumbnailService::new(config.cache_dir.clone(), db.clone())
-            .expect("Failed to initialize thumbnail service"),
+        ThumbnailService::new(
+            config.cache_dir.clone(),
+            unit_of_work.media_files_read.clone(),
+        )
+        .expect("Failed to initialize thumbnail service"),
     );
 
     let image_service = Arc::new(ferrex_core::ImageService::new(
-        db.clone(),
+        unit_of_work.media_files_read.clone(),
+        unit_of_work.images.clone(),
         config.cache_dir.clone(),
     ));
 
-    let tmdb_provider = Arc::new(ferrex_core::providers::TmdbApiProvider::new());
     let orchestrator = Arc::new(
         ScanOrchestrator::postgres(
             config.scanner.orchestrator.clone(),
-            db.clone(),
+            postgres_backend.clone(),
             tmdb_provider.clone(),
             image_service.clone(),
+            unit_of_work.clone(),
         )
         .await?,
     );
 
-    let libraries = db
-        .backend()
+    let libraries = unit_of_work
+        .libraries
         .list_libraries()
         .await
         .map_err(|err| anyhow::anyhow!("failed to list libraries: {err}"))?;
@@ -261,7 +311,8 @@ async fn main() -> anyhow::Result<()> {
 
     let quiescence = Duration::from_millis(config.scanner.quiescence_window_ms.max(1));
     let scan_control = Arc::new(ScanControlPlane::with_quiescence_window(
-        db.clone(),
+        unit_of_work.clone(),
+        postgres_backend.clone(),
         orchestrator.clone(),
         quiescence,
     ));
@@ -283,21 +334,37 @@ async fn main() -> anyhow::Result<()> {
 
     let websocket_manager = Arc::new(websocket::ConnectionManager::new());
 
-    // Initialize authentication service
-    let auth_service = {
-        // Get the PostgreSQL pool from the MediaDatabase
-        let postgres_backend = db
-            .as_any()
-            .downcast_ref::<PostgresDatabase>()
-            .expect("Expected PostgreSQL backend for authentication service");
+    let auth_crypto = Arc::new(
+        AuthCrypto::new(
+            config.auth_password_pepper.as_bytes(),
+            config.auth_token_key.as_bytes(),
+        )
+        .context("failed to initialize authentication crypto helpers")?,
+    );
 
-        Arc::new(create_authentication_service(
-            postgres_backend.pool().clone(),
-        ))
-    };
+    // Initialize authentication repositories and domain services
+    let user_auth_repository: Arc<dyn UserAuthenticationRepository> =
+        Arc::new(PostgresUserAuthRepository::new(postgres_pool.clone()));
+    let device_sessions: Arc<dyn DeviceSessionRepository> = Arc::new(
+        PostgresDeviceSessionRepository::new(postgres_pool.clone(), auth_crypto.clone()),
+    );
+    let refresh_tokens: Arc<dyn RefreshTokenRepository> =
+        Arc::new(PostgresRefreshTokenRepository::new(postgres_pool.clone()));
+    let auth_sessions: Arc<dyn AuthSessionRepository> =
+        Arc::new(PostgresAuthSessionRepository::new(postgres_pool.clone()));
+
+    let auth_service = Arc::new(AuthenticationService::new(
+        user_auth_repository.clone(),
+        device_sessions.clone(),
+        refresh_tokens.clone(),
+        auth_sessions.clone(),
+        auth_crypto.clone(),
+    ));
 
     let state = AppState {
-        db: db.clone(),
+        unit_of_work: unit_of_work.clone(),
+        postgres: postgres_backend.clone(),
+        cache_enabled: with_cache,
         config: config.clone(),
         thumbnail_service,
         scan_control: scan_control.clone(),
@@ -305,8 +372,17 @@ async fn main() -> anyhow::Result<()> {
         image_service,
         websocket_manager,
         auth_service,
+        auth_crypto: auth_crypto.clone(),
         admin_sessions: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(feature = "demo")]
+        demo: demo_coordinator.clone(),
     };
+
+    #[cfg(feature = "demo")]
+    if let Some(coordinator) = &demo_coordinator {
+        coordinator.ensure_demo_user(&state).await?;
+        info!("Demo user ensured");
+    }
 
     if let Err(err) = UserService::new(&state).ensure_admin_role_exists().await {
         warn!(error = %err, "Failed to bootstrap RBAC defaults");
@@ -491,7 +567,12 @@ async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, St
     // Check database connectivity
     let mut is_unhealthy = false;
 
-    match state.db.backend().get_stats().await {
+    match state
+        .unit_of_work
+        .media_files_read
+        .stats(MediaFileFilter::default())
+        .await
+    {
         Ok(stats) => {
             health_status["checks"]["database"] = json!({
                 "status": "healthy",
@@ -509,7 +590,7 @@ async fn health_handler(State(state): State<AppState>) -> Result<Json<Value>, St
     }
 
     // Check cache if available
-    if let Some(_cache) = state.db.cache() {
+    if state.cache_enabled {
         health_status["checks"]["cache"] = json!({
             "status": "healthy",
             "type": "redis"

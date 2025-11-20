@@ -4,6 +4,7 @@
 //! users to authenticate with passwords initially, then use PINs for convenience
 //! on trusted devices.
 
+pub mod crypto;
 pub mod device;
 pub mod domain;
 #[cfg(feature = "database")]
@@ -13,9 +14,8 @@ pub mod rate_limit;
 pub mod session;
 pub mod state;
 pub mod state_machine;
-#[cfg(feature = "database")]
-pub mod state_manager;
 
+pub use crypto::{AuthCrypto, AuthCryptoError};
 pub use device::*;
 #[cfg(feature = "database")]
 pub use pin::*;
@@ -84,7 +84,12 @@ pub enum AuthError {
 }
 
 /// Authentication event types for audit logging
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "database", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "database",
+    sqlx(type_name = "auth_event_type", rename_all = "snake_case")
+)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthEventType {
     #[serde(rename = "password_login_success")]
     PasswordLoginSuccess,
@@ -152,7 +157,8 @@ impl AuthEventType {
 pub struct AuthEvent {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
-    pub device_id: Option<Uuid>,
+    pub device_session_id: Option<Uuid>,
+    pub session_id: Option<Uuid>,
     pub event_type: AuthEventType,
     pub success: bool,
     pub failure_reason: Option<String>,

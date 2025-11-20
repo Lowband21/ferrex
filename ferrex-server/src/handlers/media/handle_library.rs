@@ -58,8 +58,8 @@ pub async fn get_library_media_util(
     library: LibraryReference,
 ) -> Result<LibraryMediaResponse, StatusCode> {
     let media = match state
-        .db
-        .backend()
+        .unit_of_work
+        .media_refs
         .get_library_media_references(library.id, library.library_type)
         .await
     {
@@ -80,7 +80,12 @@ pub async fn get_library_media_handler(
     info!("Getting media references for library: {}", library_id);
 
     // Get library reference
-    let library = match state.db.backend().get_library_reference(library_id).await {
+    let library = match state
+        .unit_of_work
+        .libraries
+        .get_library_reference(library_id)
+        .await
+    {
         Ok(lib) => lib,
         Err(e) => {
             error!("Failed to get library reference: {}", e);
@@ -107,14 +112,14 @@ pub async fn get_library_media_handler(
 }
 
 pub async fn get_libraries_with_media_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.db.backend().list_library_references().await {
+    match state.unit_of_work.libraries.list_library_references().await {
         Ok(libraries) => {
             let mut library_results = Vec::new();
             for library_ref in libraries {
                 let library = state
-                    .db
-                    .backend()
-                    .get_library(&library_ref.id)
+                    .unit_of_work
+                    .libraries
+                    .get_library(library_ref.id)
                     .await
                     .map_err(|e| {
                         error!("Failed to get library: {}", e);
@@ -186,7 +191,12 @@ pub async fn get_library_sorted_indices_handler(
     info!("Getting presorted IDs for library: {}", library_id);
 
     // Lookup library reference to get library type
-    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+    let library_ref = match state
+        .unit_of_work
+        .libraries
+        .get_library_reference(library_id)
+        .await
+    {
         Ok(lib) => lib,
         Err(e) => {
             error!("Failed to get library reference: {}", e);
@@ -220,13 +230,7 @@ pub async fn get_library_sorted_indices_handler(
     }
 
     // Build SQL that uses precomputed positions from movie_sort_positions
-    let pool = state
-        .db
-        .backend()
-        .as_any()
-        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
-        .expect("Postgres backend")
-        .pool();
+    let pool = state.postgres.pool();
 
     let (order_col, order_direction) = match (sort_field, sort_order) {
         (SortBy::Title, SortOrder::Ascending) => ("msp.title_pos", "ASC"),
@@ -304,7 +308,12 @@ pub async fn post_library_filtered_indices_handler(
 ) -> impl IntoResponse {
     info!("Getting filtered indices for library: {}", library_id);
 
-    let library_ref = match state.db.backend().get_library_reference(library_id).await {
+    let library_ref = match state
+        .unit_of_work
+        .libraries
+        .get_library_reference(library_id)
+        .await
+    {
         Ok(lib) => lib,
         Err(e) => {
             error!("Failed to get library reference: {}", e);
@@ -317,13 +326,7 @@ pub async fn post_library_filtered_indices_handler(
         return Err(StatusCode::NOT_IMPLEMENTED);
     }
 
-    let pool = state
-        .db
-        .backend()
-        .as_any()
-        .downcast_ref::<ferrex_core::database::postgres::PostgresDatabase>()
-        .expect("Postgres backend")
-        .pool();
+    let pool = state.postgres.pool();
 
     let library_uuid = library_ref.id.as_uuid();
     let user_scope = requires_user_scope(&spec).then_some(user.id);
@@ -433,7 +436,7 @@ pub async fn fetch_media_handler(
     );
 
     match request.media_id {
-        MediaID::Movie(id) => match state.db.backend().get_movie_reference(&id).await {
+        MediaID::Movie(id) => match state.unit_of_work.media_refs.get_movie_reference(&id).await {
             Ok(movie) => {
                 if matches!(movie.details, MediaDetailsOption::Endpoint(_)) {
                     warn!(
@@ -452,7 +455,12 @@ pub async fn fetch_media_handler(
                 Ok(Json(ApiResponse::error(e.to_string())))
             }
         },
-        MediaID::Series(id) => match state.db.backend().get_series_reference(&id).await {
+        MediaID::Series(id) => match state
+            .unit_of_work
+            .media_refs
+            .get_series_reference(&id)
+            .await
+        {
             Ok(series) => {
                 if matches!(series.details, MediaDetailsOption::Endpoint(_)) {
                     warn!(
@@ -472,7 +480,12 @@ pub async fn fetch_media_handler(
             }
         },
         MediaID::Season(id) => {
-            match state.db.backend().get_season_reference(&id).await {
+            match state
+                .unit_of_work
+                .media_refs
+                .get_season_reference(&id)
+                .await
+            {
                 Ok(season) => {
                     // TODO: Implement on-demand season metadata fetching if needed
                     Ok(Json(ApiResponse::success(Media::Season(season))))
@@ -484,7 +497,12 @@ pub async fn fetch_media_handler(
             }
         }
         MediaID::Episode(id) => {
-            match state.db.backend().get_episode_reference(&id).await {
+            match state
+                .unit_of_work
+                .media_refs
+                .get_episode_reference(&id)
+                .await
+            {
                 Ok(episode) => {
                     // TODO: Implement on-demand episode metadata fetching if needed
                     Ok(Json(ApiResponse::success(Media::Episode(episode))))
@@ -512,14 +530,14 @@ pub async fn manual_match_media_handler(
     match request.media_id {
         MediaID::Movie(id) => {
             match state
-                .db
-                .backend()
+                .unit_of_work
+                .media_refs
                 .update_movie_tmdb_id(&id, request.tmdb_id)
                 .await
             {
                 Ok(_) => {
                     // Send update event
-                    if let Ok(movie) = state.db.backend().get_movie_reference(&id).await {
+                    if let Ok(movie) = state.unit_of_work.media_refs.get_movie_reference(&id).await {
                         state.scan_control.publish_media_event(MediaEvent::MovieUpdated { movie });
                     }
                     Ok(Json(ApiResponse::success(
@@ -534,8 +552,8 @@ pub async fn manual_match_media_handler(
         }
         MediaID::Series(id) => {
             match state
-                .db
-                .backend()
+                .unit_of_work
+                .media_refs
                 .update_series_tmdb_id(&id, request.tmdb_id)
                 .await
             {
@@ -544,7 +562,7 @@ pub async fn manual_match_media_handler(
                     // TODO: This should cascade to seasons and episodes
 
                     // Send update event
-                    if let Ok(series) = state.db.backend().get_series_reference(&id).await {
+                    if let Ok(series) = state.unit_of_work.media_refs.get_series_reference(&id).await {
                         state.scan_control.publish_media_event(MediaEvent::SeriesUpdated { series });
                     }
                     Ok(Json(ApiResponse::success(
@@ -570,7 +588,7 @@ pub async fn list_libraries_handler(
 ) -> Result<Json<ApiResponse<Vec<LibraryReference>>>, StatusCode> {
     info!("Listing all libraries");
 
-    match state.db.backend().list_library_references().await {
+    match state.unit_of_work.libraries.list_library_references().await {
         Ok(libraries) => {
             info!("Found {} libraries", libraries.len());
             Ok(Json(ApiResponse::success(libraries)))
@@ -589,7 +607,7 @@ pub async fn get_library_handler(
 ) -> Result<Json<ApiResponse<LibraryReference>>, StatusCode> {
     info!("Getting library: {}", id);
 
-    match state.db.backend().get_library_reference(id).await {
+    match state.unit_of_work.libraries.get_library_reference(id).await {
         Ok(library) => Ok(Json(ApiResponse::success(library))),
         Err(e) => {
             error!("Failed to get library: {}", e);
@@ -630,10 +648,10 @@ pub async fn create_library_handler(
         library.id, library.library_type
     );
 
-    let db = state.db.clone();
+    let libraries_repo = state.unit_of_work.libraries.clone();
     let orchestrator = state.scan_control.orchestrator();
 
-    match db.backend().create_library(library.clone()).await {
+    match libraries_repo.create_library(library.clone()).await {
         Ok(id) => {
             info!("Library successfully created in database with ID: {}", id);
 
@@ -654,8 +672,7 @@ pub async fn create_library_handler(
                     library.id, err
                 );
 
-                if let Err(delete_err) = db.backend().delete_library(&library.id.to_string()).await
-                {
+                if let Err(delete_err) = libraries_repo.delete_library(library.id).await {
                     error!(
                         "Failed to roll back library {} after orchestrator error: {}",
                         library.id, delete_err
@@ -693,7 +710,7 @@ pub async fn create_library_handler(
                 );
             }
 
-            Ok(Json(ApiResponse::success(id)))
+            Ok(Json(ApiResponse::success(id.to_string())))
         }
         Err(e) => {
             error!("Failed to create library: {}", e);
@@ -712,7 +729,9 @@ pub async fn update_library_handler(
 
     // Get the existing library
     let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let mut library = match state.db.backend().get_library(&LibraryID(uuid)).await {
+    let libraries_repo = state.unit_of_work.libraries.clone();
+
+    let mut library = match libraries_repo.get_library(LibraryID(uuid)).await {
         Ok(Some(lib)) => lib,
         Ok(None) => {
             return Ok(Json(ApiResponse::error("Library not found".to_string())));
@@ -738,7 +757,10 @@ pub async fn update_library_handler(
     }
     library.updated_at = chrono::Utc::now();
 
-    match state.db.backend().update_library(&id, library).await {
+    match libraries_repo
+        .update_library(LibraryID(uuid), library)
+        .await
+    {
         Ok(_) => {
             info!("Library updated: {}", id);
             Ok(Json(ApiResponse::success("Library updated".to_string())))
@@ -757,7 +779,14 @@ pub async fn delete_library_handler(
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("Deleting library: {}", id);
 
-    match state.db.backend().delete_library(&id).await {
+    let library_uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    match state
+        .unit_of_work
+        .libraries
+        .delete_library(LibraryID(library_uuid))
+        .await
+    {
         Ok(_) => {
             info!("Library deleted: {}", id);
             Ok(Json(ApiResponse::success("Library deleted".to_string())))

@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use ferrex_core::{TmdbImageSize, database::traits::ImageLookupParams};
+use ferrex_core::{MediaImageKind, TmdbImageSize, database::traits::ImageLookupParams};
 use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
 use std::io::ErrorKind;
@@ -51,13 +51,13 @@ pub async fn serve_image_handler(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Validate category
-    if !["poster", "backdrop", "logo", "thumbnail", "cast"].contains(&category.as_str()) {
+    let category_kind = MediaImageKind::parse(&category);
+    if category_kind.is_other() {
         warn!("Invalid image category: {}", category);
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let plan = determine_variant_plan(&category, &query);
+    let plan = determine_variant_plan(&category_kind, &query);
     debug!("Variant plan: {:?}", plan);
     let requested_header_value = plan
         .requested_header
@@ -68,7 +68,7 @@ pub async fn serve_image_handler(
     let params = ImageLookupParams {
         media_type: media_type.clone(),
         media_id: media_id.clone(),
-        image_type: category.clone(),
+        image_type: category_kind.clone(),
         index,
         variant: plan.lookup_variant.clone(),
     };
@@ -115,7 +115,10 @@ pub async fn serve_image_handler(
             Ok(None) => {
                 warn!(
                     "No fallback available: {}/{}/{}/{}",
-                    media_type, media_id, category, index
+                    media_type,
+                    media_id,
+                    category_kind.as_str(),
+                    index
                 );
                 return Err(StatusCode::NOT_FOUND);
             }
@@ -259,14 +262,22 @@ async fn redownload_variant(
         Ok(Some(path)) => {
             info!(
                 "Fetched missing image variant on-demand: {}/{}/{}/{} variant {}",
-                params.media_type, params.media_id, params.image_type, params.index, served_variant
+                params.media_type,
+                params.media_id,
+                params.image_type.as_str(),
+                params.index,
+                served_variant
             );
             Ok(path)
         }
         Ok(None) => {
             warn!(
                 "Unable to download image variant on-demand; variant record missing: {}/{}/{}/{} variant {}",
-                params.media_type, params.media_id, params.image_type, params.index, served_variant
+                params.media_type,
+                params.media_id,
+                params.image_type.as_str(),
+                params.index,
+                served_variant
             );
             Err(StatusCode::NOT_FOUND)
         }
@@ -275,7 +286,7 @@ async fn redownload_variant(
                 "On-demand image download failed: {}/{}/{}/{} variant {}: {}",
                 params.media_type,
                 params.media_id,
-                params.image_type,
+                params.image_type.as_str(),
                 params.index,
                 served_variant,
                 e
@@ -350,7 +361,7 @@ struct VariantPlan {
     target_width: Option<u32>,
 }
 
-fn determine_variant_plan(category: &str, query: &ImageQuery) -> VariantPlan {
+fn determine_variant_plan(category: &MediaImageKind, query: &ImageQuery) -> VariantPlan {
     if let Some(w) = query.w.or(query.max_width) {
         let variant = map_width_to_tmdb_variant(category, w).to_string();
         return variant_plan_exact(variant, None);
@@ -362,7 +373,7 @@ fn determine_variant_plan(category: &str, query: &ImageQuery) -> VariantPlan {
 
         match normalized.as_str() {
             "quality" => return auto_plan_for_category(category, Some("quality")),
-            "any" if category == "cast" => {
+            "any" if matches!(category, MediaImageKind::Cast) => {
                 return auto_plan_for_category(category, Some("any"));
             }
             _ => {
@@ -388,31 +399,33 @@ fn variant_plan_exact(variant: String, header: Option<String>) -> VariantPlan {
     }
 }
 
-fn auto_plan_for_category(category: &str, label: Option<&str>) -> VariantPlan {
+fn auto_plan_for_category(category: &MediaImageKind, label: Option<&str>) -> VariantPlan {
     match category {
-        "poster" => build_variant_plan(
+        MediaImageKind::Poster => build_variant_plan(
             label,
             Some("w500"),
             &["w500", "w342", "w780", "original", "w185", "w154", "w92"],
             Some(500),
         ),
-        "backdrop" => build_variant_plan(
+        MediaImageKind::Backdrop => build_variant_plan(
             label,
             Some("w1280"),
             &["w780", "w1280", "original"],
             Some(1280),
         ),
-        "thumbnail" => {
+        MediaImageKind::Thumbnail => {
             build_variant_plan(label, Some("w300"), &["w300", "w500", "w185"], Some(300))
         }
-        "logo" => build_variant_plan(label, Some("original"), &["original"], None),
-        "cast" => build_variant_plan(
+        MediaImageKind::Logo => build_variant_plan(label, Some("original"), &["original"], None),
+        MediaImageKind::Cast => build_variant_plan(
             label,
             Some("w185"),
             &["w185", "h632", "w45", "original"],
             Some(300),
         ),
-        _ => build_variant_plan(label, Some("w500"), &["w500", "original"], Some(500)),
+        MediaImageKind::Other(_) => {
+            build_variant_plan(label, Some("w500"), &["w500", "original"], Some(500))
+        }
     }
 }
 
@@ -465,11 +478,11 @@ fn variant_width_hint(variant: &str) -> Option<u32> {
 }
 
 /// Map desired width to a TMDB variant string for a given category
-fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
+fn map_width_to_tmdb_variant(category: &MediaImageKind, w: u32) -> &'static str {
     // Choose nearest bucket >= requested; fall back to largest known or original
     match category {
         // Posters: 92, 154, 185, 342, 500, 780, original
-        "poster" => match w {
+        MediaImageKind::Poster => match w {
             0..=92 => "w92",
             93..=154 => "w154",
             155..=185 => "w185",
@@ -479,14 +492,14 @@ fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
             _ => "original",
         },
         // Backdrops: 300, 780, 1280, original
-        "backdrop" => match w {
+        MediaImageKind::Backdrop => match w {
             0..=300 => "w300",
             301..=780 => "w780",
             781..=1280 => "w1280",
             _ => "original",
         },
         // Thumbnails: 92, 185, 300, 500, original
-        "thumbnail" => match w {
+        MediaImageKind::Thumbnail => match w {
             0..=92 => "w92",
             93..=185 => "w185",
             186..=300 => "w300",
@@ -494,13 +507,13 @@ fn map_width_to_tmdb_variant(category: &str, w: u32) -> &'static str {
             _ => "original",
         },
         // Logos: prefer original to avoid artifacts
-        "logo" => "original",
-        // Cast portraits: 45, 185, h632 (height), map width thresholds to 45 or 185 else original
-        "cast" => match w {
+        MediaImageKind::Logo => "original",
+        // Cast portraits: 45, 185, original
+        MediaImageKind::Cast => match w {
             0..=45 => "w45",
             46..=185 => "w185",
             _ => "original",
         },
-        _ => "w500",
+        MediaImageKind::Other(_) => "w500",
     }
 }

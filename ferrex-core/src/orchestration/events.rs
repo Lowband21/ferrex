@@ -132,7 +132,7 @@ pub trait JobEventPublisher: Send + Sync {
 
 // Domain-level events linking the scan/analyze/index pipeline.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum DomainEvent {
+pub enum ScanEvent {
     FolderDiscovered {
         library_id: crate::LibraryID,
         folder_path: String,
@@ -149,13 +149,39 @@ pub enum DomainEvent {
 }
 
 #[async_trait]
+pub trait ScanEventPublisher: Send + Sync {
+    async fn publish_scan_event(&self, event: ScanEvent) -> Result<()>;
+}
+
+// Marker trait for an event bus capable of publishing both job and scan events.
+pub trait ScanEventBus: JobEventPublisher + ScanEventPublisher {}
+impl<T> ScanEventBus for T where T: JobEventPublisher + ScanEventPublisher {}
+
+#[cfg(feature = "compat")]
+pub use ScanEvent as DomainEvent;
+
+#[cfg(feature = "compat")]
+#[async_trait]
 pub trait DomainEventPublisher: Send + Sync {
     async fn publish_domain(&self, event: DomainEvent) -> Result<()>;
 }
 
-// Marker trait for an EventBus capable of publishing both job and domain events.
-pub trait EventBus: JobEventPublisher + DomainEventPublisher {}
-impl<T> EventBus for T where T: JobEventPublisher + DomainEventPublisher {}
+#[cfg(feature = "compat")]
+#[async_trait]
+impl<T> DomainEventPublisher for T
+where
+    T: ScanEventPublisher + Send + Sync,
+{
+    async fn publish_domain(&self, event: DomainEvent) -> Result<()> {
+        self.publish_scan_event(event).await
+    }
+}
+
+#[cfg(feature = "compat")]
+pub trait EventBus: ScanEventBus {}
+
+#[cfg(feature = "compat")]
+impl<T> EventBus for T where T: ScanEventBus {}
 
 /// Simplified message for manual enqueue debug endpoints.
 #[derive(Clone, Debug, Serialize, Deserialize)]

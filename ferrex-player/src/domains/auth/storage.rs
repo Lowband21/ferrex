@@ -427,6 +427,9 @@ mod tests {
                 access_token: "<REDACTED>".to_string(),
                 refresh_token: "refresh_token".to_string(),
                 expires_in: 3600,
+                session_id: None,
+                device_session_id: None,
+                user_id: None,
             },
             user: User {
                 id: Uuid::now_v7(),

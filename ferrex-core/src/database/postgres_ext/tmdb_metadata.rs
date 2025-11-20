@@ -3,7 +3,7 @@ use std::{
     fmt,
 };
 
-use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
+use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 use crate::{
@@ -17,32 +17,27 @@ use crate::{
     Translation, UrlLike, Video,
 };
 
-use super::super::postgres::PostgresDatabase;
-
 /// Primary entrypoint for TMDB metadata persistence.
 pub struct TmdbMetadataRepository<'a> {
-    db: &'a PostgresDatabase,
+    pool: &'a PgPool,
 }
 
 impl<'a> fmt::Debug for TmdbMetadataRepository<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let stats = self.db.pool_stats();
         f.debug_struct("TmdbMetadataRepository")
-            .field("pool_size", &stats.size)
-            .field("pool_idle", &stats.idle)
-            .field("pool_max", &stats.max_size)
-            .field("pool_min_idle", &stats.min_idle)
+            .field("pool_size", &self.pool.size())
+            .field("pool_idle", &self.pool.num_idle())
             .finish()
     }
 }
 
 impl<'a> TmdbMetadataRepository<'a> {
-    pub fn new(db: &'a PostgresDatabase) -> Self {
-        Self { db }
+    pub fn new(pool: &'a PgPool) -> Self {
+        Self { pool }
     }
 
     pub async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(|e| {
+        let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for movie reference {}: {}",
                 movie.id, e
@@ -70,7 +65,7 @@ impl<'a> TmdbMetadataRepository<'a> {
     }
 
     pub async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(|e| {
+        let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for series reference {}: {}",
                 series.id, e
@@ -91,7 +86,7 @@ impl<'a> TmdbMetadataRepository<'a> {
     }
 
     pub async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid> {
-        let mut tx = self.db.pool().begin().await.map_err(|e| {
+        let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for season reference {}: {}",
                 season.id, e
@@ -114,7 +109,7 @@ impl<'a> TmdbMetadataRepository<'a> {
     }
 
     pub async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
-        let mut tx = self.db.pool().begin().await.map_err(|e| {
+        let mut tx = self.pool.begin().await.map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to begin transaction for episode reference {}: {}",
                 episode.id, e
@@ -169,7 +164,7 @@ impl<'a> TmdbMetadataRepository<'a> {
         let theme_color: Option<String> = row.try_get("theme_color")?;
         let media_file = hydrate_media_file_row(&row)?;
 
-        let details = load_movie_details(self.db, movie_id).await?;
+        let details = load_movie_details(self.pool, movie_id).await?;
 
         Ok(MovieReference {
             id: MovieID(movie_id),
@@ -196,7 +191,7 @@ impl<'a> TmdbMetadataRepository<'a> {
         let discovered_at: chrono::DateTime<chrono::Utc> = row.try_get("discovered_at")?;
         let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
 
-        let details = load_series_details(self.db, series_id).await?;
+        let details = load_series_details(self.pool, series_id).await?;
 
         Ok(SeriesReference {
             id: SeriesID(series_id),
@@ -227,7 +222,7 @@ impl<'a> TmdbMetadataRepository<'a> {
             .try_get::<Option<String>, _>("theme_color")
             .unwrap_or(None);
 
-        let details = load_season_details(self.db, season_id).await?;
+        let details = load_season_details(self.pool, season_id).await?;
         let details_option = details
             .map(|d| MediaDetailsOption::Details(TmdbDetails::Season(d)))
             .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/media/{}", season_id)));
@@ -263,7 +258,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         let media_file = hydrate_media_file_row(&row)?;
 
-        let details = load_episode_details(self.db, episode_id).await?;
+        let details = load_episode_details(self.pool, episode_id).await?;
         let details_option = details
             .map(|d| MediaDetailsOption::Details(TmdbDetails::Episode(d)))
             .unwrap_or_else(|| MediaDetailsOption::Endpoint(format!("/media/{}", episode_id)));
@@ -2225,7 +2220,7 @@ fn hydrate_media_file_row(row: &PgRow) -> Result<MediaFile> {
 }
 
 async fn load_series_details(
-    db: &PostgresDatabase,
+    pool: &PgPool,
     series_id: Uuid,
 ) -> Result<Option<EnhancedSeriesDetails>> {
     let metadata = sqlx::query!(
@@ -2261,7 +2256,7 @@ async fn load_series_details(
             WHERE series_id = $1"#,
         series_id
     )
-    .fetch_optional(db.pool())
+    .fetch_optional(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series metadata: {}", e)))?;
 
@@ -2273,7 +2268,7 @@ async fn load_series_details(
         "SELECT genre_id, name FROM series_genres WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series genres: {}", e)))?
     .into_iter()
@@ -2287,7 +2282,7 @@ async fn load_series_details(
         "SELECT iso_3166_1 FROM series_origin_countries WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series origin countries: {}", e)))?
     .into_iter()
@@ -2298,7 +2293,7 @@ async fn load_series_details(
         "SELECT iso_639_1, name FROM series_spoken_languages WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series spoken languages: {}", e)))?
     .into_iter()
@@ -2312,7 +2307,7 @@ async fn load_series_details(
         "SELECT company_id, name, origin_country FROM series_production_companies WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series production companies: {}", e)))?
     .into_iter()
@@ -2327,7 +2322,7 @@ async fn load_series_details(
         "SELECT iso_3166_1, name FROM series_production_countries WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| {
         MediaError::Internal(format!("Failed to load series production countries: {}", e))
@@ -2343,7 +2338,7 @@ async fn load_series_details(
         "SELECT network_id, name, origin_country FROM series_networks WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series networks: {}", e)))?
     .into_iter()
@@ -2358,7 +2353,7 @@ async fn load_series_details(
         "SELECT iso_3166_1, rating, rating_system, descriptors FROM series_content_ratings WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series content ratings: {}", e)))?
     .into_iter()
@@ -2374,7 +2369,7 @@ async fn load_series_details(
         "SELECT keyword_id, name FROM series_keywords WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series keywords: {}", e)))?
     .into_iter()
@@ -2389,7 +2384,7 @@ async fn load_series_details(
             FROM series_videos WHERE series_id = $1"#,
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series videos: {}", e)))?
     .into_iter()
@@ -2413,7 +2408,7 @@ async fn load_series_details(
             FROM series_translations WHERE series_id = $1"#,
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series translations: {}", e)))?
     .into_iter()
@@ -2433,7 +2428,7 @@ async fn load_series_details(
         "SELECT group_id, name, description, group_type FROM series_episode_groups WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series episode groups: {}", e)))?
     .into_iter()
@@ -2449,7 +2444,7 @@ async fn load_series_details(
         "SELECT recommended_tmdb_id, title FROM series_recommendations WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series recommendations: {}", e)))?
     .into_iter()
@@ -2463,7 +2458,7 @@ async fn load_series_details(
         "SELECT similar_tmdb_id, title FROM series_similar WHERE series_id = $1",
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load similar series: {}", e)))?
     .into_iter()
@@ -2473,8 +2468,8 @@ async fn load_series_details(
     })
     .collect();
 
-    let cast = load_series_cast(db, series_id).await?;
-    let crew = load_series_crew(db, series_id).await?;
+    let cast = load_series_cast(pool, series_id).await?;
+    let crew = load_series_crew(pool, series_id).await?;
 
     let details = EnhancedSeriesDetails {
         id: row.tmdb_id as u64,
@@ -2531,17 +2526,14 @@ async fn load_series_details(
     Ok(Some(details))
 }
 
-async fn load_movie_details(
-    db: &PostgresDatabase,
-    movie_id: Uuid,
-) -> Result<Option<EnhancedMovieDetails>> {
+async fn load_movie_details(pool: &PgPool, movie_id: Uuid) -> Result<Option<EnhancedMovieDetails>> {
     let metadata = sqlx::query!(
         r#"
         SELECT * FROM movie_metadata WHERE movie_id = $1
         "#,
         movie_id
     )
-    .fetch_optional(db.pool())
+    .fetch_optional(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie metadata: {}", e)))?;
 
@@ -2553,7 +2545,7 @@ async fn load_movie_details(
         "SELECT genre_id, name FROM movie_genres WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie genres: {}", e)))?
     .into_iter()
@@ -2567,7 +2559,7 @@ async fn load_movie_details(
         "SELECT iso_639_1, name FROM movie_spoken_languages WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie languages: {}", e)))?
     .into_iter()
@@ -2581,7 +2573,7 @@ async fn load_movie_details(
         "SELECT company_id, name, origin_country FROM movie_production_companies WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie companies: {}", e)))?
     .into_iter()
@@ -2596,7 +2588,7 @@ async fn load_movie_details(
         "SELECT iso_3166_1, name FROM movie_production_countries WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie countries: {}", e)))?
     .into_iter()
@@ -2611,7 +2603,7 @@ async fn load_movie_details(
              FROM movie_release_dates WHERE movie_id = $1"#,
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie release dates: {}", e)))?;
 
@@ -2645,7 +2637,7 @@ async fn load_movie_details(
         "SELECT iso_3166_1, title, title_type FROM movie_alternative_titles WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| AlternativeTitle {
@@ -2660,7 +2652,7 @@ async fn load_movie_details(
             FROM movie_translations WHERE movie_id = $1"#,
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| Translation {
@@ -2680,7 +2672,7 @@ async fn load_movie_details(
              FROM movie_videos WHERE movie_id = $1"#,
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| Video {
@@ -2702,7 +2694,7 @@ async fn load_movie_details(
         "SELECT keyword_id, name FROM movie_keywords WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| Keyword {
@@ -2715,7 +2707,7 @@ async fn load_movie_details(
         "SELECT recommended_tmdb_id, title FROM movie_recommendations WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| RelatedMediaRef {
@@ -2728,7 +2720,7 @@ async fn load_movie_details(
         "SELECT similar_tmdb_id, title FROM movie_similar WHERE movie_id = $1",
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await?
     .into_iter()
     .map(|record| RelatedMediaRef {
@@ -2741,7 +2733,7 @@ async fn load_movie_details(
         "SELECT collection_id, name, poster_path, backdrop_path FROM movie_collection_membership WHERE movie_id = $1",
         movie_id
     )
-    .fetch_optional(db.pool())
+    .fetch_optional(pool)
     .await?
     .map(|record| CollectionInfo {
         id: record.collection_id as u64,
@@ -2750,8 +2742,8 @@ async fn load_movie_details(
         backdrop_path: record.backdrop_path,
     });
 
-    let cast = load_cast(db, movie_id).await?;
-    let crew = load_crew(db, movie_id).await?;
+    let cast = load_cast(pool, movie_id).await?;
+    let crew = load_crew(pool, movie_id).await?;
 
     let details = EnhancedMovieDetails {
         id: row.tmdb_id as u64,
@@ -2805,10 +2797,7 @@ async fn load_movie_details(
     Ok(Some(details))
 }
 
-async fn load_season_details(
-    db: &PostgresDatabase,
-    season_id: Uuid,
-) -> Result<Option<SeasonDetails>> {
+async fn load_season_details(pool: &PgPool, season_id: Uuid) -> Result<Option<SeasonDetails>> {
     let row = sqlx::query!(
         r#"
         SELECT
@@ -2831,7 +2820,7 @@ async fn load_season_details(
         "#,
         season_id
     )
-    .fetch_optional(db.pool())
+    .fetch_optional(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load season metadata: {}", e)))?;
 
@@ -2844,7 +2833,7 @@ async fn load_season_details(
             FROM season_videos WHERE season_id = $1"#,
         season_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load season videos: {}", e)))?
     .into_iter()
@@ -2867,7 +2856,7 @@ async fn load_season_details(
         "SELECT keyword_id, name FROM season_keywords WHERE season_id = $1",
         season_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load season keywords: {}", e)))?
     .into_iter()
@@ -2882,7 +2871,7 @@ async fn load_season_details(
             FROM season_translations WHERE season_id = $1"#,
         season_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load season translations: {}", e)))?
     .into_iter()
@@ -2936,10 +2925,7 @@ async fn load_season_details(
     Ok(Some(details))
 }
 
-async fn load_episode_details(
-    db: &PostgresDatabase,
-    episode_id: Uuid,
-) -> Result<Option<EpisodeDetails>> {
+async fn load_episode_details(pool: &PgPool, episode_id: Uuid) -> Result<Option<EpisodeDetails>> {
     let row = sqlx::query!(
         r#"
         SELECT
@@ -2965,7 +2951,7 @@ async fn load_episode_details(
         "#,
         episode_id
     )
-    .fetch_optional(db.pool())
+    .fetch_optional(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode metadata: {}", e)))?;
 
@@ -2978,7 +2964,7 @@ async fn load_episode_details(
             FROM episode_videos WHERE episode_id = $1"#,
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode videos: {}", e)))?
     .into_iter()
@@ -3001,7 +2987,7 @@ async fn load_episode_details(
         "SELECT keyword_id, name FROM episode_keywords WHERE episode_id = $1",
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode keywords: {}", e)))?
     .into_iter()
@@ -3016,7 +3002,7 @@ async fn load_episode_details(
             FROM episode_translations WHERE episode_id = $1"#,
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode translations: {}", e)))?
     .into_iter()
@@ -3036,7 +3022,7 @@ async fn load_episode_details(
         "SELECT iso_3166_1, rating, rating_system, descriptors FROM episode_content_ratings WHERE episode_id = $1",
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode content ratings: {}", e)))?
     .into_iter()
@@ -3082,7 +3068,7 @@ async fn load_episode_details(
             ORDER BY ec.order_index"#,
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode cast: {}", e)))?;
 
@@ -3158,7 +3144,7 @@ async fn load_episode_details(
             ORDER BY eg.order_index"#,
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode guest stars: {}", e)))?;
 
@@ -3237,7 +3223,7 @@ async fn load_episode_details(
         "#,
         episode_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load episode crew: {}", e)))?;
 
@@ -3390,7 +3376,7 @@ fn build_person_external_ids(
     }
 }
 
-async fn load_cast(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CastMember>> {
+async fn load_cast(pool: &PgPool, movie_id: Uuid) -> Result<Vec<CastMember>> {
     let cast_rows = sqlx::query!(
         r#"SELECT
                 mc.person_tmdb_id,
@@ -3424,7 +3410,7 @@ async fn load_cast(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CastMemb
             ORDER BY mc.order_index"#,
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie cast: {}", e)))?;
 
@@ -3471,7 +3457,7 @@ async fn load_cast(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CastMemb
         .collect())
 }
 
-async fn load_crew(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CrewMember>> {
+async fn load_crew(pool: &PgPool, movie_id: Uuid) -> Result<Vec<CrewMember>> {
     let crew_rows = sqlx::query!(
         r#"SELECT
                 mc.person_tmdb_id,
@@ -3503,7 +3489,7 @@ async fn load_crew(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CrewMemb
             WHERE mc.movie_id = $1"#,
         movie_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load movie crew: {}", e)))?;
 
@@ -3535,7 +3521,7 @@ async fn load_crew(db: &PostgresDatabase, movie_id: Uuid) -> Result<Vec<CrewMemb
         .collect())
 }
 
-async fn load_series_cast(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<CastMember>> {
+async fn load_series_cast(pool: &PgPool, series_id: Uuid) -> Result<Vec<CastMember>> {
     let cast_rows = sqlx::query!(
         r#"SELECT
                 sc.person_tmdb_id,
@@ -3569,7 +3555,7 @@ async fn load_series_cast(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<
             ORDER BY sc.order_index"#,
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series cast: {}", e)))?;
 
@@ -3616,7 +3602,7 @@ async fn load_series_cast(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<
         .collect())
 }
 
-async fn load_series_crew(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<CrewMember>> {
+async fn load_series_crew(pool: &PgPool, series_id: Uuid) -> Result<Vec<CrewMember>> {
     let crew_rows = sqlx::query!(
         r#"SELECT
                 sc.person_tmdb_id,
@@ -3648,7 +3634,7 @@ async fn load_series_crew(db: &PostgresDatabase, series_id: Uuid) -> Result<Vec<
             WHERE sc.series_id = $1"#,
         series_id
     )
-    .fetch_all(db.pool())
+    .fetch_all(pool)
     .await
     .map_err(|e| MediaError::Internal(format!("Failed to load series crew: {}", e)))?;
 

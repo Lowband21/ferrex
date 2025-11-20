@@ -1,14 +1,15 @@
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ferrex_core::api_types::{ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto};
+use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::orchestration::actors::pipeline::{IndexingChange, IndexingOutcome};
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_core::{
-    JobEvent, LibraryActorCommand, LibraryID, Media, MediaDatabase, MediaError, MediaEvent,
+    JobEvent, LibraryActorCommand, LibraryID, Media, MediaError, MediaEvent,
     PostgresCursorRepository, ScanEventMetadata, ScanProgressEvent, ScanSseEventType,
     ScanStageLatencySummary, StartMode,
     orchestration::{
-        events::{DomainEvent, JobEventPayload},
+        events::{JobEventPayload, ScanEvent},
         job::{JobId, JobKind},
         scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
     },
@@ -55,21 +56,22 @@ impl fmt::Debug for ScanControlPlane {
         let active = self.inner.active.try_read().ok().map(|guard| guard.len());
         let history = self.inner.history.try_read().ok().map(|guard| guard.len());
         let receiver_count = self.inner.media_tx.receiver_count();
-        let db_ptr = Arc::as_ptr(&self.inner.db);
+        let uow_ptr = Arc::as_ptr(&self.inner.unit_of_work);
         let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
 
         f.debug_struct("ScanControlPlane")
             .field("active_scans", &active)
             .field("history_len", &history)
             .field("subscriber_count", &receiver_count)
-            .field("db_ptr", &db_ptr)
+            .field("unit_of_work_ptr", &uow_ptr)
             .field("orchestrator_ptr", &orchestrator_ptr)
             .finish()
     }
 }
 
 struct ScanControlPlaneInner {
-    db: Arc<MediaDatabase>,
+    unit_of_work: Arc<AppUnitOfWork>,
+    postgres: Arc<PostgresDatabase>,
     orchestrator: Arc<ScanOrchestrator>,
     active: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
@@ -78,12 +80,17 @@ struct ScanControlPlaneInner {
 }
 
 impl ScanControlPlane {
-    pub fn new(db: Arc<MediaDatabase>, orchestrator: Arc<ScanOrchestrator>) -> Self {
-        Self::with_quiescence_window(db, orchestrator, DEFAULT_QUIESCENCE)
+    pub fn new(
+        unit_of_work: Arc<AppUnitOfWork>,
+        postgres: Arc<PostgresDatabase>,
+        orchestrator: Arc<ScanOrchestrator>,
+    ) -> Self {
+        Self::with_quiescence_window(unit_of_work, postgres, orchestrator, DEFAULT_QUIESCENCE)
     }
 
     pub fn with_quiescence_window(
-        db: Arc<MediaDatabase>,
+        unit_of_work: Arc<AppUnitOfWork>,
+        postgres: Arc<PostgresDatabase>,
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
     ) -> Self {
@@ -93,12 +100,14 @@ impl ScanControlPlane {
             orchestrator.cursor_repository(),
             quiescence,
             media_tx.clone(),
-            Arc::clone(&db),
+            unit_of_work.clone(),
+            postgres.clone(),
         );
 
         Self {
             inner: Arc::new(ScanControlPlaneInner {
-                db,
+                unit_of_work,
+                postgres,
                 orchestrator,
                 active: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
@@ -140,9 +149,9 @@ impl ScanControlPlane {
     ) -> Result<ScanCommandAccepted, ScanControlError> {
         let library = self
             .inner
-            .db
-            .backend()
-            .get_library(&library_id)
+            .unit_of_work
+            .libraries
+            .get_library(library_id)
             .await
             .map_err(|err| ScanControlError::internal(err.to_string()))?
             .ok_or(ScanControlError::LibraryNotFound)?;
@@ -290,25 +299,18 @@ impl ScanControlPlaneInner {
 
         // Rebuild precomputed sort positions for the completed library scan
         if snapshot.status == ScanLifecycleStatus::Completed {
-            if let Some(pg) = self
-                .db
-                .backend()
-                .as_any()
-                .downcast_ref::<PostgresDatabase>()
+            let lib = snapshot.library_id.as_uuid();
+            if let Err(e) = sqlx::query!("SELECT rebuild_movie_sort_positions($1)", lib)
+                .execute(self.postgres.pool())
+                .await
             {
-                let lib = snapshot.library_id.as_uuid();
-                if let Err(e) = sqlx::query!("SELECT rebuild_movie_sort_positions($1)", lib)
-                    .execute(pg.pool())
-                    .await
-                {
-                    tracing::warn!(
-                        "failed to rebuild movie_sort_positions for library {}: {}",
-                        lib,
-                        e
-                    );
-                } else {
-                    tracing::info!("rebuilt precomputed movie positions for library {}", lib);
-                }
+                tracing::warn!(
+                    "failed to rebuild movie_sort_positions for library {}: {}",
+                    lib,
+                    e
+                );
+            } else {
+                tracing::info!("rebuilt precomputed movie positions for library {}", lib);
             }
         }
     }
@@ -1703,7 +1705,8 @@ struct ScanRunAggregatorInner {
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
     media_tx: broadcast::Sender<MediaEvent>,
-    db: Arc<MediaDatabase>,
+    unit_of_work: Arc<AppUnitOfWork>,
+    postgres: Arc<PostgresDatabase>,
     seen_media: Mutex<HashSet<Uuid>>,
 }
 
@@ -1713,7 +1716,8 @@ impl ScanRunAggregator {
         cursor_repository: Arc<PostgresCursorRepository>,
         quiescence: Duration,
         media_tx: broadcast::Sender<MediaEvent>,
-        db: Arc<MediaDatabase>,
+        unit_of_work: Arc<AppUnitOfWork>,
+        postgres: Arc<PostgresDatabase>,
     ) -> Self {
         let chrono_window =
             ChronoDuration::from_std(quiescence).unwrap_or_else(|_| ChronoDuration::seconds(3));
@@ -1729,7 +1733,8 @@ impl ScanRunAggregator {
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
             media_tx,
-            db,
+            unit_of_work,
+            postgres,
             seen_media: Mutex::new(HashSet::new()),
         });
 
@@ -1763,7 +1768,7 @@ impl ScanRunAggregatorInner {
         use tokio::sync::broadcast::error::RecvError;
 
         let mut receiver = self.orchestrator.subscribe_job_events();
-        let mut domain_rx = self.orchestrator.subscribe_domain_events();
+        let mut domain_rx = self.orchestrator.subscribe_scan_events();
         let mut ticker = interval(Duration::from_millis(500));
 
         loop {
@@ -1780,7 +1785,7 @@ impl ScanRunAggregatorInner {
                 }
                 result = domain_rx.recv() => {
                     match result {
-                        Ok(event) => self.handle_domain_event(event).await,
+                        Ok(event) => self.handle_scan_event(event).await,
                         Err(RecvError::Lagged(skipped)) => {
                             warn!("domain event stream lagged {skipped} events");
                         }
@@ -1904,8 +1909,8 @@ impl ScanRunAggregatorInner {
         }
     }
 
-    async fn handle_domain_event(&self, event: DomainEvent) {
-        if let DomainEvent::Indexed(outcome) = event {
+    async fn handle_scan_event(&self, event: ScanEvent) {
+        if let ScanEvent::Indexed(outcome) = event {
             if let Err(err) = self.handle_indexed_outcome(outcome).await {
                 warn!("failed to process indexed outcome: {err}");
             }
@@ -1972,9 +1977,9 @@ impl ScanRunAggregatorInner {
     }
 
     async fn load_media(&self, uuid: Uuid) -> Option<Media> {
-        let backend = self.db.backend();
+        let media_refs = &self.unit_of_work.media_refs;
 
-        match backend.get_movie_reference(&MovieID(uuid)).await {
+        match media_refs.get_movie_reference(&MovieID(uuid)).await {
             Ok(movie) => return Some(Media::Movie(movie)),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => {
@@ -1983,7 +1988,7 @@ impl ScanRunAggregatorInner {
             }
         }
 
-        match backend.get_series_reference(&SeriesID(uuid)).await {
+        match media_refs.get_series_reference(&SeriesID(uuid)).await {
             Ok(series) => return Some(Media::Series(series)),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => {
@@ -1992,7 +1997,7 @@ impl ScanRunAggregatorInner {
             }
         }
 
-        match backend.get_season_reference(&SeasonID(uuid)).await {
+        match media_refs.get_season_reference(&SeasonID(uuid)).await {
             Ok(season) => return Some(Media::Season(season)),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => {
@@ -2001,7 +2006,7 @@ impl ScanRunAggregatorInner {
             }
         }
 
-        match backend.get_episode_reference(&EpisodeID(uuid)).await {
+        match media_refs.get_episode_reference(&EpisodeID(uuid)).await {
             Ok(episode) => return Some(Media::Episode(episode)),
             Err(MediaError::NotFound(_)) => {}
             Err(err) => {

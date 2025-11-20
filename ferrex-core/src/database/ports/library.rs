@@ -1,0 +1,34 @@
+use async_trait::async_trait;
+
+use crate::{Library, LibraryID, LibraryReference, Result};
+
+/// Repository port for library management within the catalog bounded context.
+///
+/// Implementations live in infrastructure adapters (e.g., Postgres) and
+/// must not leak infrastructure types into domain/application layers.
+#[async_trait]
+pub trait LibraryRepository: Send + Sync {
+    /// Create a library and return its identifier.
+    async fn create_library(&self, library: Library) -> Result<LibraryID>;
+
+    /// Fetch a library by id.
+    async fn get_library(&self, id: LibraryID) -> Result<Option<Library>>;
+
+    /// List all libraries.
+    async fn list_libraries(&self) -> Result<Vec<Library>>;
+
+    /// Update a library by id.
+    async fn update_library(&self, id: LibraryID, library: Library) -> Result<()>;
+
+    /// Delete a library by id.
+    async fn delete_library(&self, id: LibraryID) -> Result<()>;
+
+    /// Update the library's last_scan timestamp to now.
+    async fn update_library_last_scan(&self, id: LibraryID) -> Result<()>;
+
+    /// Lightweight library references for navigation and APIs.
+    async fn list_library_references(&self) -> Result<Vec<LibraryReference>>;
+
+    /// Fetch a single library reference by id (UUID of the library).
+    async fn get_library_reference(&self, id: uuid::Uuid) -> Result<LibraryReference>;
+}

@@ -29,6 +29,9 @@ fn opaque_token_uses_expires_in_field() {
         access_token: "<REDACTED>".into(),
         refresh_token: String::new(),
         expires_in: 120,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
     assert!(!is_token_expired(&token));
 
@@ -36,6 +39,9 @@ fn opaque_token_uses_expires_in_field() {
         access_token: "<REDACTED>".into(),
         refresh_token: String::new(),
         expires_in: 30,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
     assert!(is_token_expired(&short_lived));
 }
@@ -46,6 +52,9 @@ fn jwt_token_with_comfortable_margin_is_valid() {
         access_token: jwt_with_expiry(300),
         refresh_token: String::new(),
         expires_in: 300,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
     assert!(!is_token_expired(&token));
 }
@@ -56,6 +65,9 @@ fn jwt_token_inside_refresh_buffer_is_treated_as_expired() {
         access_token: jwt_with_expiry(30),
         refresh_token: String::new(),
         expires_in: 30,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
     assert!(is_token_expired(&token));
 }

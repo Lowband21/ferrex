@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use ferrex_core::auth::device::AuthenticatedDevice;
+use ferrex_core::auth::device::{AuthDeviceStatus, AuthenticatedDevice};
 use ferrex_player::domains::settings::messages as settings_messages;
 use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
 use ferrex_player::infrastructure::services::settings::SettingsService;
@@ -16,17 +16,29 @@ impl SettingsService for MockSettingsServiceOk {
     async fn list_user_devices(&self) -> anyhow::Result<Vec<AuthenticatedDevice>> {
         Ok(vec![AuthenticatedDevice {
             id: Uuid::now_v7(),
+            user_id: Uuid::now_v7(),
             fingerprint: "fp-test".to_string(),
             name: "Test Device".to_string(),
             platform: ferrex_core::auth::Platform::Linux,
             app_version: Some("1.0.0".to_string()),
+            hardware_id: None,
+            status: AuthDeviceStatus::Trusted,
+            pin_hash: None,
+            pin_set_at: None,
+            pin_last_used_at: None,
+            failed_attempts: 0,
+            locked_until: None,
             first_authenticated_by: Uuid::now_v7(),
             first_authenticated_at: Utc::now(),
-            trusted_until: Utc::now(),
+            trusted_until: Some(Utc::now()),
             last_seen_at: Utc::now(),
-            revoked: false,
+            last_activity: Utc::now(),
+            auto_login_enabled: false,
             revoked_by: None,
             revoked_at: None,
+            revoked_reason: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
             metadata: json!({}),
         }])
     }

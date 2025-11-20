@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
+use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
@@ -20,6 +22,12 @@ impl PostgresUsersRepository {
 
     fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    fn hash_token(token: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(token.as_bytes());
+        format!("{:x}", hasher.finalize())
     }
 }
 
@@ -292,13 +300,13 @@ impl UsersRepository for PostgresUsersRepository {
             })?;
 
         // Delete user sessions
-        sqlx::query!("DELETE FROM user_sessions WHERE user_id = $1", id)
+        sqlx::query!("DELETE FROM auth_sessions WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to delete user sessions: {}", e)))?;
 
         // Delete refresh tokens
-        sqlx::query!("DELETE FROM refresh_tokens WHERE user_id = $1", id)
+        sqlx::query!("DELETE FROM auth_refresh_tokens WHERE user_id = $1", id)
             .execute(&mut *tx)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to delete refresh tokens: {}", e)))?;
@@ -394,16 +402,19 @@ impl UsersRepository for PostgresUsersRepository {
         .map_err(|e| MediaError::Internal(format!("Failed to delete completed media: {}", e)))?;
 
         // Delete user sessions
-        sqlx::query!("DELETE FROM user_sessions WHERE user_id = $1", user_id)
+        sqlx::query!("DELETE FROM auth_sessions WHERE user_id = $1", user_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to delete user sessions: {}", e)))?;
 
         // Delete refresh tokens
-        sqlx::query!("DELETE FROM refresh_tokens WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete refresh tokens: {}", e)))?;
+        sqlx::query!(
+            "DELETE FROM auth_refresh_tokens WHERE user_id = $1",
+            user_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to delete refresh tokens: {}", e)))?;
 
         // Delete the user
         let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
@@ -438,15 +449,33 @@ impl UsersRepository for PostgresUsersRepository {
         device_name: Option<String>,
         expires_at: DateTime<Utc>,
     ) -> Result<()> {
+        let token_hash = Self::hash_token(token);
+
         sqlx::query!(
             r#"
-            INSERT INTO refresh_tokens (token, user_id, device_name, expires_at, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO auth_refresh_tokens (
+                token_hash,
+                user_id,
+                device_session_id,
+                session_id,
+                device_name,
+                expires_at,
+                metadata
+            )
+            VALUES ($1, $2, NULL, NULL, $3, $4, $5)
+            ON CONFLICT (token_hash) DO UPDATE
+            SET revoked = false,
+                revoked_at = NULL,
+                revoked_reason = NULL,
+                expires_at = EXCLUDED.expires_at,
+                device_name = EXCLUDED.device_name,
+                metadata = EXCLUDED.metadata
             "#,
-            token,
+            token_hash,
             user_id,
             device_name,
-            expires_at
+            expires_at,
+            json!({})
         )
         .execute(self.pool())
         .await
@@ -456,13 +485,16 @@ impl UsersRepository for PostgresUsersRepository {
     }
 
     async fn get_refresh_token(&self, token: &str) -> Result<Option<(Uuid, DateTime<Utc>)>> {
+        let token_hash = Self::hash_token(token);
         let result = sqlx::query!(
             r#"
             SELECT user_id, expires_at
-            FROM refresh_tokens
-            WHERE token = $1 AND expires_at > NOW()
+            FROM auth_refresh_tokens
+            WHERE token_hash = $1
+              AND revoked = false
+              AND expires_at > NOW()
             "#,
-            token
+            token_hash
         )
         .fetch_optional(self.pool())
         .await
@@ -472,12 +504,16 @@ impl UsersRepository for PostgresUsersRepository {
     }
 
     async fn delete_refresh_token(&self, token: &str) -> Result<()> {
+        let token_hash = Self::hash_token(token);
         sqlx::query!(
             r#"
-            DELETE FROM refresh_tokens 
-            WHERE token = $1
+            UPDATE auth_refresh_tokens
+            SET revoked = true,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, 'user_logout')
+            WHERE token_hash = $1
             "#,
-            token
+            token_hash
         )
         .execute(self.pool())
         .await
@@ -489,8 +525,11 @@ impl UsersRepository for PostgresUsersRepository {
     async fn delete_user_refresh_tokens(&self, user_id: Uuid) -> Result<()> {
         let result = sqlx::query!(
             r#"
-            DELETE FROM refresh_tokens 
-            WHERE user_id = $1
+            UPDATE auth_refresh_tokens
+            SET revoked = true,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, 'user_logout')
+            WHERE user_id = $1 AND revoked = false
             "#,
             user_id
         )
@@ -517,18 +556,58 @@ impl UsersRepository for PostgresUsersRepository {
         let last_active = DateTime::<Utc>::from_timestamp_millis(session.last_active)
             .ok_or_else(|| MediaError::Internal("Invalid last_active timestamp".to_string()))?;
 
+        let session_token_hash = Self::hash_token(&session.id.to_string());
+        let expires_at = created_at + Duration::days(30);
+        let metadata = match &session.device_name {
+            Some(name) => json!({ "device_name": name }),
+            None => json!({}),
+        };
+
         sqlx::query!(
             r#"
-            INSERT INTO user_sessions (id, user_id, refresh_token, ip_address, user_agent, last_active, created_at)
-            VALUES ($1, $2, $3, $4::text::inet, $5, $6, $7)
+            INSERT INTO auth_sessions (
+                id,
+                user_id,
+                device_session_id,
+                session_token_hash,
+                created_at,
+                expires_at,
+                last_activity,
+                ip_address,
+                user_agent,
+                metadata
+            )
+            VALUES (
+                $1,
+                $2,
+                NULL,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7::text::inet,
+                $8,
+                $9
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET last_activity = EXCLUDED.last_activity,
+                expires_at = EXCLUDED.expires_at,
+                ip_address = EXCLUDED.ip_address,
+                user_agent = EXCLUDED.user_agent,
+                metadata = EXCLUDED.metadata,
+                revoked = false,
+                revoked_at = NULL,
+                revoked_reason = NULL
             "#,
             session.id,
             session.user_id,
-            None::<String>, // refresh_token - will be set separately
-            session.ip_address.as_deref(),  // IP address as string
-            session.user_agent.as_deref(),
+            session_token_hash,
+            created_at,
+            expires_at,
             last_active,
-            created_at
+            session.ip_address.as_deref(),
+            session.user_agent.as_deref(),
+            metadata
         )
         .execute(self.pool())
         .await
@@ -541,14 +620,18 @@ impl UsersRepository for PostgresUsersRepository {
         let rows = sqlx::query!(
             r#"
             SELECT 
-                id, 
-                user_id, 
-                ip_address::text as ip_address, 
-                user_agent, 
-                EXTRACT(EPOCH FROM last_active)::BIGINT * 1000 as last_active,
-                EXTRACT(EPOCH FROM created_at)::BIGINT * 1000 as created_at
-            FROM user_sessions
-            WHERE user_id = $1
+                s.id,
+                s.user_id,
+                s.ip_address::text as ip_address,
+                s.user_agent,
+                s.metadata AS "metadata?",
+                EXTRACT(EPOCH FROM s.last_activity)::BIGINT * 1000 as last_active,
+                EXTRACT(EPOCH FROM s.created_at)::BIGINT * 1000 as created_at,
+                ads.device_name AS "device_name?"
+            FROM auth_sessions s
+            LEFT JOIN auth_device_sessions ads ON s.device_session_id = ads.id
+            WHERE s.user_id = $1
+              AND s.revoked = false
             ORDER BY last_active DESC
             "#,
             user_id
@@ -559,14 +642,23 @@ impl UsersRepository for PostgresUsersRepository {
 
         let sessions = rows
             .into_iter()
-            .map(|row| UserSession {
-                id: row.id,
-                user_id: row.user_id,
-                device_name: None, // Not stored in database
-                ip_address: row.ip_address,
-                user_agent: row.user_agent,
-                last_active: row.last_active.unwrap_or(0),
-                created_at: row.created_at.unwrap_or(0),
+            .map(|row| {
+                let metadata_device_name = row
+                    .metadata
+                    .as_ref()
+                    .and_then(|meta| meta.get("device_name"))
+                    .and_then(|value| value.as_str())
+                    .map(String::from);
+
+                UserSession {
+                    id: row.id,
+                    user_id: row.user_id,
+                    device_name: row.device_name.or(metadata_device_name),
+                    ip_address: row.ip_address,
+                    user_agent: row.user_agent,
+                    last_active: row.last_active.unwrap_or(0),
+                    created_at: row.created_at.unwrap_or(0),
+                }
             })
             .collect();
 
@@ -574,10 +666,19 @@ impl UsersRepository for PostgresUsersRepository {
     }
 
     async fn delete_session(&self, session_id: Uuid) -> Result<()> {
-        let result = sqlx::query!("DELETE FROM user_sessions WHERE id = $1", session_id)
-            .execute(self.pool())
-            .await
-            .map_err(|e| MediaError::Internal(format!("Failed to delete session: {}", e)))?;
+        let result = sqlx::query!(
+            r#"
+            UPDATE auth_sessions
+            SET revoked = true,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, 'user_logout')
+            WHERE id = $1
+            "#,
+            session_id
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| MediaError::Internal(format!("Failed to delete session: {}", e)))?;
 
         if result.rows_affected() > 0 {
             info!("Deleted session: {}", session_id);

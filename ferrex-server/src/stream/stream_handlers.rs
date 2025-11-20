@@ -32,9 +32,9 @@ pub async fn stream_with_progress_handler(
 
     // Fetch media metadata
     let media_file = state
-        .db
-        .backend()
-        .get_media(&media_id)
+        .unit_of_work
+        .media_files_read
+        .get_by_id(&media_id)
         .await
         .map_err(|e| {
             (
@@ -172,8 +172,8 @@ pub async fn report_progress_handler(
 
     // Update progress
     state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .update_watch_progress(user.id, &request)
         .await
         .map_err(|e| {

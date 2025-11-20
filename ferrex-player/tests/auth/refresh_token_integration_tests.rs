@@ -33,7 +33,11 @@ fn create_test_user() -> User {
 
 fn create_test_token(expires_in: i64, refresh_token: String) -> AuthToken {
     AuthToken {
-        access_token: format!("access_token_{}", Uuid::now_v7()),
+        access_token: format!("access_token_{,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    }", Uuid::now_v7()),
         refresh_token,
         expires_in: expires_in.max(0) as u32, // Convert to u32, ensuring non-negative
     }
@@ -174,7 +178,10 @@ async fn test_missing_refresh_token_clears_auth() {
     let token = AuthToken {
         access_token: "<REDACTED>".to_string(),
         refresh_token: String::new(), // Empty refresh token
-        expires_in: 0, // Expired (0 means expired)
+        expires_in: 0, // Expired (0 means expired),
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     };
     
     // Create stored auth without refresh token

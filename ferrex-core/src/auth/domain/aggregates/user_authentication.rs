@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::auth::AuthCrypto;
 use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
-use crate::auth::domain::events::DomainEvent;
+use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::value_objects::{DeviceFingerprint, PinPolicy, SessionToken};
 
 /// Errors that can occur during user authentication
@@ -69,10 +70,39 @@ pub struct UserAuthentication {
     last_login: Option<DateTime<Utc>>,
 
     /// Domain events
-    events: Vec<DomainEvent>,
+    events: Vec<AuthEvent>,
 }
 
 impl UserAuthentication {
+    /// Rehydrate a user authentication aggregate from persisted storage
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn hydrate(
+        user_id: Uuid,
+        username: String,
+        password_hash: String,
+        is_active: bool,
+        is_locked: bool,
+        failed_login_attempts: u8,
+        locked_until: Option<DateTime<Utc>>,
+        device_sessions: HashMap<String, DeviceSession>,
+        max_devices: usize,
+        last_login: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            user_id,
+            username,
+            password_hash,
+            is_active,
+            is_locked,
+            failed_login_attempts,
+            locked_until,
+            device_sessions,
+            max_devices,
+            last_login,
+            events: Vec::new(),
+        }
+    }
+
     /// Create a new user authentication aggregate
     pub fn new(user_id: Uuid, username: String, password_hash: String, max_devices: usize) -> Self {
         Self {
@@ -91,7 +121,11 @@ impl UserAuthentication {
     }
 
     /// Authenticate with username and password
-    pub fn authenticate_password(&mut self, password: &str) -> Result<(), UserAuthenticationError> {
+    pub fn authenticate_password(
+        &mut self,
+        password: &str,
+        crypto: &AuthCrypto,
+    ) -> Result<(), UserAuthenticationError> {
         use argon2::{Argon2, PasswordHash, PasswordVerifier};
 
         // Check if account is active
@@ -114,15 +148,26 @@ impl UserAuthentication {
         }
 
         // Verify password
-        let parsed_hash = PasswordHash::new(&self.password_hash)
-            .map_err(|_| UserAuthenticationError::InvalidCredentials)?;
+        let mut verified = crypto
+            .verify_password(password, &self.password_hash)
+            .unwrap_or(false);
+        let mut needs_rehash = false;
 
-        let argon2 = Argon2::default();
-        let valid = argon2
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok();
+        if !verified {
+            let parsed_hash = PasswordHash::new(&self.password_hash)
+                .map_err(|_| UserAuthenticationError::InvalidCredentials)?;
 
-        if !valid {
+            let argon2 = Argon2::default();
+            if argon2
+                .verify_password(password.as_bytes(), &parsed_hash)
+                .is_ok()
+            {
+                verified = true;
+                needs_rehash = true;
+            }
+        }
+
+        if !verified {
             self.failed_login_attempts += 1;
 
             // Lock account after 5 failed attempts
@@ -130,14 +175,14 @@ impl UserAuthentication {
                 self.is_locked = true;
                 self.locked_until = Some(Utc::now() + Duration::minutes(15));
 
-                self.add_event(DomainEvent::AccountLocked {
+                self.add_event(AuthEvent::AccountLocked {
                     user_id: self.user_id,
                     locked_until: self.locked_until.unwrap(),
                     timestamp: Utc::now(),
                 });
             }
 
-            self.add_event(DomainEvent::AuthenticationFailed {
+            self.add_event(AuthEvent::AuthenticationFailed {
                 session_id: Uuid::nil(), // No session yet
                 user_id: self.user_id,
                 reason: "Invalid password".to_string(),
@@ -151,7 +196,13 @@ impl UserAuthentication {
         self.failed_login_attempts = 0;
         self.last_login = Some(Utc::now());
 
-        self.add_event(DomainEvent::PasswordAuthenticated {
+        if needs_rehash {
+            if let Ok(new_hash) = crypto.hash_password(password) {
+                self.password_hash = new_hash;
+            }
+        }
+
+        self.add_event(AuthEvent::PasswordAuthenticated {
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
@@ -277,7 +328,7 @@ impl UserAuthentication {
             self.events.extend(device_events);
         }
 
-        self.add_event(DomainEvent::AllDevicesRevoked {
+        self.add_event(AuthEvent::AllDevicesRevoked {
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
@@ -299,7 +350,7 @@ impl UserAuthentication {
         // Revoke all devices when password changes
         self.revoke_all_devices();
 
-        self.add_event(DomainEvent::PasswordChanged {
+        self.add_event(AuthEvent::PasswordChanged {
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
@@ -310,7 +361,7 @@ impl UserAuthentication {
         self.is_locked = true;
         self.locked_until = Some(Utc::now() + duration);
 
-        self.add_event(DomainEvent::AccountLocked {
+        self.add_event(AuthEvent::AccountLocked {
             user_id: self.user_id,
             locked_until: self.locked_until.unwrap(),
             timestamp: Utc::now(),
@@ -323,7 +374,7 @@ impl UserAuthentication {
         self.locked_until = None;
         self.failed_login_attempts = 0;
 
-        self.add_event(DomainEvent::AccountUnlocked {
+        self.add_event(AuthEvent::AccountUnlocked {
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
@@ -334,19 +385,19 @@ impl UserAuthentication {
         self.is_active = false;
         self.revoke_all_devices();
 
-        self.add_event(DomainEvent::AccountDeactivated {
+        self.add_event(AuthEvent::AccountDeactivated {
             user_id: self.user_id,
             timestamp: Utc::now(),
         });
     }
 
     /// Add a domain event
-    fn add_event(&mut self, event: DomainEvent) {
+    fn add_event(&mut self, event: AuthEvent) {
         self.events.push(event);
     }
 
     /// Take all pending events
-    pub fn take_events(&mut self) -> Vec<DomainEvent> {
+    pub fn take_events(&mut self) -> Vec<AuthEvent> {
         std::mem::take(&mut self.events)
     }
 
@@ -365,6 +416,9 @@ impl UserAuthentication {
     }
     pub fn is_locked(&self) -> bool {
         self.is_locked
+    }
+    pub fn failed_login_attempts(&self) -> u8 {
+        self.failed_login_attempts
     }
     pub fn locked_until(&self) -> Option<DateTime<Utc>> {
         self.locked_until
@@ -399,12 +453,14 @@ mod tests {
         let mut auth =
             UserAuthentication::new(Uuid::now_v7(), "testuser".to_string(), password_hash, 5);
 
+        let crypto = AuthCrypto::new("pepper", "token-key").unwrap();
+
         // Test password authentication
-        auth.authenticate_password("password123").unwrap();
+        auth.authenticate_password("password123", &crypto).unwrap();
         assert_eq!(auth.failed_login_attempts, 0);
 
         // Test failed authentication
-        let result = auth.authenticate_password("wrong");
+        let result = auth.authenticate_password("wrong", &crypto);
         assert!(result.is_err());
         assert_eq!(auth.failed_login_attempts, 1);
     }

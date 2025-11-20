@@ -6,17 +6,22 @@ use tokio::sync::Mutex;
 use tracing::info;
 use uuid::Uuid;
 
+#[cfg(feature = "demo")]
+use crate::demo::DemoCoordinator;
 use crate::infra::config::Config;
 use crate::infra::scan::scan_manager::ScanControlPlane;
 use crate::infra::websocket::ConnectionManager;
 use crate::media::prep::thumbnail_service::ThumbnailService;
 use ferrex_core::ImageService;
-use ferrex_core::MediaDatabase;
-use ferrex_core::auth::domain::services::AuthenticationService;
+use ferrex_core::application::unit_of_work::AppUnitOfWork;
+use ferrex_core::auth::{AuthCrypto, domain::services::AuthenticationService};
+use ferrex_core::database::PostgresDatabase;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: Arc<MediaDatabase>,
+    pub unit_of_work: Arc<AppUnitOfWork>,
+    pub postgres: Arc<PostgresDatabase>,
+    pub cache_enabled: bool,
     pub config: Arc<Config>,
     pub scan_control: Arc<ScanControlPlane>,
     //pub transcoding_service: Arc<TranscodingService>,
@@ -24,8 +29,11 @@ pub struct AppState {
     pub image_service: Arc<ImageService>,
     pub websocket_manager: Arc<ConnectionManager>,
     pub auth_service: Arc<AuthenticationService>,
+    pub auth_crypto: Arc<AuthCrypto>,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
+    #[cfg(feature = "demo")]
+    pub demo: Option<Arc<DemoCoordinator>>,
 }
 
 impl fmt::Debug for AppState {
@@ -77,8 +85,8 @@ impl AppState {
     ) -> Result<(), anyhow::Error> {
         // Verify the user is actually an admin
         let user = self
-            .db
-            .backend()
+            .unit_of_work
+            .users
             .get_user_by_id(user_id)
             .await?
             .ok_or_else(|| anyhow!("User not found"))?;

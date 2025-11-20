@@ -5,6 +5,8 @@ use axum::{
 
 use ferrex_core::api_routes::v1;
 
+#[cfg(feature = "demo")]
+use crate::handlers::admin::demo_handlers;
 use crate::{
     handlers::{
         admin::dev_handlers,
@@ -304,7 +306,7 @@ fn create_metadata_routes() -> Router<AppState> {
 
 /// Create admin routes that require admin role
 fn create_admin_routes(state: AppState) -> Router<AppState> {
-    Router::new()
+    let router = Router::new()
         .route(v1::admin::USERS, get(admin_handlers::list_all_users))
         .route(
             v1::admin::USER_ROLES,
@@ -341,7 +343,14 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
             v1::admin::sessions::REMOVE,
             axum::routing::delete(auth::pin_handlers::remove_admin_session),
         )
-        .route(v1::admin::dev::SEED, post(dev_handlers::seed_database))
+        .route(v1::admin::dev::SEED, post(dev_handlers::seed_database));
+
+    #[cfg(feature = "demo")]
+    let router = router
+        .route(v1::admin::demo::STATUS, get(demo_handlers::status))
+        .route(v1::admin::demo::RESET, post(demo_handlers::reset));
+
+    router
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

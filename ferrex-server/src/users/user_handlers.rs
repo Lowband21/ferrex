@@ -6,7 +6,6 @@ use axum::{
 };
 use ferrex_core::{
     api_types::ApiResponse,
-    database::postgres::PostgresDatabase,
     user::{User, UserUpdateRequest},
 };
 use serde::Deserialize;
@@ -23,12 +22,7 @@ use crate::{
 
 /// Helper function to get the database pool
 fn get_pool(state: &AppState) -> Result<&sqlx::PgPool, AppError> {
-    state
-        .db
-        .as_any()
-        .downcast_ref::<PostgresDatabase>()
-        .ok_or_else(|| AppError::internal("Database not available".to_string()))
-        .map(|db| db.pool())
+    Ok(state.postgres.pool())
 }
 
 /// List users for selection screen (rate-limited public endpoint)
@@ -157,13 +151,13 @@ pub async fn list_users_authenticated_handler(
 
     let users = if is_admin {
         // Admin gets full user list
-        state.db.backend().get_all_users().await?
+        state.unit_of_work.users.get_all_users().await?
     } else {
         // Regular users only see themselves
         vec![
             state
-                .db
-                .backend()
+                .unit_of_work
+                .users
                 .get_user_by_id(user.id)
                 .await?
                 .ok_or_else(|| AppError::not_found("User not found".to_string()))?,
@@ -226,8 +220,8 @@ pub async fn get_user_handler(
     }
 
     let user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
@@ -252,8 +246,8 @@ pub async fn update_user_handler(
 
     // Get current user data
     let mut user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
@@ -274,8 +268,8 @@ pub async fn update_user_handler(
 
             // Get password hash from credentials table
             let password_hash = state
-                .db
-                .backend()
+                .unit_of_work
+                .users
                 .get_user_password_hash(user.id)
                 .await
                 .map_err(|_| AppError::internal("Failed to get password hash"))?
@@ -348,8 +342,8 @@ pub async fn change_password_handler(
 
     // Get the user's password hash from the database
     let password_hash = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_password_hash(current_user.id)
         .await
         .map_err(|_| AppError::internal("Failed to get password hash"))?

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT media_uuid, position, duration, last_watched\n            FROM user_watch_progress\n            WHERE user_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "media_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "position",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 2,
+        "name": "duration",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_watched",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "20c6b0270eb8f807d54dd67a609dd445bc8df0118dbcd2f2af675b7064b287c6"
+}

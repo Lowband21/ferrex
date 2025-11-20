@@ -8,7 +8,7 @@
 //! `ferrex-core` is the foundation of the Ferrex Media Server ecosystem, offering:
 //!
 //! - **Media Management**: Comprehensive types for movies, TV shows, episodes, and media files
-//! - **User System**: JWT-based authentication with session management
+//! - **User System**: Opaque session tokens with refresh rotation and device management
 //! - **Watch Status Tracking**: Track viewing progress and completion status
 //! - **Synchronized Playback**: Real-time synchronized viewing sessions
 //! - **Database Abstraction**: Trait-based database interface supporting multiple backends
@@ -85,6 +85,9 @@ pub mod image_service;
 #[cfg(feature = "database")]
 pub mod image;
 
+#[cfg(feature = "database")]
+pub use image::MediaImageKind;
+
 /// rkyv wrapper types for external dependencies
 pub mod rkyv_wrappers;
 
@@ -110,6 +113,10 @@ pub mod rbac;
 #[cfg(feature = "database")]
 #[cfg_attr(docsrs, doc(cfg(feature = "database")))]
 pub mod scanner;
+
+/// Demo-mode helpers for quickly seeding fake media libraries.
+#[cfg(feature = "demo")]
+pub mod demo;
 
 /// Scan orchestrator domain scaffolding
 #[cfg(feature = "database")]
@@ -145,75 +152,89 @@ pub mod user_management;
 /// Media watch status and progress tracking
 pub mod watch_status;
 
-pub use api_scan::*;
-pub use api_types::*;
-#[cfg(feature = "database")]
-pub use database::*;
-pub use error::*;
-pub use extras_parser::ExtrasParser;
-#[cfg(feature = "database")]
-pub use fs_watch::*;
-#[cfg(feature = "database")]
-pub use image_service::{ImageService, TmdbImageSize};
-#[cfg(feature = "ffmpeg")]
-pub use metadata::*;
-#[cfg(feature = "database")]
-pub use orchestration::events::stable_path_key;
-#[cfg(feature = "database")]
-pub use orchestration::events::{
-    DomainEvent, DomainEventPublisher, EventBus, EventMeta, JobEvent, JobEventPayload,
-    JobEventPublisher, ManualEnqueueRequest, ManualEnqueueResponse,
-};
-#[cfg(feature = "database")]
-pub use orchestration::{
-    actors::*, budget::*, classification::*, config::*, correlation::*, dispatcher::*, job::*,
-    lease::*, persistence::*, queue::*, runtime::*, scan_cursor::*, scheduler::*, series::*,
-};
-pub use providers::{ProviderError, TmdbApiProvider};
-pub use query::*;
-pub use rbac::*;
-pub use sync_session::*;
-pub use tv_parser::{EpisodeInfo, TvParser};
-pub use types::library::*;
-pub use types::transcoding::{
-    TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
-};
+/// Application-level composition utilities (Unit of Work, facades)
+pub mod application;
 
-// Authentication exports
-pub use auth::AuthError as DeviceAuthError;
-pub use auth::device::*;
-#[cfg(feature = "database")]
-pub use auth::infrastructure::*;
-#[cfg(feature = "database")]
-pub use auth::pin::*;
-pub use auth::rate_limit::*;
-pub use auth::session::{
-    CreateSessionRequest, CreateSessionResponse, DeviceSession as SessionDeviceSession,
-    ListSessionsRequest, RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
-    SessionValidationResult, generate_session_token,
-};
-pub use auth::state::{
-    AuthEvent as DeviceAuthEvent, AuthState as DeviceAuthState,
-    TransitionResult as DeviceAuthTransitionResult,
-};
-pub use auth::state_machine::AuthState as AuthStateTrait;
-pub use auth::state_machine::TransitionResult as AuthStateMachineResult;
-pub use auth::state_machine::{
-    AuthConfig, AuthStateMachine, AuthTransitionError, Authenticated, AwaitingPassword,
-    AwaitingPin, Refreshing, SerializedAuthState, SettingUpPin, Unauthenticated, UserSelected,
-};
-#[cfg(feature = "database")]
-pub use auth::state_manager::*;
-pub use auth::{AuthContext, AuthEvent, AuthEventType, AuthResult, AuthenticationMethod};
+pub mod api;
+/// Context facades exposing intentional module surfaces
+pub mod catalog;
+pub mod identity;
+pub mod playback;
 
-// Core exports
-pub use traits::*;
-pub use types::*;
-pub use user::AuthError as UserAuthError;
-pub use user::{
-    AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
-    RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
-    UserPreferences, UserSession, UserUpdateRequest, ValidationError,
-};
-pub use watch_status::*;
-// user_management is available as a module but not re-exported to avoid conflicts
+#[cfg(feature = "compat")]
+mod compat {
+    pub use super::api_scan::*;
+    pub use super::api_types::*;
+    #[cfg(feature = "database")]
+    pub use super::database::*;
+    pub use super::error::*;
+    pub use super::extras_parser::ExtrasParser;
+    #[cfg(feature = "database")]
+    pub use super::fs_watch::*;
+    #[cfg(feature = "database")]
+    pub use super::image_service::{ImageService, TmdbImageSize};
+    #[cfg(feature = "ffmpeg")]
+    pub use super::metadata::*;
+    #[cfg(feature = "database")]
+    pub use super::orchestration::events::stable_path_key;
+    #[cfg(feature = "database")]
+    pub use super::orchestration::events::{
+        DomainEvent, DomainEventPublisher, EventBus, EventMeta, JobEvent, JobEventPayload,
+        JobEventPublisher, ManualEnqueueRequest, ManualEnqueueResponse,
+    };
+    #[cfg(feature = "database")]
+    pub use super::orchestration::{
+        actors::*, budget::*, classification::*, config::*, correlation::*, dispatcher::*, job::*,
+        lease::*, persistence::*, queue::*, runtime::*, scan_cursor::*, scheduler::*, series::*,
+    };
+    pub use super::providers::{ProviderError, TmdbApiProvider};
+    pub use super::query::*;
+    pub use super::rbac::*;
+    pub use super::sync_session::*;
+    pub use super::tv_parser::{EpisodeInfo, TvParser};
+    pub use super::types::library::*;
+    pub use super::types::transcoding::{
+        TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
+    };
+
+    // Authentication exports
+    pub use super::auth::AuthError as DeviceAuthError;
+    #[cfg(feature = "database")]
+    pub use super::auth::infrastructure::*;
+    #[cfg(feature = "database")]
+    pub use super::auth::pin::*;
+    pub use super::auth::rate_limit::*;
+    pub use super::auth::session::{
+        CreateSessionRequest, CreateSessionResponse, DeviceSession as SessionDeviceSession,
+        ListSessionsRequest, RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
+        SessionValidationResult, generate_session_token,
+    };
+    pub use super::auth::state::{
+        AuthEvent as DeviceAuthEvent, AuthState as DeviceAuthState,
+        TransitionResult as DeviceAuthTransitionResult,
+    };
+    pub use super::auth::state_machine::AuthState as AuthStateTrait;
+    pub use super::auth::state_machine::TransitionResult as AuthStateMachineResult;
+    pub use super::auth::state_machine::{
+        AuthConfig, AuthStateMachine, AuthTransitionError, Authenticated, AwaitingPassword,
+        AwaitingPin, Refreshing, SerializedAuthState, SettingUpPin, Unauthenticated, UserSelected,
+    };
+    pub use super::auth::{
+        AuthContext, AuthEvent, AuthEventType, AuthResult, AuthenticationMethod,
+    };
+
+    // Core exports
+    pub use super::traits::*;
+    pub use super::types::*;
+    pub use super::user::AuthError as UserAuthError;
+    pub use super::user::{
+        AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
+        RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
+        UserPreferences, UserSession, UserUpdateRequest, ValidationError,
+    };
+    pub use super::watch_status::*;
+    // user_management is available as a module but not re-exported to avoid conflicts
+}
+
+#[cfg(feature = "compat")]
+pub use compat::*;

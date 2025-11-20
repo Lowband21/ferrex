@@ -1,26 +1,38 @@
 use crate::{
-    LibraryID, Media, MediaDatabase, MediaDetailsOption, Result, TmdbDetails,
+    LibraryID, Media, MediaDetailsOption, Result, TmdbDetails,
+    database::ports::media_references::MediaReferencesRepository,
+    database::ports::watch_metrics::{ProgressEntry as WatchProgressEntry, WatchMetricsReadPort},
     query::{SortBy, SortOrder},
 };
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{any::type_name_of_val, collections::HashMap, fmt, sync::Arc};
 use uuid::Uuid;
 
 /// Manages in-memory sorting for libraries
 pub struct IndexManager {
-    db: Arc<MediaDatabase>,
+    media_refs: Arc<dyn MediaReferencesRepository>,
+    watch_metrics: Arc<dyn WatchMetricsReadPort>,
 }
 
 impl fmt::Debug for IndexManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let watch_metrics_type = type_name_of_val(self.watch_metrics.as_ref());
+        let media_refs_type = type_name_of_val(self.media_refs.as_ref());
         f.debug_struct("IndexManager")
-            .field("db", &self.db)
+            .field("media_refs", &media_refs_type)
+            .field("watch_metrics", &watch_metrics_type)
             .finish()
     }
 }
 
 impl IndexManager {
-    pub fn new(db: Arc<MediaDatabase>) -> Self {
-        Self { db }
+    pub fn new(
+        media_refs: Arc<dyn MediaReferencesRepository>,
+        watch_metrics: Arc<dyn WatchMetricsReadPort>,
+    ) -> Self {
+        Self {
+            media_refs,
+            watch_metrics,
+        }
     }
 
     /// Convenience: sort media IDs for a library (no persistence)
@@ -33,8 +45,7 @@ impl IndexManager {
         user_id: Option<Uuid>,
     ) -> Result<Vec<Uuid>> {
         let media_items = self
-            .db
-            .backend()
+            .media_refs
             .get_library_media_references(library_id, library_type)
             .await?;
         let watch_data = if matches!(sort_field, SortBy::WatchProgress | SortBy::LastWatched) {
@@ -61,8 +72,7 @@ impl IndexManager {
     ) -> Result<HashMap<Uuid, u32>> {
         // Get media items directly from database - they're already ordered by title
         let media_items = self
-            .db
-            .backend()
+            .media_refs
             .get_library_media_references(library_id, library_type)
             .await?;
 
@@ -365,8 +375,16 @@ impl IndexManager {
     }
 }
 
+#[cfg(feature = "database")]
+impl IndexManager {
+    /// Convenience helper to build an index manager from an application unit of work.
+    pub fn from_unit_of_work(uow: &crate::application::unit_of_work::AppUnitOfWork) -> Self {
+        Self::new(uow.media_refs.clone(), uow.watch_metrics.clone())
+    }
+}
+
 struct WatchData {
-    progress: HashMap<Uuid, ProgressEntry>,
+    progress: HashMap<Uuid, WatchProgressEntry>,
     completed: HashMap<Uuid, i64>,
 }
 
@@ -390,99 +408,10 @@ impl WatchData {
     }
 }
 
-struct ProgressEntry {
-    ratio: f32,
-    last_watched: i64,
-}
-
 impl IndexManager {
     async fn load_watch_data(&self, user_id: Uuid) -> Result<WatchData> {
-        use crate::database::postgres::PostgresDatabase;
-
-        let backend = self.db.backend();
-        let pg = backend
-            .as_any()
-            .downcast_ref::<PostgresDatabase>()
-            .ok_or_else(|| {
-                crate::MediaError::InvalidMedia(
-                    "watch-based sorting is only supported on Postgres backend".to_string(),
-                )
-            })?;
-
-        use sqlx::Row;
-
-        let progress_rows = sqlx::query(
-            r#"
-            SELECT media_uuid, position, duration, last_watched
-            FROM user_watch_progress
-            WHERE user_id = $1
-            ORDER BY last_watched DESC
-            "#,
-        )
-        .bind(user_id)
-        .fetch_all(pg.pool())
-        .await
-        .map_err(|e| {
-            crate::MediaError::Internal(format!(
-                "Failed to load watch progress for user {}: {}",
-                user_id, e
-            ))
-        })?;
-
-        let mut progress = HashMap::new();
-        for row in progress_rows {
-            let duration: f32 = match row.try_get("duration") {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            if duration <= 0.0 {
-                continue;
-            }
-            let position: f32 = match row.try_get("position") {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            let media_uuid: Uuid = match row.try_get("media_uuid") {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            let last_watched: i64 = row.try_get("last_watched").unwrap_or(0);
-            let ratio = (position / duration).clamp(0.0, 1.0);
-            progress.insert(
-                media_uuid,
-                ProgressEntry {
-                    ratio,
-                    last_watched,
-                },
-            );
-        }
-
-        let completed_rows = sqlx::query(
-            r#"
-            SELECT media_uuid, completed_at
-            FROM user_completed_media
-            WHERE user_id = $1
-            "#,
-        )
-        .bind(user_id)
-        .fetch_all(pg.pool())
-        .await
-        .map_err(|e| {
-            crate::MediaError::Internal(format!(
-                "Failed to load completed media for user {}: {}",
-                user_id, e
-            ))
-        })?;
-
-        let mut completed = HashMap::new();
-        for row in completed_rows {
-            let media_uuid: Uuid = match row.try_get("media_uuid") {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            let completed_at: i64 = row.try_get("completed_at").unwrap_or(0);
-            completed.insert(media_uuid, completed_at);
-        }
+        let progress = self.watch_metrics.load_progress_map(user_id).await?;
+        let completed = self.watch_metrics.load_completed_map(user_id).await?;
 
         Ok(WatchData {
             progress,

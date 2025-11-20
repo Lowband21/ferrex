@@ -4,7 +4,6 @@ use uuid::Uuid;
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_table_exists(pool: PgPool) -> Result<(), sqlx::Error> {
-
     let result = sqlx::query(
         "SELECT EXISTS (
             SELECT FROM information_schema.tables 
@@ -27,7 +26,6 @@ async fn test_folder_inventory_table_exists(pool: PgPool) -> Result<(), sqlx::Er
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_constraints(pool: PgPool) -> Result<(), sqlx::Error> {
-
     // Test folder_type check constraint
     let invalid_folder_type = sqlx::query(
         "INSERT INTO folder_inventory (library_id, folder_path, folder_type) 
@@ -101,7 +99,6 @@ async fn test_folder_inventory_constraints(pool: PgPool) -> Result<(), sqlx::Err
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_crud_operations(pool: PgPool) -> Result<(), sqlx::Error> {
-
     // First, we need a library to reference
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -219,7 +216,6 @@ async fn test_folder_inventory_crud_operations(pool: PgPool) -> Result<(), sqlx:
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_cascade_delete(pool: PgPool) -> Result<(), sqlx::Error> {
-
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -283,7 +279,6 @@ async fn test_folder_inventory_cascade_delete(pool: PgPool) -> Result<(), sqlx::
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_unique_constraint(pool: PgPool) -> Result<(), sqlx::Error> {
-
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(
@@ -335,7 +330,6 @@ async fn test_folder_inventory_unique_constraint(pool: PgPool) -> Result<(), sql
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn test_folder_inventory_trigger_updated_at(pool: PgPool) -> Result<(), sqlx::Error> {
-
     // Create a library
     let library_id = Uuid::now_v7();
     sqlx::query(

@@ -72,8 +72,8 @@ pub async fn check_reset_status(
 ) -> AppResult<Json<ApiResponse<ResetCheckResponse>>> {
     // Check if user has admin permissions
     let perms = state
-        .db
-        .backend()
+        .unit_of_work
+        .rbac
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
@@ -82,15 +82,15 @@ pub async fn check_reset_status(
 
     // Get current counts
     let users = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_all_users()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
     let libraries = state
-        .db
-        .backend()
+        .unit_of_work
+        .libraries
         .list_libraries()
         .await
         .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
@@ -120,8 +120,8 @@ pub async fn reset_database(
 ) -> AppResult<Json<ApiResponse<ResetResult>>> {
     // Check permissions
     let perms = state
-        .db
-        .backend()
+        .unit_of_work
+        .rbac
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
@@ -146,14 +146,13 @@ pub async fn reset_database(
 
     let mut result = ResetResult::default();
 
-    // Get backend reference
-    let backend = state.db.backend();
-
     if request.reset_users {
         info!("Resetting user data...");
 
         // Get all users before deletion for count
-        let users = backend
+        let users = state
+            .unit_of_work
+            .users
             .get_all_users()
             .await
             .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
@@ -161,9 +160,14 @@ pub async fn reset_database(
 
         // Delete all users (this should cascade to related tables)
         for user in users {
-            backend.delete_user(user.id).await.map_err(|e| {
-                AppError::internal(format!("Failed to delete user {}: {}", user.id, e))
-            })?;
+            state
+                .unit_of_work
+                .users
+                .delete_user(user.id)
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!("Failed to delete user {}: {}", user.id, e))
+                })?;
         }
 
         // Roles are system data and shouldn't be deleted, just reset to defaults
@@ -180,7 +184,9 @@ pub async fn reset_database(
         info!("Resetting library data...");
 
         // Get all libraries
-        let libraries = backend
+        let libraries = state
+            .unit_of_work
+            .libraries
             .list_libraries()
             .await
             .map_err(|e| AppError::internal(format!("Failed to get libraries: {}", e)))?;
@@ -188,8 +194,10 @@ pub async fn reset_database(
 
         // Delete all libraries
         for library in libraries {
-            backend
-                .delete_library(&library.id.to_string())
+            state
+                .unit_of_work
+                .libraries
+                .delete_library(library.id)
                 .await
                 .map_err(|e| {
                     AppError::internal(format!("Failed to delete library {}: {}", library.id, e))
@@ -246,8 +254,8 @@ pub async fn seed_database(
 ) -> AppResult<Json<ApiResponse<SeedResult>>> {
     // Check permissions
     let perms = state
-        .db
-        .backend()
+        .unit_of_work
+        .rbac
         .get_user_permissions(user.id)
         .await
         .map_err(|e| AppError::internal(format!("Failed to get permissions: {}", e)))?;
@@ -333,7 +341,7 @@ pub async fn seed_database(
             media: None,
         };
 
-        match state.db.backend().create_library(library).await {
+        match state.unit_of_work.libraries.create_library(library).await {
             Ok(_) => {
                 result.libraries_created = 1;
                 info!("Created test library at path: {}", path);

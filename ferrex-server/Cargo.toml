@@ -121,3 +121,4 @@ serde_json.workspace = true
 [features]
 # Enable long-running external end-to-end HTTP tests
 e2e = []
+demo = ["ferrex-core/demo"]

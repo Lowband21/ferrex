@@ -106,8 +106,8 @@ where
     {
         // Verify sender is host
         if let Some(session) = state
-            .db
-            .backend()
+            .unit_of_work
+            .sync_sessions
             .get_sync_session_by_code(&room_code)
             .await?
             && session.host_id == user.id
@@ -118,8 +118,8 @@ where
 
             // Update database
             state
-                .db
-                .backend()
+                .unit_of_work
+                .sync_sessions
                 .update_sync_session_state(session.id, &new_state)
                 .await?;
 
@@ -184,8 +184,8 @@ async fn handle_sync_message(
             {
                 // Update participant ready status
                 if let Some(mut session) = state
-                    .db
-                    .backend()
+                    .unit_of_work
+                    .sync_sessions
                     .get_sync_session_by_code(&room_code)
                     .await?
                 {
@@ -198,8 +198,8 @@ async fn handle_sync_message(
 
                     // Update database
                     state
-                        .db
-                        .backend()
+                        .unit_of_work
+                        .sync_sessions
                         .update_sync_session(session.id, &session)
                         .await?;
 
@@ -221,8 +221,8 @@ async fn handle_sync_message(
             if let Some(conn) = state.websocket_manager.get_connection(&conn_id)
                 && let Some(room_code) = conn.get_room_code().await
                 && let Some(session) = state
-                    .db
-                    .backend()
+                    .unit_of_work
+                    .sync_sessions
                     .get_sync_session_by_code(&room_code)
                     .await?
             {
@@ -278,8 +278,8 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
 
         // Check if host left and migrate if needed
         if let Some(mut session) = state
-            .db
-            .backend()
+            .unit_of_work
+            .sync_sessions
             .get_sync_session_by_code(&room_code)
             .await
             .ok()
@@ -295,15 +295,19 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
 
                     // Update database
                     let _ = state
-                        .db
-                        .backend()
+                        .unit_of_work
+                        .sync_sessions
                         .update_sync_session(session.id, &session)
                         .await;
 
                     tracing::info!("Migrated host to user {}", new_host.user_id);
                 } else {
                     // No participants left, end session
-                    let _ = state.db.backend().end_sync_session(session.id).await;
+                    let _ = state
+                        .unit_of_work
+                        .sync_sessions
+                        .end_sync_session(session.id)
+                        .await;
 
                     tracing::info!("Ended session {} - no participants", session.id);
                 }
@@ -311,8 +315,8 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
                 // Just remove participant
                 session.remove_participant(user.id);
                 let _ = state
-                    .db
-                    .backend()
+                    .unit_of_work
+                    .sync_sessions
                     .update_sync_session(session.id, &session)
                     .await;
             }

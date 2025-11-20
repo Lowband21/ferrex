@@ -1,6 +1,7 @@
 use crate::{
-    LibraryID, LibraryReference, MediaDatabase, Result,
+    LibraryID, LibraryReference, Result,
     database::traits::{FileWatchEvent, FileWatchEventType},
+    fs_watch::event_bus::FileChangeEventBus,
 };
 use chrono::Utc;
 use notify::{Config, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
@@ -20,7 +21,7 @@ use uuid::Uuid;
 
 /// Watches filesystem changes for libraries
 pub struct FileWatcher {
-    db: Arc<MediaDatabase>,
+    event_bus: Arc<dyn FileChangeEventBus>,
     watchers: Arc<RwLock<HashMap<LibraryID, LibraryWatcher>>>,
     event_tx: mpsc::UnboundedSender<FileWatchEvent>,
     event_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<FileWatchEvent>>>,
@@ -32,7 +33,10 @@ impl fmt::Debug for FileWatcher {
         let receiver_locked = self.event_rx.try_lock().is_err();
 
         f.debug_struct("FileWatcher")
-            .field("db", &self.db)
+            .field(
+                "event_bus_type",
+                &std::any::type_name_of_val(self.event_bus.as_ref()),
+            )
             .field("watcher_count", &watcher_count)
             .field("receiver_locked", &receiver_locked)
             .finish()
@@ -46,11 +50,11 @@ enum LibraryWatcher {
 }
 
 impl FileWatcher {
-    pub fn new(db: Arc<MediaDatabase>) -> Self {
+    pub fn new(event_bus: Arc<dyn FileChangeEventBus>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         Self {
-            db,
+            event_bus,
             watchers: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
             event_rx: Arc::new(tokio::sync::Mutex::new(event_rx)),
@@ -64,7 +68,7 @@ impl FileWatcher {
 
             let event_tx = self.event_tx.clone();
             let library_id = library.id;
-            let db = self.db.clone();
+            let bus = self.event_bus.clone();
 
             // Determine if any path is on a network filesystem
             let use_poll = library.paths.iter().any(|p| is_network_filesystem(p));
@@ -78,7 +82,7 @@ impl FileWatcher {
                 let mut watcher = PollWatcher::new(
                     {
                         let event_tx = event_tx.clone();
-                        let db = db.clone();
+                        let bus = bus.clone();
                         move |res: std::result::Result<Event, notify::Error>| match res {
                             Ok(event) => {
                                 if let Some(watch_event) =
@@ -89,13 +93,9 @@ impl FileWatcher {
                                     if let Err(e) = event_tx.send(watch_event.clone()) {
                                         error!("Failed to send file watch event: {}", e);
                                     } else {
-                                        let db_clone = db.clone();
+                                        let bus_clone = bus.clone();
                                         tokio::spawn(async move {
-                                            if let Err(e) = db_clone
-                                                .backend()
-                                                .create_file_watch_event(&watch_event)
-                                                .await
-                                            {
+                                            if let Err(e) = bus_clone.publish(watch_event).await {
                                                 error!("Failed to persist file watch event: {}", e);
                                             }
                                         });
@@ -131,7 +131,7 @@ impl FileWatcher {
             } else {
                 // Debounced watcher for local filesystems (inotify/FSEvents/etc.)
                 let event_tx_cb = event_tx.clone();
-                let db_cb = db.clone();
+                let bus_cb = bus.clone();
                 let mut debouncer = new_debouncer(
                     Duration::from_millis(200), // debounce window: 200ms
                     None,
@@ -148,12 +148,9 @@ impl FileWatcher {
                                         if let Err(e) = event_tx_cb.send(watch_event.clone()) {
                                             error!("Failed to send file watch event: {}", e);
                                         } else {
-                                            let db_clone = db_cb.clone();
+                                            let bus_clone = bus_cb.clone();
                                             tokio::spawn(async move {
-                                                if let Err(e) = db_clone
-                                                    .backend()
-                                                    .create_file_watch_event(&watch_event)
-                                                    .await
+                                                if let Err(e) = bus_clone.publish(watch_event).await
                                                 {
                                                     error!(
                                                         "Failed to persist file watch event: {}",
@@ -235,15 +232,14 @@ impl FileWatcher {
         library_id: LibraryID,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
-        self.db
-            .backend()
+        self.event_bus
             .get_unprocessed_events(library_id, limit)
             .await
     }
 
     /// Mark an event as processed
     pub async fn mark_event_processed(&self, event_id: Uuid) -> Result<()> {
-        self.db.backend().mark_event_processed(event_id).await
+        self.event_bus.mark_processed(event_id).await
     }
 
     /// Convert notify event to our FileWatchEvent
@@ -356,7 +352,7 @@ impl FileWatcher {
 
     /// Cleanup old processed events
     pub async fn cleanup_old_events(&self, days_to_keep: i32) -> Result<u32> {
-        self.db.backend().cleanup_old_events(days_to_keep).await
+        self.event_bus.cleanup_retention(days_to_keep).await
     }
 }
 

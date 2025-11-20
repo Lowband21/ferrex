@@ -39,7 +39,7 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                     // Convert AuthenticatedDevice to UserDevice
                     let user_devices: Vec<UserDevice> = devices
                         .into_iter()
-                        .filter(|d| !d.revoked) // Don't show revoked devices
+                        .filter(|d| !d.is_revoked()) // Don't show revoked devices
                         .map(|device| {
                             // Determine device type from platform
                             let device_type = match device.platform {
@@ -65,7 +65,7 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                                 device_id: device.id.to_string(),
                                 device_name: device.name.clone(),
                                 device_type,
-                                last_active: device.last_seen_at,
+                                last_active: device.last_activity,
                                 is_current_device: device.id == current_device_id,
                                 location,
                             }

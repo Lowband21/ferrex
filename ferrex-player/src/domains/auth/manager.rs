@@ -613,6 +613,9 @@ impl AuthManager {
                     access_token: String::new(),
                     refresh_token: refresh_token.clone(),
                     expires_in: 0,
+                    session_id: None,
+                    device_session_id: None,
+                    user_id: None,
                 }))
                 .await;
 
@@ -989,6 +992,9 @@ impl AuthManager {
             access_token: result.session_token.clone(),
             refresh_token: String::new(), // TODO: Get from server response
             expires_in,
+            session_id: None,
+            device_session_id: None,
+            user_id: None,
         };
         self.api_client.set_token(Some(token.clone())).await;
 

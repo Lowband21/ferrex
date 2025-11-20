@@ -9,9 +9,7 @@ use ferrex_core::rbac::UserPermissions;
 use ferrex_core::user::User;
 use uuid::Uuid;
 
-use super::jwt::validate_token;
 use crate::infra::app_state::AppState;
-use ferrex_core::database::postgres::PostgresDatabase;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -23,8 +21,8 @@ pub async fn auth_middleware(
 
     // Load user permissions
     let permissions = state
-        .db
-        .backend()
+        .unit_of_work
+        .rbac
         .get_user_permissions(user.id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -44,7 +42,7 @@ pub async fn optional_auth_middleware(
         && let Ok((user, device_id)) = validate_and_get_user(&state, &token).await
     {
         // Also load permissions when user is authenticated
-        if let Ok(permissions) = state.db.backend().get_user_permissions(user.id).await {
+        if let Ok(permissions) = state.unit_of_work.rbac.get_user_permissions(user.id).await {
             request.extensions_mut().insert(permissions);
         }
         request.extensions_mut().insert(user);
@@ -126,31 +124,7 @@ async fn validate_and_get_user(
     state: &AppState,
     token: &str,
 ) -> Result<(User, Option<Uuid>), StatusCode> {
-    // First try to validate as a session token
-    if let Ok((user, device_id)) = validate_session_token(state, token).await {
-        return Ok((user, device_id));
-    }
-
-    // Fall back to JWT validation with revocation check (no device_id for JWT)
-    let pool = if let Some(pg_db) = state.db.as_any().downcast_ref::<PostgresDatabase>() {
-        pg_db.pool()
-    } else {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    };
-
-    let claims = validate_token(token, pool)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-    let user = state
-        .db
-        .backend()
-        .get_user_by_id(claims.sub)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    Ok((user, None)) // JWT tokens don't have device_id
+    validate_session_token(state, token).await
 }
 
 async fn validate_session_token(
@@ -158,27 +132,20 @@ async fn validate_session_token(
     token: &str,
 ) -> Result<(User, Option<Uuid>), StatusCode> {
     use chrono::Utc;
-    use sha2::{Digest, Sha256};
 
-    // Hash the token
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    let token_hash = format!("{:x}", hasher.finalize());
+    // Hash the token consistently with the authentication service
+    let token_hash = state.auth_crypto.hash_token(token);
 
     // Access the PostgresDatabase pool directly
     use ferrex_core::database::postgres::PostgresDatabase;
-    let pool = if let Some(pg_db) = state.db.as_any().downcast_ref::<PostgresDatabase>() {
-        pg_db.pool()
-    } else {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    };
+    let pool = state.postgres.pool();
 
-    // Query the sessions table including device_id
+    // Query the auth_sessions table including device_session_id
     let session_row = sqlx::query!(
         r#"
-        SELECT user_id, device_id, expires_at, revoked
-        FROM sessions
-        WHERE token_hash = $1
+        SELECT user_id, device_session_id, expires_at, revoked
+        FROM auth_sessions
+        WHERE session_token_hash = $1
         "#,
         token_hash
     )
@@ -202,8 +169,8 @@ async fn validate_session_token(
 
     // Get the user
     let user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(session_row.user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -214,12 +181,12 @@ async fn validate_session_token(
     let token_hash_clone = token_hash.clone();
     tokio::spawn(async move {
         let _ = sqlx::query!(
-            "UPDATE sessions SET last_activity = NOW() WHERE token_hash = $1",
+            "UPDATE auth_sessions SET last_activity = NOW() WHERE session_token_hash = $1",
             token_hash_clone
         )
         .execute(&pool_clone)
         .await;
     });
 
-    Ok((user, Some(session_row.device_id)))
+    Ok((user, session_row.device_session_id))
 }

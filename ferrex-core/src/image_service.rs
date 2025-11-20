@@ -1,9 +1,11 @@
-use crate::database::MediaDatabase;
+use crate::database::ports::images::ImageRepository;
+use crate::database::ports::media_files::MediaFilesReadPort;
 use crate::database::traits::{ImageLookupParams, ImageRecord, ImageVariant};
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
-use crate::{MediaError, Result};
+use crate::{MediaError, MediaImageKind, Result};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
+use std::any::type_name_of_val;
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -87,31 +89,34 @@ impl TmdbImageSize {
     }
 
     /// Get recommended sizes for native client usage
-    pub fn recommended_for_type(image_type: &str) -> Vec<Self> {
-        match image_type {
+    pub fn recommended_for_kind(kind: &MediaImageKind) -> Vec<Self> {
+        match kind {
             // Prioritize ~300w poster (w342) first for fast above-the-fold loads,
             // then a larger fallback for high-DPI/detail, followed by a small thumb.
-            "poster" => vec![
+            MediaImageKind::Poster => vec![
                 TmdbImageSize::PosterW300,
                 TmdbImageSize::PosterW500,
                 TmdbImageSize::PosterW185,
             ],
-            "backdrop" => vec![
+            MediaImageKind::Backdrop => vec![
                 TmdbImageSize::Original,
                 TmdbImageSize::BackdropW780,
                 TmdbImageSize::BackdropW1280,
             ],
-            "logo" => vec![TmdbImageSize::Original], // SVG logos should use original
-            "still" | "thumbnail" => vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500],
-            "profile" | "cast" => vec![TmdbImageSize::ProfileW185],
-            _ => vec![TmdbImageSize::Original],
+            MediaImageKind::Logo => vec![TmdbImageSize::Original], // SVG logos should use original
+            MediaImageKind::Thumbnail => {
+                vec![TmdbImageSize::StillW300, TmdbImageSize::StillW500]
+            }
+            MediaImageKind::Cast => vec![TmdbImageSize::ProfileW185],
+            MediaImageKind::Other(_) => vec![TmdbImageSize::Original],
         }
     }
 }
 
 #[derive(Clone)]
 pub struct ImageService {
-    db: Arc<MediaDatabase>,
+    media_files: Arc<dyn MediaFilesReadPort>,
+    images: Arc<dyn ImageRepository>,
     cache_dir: PathBuf,
     http_client: reqwest::Client,
     // Non-blocking variant generation coordination
@@ -128,7 +133,11 @@ impl fmt::Debug for ImageService {
             .unwrap_or(0);
 
         f.debug_struct("ImageService")
-            .field("db", &self.db)
+            .field(
+                "media_files_repository",
+                &type_name_of_val(self.media_files.as_ref()),
+            )
+            .field("image_repository", &type_name_of_val(self.images.as_ref()))
             .field("cache_dir", &self.cache_dir)
             .field("http_client", &self.http_client)
             .field("in_flight_requests", &in_flight)
@@ -138,7 +147,11 @@ impl fmt::Debug for ImageService {
 }
 
 impl ImageService {
-    pub fn new(db: Arc<MediaDatabase>, cache_dir: PathBuf) -> Self {
+    pub fn new(
+        media_files: Arc<dyn MediaFilesReadPort>,
+        images: Arc<dyn ImageRepository>,
+        cache_dir: PathBuf,
+    ) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -154,7 +167,8 @@ impl ImageService {
         };
 
         Self {
-            db,
+            media_files,
+            images,
             cache_dir,
             http_client,
             in_flight: Arc::new(Mutex::new(HashSet::new())),
@@ -165,12 +179,12 @@ impl ImageService {
     /// Register a TMDB image in the database
     pub async fn register_tmdb_image(&self, tmdb_path: &str) -> Result<ImageRecord> {
         // Check if already registered
-        if let Some(existing) = self.db.backend().get_image_by_tmdb_path(tmdb_path).await? {
+        if let Some(existing) = self.images.get_image_by_tmdb_path(tmdb_path).await? {
             return Ok(existing);
         }
 
         // Create new image record
-        self.db.backend().create_image(tmdb_path).await
+        self.images.create_image(tmdb_path).await
     }
 
     /// Download and cache an image variant, keeping metadata in sync with the media_variant table.
@@ -188,8 +202,7 @@ impl ImageService {
             .unwrap_or("untyped");
 
         if let Some(existing) = self
-            .db
-            .backend()
+            .images
             .get_image_variant(image_record.id, variant_name)
             .await?
         {
@@ -218,8 +231,7 @@ impl ImageService {
                 }
 
                 if let Some(ref key) = context {
-                    self.db
-                        .backend()
+                    self.images
                         .mark_media_image_variant_cached(
                             key,
                             existing.width,
@@ -230,8 +242,7 @@ impl ImageService {
                         .await?;
 
                     if let Some(color) = theme_color {
-                        self.db
-                            .backend()
+                        self.images
                             .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
                             .await?;
                     }
@@ -302,8 +313,7 @@ impl ImageService {
         };
 
         if image_record.file_hash.is_none() {
-            self.db
-                .backend()
+            self.images
                 .update_image_metadata(
                     image_record.id,
                     &hash,
@@ -315,18 +325,16 @@ impl ImageService {
                 .await?;
         }
 
-        if let Some(existing_image) = self.db.backend().get_image_by_hash(&hash).await? {
+        if let Some(existing_image) = self.images.get_image_by_hash(&hash).await? {
             debug!("Found duplicate image by hash: {}", hash);
 
             if let Some(existing_variant) = self
-                .db
-                .backend()
+                .images
                 .get_image_variant(existing_image.id, variant_name)
                 .await?
             {
                 if let Some(ref key) = context {
-                    self.db
-                        .backend()
+                    self.images
                         .mark_media_image_variant_cached(
                             key,
                             existing_variant.width,
@@ -337,8 +345,7 @@ impl ImageService {
                         .await?;
 
                     if let Some(color) = theme_color {
-                        self.db
-                            .backend()
+                        self.images
                             .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
                             .await?;
                     }
@@ -348,8 +355,7 @@ impl ImageService {
             }
 
             let variant = self
-                .db
-                .backend()
+                .images
                 .create_image_variant(
                     existing_image.id,
                     variant_name,
@@ -361,8 +367,7 @@ impl ImageService {
                 .await?;
 
             if let Some(ref key) = context {
-                self.db
-                    .backend()
+                self.images
                     .mark_media_image_variant_cached(
                         key,
                         variant.width,
@@ -373,8 +378,7 @@ impl ImageService {
                     .await?;
 
                 if let Some(color) = theme_color {
-                    self.db
-                        .backend()
+                    self.images
                         .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
                         .await?;
                 }
@@ -384,8 +388,7 @@ impl ImageService {
         }
 
         let variant = self
-            .db
-            .backend()
+            .images
             .create_image_variant(
                 image_record.id,
                 variant_name,
@@ -397,8 +400,7 @@ impl ImageService {
             .await?;
 
         if let Some(ref key) = context {
-            self.db
-                .backend()
+            self.images
                 .mark_media_image_variant_cached(
                     key,
                     variant.width,
@@ -409,8 +411,7 @@ impl ImageService {
                 .await?;
 
             if let Some(color) = theme_color {
-                self.db
-                    .backend()
+                self.images
                     .update_media_theme_color(&key.media_type, key.media_id, Some(&color))
                     .await?;
             }
@@ -432,8 +433,7 @@ impl ImageService {
         let image_folder = image_type_folder(&key.image_type);
 
         if let Some(existing) = self
-            .db
-            .backend()
+            .images
             .get_image_variant(image_record.id, &variant_name)
             .await?
         {
@@ -463,8 +463,7 @@ impl ImageService {
                     }
                 }
 
-                self.db
-                    .backend()
+                self.images
                     .mark_media_image_variant_cached(
                         &key,
                         width,
@@ -479,9 +478,8 @@ impl ImageService {
         }
 
         let media = self
-            .db
-            .backend()
-            .get_media(&media_file_id)
+            .media_files
+            .get_by_id(&media_file_id)
             .await?
             .ok_or_else(|| {
                 MediaError::NotFound("Media file missing for thumbnail generation".into())
@@ -524,8 +522,7 @@ impl ImageService {
         let format = self.detect_format(&bytes);
 
         if image_record.file_hash.is_none() {
-            self.db
-                .backend()
+            self.images
                 .update_image_metadata(
                     image_record.id,
                     &hash,
@@ -537,15 +534,13 @@ impl ImageService {
                 .await?;
         }
 
-        if let Some(existing_image) = self.db.backend().get_image_by_hash(&hash).await? {
+        if let Some(existing_image) = self.images.get_image_by_hash(&hash).await? {
             if let Some(existing_variant) = self
-                .db
-                .backend()
+                .images
                 .get_image_variant(existing_image.id, &variant_name)
                 .await?
             {
-                self.db
-                    .backend()
+                self.images
                     .mark_media_image_variant_cached(
                         &key,
                         existing_variant.width,
@@ -558,8 +553,7 @@ impl ImageService {
                 return Ok(PathBuf::from(&existing_variant.file_path));
             }
 
-            self.db
-                .backend()
+            self.images
                 .create_image_variant(
                     existing_image.id,
                     &variant_name,
@@ -570,8 +564,7 @@ impl ImageService {
                 )
                 .await?;
         } else {
-            self.db
-                .backend()
+            self.images
                 .create_image_variant(
                     image_record.id,
                     &variant_name,
@@ -583,8 +576,7 @@ impl ImageService {
                 .await?;
         }
 
-        self.db
-            .backend()
+        self.images
             .mark_media_image_variant_cached(&key, width, height, Some(&hash), None)
             .await?;
 
@@ -597,7 +589,7 @@ impl ImageService {
         media_type: &str,
         media_id: Uuid,
         tmdb_path: &str,
-        image_type: &str,
+        image_type: MediaImageKind,
         order_index: i32,
         is_primary: bool,
     ) -> Result<Uuid> {
@@ -610,8 +602,7 @@ impl ImageService {
         let image_record = self.register_tmdb_image(tmdb_path).await?;
 
         // Create the link
-        self.db
-            .backend()
+        self.images
             .link_media_image(
                 media_type,
                 media_id,
@@ -638,7 +629,7 @@ impl ImageService {
 
         // Lookup the image record and check if the desired variant exists
         if let Some((image_record, existing_variant)) =
-            self.db.backend().lookup_image_variant(params).await?
+            self.images.lookup_image_variant(params).await?
         {
             let requested_variant = params.variant.as_deref();
             let variant_key_struct = requested_variant.and_then(|v| build_variant_key(params, v));
@@ -655,10 +646,7 @@ impl ImageService {
                         theme_color: None,
                         key: key.clone(),
                     };
-                    self.db
-                        .backend()
-                        .upsert_media_image_variant(&record)
-                        .await?;
+                    self.images.upsert_media_image_variant(&record).await?;
                 }
                 return Ok(Some(PathBuf::from(variant.file_path)));
             }
@@ -684,10 +672,7 @@ impl ImageService {
                             theme_color: None,
                             key: key_struct.clone(),
                         };
-                        self.db
-                            .backend()
-                            .upsert_media_image_variant(&record)
-                            .await?;
+                        self.images.upsert_media_image_variant(&record).await?;
                     }
 
                     let this = self.clone();
@@ -730,12 +715,8 @@ impl ImageService {
         params: &ImageLookupParams,
         target_width: Option<u32>,
     ) -> Result<Option<(PathBuf, String)>> {
-        if let Some((image_record, _)) = self.db.backend().lookup_image_variant(params).await? {
-            let mut variants = self
-                .db
-                .backend()
-                .get_image_variants(image_record.id)
-                .await?;
+        if let Some((image_record, _)) = self.images.lookup_image_variant(params).await? {
+            let mut variants = self.images.get_image_variants(image_record.id).await?;
             if variants.is_empty() {
                 return Ok(None);
             }
@@ -791,7 +772,7 @@ impl ImageService {
             "{}:{}:{}:{}:{}",
             params.media_type,
             params.media_id,
-            params.image_type,
+            params.image_type.as_str(),
             params.index,
             params.variant.as_deref().unwrap_or("")
         )
@@ -808,7 +789,7 @@ impl ImageService {
         );
 
         // Look up the image in database
-        if let Some((image_record, _)) = self.db.backend().lookup_image_variant(params).await? {
+        if let Some((image_record, _)) = self.images.lookup_image_variant(params).await? {
             if let Some(size_str) = &params.variant
                 && let Some(size) = TmdbImageSize::from_str(size_str)
             {
@@ -819,11 +800,7 @@ impl ImageService {
                 return Ok(Some(path));
             }
 
-            let variants = self
-                .db
-                .backend()
-                .get_image_variants(image_record.id)
-                .await?;
+            let variants = self.images.get_image_variants(image_record.id).await?;
             if let Some(variant) = variants.first() {
                 return Ok(Some(PathBuf::from(&variant.file_path)));
             }
@@ -976,12 +953,12 @@ impl ImageService {
 
     /// Clean up orphaned images
     pub async fn cleanup_orphaned(&self) -> Result<u32> {
-        self.db.backend().cleanup_orphaned_images().await
+        self.images.cleanup_orphaned_images().await
     }
 
     /// Get cache statistics
     pub async fn get_stats(&self) -> Result<std::collections::HashMap<String, u64>> {
-        self.db.backend().get_image_cache_stats().await
+        self.images.get_image_cache_stats().await
     }
 }
 
@@ -1009,7 +986,7 @@ fn build_variant_filename(
             key.media_type,
             key.media_id,
             image_folder,
-            key.image_type,
+            key.image_type.as_str(),
             key.order_index,
             variant,
             sanitized
@@ -1020,7 +997,10 @@ fn build_variant_filename(
 
 fn should_extract_theme_color(context: Option<&MediaImageVariantKey>, variant: &str) -> bool {
     match context {
-        Some(key) => key.image_type == "poster" && matches!(variant, "w300" | "w342" | "w185"),
+        Some(key) => {
+            matches!(key.image_type, MediaImageKind::Poster)
+                && matches!(variant, "w300" | "w342" | "w185")
+        }
         None => false,
     }
 }
@@ -1036,14 +1016,14 @@ fn build_variant_key(params: &ImageLookupParams, variant: &str) -> Option<MediaI
     })
 }
 
-fn image_type_folder(image_type: &str) -> &str {
+fn image_type_folder(image_type: &MediaImageKind) -> &str {
     match image_type {
-        "poster" => "poster",
-        "backdrop" => "backdrop",
-        "profile" | "cast" => "cast",
-        "still" | "thumbnail" => "thumbnail",
-        "logo" => "logo",
-        other => other,
+        MediaImageKind::Poster => "poster",
+        MediaImageKind::Backdrop => "backdrop",
+        MediaImageKind::Logo => "logo",
+        MediaImageKind::Thumbnail => "thumbnail",
+        MediaImageKind::Cast => "cast",
+        MediaImageKind::Other(value) => value.as_str(),
     }
 }
 

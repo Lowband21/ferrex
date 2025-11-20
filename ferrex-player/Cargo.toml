@@ -32,6 +32,7 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
     "image",
     "batch",
 ] }
+
 # iced = { path = "../../iced_ferrex", default-features = false, features = [
 #     "tokio",
 #     "debug",
@@ -48,6 +49,7 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
 #     "image",
 #     "batch",
 # ] }
+
 # iced_aw = { git = "https://github.com/iced-rs/iced_aw.git", default-features = false, features = ["menu"] }
 iced_aw = { path = "../../../iced_aw", default-features = false, features = ["menu"] }
 
@@ -152,6 +154,7 @@ yoke = "^0.8"
 default = []
 testing = []
 hot = ["iced/hot"]
+demo = ["ferrex-core/demo"]
 
 profile-with-puffin = [
     "dep:profiling",

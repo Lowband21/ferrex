@@ -6,12 +6,15 @@ use argon2::{
 };
 use axum::{Extension, Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
+use ferrex_core::auth::device::{
+    AuthDeviceStatus, AuthenticatedDevice, DeviceInfo, DeviceRegistration, DeviceUpdateParams,
+    DeviceUserCredential, Platform,
+};
 use ferrex_core::{
     api_types::ApiResponse,
     auth::{
-        AuthError, AuthEvent, AuthEventType, AuthResult, AuthenticatedDevice, DeviceInfo,
-        DeviceRegistration, DeviceUpdateParams, DeviceUserCredential, Platform,
-        SessionDeviceSession, generate_trust_token,
+        self, AuthError, AuthEvent, AuthEventType, AuthResult, SessionDeviceSession,
+        generate_trust_token,
     },
     user::User,
 };
@@ -139,7 +142,8 @@ pub async fn device_login(
     let event = AuthEvent {
         id: Uuid::now_v7(),
         user_id: Some(user.id),
-        device_id: None,
+        device_session_id: None,
+        session_id: None,
         event_type: if password_valid {
             AuthEventType::PasswordLoginSuccess
         } else {
@@ -226,21 +230,21 @@ pub async fn device_login(
             }
         }
 
-        if device.revoked {
+        if device.is_revoked() {
             return Err(AppError::unauthorized(AuthError::DeviceRevoked.to_string()));
         }
 
         let mut updated_trusted_until = device.trusted_until;
-        let mut updates = DeviceUpdateParams {
-            name: None,
-            app_version: Some(device_info.app_version.clone()),
-            last_seen_at: Some(now),
-            trusted_until: None,
-        };
+        let mut updates = DeviceUpdateParams::default();
+        updates.app_version = Some(device_info.app_version.clone());
+        updates.last_seen_at = Some(now);
+        updates.last_activity = Some(now);
 
         if request.remember_device {
-            updated_trusted_until = now + remember_duration;
-            updates.trusted_until = Some(updated_trusted_until);
+            let new_trust_expiry = now + remember_duration;
+            updated_trusted_until = Some(new_trust_expiry);
+            updates.trusted_until = Some(new_trust_expiry);
+            updates.auto_login_enabled = Some(true);
         }
 
         state
@@ -261,17 +265,29 @@ pub async fn device_login(
 
         let device = AuthenticatedDevice {
             id: Uuid::now_v7(),
+            user_id: user.id,
             fingerprint: fingerprint.clone(),
             name: device_info.device_name.clone(),
             platform: device_info.platform.clone(),
             app_version: Some(device_info.app_version.clone()),
+            hardware_id: device_info.hardware_id.clone(),
+            status: AuthDeviceStatus::Trusted,
+            pin_hash: None,
+            pin_set_at: None,
+            pin_last_used_at: None,
+            failed_attempts: 0,
+            locked_until: None,
             first_authenticated_by: user.id,
             first_authenticated_at: now,
-            trusted_until: now + trust_duration,
+            trusted_until: Some(now + trust_duration),
             last_seen_at: now,
-            revoked: false,
+            last_activity: now,
+            auto_login_enabled: request.remember_device,
             revoked_by: None,
             revoked_at: None,
+            revoked_reason: None,
+            created_at: now,
+            updated_at: now,
             metadata: serde_json::json!({
                 "hardware_id": device_info.hardware_id,
             }),
@@ -288,7 +304,8 @@ pub async fn device_login(
         let event = AuthEvent {
             id: Uuid::now_v7(),
             user_id: Some(user.id),
-            device_id: Some(device.id),
+            device_session_id: Some(device.id),
+            session_id: None,
             event_type: AuthEventType::DeviceRegistered,
             success: true,
             failure_reason: None,
@@ -356,7 +373,7 @@ pub async fn device_login(
             pin_hash: credential.and_then(|c| c.pin_hash),
             registered_at: now,
             last_used_at: now,
-            expires_at: Some(trusted_until),
+            expires_at: trusted_until,
             revoked: false,
             revoked_by: None,
             revoked_at: None,
@@ -405,7 +422,7 @@ pub async fn pin_login(
         .map_err(|_| AppError::internal("Database error"))?
         .ok_or_else(|| AppError::unauthorized("Device not registered"))?;
 
-    if device.revoked {
+    if device.is_revoked() {
         return Err(AppError::unauthorized(AuthError::DeviceRevoked.to_string()));
     }
 
@@ -425,7 +442,7 @@ pub async fn pin_login(
     let now = Utc::now();
     let remember_duration = Duration::days(REMEMBER_DEVICE_DAYS);
 
-    if device.trusted_until < now {
+    if !device.is_trusted() || device.trusted_until.is_some_and(|expiry| expiry < now) {
         return Err(AppError::unauthorized(
             AuthError::DeviceNotTrusted.to_string(),
         ));
@@ -476,7 +493,10 @@ pub async fn pin_login(
             name: None,
             app_version: None,
             last_seen_at: Some(now),
+            last_activity: Some(now),
             trusted_until: Some(now + remember_duration),
+            auto_login_enabled: Some(true),
+            ..DeviceUpdateParams::default()
         };
 
         state
@@ -491,7 +511,8 @@ pub async fn pin_login(
     let event = AuthEvent {
         id: Uuid::now_v7(),
         user_id: Some(request.user_id),
-        device_id: Some(request.device_id),
+        device_session_id: Some(request.device_id),
+        session_id: None,
         event_type: if pin_valid {
             AuthEventType::PinLoginSuccess
         } else {
@@ -602,7 +623,8 @@ pub async fn set_device_pin(
     let event = AuthEvent {
         id: Uuid::now_v7(),
         user_id: Some(user.id),
-        device_id: Some(request.device_id),
+        device_session_id: Some(request.device_id),
+        session_id: None,
         event_type: AuthEventType::PinSet,
         success: true,
         failure_reason: None,
@@ -793,7 +815,8 @@ pub async fn revoke_device(
     let event = AuthEvent {
         id: Uuid::now_v7(),
         user_id: Some(user.id),
-        device_id: Some(request.device_id),
+        device_session_id: Some(request.device_id),
+        session_id: None,
         event_type: AuthEventType::DeviceRevoked,
         success: true,
         failure_reason: None,
@@ -871,7 +894,8 @@ pub async fn change_device_pin(
     let event = AuthEvent {
         id: Uuid::now_v7(),
         user_id: Some(user.id),
-        device_id: Some(device_id),
+        device_session_id: Some(device_id),
+        session_id: None,
         event_type: AuthEventType::PinSet,
         success: true,
         failure_reason: None,

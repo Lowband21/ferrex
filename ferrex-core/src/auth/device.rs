@@ -46,6 +46,19 @@ impl Platform {
             Platform::Unknown
         }
     }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "macos" => Platform::MacOS,
+            "linux" => Platform::Linux,
+            "windows" => Platform::Windows,
+            "ios" => Platform::IOS,
+            "android" => Platform::Android,
+            "tvos" => Platform::TvOS,
+            "web" => Platform::Web,
+            _ => Platform::Unknown,
+        }
+    }
 }
 
 impl AsRef<str> for Platform {
@@ -60,6 +73,47 @@ impl AsRef<str> for Platform {
             Platform::Web => "web",
             Platform::Unknown => "unknown",
         }
+    }
+}
+
+/// Device trust lifecycle status mirroring the database enum
+#[cfg_attr(feature = "database", derive(sqlx::Type))]
+#[cfg_attr(
+    feature = "database",
+    sqlx(type_name = "auth_device_status", rename_all = "lowercase")
+)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeviceStatus {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "trusted")]
+    Trusted,
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+
+impl AuthDeviceStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AuthDeviceStatus::Pending => "pending",
+            AuthDeviceStatus::Trusted => "trusted",
+            AuthDeviceStatus::Revoked => "revoked",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "trusted" => Some(Self::Trusted),
+            "revoked" => Some(Self::Revoked),
+            _ => None,
+        }
+    }
+}
+
+impl Default for AuthDeviceStatus {
+    fn default() -> Self {
+        Self::Pending
     }
 }
 
@@ -198,18 +252,40 @@ pub struct DeviceUserCredential {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticatedDevice {
     pub id: Uuid,
+    pub user_id: Uuid,
     pub fingerprint: String,
     pub name: String,
     pub platform: Platform,
     pub app_version: Option<String>,
+    pub hardware_id: Option<String>,
+    pub status: AuthDeviceStatus,
+    pub pin_hash: Option<String>,
+    pub pin_set_at: Option<DateTime<Utc>>,
+    pub pin_last_used_at: Option<DateTime<Utc>>,
+    pub failed_attempts: i32,
+    pub locked_until: Option<DateTime<Utc>>,
     pub first_authenticated_by: Uuid,
     pub first_authenticated_at: DateTime<Utc>,
-    pub trusted_until: DateTime<Utc>,
+    pub trusted_until: Option<DateTime<Utc>>,
     pub last_seen_at: DateTime<Utc>,
-    pub revoked: bool,
+    pub last_activity: DateTime<Utc>,
+    pub auto_login_enabled: bool,
     pub revoked_by: Option<Uuid>,
     pub revoked_at: Option<DateTime<Utc>>,
+    pub revoked_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub metadata: serde_json::Value,
+}
+
+impl AuthenticatedDevice {
+    pub fn is_revoked(&self) -> bool {
+        self.status == AuthDeviceStatus::Revoked
+    }
+
+    pub fn is_trusted(&self) -> bool {
+        matches!(self.status, AuthDeviceStatus::Trusted)
+    }
 }
 
 /// Parameters for updating a device
@@ -219,4 +295,29 @@ pub struct DeviceUpdateParams {
     pub app_version: Option<String>,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub trusted_until: Option<DateTime<Utc>>,
+    pub last_activity: Option<DateTime<Utc>>,
+    pub status: Option<AuthDeviceStatus>,
+    pub auto_login_enabled: Option<bool>,
+    pub locked_until: Option<Option<DateTime<Utc>>>,
+    pub revoked_by: Option<Option<Uuid>>,
+    pub revoked_reason: Option<Option<String>>,
+    pub revoked_at: Option<Option<DateTime<Utc>>>,
+}
+
+impl Default for DeviceUpdateParams {
+    fn default() -> Self {
+        Self {
+            name: None,
+            app_version: None,
+            last_seen_at: None,
+            trusted_until: None,
+            last_activity: None,
+            status: None,
+            auto_login_enabled: None,
+            locked_until: None,
+            revoked_by: None,
+            revoked_reason: None,
+            revoked_at: None,
+        }
+    }
 }

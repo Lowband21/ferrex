@@ -10,7 +10,7 @@ use argon2::{
 use chrono::Utc;
 use ferrex_core::{
     MediaError,
-    database::PostgresDatabase,
+    database::ports::{rbac::RbacRepository, users::UsersRepository},
     rbac::{PermissionCategory, permissions, roles},
     user::{AuthToken, User},
 };
@@ -18,12 +18,9 @@ use std::fmt;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{
-    infra::{
-        app_state::AppState,
-        errors::{AppError, AppResult},
-    },
-    users::auth::{generate_access_token, generate_refresh_token},
+use crate::infra::{
+    app_state::AppState,
+    errors::{AppError, AppResult},
 };
 
 /// User creation parameters
@@ -105,6 +102,18 @@ impl<'a> UserService<'a> {
         Self { state }
     }
 
+    fn users_repo(&self) -> &dyn UsersRepository {
+        &*self.state.unit_of_work.users
+    }
+
+    fn rbac_repo(&self) -> &dyn RbacRepository {
+        &*self.state.unit_of_work.rbac
+    }
+
+    fn pool(&self) -> &sqlx::PgPool {
+        self.state.postgres.pool()
+    }
+
     /// Ensure the built-in roles and their default permissions exist.
     ///
     /// Consolidated schema migrations removed the original RBAC seed data.
@@ -113,16 +122,8 @@ impl<'a> UserService<'a> {
     /// permissions to each role so the UI behaves correctly for admins.
     pub async fn ensure_admin_role_exists(&self) -> AppResult<()> {
         // Access the underlying Postgres pool
-        let postgres_db = self
-            .state
-            .db
-            .backend()
-            .as_any()
-            .downcast_ref::<PostgresDatabase>()
-            .ok_or_else(|| AppError::internal("Database backend is not PostgreSQL"))?;
-
         let mut tx =
-            postgres_db.pool().begin().await.map_err(|e| {
+            self.pool().begin().await.map_err(|e| {
                 AppError::internal(format!("Failed to start RBAC bootstrap: {}", e))
             })?;
 
@@ -530,9 +531,7 @@ impl<'a> UserService<'a> {
 
         // Check if username exists
         if let Ok(Some(_)) = self
-            .state
-            .db
-            .backend()
+            .users_repo()
             .get_user_by_username(&params.username)
             .await
         {
@@ -557,19 +556,8 @@ impl<'a> UserService<'a> {
             preferences: Default::default(),
         };
 
-        // Get PostgresDatabase directly for user creation with password
-        // This is necessary because the trait method doesn't accept password parameter
-        let postgres_db = self
-            .state
-            .db
-            .backend()
-            .as_any()
-            .downcast_ref::<ferrex_core::database::PostgresDatabase>()
-            .ok_or_else(|| AppError::internal("Database backend is not PostgreSQL"))?;
-
-        // Create user with password in a single transaction
-        postgres_db
-            .create_user(&user, &password_hash)
+        self.users_repo()
+            .create_user_with_password(&user, &password_hash)
             .await
             .map_err(|e| match e {
                 MediaError::Conflict(msg) => AppError::conflict(msg),
@@ -588,9 +576,7 @@ impl<'a> UserService<'a> {
     pub async fn update_user(&self, user_id: Uuid, params: UpdateUserParams) -> AppResult<User> {
         // Get existing user
         let mut user = self
-            .state
-            .db
-            .backend()
+            .users_repo()
             .get_user_by_id(user_id)
             .await
             .map_err(|_| AppError::not_found("User not found"))?
@@ -604,18 +590,14 @@ impl<'a> UserService<'a> {
         if let Some(password) = params.password {
             let password_hash = Self::hash_password(&password)?;
             // Update password in credentials table
-            self.state
-                .db
-                .backend()
+            self.users_repo()
                 .update_user_password(user_id, &password_hash)
                 .await
                 .map_err(|_| AppError::internal("Failed to update password"))?;
         }
 
         // Update in database
-        self.state
-            .db
-            .backend()
+        self.users_repo()
             .update_user(&user)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update user: {}", e)))?;
@@ -629,17 +611,13 @@ impl<'a> UserService<'a> {
     pub async fn delete_user(&self, user_id: Uuid, deleted_by: Uuid) -> AppResult<()> {
         // Check if user is admin to determine if we need to check for last admin
         let is_admin = self
-            .state
-            .db
-            .backend()
+            .rbac_repo()
             .user_has_role(user_id, "admin")
             .await
             .map_err(|e| AppError::internal(format!("Failed to check user role: {}", e)))?;
 
         // Use atomic delete operation that handles race conditions
-        self.state
-            .db
-            .backend()
+        self.users_repo()
             .delete_user_atomic(user_id, is_admin)
             .await
             .map_err(|e| match e {
@@ -662,9 +640,7 @@ impl<'a> UserService<'a> {
     ) -> AppResult<()> {
         // Verify user exists
         let user = self
-            .state
-            .db
-            .backend()
+            .users_repo()
             .get_user_by_id(user_id)
             .await
             .map_err(|_| AppError::not_found("User not found"))?
@@ -672,9 +648,7 @@ impl<'a> UserService<'a> {
 
         // Verify role exists
         let roles = self
-            .state
-            .db
-            .backend()
+            .rbac_repo()
             .get_all_roles()
             .await
             .map_err(|e| AppError::internal(format!("Failed to get roles: {}", e)))?;
@@ -685,9 +659,7 @@ impl<'a> UserService<'a> {
             .ok_or_else(|| AppError::not_found("Role not found"))?;
 
         // Assign role
-        self.state
-            .db
-            .backend()
+        self.rbac_repo()
             .assign_user_role(user_id, role_id, assigned_by)
             .await
             .map_err(|e| match e {
@@ -716,9 +688,7 @@ impl<'a> UserService<'a> {
         let check_last_admin = role_id == admin_role_id;
 
         // Use atomic remove operation that handles race conditions
-        self.state
-            .db
-            .backend()
+        self.rbac_repo()
             .remove_user_role_atomic(user_id, role_id, check_last_admin)
             .await
             .map_err(|e| match e {
@@ -735,46 +705,16 @@ impl<'a> UserService<'a> {
         Ok(())
     }
 
-    /// Generate authentication tokens for a user
-    pub async fn generate_auth_tokens(
-        &self,
-        user_id: Uuid,
-        device_name: Option<String>,
-    ) -> AppResult<AuthToken> {
-        // Generate tokens
-        let access_token = generate_access_token(user_id)
-            .map_err(|_| AppError::internal("Failed to generate access token"))?;
-
-        let refresh_token = generate_refresh_token();
-
-        // Store refresh token
-        let expires_at = Utc::now() + chrono::Duration::days(30);
-        self.state
-            .db
-            .backend()
-            .store_refresh_token(&refresh_token, user_id, device_name, expires_at)
-            .await
-            .map_err(|_| AppError::internal("Failed to store refresh token"))?;
-
-        Ok(AuthToken {
-            access_token,
-            refresh_token,
-            expires_in: 900, // 15 minutes
-        })
-    }
-
     /// Check if a server needs initial setup (no admin exists)
     pub async fn needs_setup(&self) -> AppResult<bool> {
         let users = self
-            .state
-            .db
-            .backend()
+            .users_repo()
             .get_all_users()
             .await
             .map_err(|e| AppError::internal(format!("Failed to get users: {}", e)))?;
 
         for user in users {
-            if let Ok(perms) = self.state.db.backend().get_user_permissions(user.id).await
+            if let Ok(perms) = self.rbac_repo().get_user_permissions(user.id).await
                 && perms.has_role("admin")
             {
                 return Ok(false);

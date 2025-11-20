@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO auth_device_sessions\n            (\n                id,\n                user_id,\n                device_fingerprint,\n                device_name,\n                platform,\n                app_version,\n                hardware_id,\n                status,\n                pin_hash,\n                pin_set_at,\n                pin_last_used_at,\n                failed_attempts,\n                locked_until,\n                trusted_until,\n                auto_login_enabled,\n                first_authenticated_by,\n                first_authenticated_at,\n                last_seen_at,\n                last_activity,\n                metadata,\n                created_at,\n                updated_at,\n                revoked_at,\n                revoked_by,\n                revoked_reason\n            )\n            VALUES (\n                $1,\n                $2,\n                $3,\n                $4,\n                $5,\n                $6,\n                $7,\n                $8::auth_device_status,\n                $9,\n                $10,\n                $11,\n                $12,\n                $13,\n                $14,\n                $15,\n                $16,\n                $17,\n                $18,\n                $19,\n                $20,\n                $21,\n                $22,\n                $23,\n                $24,\n                $25\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "auth_device_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "trusted",
+                "revoked"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int2",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93be8ed3175d6297f3bf809aaf7a665990defc39affa2911973667e02717dcfa"
+}

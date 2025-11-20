@@ -9,7 +9,7 @@ use uuid::Uuid;
 pub struct DeviceSession {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub device_id: Uuid,
+    pub device_session_id: Uuid,
     pub session_token: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -18,13 +18,15 @@ pub struct DeviceSession {
     pub user_agent: Option<String>,
     pub revoked: bool,
     pub revoked_at: Option<DateTime<Utc>>,
+    pub revoked_reason: Option<String>,
+    pub metadata: serde_json::Value,
 }
 
 impl DeviceSession {
     /// Create a new session
     pub fn new(
         user_id: Uuid,
-        device_id: Uuid,
+        device_session_id: Uuid,
         ip_address: Option<String>,
         user_agent: Option<String>,
         duration: Duration,
@@ -33,7 +35,7 @@ impl DeviceSession {
         Self {
             id: Uuid::now_v7(),
             user_id,
-            device_id,
+            device_session_id,
             session_token: generate_session_token(),
             created_at: now,
             expires_at: now + duration,
@@ -42,6 +44,8 @@ impl DeviceSession {
             user_agent,
             revoked: false,
             revoked_at: None,
+            revoked_reason: None,
+            metadata: serde_json::json!({}),
         }
     }
 
@@ -58,7 +62,8 @@ impl DeviceSession {
     /// Revoke the session
     pub fn revoke(&mut self) {
         self.revoked = true;
-        self.revoked_at = Some(Utc::now());
+        let now = Utc::now();
+        self.revoked_at = Some(now);
     }
 }
 

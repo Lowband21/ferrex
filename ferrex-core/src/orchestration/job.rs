@@ -1,5 +1,5 @@
 use crate::image::records::MediaImageVariantKey;
-use crate::{LibraryID, Result};
+use crate::{LibraryID, MediaImageKind, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -206,7 +206,7 @@ pub enum DedupeKey {
     ImageFetch {
         media_type: String,
         media_id: uuid::Uuid,
-        image_type: String,
+        image_type: MediaImageKind,
         order_index: i32,
         variant: String,
     },

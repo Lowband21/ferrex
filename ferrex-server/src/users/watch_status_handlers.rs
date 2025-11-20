@@ -79,8 +79,8 @@ pub async fn update_progress_handler(
 
     // Update progress in database
     state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .update_watch_progress(user.id, &request)
         .await
         .map_err(|e| {
@@ -123,8 +123,8 @@ pub async fn get_watch_state_handler(
     Extension(user): Extension<User>,
 ) -> Result<Json<ApiResponse<UserWatchState>>, (StatusCode, String)> {
     let watch_state = state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .get_user_watch_state(user.id)
         .await
         .map_err(|e| {
@@ -144,8 +144,8 @@ pub async fn get_continue_watching_handler(
     Query(params): Query<ContinueWatchingQuery>,
 ) -> Result<Json<ApiResponse<Vec<InProgressItem>>>, (StatusCode, String)> {
     let items = state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .get_continue_watching(user.id, params.limit)
         .await
         .map_err(|e| {
@@ -165,8 +165,8 @@ pub async fn clear_progress_handler(
     Path(media_id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .clear_watch_progress(user.id, &media_id)
         .await
         .map_err(|e| {
@@ -187,8 +187,8 @@ pub async fn get_media_progress_handler(
 ) -> Result<Json<ApiResponse<Option<ProgressResponse>>>, (StatusCode, String)> {
     // Get user's watch state
     let watch_state = state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .get_user_watch_state(user.id)
         .await
         .map_err(|e| {
@@ -249,8 +249,8 @@ pub async fn mark_completed_handler(
 
     // Update progress to mark as completed
     state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .update_watch_progress(user.id, &request)
         .await
         .map_err(|e| {
@@ -270,8 +270,8 @@ pub async fn is_completed_handler(
     Path(media_id): Path<Uuid>,
 ) -> Result<Json<bool>, (StatusCode, String)> {
     let is_completed = state
-        .db
-        .backend()
+        .unit_of_work
+        .watch_status
         .is_media_completed(user.id, &media_id)
         .await
         .map_err(|e| {

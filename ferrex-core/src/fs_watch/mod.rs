@@ -21,6 +21,8 @@ use tokio::task::{JoinHandle, spawn_blocking};
 use tokio::time::{Duration, timeout};
 use tracing::warn;
 
+pub mod event_bus;
+
 use crate::orchestration::config::WatchConfig;
 use crate::orchestration::scan_cursor::normalize_path;
 use crate::{

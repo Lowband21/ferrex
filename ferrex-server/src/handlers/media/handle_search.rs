@@ -13,7 +13,7 @@ pub async fn query_media_handler(
     query.user_context = Some(user.id);
 
     // Execute the query
-    let results = state.db.backend().query_media(&query).await?;
+    let results = state.unit_of_work.query.query_media(&query).await?;
 
     Ok(Json(results))
 }
@@ -24,7 +24,7 @@ pub async fn query_media_public_handler(
     Json(query): Json<MediaQuery>,
 ) -> AppResult<Json<Vec<MediaWithStatus>>> {
     // Execute the query without user context
-    let results = state.db.backend().query_media(&query).await?;
+    let results = state.unit_of_work.query.query_media(&query).await?;
 
     Ok(Json(results))
 }

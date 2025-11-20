@@ -7,6 +7,7 @@
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use ferrex_core::QueueService;
+use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::image_service::ImageService;
 use ferrex_core::orchestration::actors::folder::FolderScanActor;
 use ferrex_core::orchestration::actors::pipeline::{
@@ -15,8 +16,7 @@ use ferrex_core::orchestration::actors::pipeline::{
 };
 use ferrex_core::{LibraryID, LibraryRootsId};
 use ferrex_core::{
-    MediaDatabase, MediaError, PostgresCursorRepository, PostgresDatabase, PostgresQueueService,
-    Result,
+    MediaError, PostgresCursorRepository, PostgresDatabase, PostgresQueueService, Result,
     fs_watch::{FsWatchConfig, FsWatchService, NoopFsWatchObserver},
     orchestration::{
         actors::{
@@ -27,7 +27,7 @@ use ferrex_core::{
         config::OrchestratorConfig,
         correlation::CorrelationCache,
         dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
-        events::{DomainEvent, JobEvent, JobEventPayload, JobEventPublisher, stable_path_key},
+        events::{JobEvent, JobEventPayload, JobEventPublisher, ScanEvent, stable_path_key},
         job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
         lease::{DequeueRequest, JobLease},
         runtime::{
@@ -59,9 +59,9 @@ impl fmt::Debug for ScanOrchestrator {
 impl ScanOrchestrator {
     pub fn new(
         config: OrchestratorConfig,
-        db: Arc<MediaDatabase>,
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
+        unit_of_work: Arc<AppUnitOfWork>,
         queue: Arc<PostgresQueueService>,
         cursors: Arc<PostgresCursorRepository>,
         budget: Arc<InMemoryBudget>,
@@ -69,9 +69,9 @@ impl ScanOrchestrator {
         let events = Arc::new(InProcJobEventBus::new(256));
         let correlations = CorrelationCache::default();
         let actors = Arc::new(ActorSystem::new(
-            Arc::clone(&db),
             Arc::clone(&tmdb),
             Arc::clone(&image_service),
+            Arc::clone(&unit_of_work),
             Arc::clone(&events),
             correlations.clone(),
         ));
@@ -133,8 +133,8 @@ impl ScanOrchestrator {
         self.events.subscribe()
     }
 
-    pub fn subscribe_domain_events(&self) -> tokio::sync::broadcast::Receiver<DomainEvent> {
-        self.events.subscribe_domain()
+    pub fn subscribe_scan_events(&self) -> tokio::sync::broadcast::Receiver<ScanEvent> {
+        self.events.subscribe_scan()
     }
 
     pub fn config(&self) -> OrchestratorConfig {
@@ -358,25 +358,26 @@ impl ScanOrchestrator {
 impl ScanOrchestrator {
     pub async fn postgres(
         config: OrchestratorConfig,
-        db: Arc<MediaDatabase>,
+        postgres: Arc<PostgresDatabase>,
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
+        unit_of_work: Arc<AppUnitOfWork>,
     ) -> Result<Self> {
-        let backend = db
-            .backend()
-            .as_any()
-            .downcast_ref::<PostgresDatabase>()
-            .ok_or_else(|| {
-                MediaError::Internal("Media database backend must be Postgres".into())
-            })?;
-
-        let pool = backend.pool().clone();
+        let pool = postgres.pool().clone();
         let queue =
             Arc::new(PostgresQueueService::new_with_retry(pool.clone(), config.retry).await?);
         let cursors = Arc::new(PostgresCursorRepository::new(pool));
         let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
 
-        Self::new(config, db, tmdb, image_service, queue, cursors, budget)
+        Self::new(
+            config,
+            tmdb,
+            image_service,
+            unit_of_work,
+            queue,
+            cursors,
+            budget,
+        )
     }
 }
 
@@ -399,23 +400,27 @@ impl fmt::Debug for ActorSystem {
 
 impl ActorSystem {
     pub fn new(
-        db: Arc<MediaDatabase>,
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
+        unit_of_work: Arc<AppUnitOfWork>,
         events: Arc<InProcJobEventBus>,
         correlations: CorrelationCache,
     ) -> Self {
         let image_actor: Arc<dyn ImageFetchActor> =
             Arc::new(DefaultImageFetchActor::new(Arc::clone(&image_service)));
-        let metadata_actor: Arc<dyn MetadataActor> =
-            Arc::new(TmdbMetadataActor::new(Arc::clone(&db), tmdb, image_service));
+        let metadata_actor: Arc<dyn MetadataActor> = Arc::new(TmdbMetadataActor::new(
+            unit_of_work.media_refs.clone(),
+            unit_of_work.media_files_write.clone(),
+            tmdb,
+            Arc::clone(&image_service),
+        ));
 
         Self {
             observer: Arc::new(NoopActorObserver),
             folder_actor: Arc::new(DefaultFolderScanActor::new()),
             analyze_actor: Arc::new(DefaultMediaAnalyzeActor::new()),
             metadata_actor,
-            indexer_actor: Arc::new(DefaultIndexerActor::new(Arc::clone(&db))),
+            indexer_actor: Arc::new(DefaultIndexerActor::new(unit_of_work.media_refs.clone())),
             image_actor,
             events,
             correlations,

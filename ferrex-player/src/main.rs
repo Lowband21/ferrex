@@ -58,6 +58,25 @@ fn main() -> iced::Result {
     let server_url =
         std::env::var("FERREX_SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
+    #[cfg(feature = "demo")]
+    let demo_mode = {
+        let env_value = std::env::var("FERREX_PLAYER_DEMO_MODE")
+            .or_else(|_| std::env::var("FERREX_DEMO_MODE"))
+            .unwrap_or_default();
+        let is_truthy = matches!(
+            env_value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        );
+        let cli_flag = std::env::args().any(|arg| arg == "--demo");
+        is_truthy || cli_flag
+    };
+
+    #[cfg(feature = "demo")]
+    let demo_credentials = (
+        std::env::var("FERREX_DEMO_USERNAME").unwrap_or_else(|_| "demo".into()),
+        std::env::var("FERREX_DEMO_PASSWORD").unwrap_or_else(|_| "demo".into()),
+    );
+
     let init = move || {
         // Create state using the new constructor
         let mut state = State::new(server_url.clone());
@@ -152,8 +171,26 @@ fn main() -> iced::Result {
             },
         );
 
+        let mut tasks = vec![auth_task];
+
+        #[cfg(feature = "demo")]
+        if demo_mode {
+            let auth_service = state.domains.auth.state.auth_service.clone();
+            let (username, password) = demo_credentials.clone();
+            log::info!("[Demo] Attempting automatic demo login as {}", username);
+            tasks.push(Task::perform(
+                async move {
+                    auth_service
+                        .authenticate_device(username, password, true)
+                        .await
+                        .map_err(|err| err.to_string())
+                },
+                |result| DomainMessage::Auth(domains::auth::messages::Message::AuthResult(result)),
+            ));
+        }
+
         // Note: Library loading will happen after authentication
-        (state, auth_task)
+        (state, Task::batch(tasks))
     };
 
     let mut settings = iced::Settings::default();

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::auth::domain::events::DomainEvent;
+use crate::auth::domain::events::AuthEvent;
 use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, PinPolicy, SessionToken};
 
 /// Errors that can occur with device sessions
@@ -81,10 +81,38 @@ pub struct DeviceSession {
     last_activity: DateTime<Utc>,
 
     /// Domain events to be published
-    events: Vec<DomainEvent>,
+    events: Vec<AuthEvent>,
 }
 
 impl DeviceSession {
+    /// Rehydrate a device session from persisted storage.
+    pub(crate) fn hydrate(
+        id: Uuid,
+        user_id: Uuid,
+        device_fingerprint: DeviceFingerprint,
+        device_name: String,
+        status: DeviceStatus,
+        pin: Option<PinCode>,
+        session_token: Option<SessionToken>,
+        failed_attempts: u8,
+        created_at: DateTime<Utc>,
+        last_activity: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id,
+            user_id,
+            device_fingerprint,
+            device_name,
+            status,
+            pin,
+            session_token,
+            failed_attempts,
+            created_at,
+            last_activity,
+            events: Vec::new(),
+        }
+    }
+
     /// Create a new device session
     pub fn new(user_id: Uuid, device_fingerprint: DeviceFingerprint, device_name: String) -> Self {
         let now = Utc::now();
@@ -104,7 +132,7 @@ impl DeviceSession {
             events: Vec::new(),
         };
 
-        session.add_event(DomainEvent::DeviceRegistered {
+        session.add_event(AuthEvent::DeviceRegistered {
             session_id: id,
             user_id,
             device_name,
@@ -129,14 +157,14 @@ impl DeviceSession {
         // If device was pending, it's now trusted
         if self.status == DeviceStatus::Pending {
             self.status = DeviceStatus::Trusted;
-            self.add_event(DomainEvent::DeviceTrusted {
+            self.add_event(AuthEvent::DeviceTrusted {
                 session_id: self.id,
                 user_id: self.user_id,
                 timestamp: Utc::now(),
             });
         }
 
-        self.add_event(DomainEvent::PinSet {
+        self.add_event(AuthEvent::PinSet {
             session_id: self.id,
             user_id: self.user_id,
             timestamp: Utc::now(),
@@ -174,7 +202,7 @@ impl DeviceSession {
 
         if !valid {
             self.failed_attempts += 1;
-            self.add_event(DomainEvent::AuthenticationFailed {
+            self.add_event(AuthEvent::AuthenticationFailed {
                 session_id: self.id,
                 user_id: self.user_id,
                 reason: "Invalid PIN".to_string(),
@@ -193,7 +221,7 @@ impl DeviceSession {
         self.session_token = Some(token.clone());
         self.last_activity = Utc::now();
 
-        self.add_event(DomainEvent::SessionCreated {
+        self.add_event(AuthEvent::SessionCreated {
             session_id: self.id,
             user_id: self.user_id,
             expires_at: token.expires_at(),
@@ -230,7 +258,7 @@ impl DeviceSession {
         self.session_token = Some(token.clone());
         self.last_activity = Utc::now();
 
-        self.add_event(DomainEvent::SessionRefreshed {
+        self.add_event(AuthEvent::SessionRefreshed {
             session_id: self.id,
             user_id: self.user_id,
             expires_at: token.expires_at(),
@@ -249,7 +277,7 @@ impl DeviceSession {
         self.status = DeviceStatus::Revoked;
         self.session_token = None;
 
-        self.add_event(DomainEvent::DeviceRevoked {
+        self.add_event(AuthEvent::DeviceRevoked {
             session_id: self.id,
             user_id: self.user_id,
             timestamp: Utc::now(),
@@ -272,12 +300,12 @@ impl DeviceSession {
     }
 
     /// Add a domain event
-    fn add_event(&mut self, event: DomainEvent) {
+    fn add_event(&mut self, event: AuthEvent) {
         self.events.push(event);
     }
 
     /// Take all pending events (for publishing)
-    pub fn take_events(&mut self) -> Vec<DomainEvent> {
+    pub fn take_events(&mut self) -> Vec<AuthEvent> {
         std::mem::take(&mut self.events)
     }
 
@@ -311,6 +339,16 @@ impl DeviceSession {
     }
     pub fn session_token(&self) -> Option<&SessionToken> {
         self.session_token.as_ref()
+    }
+
+    /// Replace the in-memory session token (typically with the persisted hash)
+    pub fn set_persisted_token(&mut self, token: Option<SessionToken>) {
+        self.session_token = token;
+    }
+
+    /// Get the hashed PIN if one is stored
+    pub fn pin_hash(&self) -> Option<&str> {
+        self.pin.as_ref().map(|p| p.hash())
     }
 }
 

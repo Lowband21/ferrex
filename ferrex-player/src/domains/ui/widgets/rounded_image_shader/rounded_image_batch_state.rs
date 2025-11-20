@@ -6,16 +6,16 @@
 //! frame budget and texture cache state are known.
 
 use super::{
-    create_batch_instance, create_placeholder_instance, AnimatedPosterBounds, AnimationType,
+    AnimatedPosterBounds, AnimationType, create_batch_instance, create_placeholder_instance,
 };
 use crate::infrastructure::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
 use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
 use iced::{Color, Point, Rectangle as LayoutRect};
 use iced_wgpu::primitive::{
-    buffer_manager::InstanceBufferManager, PrepareContext, PrimitiveBatchState, RenderContext,
+    PrepareContext, PrimitiveBatchState, RenderContext, buffer_manager::InstanceBufferManager,
 };
-use iced_wgpu::{core, wgpu, AtlasRegion};
+use iced_wgpu::{AtlasRegion, core, wgpu};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;

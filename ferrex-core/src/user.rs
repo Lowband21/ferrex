@@ -6,14 +6,14 @@
 //! ## Authentication Flow
 //!
 //! 1. **Registration**: Users create an account with username and password
-//! 2. **Login**: Credentials are verified, returning JWT access and refresh tokens
+//! 2. **Login**: Credentials are verified, returning an opaque session token and refresh token
 //! 3. **Session**: Each login creates a session entry for device tracking
-//! 4. **Token Refresh**: Access tokens (15min) can be refreshed using refresh tokens (30 days)
+//! 4. **Token Refresh**: Session tokens (15min default) are rotated via refresh tokens (30 days)
 //!
 //! ## Security
 //!
 //! - Passwords are hashed using Argon2id
-//! - JWT tokens are used for stateless authentication
+//! - Session tokens are high-entropy secrets hashed with HMAC before persistence
 //! - Sessions track active devices and can be revoked
 //!
 //! ## Example
@@ -259,28 +259,27 @@ impl std::fmt::Display for GridSize {
     }
 }
 
-/// Authentication token response
-///
-/// Contains JWT access token and refresh token returned after successful login.
-/// Access tokens are short-lived (15 minutes) while refresh tokens last longer (30 days).
-///
-/// # Example
-///
-/// ```json
-/// {
-///   "access_token": "<REDACTED>",
-///   "refresh_token": "550e8400-e29b-41d4-a716-446655440000",
-///   "expires_in": 900
-/// }
-/// ```
+/// Authentication token response containing the opaque session token and
+/// refresh token returned after successful login. The `access_token` field is
+/// now an opaque session secret (no longer a JWT). Clients present it as a
+/// bearer token until `expires_in` elapses, then rotate via the refresh token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthToken {
-    /// JWT access token for API authentication (15 minute expiry)
+    /// Opaque access token (session secret) for API authentication
     pub access_token: String,
     /// Opaque refresh token for obtaining new access tokens (30 day expiry)
     pub refresh_token: String,
     /// Seconds until the access token expires (typically 900)
     pub expires_in: u32,
+    /// Optional identifier of the persisted session record
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+    /// Optional trusted device session identifier tied to the login
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_session_id: Option<Uuid>,
+    /// Optional user id for convenience in single-request flows
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<Uuid>,
 }
 
 /// User session for tracking active devices

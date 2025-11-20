@@ -1,15 +1,36 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use std::fmt;
+use std::{fmt, sync::Arc};
 use uuid::Uuid;
 
-use crate::auth::domain::aggregates::DeviceSession;
+use crate::auth::AuthCrypto;
+use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus};
 use crate::auth::domain::repositories::DeviceSessionRepository;
-use crate::auth::domain::value_objects::DeviceFingerprint;
+use crate::auth::domain::value_objects::{DeviceFingerprint, PinCode, SessionToken};
+
+#[derive(sqlx::FromRow, Debug)]
+struct DeviceSessionRecord {
+    id: Uuid,
+    user_id: Uuid,
+    device_fingerprint: String,
+    device_name: String,
+    status: String,
+    pin_hash: Option<String>,
+    failed_attempts: i16,
+    created_at: DateTime<Utc>,
+    last_activity: DateTime<Utc>,
+    #[allow(dead_code)]
+    updated_at: DateTime<Utc>,
+    session_token_hash: Option<String>,
+    session_created_at: Option<DateTime<Utc>>,
+    session_expires_at: Option<DateTime<Utc>>,
+}
 
 pub struct PostgresDeviceSessionRepository {
     pool: PgPool,
+    crypto: Arc<AuthCrypto>,
 }
 
 impl fmt::Debug for PostgresDeviceSessionRepository {
@@ -19,15 +40,52 @@ impl fmt::Debug for PostgresDeviceSessionRepository {
 }
 
 impl PostgresDeviceSessionRepository {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, crypto: Arc<AuthCrypto>) -> Self {
+        Self { pool, crypto }
     }
 }
 
 #[async_trait]
 impl DeviceSessionRepository for PostgresDeviceSessionRepository {
-    async fn find_by_id(&self, _session_id: Uuid) -> Result<Option<DeviceSession>> {
-        todo!("Implement find_by_id")
+    async fn find_by_id(&self, session_id: Uuid) -> Result<Option<DeviceSession>> {
+        let record = sqlx::query_as!(
+            DeviceSessionRecord,
+            r#"
+            SELECT
+                ds.id,
+                ds.user_id,
+                ds.device_fingerprint,
+                ds.device_name,
+                ds.status::text AS "status!",
+                ds.pin_hash,
+                ds.failed_attempts,
+                ds.created_at,
+                ds.last_activity,
+                ds.updated_at,
+                sess.session_token_hash,
+                sess.created_at AS session_created_at,
+                sess.expires_at AS session_expires_at
+            FROM auth_device_sessions ds
+            LEFT JOIN LATERAL (
+                SELECT
+                    s.session_token_hash,
+                    s.created_at,
+                    s.expires_at
+                FROM auth_sessions s
+                WHERE s.device_session_id = ds.id
+                  AND s.revoked = FALSE
+                  AND s.expires_at > NOW()
+                ORDER BY s.created_at DESC
+                LIMIT 1
+            ) sess ON TRUE
+            WHERE ds.id = $1
+            "#,
+            session_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        record.map(|row| self.hydrate_session(row)).transpose()
     }
 
     async fn find_by_user_and_fingerprint(
@@ -35,41 +93,304 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         user_id: Uuid,
         fingerprint: &DeviceFingerprint,
     ) -> Result<Option<DeviceSession>> {
-        // TODO: TEMPORARY IN-MEMORY IMPLEMENTATION
-        // Schema mismatch: DeviceSession domain model doesn't align with current database schema.
-        // The DeviceSession domain object expects a direct session with device fingerprint,
-        // but the database schema separates authenticated_devices and sessions tables.
-        //
-        // SOLUTIONS NEEDED:
-        // 1. Create auth_device_sessions table that matches the domain model
-        // 2. OR refactor domain model to match existing schema
-        // 3. OR implement complex mapping logic between normalized tables
-        //
-        // For now, returning None to allow compilation
-        let _ = (user_id, fingerprint); // Suppress unused warnings
-        Ok(None)
+        let record = sqlx::query_as!(
+            DeviceSessionRecord,
+            r#"
+            SELECT
+                ds.id,
+                ds.user_id,
+                ds.device_fingerprint,
+                ds.device_name,
+                ds.status::text AS "status!",
+                ds.pin_hash,
+                ds.failed_attempts,
+                ds.created_at,
+                ds.last_activity,
+                ds.updated_at,
+                sess.session_token_hash,
+                sess.created_at AS session_created_at,
+                sess.expires_at AS session_expires_at
+            FROM auth_device_sessions ds
+            LEFT JOIN LATERAL (
+                SELECT
+                    s.session_token_hash,
+                    s.created_at,
+                    s.expires_at
+                FROM auth_sessions s
+                WHERE s.device_session_id = ds.id
+                  AND s.revoked = FALSE
+                  AND s.expires_at > NOW()
+                ORDER BY s.created_at DESC
+                LIMIT 1
+            ) sess ON TRUE
+            WHERE ds.user_id = $1
+              AND ds.device_fingerprint = $2
+            "#,
+            user_id,
+            fingerprint.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        record.map(|row| self.hydrate_session(row)).transpose()
     }
 
     async fn find_by_user_id(&self, user_id: Uuid) -> Result<Vec<DeviceSession>> {
-        // TODO: TEMPORARY IN-MEMORY IMPLEMENTATION
-        // Schema mismatch: Cannot map current database schema to DeviceSession domain model.
-        // The domain expects: session_id, device_fingerprint as value object, PIN as value object,
-        // session_token as value object, but the schema stores these across multiple normalized tables.
-        //
-        // SOLUTIONS NEEDED:
-        // 1. Create auth_device_sessions table that matches the domain model
-        // 2. OR refactor domain model to work with normalized schema
-        // 3. OR implement complex mapping logic between tables:
-        //    - sessions table (id, user_id, device_id, token_hash, created_at, last_activity)
-        //    - authenticated_devices table (id, fingerprint, name, revoked)
-        //    - device_user_credentials table (user_id, device_id, pin_hash, failed_attempts)
-        //
-        // For now, returning empty vector to allow compilation
-        let _ = user_id; // Suppress unused warning
-        Ok(Vec::new())
+        let rows = sqlx::query_as!(
+            DeviceSessionRecord,
+            r#"
+            SELECT
+                ds.id,
+                ds.user_id,
+                ds.device_fingerprint,
+                ds.device_name,
+                ds.status::text AS "status!",
+                ds.pin_hash,
+                ds.failed_attempts,
+                ds.created_at,
+                ds.last_activity,
+                ds.updated_at,
+                sess.session_token_hash,
+                sess.created_at AS session_created_at,
+                sess.expires_at AS session_expires_at
+            FROM auth_device_sessions ds
+            LEFT JOIN LATERAL (
+                SELECT
+                    s.session_token_hash,
+                    s.created_at,
+                    s.expires_at
+                FROM auth_sessions s
+                WHERE s.device_session_id = ds.id
+                  AND s.revoked = FALSE
+                  AND s.expires_at > NOW()
+                ORDER BY s.created_at DESC
+                LIMIT 1
+            ) sess ON TRUE
+            WHERE ds.user_id = $1
+            ORDER BY ds.created_at DESC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| self.hydrate_session(row))
+            .collect()
     }
 
-    async fn save(&self, _session: &DeviceSession) -> Result<()> {
-        todo!("Implement save")
+    async fn save(&self, session: &DeviceSession) -> Result<Option<Uuid>> {
+        let pin_hash = session.pin_hash();
+        let status = status_to_db(session.status());
+        let failed_attempts: i16 = session
+            .failed_attempts()
+            .try_into()
+            .context("failed attempts exceeds database representation")?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO auth_device_sessions (
+                id,
+                user_id,
+                device_fingerprint,
+                device_name,
+                status,
+                pin_hash,
+                failed_attempts,
+                first_authenticated_by,
+                first_authenticated_at,
+                last_seen_at,
+                last_activity,
+                created_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                ($5)::text::auth_device_status,
+                $6,
+                $7,
+                $2,
+                $8,
+                $9,
+                $10,
+                $11
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                device_name = EXCLUDED.device_name,
+                status = EXCLUDED.status,
+                pin_hash = EXCLUDED.pin_hash,
+                failed_attempts = EXCLUDED.failed_attempts,
+                last_seen_at = EXCLUDED.last_seen_at,
+                last_activity = EXCLUDED.last_activity,
+                updated_at = NOW(),
+                revoked_at = CASE
+                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN
+                        COALESCE(auth_device_sessions.revoked_at, NOW())
+                    ELSE NULL
+                END,
+                revoked_by = CASE
+                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_by
+                    ELSE NULL
+                END,
+                revoked_reason = CASE
+                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_reason
+                    ELSE NULL
+                END
+            "#,
+            session.id(),
+            session.user_id(),
+            session.device_fingerprint().as_str(),
+            session.device_name(),
+            status,
+            pin_hash,
+            failed_attempts,
+            session.created_at(),
+            session.last_activity(),
+            session.last_activity(),
+            session.created_at()
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let mut persisted_session_id = None;
+
+        if matches!(session.status(), DeviceStatus::Revoked) {
+            sqlx::query!(
+                r#"
+                UPDATE auth_sessions
+                SET revoked = TRUE,
+                    revoked_at = NOW(),
+                    revoked_reason = COALESCE(revoked_reason, 'device_revoked')
+                WHERE device_session_id = $1
+                  AND revoked = FALSE
+                "#,
+                session.id()
+            )
+            .execute(&self.pool)
+            .await?;
+        } else if let Some(token) = session.session_token() {
+            let token_hash = if is_hex_digest(token.as_str()) {
+                token.as_str().to_string()
+            } else {
+                self.crypto.hash_token(token.as_str())
+            };
+
+            sqlx::query!(
+                r#"
+                UPDATE auth_sessions
+                SET revoked = TRUE,
+                    revoked_at = NOW(),
+                    revoked_reason = COALESCE(revoked_reason, 'replaced_by_new_token')
+                WHERE device_session_id = $1
+                  AND revoked = FALSE
+                "#,
+                session.id()
+            )
+            .execute(&self.pool)
+            .await?;
+
+            let record = sqlx::query!(
+                r#"
+                INSERT INTO auth_sessions (
+                    user_id,
+                    device_session_id,
+                    session_token_hash,
+                    created_at,
+                    expires_at,
+                    last_activity,
+                    metadata
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb)
+                ON CONFLICT (session_token_hash) DO UPDATE
+                SET expires_at = EXCLUDED.expires_at,
+                    last_activity = EXCLUDED.last_activity,
+                    revoked = FALSE,
+                    revoked_at = NULL,
+                    revoked_reason = NULL,
+                    metadata = EXCLUDED.metadata
+                RETURNING id
+                "#,
+                session.user_id(),
+                session.id(),
+                token_hash,
+                token.created_at(),
+                token.expires_at(),
+                session.last_activity()
+            )
+            .fetch_one(&self.pool)
+            .await?;
+
+            persisted_session_id = Some(record.id);
+        }
+
+        Ok(persisted_session_id)
+    }
+}
+
+impl PostgresDeviceSessionRepository {
+    fn hydrate_session(&self, row: DeviceSessionRecord) -> Result<DeviceSession> {
+        let fingerprint = DeviceFingerprint::from_hash(row.device_fingerprint)
+            .context("invalid device fingerprint stored in database")?;
+
+        let pin = row.pin_hash.map(PinCode::from_hash);
+
+        let session_token = match (
+            row.session_token_hash,
+            row.session_created_at,
+            row.session_expires_at,
+        ) {
+            (Some(token), Some(created_at), Some(expires_at)) => Some(
+                SessionToken::from_value(token, created_at, expires_at)
+                    .context("failed to hydrate session token from database row")?,
+            ),
+            _ => None,
+        };
+
+        let status =
+            status_from_db(&row.status).context("invalid auth_device_sessions.status value")?;
+
+        let failed_attempts: u8 = row
+            .failed_attempts
+            .try_into()
+            .context("failed_attempts exceeds u8 range")?;
+
+        Ok(DeviceSession::hydrate(
+            row.id,
+            row.user_id,
+            fingerprint,
+            row.device_name,
+            status,
+            pin,
+            session_token,
+            failed_attempts,
+            row.created_at,
+            row.last_activity,
+        ))
+    }
+}
+
+fn is_hex_digest(candidate: &str) -> bool {
+    candidate.len() == 64 && candidate.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn status_from_db(value: &str) -> Result<crate::auth::domain::aggregates::DeviceStatus> {
+    use crate::auth::domain::aggregates::DeviceStatus;
+
+    match value {
+        "pending" => Ok(DeviceStatus::Pending),
+        "trusted" => Ok(DeviceStatus::Trusted),
+        "revoked" => Ok(DeviceStatus::Revoked),
+        other => anyhow::bail!("unknown device session status: {other}"),
+    }
+}
+
+fn status_to_db(status: crate::auth::domain::aggregates::DeviceStatus) -> &'static str {
+    use crate::auth::domain::aggregates::DeviceStatus;
+
+    match status {
+        DeviceStatus::Pending => "pending",
+        DeviceStatus::Trusted => "trusted",
+        DeviceStatus::Revoked => "revoked",
     }
 }

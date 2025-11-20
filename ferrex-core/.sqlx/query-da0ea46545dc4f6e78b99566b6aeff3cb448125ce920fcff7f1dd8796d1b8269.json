@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE auth_device_sessions\n            SET\n                pin_hash = $3,\n                pin_set_at = $4,\n                pin_last_used_at = $5,\n                failed_attempts = $6,\n                locked_until = $7,\n                auto_login_enabled = $8,\n                updated_at = NOW()\n            WHERE user_id = $1 AND id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int2",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da0ea46545dc4f6e78b99566b6aeff3cb448125ce920fcff7f1dd8796d1b8269"
+}

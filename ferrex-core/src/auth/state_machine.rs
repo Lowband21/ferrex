@@ -595,6 +595,9 @@ mod tests {
             access_token: "<REDACTED>".to_string(),
             expires_in: 3600,
             refresh_token: "refresh_token".to_string(),
+            session_id: None,
+            device_session_id: None,
+            user_id: None,
         };
 
         let permissions = UserPermissions::default();

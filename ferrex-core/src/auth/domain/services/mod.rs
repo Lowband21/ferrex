@@ -6,19 +6,28 @@ mod authentication_service;
 mod device_trust_service;
 mod pin_management_service;
 
-pub use authentication_service::{AuthenticationError, AuthenticationService};
+pub use authentication_service::{AuthenticationError, AuthenticationService, TokenBundle};
 pub use device_trust_service::{DeviceTrustError, DeviceTrustService};
 pub use pin_management_service::{PinManagementError, PinManagementService};
 
 /// Factory function to create an AuthenticationService with PostgreSQL repositories
 #[cfg(feature = "database")]
-pub fn create_authentication_service(pool: sqlx::PgPool) -> AuthenticationService {
+pub fn create_authentication_service(
+    pool: sqlx::PgPool,
+    crypto: std::sync::Arc<crate::auth::AuthCrypto>,
+) -> AuthenticationService {
     use crate::auth::infrastructure::repositories::{
-        PostgresDeviceSessionRepository, PostgresUserAuthRepository,
+        PostgresAuthSessionRepository, PostgresDeviceSessionRepository,
+        PostgresRefreshTokenRepository, PostgresUserAuthRepository,
     };
     use std::sync::Arc;
 
     let user_repo = Arc::new(PostgresUserAuthRepository::new(pool.clone()));
-    let session_repo = Arc::new(PostgresDeviceSessionRepository::new(pool));
-    AuthenticationService::new(user_repo, session_repo)
+    let session_repo = Arc::new(PostgresDeviceSessionRepository::new(
+        pool.clone(),
+        crypto.clone(),
+    ));
+    let refresh_repo = Arc::new(PostgresRefreshTokenRepository::new(pool.clone()));
+    let session_store = Arc::new(PostgresAuthSessionRepository::new(pool));
+    AuthenticationService::new(user_repo, session_repo, refresh_repo, session_store, crypto)
 }

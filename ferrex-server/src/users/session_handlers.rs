@@ -16,7 +16,7 @@ pub async fn get_user_sessions_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> AppResult<Json<Vec<UserSession>>> {
-    let sessions = state.db.backend().get_user_sessions(user.id).await?;
+    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
 
     Ok(Json(sessions))
 }
@@ -28,7 +28,7 @@ pub async fn delete_session_handler(
     Path(session_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
     // Get the session to verify ownership
-    let sessions = state.db.backend().get_user_sessions(user.id).await?;
+    let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
 
     // Check if the session belongs to the user
     if !sessions.iter().any(|s| s.id == session_id) {
@@ -37,8 +37,8 @@ pub async fn delete_session_handler(
 
     // Delete the session
     state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .delete_session(session_id)
         .await
         .map_err(|_| AppError::internal("Failed to delete session"))?;
@@ -60,29 +60,29 @@ pub async fn delete_all_sessions_handler(
     updated_user.updated_at = chrono::Utc::now();
 
     state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .update_user(&updated_user)
         .await
         .map_err(|_| AppError::internal("Failed to update user preferences"))?;
 
     // Get all sessions
     let sessions = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_sessions(user.id)
         .await
         .map_err(|_| AppError::internal("Failed to get user sessions"))?;
 
     // Delete each session
     for session in sessions {
-        let _ = state.db.backend().delete_session(session.id).await;
+        let _ = state.unit_of_work.users.delete_session(session.id).await;
     }
 
     // Delete all refresh tokens
     state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .delete_user_refresh_tokens(user.id)
         .await
         .map_err(|_| AppError::internal("Failed to delete refresh tokens"))?;

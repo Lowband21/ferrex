@@ -54,7 +54,7 @@ pub async fn list_all_users(
     Query(filters): Query<UserFilters>,
 ) -> AppResult<Json<ApiResponse<Vec<AdminUserInfo>>>> {
     // Get all users from database
-    let mut users = state.db.backend().get_all_users().await?;
+    let mut users = state.unit_of_work.users.get_all_users().await?;
 
     // We'll filter by role after fetching role info
 
@@ -69,8 +69,12 @@ pub async fn list_all_users(
     // Convert to AdminUserInfo with session counts and roles
     let mut admin_users = Vec::new();
     for user in users {
-        let sessions = state.db.backend().get_user_sessions(user.id).await?;
-        let permissions = state.db.backend().get_user_permissions(user.id).await?;
+        let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
+        let permissions = state
+            .unit_of_work
+            .rbac
+            .get_user_permissions(user.id)
+            .await?;
         let role_names: Vec<String> = permissions.roles.into_iter().map(|r| r.name).collect();
 
         // Apply role filter if specified
@@ -113,7 +117,11 @@ pub async fn assign_user_roles(
 
     // Prevent admin from removing their own admin role
     if admin.id == user_id && !request.role_ids.contains(&admin_role_id) {
-        let current_perms = state.db.backend().get_user_permissions(user_id).await?;
+        let current_perms = state
+            .unit_of_work
+            .rbac
+            .get_user_permissions(user_id)
+            .await?;
         if current_perms.has_role("admin") {
             return Err(AppError::bad_request("Cannot remove your own admin role"));
         }
@@ -121,8 +129,8 @@ pub async fn assign_user_roles(
 
     // Verify user exists
     let user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
@@ -163,20 +171,24 @@ pub async fn delete_user_admin(
 
     // Check if user exists
     let user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
 
     // Check if user has admin role
-    let user_perms = state.db.backend().get_user_permissions(user_id).await?;
+    let user_perms = state
+        .unit_of_work
+        .rbac
+        .get_user_permissions(user_id)
+        .await?;
     if user_perms.has_role("admin") {
         return Err(AppError::forbidden("Cannot delete users with admin role"));
     }
 
     // Delete the user
-    state.db.backend().delete_user(user_id).await?;
+    state.unit_of_work.users.delete_user(user_id).await?;
 
     // Log admin action
     tracing::info!(
@@ -198,14 +210,14 @@ pub async fn get_user_sessions_admin(
 ) -> AppResult<Json<ApiResponse<Vec<ferrex_core::user::UserSession>>>> {
     // Verify user exists
     let user = state
-        .db
-        .backend()
+        .unit_of_work
+        .users
         .get_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::not_found("User not found"))?;
 
     // Get user sessions
-    let sessions = state.db.backend().get_user_sessions(user_id).await?;
+    let sessions = state.unit_of_work.users.get_user_sessions(user_id).await?;
 
     Ok(Json(ApiResponse::success(sessions)))
 }
@@ -217,7 +229,7 @@ pub async fn revoke_user_session_admin(
     Path((user_id, session_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<StatusCode> {
     // Delete the session
-    state.db.backend().delete_session(session_id).await?;
+    state.unit_of_work.users.delete_session(session_id).await?;
 
     // Log admin action
     tracing::info!(
@@ -248,13 +260,17 @@ pub async fn get_admin_stats(
     Extension(admin): Extension<User>,
 ) -> AppResult<Json<ApiResponse<AdminStats>>> {
     // Get user stats
-    let users = state.db.backend().get_all_users().await?;
+    let users = state.unit_of_work.users.get_all_users().await?;
     let total_users = users.len() as i64;
 
     // Count users with admin role
     let mut admin_users = 0i64;
     for user in &users {
-        let perms = state.db.backend().get_user_permissions(user.id).await?;
+        let perms = state
+            .unit_of_work
+            .rbac
+            .get_user_permissions(user.id)
+            .await?;
         if perms.has_role("admin") {
             admin_users += 1;
         }
@@ -263,12 +279,12 @@ pub async fn get_admin_stats(
     // Get session count (simplified - in production you'd want a dedicated query)
     let mut active_sessions = 0;
     for user in &users {
-        let sessions = state.db.backend().get_user_sessions(user.id).await?;
+        let sessions = state.unit_of_work.users.get_user_sessions(user.id).await?;
         active_sessions += sessions.len() as i64;
     }
 
     // Get library stats
-    let libraries = state.db.backend().list_libraries().await?;
+    let libraries = state.unit_of_work.libraries.list_libraries().await?;
     let total_libraries = libraries.len() as i64;
 
     // Get media stats (simplified - in production you'd want dedicated queries)

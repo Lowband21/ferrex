@@ -1,5 +1,6 @@
 use super::traits::*;
 use crate::database::ports::folder_inventory::FolderInventoryRepository;
+use crate::database::ports::library::LibraryRepository;
 use crate::database::ports::processing_status::ProcessingStatusRepository;
 use crate::database::ports::rbac::RbacRepository;
 use crate::database::ports::sync_sessions::SyncSessionsRepository;
@@ -11,16 +12,17 @@ use crate::{
     MovieReference, MovieTitle, MovieURL, SeasonReference, SeriesReference, SeriesTitle, SeriesURL,
     TmdbDetails, UrlLike,
     database::infrastructure::postgres::repositories::{
-        folder_inventory::PostgresFolderInventoryRepository, media::PostgresMediaRepository,
-        processing_status::PostgresProcessingStatusRepository, rbac::PostgresRbacRepository,
-        sync_sessions::PostgresSyncSessionsRepository, users::PostgresUsersRepository,
-        watch_status::PostgresWatchStatusRepository,
+        folder_inventory::PostgresFolderInventoryRepository, library::PostgresLibraryRepository,
+        media::PostgresMediaRepository, processing_status::PostgresProcessingStatusRepository,
+        rbac::PostgresRbacRepository, sync_sessions::PostgresSyncSessionsRepository,
+        users::PostgresUsersRepository, watch_status::PostgresWatchStatusRepository,
     },
     database::postgres_ext::tmdb_metadata::TmdbMetadataRepository,
+    fs_watch::event_bus::PostgresFileChangeEventBus,
 };
 use crate::{
     EpisodeID, Library, LibraryID, LibraryType, Media, MediaError, MediaFile, MediaFileMetadata,
-    MovieID, Result, SeasonID, SeriesID,
+    MediaImageKind, MovieID, Result, SeasonID, SeriesID,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -52,6 +54,7 @@ pub struct PostgresDatabase {
     watch_status: PostgresWatchStatusRepository,
     sync_sessions: PostgresSyncSessionsRepository,
     folder_inventory: PostgresFolderInventoryRepository,
+    libraries: PostgresLibraryRepository,
     media: PostgresMediaRepository,
     processing_status: PostgresProcessingStatusRepository,
 }
@@ -92,6 +95,7 @@ impl PostgresDatabase {
         let watch_status = PostgresWatchStatusRepository::new(pool.clone());
         let sync_sessions = PostgresSyncSessionsRepository::new(pool.clone());
         let folder_inventory = PostgresFolderInventoryRepository::new(pool.clone());
+        let libraries = PostgresLibraryRepository::new(pool.clone());
         let media = PostgresMediaRepository::new(pool.clone());
         let processing_status = PostgresProcessingStatusRepository::new(pool.clone());
 
@@ -104,6 +108,7 @@ impl PostgresDatabase {
             watch_status,
             sync_sessions,
             folder_inventory,
+            libraries,
             media,
             processing_status,
         })
@@ -120,6 +125,7 @@ impl PostgresDatabase {
         let watch_status = PostgresWatchStatusRepository::new(pool.clone());
         let sync_sessions = PostgresSyncSessionsRepository::new(pool.clone());
         let folder_inventory = PostgresFolderInventoryRepository::new(pool.clone());
+        let libraries = PostgresLibraryRepository::new(pool.clone());
         let media = PostgresMediaRepository::new(pool.clone());
         let processing_status = PostgresProcessingStatusRepository::new(pool.clone());
 
@@ -132,6 +138,7 @@ impl PostgresDatabase {
             watch_status,
             sync_sessions,
             folder_inventory,
+            libraries,
             media,
             processing_status,
         }
@@ -208,6 +215,10 @@ impl PostgresDatabase {
     /// Get a reference to the connection pool for use in extension modules
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub fn file_change_event_bus(&self) -> PostgresFileChangeEventBus {
+        PostgresFileChangeEventBus::from_postgres(self)
     }
 
     pub(crate) fn users_repository(&self) -> &PostgresUsersRepository {
@@ -289,7 +300,7 @@ impl PostgresDatabase {
         };
 
         if include_metadata {
-            let repository = TmdbMetadataRepository::new(self);
+            let repository = TmdbMetadataRepository::new(self.pool());
             let movie_ref = repository.load_movie_reference(row).await?;
             let metadata = match &movie_ref.details {
                 MediaDetailsOption::Details(TmdbDetails::Movie(details)) => Some(details.clone()),
@@ -428,196 +439,62 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // Library management
     async fn create_library(&self, library: Library) -> Result<String> {
-        let paths: Vec<String> = library
-            .paths
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-
-        let library_type = match library.library_type {
-            crate::LibraryType::Movies => "movies",
-            crate::LibraryType::Series => "tvshows",
-        };
-
-        sqlx::query!(
-            r#"
-            INSERT INTO libraries (id, name, library_type, paths, scan_interval_minutes, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            "#,
-            library.id.as_uuid(),
-            library.name,
-            library_type,
-            &paths,
-            library.scan_interval_minutes as i32,
-            library.enabled
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to create library: {}", e)))?;
-
-        Ok(library.id.to_string())
+        Ok(self.libraries.create_library(library).await?.to_string())
     }
 
     async fn get_library(&self, library_id: &LibraryID) -> Result<Option<Library>> {
-        let row = sqlx::query!(
-            "SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, auto_scan, watch_for_changes, analyze_on_scan, max_retry_attempts, created_at, updated_at FROM libraries WHERE id = $1",
-            library_id.as_uuid()
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        let Some(row) = row else {
-            return Ok(None);
-        };
-
-        let library_type = match row.library_type.as_str() {
-            "movies" => crate::LibraryType::Movies,
-            "tvshows" => crate::LibraryType::Series,
-            _ => return Err(MediaError::InvalidMedia("Unknown library type".to_string())),
-        };
-
-        Ok(Some(Library {
-            id: LibraryID(row.id),
-            name: row.name,
-            library_type,
-            paths: row.paths.into_iter().map(PathBuf::from).collect(),
-            scan_interval_minutes: row.scan_interval_minutes as u32,
-            last_scan: row.last_scan,
-            enabled: row.enabled,
-            auto_scan: row.auto_scan,
-            watch_for_changes: row.watch_for_changes,
-            analyze_on_scan: row.analyze_on_scan,
-            max_retry_attempts: row.max_retry_attempts as u32,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            media: None,
-        }))
+        self.libraries.get_library(*library_id).await
     }
 
     async fn list_libraries(&self) -> Result<Vec<Library>> {
-        let rows = sqlx::query!(
-            "SELECT id, name, library_type, paths, scan_interval_minutes, last_scan, enabled, auto_scan, watch_for_changes, analyze_on_scan, max_retry_attempts, created_at, updated_at FROM libraries ORDER BY name"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        let mut libraries = Vec::new();
-        for row in rows {
-            let library_type = match row.library_type.as_str() {
-                "movies" => crate::LibraryType::Movies,
-                "tvshows" => crate::LibraryType::Series,
-                _ => continue,
-            };
-
-            libraries.push(Library {
-                id: LibraryID(row.id),
-                name: row.name,
-                library_type,
-                paths: row.paths.into_iter().map(PathBuf::from).collect(),
-                scan_interval_minutes: row.scan_interval_minutes as u32,
-                last_scan: row.last_scan,
-                enabled: row.enabled,
-                auto_scan: row.auto_scan,
-                watch_for_changes: row.watch_for_changes,
-                analyze_on_scan: row.analyze_on_scan,
-                max_retry_attempts: row.max_retry_attempts as u32,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-                media: None, // Deprecated field
-            });
-        }
-
-        Ok(libraries)
+        self.libraries.list_libraries().await
     }
 
     async fn update_library(&self, id: &str, library: Library) -> Result<()> {
         let uuid = Uuid::parse_str(id)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
-
-        let paths: Vec<String> = library
-            .paths
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-
-        let library_type = match library.library_type {
-            crate::LibraryType::Movies => "movies",
-            crate::LibraryType::Series => "tvshows",
-        };
-
-        sqlx::query!(
-            r#"
-            UPDATE libraries
-            SET name = $1, library_type = $2, paths = $3, scan_interval_minutes = $4, enabled = $5, updated_at = NOW()
-            WHERE id = $6
-            "#,
-            library.name,
-            library_type,
-            &paths,
-            library.scan_interval_minutes as i32,
-            library.enabled,
-            uuid
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Failed to update library: {}", e)))?;
-
-        Ok(())
+        self.libraries
+            .update_library(LibraryID(uuid), library)
+            .await
     }
 
     async fn delete_library(&self, id: &str) -> Result<()> {
         let uuid = Uuid::parse_str(id)
             .map_err(|e| MediaError::InvalidMedia(format!("Invalid UUID: {}", e)))?;
-
-        sqlx::query!("DELETE FROM libraries WHERE id = $1", uuid)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Delete failed: {}", e)))?;
-
-        Ok(())
+        self.libraries.delete_library(LibraryID(uuid)).await
     }
 
     async fn update_library_last_scan(&self, uuid: &LibraryID) -> Result<()> {
-        sqlx::query!(
-            "UPDATE libraries SET last_scan = NOW(), updated_at = NOW() WHERE id = $1",
-            uuid.as_uuid()
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Update failed: {}", e)))?;
-
-        Ok(())
+        self.libraries.update_library_last_scan(*uuid).await
     }
 
     // Reference type methods
     async fn store_movie_reference(&self, movie: &MovieReference) -> Result<()> {
-        TmdbMetadataRepository::new(self)
+        TmdbMetadataRepository::new(self.pool())
             .store_movie_reference(movie)
             .await
     }
 
     async fn store_series_reference(&self, series: &SeriesReference) -> Result<()> {
-        TmdbMetadataRepository::new(self)
+        TmdbMetadataRepository::new(self.pool())
             .store_series_reference(series)
             .await
     }
 
     async fn store_season_reference(&self, season: &SeasonReference) -> Result<Uuid> {
-        TmdbMetadataRepository::new(self)
+        TmdbMetadataRepository::new(self.pool())
             .store_season_reference(season)
             .await
     }
 
     async fn store_episode_reference(&self, episode: &EpisodeReference) -> Result<()> {
-        TmdbMetadataRepository::new(self)
+        TmdbMetadataRepository::new(self.pool())
             .store_episode_reference(episode)
             .await
     }
 
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -691,7 +568,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             series_id.as_str(&mut buff)
         );
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
         let mut seasons = Vec::with_capacity(rows.len());
 
         for row in rows {
@@ -703,7 +580,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_season_episodes(&self, season_id: &SeasonID) -> Result<Vec<EpisodeReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -767,7 +644,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Series not found".to_string()))?;
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
         let series_ref = repository.load_series_reference(row).await?;
 
         Ok(series_ref)
@@ -797,7 +674,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Season not found".to_string()))?;
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
         let season_ref = repository.load_season_reference(row).await?;
 
         Ok(season_ref)
@@ -834,7 +711,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?
         .ok_or_else(|| MediaError::NotFound("Episode not found".to_string()))?;
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
         let episode_ref = repository.load_episode_reference(row).await?;
 
         Ok(episode_ref)
@@ -875,7 +752,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         library_id: LibraryID,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let row = sqlx::query(
             r#"
@@ -950,58 +827,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn list_library_references(&self) -> Result<Vec<LibraryReference>> {
-        let rows = sqlx::query!(
-            "SELECT id, name, library_type, paths FROM libraries WHERE enabled = true ORDER BY name"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        let mut libraries = Vec::new();
-        for row in rows {
-            let library_type = match row.library_type.as_str() {
-                "movies" => crate::LibraryType::Movies,
-                "tvshows" => crate::LibraryType::Series,
-                _ => continue,
-            };
-
-            libraries.push(LibraryReference {
-                id: LibraryID(row.id),
-                name: row.name,
-                library_type,
-                paths: row.paths.into_iter().map(PathBuf::from).collect(),
-            });
-        }
-
-        Ok(libraries)
+        self.libraries.list_library_references().await
     }
 
     async fn get_library_reference(&self, id: Uuid) -> Result<LibraryReference> {
-        let row = sqlx::query!(
-            "SELECT id, name, library_type, paths FROM libraries WHERE id = $1",
-            id
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
-
-        match row {
-            Some(row) => {
-                let library_type = match row.library_type.as_str() {
-                    "movies" => crate::LibraryType::Movies,
-                    "tvshows" => crate::LibraryType::Series,
-                    _ => return Err(MediaError::InvalidMedia("Unknown library type".to_string())),
-                };
-
-                Ok(LibraryReference {
-                    id: LibraryID(row.id),
-                    name: row.name,
-                    library_type,
-                    paths: row.paths.into_iter().map(PathBuf::from).collect(),
-                })
-            }
-            None => Err(MediaError::NotFound("Library not found".to_string())),
-        }
+        self.libraries.get_library_reference(id).await
     }
 
     // Image management methods
@@ -1259,7 +1089,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         media_type: &str,
         media_id: Uuid,
         image_id: Uuid,
-        image_type: &str,
+        image_type: MediaImageKind,
         order_index: i32,
         is_primary: bool,
     ) -> Result<()> {
@@ -1279,7 +1109,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             media_type,
             media_id,
             image_id,
-            image_type,
+            image_type.as_str(),
             order_index,
             is_primary
         )
@@ -1311,7 +1141,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 media_type: r.media_type,
                 media_id: r.media_id,
                 image_id: r.image_id,
-                image_type: r.image_type,
+                image_type: MediaImageKind::parse(&r.image_type),
                 order_index: r.order_index,
                 is_primary: r.is_primary,
             })
@@ -1322,7 +1152,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         &self,
         media_type: &str,
         media_id: Uuid,
-        image_type: &str,
+        image_type: MediaImageKind,
     ) -> Result<Option<MediaImage>> {
         let row = sqlx::query!(
             r#"
@@ -1333,7 +1163,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             "#,
             media_type,
             media_id,
-            image_type
+            image_type.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1343,7 +1173,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             media_type: r.media_type,
             media_id: r.media_id,
             image_id: r.image_id,
-            image_type: r.image_type,
+            image_type: MediaImageKind::parse(&r.image_type),
             order_index: r.order_index,
             is_primary: r.is_primary,
         }))
@@ -1387,7 +1217,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             "#,
             &params.media_type,
             media_id,
-            &params.image_type,
+            params.image_type.as_str(),
             params.index as i32
         )
         .fetch_optional(&self.pool)
@@ -1480,7 +1310,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             "#,
             key.media_type,
             key.media_id,
-            key.image_type,
+            key.image_type.as_str(),
             key.order_index,
             key.variant,
             record.cached,
@@ -1508,7 +1338,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             key: MediaImageVariantKey {
                 media_type: row.media_type,
                 media_id: row.media_id,
-                image_type: row.image_type,
+                image_type: MediaImageKind::parse(&row.image_type),
                 order_index: row.order_index,
                 variant: row.variant,
             },
@@ -1554,7 +1384,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             "#,
             key.media_type,
             key.media_id,
-            key.image_type,
+            key.image_type.as_str(),
             key.order_index,
             width,
             height,
@@ -1580,7 +1410,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 key: MediaImageVariantKey {
                     media_type: row.media_type,
                     media_id: row.media_id,
-                    image_type: row.image_type,
+                    image_type: MediaImageKind::parse(&row.image_type),
                     order_index: row.order_index,
                     variant: row.variant,
                 },
@@ -1645,7 +1475,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
                 key: MediaImageVariantKey {
                     media_type: row.media_type,
                     media_id: row.media_id,
-                    image_type: row.image_type,
+                    image_type: MediaImageKind::parse(&row.image_type),
                     order_index: row.order_index,
                     variant: row.variant,
                 },
@@ -2491,21 +2321,87 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn register_device(&self, device: &crate::auth::AuthenticatedDevice) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO authenticated_devices
-            (id, fingerprint, name, platform, app_version, first_authenticated_by,
-             first_authenticated_at, trusted_until, last_seen_at, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO auth_device_sessions
+            (
+                id,
+                user_id,
+                device_fingerprint,
+                device_name,
+                platform,
+                app_version,
+                hardware_id,
+                status,
+                pin_hash,
+                pin_set_at,
+                pin_last_used_at,
+                failed_attempts,
+                locked_until,
+                trusted_until,
+                auto_login_enabled,
+                first_authenticated_by,
+                first_authenticated_at,
+                last_seen_at,
+                last_activity,
+                metadata,
+                created_at,
+                updated_at,
+                revoked_at,
+                revoked_by,
+                revoked_reason
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8::auth_device_status,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13,
+                $14,
+                $15,
+                $16,
+                $17,
+                $18,
+                $19,
+                $20,
+                $21,
+                $22,
+                $23,
+                $24,
+                $25
+            )
             "#,
             device.id,
+            device.user_id,
             device.fingerprint,
             device.name,
-            serde_json::to_string(&device.platform)?,
+            device.platform.as_ref(),
             device.app_version,
+            device.hardware_id,
+            device.status as _,
+            device.pin_hash,
+            device.pin_set_at,
+            device.pin_last_used_at,
+            device.failed_attempts as i16,
+            device.locked_until,
+            device.trusted_until,
+            device.auto_login_enabled,
             device.first_authenticated_by,
             device.first_authenticated_at,
-            device.trusted_until,
             device.last_seen_at,
-            device.metadata
+            device.last_activity,
+            device.metadata,
+            device.created_at,
+            device.updated_at,
+            device.revoked_at,
+            device.revoked_by,
+            device.revoked_reason
         )
         .execute(&self.pool)
         .await?;
@@ -2519,11 +2415,34 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, fingerprint, name, platform, app_version, first_authenticated_by,
-                   first_authenticated_at, trusted_until, last_seen_at, revoked,
-                   revoked_by, revoked_at, metadata
-            FROM authenticated_devices
-            WHERE fingerprint = $1
+            SELECT
+                id,
+                user_id,
+                device_fingerprint,
+                device_name,
+                platform::text AS "platform?",
+                app_version,
+                hardware_id,
+                status as "status!: crate::auth::AuthDeviceStatus",
+                pin_hash,
+                pin_set_at,
+                pin_last_used_at,
+                failed_attempts AS "failed_attempts!: i16",
+                locked_until,
+                trusted_until,
+                auto_login_enabled,
+                first_authenticated_by,
+                first_authenticated_at,
+                last_seen_at,
+                last_activity,
+                metadata AS "metadata?",
+                created_at,
+                updated_at,
+                revoked_at,
+                revoked_by,
+                revoked_reason
+            FROM auth_device_sessions
+            WHERE device_fingerprint = $1
             "#,
             fingerprint
         )
@@ -2532,17 +2451,31 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(row.map(|r| crate::auth::AuthenticatedDevice {
             id: r.id,
-            fingerprint: r.fingerprint,
-            name: r.name,
-            platform: serde_json::from_str(&r.platform).unwrap_or(crate::auth::Platform::Unknown),
+            user_id: r.user_id,
+            fingerprint: r.device_fingerprint,
+            name: r.device_name,
+            platform: crate::auth::Platform::from_str(
+                &r.platform.unwrap_or_else(|| "unknown".to_string()),
+            ),
             app_version: r.app_version,
+            hardware_id: r.hardware_id,
+            status: r.status,
+            pin_hash: r.pin_hash,
+            pin_set_at: r.pin_set_at,
+            pin_last_used_at: r.pin_last_used_at,
+            failed_attempts: i32::from(r.failed_attempts),
+            locked_until: r.locked_until,
             first_authenticated_by: r.first_authenticated_by,
             first_authenticated_at: r.first_authenticated_at,
             trusted_until: r.trusted_until,
             last_seen_at: r.last_seen_at,
-            revoked: r.revoked,
+            last_activity: r.last_activity,
+            auto_login_enabled: r.auto_login_enabled,
             revoked_by: r.revoked_by,
             revoked_at: r.revoked_at,
+            revoked_reason: r.revoked_reason,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
             metadata: r.metadata.unwrap_or(serde_json::json!({})),
         }))
     }
@@ -2553,10 +2486,33 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Option<crate::auth::AuthenticatedDevice>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, fingerprint, name, platform, app_version, first_authenticated_by,
-                   first_authenticated_at, trusted_until, last_seen_at, revoked,
-                   revoked_by, revoked_at, metadata
-            FROM authenticated_devices
+            SELECT
+                id,
+                user_id,
+                device_fingerprint,
+                device_name,
+                platform::text AS "platform?",
+                app_version,
+                hardware_id,
+                status as "status!: crate::auth::AuthDeviceStatus",
+                pin_hash,
+                pin_set_at,
+                pin_last_used_at,
+                failed_attempts AS "failed_attempts!: i16",
+                locked_until,
+                trusted_until,
+                auto_login_enabled,
+                first_authenticated_by,
+                first_authenticated_at,
+                last_seen_at,
+                last_activity,
+                metadata AS "metadata?",
+                created_at,
+                updated_at,
+                revoked_at,
+                revoked_by,
+                revoked_reason
+            FROM auth_device_sessions
             WHERE id = $1
             "#,
             device_id
@@ -2566,17 +2522,31 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(row.map(|r| crate::auth::AuthenticatedDevice {
             id: r.id,
-            fingerprint: r.fingerprint,
-            name: r.name,
-            platform: serde_json::from_str(&r.platform).unwrap_or(crate::auth::Platform::Unknown),
+            user_id: r.user_id,
+            fingerprint: r.device_fingerprint,
+            name: r.device_name,
+            platform: crate::auth::Platform::from_str(
+                &r.platform.unwrap_or_else(|| "unknown".to_string()),
+            ),
             app_version: r.app_version,
+            hardware_id: r.hardware_id,
+            status: r.status,
+            pin_hash: r.pin_hash,
+            pin_set_at: r.pin_set_at,
+            pin_last_used_at: r.pin_last_used_at,
+            failed_attempts: i32::from(r.failed_attempts),
+            locked_until: r.locked_until,
             first_authenticated_by: r.first_authenticated_by,
             first_authenticated_at: r.first_authenticated_at,
             trusted_until: r.trusted_until,
             last_seen_at: r.last_seen_at,
-            revoked: r.revoked,
+            last_activity: r.last_activity,
+            auto_login_enabled: r.auto_login_enabled,
             revoked_by: r.revoked_by,
             revoked_at: r.revoked_at,
+            revoked_reason: r.revoked_reason,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
             metadata: r.metadata.unwrap_or(serde_json::json!({})),
         }))
     }
@@ -2587,14 +2557,36 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Vec<crate::auth::AuthenticatedDevice>> {
         let rows = sqlx::query!(
             r#"
-            SELECT ad.id, ad.fingerprint, ad.name, ad.platform, ad.app_version,
-                   ad.first_authenticated_by, ad.first_authenticated_at, ad.trusted_until,
-                   ad.last_seen_at, ad.revoked, ad.revoked_by, ad.revoked_at, ad.metadata
-            FROM authenticated_devices ad
-            INNER JOIN device_user_credentials duc ON ad.id = duc.device_id
-            WHERE duc.user_id = $1
-            AND ad.revoked = false
-            ORDER BY ad.last_seen_at DESC
+            SELECT
+                id,
+                user_id,
+                device_fingerprint,
+                device_name,
+                platform::text AS "platform?",
+                app_version,
+                hardware_id,
+                status as "status!: crate::auth::AuthDeviceStatus",
+                pin_hash,
+                pin_set_at,
+                pin_last_used_at,
+                failed_attempts AS "failed_attempts!: i16",
+                locked_until,
+                trusted_until,
+                auto_login_enabled,
+                first_authenticated_by,
+                first_authenticated_at,
+                last_seen_at,
+                last_activity,
+                metadata AS "metadata?",
+                created_at,
+                updated_at,
+                revoked_at,
+                revoked_by,
+                revoked_reason
+            FROM auth_device_sessions
+            WHERE user_id = $1
+              AND status <> 'revoked'
+            ORDER BY last_seen_at DESC
             "#,
             user_id
         )
@@ -2605,18 +2597,31 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .into_iter()
             .map(|r| crate::auth::AuthenticatedDevice {
                 id: r.id,
-                fingerprint: r.fingerprint,
-                name: r.name,
-                platform: serde_json::from_str(&r.platform)
-                    .unwrap_or(crate::auth::Platform::Unknown),
+                user_id: r.user_id,
+                fingerprint: r.device_fingerprint,
+                name: r.device_name,
+                platform: crate::auth::Platform::from_str(
+                    &r.platform.unwrap_or_else(|| "unknown".to_string()),
+                ),
                 app_version: r.app_version,
+                hardware_id: r.hardware_id,
+                status: r.status,
+                pin_hash: r.pin_hash,
+                pin_set_at: r.pin_set_at,
+                pin_last_used_at: r.pin_last_used_at,
+                failed_attempts: i32::from(r.failed_attempts),
+                locked_until: r.locked_until,
                 first_authenticated_by: r.first_authenticated_by,
                 first_authenticated_at: r.first_authenticated_at,
                 trusted_until: r.trusted_until,
                 last_seen_at: r.last_seen_at,
-                revoked: r.revoked,
+                last_activity: r.last_activity,
+                auto_login_enabled: r.auto_login_enabled,
                 revoked_by: r.revoked_by,
                 revoked_at: r.revoked_at,
+                revoked_reason: r.revoked_reason,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
                 metadata: r.metadata.unwrap_or(serde_json::json!({})),
             })
             .collect())
@@ -2627,14 +2632,14 @@ impl MediaDatabaseTrait for PostgresDatabase {
         device_id: Uuid,
         updates: &crate::auth::DeviceUpdateParams,
     ) -> Result<()> {
-        let mut query_builder = sqlx::QueryBuilder::new("UPDATE authenticated_devices SET ");
+        let mut query_builder = sqlx::QueryBuilder::new("UPDATE auth_device_sessions SET ");
         let mut first = true;
 
         if let Some(name) = &updates.name {
             if !first {
                 query_builder.push(", ");
             }
-            query_builder.push("name = ");
+            query_builder.push("device_name = ");
             query_builder.push_bind(name);
             first = false;
         }
@@ -2666,6 +2671,87 @@ impl MediaDatabaseTrait for PostgresDatabase {
             first = false;
         }
 
+        if let Some(last_activity) = &updates.last_activity {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("last_activity = ");
+            query_builder.push_bind(last_activity);
+            first = false;
+        }
+
+        if let Some(status) = &updates.status {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("status = ");
+            query_builder
+                .push_bind(status.as_str())
+                .push("::text::public.auth_device_status");
+            first = false;
+        }
+
+        if let Some(auto_login_enabled) = updates.auto_login_enabled {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("auto_login_enabled = ");
+            query_builder.push_bind(auto_login_enabled);
+            first = false;
+        }
+
+        if let Some(locked_until) = &updates.locked_until {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("locked_until = ");
+            if let Some(value) = locked_until {
+                query_builder.push_bind(value);
+            } else {
+                query_builder.push("NULL");
+            }
+            first = false;
+        }
+
+        if let Some(revoked_by) = &updates.revoked_by {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("revoked_by = ");
+            if let Some(value) = revoked_by {
+                query_builder.push_bind(value);
+            } else {
+                query_builder.push("NULL");
+            }
+            first = false;
+        }
+
+        if let Some(revoked_at) = &updates.revoked_at {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("revoked_at = ");
+            if let Some(value) = revoked_at {
+                query_builder.push_bind(value);
+            } else {
+                query_builder.push("NULL");
+            }
+            first = false;
+        }
+
+        if let Some(revoked_reason) = &updates.revoked_reason {
+            if !first {
+                query_builder.push(", ");
+            }
+            query_builder.push("revoked_reason = ");
+            if let Some(value) = revoked_reason {
+                query_builder.push_bind(value);
+            } else {
+                query_builder.push("NULL");
+            }
+            first = false;
+        }
+
         if !first {
             query_builder.push(", updated_at = NOW()");
         }
@@ -2681,8 +2767,8 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn revoke_device(&self, device_id: Uuid, revoked_by: Uuid) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE authenticated_devices
-            SET revoked = true, revoked_by = $2, revoked_at = NOW()
+            UPDATE auth_device_sessions
+            SET status = 'revoked', revoked_by = $2, revoked_at = NOW(), updated_at = NOW()
             WHERE id = $1
             "#,
             device_id,
@@ -2700,29 +2786,25 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO device_user_credentials
-            (user_id, device_id, pin_hash, pin_set_at, pin_last_used_at,
-             failed_attempts, locked_until, auto_login_enabled, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT (user_id, device_id) DO UPDATE SET
-                pin_hash = EXCLUDED.pin_hash,
-                pin_set_at = EXCLUDED.pin_set_at,
-                pin_last_used_at = EXCLUDED.pin_last_used_at,
-                failed_attempts = EXCLUDED.failed_attempts,
-                locked_until = EXCLUDED.locked_until,
-                auto_login_enabled = EXCLUDED.auto_login_enabled,
-                updated_at = EXCLUDED.updated_at
+            UPDATE auth_device_sessions
+            SET
+                pin_hash = $3,
+                pin_set_at = $4,
+                pin_last_used_at = $5,
+                failed_attempts = $6,
+                locked_until = $7,
+                auto_login_enabled = $8,
+                updated_at = NOW()
+            WHERE user_id = $1 AND id = $2
             "#,
             credential.user_id,
             credential.device_id,
             credential.pin_hash,
             credential.pin_set_at,
             credential.pin_last_used_at,
-            credential.failed_attempts,
+            credential.failed_attempts as i16,
             credential.locked_until,
-            credential.auto_login_enabled,
-            credential.created_at,
-            credential.updated_at
+            credential.auto_login_enabled
         )
         .execute(&self.pool)
         .await?;
@@ -2737,10 +2819,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Option<crate::auth::DeviceUserCredential>> {
         let row = sqlx::query!(
             r#"
-            SELECT user_id, device_id, pin_hash, pin_set_at, pin_last_used_at,
-                   failed_attempts, locked_until, auto_login_enabled, created_at, updated_at
-            FROM device_user_credentials
-            WHERE user_id = $1 AND device_id = $2
+            SELECT
+                user_id,
+                id as device_id,
+                pin_hash,
+                pin_set_at,
+                pin_last_used_at,
+                failed_attempts,
+                locked_until,
+                auto_login_enabled,
+                created_at,
+                updated_at
+            FROM auth_device_sessions
+            WHERE user_id = $1 AND id = $2
             "#,
             user_id,
             device_id
@@ -2754,7 +2845,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
             pin_hash: r.pin_hash,
             pin_set_at: r.pin_set_at,
             pin_last_used_at: r.pin_last_used_at,
-            failed_attempts: r.failed_attempts,
+            failed_attempts: i32::from(r.failed_attempts),
             locked_until: r.locked_until,
             auto_login_enabled: r.auto_login_enabled,
             created_at: r.created_at,
@@ -2770,9 +2861,13 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE device_user_credentials
-            SET pin_hash = $3, pin_set_at = NOW(), failed_attempts = 0, locked_until = NULL, updated_at = NOW()
-            WHERE user_id = $1 AND device_id = $2
+            UPDATE auth_device_sessions
+            SET pin_hash = $3,
+                pin_set_at = NOW(),
+                failed_attempts = 0,
+                locked_until = NULL,
+                updated_at = NOW()
+            WHERE user_id = $1 AND id = $2
             "#,
             user_id,
             device_id,
@@ -2793,13 +2888,15 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE device_user_credentials
-            SET failed_attempts = $3, locked_until = $4, updated_at = NOW()
-            WHERE user_id = $1 AND device_id = $2
+            UPDATE auth_device_sessions
+            SET failed_attempts = $3,
+                locked_until = $4,
+                updated_at = NOW()
+            WHERE user_id = $1 AND id = $2
             "#,
             user_id,
             device_id,
-            attempts,
+            attempts as i16,
             locked_until
         )
         .execute(&self.pool)
@@ -2815,25 +2912,24 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Token is already hashed by the caller
         sqlx::query!(
             r#"
-            INSERT INTO sessions
-            (id, token_hash, user_id, device_id, created_at, expires_at,
-             last_activity, ip_address, user_agent, revoked, revoked_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO auth_sessions
+            (id, session_token_hash, user_id, device_session_id, created_at, expires_at,
+             last_activity, ip_address, user_agent, revoked, revoked_at, revoked_reason, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text::inet, $9, $10, $11, $12, $13)
             "#,
             session.id,
             session.session_token, // Already hashed by caller
             session.user_id,
-            session.device_id,
+            session.device_session_id,
             session.created_at,
             session.expires_at,
             session.last_activity,
-            session
-                .ip_address
-                .as_ref()
-                .and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
+            session.ip_address.as_deref(),
             session.user_agent,
             session.revoked,
-            session.revoked_at
+            session.revoked_at,
+            session.revoked_reason,
+            session.metadata
         )
         .execute(&self.pool)
         .await?;
@@ -2847,10 +2943,20 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Vec<crate::auth::SessionDeviceSession>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, user_id, device_id, created_at, expires_at,
-                   last_activity, ip_address, user_agent, revoked, revoked_at
-            FROM sessions
-            WHERE device_id = $1
+            SELECT id,
+                   user_id,
+                   device_session_id AS "device_session_id!",
+                   created_at,
+                   expires_at,
+                   last_activity,
+                   ip_address::text as ip_address,
+                   user_agent,
+                   revoked,
+                   revoked_at,
+                   revoked_reason,
+                   metadata AS "metadata?"
+            FROM auth_sessions
+            WHERE device_session_id = $1
             ORDER BY created_at DESC
             "#,
             device_id
@@ -2863,15 +2969,17 @@ impl MediaDatabaseTrait for PostgresDatabase {
             .map(|r| crate::auth::SessionDeviceSession {
                 id: r.id,
                 user_id: r.user_id,
-                device_id: r.device_id,
+                device_session_id: r.device_session_id,
                 session_token: String::new(), // Token hash is not returned for security
                 created_at: r.created_at,
                 expires_at: r.expires_at,
                 last_activity: r.last_activity,
-                ip_address: r.ip_address.map(|ip| ip.to_string()),
+                ip_address: r.ip_address,
                 user_agent: r.user_agent,
                 revoked: r.revoked,
                 revoked_at: r.revoked_at,
+                revoked_reason: r.revoked_reason,
+                metadata: r.metadata.unwrap_or(serde_json::json!({})),
             })
             .collect())
     }
@@ -2879,9 +2987,11 @@ impl MediaDatabaseTrait for PostgresDatabase {
     async fn revoke_device_sessions(&self, device_id: Uuid) -> Result<()> {
         sqlx::query!(
             r#"
-            UPDATE sessions
-            SET revoked = true, revoked_at = NOW()
-            WHERE device_id = $1 AND NOT revoked
+            UPDATE auth_sessions
+            SET revoked = true,
+                revoked_at = NOW(),
+                revoked_reason = COALESCE(revoked_reason, 'device_revoked')
+            WHERE device_session_id = $1 AND NOT revoked
             "#,
             device_id
         )
@@ -2895,20 +3005,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
         sqlx::query!(
             r#"
             INSERT INTO auth_events
-            (id, user_id, device_id, event_type, success, failure_reason,
+            (id, user_id, device_session_id, session_id, event_type, success, failure_reason,
              ip_address, user_agent, metadata, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5::auth_event_type, $6, $7, $8::text::inet, $9, $10, $11)
             "#,
             event.id,
             event.user_id,
-            event.device_id,
-            event.event_type.as_str(),
+            event.device_session_id,
+            event.session_id,
+            event.event_type as _,
             event.success,
             event.failure_reason,
-            event
-                .ip_address
-                .as_ref()
-                .and_then(|ip| sqlx::types::ipnetwork::IpNetwork::from_str(ip).ok()),
+            event.ip_address.as_deref(),
             event.user_agent,
             event.metadata,
             event.created_at
@@ -2926,8 +3034,17 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Vec<crate::auth::AuthEvent>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, user_id, device_id, event_type, success, failure_reason,
-                   ip_address, user_agent, metadata, created_at
+            SELECT id,
+                   user_id,
+                   device_session_id AS "device_session_id?",
+                   session_id,
+                   event_type as "event_type!: crate::auth::AuthEventType",
+                   success,
+                   failure_reason,
+                   ip_address::text AS ip_address,
+                   user_agent,
+                   metadata AS "metadata?",
+                   created_at
             FROM auth_events
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -2941,21 +3058,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .filter_map(|r| {
-                crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
-                    crate::auth::AuthEvent {
-                        id: r.id,
-                        user_id: r.user_id,
-                        device_id: r.device_id,
-                        event_type,
-                        success: r.success,
-                        failure_reason: r.failure_reason,
-                        ip_address: r.ip_address.map(|ip| ip.to_string()),
-                        user_agent: r.user_agent,
-                        metadata: r.metadata.unwrap_or(serde_json::json!({})),
-                        created_at: r.created_at,
-                    }
-                })
+            .map(|r| crate::auth::AuthEvent {
+                id: r.id,
+                user_id: r.user_id,
+                device_session_id: r.device_session_id,
+                session_id: r.session_id,
+                event_type: r.event_type,
+                success: r.success,
+                failure_reason: r.failure_reason,
+                ip_address: r.ip_address,
+                user_agent: r.user_agent,
+                metadata: r.metadata.unwrap_or(serde_json::json!({})),
+                created_at: r.created_at,
             })
             .collect())
     }
@@ -2967,10 +3081,19 @@ impl MediaDatabaseTrait for PostgresDatabase {
     ) -> Result<Vec<crate::auth::AuthEvent>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, user_id, device_id, event_type, success, failure_reason,
-                   ip_address, user_agent, metadata, created_at
+            SELECT id,
+                   user_id,
+                   device_session_id AS "device_session_id?",
+                   session_id,
+                   event_type as "event_type!: crate::auth::AuthEventType",
+                   success,
+                   failure_reason,
+                   ip_address::text AS ip_address,
+                   user_agent,
+                   metadata AS "metadata?",
+                   created_at
             FROM auth_events
-            WHERE device_id = $1
+            WHERE device_session_id = $1
             ORDER BY created_at DESC
             LIMIT $2
             "#,
@@ -2982,21 +3105,18 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         Ok(rows
             .into_iter()
-            .filter_map(|r| {
-                crate::auth::AuthEventType::from_str(&r.event_type).map(|event_type| {
-                    crate::auth::AuthEvent {
-                        id: r.id,
-                        user_id: r.user_id,
-                        device_id: r.device_id,
-                        event_type,
-                        success: r.success,
-                        failure_reason: r.failure_reason,
-                        ip_address: r.ip_address.map(|ip| ip.to_string()),
-                        user_agent: r.user_agent,
-                        metadata: r.metadata.unwrap_or(serde_json::json!({})),
-                        created_at: r.created_at,
-                    }
-                })
+            .map(|r| crate::auth::AuthEvent {
+                id: r.id,
+                user_id: r.user_id,
+                device_session_id: r.device_session_id,
+                session_id: r.session_id,
+                event_type: r.event_type,
+                success: r.success,
+                failure_reason: r.failure_reason,
+                ip_address: r.ip_address,
+                user_agent: r.user_agent,
+                metadata: r.metadata.unwrap_or(serde_json::json!({})),
+                created_at: r.created_at,
             })
             .collect())
     }
@@ -3009,7 +3129,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         let mut media = Vec::new();
         match library_type {
             LibraryType::Movies => {
-                let repository = TmdbMetadataRepository::new(self);
+                let repository = TmdbMetadataRepository::new(self.pool());
                 let rows = sqlx::query(
                     r#"
                     SELECT
@@ -3065,7 +3185,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
     // Lookup a single movie by file path
     async fn get_movie_reference_by_path(&self, path: &str) -> Result<Option<MovieReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
         let row = sqlx::query(
             r#"
             SELECT
@@ -3108,7 +3228,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
 
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3152,7 +3272,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3183,7 +3303,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_library_series(&self, library_id: &LibraryID) -> Result<Vec<SeriesReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3222,7 +3342,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3254,7 +3374,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_library_seasons(&self, library_id: &LibraryID) -> Result<Vec<SeasonReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3297,7 +3417,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
         // Convert IDs to UUIDs
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
 
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"
@@ -3338,7 +3458,7 @@ impl MediaDatabaseTrait for PostgresDatabase {
     }
 
     async fn get_library_episodes(&self, library_id: &LibraryID) -> Result<Vec<EpisodeReference>> {
-        let repository = TmdbMetadataRepository::new(self);
+        let repository = TmdbMetadataRepository::new(self.pool());
 
         let rows = sqlx::query(
             r#"

@@ -74,7 +74,11 @@ impl MockAuthServer {
             
             // Generate new tokens
             Ok(AuthToken {
-                access_token: format!("new_access_token_{}", *count),
+                access_token: format!("new_access_token_{,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
+    }", *count),
                 refresh_token: format!("new_refresh_token_{}", *count),
                 expires_in: 900, // 15 minutes
             })
@@ -115,7 +119,10 @@ pub fn create_expired_token() -> AuthToken {
     AuthToken {
         access_token: "<REDACTED>".to_string(),
         refresh_token: "valid_refresh_token".to_string(),
-        expires_in: -60, // Already expired
+        expires_in: -60, // Already expired,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     }
 }
 
@@ -124,7 +131,10 @@ pub fn create_valid_token() -> AuthToken {
     AuthToken {
         access_token: "<REDACTED>".to_string(),
         refresh_token: "valid_refresh_token".to_string(),
-        expires_in: 900, // 15 minutes
+        expires_in: 900, // 15 minutes,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     }
 }
 
@@ -133,6 +143,9 @@ pub fn create_expiring_token() -> AuthToken {
     AuthToken {
         access_token: "<REDACTED>".to_string(),
         refresh_token: "valid_refresh_token".to_string(),
-        expires_in: 30, // 30 seconds
+        expires_in: 30, // 30 seconds,
+        session_id: None,
+        device_session_id: None,
+        user_id: None,
     }
 }

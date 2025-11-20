@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                s.id,\n                s.user_id,\n                s.ip_address::text as ip_address,\n                s.user_agent,\n                s.metadata AS \"metadata?\",\n                EXTRACT(EPOCH FROM s.last_activity)::BIGINT * 1000 as last_active,\n                EXTRACT(EPOCH FROM s.created_at)::BIGINT * 1000 as created_at,\n                ads.device_name AS \"device_name?\"\n            FROM auth_sessions s\n            LEFT JOIN auth_device_sessions ads ON s.device_session_id = ads.id\n            WHERE s.user_id = $1\n              AND s.revoked = false\n            ORDER BY last_active DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ip_address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_agent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "metadata?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_active",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "device_name?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      true,
+      false,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "f710ec6cf0c759b89c1e590f3649cf9a3eef2e79db9f1caa2d208db07f2a97ca"
+}

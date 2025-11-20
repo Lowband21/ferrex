@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE auth_device_sessions\n            SET pin_hash = $3,\n                pin_set_at = NOW(),\n                failed_attempts = 0,\n                locked_until = NULL,\n                updated_at = NOW()\n            WHERE user_id = $1 AND id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "196497b1d6958d79fe8163f48c185195f2a855605523ff0c19324a98d33c2e98"
+}

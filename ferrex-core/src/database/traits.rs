@@ -1,8 +1,8 @@
 use crate::image::records::{MediaImageVariantKey, MediaImageVariantRecord};
 use crate::{
     EpisodeID, EpisodeReference, Library, LibraryID, LibraryReference, LibraryType, Media,
-    MediaFile, MediaFileMetadata, MovieID, MovieReference, Result, SeasonID, SeasonReference,
-    SeriesID, SeriesReference,
+    MediaFile, MediaFileMetadata, MediaImageKind, MovieID, MovieReference, Result, SeasonID,
+    SeasonReference, SeriesID, SeriesReference,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -176,7 +176,7 @@ pub struct MediaImage {
     pub media_type: String,
     pub media_id: Uuid,
     pub image_id: Uuid,
-    pub image_type: String,
+    pub image_type: MediaImageKind,
     pub order_index: i32,
     pub is_primary: bool,
 }
@@ -185,7 +185,7 @@ pub struct MediaImage {
 pub struct ImageLookupParams {
     pub media_type: String,
     pub media_id: String,
-    pub image_type: String,
+    pub image_type: MediaImageKind,
     pub index: u32,
     pub variant: Option<String>,
 }
@@ -412,7 +412,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
         media_type: &str,
         media_id: Uuid,
         image_id: Uuid,
-        image_type: &str,
+        image_type: MediaImageKind,
         order_index: i32,
         is_primary: bool,
     ) -> Result<()>;
@@ -421,7 +421,7 @@ pub trait MediaDatabaseTrait: Send + Sync {
         &self,
         media_type: &str,
         media_id: Uuid,
-        image_type: &str,
+        image_type: MediaImageKind,
     ) -> Result<Option<MediaImage>>;
 
     // Combined lookup for image serving

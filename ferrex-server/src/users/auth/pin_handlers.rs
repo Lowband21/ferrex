@@ -5,12 +5,16 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use chrono::Utc;
 use ferrex_core::{
     api_types::ApiResponse,
-    auth::pin::{PinPolicy, SetPinRequest, SetPinResponse},
-    user::User,
+    auth::{
+        domain::services::{AuthenticationError, TokenBundle},
+        pin::{PinPolicy, SetPinRequest, SetPinResponse},
+    },
+    user::{AuthToken, User},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::infra::{
@@ -25,19 +29,11 @@ pub struct PinAuthRequest {
     pub pin: String,
 }
 
-/// Response for successful PIN authentication
-#[derive(Debug, Serialize)]
-pub struct PinAuthResponse {
-    pub success: bool,
-    pub message: String,
-    pub session_token: Option<String>,
-}
-
 /// Authenticate using PIN - requires admin session on device
 pub async fn authenticate_with_pin(
     State(state): State<AppState>,
     Json(request): Json<PinAuthRequest>,
-) -> AppResult<Json<ApiResponse<PinAuthResponse>>> {
+) -> AppResult<Json<ApiResponse<AuthToken>>> {
     // CRITICAL: Check if admin is authenticated on this device
     if !state
         .is_admin_authenticated_on_device(request.device_id)
@@ -54,25 +50,19 @@ pub async fn authenticate_with_pin(
         .await
         .ok_or_else(|| AppError::forbidden("Admin session not found or expired"))?;
 
-    // TODO: Implement actual PIN verification logic
-    // This would involve:
-    // 1. Looking up the PIN hash for the user/device
-    // 2. Verifying the provided PIN against the hash
-    // 3. Checking rate limiting/attempt tracking
-    // 4. Creating a new session token if successful
-
     tracing::info!(
         "PIN authentication attempt for device {} by admin {}",
         request.device_id,
         admin_session.user_id
     );
 
-    // Placeholder response - implement actual PIN verification
-    Ok(Json(ApiResponse::success(PinAuthResponse {
-        success: false,
-        message: "PIN authentication not yet fully implemented".to_string(),
-        session_token: None,
-    })))
+    let bundle = state
+        .auth_service
+        .authenticate_with_pin_session(request.device_id, &request.pin)
+        .await
+        .map_err(map_auth_error)?;
+
+    Ok(Json(ApiResponse::success(bundle_to_auth_token(bundle))))
 }
 
 /// Set or update PIN for a device - requires admin session
@@ -200,6 +190,48 @@ pub async fn remove_admin_session(
 
     state.remove_admin_session(device_id).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn map_auth_error(err: AuthenticationError) -> AppError {
+    match err {
+        AuthenticationError::InvalidCredentials | AuthenticationError::InvalidPin => {
+            AppError::unauthorized("Invalid PIN".to_string())
+        }
+        AuthenticationError::TooManyFailedAttempts => AppError::rate_limited(
+            "Too many failed PIN attempts; device locked temporarily".to_string(),
+        ),
+        AuthenticationError::DeviceNotFound => {
+            AppError::not_found("Device session not found".to_string())
+        }
+        AuthenticationError::DeviceNotTrusted => {
+            AppError::forbidden("Device is not trusted".to_string())
+        }
+        AuthenticationError::SessionExpired => {
+            AppError::unauthorized("Session expired".to_string())
+        }
+        AuthenticationError::DatabaseError(e) => {
+            AppError::internal(format!("Database error during PIN authentication: {e}"))
+        }
+        AuthenticationError::UserNotFound => AppError::not_found("User not found".to_string()),
+    }
+}
+
+fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {
+    let expires_in = bundle
+        .session_token
+        .expires_at()
+        .signed_duration_since(Utc::now())
+        .num_seconds()
+        .max(0) as u32;
+
+    AuthToken {
+        access_token: bundle.session_token.as_str().to_string(),
+        refresh_token: bundle.refresh_token.as_str().to_string(),
+        expires_in,
+        session_id: Some(bundle.session_record_id),
+        device_session_id: bundle.device_session_id,
+        user_id: Some(bundle.user_id),
+    }
 }
 
 #[derive(Debug, Deserialize)]
