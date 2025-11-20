@@ -82,6 +82,29 @@ Alternatively, set `RUST_LOG` directly in `config/.env`.
 
 Ferrex includes a feature‑gated demo mode that seeds disposable libraries for exploration and testing. See `docs/demo-mode.md` for full details and environment variables.
 
+## TLS / HTTPS
+
+Ferrex can terminate TLS directly. If you prefer a reverse proxy (nginx, Caddy, Traefik), terminate TLS there and run Ferrex over HTTP on localhost.
+
+To enable HTTPS directly in Ferrex, set certificate and key paths:
+
+```bash
+TLS_CERT_PATH=/path/to/cert.pem
+TLS_KEY_PATH=/path/to/key.pem
+```
+
+Advanced (optional):
+
+- `TLS_MIN_VERSION` – Minimum TLS version to allow. Defaults to `1.3`.
+  - `1.3` (recommended) or `1.2`.
+- `TLS_CIPHER_SUITES` – Comma‑separated allow‑list of TLS 1.3 cipher suites.
+  - Example: `TLS13_AES_256_GCM_SHA384,TLS13_CHACHA20_POLY1305_SHA256`
+
+Notes:
+- Default behavior is TLS 1.3 (Ferrex Player is the primary client).
+- If you set `TLS_MIN_VERSION=1.3`, very old clients that only support TLS 1.2 will fail to connect — this is expected and desired for hardening.
+- Certificate hot‑reload is supported: when `cert.pem`/`key.pem` contents change, the server reloads them (checked every ~5 minutes).
+
 ## Security Notes
 
 - Ferrex is under active development; avoid exposing the server directly to the public Internet.

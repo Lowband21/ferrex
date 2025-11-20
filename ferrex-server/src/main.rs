@@ -133,6 +133,15 @@ struct ServeArgs {
     #[arg(long, env = "SERVER_HOST")]
     host: Option<String>,
 
+    /// Minimum TLS version to allow (e.g., 1.3 or 1.2). Defaults to 1.3.
+    #[arg(long, env = "TLS_MIN_VERSION")]
+    tls_min_version: Option<String>,
+
+    /// Comma-separated TLS cipher suites to allow (TLS 1.3 names).
+    /// Example: TLS13_AES_256_GCM_SHA384,TLS13_CHACHA20_POLY1305_SHA256
+    #[arg(long, env = "TLS_CIPHER_SUITES")]
+    tls_cipher_suites: Option<String>,
+
     /// Reset any pending setup claim codes and exit
     #[arg(long, env = "FERREX_RESET_CLAIMS", default_value_t = false)]
     claim_reset: bool,
@@ -715,13 +724,27 @@ fn resolve_tls_paths(args: &ServeArgs) -> ResolvedTlsPaths {
     ResolvedTlsPaths { cert, key }
 }
 
-fn determine_server_mode(port: u16, tls: &ResolvedTlsPaths) -> ServerMode {
+fn determine_server_mode(
+    port: u16,
+    tls: &ResolvedTlsPaths,
+    args: &ServeArgs,
+) -> ServerMode {
     match (&tls.cert, &tls.key) {
         (Some(cert_path), Some(key_path)) => ServerMode::Https {
             addr: SocketAddr::from(([0, 0, 0, 0], port)),
             tls: TlsCertConfig {
                 cert_path: cert_path.clone(),
                 key_path: key_path.clone(),
+                // TLS config from CLI/env; default to TLS 1.3 for stronger security
+                min_tls_version: args
+                    .tls_min_version
+                    .clone()
+                    .unwrap_or_else(|| "1.3".to_string()),
+                cipher_suites: args
+                    .tls_cipher_suites
+                    .clone()
+                    .map(parse_cipher_suites)
+                    .unwrap_or_default(),
                 ..Default::default()
             },
         },
@@ -754,7 +777,7 @@ fn build_server_setup(
 ) -> ServerSetup {
     let tls = resolve_tls_paths(args);
     let router = create_app(state, tls.terminates_here());
-    let mode = determine_server_mode(config.server.port, &tls);
+    let mode = determine_server_mode(config.server.port, &tls, args);
 
     ServerSetup { router, mode }
 }
@@ -848,6 +871,14 @@ where
     }
 
     Ok(())
+}
+
+// Parse a comma-separated list of cipher suite names into Vec<String>
+fn parse_cipher_suites(s: String) -> Vec<String> {
+    s.split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
 }
 
 pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
@@ -1260,7 +1291,21 @@ mod tests {
             key: Some(PathBuf::from("key.pem")),
         };
 
-        match determine_server_mode(9443, &tls) {
+        match determine_server_mode(
+            9443,
+            &tls,
+            &ServeArgs {
+                cert: None,
+                key: None,
+                port: None,
+                host: None,
+                tls_min_version: Some("1.3".to_string()),
+                tls_cipher_suites: None,
+                claim_reset: false,
+                #[cfg(feature = "demo")]
+                demo: false,
+            },
+        ) {
             ServerMode::Https { addr, tls } => {
                 assert_eq!(addr.port(), 9443);
                 assert_eq!(tls.cert_path, PathBuf::from("cert.pem"));
@@ -1277,7 +1322,21 @@ mod tests {
             key: None,
         };
 
-        match determine_server_mode(8080, &tls) {
+        match determine_server_mode(
+            8080,
+            &tls,
+            &ServeArgs {
+                cert: None,
+                key: None,
+                port: None,
+                host: None,
+                tls_min_version: Some("1.3".to_string()),
+                tls_cipher_suites: None,
+                claim_reset: false,
+                #[cfg(feature = "demo")]
+                demo: false,
+            },
+        ) {
             ServerMode::Http { addr } => assert_eq!(addr.port(), 8080),
             other => panic!("expected HTTP mode, got {other:?}"),
         }

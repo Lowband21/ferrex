@@ -9,8 +9,12 @@
 
 use anyhow::{Context, Result};
 use axum_server::tls_rustls::RustlsConfig;
-use rustls::ServerConfig;
+use rustls::crypto::CryptoProvider;
+use rustls::version::TLS13;
+use rustls::{CipherSuite, ServerConfig};
+use rustls::{DEFAULT_VERSIONS, SupportedProtocolVersion};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use sha2::{Digest, Sha256};
 use std::{
     fmt,
     io::BufReader,
@@ -78,7 +82,8 @@ impl Default for TlsCertConfig {
             cert_path: PathBuf::from("certs/cert.pem"),
             key_path: PathBuf::from("certs/key.pem"),
             enable_ocsp_stapling: true,
-            min_tls_version: "1.2".to_string(),
+            // Default to TLS 1.3 given the controlled client surface (ferrex-player)
+            min_tls_version: "1.3".to_string(),
             cipher_suites: vec![],
         }
     }
@@ -89,6 +94,8 @@ pub struct TlsConfigManager {
     config: Arc<RwLock<TlsCertConfig>>,
     rustls_config: Arc<RwLock<Arc<ServerConfig>>>,
     reload_interval: Duration,
+    last_cert_fingerprint: Arc<RwLock<Option<[u8; 32]>>>,
+    last_key_fingerprint: Arc<RwLock<Option<[u8; 32]>>>,
 }
 
 impl fmt::Debug for TlsConfigManager {
@@ -114,10 +121,16 @@ impl TlsConfigManager {
     pub async fn new(config: TlsCertConfig) -> Result<Self, TlsError> {
         let rustls_config = Self::load_rustls_config(&config).await?;
 
+        // Initialize fingerprints so the first reload check is accurate
+        let cert_fp = Self::fingerprint_file(&config.cert_path).await.ok();
+        let key_fp = Self::fingerprint_file(&config.key_path).await.ok();
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             rustls_config: Arc::new(RwLock::new(Arc::new(rustls_config))),
             reload_interval: Duration::from_secs(300), // Check every 5 minutes
+            last_cert_fingerprint: Arc::new(RwLock::new(cert_fp)),
+            last_key_fingerprint: Arc::new(RwLock::new(key_fp)),
         })
     }
 
@@ -154,9 +167,15 @@ impl TlsConfigManager {
     async fn reload_certificates(&self) -> Result<(), TlsError> {
         let config = self.config.read().await.clone();
 
-        // Check if files have been modified
-        let cert_modified = Self::check_file_modified(&config.cert_path).await;
-        let key_modified = Self::check_file_modified(&config.key_path).await;
+        // Check if files have been modified using fingerprinting
+        let cert_modified = self
+            .has_file_changed(&config.cert_path, true)
+            .await
+            .unwrap_or(false);
+        let key_modified = self
+            .has_file_changed(&config.key_path, false)
+            .await
+            .unwrap_or(false);
 
         if cert_modified || key_modified {
             info!("TLS certificate change detected, reloading...");
@@ -193,18 +212,66 @@ impl TlsConfigManager {
         // Load private key
         let private_key = Self::load_private_key(&config.key_path).await?;
 
-        // Create rustls config
-        let mut rustls_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(cert_chain, private_key)
-            .map_err(|e| TlsError::ConfigurationError(e.to_string()))?;
+        // Determine protocol versions: "1.3" => only TLS 1.3; otherwise default (1.2 + 1.3)
+        let versions: Vec<&'static SupportedProtocolVersion> =
+            match normalize_version(&config.min_tls_version).as_str() {
+                "1.3" => vec![&TLS13],
+                // Default/fallback: enable both TLS 1.2 and 1.3
+                _ => DEFAULT_VERSIONS.to_vec(),
+            };
 
-        // Note: TLS version configuration in rustls 0.23+ is handled during ServerConfig::builder()
-        // The min_tls_version configuration would need to be applied at builder level
+        // If we can get a default provider, we can also honor custom cipher_suites by
+        // filtering its cipher list; otherwise we fall back to defaults.
+        let maybe_provider = CryptoProvider::get_default().cloned();
+        let rustls_config = if let Some(provider_arc) = maybe_provider {
+            // Clone provider so we can mutate cipher suites safely
+            let mut provider = (*provider_arc).clone();
 
-        // Configure ALPN for HTTP/2
-        rustls_config.alpn_protocols =
-            vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            if !config.cipher_suites.is_empty() {
+                let desired = desired_cipher_suites(&config.cipher_suites);
+                if !desired.is_empty() {
+                    // Filter provider suites to desired set while preserving order
+                    provider
+                        .cipher_suites
+                        .retain(|scs| desired.contains(&scs.suite()));
+                    if provider.cipher_suites.is_empty() {
+                        return Err(TlsError::ConfigurationError(
+                            "Configured cipher_suites did not match any provider-supported suites"
+                                .to_string(),
+                        ));
+                    }
+                } else {
+                    // Nothing matched; warn by returning a configuration error for clarity
+                    return Err(TlsError::ConfigurationError(
+                        "No recognized cipher suite names provided; supported TLS1.3 values include: TLS13_AES_128_GCM_SHA256, TLS13_AES_256_GCM_SHA384, TLS13_CHACHA20_POLY1305_SHA256"
+                            .to_string(),
+                    ));
+                }
+            }
+
+            // Build using the (potentially) filtered provider
+            let builder =
+                rustls::ServerConfig::builder_with_provider(provider.into());
+            let builder = builder
+                .with_protocol_versions(&versions)
+                .map_err(|e| TlsError::ConfigurationError(e.to_string()))?;
+            let mut cfg = builder
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, private_key)
+                .map_err(|e| TlsError::ConfigurationError(e.to_string()))?;
+
+            cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            cfg
+        } else {
+            // Fall back to default builder with provided versions; cipher suite customization not available
+            let mut cfg =
+                rustls::ServerConfig::builder_with_protocol_versions(&versions)
+                    .with_no_client_auth()
+                    .with_single_cert(cert_chain, private_key)
+                    .map_err(|e| TlsError::ConfigurationError(e.to_string()))?;
+            cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            cfg
+        };
 
         Ok(rustls_config)
     }
@@ -327,11 +394,46 @@ impl TlsConfigManager {
         }
     }
 
-    /// Check if a file has been modified (simplified check)
-    async fn check_file_modified(path: &Path) -> bool {
-        // In a production system, you would track modification times
-        // For now, we'll just check if the file exists
-        path.exists()
+    /// Compute a SHA‑256 fingerprint for a file's current contents
+    async fn fingerprint_file(path: &Path) -> std::io::Result<[u8; 32]> {
+        let mut file = File::open(path).await?;
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        let digest = hasher.finalize();
+        let mut fp = [0u8; 32];
+        fp.copy_from_slice(&digest[..32]);
+        Ok(fp)
+    }
+
+    /// Return true if the given file's fingerprint has changed since the last check.
+    async fn has_file_changed(
+        &self,
+        path: &Path,
+        is_cert: bool,
+    ) -> std::io::Result<bool> {
+        let new_fp = match Self::fingerprint_file(path).await {
+            Ok(fp) => fp,
+            Err(e) => return Err(e),
+        };
+
+        if is_cert {
+            let mut guard = self.last_cert_fingerprint.write().await;
+            let changed = guard.map(|old| old != new_fp).unwrap_or(true);
+            *guard = Some(new_fp);
+            Ok(changed)
+        } else {
+            let mut guard = self.last_key_fingerprint.write().await;
+            let changed = guard.map(|old| old != new_fp).unwrap_or(true);
+            *guard = Some(new_fp);
+            Ok(changed)
+        }
     }
 }
 
@@ -339,9 +441,71 @@ impl TlsConfigManager {
 pub async fn create_tls_acceptor(
     config: TlsCertConfig,
 ) -> Result<RustlsConfig> {
-    RustlsConfig::from_pem_file(&config.cert_path, &config.key_path)
-        .await
-        .context("Failed to create TLS acceptor")
+    // Start with the convenience helper, then swap in our configured ServerConfig
+    let rustls_cfg =
+        RustlsConfig::from_pem_file(&config.cert_path, &config.key_path)
+            .await
+            .context("Failed to create TLS acceptor")?;
+
+    // Build a ServerConfig honoring protocol versions and cipher suites
+    let server_cfg = SelfConfigBuilder::build_server_config(&config).await?;
+    rustls_cfg.reload_from_config(Arc::new(server_cfg));
+    Ok(rustls_cfg)
+}
+
+// Internal helper to reuse load_rustls_config without exposing it
+struct SelfConfigBuilder;
+impl SelfConfigBuilder {
+    async fn build_server_config(
+        cfg: &TlsCertConfig,
+    ) -> Result<ServerConfig, TlsError> {
+        TlsConfigManager::load_rustls_config(cfg).await
+    }
+}
+
+/// Normalize a version string like "TLS1.3", "1.3", "tls13" to "1.3" or "1.2".
+fn normalize_version(s: &str) -> String {
+    let u = s.trim().to_ascii_lowercase();
+    if u.contains("1.3") || u.contains("tls1.3") || u == "tls13" {
+        "1.3".into()
+    } else {
+        "1.2".into()
+    }
+}
+
+/// Map user-provided cipher suite names to rustls `CipherSuite` identifiers.
+/// Supports common TLS1.3 suites. Names are case-insensitive; hyphens/underscores ignored.
+fn desired_cipher_suites(names: &[String]) -> Vec<CipherSuite> {
+    fn norm(s: &str) -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .map(|c| c.to_ascii_uppercase())
+            .collect()
+    }
+
+    names
+        .iter()
+        .map(|s| norm(s))
+        .filter_map(|n| match n.as_str() {
+            // TLS 1.3 common suites
+            "TLS13_AES_128_GCM_SHA256"
+            | "TLS1_3_AES_128_GCM_SHA256"
+            | "TLS13AES128GCMSHA256" => {
+                Some(CipherSuite::TLS13_AES_128_GCM_SHA256)
+            }
+            "TLS13_AES_256_GCM_SHA384"
+            | "TLS1_3_AES_256_GCM_SHA384"
+            | "TLS13AES256GCMSHA384" => {
+                Some(CipherSuite::TLS13_AES_256_GCM_SHA384)
+            }
+            "TLS13_CHACHA20_POLY1305_SHA256"
+            | "TLS1_3_CHACHA20_POLY1305_SHA256"
+            | "TLS13CHACHA20POLY1305SHA256" => {
+                Some(CipherSuite::TLS13_CHACHA20_POLY1305_SHA256)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
