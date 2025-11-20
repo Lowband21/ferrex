@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[test]
 fn test_metadata_extraction_with_tv_library_context() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
 
     // Standard TV episode
     let tv_file = PathBuf::from("TV Shows/Breaking Bad/Season 1/S01E01 - Pilot.mkv");
@@ -25,7 +25,7 @@ fn test_metadata_extraction_with_tv_library_context() {
 
 #[test]
 fn test_metadata_extraction_multi_episode() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let multi_file = PathBuf::from("TV Shows/The Office/S01E01-E02 - Pilot & Diversity Day.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&multi_file)
@@ -41,7 +41,7 @@ fn test_metadata_extraction_multi_episode() {
 
 #[test]
 fn test_metadata_extraction_date_based() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let date_file = PathBuf::from("TV Shows/Daily Show/2024-01-15.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&date_file)
@@ -56,7 +56,7 @@ fn test_metadata_extraction_date_based() {
 
 #[test]
 fn test_metadata_extraction_specials() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let special_file = PathBuf::from("TV Shows/Doctor Who/Specials/S00E01 - Christmas Special.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&special_file)
@@ -71,7 +71,7 @@ fn test_metadata_extraction_specials() {
 
 #[test]
 fn test_metadata_extraction_folder_based() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let folder_file = PathBuf::from("TV Shows/The Wire/Season 1/03 - The Buys.mkv");
     let parsed_info = parser
         .parse_filename_with_type(&folder_file)
@@ -88,7 +88,7 @@ fn test_metadata_extraction_folder_based() {
 
 #[test]
 fn test_metadata_extraction_movie_in_tv_library() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     // Movie file without TV patterns in TV library
     let movie_file = PathBuf::from("TV Shows/Documentaries/Planet Earth (2006).mkv");
     let parsed_info = parser
@@ -104,7 +104,7 @@ fn test_metadata_extraction_movie_in_tv_library() {
 
 #[test]
 fn test_metadata_extraction_tv_in_movie_library() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Movies);
+    let parser = FilenameParser::with_library_type(LibraryType::Movies);
     // TV file in movie library
     let tv_file = PathBuf::from("Movies/Misplaced/S01E01 - Episode.mkv");
     let parsed_info = parser
@@ -121,7 +121,7 @@ fn test_metadata_extraction_tv_in_movie_library() {
 
 #[test]
 fn test_metadata_extraction_anime() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let anime_file = PathBuf::from("TV Shows/Anime/[HorribleSubs] Attack on Titan - 01 [720p].mkv");
     let parsed_info = parser
         .parse_filename_with_type(&anime_file)

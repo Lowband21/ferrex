@@ -1,3 +1,5 @@
+#[cfg(feature = "demo")]
+use crate::domains::ui::update_handlers::demo_controls;
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
     domains::{
@@ -283,8 +285,7 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
 
                     if let crate::domains::ui::tabs::TabState::Library(lib_state) =
                         state.tab_manager.get_active_tab()
-                    {
-                        if let Some(cached) = lib_state.cached_positions_for_hash(spec_hash) {
+                        && let Some(cached) = lib_state.cached_positions_for_hash(spec_hash) {
                             let cached_positions = cached.clone();
                             return DomainUpdateResult::task(Task::done(DomainMessage::Ui(
                                 ui::Message::ApplySortedPositions(
@@ -294,7 +295,6 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                                 ),
                             )));
                         }
-                    }
 
                     let task = Task::perform(
                         async move {
@@ -425,14 +425,23 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
                 library::messages::Message::FetchActiveScans,
             ));
 
+            let mut tasks = vec![fetch_scans_task];
+
+            #[cfg(feature = "demo")]
+            {
+                tasks = demo_controls::augment_show_library_management_tasks(state, tasks);
+            }
+
+            let combined_task = Task::batch(tasks);
+
             // Request library refresh if needed
             if !state.domains.ui.state.repo_accessor.is_initialized() {
                 DomainUpdateResult::with_events(
-                    fetch_scans_task,
+                    combined_task,
                     vec![CrossDomainEvent::RequestLibraryRefresh],
                 )
             } else {
-                DomainUpdateResult::task(fetch_scans_task)
+                DomainUpdateResult::task(combined_task)
             }
         }
         ui::Message::HideLibraryManagement => {
@@ -442,6 +451,18 @@ pub fn update_ui(state: &mut State, message: ui::Message) -> DomainUpdateResult 
             state.domains.library.state.library_form_success = None;
             DomainUpdateResult::task(Task::none())
         }
+        #[cfg(feature = "demo")]
+        ui::Message::DemoMoviesTargetChanged(value) => {
+            demo_controls::handle_movies_input(state, value)
+        }
+        #[cfg(feature = "demo")]
+        ui::Message::DemoSeriesTargetChanged(value) => {
+            demo_controls::handle_series_input(state, value)
+        }
+        #[cfg(feature = "demo")]
+        ui::Message::DemoApplySizing => demo_controls::handle_apply_sizing(state),
+        #[cfg(feature = "demo")]
+        ui::Message::DemoRefreshStatus => demo_controls::handle_refresh_status(state),
         ui::Message::ShowClearDatabaseConfirm => {
             state.domains.ui.state.show_clear_database_confirm = true;
             DomainUpdateResult::task(Task::none())

@@ -4,7 +4,7 @@
 
 use futures::FutureExt;
 use std::future::Future;
-use std::panic::{self, AssertUnwindSafe};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 

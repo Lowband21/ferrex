@@ -46,9 +46,9 @@ pub mod domain;
 pub mod executor;
 pub mod mocks;
 pub mod recorder;
+pub mod stubs;
 pub mod time;
 pub mod utils;
-pub mod stubs;
 
 // Re-export commonly used types
 pub use domain::{
@@ -58,8 +58,8 @@ pub use domain::{
 pub use executor::{ExecutionMode, TaskTestExt, TestExecutor};
 pub use mocks::{DomainMock, MockBuilder, MockHandle, MockRegistry, MockService, SimpleMock};
 pub use recorder::{Operation, OperationType, StateSnapshot, TestRecorder};
-pub use time::{SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider};
 pub use stubs::{TestApiService, TestAuthService, TestSettingsService};
+pub use time::{SystemTimeProvider, TimeContext, TimeProvider, VirtualTimeProvider};
 
 // The macros are already exported at the crate root via #[macro_export]
 // They don't need to be re-exported here

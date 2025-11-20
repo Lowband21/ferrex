@@ -1,5 +1,3 @@
-#![cfg(feature = "scan-runtime")]
-
 //! Temporary compatibility shim for the scan orchestrator modules.
 //!
 //! The orchestrator has been relocated under `crate::scan::orchestration`. Existing call sites

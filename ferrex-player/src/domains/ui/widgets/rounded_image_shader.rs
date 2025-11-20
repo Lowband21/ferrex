@@ -1069,7 +1069,7 @@ impl Primitive for RoundedImagePrimitive {
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> Self::Renderer {
-        ()
+        
     }
 
     fn prepare(

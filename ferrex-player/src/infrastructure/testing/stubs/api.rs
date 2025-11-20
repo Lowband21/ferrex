@@ -5,18 +5,20 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use ferrex_core::auth::device::AuthDeviceStatus;
-use ferrex_core::player_prelude::{
-    ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse, CreateLibraryRequest,
-    FilterIndicesRequest, LatestProgressResponse, Library, LibraryID, LibraryType, Media, MediaQuery,
-    MediaWithStatus, Platform, Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
-    ScanMetrics, StartClaimResponse, StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest,
-    User, UserPermissions, UserPreferences, UserWatchState, generate_trust_token,
-};
 use ferrex_core::identity::auth::domain::value_objects::SessionScope;
+use ferrex_core::player_prelude::{
+    ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
+    CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse, Library, LibraryID,
+    LibraryType, Media, MediaQuery, MediaWithStatus, Platform, Role, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanMetrics, StartClaimResponse, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions, UserPreferences,
+    UserWatchState, generate_trust_token,
+};
 use rkyv::util::AlignedVec;
-use serde_json::json;
 use uuid::Uuid;
 
+#[cfg(feature = "demo")]
+use crate::infrastructure::api_types::{DemoResetRequest, DemoStatus};
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
 
@@ -130,10 +132,7 @@ impl ApiService for TestApiService {
             .unwrap_or_default())
     }
 
-    async fn create_library(
-        &self,
-        request: CreateLibraryRequest,
-    ) -> RepositoryResult<LibraryID> {
+    async fn create_library(&self, request: CreateLibraryRequest) -> RepositoryResult<LibraryID> {
         let CreateLibraryRequest {
             name,
             library_type,
@@ -171,11 +170,7 @@ impl ApiService for TestApiService {
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
         let mut guard = self.inner.write().expect("lock poisoned");
-        if let Some(library) = guard
-            .libraries
-            .iter_mut()
-            .find(|lib| lib.id == id)
-        {
+        if let Some(library) = guard.libraries.iter_mut().find(|lib| lib.id == id) {
             if let Some(name) = request.name {
                 library.name = name;
             }
@@ -271,17 +266,34 @@ impl ApiService for TestApiService {
         Ok(true)
     }
 
+    #[cfg(feature = "demo")]
+    async fn fetch_demo_status(&self) -> RepositoryResult<DemoStatus> {
+        Err(RepositoryError::QueryFailed(
+            "Demo status not available in test stub".into(),
+        ))
+    }
+
+    #[cfg(feature = "demo")]
+    async fn reset_demo(&self, _request: DemoResetRequest) -> RepositoryResult<DemoStatus> {
+        Err(RepositoryError::UpdateFailed(
+            "Demo reset not available in test stub".into(),
+        ))
+    }
+
     async fn get_watch_state(&self) -> RepositoryResult<UserWatchState> {
-        Ok(self.inner.read().expect("lock poisoned").watch_state.clone())
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .watch_state
+            .clone())
     }
 
     async fn update_progress(&self, request: &UpdateProgressRequest) -> RepositoryResult<()> {
         if let Ok(mut guard) = self.inner.write() {
-            guard.watch_state.update_progress(
-                request.media_id,
-                request.position,
-                request.duration,
-            );
+            guard
+                .watch_state
+                .update_progress(request.media_id, request.position, request.duration);
         }
         Ok(())
     }
@@ -309,7 +321,9 @@ impl ApiService for TestApiService {
         Ok(Vec::new())
     }
 
-    async fn check_setup_status(&self) -> RepositoryResult<crate::infrastructure::api_client::SetupStatus> {
+    async fn check_setup_status(
+        &self,
+    ) -> RepositoryResult<crate::infrastructure::api_client::SetupStatus> {
         let guard = self.inner.read().expect("lock poisoned");
         Ok(crate::infrastructure::api_client::SetupStatus {
             needs_setup: guard.setup_required,
@@ -414,9 +428,7 @@ impl ApiService for TestApiService {
             .current_user
             .clone()
             .ok_or_else(|| {
-                RepositoryError::QueryFailed(
-                    "No current user available in TestApiService".into(),
-                )
+                RepositoryError::QueryFailed("No current user available in TestApiService".into())
             })
     }
 
@@ -427,9 +439,7 @@ impl ApiService for TestApiService {
             .current_permissions
             .clone()
             .ok_or_else(|| {
-                RepositoryError::QueryFailed(
-                    "No permissions available in TestApiService".into(),
-                )
+                RepositoryError::QueryFailed("No permissions available in TestApiService".into())
             })
     }
 
@@ -528,10 +538,7 @@ fn sample_permissions(user_id: Uuid) -> UserPermissions {
             is_system: true,
             created_at: Utc::now().timestamp(),
         }],
-        permissions: HashMap::from([
-            ("system:admin".into(), true),
-            ("user:create".into(), true),
-        ]),
+        permissions: HashMap::from([("system:admin".into(), true), ("user:create".into(), true)]),
         permission_details: None,
     }
 }

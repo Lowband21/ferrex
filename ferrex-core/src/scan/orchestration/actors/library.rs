@@ -871,7 +871,7 @@ mod tests {
             config,
             queue,
             Arc::new(NoopActorObserver),
-            Arc::new(NoopPublisher::default()),
+            Arc::new(NoopPublisher),
             CorrelationCache::default(),
         )
     }
@@ -926,7 +926,7 @@ mod tests {
             .iter()
             .find_map(|event| {
                 if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
-                    Some(correlation_id.clone())
+                    Some(*correlation_id)
                 } else {
                     None
                 }
@@ -1029,7 +1029,7 @@ mod tests {
                     ..
                 } = event
                 {
-                    Some(observed.clone())
+                    Some(*observed)
                 } else {
                     None
                 }
@@ -1078,7 +1078,7 @@ mod tests {
             .iter()
             .find_map(|event| {
                 if let LibraryActorEvent::EnqueueFolderScan { correlation_id, .. } = event {
-                    Some(correlation_id.clone())
+                    Some(*correlation_id)
                 } else {
                     None
                 }

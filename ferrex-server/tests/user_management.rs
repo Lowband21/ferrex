@@ -4,10 +4,7 @@ use anyhow::Result;
 use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use ferrex_core::{
-    api_routes::{self, utils as route_utils},
-    rbac,
-};
+use ferrex_core::api_routes::{self, utils as route_utils};
 use ferrex_server::infra::app_state::AppState;
 use serde_json::{Value, json};
 use sqlx::PgPool;

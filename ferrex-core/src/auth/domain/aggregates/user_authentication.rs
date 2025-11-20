@@ -255,11 +255,10 @@ impl UserAuthentication {
         self.failed_login_attempts = 0;
         self.last_login = Some(Utc::now());
 
-        if needs_rehash {
-            if let Ok(new_hash) = crypto.hash_password(password) {
+        if needs_rehash
+            && let Ok(new_hash) = crypto.hash_password(password) {
                 self.password_hash = new_hash;
             }
-        }
 
         self.add_event(AuthEvent::PasswordAuthenticated {
             user_id: self.user_id,

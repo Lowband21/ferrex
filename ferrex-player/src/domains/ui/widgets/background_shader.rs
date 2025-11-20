@@ -733,8 +733,8 @@ impl Primitive for BackgroundPrimitive {
         if let Some(handle) = backdrop_handle {
             let image_id = handle.id();
 
-            if !state.texture_cache.contains_key(&image_id) {
-                if let Some((texture, aspect_ratio)) = load_texture(device, queue, handle) {
+            if !state.texture_cache.contains_key(&image_id)
+                && let Some((texture, aspect_ratio)) = load_texture(device, queue, handle) {
                     state.texture_cache.insert(
                         image_id,
                         TextureInfo {
@@ -743,7 +743,6 @@ impl Primitive for BackgroundPrimitive {
                         },
                     );
                 }
-            }
 
             if state.texture_cache.contains_key(&image_id)
                 && !state.texture_bind_groups.contains_key(&image_id)
@@ -816,7 +815,7 @@ impl Primitive for BackgroundPrimitive {
                 viewport.logical_size().height,
             ],
             scale_and_effect: [
-                viewport.scale_factor() as f32,
+                viewport.scale_factor(),
                 effect_type,
                 effect_param1,
                 effect_param2,

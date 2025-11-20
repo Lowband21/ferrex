@@ -1,5 +1,3 @@
-#![cfg(feature = "database")]
-
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use uuid::Uuid;

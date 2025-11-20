@@ -68,6 +68,14 @@ pub enum Message {
         library_id: LibraryID,
         scan_id: Uuid,
     },
+    #[cfg(feature = "demo")]
+    FetchDemoStatus,
+    #[cfg(feature = "demo")]
+    DemoStatusLoaded(Result<crate::infrastructure::api_types::DemoStatus, String>),
+    #[cfg(feature = "demo")]
+    ApplyDemoSizing(crate::infrastructure::api_types::DemoResetRequest),
+    #[cfg(feature = "demo")]
+    DemoSizingApplied(Result<crate::infrastructure::api_types::DemoStatus, String>),
     // Scanner metrics/config
     FetchScanMetrics,
     ScanMetricsLoaded(Result<ScanMetrics, String>),
@@ -141,6 +149,14 @@ impl Message {
             Self::PauseScan { .. } => "Library::PauseScan",
             Self::ResumeScan { .. } => "Library::ResumeScan",
             Self::CancelScan { .. } => "Library::CancelScan",
+            #[cfg(feature = "demo")]
+            Self::FetchDemoStatus => "Library::FetchDemoStatus",
+            #[cfg(feature = "demo")]
+            Self::DemoStatusLoaded(_) => "Library::DemoStatusLoaded",
+            #[cfg(feature = "demo")]
+            Self::ApplyDemoSizing(_) => "Library::ApplyDemoSizing",
+            #[cfg(feature = "demo")]
+            Self::DemoSizingApplied(_) => "Library::DemoSizingApplied",
 
             // Media references
             Self::LibraryMediasLoaded(_) => "Library::LibraryMediasLoaded",
@@ -286,6 +302,28 @@ impl std::fmt::Debug for Message {
                 library_id,
                 scan_id,
             } => write!(f, "Library::CancelScan({}, {})", library_id, scan_id),
+            #[cfg(feature = "demo")]
+            Self::FetchDemoStatus => write!(f, "Library::FetchDemoStatus"),
+            #[cfg(feature = "demo")]
+            Self::DemoStatusLoaded(result) => match result {
+                Ok(status) => write!(
+                    f,
+                    "Library::DemoStatusLoaded(Ok: {} libraries)",
+                    status.libraries.len()
+                ),
+                Err(err) => write!(f, "Library::DemoStatusLoaded(Err: {})", err),
+            },
+            #[cfg(feature = "demo")]
+            Self::ApplyDemoSizing(_) => write!(f, "Library::ApplyDemoSizing"),
+            #[cfg(feature = "demo")]
+            Self::DemoSizingApplied(result) => match result {
+                Ok(status) => write!(
+                    f,
+                    "Library::DemoSizingApplied(Ok: {} libraries)",
+                    status.libraries.len()
+                ),
+                Err(err) => write!(f, "Library::DemoSizingApplied(Err: {})", err),
+            },
 
             // Media references
             Self::LibraryMediasLoaded(result) => match result {

@@ -14,6 +14,8 @@ use crate::{
 use ferrex_core::player_prelude::{
     ArchivedLibrary, ArchivedLibraryType, Library, LibraryID, ScanLifecycleStatus, ScanSnapshotDto,
 };
+#[cfg(feature = "demo")]
+use iced::widget::text_input;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
@@ -123,7 +125,12 @@ pub fn view_library_management(state: &State) -> Element<'_, Message> {
         content = content.push(success_card);
     }
 
-    content = content.push(active_scans_panel(state));
+    content = content.push(scan_status_panel(state));
+
+    #[cfg(feature = "demo")]
+    {
+        content = content.push(demo_controls_panel(state));
+    }
 
     // Libraries list
     if !state.domains.library.state.repo_accessor.is_initialized() {
@@ -300,7 +307,7 @@ fn create_library_card<'a>(
     }
 }
 
-fn active_scans_panel(state: &State) -> Element<'_, Message> {
+fn scan_status_panel(state: &State) -> Element<'_, Message> {
     let mut scans: Vec<ScanSnapshotDto> = state
         .domains
         .library
@@ -327,7 +334,7 @@ fn active_scans_panel(state: &State) -> Element<'_, Message> {
     let header = row![
         row![
             icon_text(Icon::Activity),
-            text("Active Scans")
+            text("Scanner Status")
                 .size(20)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
         ]
@@ -600,4 +607,151 @@ fn truncate_path(path: &str) -> String {
         let tail = &path[path.len() - (MAX_LEN.saturating_sub(3))..];
         format!("…{}", tail)
     }
+}
+
+#[cfg(feature = "demo")]
+fn demo_controls_panel(state: &State) -> Element<'_, Message> {
+    let controls = &state.domains.library.state.demo_controls;
+
+    let header = row![
+        icon_text(Icon::Sparkles),
+        text("Demo Controls")
+            .size(20)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+
+    let inputs = row![
+        column![
+            text("Movies")
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text_input("Desired movie count", &controls.movies_input)
+                .on_input(Message::DemoMoviesTargetChanged)
+                .padding(8)
+                .size(16),
+            text(
+                controls
+                    .movies_current
+                    .map(|count| format!("Current: {count}"))
+                    .unwrap_or_else(|| "Current: –".into()),
+            )
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        ]
+        .spacing(6)
+        .width(Length::FillPortion(1)),
+        column![
+            text("Series")
+                .size(14)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text_input("Desired series count", &controls.series_input)
+                .on_input(Message::DemoSeriesTargetChanged)
+                .padding(8)
+                .size(16),
+            text(
+                controls
+                    .series_current
+                    .map(|count| format!("Current: {count}"))
+                    .unwrap_or_else(|| "Current: –".into()),
+            )
+            .size(12)
+            .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        ]
+        .spacing(6)
+        .width(Length::FillPortion(1)),
+    ]
+    .spacing(16);
+
+    let mut actions = row![].spacing(12);
+
+    let apply_label = if controls.is_updating {
+        "Applying…"
+    } else {
+        "Apply Size"
+    };
+
+    let apply_button = if controls.is_updating {
+        button(apply_label)
+            .style(theme::Button::Secondary.style())
+            .padding([10, 20])
+    } else {
+        button(apply_label)
+            .on_press(Message::DemoApplySizing)
+            .style(theme::Button::Primary.style())
+            .padding([10, 20])
+    };
+
+    actions = actions.push(apply_button);
+
+    let refresh_label = if controls.is_loading {
+        "Refreshing…"
+    } else {
+        "Refresh Status"
+    };
+
+    let refresh_button = if controls.is_loading {
+        button(refresh_label)
+            .style(theme::Button::Secondary.style())
+            .padding([10, 20])
+    } else {
+        button(refresh_label)
+            .on_press(Message::DemoRefreshStatus)
+            .style(theme::Button::Secondary.style())
+            .padding([10, 20])
+    };
+
+    actions = actions.push(refresh_button);
+
+    let info = column![
+        text(
+            controls
+                .demo_root
+                .as_ref()
+                .map(|root| format!("Media root: {}", root.display()))
+                .unwrap_or_else(|| "Media root: –".into()),
+        )
+        .size(12)
+        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        text(
+            controls
+                .demo_username
+                .as_ref()
+                .map(|user| format!("Demo account: {}", user))
+                .unwrap_or_else(|| "Demo account: –".into()),
+        )
+        .size(12)
+        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        text(format!(
+            "Registered demo libraries: {}",
+            controls.demo_library_ids.len()
+        ))
+        .size(12)
+        .color(theme::MediaServerTheme::TEXT_SUBDUED),
+    ]
+    .spacing(4);
+
+    let mut content = column![header, inputs, actions, info]
+        .spacing(16)
+        .padding(20);
+
+    if let Some(error) = &controls.error {
+        let error_row = container(
+            row![
+                icon_text(Icon::OctagonAlert),
+                text(error).size(14).color(theme::MediaServerTheme::ERROR)
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([10, 14])
+        .style(theme::Container::ErrorBox.style());
+        content = content.push(error_row);
+    }
+
+    container(content)
+        .width(Length::Fill)
+        .style(theme::Container::Card.style())
+        .into()
 }

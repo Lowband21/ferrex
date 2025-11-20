@@ -3,14 +3,12 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use ferrex_core::player_prelude::{AuthToken, Role, User, UserPermissions, UserPreferences};
 use ferrex_core::identity::auth::domain::value_objects::SessionScope;
+use ferrex_core::player_prelude::{AuthToken, Role, User, UserPermissions, UserPreferences};
 use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
-use crate::domains::auth::manager::{
-    AutoLoginScope, DeviceAuthStatus, PlayerAuthResult,
-};
+use crate::domains::auth::manager::{AutoLoginScope, DeviceAuthStatus, PlayerAuthResult};
 use crate::domains::auth::storage::StoredAuth;
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::auth::AuthService;
@@ -103,7 +101,7 @@ impl TestAuthService {
     }
 
     pub fn with_users(
-        mut self,
+        self,
         users: Vec<User>,
         permissions: HashMap<Uuid, UserPermissions>,
     ) -> Self {
@@ -242,7 +240,12 @@ impl AuthService for TestAuthService {
     }
 
     async fn get_current_user(&self) -> RepositoryResult<Option<User>> {
-        Ok(self.inner.read().expect("lock poisoned").current_user.clone())
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .current_user
+            .clone())
     }
 
     async fn get_current_permissions(&self) -> RepositoryResult<Option<UserPermissions>> {
@@ -262,10 +265,7 @@ impl AuthService for TestAuthService {
         Ok(self.user_list())
     }
 
-    async fn check_device_auth(
-        &self,
-        user_id: Uuid,
-    ) -> RepositoryResult<DeviceAuthStatus> {
+    async fn check_device_auth(&self, user_id: Uuid) -> RepositoryResult<DeviceAuthStatus> {
         let guard = self.inner.read().expect("lock poisoned");
         guard
             .device_status
@@ -364,7 +364,12 @@ impl AuthService for TestAuthService {
     }
 
     async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>> {
-        Ok(self.inner.read().expect("lock poisoned").stored_auth.clone())
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .stored_auth
+            .clone())
     }
 
     async fn apply_stored_auth(&self, stored_auth: StoredAuth) -> RepositoryResult<()> {
@@ -430,11 +435,10 @@ impl AuthService for TestAuthService {
     }
 
     async fn save_current_auth(&self) -> RepositoryResult<()> {
-        if let Ok(mut guard) = self.inner.write() {
-            if let (Some(user), Some(token)) = (
-                guard.current_user.clone(),
-                guard.auth_token.clone(),
-            ) {
+        if let Ok(mut guard) = self.inner.write()
+            && let (Some(user), Some(token)) =
+                (guard.current_user.clone(), guard.auth_token.clone())
+            {
                 let stored = StoredAuth {
                     token,
                     user,
@@ -446,7 +450,6 @@ impl AuthService for TestAuthService {
                 };
                 guard.stored_auth = Some(stored);
             }
-        }
         Ok(())
     }
 

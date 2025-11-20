@@ -6,18 +6,14 @@
 // - Device trust integration
 // - API client retry mechanism
 
-use ferrex_player::domains::auth::manager::AuthManager;
 use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
-use ferrex_player::infrastructure::api_client::ApiClient;
 use ferrex_core::{
     auth::domain::value_objects::SessionScope,
-    rbac::UserPermissions,
     user::{AuthToken, User},
 };
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 use tempfile::TempDir;
-use std::path::PathBuf;
 
 fn create_test_user() -> User {
     User {

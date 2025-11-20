@@ -3,7 +3,6 @@
 //! Provides simplified abstractions for domain dependencies and cross-domain communication.
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

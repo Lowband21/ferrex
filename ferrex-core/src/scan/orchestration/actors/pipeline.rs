@@ -157,7 +157,7 @@ impl MediaAnalyzeActor for DefaultMediaAnalyzeActor {
         } = job;
 
         #[cfg(feature = "demo")]
-        if crate::demo::policy().map_or(false, |policy| policy.skip_metadata_probe)
+        if crate::demo::policy().is_some_and(|policy| policy.skip_metadata_probe)
             && crate::demo::is_demo_library(&library_id)
         {
             let mut context_obj: Map<String, Value> = match context {

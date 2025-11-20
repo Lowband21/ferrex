@@ -283,7 +283,7 @@ impl TestRecorder {
         report.push_str(&format!("Test Failure Report: {}\n", test_name));
         report.push_str(&format!("Reason: {}\n", failure_reason));
         report.push_str(&format!("Duration: {:?}\n", self.start_time.elapsed()));
-        report.push_str("\n");
+        report.push('\n');
 
         // Add recent operations
         report.push_str("Recent Operations:\n");
@@ -374,7 +374,7 @@ impl TestRecorder {
                     ));
                 }
             }
-            replay.push_str("\n");
+            replay.push('\n');
         }
 
         replay

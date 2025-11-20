@@ -40,7 +40,7 @@ pub use config::Config;
 pub use profiling::PROFILER;
 
 // Export profiling scope definitions
-pub use profiling_scopes::{analyze_performance, scopes, PerformanceTargets};
+pub use profiling_scopes::{PerformanceTargets, analyze_performance, scopes};
 
 // For backward compatibility when no profiling features are enabled
 #[cfg(not(any(
@@ -50,8 +50,8 @@ pub use profiling_scopes::{analyze_performance, scopes, PerformanceTargets};
     feature = "profiling-stats"
 )))]
 pub mod profiling {
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     pub struct Profiler {
         enabled: AtomicBool,

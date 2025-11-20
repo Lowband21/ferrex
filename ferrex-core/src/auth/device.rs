@@ -46,17 +46,20 @@ impl Platform {
             Platform::Unknown
         }
     }
+}
 
-    pub fn from_str(value: &str) -> Self {
+impl std::str::FromStr for Platform {
+    type Err = anyhow::Error;
+    fn from_str(value: &str) -> Result<Platform, anyhow::Error> {
         match value {
-            "macos" => Platform::MacOS,
-            "linux" => Platform::Linux,
-            "windows" => Platform::Windows,
-            "ios" => Platform::IOS,
-            "android" => Platform::Android,
-            "tvos" => Platform::TvOS,
-            "web" => Platform::Web,
-            _ => Platform::Unknown,
+            "macos" => Ok(Platform::MacOS),
+            "linux" => Ok(Platform::Linux),
+            "windows" => Ok(Platform::Windows),
+            "ios" => Ok(Platform::IOS),
+            "android" => Ok(Platform::Android),
+            "tvos" => Ok(Platform::TvOS),
+            "web" => Ok(Platform::Web),
+            _ => Err(anyhow::Error::msg("Unknown platform")),
         }
     }
 }
@@ -82,9 +85,10 @@ impl AsRef<str> for Platform {
     feature = "database",
     sqlx(type_name = "auth_device_status", rename_all = "lowercase")
 )]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthDeviceStatus {
     #[serde(rename = "pending")]
+    #[default]
     Pending,
     #[serde(rename = "trusted")]
     Trusted,
@@ -100,20 +104,17 @@ impl AuthDeviceStatus {
             AuthDeviceStatus::Revoked => "revoked",
         }
     }
-
-    pub fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "pending" => Some(Self::Pending),
-            "trusted" => Some(Self::Trusted),
-            "revoked" => Some(Self::Revoked),
-            _ => None,
-        }
-    }
 }
 
-impl Default for AuthDeviceStatus {
-    fn default() -> Self {
-        Self::Pending
+impl std::str::FromStr for AuthDeviceStatus {
+    type Err = anyhow::Error;
+    fn from_str(value: &str) -> Result<AuthDeviceStatus, anyhow::Error> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "trusted" => Ok(Self::Trusted),
+            "revoked" => Ok(Self::Revoked),
+            _ => Err(anyhow::Error::msg("Invalid auth device status")),
+        }
     }
 }
 
@@ -276,7 +277,7 @@ impl AuthenticatedDevice {
 }
 
 /// Parameters for updating a device
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeviceUpdateParams {
     pub name: Option<String>,
     pub app_version: Option<String>,
@@ -289,22 +290,4 @@ pub struct DeviceUpdateParams {
     pub revoked_by: Option<Option<Uuid>>,
     pub revoked_reason: Option<Option<String>>,
     pub revoked_at: Option<Option<DateTime<Utc>>>,
-}
-
-impl Default for DeviceUpdateParams {
-    fn default() -> Self {
-        Self {
-            name: None,
-            app_version: None,
-            last_seen_at: None,
-            trusted_until: None,
-            last_activity: None,
-            status: None,
-            auto_login_enabled: None,
-            locked_until: None,
-            revoked_by: None,
-            revoked_reason: None,
-            revoked_at: None,
-        }
-    }
 }

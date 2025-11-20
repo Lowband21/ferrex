@@ -2,11 +2,9 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use ferrex_core::auth::device::{AuthDeviceStatus, AuthenticatedDevice};
-use ferrex_player::domains::settings::messages as settings_messages;
 use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
 use ferrex_player::infrastructure::services::settings::SettingsService;
 use ferrex_player::state_refactored::State;
-use iced::Task;
 use serde_json::json;
 use uuid::Uuid;
 

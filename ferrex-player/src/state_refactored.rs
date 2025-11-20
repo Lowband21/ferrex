@@ -20,6 +20,7 @@ use crate::domains::ui::types::DisplayMode;
 use crate::domains::ui::views::carousel::CarouselState;
 use crate::domains::ui::widgets::AnimationType;
 use crate::domains::user_management::UserManagementDomainState;
+use crate::infrastructure::ServiceBuilder;
 use crate::infrastructure::adapters::ApiClientAdapter;
 use crate::infrastructure::adapters::AuthManagerAdapter;
 use crate::infrastructure::api_client::ApiClient;
@@ -34,7 +35,6 @@ use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::settings::SettingsApiAdapter;
 use crate::infrastructure::services::streaming::StreamingApiAdapter;
 use crate::infrastructure::services::user_management::UserAdminApiAdapter;
-use crate::infrastructure::ServiceBuilder;
 use ferrex_core::player_prelude::{LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus};
 use parking_lot::RwLock as StdRwLock;
 use std::sync::Arc;
@@ -228,7 +228,7 @@ impl State {
             domains,
             tab_manager,
             server_url: server_url.clone(),
-            api_service: api_service,
+            api_service,
             image_service: image_service.clone(), // TODO: Fix this clone
             image_receiver: Arc::new(std::sync::Mutex::new(Some(_receiver))),
             loading: true,

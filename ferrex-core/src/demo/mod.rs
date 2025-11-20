@@ -19,12 +19,17 @@ use crate::{
 };
 
 pub mod config;
+#[cfg(feature = "scan-runtime")]
 pub mod generator;
 pub mod policy;
 
 pub use config::{DemoLibraryOptions, DemoSeedOptions};
+#[cfg(feature = "scan-runtime")]
 pub use generator::{DemoLibraryPlan, DemoSeedPlan, apply_plan, generate_plan, prepare_plan_roots};
 pub use policy::{DemoPolicy, DemoRuntimeMetadata};
+
+#[cfg(all(test, feature = "demo"))]
+mod tests;
 
 static DEMO_CONTEXT: OnceCell<DemoContext> = OnceCell::new();
 
@@ -103,11 +108,10 @@ pub fn register_demo_library(library: &Library) {
 
 /// Clear all registered demo libraries (used when regenerating plans).
 pub fn clear_registered_libraries() {
-    if let Some(ctx) = context() {
-        if let Ok(mut guard) = ctx.libraries.lock() {
+    if let Some(ctx) = context()
+        && let Ok(mut guard) = ctx.libraries.lock() {
             guard.clear();
         }
-    }
 }
 
 /// Check if the provided library ID belongs to the demo runtime.
@@ -118,7 +122,27 @@ pub fn is_demo_library(id: &LibraryID) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns whether zero-length files are permitted for the given library.
+/// When the demo feature is disabled this always returns `false`.
+pub fn allow_zero_length_for(id: &LibraryID) -> bool {
+    let ctx = match context() {
+        Some(ctx) => ctx,
+        None => return false,
+    };
+
+    if !ctx.policy().allow_zero_length_files {
+        return false;
+    }
+
+    ctx.libraries
+        .lock()
+        .ok()
+        .map(|map| map.contains_key(id))
+        .unwrap_or(false)
+}
+
 /// Create a placeholder library record for the provided plan.
+#[cfg(feature = "scan-runtime")]
 pub fn library_from_plan(plan: &DemoLibraryPlan) -> Library {
     use chrono::Utc;
     use uuid::Uuid;

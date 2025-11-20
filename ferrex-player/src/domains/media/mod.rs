@@ -9,7 +9,7 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::domains::media::messages::Message as MediaMessage;
 use crate::infrastructure::repository::{Accessor, ReadWrite};
 use crate::infrastructure::{
-    adapters::api_client_adapter::ApiClientAdapter, api_types::UserWatchState,
+    api_types::UserWatchState,
     services::api::ApiService,
 };
 use ferrex_core::player_prelude::{InProgressItem, MediaID, MediaIDLike, SeasonDetails};

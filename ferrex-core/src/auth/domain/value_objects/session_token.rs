@@ -70,7 +70,7 @@ impl SessionToken {
 
         // Accept either URL-safe base64 (raw secrets) or ASCII hex (hashed secrets)
         let is_b64 = URL_SAFE_NO_PAD.decode(&value).is_ok();
-        let is_hex = value.len() % 2 == 0 && value.chars().all(|c| c.is_ascii_hexdigit());
+        let is_hex = value.len().is_multiple_of(2) && value.chars().all(|c| c.is_ascii_hexdigit());
 
         if !is_b64 && !is_hex {
             return Err(SessionTokenError::InvalidFormat);

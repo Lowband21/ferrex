@@ -2,7 +2,7 @@
 //!
 //! Provides abstraction over time to enable deterministic testing of time-dependent code.
 
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -307,6 +307,8 @@ macro_rules! with_time {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Timelike;
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

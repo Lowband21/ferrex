@@ -406,11 +406,10 @@ impl UserAdministrationService {
                 .await
                 .map_err(UserAdminError::from)?;
 
-            if let Some(role_name) = &role_filter {
-                if !permissions.has_role(role_name) {
+            if let Some(role_name) = &role_filter
+                && !permissions.has_role(role_name) {
                     continue;
                 }
-            }
 
             let sessions = self
                 .users

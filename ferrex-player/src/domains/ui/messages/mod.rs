@@ -42,6 +42,14 @@ pub enum Message {
     HideAdminDashboard,
     ShowLibraryManagement,
     HideLibraryManagement,
+    #[cfg(feature = "demo")]
+    DemoMoviesTargetChanged(String),
+    #[cfg(feature = "demo")]
+    DemoSeriesTargetChanged(String),
+    #[cfg(feature = "demo")]
+    DemoApplySizing,
+    #[cfg(feature = "demo")]
+    DemoRefreshStatus,
 
     // Database maintenance UI
     ShowClearDatabaseConfirm,
@@ -198,6 +206,14 @@ impl Message {
             Self::HideAdminDashboard => "UI::HideAdminDashboard",
             Self::ShowLibraryManagement => "UI::ShowLibraryManagement",
             Self::HideLibraryManagement => "UI::HideLibraryManagement",
+            #[cfg(feature = "demo")]
+            Self::DemoMoviesTargetChanged(_) => "UI::DemoMoviesTargetChanged",
+            #[cfg(feature = "demo")]
+            Self::DemoSeriesTargetChanged(_) => "UI::DemoSeriesTargetChanged",
+            #[cfg(feature = "demo")]
+            Self::DemoApplySizing => "UI::DemoApplySizing",
+            #[cfg(feature = "demo")]
+            Self::DemoRefreshStatus => "UI::DemoRefreshStatus",
 
             // Database maintenance UI
             Self::ShowClearDatabaseConfirm => "UI::ShowClearDatabaseConfirm",
@@ -357,6 +373,18 @@ impl std::fmt::Debug for Message {
             Self::HideAdminDashboard => write!(f, "UI::HideAdminDashboard"),
             Self::ShowLibraryManagement => write!(f, "UI::ShowLibraryManagement"),
             Self::HideLibraryManagement => write!(f, "UI::HideLibraryManagement"),
+            #[cfg(feature = "demo")]
+            Self::DemoMoviesTargetChanged(value) => {
+                write!(f, "UI::DemoMoviesTargetChanged({value})")
+            }
+            #[cfg(feature = "demo")]
+            Self::DemoSeriesTargetChanged(value) => {
+                write!(f, "UI::DemoSeriesTargetChanged({value})")
+            }
+            #[cfg(feature = "demo")]
+            Self::DemoApplySizing => write!(f, "UI::DemoApplySizing"),
+            #[cfg(feature = "demo")]
+            Self::DemoRefreshStatus => write!(f, "UI::DemoRefreshStatus"),
             Self::NavigateHome => write!(f, "UI::NavigateHome"),
             Self::WindowResized(size) => write!(f, "UI::WindowResized({:?})", size),
             Self::WindowMoved(position) => write!(f, "UI::WindowMoved({:?})", position),

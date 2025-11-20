@@ -5,7 +5,6 @@
 use crate::infrastructure::testing::{
     executor::TestExecutor, mocks::MockRegistry, recorder::TestRecorder, time::TimeProvider,
 };
-use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 

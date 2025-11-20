@@ -120,7 +120,7 @@ impl std::fmt::Debug for Message {
             Self::UsersLoaded(result) => write!(
                 f,
                 "UsersLoaded({:?})",
-                result.as_ref().map(|v| v.len()).map_err(|e| e)
+                result.as_ref().map(|v| v.len())
             ),
             Self::SelectUser(uuid) => write!(f, "SelectUser({})", uuid),
             Self::ShowCreateUser => write!(f, "ShowCreateUser"),

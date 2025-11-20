@@ -124,8 +124,10 @@ opt-level = 3
 [profile.dev]
 opt-level = 1
 
-[profile.dev.package."*"]
-opt-level = 3
+## Makes debug builds of ferrex-player usable
+## With the downside of slowing diagnostics
+#[profile.dev.package."*"]
+#opt-level = 3
 
 # Documentation settings
 [workspace.metadata.docs.rs]

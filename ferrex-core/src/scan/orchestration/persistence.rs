@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde_json::from_value;
 use sqlx::PgPool;
 use std::fmt;
-use std::hash::{Hash, Hasher, SipHasher};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -297,7 +297,7 @@ impl PostgresQueueService {
     }
 
     fn deterministic_unit(&self, job_id: JobId, attempt: u16) -> f64 {
-        let mut hasher = SipHasher::new_with_keys(0, 0);
+        let mut hasher = DefaultHasher::default();
         job_id.hash(&mut hasher);
         attempt.hash(&mut hasher);
         let bits = hasher.finish();

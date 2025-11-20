@@ -141,7 +141,7 @@ async fn demo_reset_preserves_libraries_and_cleans_files(pool: PgPool) -> Result
     assert!(first_file.exists(), "initial demo file should exist");
 
     coordinator
-        .reset(state.unit_of_work.clone())
+        .reset(state.unit_of_work.clone(), None)
         .await
         .context("demo reset should succeed")?;
 

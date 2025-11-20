@@ -7,7 +7,6 @@ pub mod update;
 
 use self::messages::Message as UserManagementMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;

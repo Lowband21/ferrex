@@ -309,13 +309,13 @@ impl PrimitiveBatchState for RoundedImageBatchState {
     }
 
     fn prepare(&mut self, context: &mut PrepareContext<'_>) {
-        if let Some(mut image_cache) = context.resources.image_cache() {
+        if let Some(image_cache) = context.resources.image_cache() {
             // Mutable access is required so cached lookups register cache hits
             // and keep atlas allocations alive across the renderer's trim pass.
             let atlas_layout = image_cache.texture_layout();
             self.ensure_pipeline(context.device, atlas_layout);
 
-            for mut pending in std::mem::take(&mut self.pending_primitives) {
+            for pending in std::mem::take(&mut self.pending_primitives) {
                 let mut atlas_region = image_cache.cached_raster_region(&pending.handle);
                 let was_cached = atlas_region.is_some();
 

@@ -16,7 +16,6 @@ pub mod external_mpv;
 use self::messages::Message;
 use self::state::PlayerDomainState;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
 use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::LibraryID;
 use iced::Task;

@@ -128,7 +128,7 @@ pub fn hash_filter_spec(spec: &FilterIndicesRequest) -> u64 {
 
     match spec.search.as_ref() {
         Some(search) => search.trim().to_lowercase().hash(&mut hasher),
-        None => ().hash(&mut hasher),
+        None => (),
     }
 
     spec.sort.hash(&mut hasher);

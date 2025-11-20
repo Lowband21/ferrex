@@ -41,10 +41,7 @@ impl Hash for MediaEventsId {
 }
 
 /// Creates a subscription to server-sent events for library media changes
-pub fn media_events(
-    server_url: String,
-    api_service: Arc<dyn ApiService>,
-) -> Subscription<Message> {
+pub fn media_events(server_url: String, api_service: Arc<dyn ApiService>) -> Subscription<Message> {
     Subscription::run_with(
         MediaEventsId {
             server_url: server_url.clone(),

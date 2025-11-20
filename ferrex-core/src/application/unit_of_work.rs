@@ -1,5 +1,3 @@
-#![cfg(feature = "database")]
-
 use std::any::type_name_of_val;
 use std::fmt;
 use std::sync::Arc;
@@ -113,6 +111,7 @@ impl fmt::Debug for AppUnitOfWork {
     }
 }
 
+#[derive(Default)]
 pub struct AppUnitOfWorkBuilder {
     libraries: Option<Arc<dyn LibraryRepository>>,
     media_refs: Option<Arc<dyn MediaReferencesRepository>>,
@@ -156,29 +155,6 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("processing_status", &self.processing_status.is_some())
             .field("indices", &self.indices.is_some())
             .finish()
-    }
-}
-
-impl Default for AppUnitOfWorkBuilder {
-    fn default() -> Self {
-        Self {
-            libraries: None,
-            media_refs: None,
-            media_files_read: None,
-            media_files_write: None,
-            images: None,
-            query: None,
-            users: None,
-            rbac: None,
-            security_settings: None,
-            setup_claims: None,
-            watch_status: None,
-            watch_metrics: None,
-            sync_sessions: None,
-            folder_inventory: None,
-            processing_status: None,
-            indices: None,
-        }
     }
 }
 

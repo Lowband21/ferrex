@@ -271,14 +271,10 @@ pub trait TaskTestExt<T> {
 // Note: Actual implementation would depend on Iced's Task internals
 // This is a placeholder that demonstrates the interface
 impl<T> TaskTestExt<T> for iced::Task<T> {
-    fn into_test_future(self) -> impl Future<Output = Vec<T>> + Send + 'static
+    async fn into_test_future(self) -> Vec<T>
     where
         T: Send + 'static,
-    {
-        // This would need to be implemented based on Iced's actual Task structure
-        // For now, return an empty future as a placeholder
-        async { Vec::new() }
-    }
+    { Vec::new() }
 }
 
 #[cfg(test)]

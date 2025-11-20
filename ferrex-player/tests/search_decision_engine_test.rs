@@ -1,9 +1,7 @@
 #[cfg(test)]
 mod search_decision_engine_tests {
     use ferrex_core::query::types::SearchField;
-    use ferrex_player::domains::search::metrics::{
-        NetworkMonitor, PerformanceHistory, SearchPerformanceMetrics,
-    };
+    use ferrex_player::domains::search::metrics::SearchPerformanceMetrics;
     use ferrex_player::domains::search::types::{SearchDecisionEngine, SearchStrategy};
     use std::time::{Duration, Instant};
 

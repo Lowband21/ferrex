@@ -2,6 +2,7 @@
 //! Modules expose intentional surfaces so downstream crates can depend on
 //! specialized namespaces instead of the entire API layer.
 
+pub mod demo;
 pub mod filters;
 pub mod library;
 pub mod media;
@@ -9,6 +10,7 @@ pub mod responses;
 pub mod scan;
 pub mod setup;
 
+pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use filters::{
     FilterIndicesRequest, IndicesResponse, LibraryFilters, RATING_DECIMAL_SCALE,
     RATING_SCALE_FACTOR, RatingValue, ScalarRange, rating_value_from_f32, rating_value_to_f32,
@@ -26,6 +28,7 @@ pub use scan::{
 
 /// Curated exports relied on by the UI/player crates.
 pub mod player {
+    pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::library::{
         BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, FetchMediaRequest,
         LibraryMediaCache, LibraryMediaResponse, ManualMatchRequest, UpdateLibraryRequest,

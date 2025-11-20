@@ -55,8 +55,7 @@ pub async fn optional_auth_middleware(
 ) -> Response {
     if let Ok(token) = extract_bearer_token(&request)
         && let Ok(session) = state.auth_service().validate_session_token(&token).await
-    {
-        if let Ok(Some(user)) = state
+        && let Ok(Some(user)) = state
             .unit_of_work
             .users
             .get_user_by_id(session.user_id)
@@ -69,7 +68,6 @@ pub async fn optional_auth_middleware(
             request.extensions_mut().insert(session.device_session_id);
             request.extensions_mut().insert(session.scope);
         }
-    }
 
     next.run(request).await
 }

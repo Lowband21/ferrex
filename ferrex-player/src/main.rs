@@ -3,9 +3,6 @@ use ferrex_player::app::{self, AppConfig};
 use env_logger::{Builder, Target};
 use log::LevelFilter;
 
-#[cfg(feature = "profile-with-tracy")]
-use tracy_client;
-
 fn init_logger() {
     Builder::new()
         .target(Target::Stdout)

@@ -319,8 +319,7 @@ mod tests {
                         && record.revoked_at.is_none()
                         && record.expires_at > now
                 })
-                .cloned()
-                .next())
+                .next().cloned())
         }
 
         async fn find_active_by_code_hash(
@@ -335,8 +334,7 @@ mod tests {
                 .filter(|record| record.confirmed_at.is_none())
                 .filter(|record| record.revoked_at.is_none())
                 .filter(|record| record.expires_at > now)
-                .cloned()
-                .next())
+                .next().cloned())
         }
 
         async fn mark_confirmed(
@@ -373,8 +371,7 @@ mod tests {
                 .filter(|record| record.revoked_at.is_none())
                 .filter(|record| record.confirmed_at.is_some())
                 .filter(|record| record.expires_at > now)
-                .cloned()
-                .next())
+                .next().cloned())
         }
 
         async fn revoke_by_id(

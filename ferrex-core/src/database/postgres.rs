@@ -50,9 +50,12 @@ use sqlx::{
     PgPool, Row,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
-use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fmt};
-use tracing::{debug, info, warn};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Statistics about the connection pool
@@ -2358,24 +2361,6 @@ impl MediaDatabaseTrait for PostgresDatabase {
     // Legacy device auth methods removed
 
     // legacy device credential methods removed; use auth domain repositories
-
-    // legacy device credential methods removed
-
-    // legacy device credential methods removed
-
-    // legacy device credential methods removed
-
-    // Legacy device auth methods removed
-
-    // Legacy device auth methods removed
-
-    // Legacy device auth methods removed
-
-    // Legacy device auth methods removed
-
-    // Legacy device auth methods removed
-
-    // Legacy device auth methods removed
 
     async fn get_library_media_references(
         &self,

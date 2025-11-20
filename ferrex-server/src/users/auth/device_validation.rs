@@ -150,7 +150,7 @@ pub async fn list_trusted_devices(
             platform: "unknown".to_string(),
             trusted_until: None,
             last_seen: session.last_activity(),
-            is_current: current_device.map_or(false, |id| id == session.id()),
+            is_current: current_device.is_some_and(|id| id == session.id()),
         })
         .collect();
 

@@ -101,7 +101,7 @@ mod refresh_token_integration {
 // Previously pending tests - now implemented
 mod completed_tests {
     use ferrex_player::domains::auth::service::AuthService;
-    use uuid::Uuid;
+    
 
     #[tokio::test]
     async fn auto_login_device_specific() {
@@ -178,7 +178,7 @@ mod completed_tests {
         assert!(auth.is_session_valid(&session1).await);
         assert!(auth.is_session_valid(&session2).await);
         assert!(
-            auth.is_device_trusted(user_id, &"device1".to_string())
+            auth.is_device_trusted(user_id, "device1")
                 .await
         );
         assert!(
@@ -207,7 +207,7 @@ mod completed_tests {
         );
         assert!(
             !auth
-                .is_device_trusted(user_id, &"device1".to_string())
+                .is_device_trusted(user_id, "device1")
                 .await,
             "Device should not be trusted"
         );

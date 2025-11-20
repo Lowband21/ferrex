@@ -646,7 +646,7 @@ mod tests {
         let info = TvParser::parse_episode_info(&path).unwrap();
         assert_eq!(info.season, 0);
         assert_eq!(info.episode, 1);
-        assert_eq!(info.is_special, true);
+        assert!(info.is_special);
     }
 
     #[test]

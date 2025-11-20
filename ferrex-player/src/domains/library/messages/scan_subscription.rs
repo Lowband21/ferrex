@@ -39,11 +39,11 @@ impl Hash for ScanProgressId {
 }
 
 /// Creates a subscription to monitor library scan progress via Server-Sent Events (SSE)
-    pub fn scan_progress(
-        server_url: String,
-        api_service: Arc<dyn ApiService>,
-        scan_id: Uuid,
-    ) -> Subscription<Message> {
+pub fn scan_progress(
+    server_url: String,
+    api_service: Arc<dyn ApiService>,
+    scan_id: Uuid,
+) -> Subscription<Message> {
     Subscription::run_with(
         ScanProgressId {
             server_url: server_url.clone(),

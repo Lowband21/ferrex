@@ -115,7 +115,9 @@ fn apply_test_stubs(state: &mut State) {
     use crate::domains::search::SearchDomain;
     use crate::infrastructure::services::auth::AuthService;
     use crate::infrastructure::services::settings::SettingsService;
-    use crate::infrastructure::testing::stubs::{TestApiService, TestAuthService, TestSettingsService};
+    use crate::infrastructure::testing::stubs::{
+        TestApiService, TestAuthService, TestSettingsService,
+    };
 
     let api_stub: Arc<TestApiService> = Arc::new(TestApiService::new(state.server_url.clone()));
     let auth_stub: Arc<TestAuthService> = Arc::new(TestAuthService::new());
@@ -136,18 +138,20 @@ fn apply_test_stubs(state: &mut State) {
     let stub_devices = settings_stub.devices();
     state.domains.settings.device_management_state.devices = stub_devices
         .iter()
-        .map(|device| crate::domains::ui::views::settings::device_management::UserDevice {
-            device_id: device.id.to_string(),
-            device_name: device.name.clone(),
-            device_type: format!("{:?}", device.platform),
-            last_active: device.last_activity,
-            is_current_device: false,
-            location: device
-                .metadata
-                .get("location")
-                .and_then(|value| value.as_str())
-                .map(|s| s.to_string()),
-        })
+        .map(
+            |device| crate::domains::ui::views::settings::device_management::UserDevice {
+                device_id: device.id.to_string(),
+                device_name: device.name.clone(),
+                device_type: format!("{:?}", device.platform),
+                last_active: device.last_activity,
+                is_current_device: false,
+                location: device
+                    .metadata
+                    .get("location")
+                    .and_then(|value| value.as_str())
+                    .map(|s| s.to_string()),
+            },
+        )
         .collect();
 
     api_stub.set_devices(stub_devices);
@@ -167,7 +171,7 @@ fn apply_test_stubs(_state: &mut State) {}
 
 /// Boot logic for the running application, returning the initial state and task batch.
 pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
-    let mut state = base_state(config);
+    let state = base_state(config);
 
     let auth_service = state.domains.auth.state.auth_service.clone();
 

@@ -36,13 +36,12 @@ pub async fn start_secure_claim(
         .filter(|name| !name.is_empty())
         .map(|name| name.to_string());
 
-    if let Some(ref name) = validated_name {
-        if name.len() > 64 {
+    if let Some(ref name) = validated_name
+        && name.len() > 64 {
             return Err(AppError::bad_request(
                 "Device name cannot exceed 64 characters",
             ));
         }
-    }
 
     claim_rate_limiter()
         .check_rate_limit(&client_ip.to_string())

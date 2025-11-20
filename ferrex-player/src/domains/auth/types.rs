@@ -59,7 +59,7 @@ impl SetupClaimUi {
             return false;
         }
 
-        self.expires_at.map_or(false, |expiry| expiry <= Utc::now())
+        self.expires_at.is_some_and(|expiry| expiry <= Utc::now())
     }
 
     /// Mark the claim as expired.

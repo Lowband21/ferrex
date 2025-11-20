@@ -81,7 +81,7 @@ impl SortableEntity for MovieReference {
             // Runtime requires TMDB details
             let runtime = match &self.details {
                 MediaDetailsOption::Details(TmdbDetails::Movie(movie_details)) => {
-                    movie_details.runtime.map(|r| r)
+                    movie_details.runtime
                 }
                 _ => None,
             };

@@ -317,7 +317,7 @@ mod tests {
         let device_id = Uuid::now_v7();
 
         // Create a device registration with PIN
-        let mut device_reg = DeviceRegistration {
+        let device_reg = DeviceRegistration {
             id: Uuid::now_v7(),
             user_id,
             device_id,

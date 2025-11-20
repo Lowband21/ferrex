@@ -107,7 +107,7 @@ pub async fn device_login(
 ) -> AppResult<Json<ApiResponse<AuthResult>>> {
     let device_info = extract_device_info(&headers, request.device_info);
     let fingerprint = generate_device_fingerprint(&device_info, &headers)
-        .map_err(|e| AppError::bad_request(e))?;
+        .map_err(AppError::bad_request)?;
 
     let mut context = build_event_context(&headers);
     context.insert_metadata("device_name", json!(device_info.device_name.clone()));

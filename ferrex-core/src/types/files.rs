@@ -215,9 +215,7 @@ impl MediaFile {
         let size = metadata.len();
 
         #[cfg(feature = "demo")]
-        let allow_zero_length = crate::demo::policy()
-            .map(|policy| policy.allow_zero_length_files)
-            .unwrap_or(false);
+        let allow_zero_length = crate::demo::allow_zero_length_for(&library_id);
         #[cfg(not(feature = "demo"))]
         let allow_zero_length = false;
 

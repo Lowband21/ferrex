@@ -334,7 +334,7 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
         let fetch_limit = self.config.fetch_limit;
 
         tokio::spawn(async move {
-            let mut sender = tx;
+            let sender = tx;
             let mut last_detected_at = initial_detected_at;
             let mut last_event_id = initial_event_id;
 

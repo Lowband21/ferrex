@@ -197,7 +197,7 @@ fn sample_user(username: &str) -> ferrex_core::player_prelude::User {
     ferrex_core::player_prelude::User {
         id: Uuid::now_v7(),
         username: username.into(),
-        display_name: format!("{}", username),
+        display_name: username.to_string(),
         avatar_url: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),

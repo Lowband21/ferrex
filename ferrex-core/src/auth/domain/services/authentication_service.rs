@@ -221,12 +221,12 @@ impl AuthenticationService {
                 continue;
             }
 
-            if let Err(err) = session.revoke() {
-                if !matches!(err, DeviceSessionError::DeviceRevoked) {
-                    return Err(AuthenticationError::DatabaseError(anyhow::anyhow!(
-                        err.to_string()
-                    )));
-                }
+            if let Err(err) = session.revoke()
+                && !matches!(err, DeviceSessionError::DeviceRevoked)
+            {
+                return Err(AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    err.to_string()
+                )));
             }
 
             let events = session.take_events();
@@ -416,7 +416,8 @@ impl AuthenticationService {
         if let Err(err) = session.ensure_pin_available(3) {
             let events = session.take_events();
             self.session_repo.save(&session).await?;
-            self.publish_events(events, AuthEventContext::default()).await?;
+            self.publish_events(events, AuthEventContext::default())
+                .await?;
             return Err(map_device_pin_error(err));
         }
 
@@ -434,7 +435,8 @@ impl AuthenticationService {
             let events = session.take_events();
             // persist device changes (failed attempt)
             self.session_repo.save(&session).await?;
-            self.publish_events(events, AuthEventContext::default()).await?;
+            self.publish_events(events, AuthEventContext::default())
+                .await?;
             return Err(map_device_pin_error(err));
         };
 
@@ -723,15 +725,9 @@ impl AuthenticationService {
                 _ => return Err(AuthenticationError::DeviceNotTrusted),
             };
 
-            let verified = verify_device_signature(
-                alg,
-                pk,
-                challenge_id,
-                &nonce,
-                user_id,
-                device_signature,
-            )
-            .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+            let verified =
+                verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
+                    .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
             if !verified {
                 // Do not increment device failed_attempts for possession failures
                 return Err(AuthenticationError::InvalidCredentials);
@@ -746,7 +742,8 @@ impl AuthenticationService {
         if let Err(err) = session.ensure_pin_available(3) {
             let events = session.take_events();
             self.session_repo.save(&session).await?;
-            self.publish_events(events, AuthEventContext::default()).await?;
+            self.publish_events(events, AuthEventContext::default())
+                .await?;
             return Err(map_device_pin_error(err));
         }
 
@@ -763,7 +760,8 @@ impl AuthenticationService {
             let err = session.register_pin_failure(3);
             let events = session.take_events();
             self.session_repo.save(&session).await?;
-            self.publish_events(events, AuthEventContext::default()).await?;
+            self.publish_events(events, AuthEventContext::default())
+                .await?;
             return Err(map_device_pin_error(err));
         };
 
@@ -877,7 +875,6 @@ impl AuthenticationService {
         Ok(())
     }
 
-    /// Register a new device for a user
     // Note: device registration is handled by DeviceTrustService.
 
     /// Revoke a specific device
@@ -958,12 +955,11 @@ impl AuthenticationService {
         ttl_seconds: i64,
     ) -> Result<(Uuid, Vec<u8>), AuthenticationError> {
         use rand::RngCore;
-        let repo = self
-            .challenge_repo
-            .as_ref()
-            .ok_or_else(|| AuthenticationError::DatabaseError(anyhow::anyhow!(
+        let repo = self.challenge_repo.as_ref().ok_or_else(|| {
+            AuthenticationError::DatabaseError(anyhow::anyhow!(
                 "device challenge repository not configured"
-            )))?;
+            ))
+        })?;
 
         // Ensure the device exists
         let _ = self
@@ -1069,12 +1065,11 @@ impl AuthenticationService {
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
         let user_id = session.user_id();
-        let repo = self
-            .challenge_repo
-            .as_ref()
-            .ok_or_else(|| AuthenticationError::DatabaseError(anyhow::anyhow!(
+        let repo = self.challenge_repo.as_ref().ok_or_else(|| {
+            AuthenticationError::DatabaseError(anyhow::anyhow!(
                 "device challenge repository not configured"
-            )))?;
+            ))
+        })?;
         let consumed = repo
             .consume_if_fresh(challenge_id)
             .await
@@ -1090,8 +1085,9 @@ impl AuthenticationService {
             (Some(a), Some(k)) => (a, k),
             _ => return Err(AuthenticationError::DeviceNotTrusted),
         };
-        let verified = verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
-        .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
+        let verified =
+            verify_device_signature(alg, pk, challenge_id, &nonce, user_id, device_signature)
+                .map_err(|e| AuthenticationError::DatabaseError(anyhow::anyhow!(e)))?;
         if !verified {
             return Err(AuthenticationError::InvalidCredentials);
         }

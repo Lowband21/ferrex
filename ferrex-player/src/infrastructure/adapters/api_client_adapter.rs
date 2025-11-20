@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 use crate::infrastructure::ApiClient;
 use crate::infrastructure::api_client::SetupStatus;
+#[cfg(feature = "demo")]
+use crate::infrastructure::api_types::{DemoResetRequest, DemoStatus};
 use crate::infrastructure::repository::{RepositoryError, RepositoryResult};
 use crate::infrastructure::services::api::ApiService;
 use ferrex_core::api_routes::{utils::replace_param, v1};
@@ -493,6 +495,22 @@ impl ApiService for ApiClientAdapter {
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
         Ok(wrapped)
+    }
+
+    #[cfg(feature = "demo")]
+    async fn fetch_demo_status(&self) -> RepositoryResult<DemoStatus> {
+        self.client
+            .get(v1::admin::demo::STATUS)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    #[cfg(feature = "demo")]
+    async fn reset_demo(&self, request: DemoResetRequest) -> RepositoryResult<DemoStatus> {
+        self.client
+            .post(v1::admin::demo::RESET, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }
 }
 

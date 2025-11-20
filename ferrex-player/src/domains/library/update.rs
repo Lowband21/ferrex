@@ -1,3 +1,5 @@
+#[cfg(feature = "demo")]
+use crate::infrastructure::api_types::DemoStatus;
 use crate::{
     common::messages::{DomainMessage, DomainUpdateResult},
     domains::{
@@ -16,6 +18,8 @@ use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps, Priority,
     ScanLifecycleStatus, ScanSnapshotDto,
 };
+#[cfg(feature = "demo")]
+use ferrex_core::types::library::LibraryType;
 
 #[cfg_attr(
     any(
@@ -149,6 +153,42 @@ pub fn update_library(state: &mut State, message: Message) -> DomainUpdateResult
                 state, library_id, scan_id,
             );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        #[cfg(feature = "demo")]
+        Message::FetchDemoStatus => {
+            let task = super::update_handlers::handle_fetch_demo_status(state);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        #[cfg(feature = "demo")]
+        Message::DemoStatusLoaded(result) => {
+            state.domains.library.state.demo_controls.is_loading = false;
+            match result {
+                Ok(status) => apply_demo_status(state, status),
+                Err(err) => {
+                    state.domains.library.state.demo_controls.error = Some(err);
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        #[cfg(feature = "demo")]
+        Message::ApplyDemoSizing(request) => {
+            let task = super::update_handlers::handle_apply_demo_sizing(state, request);
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        #[cfg(feature = "demo")]
+        Message::DemoSizingApplied(result) => {
+            state.domains.library.state.demo_controls.is_updating = false;
+            match result {
+                Ok(status) => apply_demo_status(state, status),
+                Err(err) => {
+                    state.domains.library.state.demo_controls.error = Some(err);
+                }
+            }
+            DomainUpdateResult::task(Task::none())
         }
 
         Message::FetchScanMetrics => {
@@ -657,6 +697,50 @@ fn refresh_tabs_for_libraries(state: &mut State, libraries: &HashSet<LibraryID>)
 
     if active_needs_refresh {
         state.tab_manager.refresh_active_tab();
+    }
+}
+
+#[cfg(feature = "demo")]
+fn apply_demo_status(state: &mut State, status: DemoStatus) {
+    let ctrl = &mut state.domains.library.state.demo_controls;
+    let was_updating = ctrl.is_updating;
+    ctrl.is_loading = false;
+    ctrl.is_updating = false;
+    ctrl.error = None;
+
+    ctrl.demo_library_ids = status
+        .libraries
+        .iter()
+        .map(|library| library.library_id)
+        .collect();
+
+    ctrl.demo_root = Some(status.root.clone());
+    ctrl.demo_username = Some(status.username.clone());
+
+    ctrl.movies_current = status
+        .libraries
+        .iter()
+        .find(|library| matches!(library.library_type, LibraryType::Movies))
+        .map(|library| library.primary_item_count);
+
+    ctrl.series_current = status
+        .libraries
+        .iter()
+        .find(|library| matches!(library.library_type, LibraryType::Series))
+        .map(|library| library.primary_item_count);
+
+    if was_updating || ctrl.movies_input.trim().is_empty() {
+        ctrl.movies_input = ctrl
+            .movies_current
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+    }
+
+    if was_updating || ctrl.series_input.trim().is_empty() {
+        ctrl.series_input = ctrl
+            .series_current
+            .map(|value| value.to_string())
+            .unwrap_or_default();
     }
 }
 

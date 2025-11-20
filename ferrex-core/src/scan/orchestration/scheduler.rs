@@ -371,7 +371,7 @@ impl WeightedFairScheduler {
                         lib.priorities
                             .values()
                             .map(|p| p.ready)
-                            .fold(0usize, |acc, v| acc + v),
+                            .sum::<usize>(),
                     ),
                 )
             })

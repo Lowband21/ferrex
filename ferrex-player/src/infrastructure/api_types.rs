@@ -3,12 +3,15 @@ pub use ferrex_core::player_prelude::UserWatchState;
 pub use ferrex_core::player_prelude::{
     ApiResponse, BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest, EnhancedMovieDetails,
     EnhancedSeriesDetails, EpisodeID, EpisodeReference, FetchMediaRequest, ImageData, Library,
-    LibraryMediaCache, LibraryMediaResponse, LibraryReference, LibraryType, Media,
+    LibraryID, LibraryMediaCache, LibraryMediaResponse, LibraryReference, LibraryType, Media,
     MediaDetailsOption, MediaFile, MediaFileMetadata, MediaID, MovieID, MovieReference,
     ParsedMediaInfo, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto, SeasonID,
     SeasonReference, SeriesID, SeriesReference, SortOrder, TmdbDetails, UpdateLibraryRequest,
     WatchProgress,
 };
+
+#[cfg(feature = "demo")]
+pub use ferrex_core::api_types::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 
 /// Helper to check if we need to fetch full details
 pub fn needs_details_fetch(details: &MediaDetailsOption) -> bool {

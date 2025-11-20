@@ -43,7 +43,7 @@ impl std::fmt::Debug for Message {
                 f,
                 "SegmentPrefetched({}, {:?})",
                 index,
-                result.as_ref().map(|v| v.len()).map_err(|e| e)
+                result.as_ref().map(|v| v.len())
             ),
 
             // Bandwidth adaptation

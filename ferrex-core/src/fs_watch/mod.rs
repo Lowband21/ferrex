@@ -1,5 +1,3 @@
-#![cfg(feature = "scan-runtime")]
-
 //! Compatibility wrapper for filesystem watch components.
 //!
 //! The active implementation now lives under `crate::scan::fs_watch`. This shim re-exports the new

@@ -62,7 +62,7 @@ impl FixtureGenerator {
 
     /// Generate a random timestamp
     pub fn random_timestamp(&mut self) -> chrono::DateTime<chrono::Utc> {
-        use chrono::{DateTime, TimeZone, Utc};
+        use chrono::Utc;
         let days_ago = self.rng.gen_range(0..365);
         Utc::now() - chrono::Duration::days(days_ago)
     }
@@ -288,7 +288,7 @@ pub mod examples {
             .add(Scenario::new(
                 "empty_system",
                 "No users in the system",
-                || vec![],
+                std::vec::Vec::new,
             ))
             .add(Scenario::new("single_admin", "Single admin user", || {
                 vec![UserFixture::typical().with_admin(true)]

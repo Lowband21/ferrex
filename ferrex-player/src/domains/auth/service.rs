@@ -81,7 +81,7 @@ impl AuthService {
     /// Advance virtual time for testing
     pub async fn advance_time(&self, duration: chrono::Duration) {
         let mut offset = self.time_offset.write().await;
-        *offset = *offset + duration;
+        *offset += duration;
     }
 
     /// Check if no users exist

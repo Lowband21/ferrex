@@ -4,7 +4,6 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 /// Trait for mock services that can be stored in the registry
@@ -66,14 +65,13 @@ impl MockService for SimpleMock {
     }
 
     fn verify(&self) -> Result<(), String> {
-        if let Some(expected) = self.expected_calls {
-            if self.call_count != expected {
+        if let Some(expected) = self.expected_calls
+            && self.call_count != expected {
                 return Err(format!(
                     "Expected {} calls, got {}",
                     expected, self.call_count
                 ));
             }
-        }
         Ok(())
     }
 

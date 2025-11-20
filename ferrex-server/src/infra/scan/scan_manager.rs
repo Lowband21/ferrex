@@ -1918,11 +1918,10 @@ impl ScanRunAggregatorInner {
     }
 
     async fn handle_scan_event(&self, event: ScanEvent) {
-        if let ScanEvent::Indexed(outcome) = event {
-            if let Err(err) = self.handle_indexed_outcome(outcome).await {
+        if let ScanEvent::Indexed(outcome) = event
+            && let Err(err) = self.handle_indexed_outcome(outcome).await {
                 warn!("failed to process indexed outcome: {err}");
             }
-        }
     }
 
     async fn handle_indexed_outcome(&self, outcome: IndexingOutcome) -> Result<(), String> {
@@ -2103,11 +2102,11 @@ impl ScanRunAggregatorInner {
 
         let path_owned = path_norm.to_string();
         let job_id = match &event.payload {
-            JobEventPayload::Completed { job_id, .. } => Some(job_id.clone()),
-            JobEventPayload::DeadLettered { job_id, .. } => Some(job_id.clone()),
+            JobEventPayload::Completed { job_id, .. } => Some(*job_id),
+            JobEventPayload::DeadLettered { job_id, .. } => Some(*job_id),
             JobEventPayload::Failed {
                 job_id, retryable, ..
-            } if !retryable => Some(job_id.clone()),
+            } if !retryable => Some(*job_id),
             _ => None,
         };
 

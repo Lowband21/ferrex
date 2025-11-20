@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SessionScope {
     /// Full access session, typically created after password authentication
+    #[default]
     Full,
     /// Playback-only scope created from reduced trust flows (e.g. PIN unlock)
     Playback,
@@ -24,11 +26,6 @@ impl SessionScope {
     }
 }
 
-impl Default for SessionScope {
-    fn default() -> Self {
-        SessionScope::Full
-    }
-}
 
 impl fmt::Display for SessionScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

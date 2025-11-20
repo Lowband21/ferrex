@@ -137,13 +137,12 @@ impl AppState {
             ));
         }
 
-        if let Some(bound_device) = validated_session.device_session_id {
-            if bound_device != device_id {
+        if let Some(bound_device) = validated_session.device_session_id
+            && bound_device != device_id {
                 return Err(anyhow!(
                     "Session is bound to a different device (expected {device_id}, got {bound_device})"
                 ));
             }
-        }
 
         let mut admin_sessions = self.admin_sessions.lock().await;
         let session_info = AdminSessionInfo::new(user_id, device_id, session_token);

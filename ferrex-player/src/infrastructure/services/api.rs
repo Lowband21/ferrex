@@ -3,9 +3,10 @@
 //! Provides abstraction over HTTP API operations,
 //! replacing direct ApiClient access per RUS-136.
 
+#[cfg(feature = "demo")]
+use crate::infrastructure::api_types::{DemoResetRequest, DemoStatus};
 use crate::infrastructure::repository::RepositoryResult;
 use async_trait::async_trait;
-use std::fmt::Debug;
 use ferrex_core::{
     api_types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{
@@ -17,6 +18,7 @@ use ferrex_core::{
     },
 };
 use rkyv::util::AlignedVec;
+use std::fmt::Debug;
 use uuid::Uuid;
 
 /// Generic API service trait for server communication
@@ -97,6 +99,12 @@ pub trait ApiService: Send + Sync + Debug {
 
     /// Check server health
     async fn health_check(&self) -> RepositoryResult<bool>;
+
+    #[cfg(feature = "demo")]
+    async fn fetch_demo_status(&self) -> RepositoryResult<DemoStatus>;
+
+    #[cfg(feature = "demo")]
+    async fn reset_demo(&self, request: DemoResetRequest) -> RepositoryResult<DemoStatus>;
 
     // === Additional API operations ===
 

@@ -549,7 +549,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
         .expect("fetch");
         assert_eq!(row.state.as_str(), "ready");
         let atts: i32 = row.attempts;
-        assert_eq!(atts, attempt as i32, "attempts should increment");
+        assert_eq!(atts, attempt, "attempts should increment");
 
         let available_at = row.available_at;
         let updated_at = row.updated_at;

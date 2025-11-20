@@ -71,7 +71,7 @@ impl Primitive for TexturePreloaderPrimitive {
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> Self::Renderer {
-        ()
+        
     }
 
     fn prepare(

@@ -88,8 +88,7 @@ impl<'a> UserService<'a> {
 
     pub async fn get_user_by_username(&self, username: &str) -> AppResult<Option<User>> {
         let lookup = username.to_lowercase();
-        self
-            .state
+        self.state
             .unit_of_work
             .users
             .get_user_by_username(&lookup)

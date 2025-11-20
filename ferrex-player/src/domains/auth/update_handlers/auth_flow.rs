@@ -6,7 +6,6 @@ use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
-use ferrex_core::api_routes::v1;
 use ferrex_core::player_prelude as core;
 use ferrex_core::player_prelude::{User, UserPermissions};
 use iced::Task;

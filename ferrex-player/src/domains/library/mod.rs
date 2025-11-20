@@ -10,14 +10,17 @@ pub mod update_handlers;
 
 use self::types::LibraryFormData;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::infrastructure::adapters::api_client_adapter::ApiClientAdapter;
-use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::repository::accessor::{Accessor, ReadWrite};
+use crate::infrastructure::services::api::ApiService;
 use ferrex_core::player_prelude::{
     LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent, ScanSnapshotDto,
 };
 use iced::Task;
 use std::collections::HashMap;
+#[cfg(feature = "demo")]
+use std::collections::HashSet;
+#[cfg(feature = "demo")]
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -41,6 +44,23 @@ pub struct LibraryDomainState {
     pub api_service: Option<Arc<dyn ApiService>>,
 
     pub repo_accessor: Accessor<ReadWrite>,
+    #[cfg(feature = "demo")]
+    pub demo_controls: DemoControlsState,
+}
+
+#[cfg(feature = "demo")]
+#[derive(Debug, Clone, Default)]
+pub struct DemoControlsState {
+    pub is_loading: bool,
+    pub is_updating: bool,
+    pub error: Option<String>,
+    pub demo_library_ids: HashSet<LibraryID>,
+    pub movies_current: Option<usize>,
+    pub series_current: Option<usize>,
+    pub movies_input: String,
+    pub series_input: String,
+    pub demo_root: Option<PathBuf>,
+    pub demo_username: Option<String>,
 }
 
 impl LibraryDomainState {
@@ -62,6 +82,8 @@ impl LibraryDomainState {
             scan_config: None,
             api_service,
             repo_accessor,
+            #[cfg(feature = "demo")]
+            demo_controls: DemoControlsState::default(),
         }
     }
 }

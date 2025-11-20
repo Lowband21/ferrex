@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::domains::library::messages::Message;
-use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::repository::repository::MediaRepo;
+use crate::infrastructure::services::api::ApiService;
 use crate::state_refactored::State;
 use ferrex_core::api_routes::v1;
 use iced::Task;

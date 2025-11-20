@@ -85,7 +85,7 @@ impl IndicesRepository for PostgresIndicesRepository {
             .into_iter()
             .filter_map(|row| {
                 let idx: i32 = row.get("idx");
-                (idx >= 0).then(|| idx as u32)
+                (idx >= 0).then_some(idx as u32)
             })
             .collect())
     }
@@ -115,7 +115,7 @@ impl IndicesRepository for PostgresIndicesRepository {
             .into_iter()
             .filter_map(|row| {
                 let idx: i32 = row.get("idx");
-                (idx >= 0).then(|| idx as u32)
+                (idx >= 0).then_some(idx as u32)
             })
             .collect())
     }

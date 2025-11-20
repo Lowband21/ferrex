@@ -32,7 +32,7 @@ async fn user_can_have_multiple_active_sessions() {
     // All sessions should be valid (no fixed limit)
     for (i, session) in sessions.iter().enumerate() {
         assert!(
-            auth.is_session_valid(&session).await,
+            auth.is_session_valid(session).await,
             "Session {} should be valid - no fixed session limit",
             i
         );

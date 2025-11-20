@@ -1,8 +1,8 @@
 #![cfg(feature = "demo")]
 
-use reqwest::Url;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use ferrex_core::api_types::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::demo::{self, DemoSeedOptions};
 use ferrex_core::providers::TmdbApiProvider;
@@ -12,6 +12,7 @@ use ferrex_core::types::library::LibraryType;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 pub use crate::db::{derive_demo_database_url, prepare_demo_database};
 use crate::infra::app_state::AppState;
@@ -26,6 +27,21 @@ pub trait DemoPlanProvider: Send + Sync {
         root: &Path,
         options: &DemoSeedOptions,
     ) -> Result<demo::DemoSeedPlan>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DemoSizeOverrides {
+    pub movie_count: Option<usize>,
+    pub series_count: Option<usize>,
+}
+
+impl From<DemoResetRequest> for DemoSizeOverrides {
+    fn from(value: DemoResetRequest) -> Self {
+        Self {
+            movie_count: value.movie_count,
+            series_count: value.series_count,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -53,7 +69,7 @@ impl DemoPlanProvider for TmdbPlanProvider {
 }
 
 pub struct DemoCoordinator {
-    options: DemoSeedOptions,
+    options: Arc<Mutex<DemoSeedOptions>>,
     plan: Mutex<demo::DemoSeedPlan>,
     root: PathBuf,
     pub username: String,
@@ -96,8 +112,14 @@ impl DemoCoordinator {
 
         std::fs::create_dir_all(&root).context("failed to create demo root directory")?;
 
+        let options_shared = Arc::new(Mutex::new(options));
+        let initial_options = {
+            let guard = options_shared.lock().await;
+            guard.clone()
+        };
+
         let plan = plan_provider
-            .generate_plan(&root, &options)
+            .generate_plan(&root, &initial_options)
             .await
             .context("failed to plan demo structure")?;
         demo::prepare_plan_roots(None, &plan)
@@ -108,13 +130,13 @@ impl DemoCoordinator {
         config.media_root = Some(root.clone());
 
         // Initialise shared context for downstream components
-        demo::init_demo_context(root.clone(), options.policy())?;
+        demo::init_demo_context(root.clone(), initial_options.policy())?;
 
         let username = std::env::var("FERREX_DEMO_USERNAME").unwrap_or_else(|_| "demo".into());
         let password = std::env::var("FERREX_DEMO_PASSWORD").unwrap_or_else(|_| "demo".into());
 
         Ok(Self {
-            options,
+            options: options_shared,
             plan: Mutex::new(plan),
             root,
             username,
@@ -130,6 +152,28 @@ impl DemoCoordinator {
 
     pub async fn library_ids(&self) -> Vec<LibraryID> {
         self.library_ids.lock().await.clone()
+    }
+
+    async fn apply_overrides(&self, overrides: &DemoSizeOverrides) {
+        if overrides.movie_count.is_none() && overrides.series_count.is_none() {
+            return;
+        }
+
+        let mut options = self.options.lock().await;
+        for library in &mut options.libraries {
+            match library.library_type {
+                LibraryType::Movies => {
+                    if let Some(count) = overrides.movie_count {
+                        library.movie_count = Some(count.max(1));
+                    }
+                }
+                LibraryType::Series => {
+                    if let Some(count) = overrides.series_count {
+                        library.series_count = Some(count.max(1));
+                    }
+                }
+            }
+        }
     }
 
     pub async fn sync_database(&self, unit_of_work: Arc<AppUnitOfWork>) -> Result<Vec<LibraryID>> {
@@ -169,15 +213,28 @@ impl DemoCoordinator {
         Ok(registered_ids)
     }
 
-    pub async fn reset(&self, unit_of_work: Arc<AppUnitOfWork>) -> Result<()> {
+    pub async fn reset(
+        &self,
+        unit_of_work: Arc<AppUnitOfWork>,
+        overrides: Option<DemoSizeOverrides>,
+    ) -> Result<()> {
         let previous_plan = {
             let guard = self.plan.lock().await;
             guard.clone()
         };
 
+        if let Some(overrides) = overrides {
+            self.apply_overrides(&overrides).await;
+        }
+
+        let options_snapshot = {
+            let guard = self.options.lock().await;
+            guard.clone()
+        };
+
         let new_plan = self
             .plan_provider
-            .generate_plan(&self.root, &self.options)
+            .generate_plan(&self.root, &options_snapshot)
             .await
             .context("failed to regenerate demo plan")?;
 
@@ -198,18 +255,57 @@ impl DemoCoordinator {
     }
 
     pub async fn describe(&self) -> DemoStatus {
+        use std::collections::HashMap;
+
         let plan = self.plan.lock().await.clone();
+
+        let registered = demo::context()
+            .map(|ctx| ctx.libraries())
+            .unwrap_or_default();
+
+        let mut id_by_root: HashMap<PathBuf, LibraryID> = HashMap::new();
+        let mut id_by_name: HashMap<String, LibraryID> = HashMap::new();
+        for (id, meta) in registered {
+            id_by_root.insert(meta.root.clone(), id);
+            id_by_name.insert(meta.name.clone(), id);
+        }
+
         DemoStatus {
             root: self.root.clone(),
             libraries: plan
                 .libraries
                 .iter()
-                .map(|lib| DemoLibraryStatus {
-                    name: lib.name.clone(),
-                    library_type: lib.library_type,
-                    root: lib.root_path.clone(),
-                    file_count: lib.files.len(),
-                    directory_count: lib.directories.len(),
+                .map(|lib| {
+                    let primary_item_count = lib
+                        .directories
+                        .iter()
+                        .filter(|dir| {
+                            dir.parent() == Some(lib.root_path.as_path())
+                                && dir != &&lib.root_path
+                        })
+                        .count();
+
+                    let library_id = id_by_root
+                        .get(&lib.root_path)
+                        .copied()
+                        .or_else(|| id_by_name.get(&lib.name).copied())
+                        .unwrap_or_else(|| {
+                            warn!(
+                                "demo library {} not found in registered context; falling back to synthetic id",
+                                lib.name
+                            );
+                            LibraryID::new()
+                        });
+
+                    DemoLibraryStatus {
+                        library_id,
+                        name: lib.name.clone(),
+                        library_type: lib.library_type,
+                        root: lib.root_path.clone(),
+                        primary_item_count,
+                        file_count: lib.files.len(),
+                        directory_count: lib.directories.len(),
+                    }
                 })
                 .collect(),
             username: self.username.clone(),
@@ -271,27 +367,4 @@ fn resolve_root(options: &DemoSeedOptions, config: &Config) -> PathBuf {
         return explicit.clone();
     }
     config.cache_dir.join("demo-media")
-}
-
-/// Lightweight status payload surfaced via the admin API.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DemoStatus {
-    pub root: PathBuf,
-    pub libraries: Vec<DemoLibraryStatus>,
-    pub username: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DemoLibraryStatus {
-    pub name: String,
-    pub library_type: LibraryType,
-    pub root: PathBuf,
-    pub file_count: usize,
-    pub directory_count: usize,
-}
-
-impl DemoStatus {
-    pub fn is_empty(&self) -> bool {
-        self.libraries.is_empty()
-    }
 }

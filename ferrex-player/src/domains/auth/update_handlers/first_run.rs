@@ -8,7 +8,6 @@ use crate::domains::auth::types::{AuthenticationFlow, SetupClaimStatus, SetupCla
 use crate::infrastructure::services::api::ApiService;
 use crate::infrastructure::services::auth::AuthService;
 use crate::state_refactored::State;
-use ferrex_core::api_routes::v1;
 use ferrex_core::api_types::setup::{ConfirmClaimResponse, StartClaimResponse};
 use ferrex_core::{auth::domain::value_objects::SessionScope, player_prelude as core};
 use iced::Task;

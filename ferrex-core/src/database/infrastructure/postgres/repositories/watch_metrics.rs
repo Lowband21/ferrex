@@ -50,7 +50,7 @@ impl WatchMetricsReadPort for PostgresWatchMetricsRepository {
         let mut map = HashMap::with_capacity(rows.len());
         for row in rows {
             let duration = row.duration.max(1.0);
-            let ratio = (row.position / duration).clamp(0.0, 1.0) as f32;
+            let ratio = (row.position / duration).clamp(0.0, 1.0);
             map.insert(
                 row.media_uuid,
                 ProgressEntry {

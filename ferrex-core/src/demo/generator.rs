@@ -267,23 +267,22 @@ fn apply_movie_deviations(plan: &mut DemoLibraryPlan, rate: f32) {
     for dir in movie_dirs {
         let mut current_dir = dir.clone();
 
-        if rng.random::<f32>() < rate {
-            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
-                let new_dir = dir.with_file_name(format!("{} - UNSORTED", name));
-                rename_subtree(plan, &dir, &new_dir);
-                current_dir = new_dir;
-            }
+        if rng.random::<f32>() < rate
+            && let Some(name) = dir.file_name().and_then(|n| n.to_str())
+        {
+            let new_dir = dir.with_file_name(format!("{} - UNSORTED", name));
+            rename_subtree(plan, &dir, &new_dir);
+            current_dir = new_dir;
         }
 
-        if rng.random::<f32>() < rate / 2.0 {
-            if let Some(target) = plan
+        if rng.random::<f32>() < rate / 2.0
+            && let Some(target) = plan
                 .files
                 .iter()
                 .find(|file| file.parent() == Some(current_dir.as_path()))
                 .cloned()
-            {
-                plan.files.retain(|file| file != &target);
-            }
+        {
+            plan.files.retain(|file| file != &target);
         }
     }
 }
@@ -320,15 +319,14 @@ fn apply_series_deviations(plan: &mut DemoLibraryPlan, rate: f32) {
                 current_dir = new_dir;
             }
 
-            if rng.random::<f32>() < rate {
-                if let Some(target) = plan
+            if rng.random::<f32>() < rate
+                && let Some(target) = plan
                     .files
                     .iter()
                     .find(|file| file.parent() == Some(current_dir.as_path()))
                     .cloned()
-                {
-                    plan.files.retain(|file| file != &target);
-                }
+            {
+                plan.files.retain(|file| file != &target);
             }
         }
     }

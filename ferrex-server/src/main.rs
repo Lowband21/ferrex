@@ -46,9 +46,7 @@ use ferrex_core::auth::{
         PostgresUserAuthRepository,
     },
 };
-use ferrex_core::database::ports::media_files::{
-    MediaFileFilter, MediaFileSort, MediaFileSortField, Page,
-};
+use ferrex_core::database::ports::media_files::MediaFileFilter;
 use ferrex_core::database::{PostgresDatabase, traits::MediaDatabaseTrait};
 use ferrex_core::image_service::ImageService;
 use ferrex_core::orchestration::LibraryActorConfig;
@@ -71,8 +69,6 @@ use ferrex_server::{
 };
 #[cfg(feature = "demo")]
 use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
-use reqwest::header::CONTENT_TYPE;
-use reqwest::header::HeaderValue;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;

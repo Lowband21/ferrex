@@ -263,7 +263,7 @@ impl DeviceTrustService {
             user_id,
             timestamp: Utc::now(),
         }];
-        let audit_events = map_domain_events(events.drain(..).collect(), &ctx);
+        let audit_events = map_domain_events(std::mem::take(&mut events), &ctx);
         if !audit_events.is_empty() {
             self.event_repo.record(audit_events).await?;
         }
@@ -339,6 +339,7 @@ impl DeviceTrustService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthCrypto;
     use crate::auth::domain::aggregates::{DeviceSession, DeviceStatus, UserAuthentication};
     use crate::auth::domain::repositories::{
         AuthAuditEventKind, AuthEventLog, AuthSessionRecord, AuthSessionRepository,
