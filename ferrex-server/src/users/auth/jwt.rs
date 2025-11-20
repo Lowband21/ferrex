@@ -22,7 +22,20 @@ impl Default for JwtKeyManager {
 impl JwtKeyManager {
     /// Create a new key manager with the current JWT secret
     pub fn new() -> Self {
-        let current_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+        let current_secret = match env::var("JWT_SECRET") {
+            Ok(s) => s,
+            Err(_) => {
+                #[cfg(test)]
+                {
+                    // Provide a deterministic default for tests to avoid env flakiness
+                    "test-secret".to_string()
+                }
+                #[cfg(not(test))]
+                {
+                    panic!("JWT_SECRET must be set");
+                }
+            }
+        };
         Self {
             keys: Arc::new(RwLock::new(vec![current_secret])),
         }
@@ -58,6 +71,13 @@ impl JwtKeyManager {
         if keys.len() > keep_count {
             keys.truncate(keep_count);
         }
+    }
+
+    /// Replace the entire key set (useful for tests)
+    #[cfg(test)]
+    pub fn test_set_keys(&self, keys: Vec<String>) {
+        let mut guard = self.keys.write().unwrap();
+        *guard = keys;
     }
 }
 
@@ -185,6 +205,7 @@ async fn is_token_revoked(db: &PgPool, jti: &str) -> Result<bool, jsonwebtoken::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::{Algorithm, EncodingKey, Header};
 
     #[test]
     fn test_generate_and_validate_token() {
@@ -279,5 +300,46 @@ mod tests {
         // Clean up to keep only 2 keys
         manager.cleanup_old_keys(2);
         assert_eq!(manager.get_all_keys().len(), 2);
+    }
+
+    #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+    async fn test_revoked_token_fails_validation(pool: PgPool) {
+        let manager = get_key_manager();
+        let signing_secret = manager.get_current_key();
+
+        // Create a token with known jti
+        let now = Utc::now();
+        let exp = now + Duration::seconds(900);
+        let claims = ferrex_core::user::Claims {
+            sub: Uuid::now_v7(),
+            exp: exp.timestamp(),
+            iat: now.timestamp(),
+            jti: Uuid::new_v4().to_string(),
+        };
+
+        let token = jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(signing_secret.as_ref()),
+        )
+        .expect("token encode");
+
+        // Insert into blacklist
+        let user_id = claims.sub;
+        let expires_at = now + Duration::hours(1);
+        sqlx::query!(
+            "INSERT INTO jwt_blacklist (jti, user_id, revoked_at, expires_at, revoked_reason) VALUES ($1, $2, NOW(), $3, $4)",
+            claims.jti,
+            user_id,
+            expires_at,
+            Some("test".to_string())
+        )
+        .execute(&pool)
+        .await
+        .expect("insert blacklist");
+
+        // Validate should fail due to revocation
+        let result = validate_token(&token, &pool).await;
+        assert!(result.is_err(), "revoked token should not validate");
     }
 }

@@ -49,7 +49,6 @@ pub struct AuthService {
 
     auto_login_enabled: Arc<RwLock<HashMap<(String, Uuid), bool>>>,
 
-    #[cfg(any(test, feature = "testing"))]
     time_offset: Arc<RwLock<chrono::Duration>>,
 }
 
@@ -69,26 +68,16 @@ impl AuthService {
             admin_session_active: Arc::new(RwLock::new(None)),
             failed_attempts: Arc::new(RwLock::new(Vec::new())),
             auto_login_enabled: Arc::new(RwLock::new(HashMap::new())),
-            #[cfg(any(test, feature = "testing"))]
             time_offset: Arc::new(RwLock::new(chrono::Duration::zero())),
         }
     }
 
     async fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        #[cfg(any(test, feature = "testing"))]
-        {
-            let offset = self.time_offset.read().await;
-            Utc::now() + *offset
-        }
-
-        #[cfg(not(any(test, feature = "testing")))]
-        {
-            Utc::now()
-        }
+        let offset = self.time_offset.read().await;
+        Utc::now() + *offset
     }
 
     /// Advance virtual time for testing
-    #[cfg(any(test, feature = "testing"))]
     pub async fn advance_time(&self, duration: chrono::Duration) {
         let mut offset = self.time_offset.write().await;
         *offset = *offset + duration;

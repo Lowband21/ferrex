@@ -409,8 +409,14 @@ async fn lease_renewal_success_and_post_expiry_failure(pool: PgPool) {
     );
     assert_eq!(renewed.renewals, 1, "renewals should increment locally");
 
-    // Sleep past new expiry (~800ms total)
-    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    // Force expiry deterministically (avoid flakiness due to sleeps)
+    sqlx::query(
+        "UPDATE orchestrator_jobs SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE id = $1",
+    )
+    .bind(renewed.job.id.0)
+    .execute(&pool)
+    .await
+    .expect("force lease expiry");
 
     // Attempt another renewal should fail with NotFound
     let renewal2 = ferrex_core::orchestration::lease::LeaseRenewal {

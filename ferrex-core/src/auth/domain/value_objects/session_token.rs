@@ -152,9 +152,9 @@ mod tests {
     fn test_token_expiration() {
         let created_at = Utc::now() - Duration::hours(2);
         let expires_at = created_at + Duration::hours(1);
+        let token_value = URL_SAFE_NO_PAD.encode([0u8; 32]);
 
-        let token =
-            SessionToken::from_value("test_token".to_string(), created_at, expires_at).unwrap();
+        let token = SessionToken::from_value(token_value, created_at, expires_at).unwrap();
 
         assert!(token.is_expired());
         assert!(!token.is_valid());

@@ -85,8 +85,6 @@ impl AuthStorage {
         &self.cache_path
     }
 
-    /// Create auth storage with custom cache path (for testing)
-    #[cfg(any(test, feature = "testing"))]
     pub fn with_cache_path(cache_path: PathBuf) -> Self {
         Self { cache_path }
     }

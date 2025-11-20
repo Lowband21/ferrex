@@ -1127,6 +1127,20 @@ mod tests {
         completions: Vec<(LibraryID, JobPriority)>,
     }
 
+    async fn ensure_library(pool: &PgPool, id: LibraryID, name: &str) {
+        let paths = vec!["/tmp".to_string()];
+        sqlx::query!(
+            "INSERT INTO libraries (id, name, library_type, paths) VALUES ($1, $2, $3, $4)",
+            id.as_uuid(),
+            name,
+            "movies",
+            &paths
+        )
+        .execute(pool)
+        .await
+        .expect("insert library fixture");
+    }
+
     struct TestDispatcher {
         delay: Duration,
         state: TokioMutex<DispatcherState>,
@@ -1415,6 +1429,9 @@ mod tests {
         let lib_a = LibraryID::new();
         let lib_b = LibraryID::new();
 
+        ensure_library(&pool, lib_a, "scheduler_caps_a").await;
+        ensure_library(&pool, lib_b, "scheduler_caps_b").await;
+
         let mut config = OrchestratorConfig::default();
         config.queue.max_parallel_scans = 4;
         config.queue.max_parallel_analyses = 0;
@@ -1521,6 +1538,9 @@ mod tests {
     async fn scheduler_selector_balances_by_library_and_priority(pool: PgPool) {
         let lib_a = LibraryID::new();
         let lib_b = LibraryID::new();
+
+        ensure_library(&pool, lib_a, "scheduler_balance_a").await;
+        ensure_library(&pool, lib_b, "scheduler_balance_b").await;
 
         let mut config = OrchestratorConfig::default();
         config.queue.max_parallel_scans = 2;

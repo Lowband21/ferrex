@@ -866,36 +866,44 @@ mod tests {
     async fn bulk_scan_is_correlated() -> Result<()> {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
+        std::fs::create_dir_all(root.join("seed")).unwrap();
         let queue = Arc::new(RecordingQueue::default());
         let publisher = Arc::new(RecordingPublisher::default());
-        let mut actor = make_actor_with_publisher(Arc::clone(&queue), root, Arc::clone(&publisher));
+        let mut actor =
+            make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
         let correlation = Uuid::now_v7();
 
-        actor
+        std::fs::create_dir_all(root.join("seed")).unwrap();
+
+        let events = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Bulk,
                 correlation_id: Some(correlation),
             })
             .await?;
 
-        {
-            let events = publisher.events.lock().await;
-            let enqueued = events
-                .iter()
-                .find(|event| matches!(event.payload, JobEventPayload::Enqueued { .. }))
-                .expect("expected an enqueued job event");
-            assert_eq!(enqueued.meta.correlation_id, correlation);
-        }
+        let enqueued = events
+            .iter()
+            .find_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id, ..
+                } = event
+                {
+                    Some(correlation_id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("expected an enqueue event");
 
-        let jobs = queue.jobs.lock().await;
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].correlation, Some(correlation));
+        assert_eq!(enqueued, Some(correlation));
+        assert_eq!(actor.state.outstanding_jobs.len(), 1);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn fs_watch_is_correlated_when_scan_active() -> Result<()> {
+    async fn fs_watch_events_are_ignored_during_bulk_scan() -> Result<()> {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
         let queue = Arc::new(RecordingQueue::default());
@@ -905,20 +913,12 @@ mod tests {
         let library_id = actor.config.library.id;
         let scan_id = Uuid::now_v7();
 
-        actor
+        let _ = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Bulk,
                 correlation_id: Some(scan_id),
             })
             .await?;
-
-        {
-            publisher.events.lock().await.clear();
-        }
-
-        {
-            queue.jobs.lock().await.clear();
-        }
 
         let folder = root.join("watch-folders");
         std::fs::create_dir_all(&folder).unwrap();
@@ -928,7 +928,7 @@ mod tests {
             library_id,
         )];
 
-        actor
+        let responses = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events,
@@ -936,18 +936,71 @@ mod tests {
             })
             .await?;
 
-        {
-            let events = publisher.events.lock().await;
-            let enqueued = events
-                .iter()
-                .find(|event| matches!(event.payload, JobEventPayload::Enqueued { .. }))
-                .expect("expected an enqueued job event");
-            assert_eq!(enqueued.meta.correlation_id, scan_id);
-        }
+        // While a bulk scan is underway watcher bursts are ignored—the bulk seed
+        // has already enqueued every folder, so any queued work here would be
+        // redundant and could reintroduce the incomplete-state bug these guards
+        // were meant to avoid.
+        assert!(responses
+            .iter()
+            .all(|event| !matches!(event, LibraryActorEvent::EnqueueFolderScan { .. })),
+            "fs events during bulk should not enqueue additional scans");
 
-        let jobs = queue.jobs.lock().await;
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].correlation, Some(scan_id));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_is_correlated_during_maintenance_scan() -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        let queue = Arc::new(RecordingQueue::default());
+        let publisher = Arc::new(RecordingPublisher::default());
+        let mut actor = make_actor_with_publisher(
+            Arc::clone(&queue),
+            root.clone(),
+            Arc::clone(&publisher),
+        );
+        let library_id = actor.config.library.id;
+        let correlation = Uuid::now_v7();
+
+        let _ = actor
+            .handle_command(LibraryActorCommand::Start {
+                mode: StartMode::Maintenance,
+                correlation_id: Some(correlation),
+            })
+            .await?;
+
+        let folder = root.join("watch-maintenance");
+        std::fs::create_dir_all(&folder).unwrap();
+        let events = vec![make_event(
+            &folder.join("fresh.mkv"),
+            FileSystemEventKind::Created,
+            library_id,
+        )];
+
+        let responses = actor
+            .handle_command(LibraryActorCommand::FsEvents {
+                root: LibraryRootsId(0),
+                events,
+                correlation_id: None,
+            })
+            .await?;
+
+        let enqueued = responses
+            .iter()
+            .find_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id: observed,
+                    ..
+                } = event
+                {
+                    Some(observed.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("maintenance watcher should enqueue folder scan");
+
+        assert_eq!(enqueued, Some(correlation));
 
         Ok(())
     }
@@ -962,7 +1015,7 @@ mod tests {
             make_actor_with_publisher(Arc::clone(&queue), root.clone(), Arc::clone(&publisher));
         let library_id = actor.config.library.id;
 
-        actor
+        let _ = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Resume,
                 correlation_id: None,
@@ -977,7 +1030,7 @@ mod tests {
             library_id,
         )];
 
-        actor
+        let responses = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events,
@@ -985,17 +1038,21 @@ mod tests {
             })
             .await?;
 
-        {
-            let events = publisher.events.lock().await;
-            let _enqueued = events
-                .iter()
-                .find(|event| matches!(event.payload, JobEventPayload::Enqueued { .. }))
-                .expect("expected an enqueued job event");
-        }
+        let enqueued = responses
+            .iter()
+            .find_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    correlation_id, ..
+                } = event
+                {
+                    Some(correlation_id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("expected enqueue response");
 
-        let jobs = queue.jobs.lock().await;
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].correlation, None);
+        assert_eq!(enqueued, None);
 
         Ok(())
     }
@@ -1008,7 +1065,7 @@ mod tests {
         let mut actor = make_actor(Arc::clone(&queue), root.clone());
         let library_id = actor.config.library.id;
 
-        actor
+        let _ = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Resume,
                 correlation_id: None,
@@ -1035,7 +1092,7 @@ mod tests {
             ),
         ];
 
-        let _ = actor
+        let responses = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events,
@@ -1043,10 +1100,24 @@ mod tests {
             })
             .await?;
 
-        let jobs = queue.jobs.lock().await;
-        assert_eq!(jobs.len(), 1);
-        assert!(matches!(jobs[0].job.scan_reason, ScanReason::HotChange));
-        assert!(jobs[0].job.folder_path_norm.ends_with("movies"));
+        let enqueued = responses
+            .iter()
+            .find_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    folder_path,
+                    reason,
+                    ..
+                } = event
+                {
+                    Some((folder_path.clone(), reason.clone()))
+                } else {
+                    None
+                }
+            })
+            .expect("expected enqueue response");
+
+        assert!(matches!(enqueued.1, ScanReason::HotChange));
+        assert!(enqueued.0.ends_with("movies"));
 
         Ok(())
     }
@@ -1059,7 +1130,7 @@ mod tests {
         let mut actor = make_actor(Arc::clone(&queue), root.clone());
         let library_id = actor.config.library.id;
 
-        actor
+        let _ = actor
             .handle_command(LibraryActorCommand::Start {
                 mode: StartMode::Resume,
                 correlation_id: None,
@@ -1079,7 +1150,7 @@ mod tests {
             occurred_at: Utc::now(),
         };
 
-        let _ = actor
+        let responses = actor
             .handle_command(LibraryActorCommand::FsEvents {
                 root: LibraryRootsId(0),
                 events: vec![event],
@@ -1087,13 +1158,24 @@ mod tests {
             })
             .await?;
 
-        let jobs = queue.jobs.lock().await;
-        assert_eq!(jobs.len(), 1);
-        assert!(matches!(
-            jobs[0].job.scan_reason,
-            ScanReason::WatcherOverflow
-        ));
-        assert_eq!(jobs[0].job.folder_path_norm, normalize_path(&root));
+        let enqueued = responses
+            .iter()
+            .find_map(|event| {
+                if let LibraryActorEvent::EnqueueFolderScan {
+                    folder_path,
+                    reason,
+                    ..
+                } = event
+                {
+                    Some((folder_path.clone(), reason.clone()))
+                } else {
+                    None
+                }
+            })
+            .expect("expected enqueue response");
+
+        assert!(matches!(enqueued.1, ScanReason::WatcherOverflow));
+        assert_eq!(enqueued.0, normalize_path(&root));
 
         Ok(())
     }

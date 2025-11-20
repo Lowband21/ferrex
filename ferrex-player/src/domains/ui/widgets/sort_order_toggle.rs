@@ -4,7 +4,7 @@ use crate::{
 };
 use iced::{
     Element, Length,
-    widget::{button, container, text},
+    widget::{button, container},
 };
 use lucide_icons::Icon;
 

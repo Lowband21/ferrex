@@ -339,6 +339,7 @@ mod tests {
         // Moderate query
         let mut moderate_query = MediaQuery::default();
         moderate_query.sort.primary = SortBy::Title;
+        moderate_query.sort.secondary = Some(SortBy::Rating);
         moderate_query.filters.library_ids = vec![Uuid::now_v7()];
         moderate_query.filters.media_type = Some(crate::query::types::MediaTypeFilter::Movie);
 

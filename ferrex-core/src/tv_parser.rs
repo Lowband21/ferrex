@@ -471,7 +471,14 @@ impl TvParser {
                 if let Some(grandparent) = parent.parent()
                     && let Some(show_name) = grandparent.file_name()
                 {
-                    return show_name.to_str().map(|s| s.to_string());
+                    let has_named_ancestor = grandparent
+                        .parent()
+                        .and_then(|ancestor| ancestor.file_name())
+                        .is_some();
+
+                    if has_named_ancestor {
+                        return show_name.to_str().map(|s| s.to_string());
+                    }
                 }
             } else {
                 return Some(parent_str.to_string());

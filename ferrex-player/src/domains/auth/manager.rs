@@ -1431,20 +1431,9 @@ fn get_device_name() -> String {
     format!("{} Device", get_current_platform().as_ref())
 }
 
-/// Check if a token is expired
-#[cfg(any(test, feature = "testing"))]
+/// Check if a token is expired. Exposed publicly so integration tests can
+/// validate expiry rules without re-implementing the logic.
 pub fn is_token_expired(token: &AuthToken) -> bool {
-    is_token_expired_impl(token)
-}
-
-/// Check if a token is expired (internal implementation)
-#[cfg(not(any(test, feature = "testing")))]
-fn is_token_expired(token: &AuthToken) -> bool {
-    is_token_expired_impl(token)
-}
-
-/// Actual implementation of token expiry check
-fn is_token_expired_impl(token: &AuthToken) -> bool {
     // First check if this looks like a JWT token (has 3 parts separated by dots)
     let parts: Vec<&str> = token.access_token.split('.').collect();
     if parts.len() != 3 {

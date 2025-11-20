@@ -1,70 +1,36 @@
 # Ferrex Core Test Suite
 
-## Running Query Optimization Tests
+## Overview
 
-The query optimization tests require a PostgreSQL database to be running with the following configuration:
+The core test suite contains fast, deterministic unit tests and DB-backed integration tests that use `#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]`. The migrator ensures schema is applied before each test.
 
-### Test Database Setup
+## Prerequisites (PostgreSQL)
 
-1. Create a test database:
+`#[sqlx::test]` for Postgres requires a reachable Postgres instance indicated by `DATABASE_URL`. The macro will create per-test databases and apply migrations automatically.
+
+Example local setup:
+
 ```bash
-createdb ferrex_test
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/postgres"
 ```
 
-2. Create a test user:
-```sql
-CREATE USER ferrex WITH PASSWORD 'ferrex';
-GRANT ALL PRIVILEGES ON DATABASE ferrex_test TO ferrex;
-```
+Use an account with permission to create/drop databases.
 
-3. Apply migrations to the test database:
+## Running Tests
+
+Run all core tests:
+
 ```bash
-export DATABASE_URL="postgresql://ferrex:ferrex@localhost:5432/ferrex_test"
-cargo sqlx database reset
-cargo sqlx migrate run
+cargo test -p ferrex-core
 ```
 
-### Running Tests
+Run a single test file:
 
-Run all query tests:
 ```bash
-export TEST_DATABASE_URL="postgresql://ferrex:ferrex@localhost:5432/ferrex_test"
-cargo test -p ferrex-core --test query_tests
-cargo test -p ferrex-core --test query_search_tests
-cargo test -p ferrex-core --test query_performance_tests
+cargo test -p ferrex-core --test orchestration
 ```
 
-Run with single thread to avoid database conflicts:
-```bash
-cargo test -p ferrex-core --test query_tests -- --test-threads=1
-```
+## Notes
 
-### Test Coverage
-
-The test suite covers:
-
-1. **Filter Tests** (`query_tests.rs`)
-   - Genre filtering with GIN indexes
-   - Year range filtering with B-tree indexes
-   - Rating range filtering with B-tree indexes
-   - Complex multi-filter queries
-
-2. **Search Tests** (`query_search_tests.rs`)
-   - Exact text search with ILIKE
-   - Fuzzy text search with trigram similarity
-   - Field-specific search (title, overview, cast)
-   - Combined search across all fields
-
-3. **Performance Tests** (`query_performance_tests.rs`)
-   - Large dataset queries (1000+ records)
-   - Query execution time < 100ms verification
-   - Concurrent query handling
-   - Deep pagination performance
-
-### Performance Expectations
-
-All queries should complete within these time limits:
-- Simple queries: < 50ms
-- Complex filtered queries: < 100ms
-- Search queries: < 150ms
-- Fuzzy search: < 200ms
+- Tests with `#[sqlx::test]` are isolated and run against ephemeral databases managed by the macro.
+- No manual `cargo sqlx migrate` is required for tests; the migrator runs automatically.

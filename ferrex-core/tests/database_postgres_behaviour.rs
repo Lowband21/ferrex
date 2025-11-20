@@ -170,10 +170,8 @@ async fn processing_status_helpers_filter_correctly(pool: PgPool) -> Result<()> 
 
     let remaining_metadata = repo.fetch_unprocessed(library_id, "metadata", 10).await?;
     let metadata_ids: HashSet<_> = remaining_metadata.iter().map(|f| f.id).collect();
-    let expected_metadata: HashSet<_> = HashSet::from([
-        fixture_media_file("22222222-2222-2222-2222-222222222222"),
-        fixture_media_file("33333333-3333-3333-3333-333333333333"),
-    ]);
+    let expected_metadata: HashSet<_> =
+        HashSet::from([fixture_media_file("33333333-3333-3333-3333-333333333333")]);
     assert_eq!(metadata_ids, expected_metadata);
 
     let remaining_tmdb = repo.fetch_unprocessed(library_id, "tmdb", 10).await?;

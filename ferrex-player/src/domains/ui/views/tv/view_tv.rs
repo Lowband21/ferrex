@@ -1,7 +1,6 @@
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::{
-    common::ui_utils::{icon_text, lucide_font},
     domains::ui::{
         messages::Message, theme, views::grid::macros::ThemeColorAccess,
         widgets::image_for::image_for,
@@ -17,7 +16,6 @@ use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, text},
 };
-use lucide_icons::Icon;
 
 #[cfg_attr(
     any(

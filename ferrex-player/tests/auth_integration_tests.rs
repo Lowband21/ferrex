@@ -3,7 +3,6 @@
 //! This file includes all auth tests and provides a single entry point
 //! for running the complete auth test suite.
 
-#![cfg(feature = "testing")]
 // Basic auth functionality tests
 mod auth_basic {
     use ferrex_player::domains::auth::service::AuthService;
@@ -79,19 +78,19 @@ mod first_run {
     include!("auth/first_run_tests.rs");
 }
 
-// Token persistence tests
-mod token_persistence {
-    include!("auth/token_persistence_tests.rs");
-}
-
 // Token expiry extraction tests
 mod token_expiry_extraction {
     include!("auth/token_expiry_extraction_test.rs");
 }
 
-// Auto-login end-to-end tests
-mod auto_login_e2e {
-    include!("auth/auto_login_e2e_test.rs");
+// Token persistence behaviour
+mod auth_storage_persistence {
+    include!("auth/auth_storage_tests.rs");
+}
+
+// Token expiry handling
+mod token_expiry_behaviour {
+    include!("auth/token_expiry_tests.rs");
 }
 
 // Refresh token integration tests

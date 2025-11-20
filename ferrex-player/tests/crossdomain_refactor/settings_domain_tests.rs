@@ -1,271 +1,112 @@
-// Settings Domain Cross-Domain Refactoring Tests
-//
-// Requirements from Phase_1_Remove_EmitEvents.md Task 1.10:
-// - No _EmitCrossDomainEvent in SettingsMessage
-// - All handlers return DomainUpdateResult
-// - Settings functionality works correctly
-// - All tests pass
-
-use ferrex_player::common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult};
+use ferrex_player::common::messages::CrossDomainEvent;
+use ferrex_player::domains::auth::messages::commands::AuthCommand;
 use ferrex_player::domains::settings::messages::Message as SettingsMessage;
+use ferrex_player::domains::settings::state::SettingsView;
 use ferrex_player::domains::settings::update;
-use ferrex_player::state_refactored::State;
-use iced::Task;
+use ferrex_player::state::State;
 
-/// Helper to create a test state
 fn create_test_state() -> State {
     State::default()
 }
 
-/// Helper to check if a Task contains any messages
-fn task_has_messages<T>(task: Task<T>) -> bool {
-    // We can't inspect the internal structure of a Task, but we can check if it's Task::none()
-    // For testing purposes, we'll consider any non-none task as having messages
-    // This is sufficient for our refactoring tests
-    true // Placeholder - in real tests we'd run the task
-}
-
 #[test]
-fn test_settings_message_enum_has_no_emit_variant() {
-    // This test will fail until _EmitCrossDomainEvent is removed
-    // We check by attempting to match all variants
-    let test_message = SettingsMessage::ShowProfile;
-    
-    // This match should be exhaustive once _EmitCrossDomainEvent is removed
-    match test_message {
-        // Navigation
-        SettingsMessage::ShowProfile => {}
-        SettingsMessage::ShowPreferences => {}
-        SettingsMessage::ShowSecurity => {}
-        SettingsMessage::BackToMain => {}
-        SettingsMessage::BackToHome => {}
-        
-        // Security - Password
-        SettingsMessage::ShowChangePassword => {}
-        SettingsMessage::UpdatePasswordCurrent(_) => {}
-        SettingsMessage::UpdatePasswordNew(_) => {}
-        SettingsMessage::UpdatePasswordConfirm(_) => {}
-        SettingsMessage::TogglePasswordVisibility => {}
-        SettingsMessage::SubmitPasswordChange => {}
-        SettingsMessage::PasswordChangeResult(_) => {}
-        SettingsMessage::CancelPasswordChange => {}
-        
-        // Security - PIN
-        SettingsMessage::CheckUserHasPin => {}
-        SettingsMessage::UserHasPinResult(_) => {}
-        SettingsMessage::ShowSetPin => {}
-        SettingsMessage::ShowChangePin => {}
-        SettingsMessage::UpdatePinCurrent(_) => {}
-        SettingsMessage::UpdatePinNew(_) => {}
-        SettingsMessage::UpdatePinConfirm(_) => {}
-        SettingsMessage::SubmitPinChange => {}
-        SettingsMessage::PinChangeResult(_) => {}
-        SettingsMessage::CancelPinChange => {}
-        
-        // Preferences
-        SettingsMessage::ToggleAutoLogin(_) => {}
-        SettingsMessage::AutoLoginToggled(_) => {}
-        
-        // Profile
-        SettingsMessage::UpdateDisplayName(_) => {}
-        SettingsMessage::UpdateEmail(_) => {}
-        SettingsMessage::SubmitProfileChanges => {}
-        SettingsMessage::ProfileChangeResult(_) => {}
-        
-        // Device Management
-        SettingsMessage::LoadDevices => {}
-        SettingsMessage::DevicesLoaded(_) => {}
-        SettingsMessage::RefreshDevices => {}
-        SettingsMessage::RevokeDevice(_) => {}
-        SettingsMessage::DeviceRevoked(_) => {}
-        
-        // Should NOT have _EmitCrossDomainEvent variant
-    }
-}
-
-#[test]
-fn test_update_settings_returns_domain_update_result() {
+fn password_change_validates_and_emits_event() {
     let mut state = create_test_state();
-    
-    // Test that update_settings returns DomainUpdateResult for various messages
-    let messages = vec![
-        SettingsMessage::ShowProfile,
-        SettingsMessage::ShowPreferences,
-        SettingsMessage::ShowSecurity,
-        SettingsMessage::UpdatePasswordCurrent("test".to_string()),
-        SettingsMessage::TogglePasswordVisibility,
-        SettingsMessage::LoadDevices,
-    ];
-    
-    for message in messages {
-        let result = update::update_settings(&mut state, message);
-        
-        // Verify result is DomainUpdateResult
-        assert!(matches!(result, DomainUpdateResult { .. }));
-    }
-}
 
-#[test]
-fn test_security_handler_emits_auth_command_event() {
-    let mut state = create_test_state();
-    
-    // Set up password change state
-    state.domains.settings.security.password_current = 
-        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("oldpass123");
-    state.domains.settings.security.password_new = 
-        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("NewPass123");
-    state.domains.settings.security.password_confirm = 
-        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("NewPass123");
-    
-    // Submit password change should emit an AuthCommandRequested event
+    // Valid inputs
+    state.domains.settings.security.password_current =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("OldPass1");
+    state.domains.settings.security.password_new =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("NewPass1");
+    state.domains.settings.security.password_confirm =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("NewPass1");
+
     let result = update::update_settings(&mut state, SettingsMessage::SubmitPasswordChange);
-    
-    // Check that the result contains an AuthCommandRequested event
-    assert!(!result.events.is_empty(), "Should emit at least one event");
-    
-    let has_auth_command = result.events.iter().any(|event| {
-        matches!(event, CrossDomainEvent::AuthCommandRequested(_))
+
+    // Emits AuthCommandRequested(ChangePassword) and sets loading, no error
+    assert!(state.domains.settings.security.password_loading);
+    assert!(state.domains.settings.security.password_error.is_none());
+    let change_cmd = result.events.iter().any(|e| match e {
+        CrossDomainEvent::AuthCommandRequested(AuthCommand::ChangePassword { .. }) => true,
+        _ => false,
     });
-    
-    assert!(has_auth_command, "Should emit AuthCommandRequested event");
+    assert!(change_cmd, "should request ChangePassword auth command");
 }
 
 #[test]
-fn test_navigation_handlers_return_proper_results() {
+fn password_change_validation_errors_no_event() {
     let mut state = create_test_state();
-    
-    // Test navigation messages
-    let nav_messages = vec![
-        SettingsMessage::ShowProfile,
-        SettingsMessage::ShowPreferences,
-        SettingsMessage::ShowSecurity,
-        SettingsMessage::BackToMain,
-        SettingsMessage::BackToHome,
-    ];
-    
-    for message in nav_messages {
-        let result = update::update_settings(&mut state, message);
-        
-        // Navigation handlers should return DomainUpdateResult
-        assert!(matches!(result, DomainUpdateResult { .. }));
-        
-        // Most navigation handlers don't emit events
-        // They just update state and return Task::none()
-    }
+
+    // Missing complexity and too short
+    state.domains.settings.security.password_current =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("old");
+    state.domains.settings.security.password_new =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("short");
+    state.domains.settings.security.password_confirm =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("short");
+
+    let result = update::update_settings(&mut state, SettingsMessage::SubmitPasswordChange);
+
+    assert!(result.events.is_empty());
+    assert!(state.domains.settings.security.password_error.is_some());
+    assert!(!state.domains.settings.security.password_loading);
 }
 
 #[test]
-fn test_preferences_handler_returns_domain_update_result() {
+fn pin_set_and_change_emit_correct_commands() {
+    // Case 1: setting a new PIN (has_pin = false)
     let mut state = create_test_state();
-    
-    // Test auto-login toggle
-    let result = update::update_settings(&mut state, SettingsMessage::ToggleAutoLogin(true));
-    
-    // Should return DomainUpdateResult
-    assert!(matches!(result, DomainUpdateResult { .. }));
+    state.domains.settings.security.has_pin = false;
+    state.domains.settings.security.pin_new =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("1234");
+    state.domains.settings.security.pin_confirm =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("1234");
+
+    let result = update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
+    assert!(state.domains.settings.security.pin_loading);
+    let set_cmd = result.events.iter().any(|e| match e {
+        CrossDomainEvent::AuthCommandRequested(AuthCommand::SetUserPin { .. }) => true,
+        _ => false,
+    });
+    assert!(set_cmd, "should request SetUserPin when user has no PIN");
+
+    // Case 2: changing existing PIN (has_pin = true)
+    let mut state = create_test_state();
+    state.domains.settings.security.has_pin = true;
+    state.domains.settings.security.pin_current =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("1111");
+    state.domains.settings.security.pin_new =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("2222");
+    state.domains.settings.security.pin_confirm =
+        ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("2222");
+
+    let result = update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
+    assert!(state.domains.settings.security.pin_loading);
+    let change_cmd = result.events.iter().any(|e| match e {
+        CrossDomainEvent::AuthCommandRequested(AuthCommand::ChangeUserPin { .. }) => true,
+        _ => false,
+    });
+    assert!(change_cmd, "should request ChangeUserPin when user has a PIN");
 }
 
 #[test]
-fn test_profile_handlers_return_domain_update_result() {
+fn auto_login_toggle_updates_state_on_result() {
     let mut state = create_test_state();
-    
-    // Test profile update messages
-    let profile_messages = vec![
-        SettingsMessage::UpdateDisplayName("Test User".to_string()),
-        SettingsMessage::UpdateEmail("test@example.com".to_string()),
-        SettingsMessage::SubmitProfileChanges,
-    ];
-    
-    for message in profile_messages {
-        let result = update::update_settings(&mut state, message);
-        
-        // Should return DomainUpdateResult
-        assert!(matches!(result, DomainUpdateResult { .. }));
-    }
+    // Simulate successful toggle completion message
+    let _ = update::update_settings(&mut state, SettingsMessage::AutoLoginToggled(Ok(true)));
+
+    assert!(state.domains.settings.preferences.auto_login_enabled);
+    assert!(state.domains.auth.state.auto_login_enabled);
 }
 
 #[test]
-fn test_device_management_handlers_return_domain_update_result() {
+fn navigation_sets_current_view() {
     let mut state = create_test_state();
-    
-    // Test device management messages
-    let device_messages = vec![
-        SettingsMessage::LoadDevices,
-        SettingsMessage::RefreshDevices,
-        SettingsMessage::RevokeDevice("device123".to_string()),
-    ];
-    
-    for message in device_messages {
-        let result = update::update_settings(&mut state, message);
-        
-        // Should return DomainUpdateResult
-        assert!(matches!(result, DomainUpdateResult { .. }));
-    }
-}
+    assert_eq!(state.domains.settings.current_view, SettingsView::Main);
 
-#[test]
-fn test_all_handlers_migrated_to_domain_update_result() {
-    // This is a comprehensive test to ensure all handlers are migrated
-    let mut state = create_test_state();
-    
-    // Create one message of each type to ensure all paths return DomainUpdateResult
-    let all_messages = vec![
-        // Navigation
-        SettingsMessage::ShowProfile,
-        SettingsMessage::ShowPreferences,
-        SettingsMessage::ShowSecurity,
-        SettingsMessage::BackToMain,
-        SettingsMessage::BackToHome,
-        
-        // Security - Password
-        SettingsMessage::ShowChangePassword,
-        SettingsMessage::UpdatePasswordCurrent("test".to_string()),
-        SettingsMessage::UpdatePasswordNew("test".to_string()),
-        SettingsMessage::UpdatePasswordConfirm("test".to_string()),
-        SettingsMessage::TogglePasswordVisibility,
-        SettingsMessage::SubmitPasswordChange,
-        SettingsMessage::PasswordChangeResult(Ok(())),
-        SettingsMessage::CancelPasswordChange,
-        
-        // Security - PIN
-        SettingsMessage::CheckUserHasPin,
-        SettingsMessage::UserHasPinResult(true),
-        SettingsMessage::ShowSetPin,
-        SettingsMessage::ShowChangePin,
-        SettingsMessage::UpdatePinCurrent("1234".to_string()),
-        SettingsMessage::UpdatePinNew("5678".to_string()),
-        SettingsMessage::UpdatePinConfirm("5678".to_string()),
-        SettingsMessage::SubmitPinChange,
-        SettingsMessage::PinChangeResult(Ok(())),
-        SettingsMessage::CancelPinChange,
-        
-        // Preferences
-        SettingsMessage::ToggleAutoLogin(true),
-        SettingsMessage::AutoLoginToggled(Ok(true)),
-        
-        // Profile
-        SettingsMessage::UpdateDisplayName("Test".to_string()),
-        SettingsMessage::UpdateEmail("test@test.com".to_string()),
-        SettingsMessage::SubmitProfileChanges,
-        SettingsMessage::ProfileChangeResult(Ok(())),
-        
-        // Device Management
-        SettingsMessage::LoadDevices,
-        SettingsMessage::DevicesLoaded(Ok(vec![])),
-        SettingsMessage::RefreshDevices,
-        SettingsMessage::RevokeDevice("device123".to_string()),
-        SettingsMessage::DeviceRevoked(Ok("device123".to_string())),
-    ];
-    
-    for message in all_messages {
-        let message_name = message.name();
-        let result = update::update_settings(&mut state, message);
-        
-        // Every handler should return DomainUpdateResult
-        assert!(
-            matches!(result, DomainUpdateResult { .. }),
-            "Handler for {} should return DomainUpdateResult",
-            message_name
-        );
-    }
+    let _ = update::update_settings(&mut state, SettingsMessage::ShowSecurity);
+    assert_eq!(state.domains.settings.current_view, SettingsView::Security);
+
+    let _ = update::update_settings(&mut state, SettingsMessage::BackToMain);
+    assert_eq!(state.domains.settings.current_view, SettingsView::Main);
 }

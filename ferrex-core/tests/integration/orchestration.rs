@@ -451,6 +451,7 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
     svc.metrics_snapshot().await.expect("metrics snapshot ok");
 }
 
+#[ignore = "measurement only; does not assert behavior"]
 #[sqlx::test]
 async fn bench_stub_latency_logging(pool: PgPool) {
     let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
