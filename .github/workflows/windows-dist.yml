@@ -1,0 +1,109 @@
+name: Windows Dist
+
+on:
+  workflow_dispatch:
+    inputs:
+      gstreamer_version:
+        description: "GStreamer version (MSVC)"
+        default: "1.26.6"
+        required: true
+      profile:
+        description: "Cargo profile"
+        default: "release"
+        required: true
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows-dist:
+    name: Build ferrex-player (Windows)
+    runs-on: windows-latest
+    env:
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: moonrepo/setup-rust@v1
+        with:
+          profile: minimal
+          targets: ${{ env.TARGET }}
+          components: clippy,rustfmt
+
+      - name: Setup GStreamer (Windows)
+        uses: marcpabst/setup-gstreamer@v1.5.3
+        with:
+          version: '${{ github.event.inputs.gstreamer_version || '1.26.6' }}'
+          arch: x86_64
+
+      - name: Show pkg-config
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pkg-config --version
+          pkg-config --print-errors --exists glib-2.0 'glib-2.0 >= 2.56' gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0
+          "glib:        $(pkg-config --modversion glib-2.0)" | Write-Host
+          "gstreamer:   $(pkg-config --modversion gstreamer-1.0)" | Write-Host
+          "gst-app:     $(pkg-config --modversion gstreamer-app-1.0)" | Write-Host
+          "gst-video:   $(pkg-config --modversion gstreamer-video-1.0)" | Write-Host
+
+      - name: Build ferrex-player (release)
+        shell: pwsh
+        run: |
+          $profile = if ('${{ github.event.inputs.profile }}') { '${{ github.event.inputs.profile }}' } else { 'release' }
+          cargo build -p ferrex-player --target $env:TARGET --profile $profile
+
+      - name: Stage distribution folder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root   = (Get-Location).Path
+          $stage  = Join-Path $root 'dist-windows'
+          $bin    = Join-Path $stage 'bin'
+          $libg   = Join-Path $stage 'lib\\gstreamer-1.0'
+          New-Item -ItemType Directory -Force -Path $stage, $bin, $libg | Out-Null
+
+          # Copy launcher scripts and README from repo
+          Copy-Item -Force build-windows\\run-ferrex.bat $stage
+          Copy-Item -Force build-windows\\run-ferrex.ps1 $stage
+          Copy-Item -Force build-windows\\README.txt $stage
+
+          # Copy freshly built executable
+          $exe = Join-Path $root "target\\$env:TARGET\\${{ github.event.inputs.profile || 'release' }}\\ferrex-player.exe"
+          if (-not (Test-Path $exe)) { throw "Built executable not found: $exe" }
+          Copy-Item -Force $exe (Join-Path $stage 'ferrex-player.exe')
+
+          # Bundle GStreamer runtime and plugins from official SDK installed by the action
+          $gstroot = $env:GSTREAMER_1_0_ROOT_MSVC_X86_64
+          if (-not $gstroot) { throw 'GSTREAMER_1_0_ROOT_MSVC_X86_64 not set' }
+
+          # Core DLLs
+          Copy-Item -Force -Recurse (Join-Path $gstroot 'bin\\*.dll') $bin
+          # Plugins
+          Copy-Item -Force -Recurse (Join-Path $gstroot 'lib\\gstreamer-1.0\\*.dll') $libg
+
+          # Optional: include inspection tool for debugging
+          if (Test-Path (Join-Path $gstroot 'bin\\gst-inspect-1.0.exe')) {
+            Copy-Item -Force (Join-Path $gstroot 'bin\\gst-inspect-1.0.exe') $bin
+          }
+
+      - name: Create zip artifact
+        shell: pwsh
+        run: |
+          $stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
+          $version = (Get-Content -Raw Cargo.toml | Select-String -Pattern 'version\s*=\s*"([0-9A-Za-z\.-]+)"' -AllMatches).Matches | ForEach-Object { $_.Groups[1].Value } | Select-Object -First 1
+          if (-not $version) { $version = '0.1.0' }
+          $zip = "ferrex-player_windows_${version}_$stamp.zip"
+          Compress-Archive -Path 'dist-windows/*' -DestinationPath $zip -Force
+          "Artifact: $zip" | Write-Host
+          (Get-FileHash $zip -Algorithm SHA256).Hash | Write-Host
+          echo "ZIP_FILE=$zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrex-player-windows
+          path: ${{ env.ZIP_FILE }}
+
