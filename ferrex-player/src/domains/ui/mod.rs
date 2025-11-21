@@ -4,6 +4,7 @@
 
 pub mod background_state;
 pub mod components;
+pub mod menu;
 pub mod messages;
 pub mod motion_controller;
 pub mod scroll_manager;
@@ -22,6 +23,7 @@ pub mod yoke_cache;
 
 pub use motion_controller::MotionController;
 
+use self::menu::PosterMenuState;
 use self::views::carousel::CarouselState;
 use self::views::virtual_carousel::{CarouselFocus, CarouselRegistry};
 use crate::{
@@ -116,6 +118,10 @@ pub struct UIDomainState {
 
     // Carousel focus controller - tracks which carousel receives keyboard events
     pub carousel_focus: CarouselFocus,
+
+    // Poster menu open state (single target for now)
+    pub poster_menu_open: Option<Uuid>,
+    pub poster_menu_states: HashMap<Uuid, PosterMenuState>,
 }
 
 impl UIDomainState {}

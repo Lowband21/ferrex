@@ -14,6 +14,7 @@ use crate::{
     media_card,
     state::State,
 };
+use crate::infra::widgets::poster::poster_animation_types::AnimationBehavior;
 use ferrex_core::player_prelude::{
     EpisodeLike, MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
 };
@@ -126,12 +127,34 @@ pub fn view_series_detail<'a>(
         .image_type(ImageType::Series)
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
-        .priority(Priority::Visible);
+        .priority(Priority::Visible)
+        .animation_behavior(AnimationBehavior::flip_then_fade());
 
     if let Some(hex) = series.theme_color()
         && let Ok(color) = parse_hex_color(hex)
     {
         poster = poster.theme_color(color);
+    }
+    let poster_id = media_id.to_uuid();
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&poster_id)
+    {
+        (
+            menu_state.face_for_render(),
+            Some(menu_state.angle),
+        )
+    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (crate::infra::widgets::poster::PosterFace::Front, None)
+    };
+    poster = poster.face(face);
+    if let Some(rot) = rotation_override {
+        poster = poster.rotation_y(rot);
     }
     let poster_element: Element<UiMessage> = poster.into();
 
@@ -440,11 +463,33 @@ pub fn view_season_detail<'a>(
         .image_type(ImageType::Season)
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
-        .priority(Priority::Visible);
+        .priority(Priority::Visible)
+        .animation_behavior(AnimationBehavior::flip_then_fade());
     if let Some(hex) = season.theme_color()
         && let Ok(color) = parse_hex_color(hex)
     {
         poster = poster.theme_color(color);
+    }
+    let poster_id = season.id.to_uuid();
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&poster_id)
+    {
+        (
+            menu_state.face_for_render(),
+            Some(menu_state.angle),
+        )
+    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (crate::infra::widgets::poster::PosterFace::Front, None)
+    };
+    poster = poster.face(face);
+    if let Some(rot) = rotation_override {
+        poster = poster.rotation_y(rot);
     }
     let poster_element: Element<UiMessage> = poster.into();
 
@@ -679,13 +724,34 @@ pub fn view_episode_detail<'a>(
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Episode still image
-    let still_element: Element<UiMessage> = image_for(episode.id.to_uuid())
+    let mut still = image_for(episode.id.to_uuid())
         .size(ImageSize::Thumbnail)
         .image_type(ImageType::Episode)
         .width(Length::Fixed(640.0))
         .height(Length::Fixed(360.0))
-        .priority(Priority::Visible)
-        .into();
+        .priority(Priority::Visible);
+    let poster_id = episode.id.to_uuid();
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&poster_id)
+    {
+        (
+            menu_state.face_for_render(),
+            Some(menu_state.angle),
+        )
+    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (crate::infra::widgets::poster::PosterFace::Front, None)
+    };
+    still = still.face(face);
+    if let Some(rot) = rotation_override {
+        still = still.rotation_y(rot);
+    }
+    let still_element: Element<UiMessage> = still.into();
 
     // Details column
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);

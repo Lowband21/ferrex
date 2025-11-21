@@ -4,6 +4,7 @@ use crate::domains::{
     library::media_root_browser,
     ui::{
         DisplayMode,
+        menu::PosterMenuMessage,
         motion_controller::MotionMessage,
         views::{settings, virtual_carousel::VirtualCarouselMessage},
     },
@@ -159,6 +160,8 @@ pub enum UiMessage {
 
     // Virtual carousel events (new module)
     VirtualCarousel(VirtualCarouselMessage),
+    // Poster menu subdomain
+    PosterMenu(PosterMenuMessage),
 
     // Animation and transition messages
     UpdateTransitions, // Update color and backdrop transitions
@@ -347,6 +350,7 @@ impl UiMessage {
             Self::AutoLoginToggled(_) => "UI::AutoLoginToggled",
 
             Self::VirtualCarousel(_) => "UI::VirtualCarousel",
+            Self::PosterMenu(_) => "UI::PosterMenu",
 
             // Animation and transition messages
             Self::UpdateTransitions => "UI::UpdateTransitions",
@@ -613,6 +617,7 @@ impl std::fmt::Debug for UiMessage {
             Self::VirtualCarousel(msg) => {
                 write!(f, "UI::VirtualCarousel({:?})", msg)
             }
+            Self::PosterMenu(msg) => write!(f, "UI::PosterMenu({:?})", msg),
             Self::UpdateTransitions => write!(f, "UI::UpdateTransitions"),
             Self::UpdateBackdropHandle(handle) => {
                 write!(f, "UI::UpdateBackdropHandle({:?})", handle)

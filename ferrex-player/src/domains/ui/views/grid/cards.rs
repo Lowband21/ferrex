@@ -13,7 +13,10 @@ use crate::{
     infra::{
         api_types::WatchProgress, constants::poster::CORNER_RADIUS,
         repository::MaybeYoked,
-        widgets::poster::poster_animation_types::AnimationBehavior,
+        widgets::{
+            poster::poster_animation_types::AnimationBehavior,
+            poster::PosterFace,
+        },
     },
     state::State,
 };
@@ -265,6 +268,28 @@ pub fn movie_reference_card_with_state<'a>(
         img = img.progress(progress.as_percentage());
     }
 
+    let poster_id = movie_id.to_uuid();
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&poster_id)
+    {
+        (
+            menu_state.face_for_render(),
+            Some(menu_state.angle),
+        )
+    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+        (PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (PosterFace::Front, None)
+    };
+    img = img.face(face);
+    if let Some(rot) = rotation_override {
+        img = img.rotation_y(rot);
+    }
+
     // Create the full card manually to match media_card! structure
     let image_element: Element<'_, UiMessage> = img.into();
 
@@ -471,6 +496,28 @@ pub fn series_reference_card_with_state<'a>(
         if let Some(color) = color_opt {
             img = img.theme_color(color);
         }
+    }
+
+    let poster_id = series_id.to_uuid();
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&poster_id)
+    {
+        (
+            menu_state.face_for_render(),
+            Some(menu_state.angle),
+        )
+    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+        (PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (PosterFace::Front, None)
+    };
+    img = img.face(face);
+    if let Some(rot) = rotation_override {
+        img = img.rotation_y(rot);
     }
 
     let image_element: Element<'_, UiMessage> = img.into();

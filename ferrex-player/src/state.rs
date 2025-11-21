@@ -192,6 +192,8 @@ impl State {
                 motion_controller: MotionController::new(),
                 carousel_registry: CarouselRegistry::new(),
                 carousel_focus: CarouselFocus::new(),
+                poster_menu_open: None,
+                poster_menu_states: HashMap::new(),
             };
 
         // Create settings service adapter

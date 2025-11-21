@@ -1,4 +1,7 @@
-use super::{ensure_batch_registration, primitive::PosterPrimitive};
+use super::{
+    ensure_batch_registration, primitive::PosterPrimitive,
+    render_pipeline::PosterFace,
+};
 use crate::{
     domains::ui::messages::UiMessage,
     infra::widgets::poster::poster_animation_types::{
@@ -16,6 +19,7 @@ use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct PosterProgram {
     pub id: u64,
+    pub menu_target: Option<uuid::Uuid>,
     pub handle: Handle,
     pub radius: f32,
     pub animation: PosterAnimationType,
@@ -26,10 +30,12 @@ pub struct PosterProgram {
     pub is_hovered: bool,
     pub progress: Option<f32>,
     pub progress_color: Color,
+    pub rotation_y: Option<f32>,
     pub on_play: Option<UiMessage>,
     pub on_edit: Option<UiMessage>,
     pub on_options: Option<UiMessage>,
     pub on_click: Option<UiMessage>,
+    pub face: PosterFace,
 }
 
 /// State for tracking mouse position within the shader widget
@@ -41,6 +47,8 @@ pub struct PosterState {
     pub is_hovered: bool,
     /// Whether the primary button was pressed inside this widget
     pub pressed_inside: bool,
+    /// Whether the right button was pressed inside this widget
+    pub right_pressed_inside: bool,
 }
 
 impl Program<UiMessage> for PosterProgram {
@@ -87,6 +95,8 @@ impl Program<UiMessage> for PosterProgram {
             mouse_position,
             progress: self.progress,
             progress_color: self.progress_color,
+            rotation_override: self.rotation_y,
+            face: self.face,
         }
     }
 
@@ -272,6 +282,36 @@ impl Program<UiMessage> for PosterProgram {
                         }
                     }
                 }
+                mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                    if let Some(target) = self.menu_target {
+                        if let Some(cursor_pos) = cursor.position()
+                            && bounds.contains(cursor_pos)
+                        {
+                            state.right_pressed_inside = true;
+                            return Some(iced::widget::Action::publish(
+                                UiMessage::PosterMenu(
+                                    crate::domains::ui::menu::PosterMenuMessage::HoldStart(
+                                        target,
+                                    ),
+                                ),
+                            ));
+                        }
+                    }
+                }
+                mouse::Event::ButtonReleased(mouse::Button::Right) => {
+                    if state.right_pressed_inside {
+                        state.right_pressed_inside = false;
+                        if let Some(target) = self.menu_target {
+                            return Some(iced::widget::Action::publish(
+                                UiMessage::PosterMenu(
+                                    crate::domains::ui::menu::PosterMenuMessage::HoldEnd(
+                                        target,
+                                    ),
+                                ),
+                            ));
+                        }
+                    }
+                }
                 mouse::Event::CursorEntered => {
                     // Handle cursor entering the widget
                     if let Some(position) = cursor.position()
@@ -291,6 +331,18 @@ impl Program<UiMessage> for PosterProgram {
                     state.mouse_position = None;
                     state.is_hovered = false;
                     state.pressed_inside = false;
+                    if state.right_pressed_inside {
+                        state.right_pressed_inside = false;
+                        if let Some(target) = self.menu_target {
+                            return Some(iced::widget::Action::publish(
+                                UiMessage::PosterMenu(
+                                    crate::domains::ui::menu::PosterMenuMessage::HoldEnd(
+                                        target,
+                                    ),
+                                ),
+                            ));
+                        }
+                    }
                     log::debug!("Cursor left widget");
                 }
                 _ => {}

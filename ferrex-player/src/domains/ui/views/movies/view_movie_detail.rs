@@ -79,6 +79,31 @@ pub fn view_movie_detail<'a>(
                 poster_element = poster_element.theme_color(color);
             }
 
+            // Apply poster menu face/rotation if menu is open for this media
+            let poster_id = media_id.to_uuid();
+            let (face, rotation_override) = if let Some(menu_state) = state
+                .domains
+                .ui
+                .state
+                .poster_menu_states
+                .get(&poster_id)
+            {
+                (
+                    menu_state.face_for_render(),
+                    Some(menu_state.angle),
+                )
+            } else if state.domains.ui.state.poster_menu_open
+                == Some(poster_id)
+            {
+                (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+            } else {
+                (crate::infra::widgets::poster::PosterFace::Front, None)
+            };
+            poster_element = poster_element.face(face);
+            if let Some(rot) = rotation_override {
+                poster_element = poster_element.rotation_y(rot);
+            }
+
             // Details column
             let mut details = column![]
                 .spacing(5)

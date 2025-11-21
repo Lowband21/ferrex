@@ -5,6 +5,7 @@ use crate::{
         metadata::demand_planner::DemandSnapshot,
         settings::messages::SettingsMessage,
         ui::{
+            menu::{PosterMenuState, poster_menu_update},
             messages::UiMessage,
             tabs::{TabId, TabState},
             types::{BackdropAspectMode, DisplayMode, ViewState},
@@ -16,7 +17,9 @@ use crate::{
             windows,
         },
     },
-    infra::{api_types::LibraryType, constants::layout},
+    infra::{
+        api_types::LibraryType, constants::layout, widgets::poster::PosterFace,
+    },
     state::State,
 };
 
@@ -1348,8 +1351,25 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
             )
         }
         UiMessage::UpdateTransitions => {
+            use crate::domains::ui::menu::MENU_KEEPALIVE_MS;
             let ui_state = &mut state.domains.ui.state;
             let now = Instant::now();
+
+            // Advance poster menu flip states
+            let mut menu_active = false;
+            ui_state.poster_menu_states.retain(|id, menu_state| {
+                let active = menu_state.step(now);
+                if active {
+                    menu_active = true;
+                }
+                // Keep entry if still active or still targeted for open face
+                active || ui_state.poster_menu_open == Some(*id)
+            });
+            if menu_active {
+                ui_state.poster_anim_active_until = Some(
+                    now + std::time::Duration::from_millis(MENU_KEEPALIVE_MS),
+                );
+            }
 
             let poster_anim_active = match ui_state.poster_anim_active_until {
                 Some(until) if until > now => true,
@@ -1365,7 +1385,7 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 || shader_state.backdrop_transitions.is_transitioning()
                 || shader_state.gradient_transitions.is_transitioning();
 
-            if !poster_anim_active && !transitions_active {
+            if !poster_anim_active && !transitions_active && !menu_active {
                 return DomainUpdateResult::task(Task::none());
             }
 
@@ -1405,6 +1425,9 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 }
             };
             DomainUpdateResult::task(Task::none())
+        }
+        UiMessage::PosterMenu(menu_msg) => {
+            poster_menu_update(state, menu_msg)
         }
         UiMessage::UpdateBackdropHandle(_handle) => {
             // Deprecated - backdrops are now pulled reactively from image service

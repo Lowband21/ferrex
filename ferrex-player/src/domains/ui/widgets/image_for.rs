@@ -7,6 +7,7 @@ use crate::domains::metadata::image_service::FirstDisplayHint;
 use crate::infra::widgets::poster::poster_animation_types::{
     AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
 };
+use crate::infra::widgets::poster::PosterFace;
 use crate::{
     domains::ui::messages::UiMessage,
     domains::ui::widgets::poster,
@@ -52,6 +53,8 @@ pub struct ImageFor {
     on_click: Option<UiMessage>,
     progress: Option<f32>,
     progress_color: Option<Color>,
+    rotation_y: Option<f32>,
+    face: Option<PosterFace>,
     // Optimization: Cache to avoid repeated lookups
     cached_data: Option<CachedImageData>,
     // If true, do not enqueue a network request on cache miss.
@@ -89,6 +92,8 @@ impl ImageFor {
             on_click: None,
             progress: None,
             progress_color: None,
+            rotation_y: None,
+            face: None,
             cached_data: None,
             skip_request: false,
         }
@@ -216,6 +221,18 @@ impl ImageFor {
         self
     }
 
+    /// Override rotation_y for custom flip control
+    pub fn rotation_y(mut self, rotation: f32) -> Self {
+        self.rotation_y = Some(rotation);
+        self
+    }
+
+    /// Set which face/pipeline to render
+    pub fn face(mut self, face: PosterFace) -> Self {
+        self.face = Some(face);
+        self
+    }
+
     /// If set, the image widget will not enqueue a fetch on cache miss and
     /// will render only a placeholder. Useful when metadata lacks a poster.
     pub fn skip_request(mut self, skip: bool) -> Self {
@@ -294,6 +311,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 image.animation,
                 &image,
                 bounds,
+                image.media_id,
             );
         }
 
@@ -338,7 +356,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         poster(handle, Some(request_hash))
                             .radius(image.radius)
                             .with_animated_bounds(bounds)
-                            .is_hovered(image.is_hovered);
+                            .is_hovered(image.is_hovered)
+                            .menu_target(image.media_id)
+                            .face(image.face.unwrap_or(PosterFace::Front));
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);
@@ -350,6 +370,10 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
 
                     if let Some(click_msg) = image.on_click.clone() {
                         shader = shader.on_click(click_msg);
+                    }
+
+                    if let Some(rot) = image.rotation_y {
+                        shader = shader.rotation_y(rot);
                     }
 
                     // Add a tiny random jitter to animation selection so rows don't animate in lockstep.
@@ -444,6 +468,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         image.radius,
                         image.theme_color,
                         request_hash,
+                        image.media_id,
+                        image.face.unwrap_or(PosterFace::Front),
+                        image.rotation_y,
                     )
                 }
             }
@@ -454,6 +481,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 image.radius,
                 image.theme_color,
                 request_hash,
+                image.media_id,
+                image.face.unwrap_or(PosterFace::Front),
+                image.rotation_y,
             )
         }
     }
@@ -474,12 +504,15 @@ fn create_shader_from_cached<'a>(
     animation: AnimationBehavior,
     image: &ImageFor,
     bounds: AnimatedPosterBounds,
+    media_id: uuid::Uuid,
 ) -> Element<'a, UiMessage> {
     // Check if we should skip atlas upload for VeryFast scrolling
     let mut shader = poster(handle, Some(request_hash))
         .radius(image.radius)
         .with_animated_bounds(bounds)
-        .is_hovered(image.is_hovered);
+        .is_hovered(image.is_hovered)
+        .menu_target(media_id)
+        .face(image.face.unwrap_or(PosterFace::Front));
 
     // Set theme color if provided
     if let Some(color) = image.theme_color {
@@ -492,6 +525,9 @@ fn create_shader_from_cached<'a>(
     }
     if let Some(click_msg) = image.on_click.clone() {
         shader = shader.on_click(click_msg);
+    }
+    if let Some(rot) = image.rotation_y {
+        shader = shader.rotation_y(rot);
     }
 
     // Apply load-time aware animation selection, but defer actual animation start
@@ -535,6 +571,9 @@ fn create_loading_placeholder<'a>(
     radius: f32,
     theme_color: Option<Color>,
     request_hash: u64,
+    media_id: uuid::Uuid,
+    face: PosterFace,
+    rotation_override: Option<f32>,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -552,13 +591,20 @@ fn create_loading_placeholder<'a>(
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
     // Use the request hash so the placeholder shares identity with the texture once it loads.
-    poster(placeholder_handle, Some(request_hash))
+    let mut poster = poster(placeholder_handle, Some(request_hash))
         .radius(radius)
         .with_animated_bounds(bounds)
         .theme_color(color)
         .with_animation(PosterAnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
-        .into()
+        .menu_target(media_id)
+        .face(face);
+
+    if let Some(rot) = rotation_override {
+        poster = poster.rotation_y(rot);
+    }
+
+    poster.into()
 }
 
 /// Extension trait for creating image widgets from media references

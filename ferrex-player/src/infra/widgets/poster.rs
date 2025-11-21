@@ -8,6 +8,7 @@ pub mod poster_animation_types;
 mod poster_program;
 mod primitive;
 mod render_pipeline;
+pub use render_pipeline::PosterFace;
 
 use crate::domains::ui::messages::UiMessage;
 use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
@@ -29,6 +30,7 @@ fn ensure_batch_registration() {
 /// A widget that displays a poster with rounded corners using GPU shaders
 pub struct Poster {
     id: u64,
+    menu_target: Option<uuid::Uuid>,
     handle: Handle,
     radius: f32,
     width: Length,
@@ -45,6 +47,8 @@ pub struct Poster {
     on_click: Option<UiMessage>, // For clicking empty space (details page)
     progress: Option<f32>,       // Progress percentage (0.0 to 1.0)
     progress_color: Color,       // Color for the progress bar
+    rotation_y: Option<f32>,
+    face: PosterFace,
 }
 
 impl Poster {
@@ -54,6 +58,7 @@ impl Poster {
 
         Self {
             id: id.unwrap_or(0),
+            menu_target: None,
             handle,
             radius: crate::infra::constants::layout::poster::CORNER_RADIUS,
             width: Length::Fixed(200.0),
@@ -70,6 +75,8 @@ impl Poster {
             on_click: None,
             progress: None,
             progress_color: MediaServerTheme::ACCENT_BLUE, // Default to theme blue
+            rotation_y: None,
+            face: PosterFace::Front,
         }
     }
 
@@ -162,6 +169,18 @@ impl Poster {
         self
     }
 
+    /// Overrides rotation_y (radians) for custom flip control.
+    pub fn rotation_y(mut self, rotation: f32) -> Self {
+        self.rotation_y = Some(rotation);
+        self
+    }
+
+    /// Sets the menu target (media id) for right-click toggles
+    pub fn menu_target(mut self, media_id: uuid::Uuid) -> Self {
+        self.menu_target = Some(media_id);
+        self
+    }
+
     /// Sets the progress percentage (0.0 to 1.0)
     pub fn progress(mut self, progress: f32) -> Self {
         self.progress = Some(progress.clamp(0.0, 1.0));
@@ -171,6 +190,12 @@ impl Poster {
     /// Sets the progress bar color
     pub fn progress_color(mut self, color: Color) -> Self {
         self.progress_color = color;
+        self
+    }
+
+    /// Sets which face/pipeline to render
+    pub fn face(mut self, face: PosterFace) -> Self {
+        self.face = face;
         self
     }
 }
@@ -184,6 +209,7 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
     fn from(image: Poster) -> Self {
         let shader = iced::widget::shader(poster_program::PosterProgram {
             id: image.id,
+            menu_target: image.menu_target,
             handle: image.handle,
             radius: image.radius,
             animation: image.animation,
@@ -198,6 +224,8 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
             on_edit: image.on_edit,
             on_options: image.on_options,
             on_click: image.on_click,
+            rotation_y: image.rotation_y,
+            face: image.face,
         })
         .width(image.width)
         .height(image.height);

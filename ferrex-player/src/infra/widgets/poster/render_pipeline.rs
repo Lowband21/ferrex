@@ -15,6 +15,12 @@ use std::sync::Arc;
 
 const ATLAS_SIZE: f32 = 2048.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PosterFace {
+    Front,
+    Back,
+}
+
 /// Global uniform data (viewport transform)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -111,13 +117,17 @@ impl Pipeline {
     ) -> Self {
         log::debug!("Creating rounded image shader pipeline");
 
-        // Load shader
+        // Load shader (front pipeline): concatenate shared helpers + poster shader.
+        let shader_src = format!(
+            "{}\n{}",
+            include_str!("../../shaders/common.wgsl"),
+            include_str!("../../shaders/poster.wgsl")
+        );
+
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Rounded Image Shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("../../shaders/poster.wgsl").into(),
-                ),
+                source: wgpu::ShaderSource::Wgsl(shader_src.into()),
             });
 
         // Create globals bind group layout (includes sampler)
@@ -324,6 +334,8 @@ pub(crate) fn create_batch_instance(
     mouse_position: Option<Point>,
     progress: Option<f32>,
     progress_color: Color,
+    rotation_override: Option<f32>,
+    _face: PosterFace,
 ) -> batch_state::PosterInstance {
     // Extract UV coordinates and layer from the atlas entry
     let (mut uv_min, mut uv_max, layer) = if let Some(region) = atlas_region {
@@ -351,13 +363,23 @@ pub(crate) fn create_batch_instance(
 
     let (
         actual_opacity,
-        rotation_y,
-        animation_progress,
+        mut rotation_y,
+        mut animation_progress,
         z_depth,
         scale,
         shadow_intensity,
         border_glow,
-    ) = if let Some(load_time) = load_time {
+    ) = if let Some(rot) = rotation_override {
+        (
+            opacity,
+            rot,
+            (rot / std::f32::consts::PI).clamp(0.0, 1.0),
+            0.0,
+            1.0,
+            0.4,
+            0.0,
+        )
+    } else if let Some(load_time) = load_time {
         let elapsed = load_time.elapsed();
         let animation = match animation {
             PosterAnimationType::Flip {
@@ -516,6 +538,7 @@ pub fn create_placeholder_instance(
     animated_bounds: Option<&poster_animation_types::AnimatedPosterBounds>,
     progress: Option<f32>,
     progress_color: Color,
+    _face: PosterFace,
 ) -> batch_state::PosterInstance {
     let (
         actual_opacity,

@@ -11,9 +11,10 @@ use iced::{
 
 use std::time::Instant;
 
-use crate::infra::widgets::poster::{
+use super::{
     batch_state::{PendingPrimitive, PosterBatchState},
     poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
+    render_pipeline::PosterFace,
 };
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,8 @@ pub struct PosterPrimitive {
     pub mouse_position: Option<Point>, // Mouse position relative to widget
     pub progress: Option<f32>,
     pub progress_color: Color,
+    pub rotation_override: Option<f32>,
+    pub face: super::render_pipeline::PosterFace,
 }
 
 impl PosterPrimitive {
@@ -97,6 +100,8 @@ impl BatchPrimitive for PosterPrimitive {
             mouse_position: self.mouse_position,
             progress: self.progress,
             progress_color: self.progress_color,
+            rotation_override: self.rotation_override,
+            face: self.face,
         });
 
         true

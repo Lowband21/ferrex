@@ -9,8 +9,8 @@ use crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER
 use crate::infra::widgets::poster::poster_animation_types::{
     AnimatedPosterBounds, PosterAnimationType,
 };
-use crate::infra::widgets::poster::render_pipeline::{
-    create_batch_instance, create_placeholder_instance,
+use super::render_pipeline::{
+    create_batch_instance, create_placeholder_instance, PosterFace,
 };
 use bytemuck::{Pod, Zeroable};
 use iced::widget::image::Handle;
@@ -56,6 +56,8 @@ pub struct PendingPrimitive {
     pub mouse_position: Option<Point>,
     pub progress: Option<f32>,
     pub progress_color: Color,
+    pub rotation_override: Option<f32>,
+    pub face: PosterFace,
 }
 
 /// globals uniform buffer layout shared with the WGSL shader.
@@ -74,10 +76,14 @@ struct Globals {
 /// Handles instanced draws for batched posters.
 pub struct PosterBatchState {
     pending_primitives: Vec<PendingPrimitive>,
-    pending_instances: Vec<PosterInstance>,
-    instance_manager: InstanceBufferManager<PosterInstance>,
-    render_pipeline: Option<Arc<wgpu::RenderPipeline>>,
+    pending_instances_front: Vec<PosterInstance>,
+    pending_instances_back: Vec<PosterInstance>,
+    instance_manager_front: InstanceBufferManager<PosterInstance>,
+    instance_manager_back: InstanceBufferManager<PosterInstance>,
+    render_pipeline_front: Option<Arc<wgpu::RenderPipeline>>,
+    render_pipeline_back: Option<Arc<wgpu::RenderPipeline>>,
     shader: Arc<wgpu::ShaderModule>,
+    shader_back: Arc<wgpu::ShaderModule>,
     atlas_bind_group_layout: Option<Arc<wgpu::BindGroupLayout>>,
     surface_format: wgpu::TextureFormat,
     globals_buffer: Option<wgpu::Buffer>,
@@ -88,7 +94,8 @@ pub struct PosterBatchState {
     loaded_times: HashMap<u64, Instant>,
     // Avoid log flooding: remember last layer we logged per instance id
     logged_layers: HashMap<u64, i32>,
-    groups: Vec<PosterGroup>,
+    groups_front: Vec<PosterGroup>,
+    groups_back: Vec<PosterGroup>,
 }
 
 impl PosterBatchState {
@@ -149,15 +156,15 @@ impl PosterBatchState {
         }
     }
 
-    /// Lazily creates the render pipeline once the atlas layout is known.
-    fn ensure_pipeline(
+    /// Lazily creates the front render pipeline once the atlas layout is known.
+    fn ensure_pipeline_front(
         &mut self,
         device: &wgpu::Device,
         atlas_layout: Arc<wgpu::BindGroupLayout>,
     ) {
         if let Some(existing) = &self.atlas_bind_group_layout {
             if Arc::ptr_eq(existing, &atlas_layout)
-                && self.render_pipeline.is_some()
+                && self.render_pipeline_front.is_some()
             {
                 return;
             }
@@ -179,9 +186,8 @@ impl PosterBatchState {
                 push_constant_ranges: &[],
             });
 
-        let pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Rounded Image Pipeline (Batched)"),
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Poster Front Pipeline (Batched)"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &self.shader,
@@ -218,7 +224,74 @@ impl PosterBatchState {
                 cache: None,
             });
 
-        self.render_pipeline = Some(Arc::new(pipeline));
+        self.render_pipeline_front = Some(Arc::new(pipeline));
+        self.atlas_bind_group_layout = Some(atlas_layout);
+    }
+
+    /// Lazily creates the back render pipeline once the atlas layout is known.
+    fn ensure_pipeline_back(
+        &mut self,
+        device: &wgpu::Device,
+        atlas_layout: Arc<wgpu::BindGroupLayout>,
+    ) {
+        if let Some(existing) = &self.atlas_bind_group_layout {
+            if Arc::ptr_eq(existing, &atlas_layout)
+                && self.render_pipeline_back.is_some()
+            {
+                return;
+            }
+        }
+
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Poster Back Pipeline Layout (Batched)"),
+                bind_group_layouts: &[
+                    &self.globals_bind_group_layout,
+                    atlas_layout.as_ref(),
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Poster Back Pipeline (Batched)"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.shader_back,
+                    entry_point: Some("vs_main_back"),
+                    buffers: &[Self::vertex_buffer_layout()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader_back,
+                    entry_point: Some("fs_main_back"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
+        self.render_pipeline_back = Some(Arc::new(pipeline));
         self.atlas_bind_group_layout = Some(atlas_layout);
     }
 
@@ -243,17 +316,25 @@ impl PosterBatchState {
             pending.animated_bounds.as_ref(),
             pending.progress,
             pending.progress_color,
+            pending.face,
         );
 
-        self.pending_instances.push(instance);
+        match pending.face {
+            PosterFace::Front => self.pending_instances_front.push(instance),
+            PosterFace::Back => self.pending_instances_back.push(instance),
+        }
     }
 
-    fn push_group_instance(&mut self, group: Arc<wgpu::BindGroup>) {
-        match self.groups.last_mut() {
+    fn push_group_instance(&mut self, face: PosterFace, group: Arc<wgpu::BindGroup>) {
+        let groups = match face {
+            PosterFace::Front => &mut self.groups_front,
+            PosterFace::Back => &mut self.groups_back,
+        };
+        match groups.last_mut() {
             Some(last) if Arc::ptr_eq(&last.atlas, &group) => {
                 last.instance_count += 1;
             }
-            _ => self.groups.push(PosterGroup {
+            _ => groups.push(PosterGroup {
                 atlas: group,
                 instance_count: 1,
             }),
@@ -271,8 +352,12 @@ impl std::fmt::Debug for PosterBatchState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PosterBatchState")
             .field(
-                "rendered_instances",
-                &self.instance_manager.instance_count(),
+                "rendered_instances_front",
+                &self.instance_manager_front.instance_count(),
+            )
+            .field(
+                "rendered_instances_back",
+                &self.instance_manager_back.instance_count(),
             )
             .field("pending_primitives", &self.pending_primitives.len())
             .finish()
@@ -286,12 +371,30 @@ impl PrimitiveBatchState for PosterBatchState {
     where
         Self: Sized,
     {
+        // Combine common helpers with the poster shader to allow shared utilities.
+        let shader_src = format!(
+            "{}\n{}",
+            include_str!("../../shaders/common.wgsl"),
+            include_str!("../../shaders/poster.wgsl")
+        );
+
         let shader = Arc::new(device.create_shader_module(
             wgpu::ShaderModuleDescriptor {
                 label: Some("Poster Shader (Batched)"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("../../shaders/poster.wgsl").into(),
-                ),
+                source: wgpu::ShaderSource::Wgsl(shader_src.into()),
+            },
+        ));
+
+        let shader_src_back = format!(
+            "{}\n{}",
+            include_str!("../../shaders/common.wgsl"),
+            include_str!("../../shaders/poster_back.wgsl")
+        );
+
+        let shader_back = Arc::new(device.create_shader_module(
+            wgpu::ShaderModuleDescriptor {
+                label: Some("Poster Back Shader (Batched)"),
+                source: wgpu::ShaderSource::Wgsl(shader_src_back.into()),
             },
         ));
 
@@ -343,10 +446,14 @@ impl PrimitiveBatchState for PosterBatchState {
 
         Self {
             pending_primitives: Vec::new(),
-            pending_instances: Vec::new(),
-            instance_manager: InstanceBufferManager::new(),
-            render_pipeline: None,
-            shader,
+            pending_instances_front: Vec::new(),
+            pending_instances_back: Vec::new(),
+            instance_manager_front: InstanceBufferManager::new(),
+            instance_manager_back: InstanceBufferManager::new(),
+            render_pipeline_front: None,
+            render_pipeline_back: None,
+            shader: shader.clone(),
+            shader_back,
             atlas_bind_group_layout: None,
             surface_format: format,
             globals_buffer: None,
@@ -356,22 +463,25 @@ impl PrimitiveBatchState for PosterBatchState {
             uploads_this_frame: 0,
             loaded_times: HashMap::new(),
             logged_layers: HashMap::new(),
-            groups: Vec::new(),
+            groups_front: Vec::new(),
+            groups_back: Vec::new(),
         }
     }
 
     fn add_instance(&mut self, instance: Self::InstanceData) {
-        self.pending_instances.push(instance);
+        self.pending_instances_front.push(instance);
     }
 
     fn prepare(&mut self, context: &mut PrepareContext<'_>) {
-        self.groups.clear();
+        self.groups_front.clear();
+        self.groups_back.clear();
 
         if let Some(image_cache) = context.resources.image_cache() {
             // Mutable access is required so cached lookups register cache hits
             // and keep atlas allocations alive across the renderer's trim pass.
             let atlas_layout = image_cache.texture_layout();
-            self.ensure_pipeline(context.device, atlas_layout.clone());
+            self.ensure_pipeline_front(context.device, atlas_layout.clone());
+            self.ensure_pipeline_back(context.device, atlas_layout.clone());
 
             // Keep track of the last atlas bind group we saw this frame so we can
             // reuse it when we draw placeholders for images that missed the budget.
@@ -427,8 +537,16 @@ impl PrimitiveBatchState for PosterBatchState {
                             pending.animated_bounds.as_ref(),
                             pending.progress,
                             pending.progress_color,
+                            pending.face,
                         );
-                        self.pending_instances.push(instance);
+                        match pending.face {
+                            PosterFace::Front => {
+                                self.pending_instances_front.push(instance)
+                            }
+                            PosterFace::Back => {
+                                self.pending_instances_back.push(instance)
+                            }
+                        }
 
                         let group_arc = match &last_group {
                             Some(group) => Arc::clone(group),
@@ -440,7 +558,7 @@ impl PrimitiveBatchState for PosterBatchState {
                             }
                         };
 
-                        self.push_group_instance(group_arc);
+                        self.push_group_instance(pending.face, group_arc);
 
                         continue;
                     }
@@ -470,8 +588,16 @@ impl PrimitiveBatchState for PosterBatchState {
                         pending.animated_bounds.as_ref(),
                         pending.progress,
                         pending.progress_color,
+                        pending.face,
                     );
-                    self.pending_instances.push(instance);
+                    match pending.face {
+                        PosterFace::Front => {
+                            self.pending_instances_front.push(instance)
+                        }
+                        PosterFace::Back => {
+                            self.pending_instances_back.push(instance)
+                        }
+                    }
 
                     let group_arc = match &last_group {
                         Some(group) => Arc::clone(group),
@@ -482,7 +608,7 @@ impl PrimitiveBatchState for PosterBatchState {
                         }
                     };
 
-                    self.push_group_instance(group_arc);
+                    self.push_group_instance(pending.face, group_arc);
                     continue;
                 };
 
@@ -550,6 +676,8 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.mouse_position,
                     pending.progress,
                     pending.progress_color,
+                    pending.rotation_override,
+                    pending.face,
                 );
 
                 // Track groups by atlas bind group. If none obtained yet, try to
@@ -577,10 +705,17 @@ impl PrimitiveBatchState for PosterBatchState {
                 };
 
                 // Append instance and update grouping for render segmentation
-                self.pending_instances.push(instance);
+                match pending.face {
+                    PosterFace::Front => {
+                        self.pending_instances_front.push(instance)
+                    }
+                    PosterFace::Back => {
+                        self.pending_instances_back.push(instance)
+                    }
+                }
 
                 last_group = Some(group_arc.clone());
-                self.push_group_instance(group_arc);
+                self.push_group_instance(pending.face, group_arc);
             }
         } else {
             if !self.pending_primitives.is_empty() {
@@ -595,26 +730,38 @@ impl PrimitiveBatchState for PosterBatchState {
             }
         }
 
-        for instance in self.pending_instances.drain(..) {
-            self.instance_manager.add_instance(instance);
+        for instance in self.pending_instances_front.drain(..) {
+            self.instance_manager_front.add_instance(instance);
+        }
+        for instance in self.pending_instances_back.drain(..) {
+            self.instance_manager_back.add_instance(instance);
         }
 
-        let pending_before_upload = self.instance_manager.pending_count();
-        let upload_result = self.instance_manager.upload(
+        let pending_before_upload_front = self.instance_manager_front.pending_count();
+        let upload_result_front = self.instance_manager_front.upload(
             context.device,
             context.encoder,
             context.belt,
         );
 
-        if upload_result.is_none() {
-            if pending_before_upload > 0 {
-                log::error!(
-                    "RoundedImageBatchState failed to upload {} pending instances",
-                    pending_before_upload
-                );
-            }
+        let pending_before_upload_back = self.instance_manager_back.pending_count();
+        let upload_result_back = self.instance_manager_back.upload(
+            context.device,
+            context.encoder,
+            context.belt,
+        );
 
-            return;
+        if upload_result_front.is_none() && pending_before_upload_front > 0 {
+            log::error!(
+                "PosterBatchState failed to upload {} pending front instances",
+                pending_before_upload_front
+            );
+        }
+        if upload_result_back.is_none() && pending_before_upload_back > 0 {
+            log::error!(
+                "PosterBatchState failed to upload {} pending back instances",
+                pending_before_upload_back
+            );
         }
 
         // Consider renderer present-time encode for non-sRGB surfaces
@@ -694,7 +841,72 @@ impl PrimitiveBatchState for PosterBatchState {
         context: &mut RenderContext<'_>,
         range: std::ops::Range<u32>,
     ) {
-        let instance_count = self.instance_manager.instance_count() as u32;
+        Self::render_face(
+            &self.instance_manager_front,
+            &self.groups_front,
+            self.render_pipeline_front.as_ref(),
+            self.globals_bind_group.as_ref(),
+            render_pass,
+            context,
+            range.clone(),
+        );
+
+        Self::render_face(
+            &self.instance_manager_back,
+            &self.groups_back,
+            self.render_pipeline_back.as_ref(),
+            self.globals_bind_group.as_ref(),
+            render_pass,
+            context,
+            range,
+        );
+    }
+
+    fn trim(&mut self) {
+        let pending = self.pending_primitives.len();
+
+        if pending > 0 {
+            log::warn!(
+                "RoundedImageBatchState::trim discarded {} pending primitives",
+                pending
+            );
+        }
+
+        self.instance_manager_front.clear();
+        self.instance_manager_back.clear();
+        self.pending_instances_front.clear();
+        self.pending_instances_back.clear();
+        self.pending_primitives.clear();
+        self.uploads_this_frame = 0;
+        self.groups_front.clear();
+        self.groups_back.clear();
+    }
+
+    fn instance_count(&self) -> usize {
+        let uploaded =
+            self.instance_manager_front.instance_count()
+                + self.instance_manager_back.instance_count();
+        let staged = self.instance_manager_front.pending_count()
+            + self.instance_manager_back.pending_count()
+            + self.pending_instances_front.len()
+            + self.pending_instances_back.len()
+            + self.pending_primitives.len();
+
+        uploaded + staged
+    }
+}
+
+impl PosterBatchState {
+    fn render_face(
+        manager: &InstanceBufferManager<PosterInstance>,
+        groups: &[PosterGroup],
+        pipeline: Option<&Arc<wgpu::RenderPipeline>>,
+        globals: Option<&wgpu::BindGroup>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        context: &mut RenderContext<'_>,
+        range: std::ops::Range<u32>,
+    ) {
+        let instance_count = manager.instance_count() as u32;
         if instance_count == 0 {
             return;
         }
@@ -705,13 +917,11 @@ impl PrimitiveBatchState for PosterBatchState {
             return;
         }
 
-        let (Some(instance_buffer), Some(globals_bind_group), Some(pipeline)) = (
-            self.instance_manager.buffer(),
-            self.globals_bind_group.as_ref(),
-            self.render_pipeline.as_ref(),
-        ) else {
+        let (Some(instance_buffer), Some(globals_bind_group), Some(pipeline)) =
+            (manager.buffer(), globals, pipeline)
+        else {
             log::error!(
-                "RoundedImageBatchState::render missing buffer/pipeline for {} instances",
+                "PosterBatchState::render missing buffer/pipeline for {} instances",
                 end - start
             );
             return;
@@ -729,9 +939,8 @@ impl PrimitiveBatchState for PosterBatchState {
         );
         render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
 
-        // Draw grouped by atlas bind group to ensure correct sampling
         let mut offset: u32 = 0;
-        for group in &self.groups {
+        for group in groups {
             let group_start = offset;
             let group_end = offset + group.instance_count;
 
@@ -748,31 +957,5 @@ impl PrimitiveBatchState for PosterBatchState {
                 break;
             }
         }
-    }
-
-    fn trim(&mut self) {
-        let pending = self.pending_primitives.len();
-
-        if pending > 0 {
-            log::warn!(
-                "RoundedImageBatchState::trim discarded {} pending primitives",
-                pending
-            );
-        }
-
-        self.instance_manager.clear();
-        self.pending_instances.clear();
-        self.pending_primitives.clear();
-        self.uploads_this_frame = 0;
-        self.groups.clear();
-    }
-
-    fn instance_count(&self) -> usize {
-        let uploaded = self.instance_manager.instance_count();
-        let staged = self.instance_manager.pending_count()
-            + self.pending_instances.len()
-            + self.pending_primitives.len();
-
-        uploaded + staged
     }
 }
