@@ -2,7 +2,7 @@
 # Useful for keeping in sync with multiple projects/worktrees
 # Uses the .env from it's containing folder
 
-set dotenv-path := "config/.env"
+set dotenv-path := ".env"
 set dotenv-override := true
 
 # Current date
@@ -39,55 +39,44 @@ clippy_player_file := 'logs/clippy/clippy_player_' + date + '.log'
 [no-cd]
 [no-exit-message]
 down:
-    #if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
+    #if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
     @docker stop -f ferrex_media_db ferrex_media_cache ferrex_media_server || true
     @docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server || true
-    @COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env down || true
+    @COMPOSE_PROJECT_NAME=ferrex docker compose --env-file .env down || true
     @docker network rm -f ferrex_default || true
 
 [no-cd]
 [no-exit-message]
 down-tailscale:
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
     # Remove containers up front to avoid Podman pod teardown issues and noisy errors.
     @docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server ferrex_tailscale >/dev/null 2>&1 || true
     # Compose down after hard removal to clean up network/resources; suppress output.
-    @COMPOSE_PROJECT_NAME=ferrex docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --env-file config/.env down >/dev/null 2>&1 || true
+    @COMPOSE_PROJECT_NAME=ferrex docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --env-file .env down >/dev/null 2>&1 || true
     # Best-effort project network cleanup.
     @docker network rm ferrex_default >/dev/null 2>&1 || true
 
 [no-cd]
 logs service="ferrex":
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
-    COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env logs -f {{ service }}
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
+    COMPOSE_PROJECT_NAME=ferrex docker compose --env-file .env logs -f {{ service }}
 
 # Override the default Serve mapping configured during stack startup.
 [no-cd]
 tailscale-serve target="http://127.0.0.1:3000":
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
-    COMPOSE_PROJECT_NAME=ferrex docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --env-file config/.env exec tailscale tailscale serve --bg {{ target }}
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
+    COMPOSE_PROJECT_NAME=ferrex docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --env-file .env exec tailscale tailscale serve --bg {{ target }}
 
 [no-cd]
 start *args:
     utils/stack-up.sh {{ args }}
-
-# Interactive config init (host-native by default).
-
-# Writes config/.env on the host via volume mounts.
-[no-cd]
-init-config args="" FERREX_INIT_SKIP_BUILD="0" FERREX_INIT_MODE="host":
-    FERREX_INIT_MODE={{ FERREX_INIT_MODE }} utils/init-config.sh {{ args }}
 
 [no-cd]
 config args="" FERREX_INIT_SKIP_BUILD="1" FERREX_INIT_MODE="host":
     FERREX_INIT_MODE={{ FERREX_INIT_MODE }} utils/init-config.sh {{ args }}
 
 [no-cd]
-config-tailnet from_dir="config" to_dir="config/tailnet" args="":
-    bash utils/make-tailnet-config.sh --from {{ from_dir }} --to {{ to_dir }} {{ args }}
-
-[no-cd]
-show-setup-token env_file="config/.env":
+show-setup-token env_file=".env":
     if [ ! -f {{ env_file }} ]; then \
         echo "Env missing: {{ env_file }}. Run: just init-config" >&2; \
         exit 1; \
@@ -102,44 +91,46 @@ rebuild-server profile="release" wild="1":
 # Validate configuration (will also sanity-check DB/Redis connectivity if present)
 [no-cd]
 check-config profile="release" args="" wild="1":
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
     docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server >/dev/null 2>&1 || true
-    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db cache
-    # Always build with the requested linker mode; BuildKit will reuse cache.
+    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file .env up -d db cache
     docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
     docker run --rm \
       --network ferrex_default \
-      --env-file "$PWD/config/.env" \
+      --env-file "$PWD/.env" \
+      -v "$PWD/.env":/app/.env:ro \
       -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
-      -v "$PWD/config":/app/config \
+      -e DATABASE_URL="${DATABASE_URL_CONTAINER:-postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST_CONTAINER:-db}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}}" \
       ferrex/server:local \
-      config check --env-file /app/config/.env {{ args }}
+      config check --env-file /app/.env {{ args }}
 
 [no-cd]
 db-preflight profile="release" args="" wild="1":
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
     docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server >/dev/null 2>&1 || true
-    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db
-    docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
+    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file .env up -d db
+    # docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
     docker run --rm \
       --network ferrex_default \
-      --env-file "$PWD/config/.env" \
+      --env-file "$PWD/.env" \
+      -v "$PWD/.env":/app/.env:ro \
       -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
-      -v "$PWD/config":/app/config \
+      -e DATABASE_URL="${DATABASE_URL_CONTAINER:-postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST_CONTAINER:-db}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}}" \
       ferrex/server:local \
       db preflight {{ args }}
 
 [no-cd]
 db-migrate profile="release" args="" wild="1":
-    if [ ! -f config/.env ]; then echo "Config missing: config/.env. Run: just init-config"; exit 1; fi
+    if [ ! -f .env ]; then echo "Config missing: .env. Run: just init-config"; exit 1; fi
     docker rm -f ferrex_media_db ferrex_media_cache ferrex_media_server >/dev/null 2>&1 || true
-    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file config/.env up -d db
+    FERREX_BUILD_PROFILE={{ profile }} COMPOSE_PROJECT_NAME=ferrex docker compose --env-file .env up -d db
     docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
     docker run --rm \
       --network ferrex_default \
-      --env-file "$PWD/config/.env" \
+      --env-file "$PWD/.env" \
+      -v "$PWD/.env":/app/.env:ro \
       -e DATABASE_HOST="${DATABASE_HOST_CONTAINER:-db}" \
-      -v "$PWD/config":/app/config \
+      -e DATABASE_URL="${DATABASE_URL_CONTAINER:-postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST_CONTAINER:-db}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}}" \
       ferrex/server:local \
       db migrate {{ args }}
 
@@ -386,16 +377,16 @@ run-server-demo:
 # sqlx
 [no-cd]
 prepare $SQLX_OFFLINE="false":
-    cargo sqlx prepare --workspace -- --all-features --all-targets
+    DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx prepare --workspace -- --all-features --all-targets
 
 [confirm]
 [no-cd]
 migrate:
-    cd ferrex-core && cargo sqlx migrate run
+    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx migrate run
 
 [no-cd]
 reset:
-    cd ferrex-core && cargo sqlx database reset
+    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx database reset
 
 # Git
 [no-cd]

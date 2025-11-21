@@ -2,7 +2,6 @@
 .cargo/*
 !.cargo/audit.toml
 target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
 

@@ -362,7 +362,7 @@ impl PostgresDatabase {
             })?
         };
 
-        if let Ok(db_name) = std::env::var("PGDATABASE")
+        if let Ok(db_name) = std::env::var("DATABASE_NAME")
             && !db_name.is_empty()
         {
             options = options.database(&db_name);

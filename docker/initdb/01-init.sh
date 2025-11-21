@@ -5,26 +5,29 @@ log() {
   printf '[initdb] %s\n' "$*"
 }
 
-: "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${FERREX_DB:?FERREX_DB is required}"
-: "${FERREX_APP_USER:?FERREX_APP_USER is required}"
-if [ -z "${FERREX_APP_PASSWORD:-}" ] && [ -n "${FERREX_APP_PASSWORD_FILE:-}" ]; then
-  if [ -r "$FERREX_APP_PASSWORD_FILE" ]; then
-    FERREX_APP_PASSWORD="$(<"$FERREX_APP_PASSWORD_FILE")"
+: "${DATABASE_ADMIN_USER:?DATABASE_ADMIN_USER is required}"
+: "${DATABASE_NAME:?DATABASE_NAME is required}"
+: "${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}"
+: "${DATABASE_APP_USER:?DATABASE_APP_USER is required}"
+# psql will read PGPASSWORD when provided; keeps scripts non-interactive.
+export PGPASSWORD="$DATABASE_ADMIN_PASSWORD"
+if [ -z "${DATABASE_APP_PASSWORD:-}" ] && [ -n "${DATABASE_APP_PASSWORD_FILE:-}" ]; then
+  if [ -r "$DATABASE_APP_PASSWORD_FILE" ]; then
+    DATABASE_APP_PASSWORD="$(<"$DATABASE_APP_PASSWORD_FILE")"
   else
-    log "Warning: FERREX_APP_PASSWORD_FILE '$FERREX_APP_PASSWORD_FILE' not readable"
+    log "Warning: DATABASE_APP_PASSWORD_FILE '$DATABASE_APP_PASSWORD_FILE' not readable"
   fi
 fi
-: "${FERREX_APP_PASSWORD:?FERREX_APP_PASSWORD or FERREX_APP_PASSWORD_FILE is required}"
+: "${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD or DATABASE_APP_PASSWORD_FILE is required}"
 
-log "Configuring application role '${FERREX_APP_USER}' for database '${FERREX_DB}'."
+log "Configuring application role '${DATABASE_APP_USER}' for database '${DATABASE_NAME}'."
 
 psql \
-  --username "$POSTGRES_USER" \
-  --dbname "${POSTGRES_DB:-postgres}" \
-  --set=app_user="$FERREX_APP_USER" \
-  --set=app_password="$FERREX_APP_PASSWORD" \
-  --set=app_database="$FERREX_DB" <<'SQL'
+  --username "$DATABASE_ADMIN_USER" \
+  --dbname "${DATABASE_NAME:-ferrex}" \
+  --set=app_user="$DATABASE_APP_USER" \
+  --set=app_password="$DATABASE_APP_PASSWORD" \
+  --set=app_database="$DATABASE_NAME" <<'SQL'
 \set ON_ERROR_STOP on
 \set schema_name 'public'
 SET client_min_messages TO WARNING;
@@ -81,9 +84,9 @@ $q$, :'app_database', :'app_user')\gexec
 SQL
 
 psql \
-  --username "$POSTGRES_USER" \
-  --dbname "$FERREX_DB" \
-  --set=app_user="$FERREX_APP_USER" <<'SQL'
+  --username "$DATABASE_ADMIN_USER" \
+  --dbname "$DATABASE_NAME" \
+  --set=app_user="$DATABASE_APP_USER" <<'SQL'
 \set ON_ERROR_STOP on
 \set schema_name 'public'
 SET client_min_messages TO WARNING;

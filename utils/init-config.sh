@@ -34,9 +34,9 @@ relative_to_root() {
   esac
 }
 
-CONFIG_DIR_INPUT="${FERREX_CONFIG_DIR:-$ROOT_DIR/config}"
-CONFIG_DIR="$(resolve_path "$CONFIG_DIR_INPUT")"
-ENV_FILE="$CONFIG_DIR/.env"
+ENV_FILE_INPUT="${FERREX_ENV_FILE:-$ROOT_DIR/.env}"
+ENV_FILE="$(resolve_path "$ENV_FILE_INPUT")"
+ENV_DIR="$(dirname "$ENV_FILE")"
 ENV_FILE_DISPLAY="$(relative_to_root "$ENV_FILE")"
 IMAGE="${FERREX_INIT_IMAGE:-ferrex/server:local}"
 DOCKERFILE="${FERREX_INIT_DOCKERFILE:-docker/Dockerfile.prod}"
@@ -93,8 +93,13 @@ fi
 
 RUN_AS_USER="${FERREX_INIT_RUN_AS_USER:-$(id -u):$(id -g)}"
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$ENV_DIR"
 touch "$ENV_FILE"
+
+# Seed a readable template with section banners when creating the file for the first time.
+if [ ! -s "$ENV_FILE" ] && [ -f "$ROOT_DIR/.env.example" ]; then
+  cp "$ROOT_DIR/.env.example" "$ENV_FILE"
+fi
 
 if [ "$FERREX_INIT_MODE" = "docker" ]; then
   if [ "${FERREX_INIT_SKIP_BUILD:-0}" = "1" ]; then
@@ -105,7 +110,7 @@ if [ "$FERREX_INIT_MODE" = "docker" ]; then
   fi
 fi
 
-echo "Preparing configuration environment at $CONFIG_DIR"
+echo "Preparing environment file at $ENV_FILE_DISPLAY"
 
 if [ -s "$ENV_FILE" ]; then
   set -a
@@ -208,6 +213,9 @@ prompt_password() {
   local var_name="$1"
   local label="$2"
   local current="${!var_name:-}"
+  case "$current" in
+    changeme_*) current="" ;;
+  esac
   local new_pwd=""
   local confirm_pwd=""
   local non_interactive="${FERREX_INIT_NON_INTERACTIVE:-0}"
@@ -305,17 +313,20 @@ maybe_prompt_database_reset() {
   fi
 }
 
-POSTGRES_USER=${POSTGRES_USER:-postgres}
+DATABASE_ADMIN_USER=${DATABASE_ADMIN_USER:-postgres}
 POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:-"--auth-host=scram-sha-256 --auth-local=scram-sha-256"}
 MEDIA_ROOT=${MEDIA_ROOT:-/media}
 SERVER_HOST=${SERVER_HOST:-0.0.0.0}
 SERVER_PORT=${SERVER_PORT:-3000}
 
 # Canonical DB vars
-DATABASE_NAME=${DATABASE_NAME:-${FERREX_DB:-ferrex}}
-DATABASE_USER=${DATABASE_USER:-${FERREX_APP_USER:-ferrex_app}}
+DATABASE_NAME=${DATABASE_NAME:-ferrex}
+DATABASE_APP_USER=${DATABASE_APP_USER:-ferrex_app}
 DATABASE_HOST=${DATABASE_HOST:-localhost}
 DATABASE_PORT=${DATABASE_PORT:-5432}
+
+# Redis defaults
+REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379}
 
 # Container override vars
 if [ "${FERREX_INIT_TAILSCALE:-0}" = "1" ]; then
@@ -326,36 +337,40 @@ else
   REDIS_URL_CONTAINER=${REDIS_URL_CONTAINER:-redis://cache:6379}
 fi
 
-# Redis defaults
-REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379}
 FERREX_SERVER_URL_DEFAULT="http://localhost:${SERVER_PORT}"
 SERVER_HOST_INITIAL="$SERVER_HOST"
 
-set_env_var FERREX_CONFIG_DIR "$CONFIG_DIR"
-set_env_var POSTGRES_USER "$POSTGRES_USER"
-set_env_var POSTGRES_INITDB_ARGS "$POSTGRES_INITDB_ARGS"
 set_env_var MEDIA_ROOT "$MEDIA_ROOT"
+
 set_env_var SERVER_HOST "$SERVER_HOST"
 set_env_var SERVER_PORT "$SERVER_PORT"
+
 set_env_var FERREX_SERVER_URL "$FERREX_SERVER_URL_DEFAULT"
+
 set_env_var REDIS_URL "$REDIS_URL"
 set_env_var REDIS_URL_CONTAINER "$REDIS_URL_CONTAINER"
+
 set_env_var DATABASE_HOST "$DATABASE_HOST"
+set_env_var DATABASE_HOST_CONTAINER "$DATABASE_HOST_CONTAINER"
 set_env_var DATABASE_PORT "$DATABASE_PORT"
 set_env_var DATABASE_NAME "$DATABASE_NAME"
-set_env_var DATABASE_USER "$DATABASE_USER"
-set_env_var DATABASE_HOST_CONTAINER "$DATABASE_HOST_CONTAINER"
 
-prompt_password POSTGRES_PASSWORD "Postgres superuser"
-prompt_password DATABASE_PASSWORD "Application database"
+set_env_var DATABASE_ADMIN_USER "$DATABASE_ADMIN_USER"
+prompt_password DATABASE_ADMIN_PASSWORD "Postgres superuser"
+set_env_var DATABASE_ADMIN_PASSWORD "$DATABASE_ADMIN_PASSWORD"
 
-set_env_var POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
-set_env_var DATABASE_PASSWORD "$DATABASE_PASSWORD"
-set_env_var FERREX_APP_PASSWORD "$DATABASE_PASSWORD"
+set_env_var DATABASE_APP_USER "$DATABASE_APP_USER"
+prompt_password DATABASE_APP_PASSWORD "Application database"
+set_env_var DATABASE_APP_PASSWORD "$DATABASE_APP_PASSWORD"
 
-DATABASE_URL_HOST="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
-DATABASE_URL_CONTAINER="postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST_CONTAINER}:${DATABASE_PORT}/${DATABASE_NAME}"
+set_env_var POSTGRES_INITDB_ARGS "$POSTGRES_INITDB_ARGS"
+
+DATABASE_URL_HOST="postgresql://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+DATABASE_URL_ADMIN="postgresql://${DATABASE_ADMIN_USER}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}"
+DATABASE_URL_CONTAINER="postgresql://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@${DATABASE_HOST_CONTAINER}:${DATABASE_PORT}/${DATABASE_NAME}"
 set_env_var DATABASE_URL "$DATABASE_URL_HOST"
+set_env_var DATABASE_URL_ADMIN "$DATABASE_URL_ADMIN"
+set_env_var DATABASE_URL_CONTAINER "$DATABASE_URL_CONTAINER"
 
 # Provide hints for the server-side generator
 export FERREX_CONFIG_INIT_DATABASE_URL="$DATABASE_URL_CONTAINER"
@@ -363,33 +378,62 @@ export FERREX_CONFIG_INIT_HOST_DATABASE_URL="$DATABASE_URL_HOST"
 export FERREX_CONFIG_INIT_REDIS_URL="$REDIS_URL_CONTAINER"
 export FERREX_CONFIG_INIT_HOST_REDIS_URL="$REDIS_URL"
 
-unset DATABASE_PASSWORD
-unset POSTGRES_PASSWORD
+unset DATABASE_APP_PASSWORD
+unset DATABASE_ADMIN_PASSWORD
 
 SHOULD_RUN_WIZARD=true
-FORCE_FLAG=""
-if [ -f "$ENV_FILE" ]; then
-  if [ "${FERREX_INIT_FORCE_CONFIG:-0}" = "1" ]; then
-    FORCE_FLAG="--force"
+is_placeholder_env() {
+  local file="$1"
+  [[ ! -s "$file" ]] && return 0
+  if grep -Eq 'changeme_|/change/me' "$file" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+if [ -f "$ENV_FILE" ] && [ -s "$ENV_FILE" ]; then
+  if is_placeholder_env "$ENV_FILE"; then
+    SHOULD_RUN_WIZARD=true
+  elif [ "${FERREX_INIT_FORCE_CONFIG:-0}" = "1" ]; then
+    SHOULD_RUN_WIZARD=true
   elif [ "${FERREX_INIT_NON_INTERACTIVE:-0}" = "1" ]; then
     SHOULD_RUN_WIZARD=false
   else
     local_resp=""
-    read -r -p "$ENV_FILE_DISPLAY already exists. Re-run interactive wizard to overwrite/update it? [y/N] " local_resp || true
+    read -r -p "$ENV_FILE_DISPLAY already exists. Re-run configuration prompts to refresh it? [y/N] " local_resp || true
     local_resp=${local_resp:-n}
     if [[ ! "$local_resp" =~ ^[Yy]$ ]]; then
       SHOULD_RUN_WIZARD=false
-    else
-      FORCE_FLAG="--force"
     fi
   fi
 fi
 
+ADVANCED_FLAG=""
+ADVANCED_CHOICE="${FERREX_INIT_ADVANCED_CONFIG:-}"
+if [ -z "$ADVANCED_CHOICE" ]; then
+  if [ "${FERREX_INIT_NON_INTERACTIVE:-0}" = "1" ]; then
+    ADVANCED_CHOICE=0
+  else
+    resp=""
+    read -r -p "Run advanced configuration (TLS, CORS, HSTS, proxy headers)? [y/N] " resp || true
+    resp=${resp:-n}
+    if [[ "$resp" =~ ^[Yy]$ ]]; then
+      ADVANCED_CHOICE=1
+    else
+      ADVANCED_CHOICE=0
+    fi
+  fi
+fi
+
+if [ "$ADVANCED_CHOICE" = "1" ]; then
+  ADVANCED_FLAG="--advanced"
+fi
+
 if [ "$SHOULD_RUN_WIZARD" = true ]; then
-  ENV_TMP="$CONFIG_DIR/.env.generated"
+  ENV_TMP="$ENV_DIR/.env.generated"
   rm -f "$ENV_TMP"
 
-  if [ "$FORCE_FLAG" = "--force" ]; then
+  if [ "${FERREX_INIT_FORCE_DB_RESET:-0}" = "1" ]; then
     maybe_prompt_database_reset
   fi
 
@@ -408,13 +452,13 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
     docker run --rm "${DOCKER_TTY_ARGS[@]}" \
       --user "$RUN_AS_USER" \
       --entrypoint /usr/local/bin/ferrex-server \
-      -v "$CONFIG_DIR":/app/config"${DETECTED_MOUNT_SUFFIX}" \
+      -v "$ENV_DIR":/app/env"${DETECTED_MOUNT_SUFFIX}" \
       -e FERREX_CONFIG_INIT_DATABASE_URL="$FERREX_CONFIG_INIT_DATABASE_URL" \
       -e FERREX_CONFIG_INIT_HOST_DATABASE_URL="$FERREX_CONFIG_INIT_HOST_DATABASE_URL" \
       -e FERREX_CONFIG_INIT_REDIS_URL="$FERREX_CONFIG_INIT_REDIS_URL" \
       -e FERREX_CONFIG_INIT_HOST_REDIS_URL="$FERREX_CONFIG_INIT_HOST_REDIS_URL" \
       "$IMAGE" \
-      config init --env-path /app/config/.env.generated $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
+      config init --env-path /app/env/.env $ADVANCED_FLAG $NON_INTERACTIVE_FLAG "$@" > "$ENV_TMP"
   else
     if ! command -v cargo >/dev/null 2>&1; then
       echo "Error: cargo is required for host-native init (install Rust toolchain) or set FERREX_INIT_MODE=docker." >&2
@@ -423,12 +467,13 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
     echo "Running ferrex-server config init natively on host..."
     # Use explicit manifest path to avoid CWD assumptions.
     env \
+      SQLX_OFFLINE="${SQLX_OFFLINE:-1}" \
       FERREX_CONFIG_INIT_DATABASE_URL="$FERREX_CONFIG_INIT_DATABASE_URL" \
       FERREX_CONFIG_INIT_HOST_DATABASE_URL="$FERREX_CONFIG_INIT_HOST_DATABASE_URL" \
       FERREX_CONFIG_INIT_REDIS_URL="$FERREX_CONFIG_INIT_REDIS_URL" \
       FERREX_CONFIG_INIT_HOST_REDIS_URL="$FERREX_CONFIG_INIT_HOST_REDIS_URL" \
       cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p ferrex-server -- \
-        config init --env-path "$ENV_TMP" $FORCE_FLAG $NON_INTERACTIVE_FLAG "$@"
+        config init --env-path "$ENV_FILE" $ADVANCED_FLAG $NON_INTERACTIVE_FLAG "$@" > "$ENV_TMP"
   fi
 
   if [ -f "$ENV_TMP" ]; then
@@ -473,14 +518,6 @@ if [ "$SHOULD_RUN_WIZARD" = true ]; then
   fi
 
   echo "Configuration wizard complete."
-
-  # Use values we just wrote to env to compute server URL
-  SERVER_PORT_ACTUAL="$SERVER_PORT"
-  if [ "${ENFORCE_HTTPS:-false}" = "true" ]; then
-    set_env_var FERREX_SERVER_URL "https://localhost:${SERVER_PORT_ACTUAL}"
-  else
-    set_env_var FERREX_SERVER_URL "http://localhost:${SERVER_PORT_ACTUAL}"
-  fi
 else
   echo "Skipping config wizard; existing $ENV_FILE_DISPLAY preserved."
 fi
@@ -497,10 +534,9 @@ fi
 cat <<'EOF'
 
 Next steps:
-  - Run `just start` for a local stack or `just start --mode tailscale` to include the Tailnet sidecar. Add `--config-dir ...` to target an alternate configuration directory.
+  - Run `just start` for a local stack or `just start --mode tailscale` to include the Tailnet sidecar. Use `--env-file ...` if you keep a separate .env for a variant.
   - Run `just rebuild-server` if you have updated the server sources since the last build.
   - Use `just tailscale-serve` after the tailnet stack is running to enable HTTPS proxying.
   - Use `just check-config` to validate connectivity when needed.
-  - Update `FERREX_SERVER_URL` in "$ENV_FILE_DISPLAY" if your Tailnet hostname differs from localhost.
   - The server binds to 0.0.0.0 by default so containers and Tailnet access stay reachable; change SERVER_HOST to 127.0.0.1 if you explicitly want localhost-only.
 EOF

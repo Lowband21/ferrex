@@ -47,48 +47,30 @@ impl ConfigLoader {
     pub fn load(&self) -> Result<ConfigLoad, ConfigLoadError> {
         // Load .env with the following precedence:
         // 1) Explicit file path provided via options.env_file
-        // 2) $FERREX_CONFIG_DIR/.env when FERREX_CONFIG_DIR is set
-        // 3) Default dotenv discovery from current working directory
-        let env_file_loaded = match (
-            &self.options.env_file,
-            std::env::var("FERREX_CONFIG_DIR"),
-        ) {
-            // Explicit .env path
-            (Some(path), _) => dotenvy::from_path(path).map(|_| true).or_else(
-                |err| match err {
-                    dotenvy::Error::Io(_) => Ok(false),
-                    _ => Err(err),
-                },
-            )?,
-            // Config directory provided via environment; resolve to <dir>/.env
-            (None, Ok(dir)) => {
-                let candidate = {
-                    let p = Path::new(&dir);
-                    // If the provided path is a directory (or does not exist yet but looks like a dir),
-                    // look for a .env inside it. Otherwise, assume the path is already a file.
-                    if p.is_dir() {
-                        p.join(".env")
-                    } else {
-                        p.to_path_buf()
-                    }
-                };
-                dotenvy::from_path(&candidate)
-                    .map(|_| true)
-                    .or_else(|err| match err {
-                        dotenvy::Error::Io(e) => {
-                            error!("{}", e);
-                            Ok(false)
-                        }
-                        _ => Err(err),
-                    })?
-            }
-            // Fallback: dotenv discovery from CWD
-            (None, Err(_)) => {
-                dotenvy::dotenv().map(|_| true).or_else(|err| match err {
+        // 2) Path from $FERREX_ENV_FILE
+        // 3) Default dotenv discovery from the current working directory
+        let env_file_loaded = if let Some(path) = &self.options.env_file {
+            dotenvy::from_path(path)
+                .map(|_| true)
+                .or_else(|err| match err {
                     dotenvy::Error::Io(_) => Ok(false),
                     _ => Err(err),
                 })?
-            }
+        } else if let Ok(path) = std::env::var("FERREX_ENV_FILE") {
+            dotenvy::from_path(Path::new(&path)).map(|_| true).or_else(
+                |err| match err {
+                    dotenvy::Error::Io(e) => {
+                        error!("{}", e);
+                        Ok(false)
+                    }
+                    _ => Err(err),
+                },
+            )?
+        } else {
+            dotenvy::dotenv().map(|_| true).or_else(|err| match err {
+                dotenvy::Error::Io(_) => Ok(false),
+                _ => Err(err),
+            })?
         };
 
         let env_config = EnvConfig::gather();

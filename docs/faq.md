@@ -18,11 +18,11 @@ The player communicates with mpv via IPC (Unix) or a named pipe (Windows) and ke
 
 ## What’s the default server port?
 
-`3000` (HTTP). Configure via `FERREX_BIND` in `config/.env`. See `docs/configuration.md` for more.
+`3000` (HTTP). Configure via `SERVER_PORT` (and `SERVER_HOST`) in `.env`. See `docs/configuration.md` for more.
 
 ## Where do I configure environment variables?
 
-`config/.env`. Generate or refresh it with `just config` or `just start`. A reference lives at `config/.env.example`.
+`.env`. Generate or refresh it with `just config` or `just start`. A reference lives at `.env.example`.
 
 ## How do I adjust server logging verbosity?
 
@@ -32,7 +32,7 @@ Use `--rust-log` when starting the stack, e.g.:
 just start --rust-log 'sqlx=trace,ferrex=debug'
 ```
 
-Or set `RUST_LOG` in `config/.env`.
+Or set `RUST_LOG` in `.env`.
 
 ## Is there a quick way to try Ferrex without real media?
 

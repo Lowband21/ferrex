@@ -252,6 +252,12 @@ iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "i
 iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
 
+[patch."https://github.com/Lowband21/iced-ferrix.git"]
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
+iced_core = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_core" }
+iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_widget" }
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
+
 # [patch.crates-io]
 # iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
 # iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
@@ -277,7 +283,7 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "i
 # [patch."https://github.com/Lowband21/iced_aw_ferrex.git"]
 # iced_aw = { path = "../../fxecodev/iced_aw" }
 
-# [patch."https://github.com/Lowband21/subwave.git"]
-# subwave_unified = { path = "../../fxeco/subwave/subwave_unified" }
-# subwave_core = { path = "../../fxeco/subwave/subwave_core" }
-# subwave_wayland = { path = "../../fxeco/subwave/subwave_wayland" }
+[patch."https://github.com/Lowband21/subwave.git"]
+subwave_unified = { path = "../fxeco/subwave/subwave_unified" }
+subwave_core = { path = "../fxeco/subwave/subwave_core" }
+subwave_wayland = { path = "../fxeco/subwave/subwave_wayland" }

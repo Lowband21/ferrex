@@ -91,9 +91,9 @@ just start
 just run-player-release
 ```
 
-This bootstraps configuration, generates strong Postgres credentials into `config/.env`, and launches Postgres, Redis, and the Ferrex server. Keep `config/.env` backed up—it contains generated passwords.
+This bootstraps configuration, generates strong Postgres credentials into `.env` in the project root, and launches Postgres, Redis, and the Ferrex server. Keep `.env` backed up—it contains generated passwords.
 
-More options (profiles, logging, Tailscale, alternate config dirs): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
+More options (profiles, logging, Tailscale, alternate env files): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
 
 ## Platform Support
 
@@ -127,7 +127,7 @@ See [Architecture](docs/architecture.md) for the diagram and component responsib
 
 ## Configuration
 
-See [Configuration](docs/configuration.md) for options and workflows, and [`config/.env.example`](config/.env.example) for the authoritative reference of environment variables.
+See [Configuration](docs/configuration.md) for options and workflows, and [`.env.example`](.env.example) for the authoritative reference of environment variables.
 
 
 

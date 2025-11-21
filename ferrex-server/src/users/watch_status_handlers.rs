@@ -3,13 +3,15 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
+use ferrex_core::types::watch::{
+    NextEpisode, SeasonWatchStatus, SeriesWatchStatus,
+};
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::user::User,
     domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
     types::MediaType,
 };
-use ferrex_core::types::watch::{SeasonWatchStatus, SeriesWatchStatus, NextEpisode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

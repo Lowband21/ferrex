@@ -3,21 +3,22 @@
 This guide explains how Ferrex is configured for local development and self‑hosting. It complements the quickstart in the README and the reference `.env.example`.
 
 ## Where Configuration Lives
-- Generated environment file: `config/.env` (created by `just start` or `just config`).
-- Example reference: `config/.env.example` (kept in repo).
+- Generated environment file: `.env` in the project root (created by `just start` or `just config`).
+- Example reference: `.env.example` (kept in repo).
 - Derived assets and caches: `cache/`
 - Optional demo seed data: `demo/` (when using demo mode)
 
-Back up `config/.env` if you keep long‑lived credentials. The generator creates strong Postgres/Redis passwords.
+Back up `.env` if you keep long‑lived credentials. The generator creates strong Postgres/Redis passwords.
 
 ## Core Environment Variables
 
-These are the most commonly used variables. See `config/.env.example` for the authoritative list.
+These are the most commonly used variables. See `.env.example` for the authoritative list.
 
 - `TMDB_API_KEY` – Required for metadata lookups.
-- `FERREX_BIND` – Server bind address, e.g. `0.0.0.0:3000` (default HTTP port is 3000).
-- `DATABASE_URL` – Postgres connection URL.
-- `REDIS_URL` – Redis connection URL.
+- `SERVER_HOST` / `SERVER_PORT` – Bind address and port (defaults: `0.0.0.0` / `3000`).
+- `FERREX_SERVER_URL` – The URL clients use to reach the server (e.g., `http://localhost:3000`).
+- `DATABASE_URL` – Postgres connection URL (host/local use) plus `DATABASE_URL_CONTAINER` for in-container commands.
+- `REDIS_URL` – Redis connection URL (plus `REDIS_URL_CONTAINER` for in-container access).
 - `RUST_LOG` – Server logging filter, e.g. `sqlx=trace,ferrex=debug`.
 - `FERREX_MPV_PATH` – Optional override for mpv path on Windows if auto‑detection fails.
 - TLS options – Paths can be provided via env (if you terminate TLS at the app). If you use a reverse proxy, terminate TLS there instead.
@@ -48,25 +49,15 @@ Ferrex defines useful build profiles for faster iteration and improved runtime p
 
 The `ferrex-player` benefits noticeably from optimization.
 
-## Tailscale Sidecar and Alternate Config Dirs
+## Tailscale Sidecar (single env file)
 
-Run the stack with a Tailscale sidecar:
+Run the stack with the Tailscale sidecar; no extra `.env` is required:
 
 ```bash
 just start --mode tailscale
 ```
 
-Use a separate Tailnet config directory and switch modes:
-
-```bash
-just config-tailnet from_dir="config" to_dir="config/tailnet"
-just start --mode tailscale --config-dir config/tailnet
-```
-
-Conventions:
-- Local mode uses `config/` (DB host `db` inside the Compose network).
-- Tailnet mode uses `config/tailnet/` (DB host `127.0.0.1`).
-- To use a different configuration directory entirely: `just start --config-dir config/prod`.
+`just start --mode tailscale` automatically overrides the container endpoints to `127.0.0.1` for Postgres and Redis inside the shared Tailnet namespace while keeping your base `.env` intact.
 
 ## Logging
 
@@ -76,7 +67,7 @@ Control server verbosity via `--rust-log`:
 just start --rust-log 'sqlx=trace,ferrex=debug'
 ```
 
-Alternatively, set `RUST_LOG` directly in `config/.env`.
+Alternatively, set `RUST_LOG` directly in `.env`.
 
 ## Demo Mode (Optional)
 

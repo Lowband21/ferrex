@@ -13,13 +13,15 @@ Usage: stack-up.sh [options] [-- <config-init-args>...]
 Options:
   --mode <local|tailscale>      Stack mode to launch (default: local)
   --profile <cargo-profile>     Cargo build profile for server image (default: release)
-  --config-dir <path>           Host directory for config artifacts (default: ./config)
+  --env-file <path>             Path to the .env file to load (default: ./.env)
   --rust-log <level(s)>         Override RUST_LOG for the runtime containers (default: leave unchanged)
   --wild                        Force-enable the wild linker (default: enabled)
   --no-wild                     Disable the wild linker (overrides default)
   --clean                       Remove existing stack containers before starting
-  --interactive                 Run init-config prompts interactively (default: non-interactive)
-  --force-init                  Force re-running the config wizard (implies --interactive unless overridden)
+  --advanced                    Enable advanced configuration prompts on first run
+  --no-advanced                 Skip advanced prompts (use defaults)
+  --non-interactive             Suppress all prompts (for CI/automation)
+  --force-init                  Force re-running the config wizard
   --reset-db                    Force a database volume reset before reinitialising
   -h, --help                    Show this message and exit
 
@@ -30,8 +32,9 @@ EOF
 
 MODE="local"
 PROFILE="${FERREX_BUILD_PROFILE:-release}"
-CONFIG_DIR_OVERRIDE=""
-INTERACTIVE=0
+ENV_FILE_OVERRIDE=""
+INIT_NON_INTERACTIVE=0
+ADVANCED_CONFIG=""
 FORCE_INIT=0
 FORCE_DB_RESET=0
 CLEAN=0
@@ -51,9 +54,9 @@ while [[ $# -gt 0 ]]; do
       PROFILE="$2"
       shift 2
       ;;
-    --config-dir)
-      [[ $# -ge 2 ]] || { echo "Missing value for --config-dir" >&2; usage; exit 1; }
-      CONFIG_DIR_OVERRIDE="$2"
+    --env-file)
+      [[ $# -ge 2 ]] || { echo "Missing value for --env-file" >&2; usage; exit 1; }
+      ENV_FILE_OVERRIDE="$2"
       shift 2
       ;;
     --rust-log)
@@ -73,8 +76,16 @@ while [[ $# -gt 0 ]]; do
       ENABLE_WILD=0
       shift
       ;;
-    --interactive)
-      INTERACTIVE=1
+    --advanced)
+      ADVANCED_CONFIG=1
+      shift
+      ;;
+    --no-advanced)
+      ADVANCED_CONFIG=0
+      shift
+      ;;
+    --non-interactive)
+      INIT_NON_INTERACTIVE=1
       shift
       ;;
     --force-init)
@@ -125,20 +136,43 @@ PY
   fi
 }
 
-CONFIG_DIR_RAW="${CONFIG_DIR_OVERRIDE:-$ROOT_DIR/config}"
-CONFIG_DIR="$(resolve_path "$CONFIG_DIR_RAW")"
-ENV_FILE="$CONFIG_DIR/.env"
+ENV_FILE_RAW="${ENV_FILE_OVERRIDE:-$ROOT_DIR/.env}"
+ENV_FILE="$(resolve_path "$ENV_FILE_RAW")"
+ENV_DIR="$(dirname "$ENV_FILE")"
+mkdir -p "$ENV_DIR"
 
-mkdir -p "$CONFIG_DIR"
+# Derive a stable compose project name from the env file location so that
+# config bootstrap and runtime stack use the same Docker resources (volumes,
+# networks, etc.).
+env_parent="$(basename "$ENV_DIR")"
+env_slug="$(printf '%s' "${env_parent:-env}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+if [[ -z "$env_slug" || "$env_slug" = "env" || "$env_slug" = "." ]]; then
+  project_name="ferrex"
+else
+  project_name="ferrex-${env_slug}"
+fi
+export COMPOSE_PROJECT_NAME="$project_name"
+
+env_is_placeholder() {
+  local file="$1"
+  [[ ! -s "$file" ]] && return 0
+  if grep -Eq 'changeme_|/change/me' "$file" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
 
 run_bootstrap() {
   local include_force="${1:-0}"
   local env_vars=(
-    "FERREX_CONFIG_DIR=$CONFIG_DIR"
+    "FERREX_ENV_FILE=$ENV_FILE"
     "FERREX_INIT_NON_INTERACTIVE=$INIT_NON_INTERACTIVE"
     "FERREX_ENABLE_WILD=$ENABLE_WILD"
     "FERREX_INIT_MODE=${FERREX_INIT_MODE:-host}"
   )
+  if [[ -n "$ADVANCED_CONFIG" ]]; then
+    env_vars+=("FERREX_INIT_ADVANCED_CONFIG=$ADVANCED_CONFIG")
+  fi
   if [[ "$MODE" = "tailscale" ]]; then
     env_vars+=("FERREX_INIT_TAILSCALE=1")
   fi
@@ -163,14 +197,9 @@ force_init_needed() {
   [[ "$FORCE_INIT" -eq 1 ]] && return 0
   [[ "$FORCE_DB_RESET" -eq 1 ]] && return 0
   [[ ! -s "$ENV_FILE" ]] && return 0
+  env_is_placeholder "$ENV_FILE" && return 0
   return 1
 }
-
-if [[ "$INTERACTIVE" -eq 1 ]]; then
-  INIT_NON_INTERACTIVE=0
-else
-  INIT_NON_INTERACTIVE=1
-fi
 
 export FERREX_ENABLE_WILD="$ENABLE_WILD"
 
@@ -188,21 +217,13 @@ set -a
 source "$ENV_FILE"
 set +a
 
-export FERREX_CONFIG_DIR="${FERREX_CONFIG_DIR:-$CONFIG_DIR}"
 export FERREX_ENV_FILE="$ENV_FILE"
 
-config_basename="$(basename "$FERREX_CONFIG_DIR")"
-config_slug="$(printf '%s' "$config_basename" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
-if [[ -z "$config_slug" ]]; then
-  config_slug="default"
+if [[ "$MODE" = "tailscale" ]]; then
+  export DATABASE_HOST_CONTAINER="127.0.0.1"
+  export DATABASE_URL_CONTAINER="postgresql://${DATABASE_APP_USER:-ferrex_app}:${DATABASE_APP_PASSWORD}@127.0.0.1:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}"
+  export REDIS_URL_CONTAINER="redis://127.0.0.1:6379"
 fi
-if [[ "$config_slug" = "config" ]]; then
-  project_name="ferrex"
-else
-  project_name="ferrex-${config_slug}"
-fi
-export COMPOSE_PROJECT_NAME="$project_name"
-
 
 export FERREX_BUILD_PROFILE="$PROFILE"
 
@@ -235,7 +256,7 @@ if [[ -n "$RUST_LOG_VALUE" ]]; then
   export RUST_LOG="$RUST_LOG_VALUE"
 fi
 
-echo "Bringing up stack (mode=$MODE, profile=$PROFILE, config=$FERREX_CONFIG_DIR, project=$COMPOSE_PROJECT_NAME)..."
+echo "Bringing up stack (mode=$MODE, profile=$PROFILE, env=$FERREX_ENV_FILE, project=$COMPOSE_PROJECT_NAME)..."
 docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
 
 if [[ "$MODE" = "tailscale" ]]; then

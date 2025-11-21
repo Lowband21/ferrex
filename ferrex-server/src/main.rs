@@ -162,6 +162,8 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
+    /// Generate config and print KEY=VALUE lines to stdout; wrappers like `just init-config` capture
+    /// and merge them into .env (redirect manually if running standalone).
     Init(ConfigInitArgs),
     Check(ConfigCheckArgs),
 }
@@ -180,13 +182,13 @@ struct ConfigInitArgs {
     #[arg(long, default_value = ".env")]
     env_path: PathBuf,
 
-    /// Overwrite existing files
-    #[arg(long, default_value_t = false)]
-    force: bool,
-
     /// Skip interactive prompts and use defaults
     #[arg(long, default_value_t = false)]
     non_interactive: bool,
+
+    /// Enable advanced configuration prompts (TLS, CORS, HSTS)
+    #[arg(long, default_value_t = false)]
+    advanced: bool,
 }
 
 #[derive(ClapArgs, Debug, Clone)]
@@ -213,8 +215,8 @@ async fn main() -> anyhow::Result<()> {
             Command::Config(ConfigCommand::Init(args)) => {
                 let options = InitOptions {
                     env_path: args.env_path.clone(),
-                    force: args.force,
                     non_interactive: args.non_interactive,
+                    advanced: args.advanced,
                 };
                 run_config_init(&options).await?;
                 return Ok(());
@@ -270,8 +272,8 @@ async fn run_db_migrate(args: &ServeArgs) -> anyhow::Result<()> {
 }
 
 fn derive_database_url_from_env() -> Option<String> {
-    let database = std::env::var("PGDATABASE")
-        .or_else(|_| std::env::var("POSTGRES_DB"))
+    let database = std::env::var("DATABASE_NAME")
+        .or_else(|_| std::env::var("DATABASE_NAME"))
         .ok()?
         .trim()
         .to_owned();
@@ -421,7 +423,7 @@ async fn load_runtime_config(
             Some(url) => (url, "PG env"),
             None => {
                 error!(
-                    "DATABASE_URL or PGDATABASE must be provided for PostgreSQL connections"
+                    "DATABASE_URL or DATABASE_NAME must be provided for PostgreSQL connections"
                 );
                 return Err(anyhow::anyhow!(
                     "No PostgreSQL connection configuration found"

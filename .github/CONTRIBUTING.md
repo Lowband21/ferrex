@@ -53,7 +53,7 @@ Generate configuration and start the local stack (Postgres, Redis, server):
 
 ```bash
 # from repo root
-just config      # interactive generator for config/.env
+just config      # interactive generator for .env in project root
 just start            # boots DB/Redis + ferrex-server
 ```
 
@@ -88,7 +88,7 @@ Parts of the codebase use SQLx with offline metadata under `./.sqlx/`.
 - If you change queries or migrations, update the metadata (requires a DB):
 
   ```bash
-  # ensure the stack is up (just start) and DATABASE_URL is set via config/.env
+  # ensure the stack is up (just start) and DATABASE_URL is set via .env
   just prepare
   # or
   cargo sqlx prepare --workspace -- --all-features --all-targets
