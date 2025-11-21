@@ -201,7 +201,10 @@ fn start_vertical_snap_to_key(
     Task::none()
 }
 
-fn start_vertical_snap_to_y(state: &mut State, target_y: f32) -> Task<UiMessage> {
+fn start_vertical_snap_to_y(
+    state: &mut State,
+    target_y: f32,
+) -> Task<UiMessage> {
     let Some(TabState::All(all_state)) =
         state.tab_manager.get_tab_mut(TabId::All)
     else {
@@ -242,7 +245,10 @@ pub fn handle_all_focus_tick(state: &mut State) -> Task<UiMessage> {
     if let Some(next_y) = all_state.focus.vertical_animator.tick() {
         all_state.focus.scroll_y = next_y;
         let id = all_state.focus.scrollable_id.clone();
-        return scroll_to::<UiMessage>(id, AbsoluteOffset { x: 0.0, y: next_y });
+        return scroll_to::<UiMessage>(
+            id,
+            AbsoluteOffset { x: 0.0, y: next_y },
+        );
     }
 
     Task::none()

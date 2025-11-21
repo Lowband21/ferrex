@@ -358,7 +358,8 @@ impl ApiService for TestApiService {
     async fn get_series_next_episode(
         &self,
         _tmdb_series_id: u64,
-    ) -> RepositoryResult<Option<ferrex_core::player_prelude::NextEpisode>> {
+    ) -> RepositoryResult<Option<ferrex_core::player_prelude::NextEpisode>>
+    {
         Ok(None)
     }
 

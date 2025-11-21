@@ -6,7 +6,7 @@ pub mod messages;
 pub mod update;
 pub mod update_handlers;
 
-use self::messages::StreamingMessage as StreamingMessage;
+use self::messages::StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::{LibraryID, TranscodingStatus};

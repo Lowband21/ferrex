@@ -297,7 +297,9 @@ impl MediaEventState {
             }
             MediaEvent::SeriesAdded { series } => {
                 log::info!("Series added: {}", series.title.as_str());
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Series(series)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Series(
+                    series,
+                )]))
             }
             MediaEvent::SeasonAdded { season } => {
                 log::info!(
@@ -305,7 +307,9 @@ impl MediaEventState {
                     season.season_number.value(),
                     season.series_id.as_str()
                 );
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Season(season)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Season(
+                    season,
+                )]))
             }
             MediaEvent::EpisodeAdded { episode } => {
                 log::info!(
@@ -313,7 +317,9 @@ impl MediaEventState {
                     episode.season_number.value(),
                     episode.episode_number.value()
                 );
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Episode(episode)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Episode(
+                    episode,
+                )]))
             }
 
             // Updates require refreshing existing data

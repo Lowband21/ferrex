@@ -76,9 +76,8 @@ pub mod v1 {
         // Identity-based TV helpers
         pub const SERIES_STATE: &str =
             v1_path!("/watch/series/{tmdb_series_id}");
-        pub const SEASON_STATE: &str = v1_path!(
-            "/watch/series/{tmdb_series_id}/season/{season_number}"
-        );
+        pub const SEASON_STATE: &str =
+            v1_path!("/watch/series/{tmdb_series_id}/season/{season_number}");
         pub const SERIES_NEXT: &str =
             v1_path!("/watch/series/{tmdb_series_id}/next");
     }

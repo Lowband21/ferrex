@@ -89,7 +89,9 @@ async fn watch_state_loaded_does_not_emit_authentication_complete() {
     let result_err: DomainUpdateResult =
         ferrex_player::domains::auth::update::update_auth(
             &mut state,
-            auth_msgs::AuthMessage::WatchStatusLoaded(Err("neterr".to_string())),
+            auth_msgs::AuthMessage::WatchStatusLoaded(
+                Err("neterr".to_string()),
+            ),
         );
     assert!(
         result_err.events.is_empty(),

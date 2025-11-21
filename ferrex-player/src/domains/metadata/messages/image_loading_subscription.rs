@@ -79,7 +79,8 @@ fn image_loader_stream_concurrent(
         Running {
             last_spawn_time: Option<std::time::Instant>,
             receiver: Option<tokio::sync::mpsc::UnboundedReceiver<()>>,
-            inflight: FuturesUnordered<tokio::task::JoinHandle<MetadataMessage>>,
+            inflight:
+                FuturesUnordered<tokio::task::JoinHandle<MetadataMessage>>,
         },
         Finished,
     }

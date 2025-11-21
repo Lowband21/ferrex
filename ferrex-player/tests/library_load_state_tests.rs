@@ -4,7 +4,7 @@
 //! session-scoped success handling, and proper resets on clear/logout events.
 
 use ferrex_player::domains::library::LibrariesLoadState;
-use ferrex_player::domains::library::messages::LibraryMessage as LibraryMessage;
+use ferrex_player::domains::library::messages::LibraryMessage;
 use ferrex_player::state::State;
 
 // Import auth types to fabricate an authenticated session

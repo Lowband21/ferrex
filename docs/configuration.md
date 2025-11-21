@@ -34,6 +34,9 @@ just config
 
 # Start the full stack (DB, Redis, ferrex-server)
 just start
+# (same as: ferrex-init stack up)
+# Bring the stack down:
+#   ferrex-init stack down
 
 # Run the desktop player (release profile)
 just run-player-release

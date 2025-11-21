@@ -6,7 +6,7 @@ pub mod messages;
 pub mod state;
 pub mod update;
 
-use self::messages::SettingsMessage as SettingsMessage;
+use self::messages::SettingsMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::UserPermissions;

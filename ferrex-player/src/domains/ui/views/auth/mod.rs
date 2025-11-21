@@ -181,8 +181,10 @@ pub fn view_first_run_setup<'a>(
 
     let display_name_input = text_input("Display Name", display_name)
         .on_input(|s| {
-            auth::AuthMessage::UpdateSetupField(auth::SetupField::DisplayName(s))
-                .into()
+            auth::AuthMessage::UpdateSetupField(auth::SetupField::DisplayName(
+                s,
+            ))
+            .into()
         })
         .id(ids::auth_first_run_display_name())
         .padding(12)
@@ -222,8 +224,10 @@ pub fn view_first_run_setup<'a>(
     let setup_token_input =
         text_input("Setup Token (if required)", setup_token)
             .on_input(|s| {
-                auth::AuthMessage::UpdateSetupField(auth::SetupField::SetupToken(s))
-                    .into()
+                auth::AuthMessage::UpdateSetupField(
+                    auth::SetupField::SetupToken(s),
+                )
+                .into()
             })
             .id(ids::auth_first_run_setup_token())
             .padding(12)
@@ -329,8 +333,8 @@ pub fn view_first_run_setup<'a>(
         && !claim.is_confirming
         && !claim.is_expired();
     if can_confirm {
-        confirm_button =
-            confirm_button.on_press(auth::AuthMessage::ConfirmSetupClaim.into());
+        confirm_button = confirm_button
+            .on_press(auth::AuthMessage::ConfirmSetupClaim.into());
     } else {
         confirm_button = confirm_button.style(theme::Button::Disabled.style());
     }

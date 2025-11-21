@@ -60,7 +60,11 @@ impl PlayerDomainState {
                     let controls = self.controls_overlay();
 
                     let mut children: Vec<
-                        iced::Element<PlayerMessage, Theme, iced_wgpu::Renderer>,
+                        iced::Element<
+                            PlayerMessage,
+                            Theme,
+                            iced_wgpu::Renderer,
+                        >,
                     > = vec![clickable_video];
 
                     children.push(controls);

@@ -340,7 +340,9 @@ pub fn runtime_boot(config: &AppConfig) -> (State, Task<DomainMessage>) {
                                     .await
                                     .map_err(|err| err.to_string());
                                 DomainMessage::Auth(
-                                    auth_messages::AuthMessage::AuthResult(result),
+                                    auth_messages::AuthMessage::AuthResult(
+                                        result,
+                                    ),
                                 )
                             }
                         }

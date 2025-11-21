@@ -2,8 +2,10 @@ use crate::{
     database::PostgresDatabase,
     database::ports::watch_status::WatchStatusRepository,
     domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
-    types::watch::{EpisodeKey, NextEpisode, SeasonWatchStatus, SeriesWatchStatus},
     error::Result,
+    types::watch::{
+        EpisodeKey, NextEpisode, SeasonWatchStatus, SeriesWatchStatus,
+    },
 };
 use uuid::Uuid;
 

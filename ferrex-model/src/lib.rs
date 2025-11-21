@@ -1,4 +1,5 @@
 //! Core data model definitions shared across Ferrex crates.
+#![allow(missing_docs)]
 
 #[cfg(feature = "chrono")]
 pub use ::chrono;

@@ -291,7 +291,6 @@ impl TmdbFolderGenerator {
             }
         }
 
-        let mut rng = rand::rng();
         for title in collected.into_iter().take(count) {
             let series_folder = self.naming.series_folder_name(&title);
             let series_path = root.join(series_folder);

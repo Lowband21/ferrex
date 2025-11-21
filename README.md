@@ -83,6 +83,7 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 ```bash
 # from repo root
 just start
+# equivalent: ferrex-init stack up
 ```
 
 ### And the player:
@@ -93,7 +94,7 @@ just run-player-release
 
 This bootstraps configuration, generates strong Postgres credentials into `.env` in the project root, and launches Postgres, Redis, and the Ferrex server. Keep `.env` backed up—it contains generated passwords.
 
-More options (profiles, logging, Tailscale, alternate env files): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
+More options (profiles, logging, tailscale, host vs docker server): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
 
 ## Platform Support
 

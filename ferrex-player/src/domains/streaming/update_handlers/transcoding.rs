@@ -50,7 +50,9 @@ pub fn handle_transcoding_started(
 
             // Start checking status immediately
             DomainUpdateResult::task(Task::perform(async {}, |_| {
-                DomainMessage::Streaming(StreamingMessage::CheckTranscodingStatus)
+                DomainMessage::Streaming(
+                    StreamingMessage::CheckTranscodingStatus,
+                )
             }))
         }
         Err(e) => {
@@ -97,9 +99,9 @@ pub fn handle_check_transcoding_status(state: &State) -> DomainUpdateResult {
                 }
             },
             |result| {
-                DomainMessage::Streaming(StreamingMessage::TranscodingStatusUpdate(
-                    result,
-                ))
+                DomainMessage::Streaming(
+                    StreamingMessage::TranscodingStatusUpdate(result),
+                )
             },
         ))
     } else {
@@ -285,7 +287,9 @@ pub fn handle_transcoding_status_update(
                                 },
                                 |playlist| {
                                     DomainMessage::Streaming(
-                                        StreamingMessage::MasterPlaylistReady(playlist),
+                                        StreamingMessage::MasterPlaylistReady(
+                                            playlist,
+                                        ),
                                     )
                                 },
                             ))
@@ -398,7 +402,9 @@ pub fn handle_transcoding_status_update(
                                 },
                                 |playlist| {
                                     DomainMessage::Streaming(
-                                        StreamingMessage::MasterPlaylistLoaded(playlist),
+                                        StreamingMessage::MasterPlaylistLoaded(
+                                            playlist,
+                                        ),
                                     )
                                 },
                             ))

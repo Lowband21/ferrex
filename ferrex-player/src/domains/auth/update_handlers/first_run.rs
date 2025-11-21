@@ -470,7 +470,9 @@ pub fn handle_setup_claim_failed(
 }
 
 /// Confirm the secure claim
-pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_confirm_setup_claim(
+    state: &mut State,
+) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
         claim, claim_token, ..
     } = &mut state.domains.auth.state.auth_flow
@@ -520,7 +522,9 @@ pub fn handle_confirm_setup_claim(state: &mut State) -> Task<auth::AuthMessage> 
                     .map_err(|e| e.to_string())
             },
             |result| match result {
-                Ok(response) => auth::AuthMessage::SetupClaimConfirmed(response),
+                Ok(response) => {
+                    auth::AuthMessage::SetupClaimConfirmed(response)
+                }
                 Err(err) => auth::AuthMessage::SetupClaimConfirmFailed(err),
             },
         );

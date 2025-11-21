@@ -23,11 +23,15 @@ fn icon_button(
     icon: Icon,
     message: Option<PlayerMessage>,
 ) -> Element<'static, PlayerMessage, Theme, iced::Renderer> {
-    let btn: iced::widget::Button<'static, PlayerMessage, Theme, iced::Renderer> =
-        button(icon_text(icon)).style(
-            theme::button_transparent
-                as fn(&iced::Theme, button::Status) -> button::Style,
-        );
+    let btn: iced::widget::Button<
+        'static,
+        PlayerMessage,
+        Theme,
+        iced::Renderer,
+    > = button(icon_text(icon)).style(
+        theme::button_transparent
+            as fn(&iced::Theme, button::Status) -> button::Style,
+    );
 
     if let Some(msg) = message {
         btn.on_press(msg)
@@ -123,7 +127,9 @@ impl PlayerDomainState {
     /// The seek bar has a visual height of 4px but a hit zone of 30px for easier interaction.
     /// Mouse clicks are validated to be within 7x the visual bar height (28px) vertically to prevent
     /// accidental seeks when clicking elsewhere on the screen.
-    fn build_seek_bar(&self) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
+    fn build_seek_bar(
+        &self,
+    ) -> Element<'_, PlayerMessage, Theme, iced::Renderer> {
         let bar_height = super::state::SEEK_BAR_VISUAL_HEIGHT;
         let hit_area_height =
             crate::infra::constants::player_controls::SEEK_BAR_HIT_ZONE_HEIGHT;
@@ -614,7 +620,9 @@ impl PlayerDomainState {
                             PlayerMessage::SubtitleTrackSelected(None)
                         }
                         SubtitleOption::Track(track) => {
-                            PlayerMessage::SubtitleTrackSelected(Some(track.index))
+                            PlayerMessage::SubtitleTrackSelected(Some(
+                                track.index,
+                            ))
                         }
                     }
                 })
@@ -725,9 +733,9 @@ impl PlayerDomainState {
                                 ]
                                 .align_y(Alignment::Center)
                             })
-                            .on_press(PlayerMessage::SubtitleTrackSelected(Some(
-                                track.index,
-                            )))
+                            .on_press(PlayerMessage::SubtitleTrackSelected(
+                                Some(track.index),
+                            ))
                             .width(Length::Fill)
                             .style(theme::button_menu_item)
                             .padding([6, 10])

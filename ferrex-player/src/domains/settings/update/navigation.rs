@@ -58,7 +58,8 @@ pub fn handle_show_security(state: &mut State) -> DomainUpdateResult {
 
     // Check if user has PIN when entering security view
     DomainUpdateResult::task(
-        Task::done(SettingsMessage::CheckUserHasPin).map(DomainMessage::Settings),
+        Task::done(SettingsMessage::CheckUserHasPin)
+            .map(DomainMessage::Settings),
     )
 }
 

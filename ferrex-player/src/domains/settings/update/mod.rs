@@ -32,8 +32,12 @@ pub fn update_settings(
     match message {
         // Navigation
         SettingsMessage::ShowProfile => navigation::handle_show_profile(state),
-        SettingsMessage::ShowPreferences => navigation::handle_show_preferences(state),
-        SettingsMessage::ShowSecurity => navigation::handle_show_security(state),
+        SettingsMessage::ShowPreferences => {
+            navigation::handle_show_preferences(state)
+        }
+        SettingsMessage::ShowSecurity => {
+            navigation::handle_show_security(state)
+        }
         SettingsMessage::BackToMain => navigation::handle_back_to_main(state),
         SettingsMessage::BackToHome => navigation::handle_back_to_home(state),
 
@@ -64,12 +68,16 @@ pub fn update_settings(
         }
 
         // Security - PIN
-        SettingsMessage::CheckUserHasPin => security::handle_check_user_has_pin(state),
+        SettingsMessage::CheckUserHasPin => {
+            security::handle_check_user_has_pin(state)
+        }
         SettingsMessage::UserHasPinResult(has_pin) => {
             security::handle_user_has_pin_result(state, has_pin)
         }
         SettingsMessage::ShowSetPin => security::handle_show_set_pin(state),
-        SettingsMessage::ShowChangePin => security::handle_show_change_pin(state),
+        SettingsMessage::ShowChangePin => {
+            security::handle_show_change_pin(state)
+        }
         SettingsMessage::UpdatePinCurrent(value) => {
             security::handle_update_pin_current(state, value)
         }
@@ -79,11 +87,15 @@ pub fn update_settings(
         SettingsMessage::UpdatePinConfirm(value) => {
             security::handle_update_pin_confirm(state, value)
         }
-        SettingsMessage::SubmitPinChange => security::handle_submit_pin_change(state),
+        SettingsMessage::SubmitPinChange => {
+            security::handle_submit_pin_change(state)
+        }
         SettingsMessage::PinChangeResult(result) => {
             security::handle_pin_change_result(state, result)
         }
-        SettingsMessage::CancelPinChange => security::handle_cancel_pin_change(state),
+        SettingsMessage::CancelPinChange => {
+            security::handle_cancel_pin_change(state)
+        }
 
         // Preferences
         SettingsMessage::ToggleAutoLogin(enabled) => {
@@ -108,7 +120,9 @@ pub fn update_settings(
         }
 
         // Device Management
-        SettingsMessage::LoadDevices => device_management::handle_load_devices(state),
+        SettingsMessage::LoadDevices => {
+            device_management::handle_load_devices(state)
+        }
         SettingsMessage::DevicesLoaded(result) => {
             device_management::handle_devices_loaded(state, result)
         }

@@ -142,7 +142,9 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
         text_input("Search...", &search_state.query)
             .id(TextInputId::new(SEARCH_WINDOW_INPUT_ID))
             .on_input(|value| DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(value),
+                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(
+                    value
+                ),
             ))
             .on_submit(DomainMessage::Ui(
                 crate::domains::ui::messages::UiMessage::ExecuteSearch,

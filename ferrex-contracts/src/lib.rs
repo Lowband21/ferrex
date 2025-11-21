@@ -1,4 +1,5 @@
 //! Trait surfaces that describe interactions with Ferrex data models.
+#![allow(missing_docs)]
 
 pub mod details_like;
 pub mod id;

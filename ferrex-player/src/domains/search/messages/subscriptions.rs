@@ -1,5 +1,5 @@
 use crate::common::messages::DomainMessage;
-use crate::domains::ui::{messages::UiMessage as UiMessage, types::ViewState};
+use crate::domains::ui::{messages::UiMessage, types::ViewState};
 use crate::state::State;
 use iced::Subscription;
 

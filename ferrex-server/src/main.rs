@@ -60,8 +60,9 @@ use ferrex_server::{
         app_state::AppState,
         config::{
             Config, ConfigLoad, ConfigLoader, HstsSettings, RateLimitSource,
-            cli::{
-                CheckOptions, InitOptions, run_config_check, run_config_init,
+            loader::db_url::{
+                DatabaseUrlSource,
+                resolve_effective_database_url_with_source,
             },
         },
         orchestration::ScanOrchestrator,
@@ -73,6 +74,7 @@ use ferrex_server::{
     routes,
     users::auth::tls::{TlsCertConfig, create_tls_acceptor},
 };
+
 #[cfg(feature = "demo")]
 use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
 
@@ -155,17 +157,7 @@ struct ServeArgs {
 #[derive(Debug, Subcommand)]
 enum Command {
     #[command(subcommand)]
-    Config(ConfigCommand),
-    #[command(subcommand)]
     Db(DbCommand),
-}
-
-#[derive(Debug, Subcommand)]
-enum ConfigCommand {
-    /// Generate config and print KEY=VALUE lines to stdout; wrappers like `just init-config` capture
-    /// and merge them into .env (redirect manually if running standalone).
-    Init(ConfigInitArgs),
-    Check(ConfigCheckArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -176,61 +168,12 @@ enum DbCommand {
     Migrate,
 }
 
-#[derive(ClapArgs, Debug, Clone)]
-struct ConfigInitArgs {
-    /// Path to write the companion .env file
-    #[arg(long, default_value = ".env")]
-    env_path: PathBuf,
-
-    /// Skip interactive prompts and use defaults
-    #[arg(long, default_value_t = false)]
-    non_interactive: bool,
-
-    /// Enable advanced configuration prompts (TLS, CORS, HSTS)
-    #[arg(long, default_value_t = false)]
-    advanced: bool,
-}
-
-#[derive(ClapArgs, Debug, Clone)]
-struct ConfigCheckArgs {
-    /// Optional path to a .env file to load before checking
-    #[arg(long)]
-    env_file: Option<PathBuf>,
-
-    /// TLS certificate path to validate when enforcing HTTPS
-    #[arg(long)]
-    cert: Option<PathBuf>,
-
-    /// TLS key path to validate when enforcing HTTPS
-    #[arg(long)]
-    key: Option<PathBuf>,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     if let Some(command) = cli.command {
         match command {
-            Command::Config(ConfigCommand::Init(args)) => {
-                let options = InitOptions {
-                    env_path: args.env_path.clone(),
-                    non_interactive: args.non_interactive,
-                    advanced: args.advanced,
-                };
-                run_config_init(&options).await?;
-                return Ok(());
-            }
-            Command::Config(ConfigCommand::Check(args)) => {
-                let options = CheckOptions {
-                    config_path: None,
-                    env_path: args.env_file.clone(),
-                    tls_cert_path: args.cert.clone(),
-                    tls_key_path: args.key.clone(),
-                };
-                run_config_check(&options).await?;
-                return Ok(());
-            }
             Command::Db(DbCommand::Preflight) => {
                 run_db_preflight(&cli.serve).await?;
                 return Ok(());
@@ -269,20 +212,6 @@ async fn run_db_migrate(args: &ServeArgs) -> anyhow::Result<()> {
         .context("database migration failed")?;
     info!("Database migrations applied successfully");
     Ok(())
-}
-
-fn derive_database_url_from_env() -> Option<String> {
-    let database = std::env::var("DATABASE_NAME")
-        .or_else(|_| std::env::var("DATABASE_NAME"))
-        .ok()?
-        .trim()
-        .to_owned();
-
-    if database.is_empty() {
-        return None;
-    }
-
-    Some(format!("postgresql:///{database}"))
 }
 
 fn build_hsts_header(settings: &HstsSettings) -> Option<HeaderValue> {
@@ -411,26 +340,19 @@ async fn load_runtime_config(
     }
 
     #[allow(unused_mut)]
-    let (mut database_url, mut url_source) = match config
-        .database
-        .primary_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-    {
-        Some(url) => (url.to_owned(), "config"),
-        None => match derive_database_url_from_env() {
-            Some(url) => (url, "PG env"),
+    let (mut database_url, mut url_source): (String, &str) =
+        match resolve_effective_database_url_with_source(&config) {
+            Some((url, DatabaseUrlSource::Config)) => (url, "config"),
+            Some((url, DatabaseUrlSource::Env)) => (url, "PG env"),
             None => {
                 error!(
-                    "DATABASE_URL or DATABASE_NAME must be provided for PostgreSQL connections"
+                    "DATABASE_URL, PGDATABASE, or DATABASE_NAME must be provided for PostgreSQL connections"
                 );
                 return Err(anyhow::anyhow!(
                     "No PostgreSQL connection configuration found"
                 ));
             }
-        },
-    };
+        };
 
     validate_primary_database_url(&database_url)?;
 

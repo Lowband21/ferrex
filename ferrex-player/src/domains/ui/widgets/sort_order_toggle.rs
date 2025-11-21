@@ -9,7 +9,9 @@ use iced::{
 use lucide_icons::Icon;
 
 /// Creates a sort order toggle button with consistent styling
-pub fn sort_order_toggle<'a>(current_order: SortOrder) -> Element<'a, UiMessage> {
+pub fn sort_order_toggle<'a>(
+    current_order: SortOrder,
+) -> Element<'a, UiMessage> {
     let icon = match current_order {
         SortOrder::Ascending => Icon::ArrowUp,
         SortOrder::Descending => Icon::ArrowDown,

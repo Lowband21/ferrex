@@ -43,8 +43,8 @@ pub struct Poster {
     on_edit: Option<UiMessage>,
     on_options: Option<UiMessage>,
     on_click: Option<UiMessage>, // For clicking empty space (details page)
-    progress: Option<f32>,     // Progress percentage (0.0 to 1.0)
-    progress_color: Color,     // Color for the progress bar
+    progress: Option<f32>,       // Progress percentage (0.0 to 1.0)
+    progress_color: Color,       // Color for the progress bar
 }
 
 impl Poster {

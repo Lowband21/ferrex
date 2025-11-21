@@ -26,10 +26,11 @@ use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
     LibraryID, LibraryMediaResponse, Media, MediaID, MediaQuery,
-    MediaRootBrowseResponse, MediaWithStatus, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanMetrics, SortBy, SortOrder,
-    StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
-    UserPermissions, UserWatchState, SeriesWatchStatus, SeasonWatchStatus, NextEpisode,
+    MediaRootBrowseResponse, MediaWithStatus, NextEpisode,
+    ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
+    SeasonWatchStatus, SeriesWatchStatus, SortBy, SortOrder, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use parking_lot::RwLock;

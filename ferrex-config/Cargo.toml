@@ -1,0 +1,45 @@
+[package]
+name = "ferrex-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../README.md"
+description = "Shared configuration generation and loading utilities for Ferrex"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dialoguer = "^0.11"
+rand.workspace = true
+redis.workspace = true
+sqlx.workspace = true
+url.workspace = true
+uuid.workspace = true
+dotenvy = "^0.15.7"
+humantime = "^2.1"
+clap = { version = "^4.5", features = ["derive"] }
+ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
+crossterm = "0.27"
+toml = { version = "^0.9", default-features = false, features = [
+  "parse",
+  "serde",
+  "display",
+] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum.workspace = true
+ferrex-core = { path = "../ferrex-core" }
+tempfile.workspace = true
+tokio.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tempfile.workspace = true
+once_cell = "1.19"
+assert_cmd = "2.0"
+which = "6.0"

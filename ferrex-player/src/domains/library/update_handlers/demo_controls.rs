@@ -1,8 +1,8 @@
 use iced::Task;
 
 use crate::{
-    domains::library::messages::LibraryMessage, infra::api_types::DemoResetRequest,
-    state::State,
+    domains::library::messages::LibraryMessage,
+    infra::api_types::DemoResetRequest, state::State,
 };
 
 pub fn handle_fetch_demo_status(state: &mut State) -> Task<LibraryMessage> {
@@ -23,9 +23,9 @@ pub fn handle_fetch_demo_status(state: &mut State) -> Task<LibraryMessage> {
         state.domains.library.state.demo_controls.is_loading = false;
         state.domains.library.state.demo_controls.error =
             Some("Demo API unavailable".to_string());
-        Task::done(LibraryMessage::DemoStatusLoaded(
-            Err("Demo API unavailable".into()),
-        ))
+        Task::done(LibraryMessage::DemoStatusLoaded(Err(
+            "Demo API unavailable".into(),
+        )))
     }
 }
 
@@ -51,7 +51,7 @@ pub fn handle_apply_demo_sizing(
         state.domains.library.state.demo_controls.error =
             Some("Demo API unavailable".to_string());
         Task::done(LibraryMessage::DemoSizingApplied(Err(
-            "Demo API unavailable".into()
+            "Demo API unavailable".into(),
         )))
     }
 }

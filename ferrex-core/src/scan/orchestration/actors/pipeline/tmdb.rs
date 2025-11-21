@@ -11,7 +11,7 @@ use chrono::Utc;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::{Map, Value};
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::{
     database::ports::{
@@ -478,6 +478,7 @@ impl TmdbMetadataActor {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn slugify_title(title: &str) -> String {
         let mut slug = String::new();
         for ch in title.trim().chars() {
@@ -2040,6 +2041,7 @@ impl TmdbMetadataActor {
         })
     }
 
+    #[allow(dead_code)]
     fn build_series_stub(
         &self,
         library_id: LibraryID,

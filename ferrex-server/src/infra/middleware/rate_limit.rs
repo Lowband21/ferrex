@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+pub use ferrex_config::RateLimiterConfig;
 use ferrex_core::domain::users::auth::rate_limit::{
     EndpointLimits, RateLimitAlgorithm, RateLimitDecision, RateLimitError,
     RateLimitKey, RateLimitResult, RateLimitRule, RateLimiter, TrustedSources,
@@ -121,45 +122,6 @@ impl fmt::Debug for RedisRateLimiter {
 struct CachedDecision {
     decision: RateLimitDecision,
     expires_at: SystemTime,
-}
-
-/// Rate limiter configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RateLimiterConfig {
-    /// Endpoint-specific limits
-    pub endpoint_limits: EndpointLimits,
-
-    /// Trusted sources that bypass rate limiting
-    pub trusted_sources: TrustedSources,
-
-    /// Cache TTL for decisions
-    pub cache_ttl: Duration,
-
-    /// Enable distributed synchronization
-    pub enable_sync: bool,
-
-    /// Redis key prefix
-    pub key_prefix: String,
-
-    /// Clock skew tolerance
-    pub clock_skew_tolerance: Duration,
-}
-
-impl Default for RateLimiterConfig {
-    fn default() -> Self {
-        Self {
-            endpoint_limits: EndpointLimits::default(),
-            trusted_sources: TrustedSources {
-                ip_addresses: vec![],
-                user_ids: vec![],
-                device_ids: vec![],
-            },
-            cache_ttl: Duration::from_millis(100),
-            enable_sync: true,
-            key_prefix: "ferrex:ratelimit".to_string(),
-            clock_skew_tolerance: Duration::from_secs(5),
-        }
-    }
 }
 
 /// Configuration update message

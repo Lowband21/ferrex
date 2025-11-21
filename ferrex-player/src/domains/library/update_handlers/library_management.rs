@@ -56,7 +56,11 @@ pub fn handle_library_created(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
                 ),
-                |res| LibraryMessage::LibrariesLoaded(res.map_err(|e| e.to_string())),
+                |res| {
+                    LibraryMessage::LibrariesLoaded(
+                        res.map_err(|e| e.to_string()),
+                    )
+                },
             )
         }
         Err(e) => {
@@ -120,7 +124,11 @@ pub fn handle_library_updated(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
                 ),
-                |res| LibraryMessage::LibrariesLoaded(res.map_err(|e| e.to_string())),
+                |res| {
+                    LibraryMessage::LibrariesLoaded(
+                        res.map_err(|e| e.to_string()),
+                    )
+                },
             )
         }
         Err(e) => {
@@ -175,7 +183,11 @@ pub fn handle_library_deleted(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
                 ),
-                |res| LibraryMessage::LibrariesLoaded(res.map_err(|e| e.to_string())),
+                |res| {
+                    LibraryMessage::LibrariesLoaded(
+                        res.map_err(|e| e.to_string()),
+                    )
+                },
             )
         }
         Err(e) => {
@@ -254,7 +266,7 @@ pub fn handle_reset_library(
 
     let Ok(Some(yoke)) = archived else {
         return Task::done(LibraryMessage::ResetLibraryDone(Err(
-            "library_not_found".to_string()
+            "library_not_found".to_string(),
         )));
     };
 
@@ -354,7 +366,9 @@ pub fn handle_update_library_form_scan_interval(
     Task::none()
 }
 
-pub fn handle_toggle_library_form_enabled(state: &mut State) -> Task<LibraryMessage> {
+pub fn handle_toggle_library_form_enabled(
+    state: &mut State,
+) -> Task<LibraryMessage> {
     if let Some(ref mut form_data) =
         state.domains.library.state.library_form_data
     {
@@ -484,7 +498,9 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
                     Ok(updated_library) => {
                         LibraryMessage::LibraryUpdated(Ok(updated_library))
                     }
-                    Err(e) => LibraryMessage::LibraryUpdated(Err(e.to_string())),
+                    Err(e) => {
+                        LibraryMessage::LibraryUpdated(Err(e.to_string()))
+                    }
                 },
             )
         } else {
@@ -511,7 +527,9 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
                     Ok(created_library) => {
                         LibraryMessage::LibraryCreated(Ok(created_library))
                     }
-                    Err(e) => LibraryMessage::LibraryCreated(Err(e.to_string())),
+                    Err(e) => {
+                        LibraryMessage::LibraryCreated(Err(e.to_string()))
+                    }
                 },
             )
         }

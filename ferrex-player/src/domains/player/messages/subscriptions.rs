@@ -17,7 +17,11 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     {
         subs.push(
             iced::time::every(std::time::Duration::from_millis(500)).map(
-                |_| DomainMessage::Player(PlayerMessage::CheckControlsVisibility),
+                |_| {
+                    DomainMessage::Player(
+                        PlayerMessage::CheckControlsVisibility,
+                    )
+                },
             ),
         );
     }
@@ -38,8 +42,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         && state.domains.player.state.is_playing()
     {
         subs.push(
-            iced::time::every(std::time::Duration::from_secs(10))
-                .map(|_| DomainMessage::Player(PlayerMessage::ProgressHeartbeat)),
+            iced::time::every(std::time::Duration::from_secs(10)).map(|_| {
+                DomainMessage::Player(PlayerMessage::ProgressHeartbeat)
+            }),
         );
     }
 

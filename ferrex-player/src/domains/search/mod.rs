@@ -11,7 +11,7 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use iced::Task;
 use std::sync::Arc;
 
-pub use self::messages::{SearchMessage, SearchEvent};
+pub use self::messages::{SearchEvent, SearchMessage};
 pub use self::service::SearchService;
 pub use self::types::{SearchMode, SearchResult, SearchState, SearchStrategy};
 
@@ -71,7 +71,9 @@ impl SearchDomain {
             async move { calibrator::SearchCalibrator::calibrate(&service).await },
             move |results| {
                 // Store calibration results in the decision engine
-                DomainMessage::Search(SearchMessage::_CalibrationComplete(results))
+                DomainMessage::Search(SearchMessage::_CalibrationComplete(
+                    results,
+                ))
             },
         )
     }
@@ -93,7 +95,9 @@ impl SearchDomain {
             CrossDomainEvent::LibrarySelected(_library_id) => {
                 // Keep search global; no library scoping.
                 if !self.state.query.is_empty() {
-                    Task::done(DomainMessage::Search(SearchMessage::ExecuteSearch))
+                    Task::done(DomainMessage::Search(
+                        SearchMessage::ExecuteSearch,
+                    ))
                 } else {
                     Task::none()
                 }
@@ -101,7 +105,9 @@ impl SearchDomain {
             CrossDomainEvent::LibrarySelectAll => {
                 // Already global; just rerun if needed.
                 if !self.state.query.is_empty() {
-                    Task::done(DomainMessage::Search(SearchMessage::ExecuteSearch))
+                    Task::done(DomainMessage::Search(
+                        SearchMessage::ExecuteSearch,
+                    ))
                 } else {
                     Task::none()
                 }

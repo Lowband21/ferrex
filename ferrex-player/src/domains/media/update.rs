@@ -242,13 +242,15 @@ pub fn update_media(
                                 .repo_accessor
                                 .get(&MediaID::Episode(ep_id))
                             {
-                                Ok(crate::infra::api_types::Media::Episode(ep)) => {
-                                    Some(EpisodeKey {
-                                        tmdb_series_id: ep.tmdb_series_id,
-                                        season_number: ep.season_number.value() as u16,
-                                        episode_number: ep.episode_number.value() as u16,
-                                    })
-                                }
+                                Ok(
+                                    crate::infra::api_types::Media::Episode(ep),
+                                ) => Some(EpisodeKey {
+                                    tmdb_series_id: ep.tmdb_series_id,
+                                    season_number: ep.season_number.value()
+                                        as u16,
+                                    episode_number: ep.episode_number.value()
+                                        as u16,
+                                }),
                                 _ => None,
                             }
                         }

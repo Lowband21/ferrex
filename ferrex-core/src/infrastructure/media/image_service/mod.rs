@@ -733,7 +733,7 @@ impl ImageService {
 
             // Missing: spawn background download for requested size if it maps to TMDB size
             if let Some(size_str) = requested_variant
-                && let Some(size) = TmdbImageSize::from_str(size_str)
+                && let Some(_size) = TmdbImageSize::from_str(size_str)
             {
                 // Per-variant singleflight key (same image, same TMDB size)
                 let vkey = format!(

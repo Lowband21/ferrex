@@ -1,5 +1,9 @@
 version: '3.9'
 
+volumes:
+  postgres-data:
+  redis-data:
+
 services:
   db:
     image: postgres:18
@@ -86,6 +90,3 @@ services:
       # Optional TLS certs if terminating at app
       # - ./certs:/certs:ro
 
-volumes:
-  postgres-data:
-  redis-data:

@@ -374,7 +374,9 @@ fn media_root_browser_modal<'a>(state: &'a State) -> Element<'a, UiMessage> {
         .into()
 }
 
-fn render_media_root_entry(entry: MediaRootEntry) -> Element<'static, UiMessage> {
+fn render_media_root_entry(
+    entry: MediaRootEntry,
+) -> Element<'static, UiMessage> {
     let MediaRootEntry {
         name,
         relative_path,

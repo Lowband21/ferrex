@@ -1,12 +1,10 @@
 # FAQ
-
+  
 Common questions about platforms, playback, and workflows.
 
 ## Why is HDR Wayland‑only today?
 
 Ferrex’s native zero‑copy HDR path depends on Wayland subsurfaces and recent HDR metadata handling in GStreamer. This combination enables passing HDR surfaces to the compositor without expensive copies. Other platforms currently lack an equivalent path in this project.
-
-See platform specifics and player notes in `ferrex-player/README.md`.
 
 ## Will HDR come to Windows/macOS?
 
@@ -23,6 +21,14 @@ The player communicates with mpv via IPC (Unix) or a named pipe (Windows) and ke
 ## Where do I configure environment variables?
 
 `.env`. Generate or refresh it with `just config` or `just start`. A reference lives at `.env.example`.
+
+## Why is compilation failing with hundreds of sqlx errors?
+
+As the errors describe, sqlx needs a database connection during compilation in order to validate queries.
+To bypass this requirement using cached queries, include `SQLX_OFFLINE` in your environment.
+For example, run `export SQLX_OFFLINE=true` to add to your current session or ensure the variable is set in `.env`.
+
+> Note: `SQLX_OFFLINE=true` is automatically included in `.env` during initial configuration.
 
 ## How do I adjust server logging verbosity?
 

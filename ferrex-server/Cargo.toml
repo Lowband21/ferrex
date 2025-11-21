@@ -126,6 +126,7 @@ rand.workspace = true
 
 # Internal dependencies
 ferrex-core = { path = "../ferrex-core" }
+ferrex-config = { path = "../ferrex-config" }
 
 [dev-dependencies]
 tempfile.workspace = true

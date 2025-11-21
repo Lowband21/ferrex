@@ -70,4 +70,3 @@ pub struct SeriesWatchStatus {
     pub seasons: std::collections::HashMap<u16, SeasonWatchStatus>,
     pub next_episode: Option<NextEpisode>,
 }
-

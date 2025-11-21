@@ -107,7 +107,11 @@ fn handle_master_playlist_ready(
             async {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             },
-            |_| DomainMessage::Streaming(StreamingMessage::CheckTranscodingStatus),
+            |_| {
+                DomainMessage::Streaming(
+                    StreamingMessage::CheckTranscodingStatus,
+                )
+            },
         ))
     }
 }

@@ -365,7 +365,9 @@ pub fn update_library(
                     );
                 return DomainUpdateResult::task(
                     Task::perform(fetch, |res| {
-                        LibraryMessage::LibrariesLoaded(res.map_err(|e| e.to_string()))
+                        LibraryMessage::LibrariesLoaded(
+                            res.map_err(|e| e.to_string()),
+                        )
                     })
                     .map(DomainMessage::Library),
                 );

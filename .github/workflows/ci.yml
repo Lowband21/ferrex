@@ -90,6 +90,10 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo test --doc --workspace --all-features --target ${{ matrix.target }}
 
+      - name: Tests (ferrex-config, non-Windows)
+        if: runner.os != 'Windows'
+        run: cargo test -p ferrex-config
+
       # Verify pkg-config finds GStreamer (Windows)
       - name: Verify pkg-config and libs (Windows)
         if: runner.os == 'Windows'

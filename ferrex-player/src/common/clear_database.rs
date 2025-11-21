@@ -28,7 +28,9 @@ pub fn handle_clear_database(state: &mut State) -> Task<DomainMessage> {
         },
         |result| {
             DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::DatabaseCleared(result),
+                crate::domains::ui::messages::UiMessage::DatabaseCleared(
+                    result,
+                ),
             )
         },
     )

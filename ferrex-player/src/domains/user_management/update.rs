@@ -41,7 +41,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::perform(
                 async move { service.list_users().await.map_err(|e| e.to_string()) },
                 |result: Result<Vec<AdminUserInfo>, String>| {
-                    DomainMessage::from(UserManagementMessage::UsersLoaded(result))
+                    DomainMessage::from(UserManagementMessage::UsersLoaded(
+                        result,
+                    ))
                 },
             ))
         }
@@ -97,7 +99,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::none())
         }
 
-        UserManagementMessage::CreateUserFormUpdateDisplayName(display_name) => {
+        UserManagementMessage::CreateUserFormUpdateDisplayName(
+            display_name,
+        ) => {
             debug!("Updating create user form display name: {}", display_name);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
@@ -109,7 +113,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::none())
         }
 
-        UserManagementMessage::CreateUserFormUpdateConfirmPassword(_confirm_password) => {
+        UserManagementMessage::CreateUserFormUpdateConfirmPassword(
+            _confirm_password,
+        ) => {
             debug!("Updating create user form confirm password");
             // TODO: Update form state (password will be SecureCredential)
             DomainUpdateResult::task(Task::none())
@@ -165,7 +171,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::none())
         }
 
-        UserManagementMessage::UpdateUserFormUpdateDisplayName(display_name) => {
+        UserManagementMessage::UpdateUserFormUpdateDisplayName(
+            display_name,
+        ) => {
             debug!("Updating user update form display name: {}", display_name);
             // TODO: Update form state
             DomainUpdateResult::task(Task::none())
@@ -177,7 +185,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::none())
         }
 
-        UserManagementMessage::UpdateUserFormUpdateConfirmPassword(_confirm_password) => {
+        UserManagementMessage::UpdateUserFormUpdateConfirmPassword(
+            _confirm_password,
+        ) => {
             debug!("Updating user update form confirm password");
             // TODO: Update form state (password will be SecureCredential)
             DomainUpdateResult::task(Task::none())
@@ -248,12 +258,12 @@ pub fn update_user_management(
                         .map_err(|e| e.to_string())
                 },
                 |result| match result {
-                    Ok(id) => {
-                        DomainMessage::from(UserManagementMessage::DeleteUserSuccess(id))
-                    }
-                    Err(err) => {
-                        DomainMessage::from(UserManagementMessage::DeleteUserError(err))
-                    }
+                    Ok(id) => DomainMessage::from(
+                        UserManagementMessage::DeleteUserSuccess(id),
+                    ),
+                    Err(err) => DomainMessage::from(
+                        UserManagementMessage::DeleteUserError(err),
+                    ),
                 },
             ))
         }
@@ -311,7 +321,9 @@ pub fn update_user_management(
             DomainUpdateResult::task(Task::none())
         }
 
-        UserManagementMessage::FirstRunUpdateConfirmPassword(_confirm_password) => {
+        UserManagementMessage::FirstRunUpdateConfirmPassword(
+            _confirm_password,
+        ) => {
             debug!("Updating first-run confirm password");
             // TODO: Update first-run form state (password will be SecureCredential)
             DomainUpdateResult::task(Task::none())

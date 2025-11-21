@@ -71,7 +71,10 @@ fn prepare_depth_regions_for_transition(
     ),
     profiling::function
 )]
-pub fn handle_view_details(state: &mut State, media: MediaID) -> Task<UiMessage> {
+pub fn handle_view_details(
+    state: &mut State,
+    media: MediaID,
+) -> Task<UiMessage> {
     // Save current view to navigation history
     state
         .domains
@@ -874,7 +877,9 @@ pub fn handle_exit_fullscreen(state: &mut State) -> Task<UiMessage> {
     ),
     profiling::function
 )]
-pub fn handle_toggle_backdrop_aspect_mode(state: &mut State) -> Task<UiMessage> {
+pub fn handle_toggle_backdrop_aspect_mode(
+    state: &mut State,
+) -> Task<UiMessage> {
     // Toggle between Auto and Force21x9 modes
     state
         .domains

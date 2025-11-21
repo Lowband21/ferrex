@@ -327,7 +327,9 @@ pub fn handle_enable_admin_pin_unlock(
     Task::future(async move {
         match svc.enable_admin_pin_unlock().await {
             Ok(_) => auth::AuthMessage::AdminPinUnlockToggled(Ok(true)),
-            Err(e) => auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string())),
+            Err(e) => {
+                auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string()))
+            }
         }
     })
 }
@@ -341,7 +343,9 @@ pub fn handle_disable_admin_pin_unlock(
     Task::future(async move {
         match svc.disable_admin_pin_unlock().await {
             Ok(_) => auth::AuthMessage::AdminPinUnlockToggled(Ok(false)),
-            Err(e) => auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string())),
+            Err(e) => {
+                auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string()))
+            }
         }
     })
 }
@@ -434,7 +438,9 @@ pub fn handle_login_success(
 }
 
 /// Handle back to user selection
-pub fn handle_back_to_user_selection(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_back_to_user_selection(
+    state: &mut State,
+) -> Task<auth::AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     state.domains.auth.state.auth_flow = AuthenticationFlow::LoadingUsers;
@@ -950,7 +956,9 @@ pub fn handle_auth_flow_auth_result(
 }
 
 /// Handle PIN setup submission
-pub fn handle_auth_flow_submit_pin(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_submit_pin(
+    state: &mut State,
+) -> Task<auth::AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::SettingUpPin {
@@ -1090,7 +1098,9 @@ pub fn handle_remember_device_synced(
 }
 
 /// Transition into PIN setup when we have an authenticated user context.
-pub fn handle_auth_flow_setup_pin(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_setup_pin(
+    state: &mut State,
+) -> Task<auth::AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     let user = match &state.domains.auth.state.auth_flow {

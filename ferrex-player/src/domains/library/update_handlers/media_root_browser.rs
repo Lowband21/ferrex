@@ -12,7 +12,10 @@ use crate::{
     state::State,
 };
 
-pub fn update(state: &mut State, message: BrowserMessage) -> Task<LibraryMessage> {
+pub fn update(
+    state: &mut State,
+    message: BrowserMessage,
+) -> Task<LibraryMessage> {
     match message {
         BrowserMessage::Open => handle_open(state),
         BrowserMessage::Close => handle_close(state),
@@ -47,7 +50,10 @@ fn handle_close(state: &mut State) -> Task<LibraryMessage> {
     Task::none()
 }
 
-fn handle_browse(state: &mut State, path: Option<String>) -> Task<LibraryMessage> {
+fn handle_browse(
+    state: &mut State,
+    path: Option<String>,
+) -> Task<LibraryMessage> {
     let Some(api) = state.domains.library.state.api_service.clone() else {
         let browser = browser_state(state);
         browser.error = Some(
@@ -68,7 +74,9 @@ fn handle_browse(state: &mut State, path: Option<String>) -> Task<LibraryMessage
                 .map_err(|e| e.to_string())
         },
         |result| {
-            LibraryMessage::MediaRootBrowser(BrowserMessage::ListingLoaded(result))
+            LibraryMessage::MediaRootBrowser(BrowserMessage::ListingLoaded(
+                result,
+            ))
         },
     )
 }
