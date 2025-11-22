@@ -916,7 +916,7 @@ impl QueryRepository for PostgresQueryRepository {
                 ))
             })?;
 
-        let library_id = LibraryID(row.get("library_id"));
+        let library_id = LibraryId(row.get("library_id"));
 
         let media_file = MediaFile {
             id: row.get("file_id"),
@@ -964,7 +964,7 @@ impl QueryRepository for PostgresQueryRepository {
                 ))
             })?;
 
-        let library_id = LibraryID(row.get("library_id"));
+        let library_id = LibraryId(row.get("library_id"));
         let media_file = MediaFile {
             id: row.get("file_id"),
             path: std::path::PathBuf::from(row.get::<String, _>("file_path")),
@@ -1027,7 +1027,7 @@ impl QueryRepository for PostgresQueryRepository {
 
         for row in rows {
             let series_id: Uuid = row.get("series_id");
-            let library_id = LibraryID(row.get("series_library_id"));
+            let library_id = LibraryId(row.get("series_library_id"));
 
             // Create or get series reference
             if let std::collections::hash_map::Entry::Vacant(e) =
@@ -1129,7 +1129,7 @@ impl QueryRepository for PostgresQueryRepository {
                     media_file_metadata: None,
                     library_id: row
                         .try_get::<Uuid, _>("file_library_id")
-                        .map(LibraryID)
+                        .map(LibraryId)
                         .unwrap_or(library_id),
                 };
 

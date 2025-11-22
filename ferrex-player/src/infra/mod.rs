@@ -9,7 +9,7 @@ pub mod config;
 pub mod constants;
 pub mod image_log;
 pub mod render;
-pub mod widgets;
+pub mod shader_widgets;
 
 // New profiling modules (feature-gated)
 #[cfg(any(

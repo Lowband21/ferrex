@@ -1,13 +1,13 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use ferrex_core::api::routes::{utils, v1};
+use ferrex_core::api::{
+    AdminUserInfo, CreateUserRequest, UpdateUserRequest,
+    routes::{utils, v1},
+};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::infra::{
-    api_client::ApiClient,
-    api_types::{AdminUserInfo, CreateUserRequest, UpdateUserRequest},
-};
+use crate::infra::api_client::ApiClient;
 
 // DTOs imported from ferrex-core::api::types::users_admin
 

@@ -197,7 +197,8 @@ pub fn update_media(
                 log::debug!("Triggering UI refresh for watch progress update");
                 // Use UpdateViewModelFilters for a lightweight refresh
                 DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                    crate::domains::ui::messages::UiMessage::UpdateViewModelFilters,
+                    crate::domains::ui::view_model_ui::ViewModelMessage::UpdateViewModelFilters
+                        .into(),
                 )))
             } else {
                 DomainUpdateResult::task(Task::none())

@@ -1,5 +1,6 @@
 pub mod accessor;
 pub mod repository;
+pub mod yoke_cache;
 
 pub use accessor::*;
 pub use repository::*;

@@ -1,6 +1,6 @@
 use crate::{
-    common::ui_utils::icon_text, domains::ui::messages::UiMessage,
-    domains::ui::theme,
+    common::ui_utils::icon_text,
+    domains::ui::{messages::UiMessage, shell_ui::UiShellMessage, theme},
 };
 use iced::{
     Element, Length,
@@ -19,7 +19,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, UiMessage> {
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(UiMessage::NavigateBack)
+            .on_press(UiShellMessage::NavigateBack.into())
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),
@@ -43,7 +43,7 @@ pub fn view_video_error(error_message: &str) -> Element<'_, UiMessage> {
             .align_x(iced::alignment::Horizontal::Center),
             Space::new().height(40),
             button("Back to Library")
-                .on_press(UiMessage::NavigateBack)
+                .on_press(UiShellMessage::NavigateBack.into())
                 .style(theme::Button::Primary.style()),
         ]
         .align_x(iced::Alignment::Center),

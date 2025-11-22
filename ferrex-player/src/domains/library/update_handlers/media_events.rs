@@ -10,15 +10,15 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps,
+    ImageRequest, ImageSize, ImageType, LibraryId, MediaIDLike, MediaOps,
     Priority, SeasonID, SeriesID,
 };
 
 /// Result of applying media events to the repository
 #[derive(Debug, Default)]
 pub struct MediaEventApplyOutcome {
-    pub touched_libraries: HashSet<LibraryID>,
-    pub inline_additions: HashMap<LibraryID, Vec<Media>>, // for Movies/Series only
+    pub touched_libraries: HashSet<LibraryId>,
+    pub inline_additions: HashMap<LibraryId, Vec<Media>>, // for Movies/Series only
     pub affected_series: HashSet<SeriesID>,
     pub affected_seasons: HashSet<SeasonID>,
 }
@@ -156,7 +156,7 @@ pub fn apply_media_updated(
 
 // --- helpers ---
 
-fn media_library_id(media: &Media) -> Option<LibraryID> {
+fn media_library_id(media: &Media) -> Option<LibraryId> {
     match media {
         Media::Movie(movie) => Some(movie.library_id),
         Media::Series(series) => Some(series.library_id),

@@ -20,7 +20,7 @@ use crate::{
             SpokenLanguage, TmdbDetails, Translation, Video,
         },
         files::{MediaFile, MediaFileMetadata},
-        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
         image::MediaImages,
         media::{
             EpisodeReference, MovieReference, SeasonReference, SeriesReference,
@@ -285,7 +285,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         Ok(SeriesReference {
             id: SeriesID(series_id),
-            library_id: LibraryID(library_id),
+            library_id: LibraryId(library_id),
             tmdb_id: tmdb_id.unwrap_or_default() as u64,
             title: SeriesTitle::new(title.clone()).map_err(|e| {
                 MediaError::Internal(format!(
@@ -340,7 +340,7 @@ impl<'a> TmdbMetadataRepository<'a> {
 
         Ok(SeasonReference {
             id: SeasonID(season_id),
-            library_id: LibraryID(library_id),
+            library_id: LibraryId(library_id),
             season_number: SeasonNumber::new(season_number),
             series_id: SeriesID(series_id),
             tmdb_series_id: tmdb_series_id as u64,
@@ -2545,7 +2545,7 @@ fn hydrate_media_file_row(row: &PgRow) -> Result<MediaFile> {
         serde_json::from_value::<MediaFileMetadata>(tm.clone()).ok()
     });
 
-    let library_id = LibraryID(row.try_get("library_id")?);
+    let library_id = LibraryId(row.try_get("library_id")?);
 
     Ok(MediaFile {
         id: row.try_get("file_id")?,

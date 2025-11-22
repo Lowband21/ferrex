@@ -3,7 +3,7 @@ use std::fmt;
 use uuid::Uuid;
 
 use super::{
-    EpisodeReference, LibraryID, Media, MediaID, MovieReference,
+    EpisodeReference, LibraryId, Media, MediaID, MovieReference,
     SeasonReference, SeriesReference,
 };
 
@@ -30,7 +30,7 @@ pub struct ScanStageLatencySummary {
 pub struct ScanProgressEvent {
     pub version: String,
     pub scan_id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub status: String,
     pub completed_items: u64,
     pub total_items: u64,
@@ -93,7 +93,7 @@ pub struct ScanEventMetadata {
     pub version: String,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
 }
 
 #[derive(Debug, Clone, PartialEq)]

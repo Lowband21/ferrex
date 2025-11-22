@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rkyv::ArchiveUnsized;
+use uuid::Uuid;
 
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::{
     messages as auth_messages, types::AuthenticationFlow,
 };
+use crate::infra::service_registry::init_registry;
 use crate::state::State;
 
 #[derive(Clone, Debug)]
@@ -105,14 +108,10 @@ fn sanitize_server_url(input: &str) -> String {
 pub fn base_state(config: &AppConfig) -> State {
     let mut state = State::new(config.server_url().to_string());
 
-    crate::infra::service_registry::init_registry(state.image_service.clone());
+    init_registry(state.image_service.clone());
 
-    let lib_id = state
-        .domains
-        .library
-        .state
-        .current_library_id
-        .map(|library_id| library_id.to_uuid());
+    let lib_id: Option<Uuid> =
+        state.domains.ui.state.scope.lib_id().map(|id| id.to_uuid());
 
     state
         .domains

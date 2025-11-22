@@ -9,7 +9,7 @@ pub mod update_handlers;
 use self::messages::StreamingMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
-use ferrex_core::player_prelude::{LibraryID, TranscodingStatus};
+use ferrex_core::player_prelude::{LibraryId, TranscodingStatus};
 use iced::Task;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ use crate::infra::repository::accessor::{Accessor, ReadOnly};
 pub struct StreamingDomainState {
     // References needed by streaming domain
     pub api_service: Arc<dyn ApiService>,
-    pub current_library_id: Option<LibraryID>,
+    pub current_library_id: Option<LibraryId>,
 
     pub repo_accessor: Accessor<ReadOnly>,
 

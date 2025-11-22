@@ -6,7 +6,7 @@ use crate::database::traits::{
     FolderInventory, FolderProcessingStatus, FolderScanFilters,
 };
 use crate::error::Result;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -44,7 +44,7 @@ impl PostgresDatabase {
 
     pub async fn get_folder_inventory(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<FolderInventory>> {
         self.folder_inventory_repository()
             .get_folder_inventory(library_id)
@@ -62,7 +62,7 @@ impl PostgresDatabase {
 
     pub async fn cleanup_stale_folders(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         stale_after_hours: i32,
     ) -> Result<u32> {
         self.folder_inventory_repository()
@@ -72,7 +72,7 @@ impl PostgresDatabase {
 
     pub async fn get_folder_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &Path,
     ) -> Result<Option<FolderInventory>> {
         self.folder_inventory_repository()

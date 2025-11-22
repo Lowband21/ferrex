@@ -1,6 +1,7 @@
 //! Root-level view composition
 
 use crate::common::messages::DomainMessage;
+use crate::domains::ui::interaction_ui::InteractionMessage;
 use crate::domains::ui::theme;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::admin::{
@@ -128,13 +129,8 @@ pub fn view(
             .style(theme::Container::Header.style());
 
         // Check if we need library controls bar
-        let selected_library = state
-            .domains
-            .library
-            .state
-            .current_library_id
-            .as_ref()
-            .map(|id| id.to_uuid());
+        let selected_library =
+            state.domains.ui.state.scope.lib_id().map(|id| id.to_uuid());
 
         let controls_bar = match &state.domains.ui.state.view {
             ViewState::Library => {
@@ -153,10 +149,9 @@ pub fn view(
                 // Wrap content in scrollable for detail views
                 scrollable(content)
                     .on_scroll(|viewport| {
-                        DomainMessage::from(
-                            ui::messages::UiMessage::DetailViewScrolled(
-                                viewport,
-                            ),
+                        DomainMessage::Ui(
+                            InteractionMessage::DetailViewScrolled(viewport)
+                                .into(),
                         )
                     })
                     .width(Length::Fill)

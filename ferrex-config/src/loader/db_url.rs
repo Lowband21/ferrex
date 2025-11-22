@@ -3,8 +3,7 @@ use std::{fs::read_to_string, path::Path};
 use url::Url;
 
 use crate::{
-    Config,
-    ConfigLoadError,
+    Config, ConfigLoadError,
     models::sources::{EnvConfig, FileDatabaseConfig},
 };
 
@@ -41,16 +40,15 @@ pub fn resolve_database_url(
         if trimmed.is_empty() {
             return Ok(None);
         }
-        let mut parsed = Url::parse(trimmed).map_err(|source| {
-            ConfigLoadError::InvalidDatabaseUrl { source }
-        })?;
+        let mut parsed = Url::parse(trimmed)
+            .map_err(|source| ConfigLoadError::InvalidDatabaseUrl { source })?;
         if parsed.password().is_none()
             && let Some(password) =
                 resolve_database_password(env, file_database)?
         {
-            parsed.set_password(Some(&password)).map_err(|_| {
-                ConfigLoadError::InvalidDatabasePassword
-            })?;
+            parsed
+                .set_password(Some(&password))
+                .map_err(|_| ConfigLoadError::InvalidDatabasePassword)?;
         }
         return Ok(Some(parsed.to_string()));
     }
@@ -71,18 +69,15 @@ pub fn resolve_database_url(
     if let (Some(host), Some(user), Some(name)) = (host, user, name) {
         let port = env.database_port.unwrap_or(5432);
         let mut url = Url::parse(&format!("postgresql://{host}:{port}/{name}"))
-            .map_err(|source| ConfigLoadError::InvalidDatabaseUrl {
-                source,
-            })?;
+            .map_err(|source| ConfigLoadError::InvalidDatabaseUrl { source })?;
         url.set_username(&user).map_err(|_| {
             ConfigLoadError::InvalidDatabaseUsername {
                 username: user.clone(),
             }
         })?;
         if let Some(password) = resolve_database_password(env, file_database)? {
-            url.set_password(Some(&password)).map_err(|_| {
-                ConfigLoadError::InvalidDatabasePassword
-            })?;
+            url.set_password(Some(&password))
+                .map_err(|_| ConfigLoadError::InvalidDatabasePassword)?;
         }
         return Ok(Some(url.to_string()));
     }

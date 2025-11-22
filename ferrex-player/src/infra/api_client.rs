@@ -1,11 +1,13 @@
-use anyhow::Result;
 use ferrex_core::{
     api::routes::v1,
     player_prelude::{
-        ApiResponse, AuthToken, AuthenticatedDevice, MediaQuery,
-        MediaWithStatus, UpdateProgressRequest, UserWatchState,
+        ApiResponse, AuthToken, AuthenticatedDevice, ConfirmClaimRequest,
+        ConfirmClaimResponse, MediaQuery, MediaWithStatus, StartClaimRequest,
+        StartClaimResponse, UpdateProgressRequest, UserWatchState,
     },
 };
+
+use anyhow::Result;
 use log::{info, warn};
 use reqwest::{Client, RequestBuilder, StatusCode};
 use rkyv::util::AlignedVec;
@@ -13,10 +15,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::infra::api_types::{
-    ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
-    StartClaimResponse,
-};
 /// Callback for token refresh
 pub type RefreshTokenCallback = Arc<
     Mutex<

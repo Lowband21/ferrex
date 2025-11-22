@@ -50,7 +50,7 @@ use crate::{
             SpokenLanguage, TmdbDetails, Translation, Video,
         },
         files::{MediaFile, MediaFileMetadata, ParsedMediaInfo},
-        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
         image::MediaImages,
         library::LibraryType,
         media::{
@@ -155,7 +155,7 @@ impl TmdbMetadataActor {
 
     async fn seed_series_from_folder(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         folder_name: &str,
     ) -> Result<SeriesReference> {
         // Prefer existing match by cleaned name
@@ -340,7 +340,7 @@ impl TmdbMetadataActor {
     #[allow(clippy::too_many_arguments)]
     async fn queue_image_job(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         media_type: &str,
         media_id: Uuid,
         image_type: MediaImageKind,
@@ -389,7 +389,7 @@ impl TmdbMetadataActor {
 
     async fn queue_local_episode_thumbnail(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         episode: &EpisodeReference,
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
@@ -435,7 +435,7 @@ impl TmdbMetadataActor {
 
     async fn queue_person_profile_jobs(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         cast: &[CastMember],
         jobs: &mut Vec<ImageFetchJob>,
     ) -> Result<()> {
@@ -1230,7 +1230,7 @@ impl TmdbMetadataActor {
 
     async fn build_movie_reference(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path_norm: &str,
         metadata: Option<&MediaFileMetadata>,
         tmdb_id: u64,
@@ -1762,7 +1762,7 @@ impl TmdbMetadataActor {
 
     async fn resolve_series(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         info: &EpisodeContextInfo,
         parent: Option<&ParentDescriptors>,
         excluded_tmdb_ids: &HashSet<u64>,
@@ -1880,7 +1880,7 @@ impl TmdbMetadataActor {
 
     async fn build_series_reference(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         tmdb_id: u64,
     ) -> Result<SeriesReference> {
         let details = self.tmdb.get_series(tmdb_id).await.map_err(|e| {
@@ -2044,7 +2044,7 @@ impl TmdbMetadataActor {
     #[allow(dead_code)]
     fn build_series_stub(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         info: &EpisodeContextInfo,
         parent: Option<&ParentDescriptors>,
     ) -> Result<SeriesReference> {
@@ -2088,7 +2088,7 @@ impl TmdbMetadataActor {
 
     async fn resolve_season(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         series_ref: &SeriesReference,
         season_number: u32,
     ) -> Result<SeasonReference> {
@@ -2154,7 +2154,7 @@ impl TmdbMetadataActor {
 
     async fn build_season_reference(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         series_ref: &SeriesReference,
         season_number: u8,
         season_details: Option<TmdbSeason>,

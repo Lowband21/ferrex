@@ -7,8 +7,8 @@ use crate::{
             messages as ui,
             motion_controller::{MotionController, MotionControllerConfig},
             scroll_manager::CarouselScrollState,
+            shell_ui::Scope,
             tabs::{TabId, TabState},
-            types::DisplayMode,
             views::virtual_carousel::{
                 messages::VirtualCarouselMessage as VCM, planner,
                 registry::MotionState, types::CarouselKey,
@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use ferrex_contracts::prelude::MediaLike;
 use ferrex_core::{
-    player_prelude::{LibraryID, MediaID, PosterKind, PosterSize},
+    player_prelude::{LibraryId, MediaID, PosterKind, PosterSize},
     types::ids::SeriesID,
 };
 
@@ -239,7 +239,7 @@ pub fn handle_virtual_carousel_message(
                         state.domains.metadata.state.planner_handle.as_ref()
                         && let Some(tab) = state
                             .tab_manager
-                            .get_tab(TabId::Library(LibraryID(lib_uuid)))
+                            .get_tab(TabId::Library(LibraryId(lib_uuid)))
                         && let TabState::Library(lib_state) = tab
                     {
                         let ids = &lib_state.cached_index_ids;
@@ -271,7 +271,7 @@ pub fn handle_virtual_carousel_message(
                         state.domains.metadata.state.planner_handle.as_ref()
                         && let Some(tab) = state
                             .tab_manager
-                            .get_tab(TabId::Library(LibraryID(lib_uuid)))
+                            .get_tab(TabId::Library(LibraryId(lib_uuid)))
                         && let TabState::Library(lib_state) = tab
                     {
                         let ids = &lib_state.cached_index_ids;
@@ -303,8 +303,8 @@ pub fn handle_virtual_carousel_message(
                         state.domains.metadata.state.planner_handle.as_ref()
                     {
                         // Access All tab curated lists
-                        if let Some(TabState::All(all_state)) =
-                            state.tab_manager.get_tab(TabId::All)
+                        if let Some(TabState::Home(all_state)) =
+                            state.tab_manager.get_tab(TabId::Home)
                         {
                             match name {
                                 "ContinueWatching" => {
@@ -486,13 +486,11 @@ pub fn handle_virtual_carousel_message(
                 .state
                 .carousel_focus
                 .activate_hovered(key.clone());
-            // Sync All view vertical focus so Up/Down starts from hovered row
-            if matches!(
-                state.domains.ui.state.display_mode,
-                DisplayMode::Curated
-            ) && matches!(state.tab_manager.active_tab_id(), TabId::All)
-                && let Some(TabState::All(all_state)) =
-                    state.tab_manager.get_tab_mut(TabId::All)
+            // Sync Home vertical focus so Up/Down starts from hovered row
+            if matches!(state.domains.ui.state.scope, Scope::Home)
+                && matches!(state.tab_manager.active_tab_id(), TabId::Home)
+                && let Some(TabState::Home(all_state)) =
+                    state.tab_manager.get_tab_mut(TabId::Home)
             {
                 all_state.focus.active_carousel = Some(key);
             }
@@ -858,15 +856,12 @@ fn active_carousel_key(state: &State) -> Option<CarouselKey> {
             ..
         } => Some(CarouselKey::SeasonEpisodes(season_id.to_uuid())),
         crate::domains::ui::types::ViewState::Library
-            if matches!(
-                state.domains.ui.state.display_mode,
-                crate::domains::ui::types::DisplayMode::Curated
-            ) =>
+            if matches!(state.domains.ui.state.scope, Scope::Home) =>
         {
-            if let Some(crate::domains::ui::tabs::TabState::All(all_state)) =
+            if let Some(crate::domains::ui::tabs::TabState::Home(all_state)) =
                 state
                     .tab_manager
-                    .get_tab(crate::domains::ui::tabs::TabId::All)
+                    .get_tab(crate::domains::ui::tabs::TabId::Home)
             {
                 all_state.focus.active_carousel.clone()
             } else {
@@ -890,12 +885,10 @@ fn start_snap_to_page(
         .carousel_focus
         .set_keyboard_active(Some(key.clone()));
     // Keep All view's vertical focus in sync so Up/Down moves from this row
-    if matches!(
-        state.domains.ui.state.display_mode,
-        crate::domains::ui::types::DisplayMode::Curated
-    ) && matches!(state.tab_manager.active_tab_id(), TabId::All)
-        && let Some(TabState::All(all_state)) =
-            state.tab_manager.get_tab_mut(TabId::All)
+    if matches!(state.domains.ui.state.scope, Scope::Home)
+        && matches!(state.tab_manager.active_tab_id(), TabId::Home)
+        && let Some(TabState::Home(all_state)) =
+            state.tab_manager.get_tab_mut(TabId::Home)
     {
         all_state.focus.active_carousel = Some(key.clone());
     }
@@ -967,10 +960,10 @@ fn start_snap_to_step(
         .carousel_focus
         .set_keyboard_active(Some(key.clone()));
     // Keep All view's vertical focus in sync so Up/Down moves from this row
-    if matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
-        && matches!(state.tab_manager.active_tab_id(), TabId::All)
-        && let Some(TabState::All(all_state)) =
-            state.tab_manager.get_tab_mut(TabId::All)
+    if matches!(state.domains.ui.state.scope, Scope::Home)
+        && matches!(state.tab_manager.active_tab_id(), TabId::Home)
+        && let Some(TabState::Home(all_state)) =
+            state.tab_manager.get_tab_mut(TabId::Home)
     {
         all_state.focus.active_carousel = Some(key.clone());
     }
@@ -1265,7 +1258,7 @@ fn maybe_send_snapshot_for_key(
                     state.domains.ui.state.carousel_registry.get(key)
                     && let Some(tab) = state
                         .tab_manager
-                        .get_tab(TabId::Library(LibraryID(*lib_uuid)))
+                        .get_tab(TabId::Library(LibraryId(*lib_uuid)))
                     && let TabState::Library(lib_state) = tab
                 {
                     let ids = &lib_state.cached_index_ids;
@@ -1293,7 +1286,7 @@ fn maybe_send_snapshot_for_key(
                     state.domains.ui.state.carousel_registry.get(key)
                     && let Some(tab) = state
                         .tab_manager
-                        .get_tab(TabId::Library(LibraryID(*lib_uuid)))
+                        .get_tab(TabId::Library(LibraryId(*lib_uuid)))
                     && let TabState::Library(lib_state) = tab
                 {
                     let ids = &lib_state.cached_index_ids;

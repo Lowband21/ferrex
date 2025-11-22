@@ -9,7 +9,9 @@ use super::types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy};
 use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
 };
-use crate::domains::ui::{messages as ui_messages, windows::focus};
+use crate::domains::ui::{
+    messages as ui_messages, shell_ui::UiShellMessage, windows::focus,
+};
 use crate::infra::constants::layout::search as search_layout;
 use crate::state::State;
 use iced::widget::scrollable::RelativeOffset;
@@ -88,7 +90,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::batch([
                 navigation_task,
                 Task::done(DomainMessage::Ui(
-                    ui_messages::UiMessage::CloseSearchWindow,
+                    UiShellMessage::CloseSearchWindow.into(),
                 )),
             ]))
         }
@@ -160,7 +162,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
                 result.task = Task::batch([
                     result.task,
                     Task::done(DomainMessage::Ui(
-                        ui_messages::UiMessage::CloseSearchWindow,
+                        UiShellMessage::CloseSearchWindow.into(),
                     )),
                 ]);
                 result
@@ -173,7 +175,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
             if state.domains.search.state.escape_pending {
                 state.domains.search.state.escape_pending = false;
                 DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                    ui_messages::UiMessage::CloseSearchWindow,
+                    UiShellMessage::CloseSearchWindow.into(),
                 )))
             } else {
                 {

@@ -12,17 +12,17 @@ use uuid::Uuid;
     feature = "rkyv",
     rkyv(derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy))
 )]
-pub struct LibraryID(pub Uuid);
+pub struct LibraryId(pub Uuid);
 
-impl Default for LibraryID {
+impl Default for LibraryId {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LibraryID {
+impl LibraryId {
     pub fn new() -> Self {
-        LibraryID(Uuid::now_v7())
+        LibraryId(Uuid::now_v7())
     }
 
     pub fn as_str(&self) -> String {
@@ -38,14 +38,14 @@ impl LibraryID {
     }
 }
 
-impl AsRef<Uuid> for LibraryID {
+impl AsRef<Uuid> for LibraryId {
     fn as_ref(&self) -> &Uuid {
         &self.0
     }
 }
 
 #[cfg(feature = "rkyv")]
-impl ArchivedLibraryID {
+impl ArchivedLibraryId {
     pub fn as_str(&self) -> String {
         self.0.to_string()
     }
@@ -55,7 +55,7 @@ impl ArchivedLibraryID {
     }
 }
 
-impl std::fmt::Display for LibraryID {
+impl std::fmt::Display for LibraryId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }

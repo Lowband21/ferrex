@@ -1,9 +1,9 @@
 //! View Models for transforming store data for specific views
 
-pub mod all_view_model;
+pub mod home_view_model;
 
-pub use all_view_model::AllViewModel;
 use ferrex_core::player_prelude::Media;
+pub use home_view_model::HomeViewModel;
 
 //use crate::domains::metadata::service::FetchPriority;
 

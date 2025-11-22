@@ -3,21 +3,25 @@
 //! This widget provides a simple, declarative API for displaying media images
 //! with automatic loading, caching, and animation support.
 
-use crate::domains::metadata::image_service::FirstDisplayHint;
-use crate::infra::widgets::poster::poster_animation_types::{
-    AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
-};
-use crate::infra::widgets::poster::PosterFace;
 use crate::{
-    domains::ui::messages::UiMessage,
-    domains::ui::widgets::poster,
-    infra::api_types::{
-        EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+    domains::{
+        metadata::image_service::FirstDisplayHint, ui::messages::UiMessage,
     },
-    infra::service_registry,
+    infra::{
+        service_registry,
+        shader_widgets::poster::{
+            Poster, PosterFace, poster,
+            poster_animation_types::{
+                AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
+            },
+        },
+    },
 };
 use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, ImageType, MediaIDLike, Priority,
+};
+use ferrex_model::{
+    EpisodeReference, MovieReference, SeasonReference, SeriesReference,
 };
 use iced::{Color, Element, Length, widget::image::Handle};
 use lucide_icons::Icon;
@@ -352,13 +356,12 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         None => image.animation,
                     };
 
-                    let mut shader: poster::Poster =
-                        poster(handle, Some(request_hash))
-                            .radius(image.radius)
-                            .with_animated_bounds(bounds)
-                            .is_hovered(image.is_hovered)
-                            .menu_target(image.media_id)
-                            .face(image.face.unwrap_or(PosterFace::Front));
+                    let mut shader: Poster = poster(handle, Some(request_hash))
+                        .radius(image.radius)
+                        .with_animated_bounds(bounds)
+                        .is_hovered(image.is_hovered)
+                        .menu_target(image.media_id)
+                        .face(image.face.unwrap_or(PosterFace::Front));
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);

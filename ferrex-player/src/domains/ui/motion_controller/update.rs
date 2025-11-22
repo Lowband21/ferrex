@@ -3,8 +3,9 @@ use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 
 use super::messages::{Direction, MotionMessage};
 use crate::domains::ui::messages::UiMessage;
+use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::tabs::TabState;
-use crate::domains::ui::types::{DisplayMode, ViewState};
+use crate::domains::ui::types::ViewState;
 use crate::state::State;
 
 #[cfg_attr(
@@ -29,7 +30,7 @@ fn handle_start(state: &mut State, dir: Direction) -> Task<UiMessage> {
     if !matches!(state.domains.ui.state.view, ViewState::Library) {
         return Task::none();
     }
-    if !matches!(state.domains.ui.state.display_mode, DisplayMode::Library) {
+    if !matches!(state.domains.ui.state.scope, Scope::Library(_)) {
         return Task::none();
     }
     if !matches!(state.tab_manager.active_tab(), TabState::Library(_)) {

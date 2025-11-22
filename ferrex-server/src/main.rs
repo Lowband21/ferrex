@@ -61,8 +61,7 @@ use ferrex_server::{
         config::{
             Config, ConfigLoad, ConfigLoader, HstsSettings, RateLimitSource,
             loader::db_url::{
-                DatabaseUrlSource,
-                resolve_effective_database_url_with_source,
+                DatabaseUrlSource, resolve_effective_database_url_with_source,
             },
         },
         orchestration::ScanOrchestrator,

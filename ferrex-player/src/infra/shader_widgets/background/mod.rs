@@ -3,16 +3,26 @@
 //! This widget creates visually appealing animated backgrounds with gradients,
 //! depth effects, and subtle animations for a professional streaming app experience.
 
+pub mod state;
+pub mod transitions;
+
 pub use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::types::BackdropAspectMode;
+
+use crate::{
+    domains::ui::types::BackdropAspectMode,
+    infra::shader_widgets::background::transitions::generate_random_gradient_center,
+};
+
 use bytemuck::{Pod, Zeroable};
-use iced::advanced::graphics::Viewport;
-use iced::advanced::image::Id as ImageId;
-use iced::widget::shader::{Primitive, Program};
-use iced::{Color, Element, Length, Rectangle, Vector, mouse, wgpu};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
+
+use iced::{
+    Color, Element, Length, Rectangle, Vector,
+    advanced::{graphics::Viewport, image::Id as ImageId},
+    mouse, wgpu,
+    widget::shader::{Primitive, Program},
+};
+
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 /// Background effect types
 #[derive(Debug, Clone)]
@@ -404,7 +414,7 @@ impl Pipeline {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(&shader_label),
                 source: wgpu::ShaderSource::Wgsl(
-                    include_str!("../shaders/background.wgsl").into(),
+                    include_str!("../../shaders/background.wgsl").into(),
                 ),
             });
 
@@ -894,7 +904,14 @@ impl Primitive for BackgroundPrimitive {
                 frequency,
                 amplitude,
             } => (*frequency, *amplitude),
-            BackgroundEffect::BackdropGradient { .. } => (0.0, 0.0),
+            BackgroundEffect::BackdropGradient { .. } => {
+                // For BackdropGradient, effect_param2 holds aspect_mode (0.0 = Auto, 1.0 = Force21x9)
+                let aspect_mode = match self.backdrop_aspect_mode {
+                    BackdropAspectMode::Auto => 0.0,
+                    BackdropAspectMode::Force21x9 => 1.0,
+                };
+                (0.0, aspect_mode)
+            }
         };
 
         let (fade_start, fade_end) = match &self.effect {
@@ -934,15 +951,31 @@ impl Primitive for BackgroundPrimitive {
                 self.secondary_color.b,
                 self.secondary_color.a,
             ],
-            texture_params: [
-                self.backdrop_aspect_ratio.unwrap_or(1.0),
-                self.scroll_offset,
-                self.header_offset,
-                match self.backdrop_aspect_mode {
-                    BackdropAspectMode::Auto => 0.0,
-                    BackdropAspectMode::Force21x9 => 1.0,
-                },
-            ],
+            texture_params: {
+                // Calculate backdrop coverage in UV space (single source of truth)
+                let viewport_width = viewport.logical_size().width;
+                let viewport_height = viewport.logical_size().height;
+                let display_aspect = match self.backdrop_aspect_mode {
+                    BackdropAspectMode::Auto => {
+                        if viewport_width >= viewport_height {
+                            30.0 / 9.0 // Ultra-wide for wide windows
+                        } else {
+                            21.0 / 9.0 // 21:9 for tall windows
+                        }
+                    }
+                    BackdropAspectMode::Force21x9 => 21.0 / 9.0,
+                };
+                let backdrop_height = viewport_width / display_aspect;
+                let backdrop_coverage_uv =
+                    (backdrop_height / viewport_height).min(1.0);
+
+                [
+                    self.backdrop_aspect_ratio.unwrap_or(1.0),
+                    self.scroll_offset,
+                    self.header_offset,
+                    backdrop_coverage_uv, // Pre-calculated coverage for shader
+                ]
+            },
             prev_primary_color: [
                 self.prev_primary_color.r,
                 self.prev_primary_color.g,
@@ -1158,7 +1191,6 @@ impl BackgroundShader {
     /// Create a new background shader with default settings
     pub fn new() -> Self {
         use crate::domains::ui::theme::MediaServerTheme;
-        use crate::domains::ui::transitions::generate_random_gradient_center;
 
         let primary = MediaServerTheme::SOFT_GREY_DARK;
         let secondary = MediaServerTheme::SOFT_GREY_LIGHT;

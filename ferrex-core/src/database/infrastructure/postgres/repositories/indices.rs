@@ -14,7 +14,7 @@ use crate::{
     domain::watch::WatchStatusFilter,
     error::{MediaError, Result},
     query::types::{MediaTypeFilter, SortBy, SortOrder},
-    types::ids::LibraryID,
+    types::ids::LibraryId,
 };
 
 #[derive(Clone, Debug)]
@@ -36,7 +36,7 @@ impl PostgresIndicesRepository {
 impl IndicesRepository for PostgresIndicesRepository {
     async fn rebuild_movie_sort_positions(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<()> {
         sqlx::query("SELECT rebuild_movie_sort_positions($1)")
             .bind(library_id.as_uuid())
@@ -53,7 +53,7 @@ impl IndicesRepository for PostgresIndicesRepository {
 
     async fn fetch_sorted_movie_indices(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         sort: SortBy,
         order: SortOrder,
         offset: Option<usize>,
@@ -100,7 +100,7 @@ impl IndicesRepository for PostgresIndicesRepository {
 
     async fn fetch_filtered_movie_indices(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         spec: &FilterIndicesRequest,
         user_id: Option<Uuid>,
     ) -> Result<Vec<u32>> {

@@ -10,7 +10,7 @@ use ferrex_core::domain::users::auth::{
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
     CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-    Library, LibraryID, LibraryType, Media, MediaQuery,
+    Library, LibraryId, LibraryType, Media, MediaQuery,
     MediaRootBrowseResponse, MediaWithStatus, Platform, Role,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
     StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
@@ -149,7 +149,7 @@ impl ApiService for TestApiService {
     async fn create_library(
         &self,
         request: CreateLibraryRequest,
-    ) -> RepositoryResult<LibraryID> {
+    ) -> RepositoryResult<LibraryId> {
         let CreateLibraryRequest {
             name,
             library_type,
@@ -161,7 +161,7 @@ impl ApiService for TestApiService {
 
         let mut guard = self.inner.write().expect("lock poisoned");
         let library = Library {
-            id: LibraryID::new(),
+            id: LibraryId::new(),
             name,
             library_type,
             paths: paths.into_iter().map(PathBuf::from).collect(),
@@ -183,7 +183,7 @@ impl ApiService for TestApiService {
 
     async fn update_library(
         &self,
-        id: LibraryID,
+        id: LibraryId,
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
         let mut guard = self.inner.write().expect("lock poisoned");
@@ -203,7 +203,7 @@ impl ApiService for TestApiService {
         }
     }
 
-    async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()> {
+    async fn delete_library(&self, id: LibraryId) -> RepositoryResult<()> {
         let mut guard = self.inner.write().expect("lock poisoned");
         guard.libraries.retain(|library| library.id != id);
         Ok(())
@@ -211,7 +211,7 @@ impl ApiService for TestApiService {
 
     async fn start_library_scan(
         &self,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
         _request: StartScanRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         Ok(ScanCommandAcceptedResponse {
@@ -222,7 +222,7 @@ impl ApiService for TestApiService {
 
     async fn pause_library_scan(
         &self,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         Ok(ScanCommandAcceptedResponse {
@@ -233,7 +233,7 @@ impl ApiService for TestApiService {
 
     async fn resume_library_scan(
         &self,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         Ok(ScanCommandAcceptedResponse {
@@ -244,7 +244,7 @@ impl ApiService for TestApiService {
 
     async fn cancel_library_scan(
         &self,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         Ok(ScanCommandAcceptedResponse {
@@ -550,7 +550,7 @@ impl ApiService for TestApiService {
 
 fn sample_library(name: &str) -> Library {
     Library {
-        id: LibraryID::new(),
+        id: LibraryId::new(),
         name: name.into(),
         library_type: LibraryType::Movies,
         paths: vec![PathBuf::from("/var/lib/ferrex")],

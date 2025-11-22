@@ -1,7 +1,7 @@
 use ferrex_core::error::MediaError;
 use ferrex_core::scan::orchestration::QueueService;
 use ferrex_core::scan::orchestration::config::RetryConfig;
-use ferrex_core::types::LibraryID;
+use ferrex_core::types::LibraryId;
 use sqlx::PgPool;
 use sqlx::Row;
 
@@ -51,7 +51,7 @@ async fn enqueue_unique_job_creates_ready_row(pool: PgPool) {
 
     // Seed library referenced by job
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Build a simple FolderScan job
     let fs = FolderScanJob {
@@ -85,7 +85,7 @@ async fn enqueue_duplicate_returns_merged_handle(pool: PgPool) {
 
     // Seed library
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Build identical FolderScan job twice
     let fs = FolderScanJob {
@@ -129,7 +129,7 @@ async fn dequeue_leases_one_and_leaves_others_ready(pool: PgPool) {
 
     // Seed library
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Enqueue two jobs
     let fs1 = FolderScanJob {
@@ -203,7 +203,7 @@ async fn concurrent_dequeues_do_not_double_lease(pool: PgPool) {
 
     // Seed library and enqueue exactly one job
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
     let fs = FolderScanJob {
         library_id: lib_id,
         folder_path_norm: "/media/only".to_string(),
@@ -258,7 +258,7 @@ async fn enqueue_merge_elevates_priority_and_makes_available(pool: PgPool) {
 
     // Seed library
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // P2 enqueue
     let fs = FolderScanJob {
@@ -320,7 +320,7 @@ async fn enqueue_duplicate_no_elevation_keeps_priority(pool: PgPool) {
 
     // Seed library
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Enqueue P0 first
     let fs = FolderScanJob {
@@ -385,7 +385,7 @@ async fn lease_renewal_success_and_post_expiry_failure(pool: PgPool) {
 
     // Seed library
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Enqueue single job
     let fs = FolderScanJob {
@@ -467,7 +467,7 @@ async fn job_completion_sets_terminal_state(pool: PgPool) {
         .expect("svc init");
 
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     let fs = FolderScanJob {
         library_id: lib_id,
@@ -521,7 +521,7 @@ async fn job_failure_backoff_and_dead_letter(pool: PgPool) {
         .await
         .expect("svc init");
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     let fs = FolderScanJob {
         library_id: lib_id,
@@ -670,7 +670,7 @@ async fn scan_expired_leases_transitions_ready_and_dlq(pool: PgPool) {
         .expect("svc init");
 
     let lib = seed_library(&pool).await;
-    let lib_id = LibraryID(lib);
+    let lib_id = LibraryId(lib);
 
     // Enqueue and lease 3 jobs
     for i in 0..3 {

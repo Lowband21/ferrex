@@ -5,7 +5,7 @@ pub mod subscriptions;
 use crate::domains::library::media_root_browser;
 use crate::infra::api_types::{Library, Media, MediaID};
 use ferrex_core::player_prelude::{
-    LibraryID, LibraryMediaResponse, MediaFile, ScanConfig, ScanMetrics,
+    LibraryId, LibraryMediaResponse, MediaFile, ScanConfig, ScanMetrics,
     ScanProgressEvent, ScanSnapshotDto,
 };
 use rkyv::util::AlignedVec;
@@ -27,11 +27,11 @@ pub enum LibraryMessage {
     LibraryCreated(Result<Library, String>),
     UpdateLibrary(Library),
     LibraryUpdated(Result<Library, String>),
-    DeleteLibrary(LibraryID),
-    LibraryDeleted(Result<LibraryID, String>),
-    SelectLibrary(Option<LibraryID>),
+    DeleteLibrary(LibraryId),
+    LibraryDeleted(Result<LibraryId, String>),
+    SelectLibrary(Option<LibraryId>),
     LibrarySelected(Uuid, Result<Vec<MediaFile>, String>),
-    ScanLibrary(LibraryID),
+    ScanLibrary(LibraryId),
 
     // Library form management
     ShowLibraryForm(Option<Library>),
@@ -47,7 +47,7 @@ pub enum LibraryMessage {
 
     // Scanning
     ScanStarted {
-        library_id: LibraryID,
+        library_id: LibraryId,
         scan_id: Uuid,
         correlation_id: Uuid,
     },
@@ -55,19 +55,19 @@ pub enum LibraryMessage {
     FetchActiveScans,
     ActiveScansUpdated(Vec<ScanSnapshotDto>),
     ScanCommandFailed {
-        library_id: Option<LibraryID>,
+        library_id: Option<LibraryId>,
         error: String,
     },
     PauseScan {
-        library_id: LibraryID,
+        library_id: LibraryId,
         scan_id: Uuid,
     },
     ResumeScan {
-        library_id: LibraryID,
+        library_id: LibraryId,
         scan_id: Uuid,
     },
     CancelScan {
-        library_id: LibraryID,
+        library_id: LibraryId,
         scan_id: Uuid,
     },
     #[cfg(feature = "demo")]
@@ -85,7 +85,7 @@ pub enum LibraryMessage {
     ScanConfigLoaded(Result<ScanConfig, String>),
 
     // Destructive: delete and recreate library with start_scan=true
-    ResetLibrary(LibraryID),
+    ResetLibrary(LibraryId),
     ResetLibraryDone(Result<(), String>),
 
     // Media references

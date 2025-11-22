@@ -107,8 +107,10 @@ pub fn update_metadata(
             let meta_task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_loaded(state, request, handle)
                 .map(DomainMessage::Metadata);
             // Nudge UI to render promptly to avoid coalesced updates
-            let ui_nudge =
-                Task::done(DomainMessage::Ui(ui::UiMessage::UpdateTransitions));
+            let ui_nudge = Task::done(DomainMessage::Ui(
+                crate::domains::ui::background_ui::BackgroundMessage::UpdateTransitions
+                    .into(),
+            ));
             DomainUpdateResult::task(Task::batch(vec![meta_task, ui_nudge]))
         }
         MetadataMessage::UnifiedImageLoadFailed(request, error) => {

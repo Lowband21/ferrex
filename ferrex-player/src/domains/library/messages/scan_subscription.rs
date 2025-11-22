@@ -264,7 +264,7 @@ mod tests {
         Engine, engine::general_purpose::STANDARD as BASE64_STANDARD,
     };
     use chrono::Utc;
-    use ferrex_core::player_prelude::{LibraryID, ScanStageLatencySummary};
+    use ferrex_core::player_prelude::{LibraryId, ScanStageLatencySummary};
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
 
@@ -272,7 +272,7 @@ mod tests {
         ScanProgressEvent {
             version: "1.0".to_string(),
             scan_id: Uuid::now_v7(),
-            library_id: LibraryID::new(),
+            library_id: LibraryId::new(),
             status: "running".to_string(),
             completed_items: 10,
             total_items: 100,

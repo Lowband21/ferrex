@@ -1,7 +1,7 @@
 use crate::{
     error::{MediaError, Result},
     query::types::MediaQuery,
-    types::ids::LibraryID,
+    types::ids::LibraryId,
 };
 use redis::{AsyncCommands, aio::ConnectionManager};
 use serde::{Serialize, de::DeserializeOwned};
@@ -182,7 +182,7 @@ impl CacheKeys {
     /// The key includes all fields that affect query results
     pub fn media_query(
         query: &MediaQuery,
-        library_scope: Option<LibraryID>,
+        library_scope: Option<LibraryId>,
         user_id: Option<Uuid>,
     ) -> String {
         let mut hasher = DefaultHasher::new();
@@ -250,7 +250,7 @@ impl CacheKeys {
     }
 
     /// Generate cache keys for invalidation based on library
-    pub fn media_query_by_library_pattern(library_id: LibraryID) -> String {
+    pub fn media_query_by_library_pattern(library_id: LibraryId) -> String {
         format!("query:media:v1:{}:*", library_id)
     }
 }

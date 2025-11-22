@@ -15,7 +15,7 @@ use crate::scan::orchestration::job::{
     ImageFetchJob, IndexUpsertJob, MediaAnalyzeJob, MediaFingerprint,
     MetadataEnrichJob,
 };
-use crate::types::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+use crate::types::ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
 use crate::types::library::LibraryType;
 use crate::types::media::Media;
 
@@ -32,7 +32,7 @@ pub struct MediaAnalyzeCommand {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MediaAnalyzed {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub path_norm: String,
     pub fingerprint: MediaFingerprint,
     pub analyzed_at: DateTime<Utc>,
@@ -50,7 +50,7 @@ pub struct MetadataCommand {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MediaReadyForIndex {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub logical_id: Option<String>,
     pub normalized_title: Option<String>,
     pub analyzed: MediaAnalyzed,
@@ -78,7 +78,7 @@ pub enum IndexingChange {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexingOutcome {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub path_norm: String,
     pub indexed_at: DateTime<Utc>,
     pub upserted: bool,

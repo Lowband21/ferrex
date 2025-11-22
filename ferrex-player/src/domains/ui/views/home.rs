@@ -1,0 +1,589 @@
+use crate::domains::ui::interaction_ui::InteractionMessage;
+use crate::domains::ui::messages::UiMessage;
+use crate::domains::ui::tabs::{TabId, TabState};
+use crate::domains::ui::theme;
+use crate::domains::ui::update_handlers::virtual_carousel_helpers as vchelper;
+use crate::domains::ui::views::grid::{
+    movie_reference_card_with_state, series_reference_card_with_state,
+};
+use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
+use crate::infra::LibraryType;
+use crate::infra::constants::virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS;
+use crate::state::State;
+use ferrex_core::player_prelude::PosterKind;
+use ferrex_core::player_prelude::{MediaID, MovieID, SeriesID};
+use iced::{
+    Element, Length,
+    widget::{Id as WidgetId, column, container, scrollable, text},
+};
+use std::time::Instant;
+
+// Helper function for carousel view used in All mode
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::scope!(crate::infra::profiling_scopes::scopes::VIEW_RENDER);
+
+    let watch_state_opt = state.domains.media.state.get_watch_state();
+
+    let mut content = column![].spacing(30).padding(20);
+    let mut added_count = 0;
+
+    log::debug!(
+        "view_all_content: library_info has {} libraries",
+        state.tab_manager.library_info().len()
+    );
+
+    // Curated carousels at top of All view
+    if let Some(tab) = state.tab_manager.get_tab(TabId::Home)
+        && let TabState::Home(all_state) = tab
+    {
+        // Continue Watching (mixed movies/series)
+        if !all_state.continue_watching.is_empty() {
+            let ids = all_state.continue_watching.clone();
+            let key = CarouselKey::Custom("ContinueWatching");
+            if let Some(vc_state) =
+                state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let cf = &state.domains.ui.state.carousel_focus;
+                let now = Instant::now();
+                let hover_preferred =
+                    cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                let is_active = (hover_preferred
+                    && cf.hovered_key.as_ref() == Some(&key))
+                    || (cf.keyboard_active_key.as_ref() == Some(&key));
+                let total = ids.len();
+                let ids_for_closure = ids.clone();
+                let ids_for_emit = ids.clone();
+                let carousel = virtual_carousel::virtual_carousel(
+                    key.clone(),
+                    "Continue Watching",
+                    total,
+                    vc_state,
+                    move |idx| {
+                        ids_for_closure.get(idx).and_then(|uuid| {
+                            let is_hovered = state
+                                .domains
+                                .ui
+                                .state
+                                .hovered_media_id
+                                .as_ref()
+                                == Some(uuid);
+                            let item_watch_progress =
+                                if let Some(watch_state) = watch_state_opt {
+                                    watch_state.get_watch_progress(uuid)
+                                } else {
+                                    None
+                                };
+
+                            let acc = &state.domains.ui.state.repo_accessor;
+                            if acc.get(&MediaID::Movie(MovieID(*uuid))).is_ok()
+                            {
+                                return Some(movie_reference_card_with_state(
+                                    state,
+                                    MovieID(*uuid),
+                                    is_hovered,
+                                    false,
+                                    item_watch_progress,
+                                ));
+                            }
+                            if acc
+                                .get(&MediaID::Series(SeriesID(*uuid)))
+                                .is_ok()
+                            {
+                                return Some(series_reference_card_with_state(
+                                    state,
+                                    SeriesID(*uuid),
+                                    is_hovered,
+                                    false,
+                                    item_watch_progress,
+                                ));
+                            }
+                            None
+                        })
+                    },
+                    is_active,
+                );
+                // Emit a snapshot for the currently visible window (mixed Movie/Series)
+                if let Some(vc) =
+                    state.domains.ui.state.carousel_registry.get(&key)
+                {
+                    let total = ids_for_emit.len();
+                    let (vis, mut pre, mut back) =
+                        virtual_carousel::planner::collect_ranges_ids(
+                            vc,
+                            total,
+                            |i| ids_for_emit.get(i).copied(),
+                        );
+                    pre.retain(|id| !vis.contains(id));
+                    back.retain(|id| !vis.contains(id) && !pre.contains(id));
+                    let mut all = vis.clone();
+                    all.extend(pre.iter().copied());
+                    all.extend(back.iter().copied());
+                    let ctx = vchelper::build_mixed_poster_context(state, &all);
+                    if let Some(handle) =
+                        state.domains.metadata.state.planner_handle.as_ref()
+                    {
+                        handle.send(crate::domains::metadata::demand_planner::DemandSnapshot {
+                                visible_ids: vis,
+                                prefetch_ids: pre,
+                                background_ids: back,
+                                timestamp: Instant::now(),
+                                context: Some(ctx),
+                                poster_kind: None,
+                            });
+                    }
+                }
+                added_count += 1;
+                content = content.push(carousel);
+            }
+        }
+
+        // Recently Added Movies
+        if !all_state.recent_movies.is_empty() {
+            let ids = all_state.recent_movies.clone();
+            let key = CarouselKey::Custom("RecentlyAddedMovies");
+            if let Some(vc_state) =
+                state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let cf = &state.domains.ui.state.carousel_focus;
+                let now = Instant::now();
+                let hover_preferred =
+                    cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                let is_active = (hover_preferred
+                    && cf.hovered_key.as_ref() == Some(&key))
+                    || (cf.keyboard_active_key.as_ref() == Some(&key));
+                let total = ids.len();
+                let ids_for_closure = ids.clone();
+                let ids_for_emit = ids.clone();
+                let carousel = virtual_carousel::virtual_carousel(
+                    key.clone(),
+                    "Recently Added Movies",
+                    total,
+                    vc_state,
+                    move |idx| {
+                        ids_for_closure.get(idx).map(|uuid| {
+                            let is_hovered = state
+                                .domains
+                                .ui
+                                .state
+                                .hovered_media_id
+                                .as_ref()
+                                == Some(uuid);
+                            let item_watch_progress =
+                                if let Some(watch_state) = watch_state_opt {
+                                    watch_state.get_watch_progress(uuid)
+                                } else {
+                                    None
+                                };
+                            movie_reference_card_with_state(
+                                state,
+                                MovieID(*uuid),
+                                is_hovered,
+                                false,
+                                item_watch_progress,
+                            )
+                        })
+                    },
+                    is_active,
+                );
+                vchelper::emit_snapshot_for_carousel_simple(
+                    state,
+                    &key,
+                    total,
+                    |i| ids_for_emit.get(i).copied(),
+                    Some(PosterKind::Movie),
+                );
+                added_count += 1;
+                content = content.push(carousel);
+            }
+        }
+
+        // Recently Added Series
+        if !all_state.recent_series.is_empty() {
+            let ids = all_state.recent_series.clone();
+            let key = CarouselKey::Custom("RecentlyAddedSeries");
+            if let Some(vc_state) =
+                state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let cf = &state.domains.ui.state.carousel_focus;
+                let now = Instant::now();
+                let hover_preferred =
+                    cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                let is_active = (hover_preferred
+                    && cf.hovered_key.as_ref() == Some(&key))
+                    || (cf.keyboard_active_key.as_ref() == Some(&key));
+                let total = ids.len();
+                let ids_for_closure = ids.clone();
+                let ids_for_emit = ids.clone();
+                let carousel = virtual_carousel::virtual_carousel(
+                    key.clone(),
+                    "Recently Added Series",
+                    total,
+                    vc_state,
+                    move |idx| {
+                        ids_for_closure.get(idx).map(|uuid| {
+                            let is_hovered = state
+                                .domains
+                                .ui
+                                .state
+                                .hovered_media_id
+                                .as_ref()
+                                == Some(uuid);
+                            let item_watch_progress =
+                                if let Some(watch_state) = watch_state_opt {
+                                    watch_state.get_watch_progress(uuid)
+                                } else {
+                                    None
+                                };
+                            series_reference_card_with_state(
+                                state,
+                                SeriesID(*uuid),
+                                is_hovered,
+                                false,
+                                item_watch_progress,
+                            )
+                        })
+                    },
+                    is_active,
+                );
+                vchelper::emit_snapshot_for_carousel_simple(
+                    state,
+                    &key,
+                    total,
+                    |i| ids_for_emit.get(i).copied(),
+                    Some(PosterKind::Series),
+                );
+                added_count += 1;
+                content = content.push(carousel);
+            }
+        }
+
+        // Recently Released Movies
+        if !all_state.released_movies.is_empty() {
+            let ids = all_state.released_movies.clone();
+            let key = CarouselKey::Custom("RecentlyReleasedMovies");
+            if let Some(vc_state) =
+                state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let cf = &state.domains.ui.state.carousel_focus;
+                let now = Instant::now();
+                let hover_preferred =
+                    cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                let is_active = (hover_preferred
+                    && cf.hovered_key.as_ref() == Some(&key))
+                    || (cf.keyboard_active_key.as_ref() == Some(&key));
+                let total = ids.len();
+                let ids_for_closure = ids.clone();
+                let ids_for_emit = ids.clone();
+                let carousel = virtual_carousel::virtual_carousel(
+                    key.clone(),
+                    "Recently Released Movies",
+                    total,
+                    vc_state,
+                    move |idx| {
+                        ids_for_closure.get(idx).map(|uuid| {
+                            let is_hovered = state
+                                .domains
+                                .ui
+                                .state
+                                .hovered_media_id
+                                .as_ref()
+                                == Some(uuid);
+                            let item_watch_progress =
+                                if let Some(watch_state) = watch_state_opt {
+                                    watch_state.get_watch_progress(uuid)
+                                } else {
+                                    None
+                                };
+                            movie_reference_card_with_state(
+                                state,
+                                MovieID(*uuid),
+                                is_hovered,
+                                false,
+                                item_watch_progress,
+                            )
+                        })
+                    },
+                    is_active,
+                );
+                vchelper::emit_snapshot_for_carousel_simple(
+                    state,
+                    &key,
+                    total,
+                    |i| ids_for_emit.get(i).copied(),
+                    Some(PosterKind::Movie),
+                );
+                added_count += 1;
+                content = content.push(carousel);
+            }
+        }
+
+        // Recently Released Series
+        if !all_state.released_series.is_empty() {
+            let ids = all_state.released_series.clone();
+            let key = CarouselKey::Custom("RecentlyReleasedSeries");
+            if let Some(vc_state) =
+                state.domains.ui.state.carousel_registry.get(&key)
+            {
+                let cf = &state.domains.ui.state.carousel_focus;
+                let now = Instant::now();
+                let hover_preferred =
+                    cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                let is_active = (hover_preferred
+                    && cf.hovered_key.as_ref() == Some(&key))
+                    || (cf.keyboard_active_key.as_ref() == Some(&key));
+                let total = ids.len();
+                let ids_for_closure = ids.clone();
+                let ids_for_emit = ids.clone();
+                let carousel = virtual_carousel::virtual_carousel(
+                    key.clone(),
+                    "Recently Released Series",
+                    total,
+                    vc_state,
+                    move |idx| {
+                        ids_for_closure.get(idx).map(|uuid| {
+                            let is_hovered = state
+                                .domains
+                                .ui
+                                .state
+                                .hovered_media_id
+                                .as_ref()
+                                == Some(uuid);
+                            let item_watch_progress =
+                                if let Some(watch_state) = watch_state_opt {
+                                    watch_state.get_watch_progress(uuid)
+                                } else {
+                                    None
+                                };
+                            series_reference_card_with_state(
+                                state,
+                                SeriesID(*uuid),
+                                is_hovered,
+                                false,
+                                item_watch_progress,
+                            )
+                        })
+                    },
+                    is_active,
+                );
+                vchelper::emit_snapshot_for_carousel_simple(
+                    state,
+                    &key,
+                    total,
+                    |i| ids_for_emit.get(i).copied(),
+                    Some(PosterKind::Series),
+                );
+                added_count += 1;
+                content = content.push(carousel);
+            }
+        }
+    }
+    for (library_id, library_type) in state.tab_manager.library_info() {
+        log::debug!(
+            "Processing library {} of type {:?}",
+            library_id,
+            library_type
+        );
+        match library_type {
+            LibraryType::Movies => {
+                // Use cached sorted IDs from the library tab to avoid per-frame re-sorts
+                if let Some(tab) =
+                    state.tab_manager.get_tab(TabId::Library(*library_id))
+                    && let crate::domains::ui::tabs::TabState::Library(
+                        lib_state,
+                    ) = tab
+                {
+                    let key = CarouselKey::LibraryMovies(library_id.to_uuid());
+                    if let Some(vc_state) =
+                        state.domains.ui.state.carousel_registry.get(&key)
+                    {
+                        let cf = &state.domains.ui.state.carousel_focus;
+                        let now = Instant::now();
+                        let hover_preferred =
+                            cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                        let is_active = (hover_preferred
+                            && cf.hovered_key.as_ref() == Some(&key))
+                            || (cf.keyboard_active_key.as_ref() == Some(&key));
+                        let ids = lib_state.cached_index_ids.clone();
+                        log::debug!(
+                            "All view: Using cached {} movie IDs for library {}",
+                            ids.len(),
+                            library_id
+                        );
+                        let total = ids.len();
+                        let ids_for_closure = ids.clone();
+                        let ids_for_emit = ids.clone();
+                        let carousel = virtual_carousel::virtual_carousel(
+                            key.clone(),
+                            "Movies",
+                            total,
+                            vc_state,
+                            move |idx| {
+                                ids_for_closure.get(idx).map(|uuid| {
+                                    let is_hovered = state
+                                        .domains
+                                        .ui
+                                        .state
+                                        .hovered_media_id
+                                        .as_ref()
+                                        == Some(uuid);
+
+                                    let item_watch_progress =
+                                        if let Some(watch_state) =
+                                            watch_state_opt
+                                        {
+                                            watch_state.get_watch_progress(uuid)
+                                        } else {
+                                            None
+                                        };
+                                    let movie_id = MovieID(*uuid);
+                                    movie_reference_card_with_state(
+                                        state,
+                                        movie_id,
+                                        is_hovered,
+                                        false,
+                                        item_watch_progress,
+                                    )
+                                })
+                            },
+                            is_active,
+                        );
+                        vchelper::emit_snapshot_for_carousel_simple(
+                            state,
+                            &key,
+                            total,
+                            |i| ids_for_emit.get(i).copied(),
+                            Some(PosterKind::Movie),
+                        );
+                        added_count += 1;
+                        content = content.push(carousel);
+                    }
+                }
+            }
+            LibraryType::Series => {
+                // Use cached sorted IDs from the library tab to avoid per-frame re-sorts
+                if let Some(tab) =
+                    state.tab_manager.get_tab(TabId::Library(*library_id))
+                    && let TabState::Library(lib_state) = tab
+                {
+                    let key = CarouselKey::LibrarySeries(library_id.to_uuid());
+                    if let Some(vc_state) =
+                        state.domains.ui.state.carousel_registry.get(&key)
+                    {
+                        let cf = &state.domains.ui.state.carousel_focus;
+                        let now = Instant::now();
+                        let hover_preferred =
+                            cf.should_prefer_hover(now, HOVER_SWITCH_WINDOW_MS);
+                        let is_active = (hover_preferred
+                            && cf.hovered_key.as_ref() == Some(&key))
+                            || (cf.keyboard_active_key.as_ref() == Some(&key));
+                        let ids = lib_state.cached_index_ids.clone();
+                        log::debug!(
+                            "All view: Using cached {} series IDs for library {}",
+                            ids.len(),
+                            library_id
+                        );
+                        let total = ids.len();
+                        let ids_for_closure = ids.clone();
+                        let ids_for_emit = ids.clone();
+                        let carousel = virtual_carousel::virtual_carousel(
+                            key.clone(),
+                            "TV Shows",
+                            total,
+                            vc_state,
+                            move |idx| {
+                                ids_for_closure.get(idx).map(|uuid| {
+                                    let is_hovered = state
+                                        .domains
+                                        .ui
+                                        .state
+                                        .hovered_media_id
+                                        .as_ref()
+                                        == Some(uuid);
+
+                                    let item_watch_progress =
+                                        if let Some(watch_state) =
+                                            watch_state_opt
+                                        {
+                                            watch_state.get_watch_progress(uuid)
+                                        } else {
+                                            None
+                                        };
+                                    let series_id = SeriesID(*uuid);
+                                    series_reference_card_with_state(
+                                        state,
+                                        series_id,
+                                        is_hovered,
+                                        false,
+                                        item_watch_progress,
+                                    )
+                                })
+                            },
+                            is_active,
+                        );
+                        vchelper::emit_snapshot_for_carousel_simple(
+                            state,
+                            &key,
+                            total,
+                            |i| ids_for_emit.get(i).copied(),
+                            Some(PosterKind::Series),
+                        );
+                        added_count += 1;
+                        content = content.push(carousel);
+                    }
+                }
+            }
+        }
+    }
+
+    if added_count == 0 && !state.loading {
+        content = content.push(
+            container(
+                column![
+                    text("📁").size(64),
+                    text("No media files found")
+                        .size(24)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    text("Click 'Scan Library' to search for media files")
+                        .size(16)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY)
+                ]
+                .spacing(10)
+                .align_x(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding(100) // Add padding instead of fill height for visual centering
+            .align_x(iced::alignment::Horizontal::Center),
+        );
+    }
+
+    let scroll_id = if let Some(TabState::Home(all_state)) =
+        state.tab_manager.get_tab(TabId::Home)
+    {
+        all_state.focus.scrollable_id.clone()
+    } else {
+        WidgetId::unique()
+    };
+
+    scrollable(content)
+        .id(scroll_id)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::default(),
+        ))
+        .on_scroll(|viewport| InteractionMessage::HomeScrolled(viewport).into())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}

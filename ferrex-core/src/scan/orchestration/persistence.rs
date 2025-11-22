@@ -26,7 +26,7 @@ use crate::{
         },
         scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
     },
-    types::LibraryID,
+    types::LibraryId,
 };
 
 /// Durable queue backed by Postgres. All methods are stubs for now.
@@ -50,7 +50,7 @@ impl fmt::Debug for PostgresQueueService {
 #[derive(Clone, Debug)]
 pub struct ReadyQueueCount {
     pub kind: JobKind,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub priority: JobPriority,
     pub ready: usize,
 }
@@ -134,7 +134,7 @@ impl PostgresQueueService {
             if attempts_before < max_attempts {
                 let attempt_next = attempts_before.saturating_add(1) as u16;
                 let job_id = JobId(row.id);
-                let library_id = LibraryID(row.library_id);
+                let library_id = LibraryId(row.library_id);
                 let payload: JobPayload = from_value(row.payload).map_err(|e| {
                     MediaError::Internal(format!(
                         "lease resurrection payload decode failed for job {}: {e}",
@@ -388,7 +388,7 @@ impl PostgresQueueService {
             let ready = row.ready.unwrap_or(0).max(0i64) as usize;
             counts.push(ReadyQueueCount {
                 kind,
-                library_id: LibraryID(row.library_id),
+                library_id: LibraryId(row.library_id),
                 priority,
                 ready,
             });
@@ -1256,7 +1256,7 @@ SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond
         let max_attempts = i32::from(self.retry_config.max_attempts);
         let attempt_next = attempts_before.saturating_add(1) as u16;
         let job_id = JobId(row.id);
-        let library_id = LibraryID(row.library_id);
+        let library_id = LibraryId(row.library_id);
         let payload: JobPayload = from_value(row.payload).map_err(|e| {
             MediaError::Internal(format!(
                 "fail payload decode failed for job {}: {e}",
@@ -1513,7 +1513,7 @@ impl ScanCursorRepository for PostgresCursorRepository {
 
     async fn list_by_library(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<ScanCursor>> {
         let results = sqlx::query_as::<
             _,
@@ -1598,7 +1598,7 @@ impl ScanCursorRepository for PostgresCursorRepository {
         Ok(())
     }
 
-    async fn delete_by_library(&self, library_id: LibraryID) -> Result<usize> {
+    async fn delete_by_library(&self, library_id: LibraryId) -> Result<usize> {
         let result = sqlx::query(
             r#"
             DELETE FROM scan_cursors
@@ -1614,7 +1614,7 @@ impl ScanCursorRepository for PostgresCursorRepository {
 
     async fn list_stale(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         older_than: chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<ScanCursor>> {
         let results = sqlx::query_as::<

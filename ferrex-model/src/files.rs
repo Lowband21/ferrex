@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::LibraryID;
+use super::LibraryId;
 use crate::chrono::{DateTime, Utc};
 
 #[derive(Clone, PartialEq)]
@@ -24,7 +24,7 @@ pub struct MediaFile {
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
     pub created_at: DateTime<Utc>,
     pub media_file_metadata: Option<MediaFileMetadata>,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
 }
 
 impl Default for MediaFile {
@@ -37,7 +37,7 @@ impl Default for MediaFile {
             discovered_at: Utc::now(),
             created_at: Utc::now(),
             media_file_metadata: None,
-            library_id: LibraryID(Uuid::nil()), // Use nil UUID for default
+            library_id: LibraryId(Uuid::nil()), // Use nil UUID for default
         }
     }
 }
@@ -195,13 +195,13 @@ impl std::fmt::Display for ExtraType {
 }
 
 impl MediaFile {
-    pub fn new(path: PathBuf, library_id: LibraryID) -> Result<Self> {
+    pub fn new(path: PathBuf, library_id: LibraryId) -> Result<Self> {
         Self::new_with_policy(path, library_id, false)
     }
 
     pub fn new_with_policy(
         path: PathBuf,
-        library_id: LibraryID,
+        library_id: LibraryId,
         allow_zero_length: bool,
     ) -> Result<Self> {
         let filename = path

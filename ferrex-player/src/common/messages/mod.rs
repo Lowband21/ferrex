@@ -15,7 +15,7 @@ use crate::domains::search;
 use crate::domains::user_management;
 
 use ferrex_core::player_prelude::{
-    LibraryID, MediaFile, MediaID, User, UserPermissions,
+    LibraryId, MediaFile, MediaID, User, UserPermissions,
 };
 use iced::Task;
 
@@ -295,8 +295,8 @@ pub enum CrossDomainEvent {
     // Library events
     LibraryUpdated,
     MediaListChanged,
-    LibrarySelected(LibraryID),
-    LibrarySelectAll, // Select all libraries (show all content)
+    LibrarySelected(LibraryId),
+    LibrarySelectHome, // Select all libraries (show all content)
     RequestLibraryRefresh, // Request to refresh library list
     // NOTE: Library management events moved to direct messages in Task 2.5
 
@@ -334,7 +334,7 @@ pub enum CrossDomainEvent {
     MediaLoaded, // Media has been loaded and is ready
 
     // Additional library events
-    LibraryChanged(LibraryID), // Library selection changed
+    LibraryChanged(LibraryId), // Library selection changed
     // Children updates for series/season detail views
     SeriesChildrenChanged(ferrex_core::player_prelude::SeriesID),
     SeasonChildrenChanged(ferrex_core::player_prelude::SeasonID),

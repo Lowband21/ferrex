@@ -2,7 +2,9 @@ use iced::Task;
 
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
-    domains::ui::types::ViewState,
+    domains::ui::{
+        messages::UiMessage, settings_ui::SettingsUiMessage, types::ViewState,
+    },
     state::State,
 };
 
@@ -27,11 +29,9 @@ pub fn handle_clear_database(state: &mut State) -> Task<DomainMessage> {
             }
         },
         |result| {
-            DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::DatabaseCleared(
-                    result,
-                ),
-            )
+            DomainMessage::Ui(UiMessage::Settings(
+                SettingsUiMessage::DatabaseCleared(result),
+            ))
         },
     )
 }
@@ -55,7 +55,6 @@ pub fn handle_database_cleared(
             }
 
             // Clear library state
-            state.domains.library.state.current_library_id = None;
             state.domains.library.state.library_form_data = None;
             state.domains.library.state.library_form_errors.clear();
             state.domains.library.state.library_media_cache.clear();

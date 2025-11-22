@@ -10,7 +10,7 @@ use ferrex_core::{
     demo::{self, DemoSeedOptions},
     domain::users::rbac::roles,
     infrastructure::providers::TmdbApiProvider,
-    types::{LibraryID, library::LibraryType},
+    types::{LibraryId, library::LibraryType},
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -76,7 +76,7 @@ pub struct DemoCoordinator {
     root: PathBuf,
     pub username: String,
     pub password: String,
-    library_ids: Mutex<Vec<LibraryID>>,
+    library_ids: Mutex<Vec<LibraryId>>,
     plan_provider: Arc<dyn DemoPlanProvider>,
 }
 
@@ -173,7 +173,7 @@ impl DemoCoordinator {
         &self.root
     }
 
-    pub async fn library_ids(&self) -> Vec<LibraryID> {
+    pub async fn library_ids(&self) -> Vec<LibraryId> {
         self.library_ids.lock().await.clone()
     }
 
@@ -202,7 +202,7 @@ impl DemoCoordinator {
     pub async fn sync_database(
         &self,
         unit_of_work: Arc<AppUnitOfWork>,
-    ) -> Result<Vec<LibraryID>> {
+    ) -> Result<Vec<LibraryId>> {
         let mut registered_ids = Vec::new();
 
         let plans = {
@@ -292,8 +292,8 @@ impl DemoCoordinator {
             .map(|ctx| ctx.libraries())
             .unwrap_or_default();
 
-        let mut id_by_root: HashMap<PathBuf, LibraryID> = HashMap::new();
-        let mut id_by_name: HashMap<String, LibraryID> = HashMap::new();
+        let mut id_by_root: HashMap<PathBuf, LibraryId> = HashMap::new();
+        let mut id_by_name: HashMap<String, LibraryId> = HashMap::new();
         for (id, meta) in registered {
             id_by_root.insert(meta.root.clone(), id);
             id_by_name.insert(meta.name.clone(), id);
@@ -323,7 +323,7 @@ impl DemoCoordinator {
                                 "demo library {} not found in registered context; falling back to synthetic id",
                                 lib.name
                             );
-                            LibraryID::new()
+                            LibraryId::new()
                         });
 
                     DemoLibraryStatus {

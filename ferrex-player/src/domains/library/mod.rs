@@ -16,7 +16,7 @@ use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::repository::accessor::{Accessor, ReadWrite};
 use crate::infra::services::api::ApiService;
 use ferrex_core::player_prelude::{
-    LibraryID, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
+    LibraryId, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
     ScanSnapshotDto,
 };
 use iced::Task;
@@ -30,8 +30,6 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct LibraryDomainState {
-    // From State struct:
-    pub current_library_id: Option<LibraryID>,
     pub show_library_management: bool,
     pub library_form_data: Option<LibraryFormData>,
     pub library_form_errors: Vec<String>,
@@ -59,7 +57,7 @@ pub struct DemoControlsState {
     pub is_loading: bool,
     pub is_updating: bool,
     pub error: Option<String>,
-    pub demo_library_ids: HashSet<LibraryID>,
+    pub demo_library_ids: HashSet<LibraryId>,
     pub movies_current: Option<usize>,
     pub series_current: Option<usize>,
     pub movies_input: String,
@@ -74,7 +72,6 @@ impl LibraryDomainState {
         repo_accessor: Accessor<ReadWrite>,
     ) -> Self {
         Self {
-            current_library_id: None,
             show_library_management: false,
             library_form_data: None,
             library_form_errors: Vec::new(),
@@ -130,14 +127,12 @@ impl LibraryDomain {
             CrossDomainEvent::DatabaseCleared => {
                 // Clear library cache
                 self.state.library_media_cache.clear();
-                self.state.current_library_id = None;
                 self.state.load_state = LibrariesLoadState::NotStarted;
                 Task::none()
             }
             // Should probably be depricated in favor of repo centric handling
             CrossDomainEvent::ClearLibraries => {
                 // Clear libraries and current_library_id
-                self.state.current_library_id = None;
                 self.state.library_media_cache.clear();
                 self.state.load_state = LibrariesLoadState::NotStarted;
                 Task::none()

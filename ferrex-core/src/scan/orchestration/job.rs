@@ -2,7 +2,7 @@ use crate::domain::media::image::{
     MediaImageKind, records::MediaImageVariantKey,
 };
 use crate::error::Result;
-use crate::types::LibraryID;
+use crate::types::LibraryId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -117,7 +117,7 @@ impl JobPayload {
         }
     }
 
-    pub fn library_id(&self) -> LibraryID {
+    pub fn library_id(&self) -> LibraryId {
         match self {
             JobPayload::FolderScan(job) => job.library_id,
             JobPayload::MediaAnalyze(job) => job.library_id,
@@ -197,7 +197,7 @@ impl JobRecord {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum DedupeKey {
     FolderScan {
-        library_id: LibraryID,
+        library_id: LibraryId,
         folder_path_norm: String,
     },
     MediaAnalyze(MediaFingerprint),
@@ -205,7 +205,7 @@ pub enum DedupeKey {
         candidate_id: String,
     },
     IndexUpsert {
-        library_id: LibraryID,
+        library_id: LibraryId,
         file_path_norm: String,
     },
     ImageFetch {
@@ -252,7 +252,7 @@ impl fmt::Display for DedupeKey {
 /// Background image fetch task for media imagery.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageFetchJob {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub source: ImageFetchSource,
     pub key: MediaImageVariantKey,
     pub priority_hint: ImageFetchPriority,
@@ -289,7 +289,7 @@ impl ImageFetchPriority {
 /// Minimum contract for folder scan payload.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FolderScanJob {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub folder_path_norm: String,
     pub parent_context: Option<String>,
     pub scan_reason: ScanReason,
@@ -324,7 +324,7 @@ impl FromStr for ScanReason {
 /// Analyze job payload (typically ffprobe + thumbnails).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MediaAnalyzeJob {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub path_norm: String,
     pub fingerprint: MediaFingerprint,
     pub discovered_at: DateTime<Utc>,
@@ -341,7 +341,7 @@ fn default_scan_reason() -> ScanReason {
 /// Metadata enrichment payload (normalize/match/fetch).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetadataEnrichJob {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub logical_candidate_id: String,
     pub intent: MetadataIntent,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -384,7 +384,7 @@ fn default_json_null() -> Value {
 /// Index upsert payload (DB + search index writes).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IndexUpsertJob {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub logical_entity: serde_json::Value,
     pub media_attrs: serde_json::Value,
     pub relations: serde_json::Value,
@@ -433,7 +433,7 @@ pub struct JobHandle {
     pub job_id: JobId,
     pub kind: JobKind,
     pub dedupe_key: String,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub priority: JobPriority,
     pub accepted: bool,
     pub merged_into: Option<JobId>,

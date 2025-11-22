@@ -9,7 +9,7 @@ use crate::{
     traits::prelude::MediaIDLike,
     types::{
         details::{MediaDetailsOption, TmdbDetails},
-        ids::LibraryID,
+        ids::LibraryId,
         library::LibraryType,
     },
 };
@@ -47,7 +47,7 @@ impl IndexManager {
     /// Convenience: sort media IDs for a library (no persistence)
     pub async fn sort_media_ids_for_library(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
         sort_field: SortBy,
         sort_order: SortOrder,
@@ -85,7 +85,7 @@ impl IndexManager {
     /// Uses the database's natural ordering (ORDER BY title) to maintain consistency
     pub async fn compute_title_position_map(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
     ) -> Result<HashMap<Uuid, u32>> {
         // Get media items directly from database - they're already ordered by title

@@ -1,6 +1,8 @@
 pub use self::sort_option::SortOption;
 
-use crate::domains::ui::{messages::UiMessage, theme::MediaServerTheme};
+use crate::domains::ui::{
+    library_ui::LibraryUiMessage, messages::UiMessage, theme::MediaServerTheme,
+};
 use ferrex_core::player_prelude::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
@@ -78,7 +80,7 @@ pub fn sort_dropdown<'a>(current_sort: SortBy) -> Element<'a, UiMessage> {
 
     container(
         pick_list(SortOption::OPTIONS, selected, |option| {
-            UiMessage::SetSortBy(option.value)
+            LibraryUiMessage::SetSortBy(option.value).into()
         })
         .placeholder("Sort by...")
         .width(Length::Fixed(160.0))

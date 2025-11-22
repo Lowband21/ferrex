@@ -3,7 +3,7 @@ use ferrex_model::details::{
     MediaDetailsOption, MediaDetailsOptionLike, TmdbDetails,
 };
 use ferrex_model::files::MediaFile;
-use ferrex_model::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+use ferrex_model::ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
 use ferrex_model::media::{
     EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
 };
@@ -74,7 +74,7 @@ pub trait Browsable: MediaOps {
     fn child_count(&self) -> Option<usize>;
 
     /// Get the library ID this media belongs to
-    fn library_id(&self) -> LibraryID;
+    fn library_id(&self) -> LibraryId;
 }
 
 // ===== MediaOps Implementations =====
@@ -228,7 +228,7 @@ impl Browsable for SeriesReference {
         }
     }
 
-    fn library_id(&self) -> LibraryID {
+    fn library_id(&self) -> LibraryId {
         self.library_id
     }
 }
@@ -246,7 +246,7 @@ impl Browsable for SeasonReference {
         }
     }
 
-    fn library_id(&self) -> LibraryID {
+    fn library_id(&self) -> LibraryId {
         // Seasons now have library_id directly
         self.library_id
     }

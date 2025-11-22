@@ -6,7 +6,7 @@ use crate::database::ports::media_references::MediaReferencesRepository;
 use crate::error::Result;
 use crate::scan::orchestration::actors::messages::ParentDescriptors;
 use crate::scan::orchestration::series::clean_series_title;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use crate::types::media::SeriesReference;
 
 /// Helper responsible for locating existing series references using canonical hints.
@@ -32,7 +32,7 @@ impl SeriesLocator {
     /// Attempt to find an existing series using the parent descriptors and a fallback title.
     pub async fn find_existing_series(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         descriptors: Option<&ParentDescriptors>,
         fallback_title: &str,
     ) -> Result<Option<SeriesReference>> {

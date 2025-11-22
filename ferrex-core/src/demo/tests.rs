@@ -3,7 +3,7 @@ use crate::demo::{
     init_demo_context, register_demo_library,
 };
 use crate::types::{
-    ids::LibraryID,
+    ids::LibraryId,
     library::{Library, LibraryType},
 };
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ fn allow_zero_length_is_true_only_for_registered_demo_library() {
     clear_registered_libraries();
 
     let library = Library {
-        id: LibraryID::new(),
+        id: LibraryId::new(),
         name: "Demo Movies".into(),
         library_type: LibraryType::Movies,
         paths: vec![PathBuf::from("/demo")],
@@ -47,6 +47,6 @@ fn allow_zero_length_is_true_only_for_registered_demo_library() {
     register_demo_library(&library);
     assert!(allow_zero_length_for(&library.id));
 
-    let stranger = LibraryID::new();
+    let stranger = LibraryId::new();
     assert!(!allow_zero_length_for(&stranger));
 }

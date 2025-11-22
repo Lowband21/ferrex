@@ -1,6 +1,7 @@
 use iced::{Size, Task};
 
 use crate::domains::metadata::demand_planner::DemandSnapshot;
+use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::views::virtual_carousel::{
     planner, types::CarouselKey,
 };
@@ -39,9 +40,10 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
     // TODO: This is cumbersome, fix it
     let uuid = state
         .domains
-        .library
+        .ui
         .state
-        .current_library_id
+        .scope
+        .lib_id()
         .map(|library_id| library_id.to_uuid());
 
     // Update depth regions for the current view with new window size
@@ -121,14 +123,13 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
     // After resizing, re-emit snapshots for carousels to refresh visible/prefetch windows.
     // Covers All-tab (curated + per-library) and active detail carousels.
     // All view (Curated): re-emit combined snapshots so posters stay up to date after width change
-    if matches!(
-        state.domains.ui.state.display_mode,
-        crate::domains::ui::types::DisplayMode::Curated
-    ) && matches!(
-        state.tab_manager.active_tab_id(),
-        crate::domains::ui::tabs::TabId::All
-    ) {
-        super::all_tab::emit_initial_all_tab_snapshots_combined(state);
+    if matches!(state.domains.ui.state.scope, Scope::Home)
+        && matches!(
+            state.tab_manager.active_tab_id(),
+            crate::domains::ui::tabs::TabId::Home
+        )
+    {
+        super::home_tab::emit_initial_all_tab_snapshots_combined(state);
     }
 
     // Detail views: re-emit for the active carousel key

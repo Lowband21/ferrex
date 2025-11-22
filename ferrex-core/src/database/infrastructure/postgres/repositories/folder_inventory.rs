@@ -7,7 +7,7 @@ use crate::database::traits::{
     FolderScanFilters, FolderType,
 };
 use crate::error::{MediaError, Result};
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use tracing::info;
@@ -59,7 +59,7 @@ impl FolderInventoryRepository for PostgresFolderInventoryRepository {
 
     async fn get_folder_inventory(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<FolderInventory>> {
         self.get_folder_inventory_impl(library_id).await
     }
@@ -70,7 +70,7 @@ impl FolderInventoryRepository for PostgresFolderInventoryRepository {
 
     async fn cleanup_stale_folders(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         stale_after_hours: i32,
     ) -> Result<u32> {
         self.cleanup_stale_folders_impl(library_id, stale_after_hours)
@@ -79,7 +79,7 @@ impl FolderInventoryRepository for PostgresFolderInventoryRepository {
 
     async fn get_folder_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &Path,
     ) -> Result<Option<FolderInventory>> {
         self.get_folder_by_path_impl(library_id, path).await
@@ -301,7 +301,7 @@ impl PostgresFolderInventoryRepository {
     /// Get complete folder inventory for a library
     pub async fn get_folder_inventory_impl(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<FolderInventory>> {
         let rows = sqlx::query_as::<_, FolderInventoryRow>(
             r#"
@@ -415,7 +415,7 @@ impl PostgresFolderInventoryRepository {
     /// Cleanup stale folders that haven't been seen in the specified time
     pub async fn cleanup_stale_folders_impl(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         stale_after_hours: i32,
     ) -> Result<u32> {
         let result = sqlx::query!(
@@ -451,7 +451,7 @@ impl PostgresFolderInventoryRepository {
     /// Get folder by path
     pub async fn get_folder_by_path_impl(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &Path,
     ) -> Result<Option<FolderInventory>> {
         let row = sqlx::query_as::<_, FolderInventoryRow>(
@@ -740,7 +740,7 @@ impl From<FolderInventoryRow> for FolderInventory {
 
         FolderInventory {
             id: row.id,
-            library_id: LibraryID(row.library_id),
+            library_id: LibraryId(row.library_id),
             folder_path: row.folder_path,
             folder_type,
             parent_folder_id: row.parent_folder_id,

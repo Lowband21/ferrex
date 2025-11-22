@@ -1,15 +1,15 @@
 use iced::widget::Id;
 
-use crate::domains::ui::tabs::TabId;
+use crate::domains::ui::tabs::{TabId, TabState};
 use crate::domains::ui::views::virtual_carousel::animator::SnapAnimator;
 use crate::domains::ui::views::virtual_carousel::types::CarouselKey;
 use crate::infra::api_types::LibraryType;
 use crate::infra::constants::virtual_carousel::layout as vcl;
 use crate::state::State;
 
-/// Focus and vertical snap state for the All view (Curated mode)
+/// Focus and vertical snap state for the Home view
 #[derive(Debug, Clone)]
-pub struct AllFocusState {
+pub struct HomeFocusState {
     pub scrollable_id: Id,
     pub active_carousel: Option<CarouselKey>,
     pub ordered_keys: Vec<CarouselKey>,
@@ -18,7 +18,7 @@ pub struct AllFocusState {
     pub scroll_y: f32,
 }
 
-impl Default for AllFocusState {
+impl Default for HomeFocusState {
     fn default() -> Self {
         Self {
             scrollable_id: Id::unique(),
@@ -31,39 +31,38 @@ impl Default for AllFocusState {
     }
 }
 
-impl AllFocusState {
+impl HomeFocusState {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Rebuild the display order of all carousels shown in the All view, based on
-    /// curated sections and per-library sections.
+    /// Rebuild the display order of all carousels shown in Home view
     pub fn rebuild_ordered_keys(&mut self, state: &State) {
         self.ordered_keys.clear();
 
         // Curated sections first (only include non-empty lists)
-        if let Some(tab) = state.tab_manager.get_tab(TabId::All) {
-            if let crate::domains::ui::tabs::TabState::All(all) = tab {
-                if !all.continue_watching.is_empty() {
-                    self.ordered_keys
-                        .push(CarouselKey::Custom("ContinueWatching"));
-                }
-                if !all.recent_movies.is_empty() {
-                    self.ordered_keys
-                        .push(CarouselKey::Custom("RecentlyAddedMovies"));
-                }
-                if !all.recent_series.is_empty() {
-                    self.ordered_keys
-                        .push(CarouselKey::Custom("RecentlyAddedSeries"));
-                }
-                if !all.released_movies.is_empty() {
-                    self.ordered_keys
-                        .push(CarouselKey::Custom("RecentlyReleasedMovies"));
-                }
-                if !all.released_series.is_empty() {
-                    self.ordered_keys
-                        .push(CarouselKey::Custom("RecentlyReleasedSeries"));
-                }
+        if let Some(tab) = state.tab_manager.get_tab(TabId::Home)
+            && let TabState::Home(home) = tab
+        {
+            if !home.continue_watching.is_empty() {
+                self.ordered_keys
+                    .push(CarouselKey::Custom("ContinueWatching"));
+            }
+            if !home.recent_movies.is_empty() {
+                self.ordered_keys
+                    .push(CarouselKey::Custom("RecentlyAddedMovies"));
+            }
+            if !home.recent_series.is_empty() {
+                self.ordered_keys
+                    .push(CarouselKey::Custom("RecentlyAddedSeries"));
+            }
+            if !home.released_movies.is_empty() {
+                self.ordered_keys
+                    .push(CarouselKey::Custom("RecentlyReleasedMovies"));
+            }
+            if !home.released_series.is_empty() {
+                self.ordered_keys
+                    .push(CarouselKey::Custom("RecentlyReleasedSeries"));
             }
         }
 
@@ -114,7 +113,7 @@ impl AllFocusState {
     }
 
     /// Compute the approximate top Y position (in px) of the section for the given
-    /// key within the All view's scrollable content, based on known layout constants
+    /// key within the Home view's scrollable content, based on known layout constants
     /// and the section index in `ordered_keys`.
     pub fn section_top_y(&self, key: &CarouselKey) -> Option<f32> {
         let idx = self.ordered_keys.iter().position(|k| k == key)? as f32;
@@ -127,16 +126,13 @@ impl AllFocusState {
     }
 }
 
-/// Compute the ordered list of carousel keys shown in the All view without
-/// borrowing the All tab mutably. This avoids borrow checker conflicts when
-/// assigning into `AllFocusState` later.
-pub fn ordered_keys_for_all_view(state: &State) -> Vec<CarouselKey> {
+/// Compute the ordered list of carousel keys shown in the Home view without
+/// borrowing the Home tab mutably. This avoids borrow checker conflicts when
+/// assigning into `HomeFocusState` later.
+pub fn ordered_keys_for_home(state: &State) -> Vec<CarouselKey> {
     let mut keys: Vec<CarouselKey> = Vec::new();
 
-    // Curated sections
-    if let Some(crate::domains::ui::tabs::TabState::All(all)) =
-        state.tab_manager.get_tab(TabId::All)
-    {
+    if let Some(TabState::Home(all)) = state.tab_manager.get_tab(TabId::Home) {
         if !all.continue_watching.is_empty() {
             keys.push(CarouselKey::Custom("ContinueWatching"));
         }

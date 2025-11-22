@@ -773,20 +773,20 @@ mod tests {
         job::*,
         lease::{DequeueRequest, LeaseId},
     };
-    use crate::types::ids::LibraryID;
+    use crate::types::ids::LibraryId;
     use crate::types::library::LibraryType;
     use sqlx::PgPool;
     use tokio::time::Duration;
     use uuid::Uuid;
 
-    const FIXTURE_LIB_A: LibraryID =
-        LibraryID(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
-    const FIXTURE_LIB_B: LibraryID =
-        LibraryID(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
+    const FIXTURE_LIB_A: LibraryId =
+        LibraryId(Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa));
+    const FIXTURE_LIB_B: LibraryId =
+        LibraryId(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
 
     async fn upsert_library(
         pool: &PgPool,
-        library_id: LibraryID,
+        library_id: LibraryId,
         name: &str,
         library_type: LibraryType,
         paths: Vec<String>,
@@ -1343,7 +1343,7 @@ mod tests {
     async fn correlation_id_propagates_when_provided() {
         let correlations = CorrelationCache::default();
 
-        let library_id = LibraryID(uuid::Uuid::now_v7());
+        let library_id = LibraryId(uuid::Uuid::now_v7());
         let payload = JobPayload::FolderScan(FolderScanJob {
             library_id,
             folder_path_norm: "/folder".into(),
@@ -1408,7 +1408,7 @@ mod tests {
     async fn correlation_id_generated_when_missing() {
         let correlations = CorrelationCache::default();
 
-        let library_id = LibraryID(uuid::Uuid::now_v7());
+        let library_id = LibraryId(uuid::Uuid::now_v7());
         let payload = JobPayload::FolderScan(FolderScanJob {
             library_id,
             folder_path_norm: "/missing".into(),

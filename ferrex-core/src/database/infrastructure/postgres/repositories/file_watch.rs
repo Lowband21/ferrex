@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::database::ports::file_watch::FileWatchEventRepository;
 use crate::database::traits::{FileWatchEvent, FileWatchEventType};
 use crate::error::{MediaError, Result};
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 #[derive(Clone, Debug)]
 pub struct PostgresFileWatchRepository {
@@ -61,7 +61,7 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
 
     async fn get_unprocessed_events(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
         let rows = sqlx::query!(
@@ -97,7 +97,7 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
 
             events.push(FileWatchEvent {
                 id: row.id,
-                library_id: LibraryID(row.library_id),
+                library_id: LibraryId(row.library_id),
                 event_type,
                 file_path: row.file_path,
                 old_path: row.old_path,

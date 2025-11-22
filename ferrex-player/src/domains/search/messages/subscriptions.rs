@@ -1,6 +1,7 @@
 use crate::common::messages::DomainMessage;
-use crate::domains::ui::{messages::UiMessage, types::ViewState};
+use crate::domains::ui::{shell_ui::UiShellMessage, types::ViewState};
 use crate::state::State;
+
 use iced::Subscription;
 
 /// Subscribe to top-level keyboard events and seed dropdown search when appropriate.
@@ -34,9 +35,10 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                     return None;
                 }
 
-                Some(DomainMessage::Ui(UiMessage::OpenSearchWindowWithSeed(
-                    text.to_string(),
-                )))
+                Some(DomainMessage::Ui(
+                    UiShellMessage::OpenSearchWindowWithSeed(text.to_string())
+                        .into(),
+                ))
             }
             _ => None,
         }

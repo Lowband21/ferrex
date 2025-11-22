@@ -1,5 +1,6 @@
 use crate::domains::ui::{
     SortBy, SortOrder,
+    library_ui::LibraryUiMessage,
     messages::UiMessage,
     theme::{self, FerrexTheme},
     widgets::sort_dropdown::SortOption,
@@ -62,7 +63,7 @@ fn build_sort_menu(
     sort_items.push(menu_item(
         "Toggle sort order",
         Some(Icon::ArrowUpDown),
-        UiMessage::ToggleSortOrder,
+        LibraryUiMessage::ToggleSortOrder.into(),
     ));
 
     for option in SortOption::OPTIONS {
@@ -75,7 +76,7 @@ fn build_sort_menu(
         sort_items.push(menu_item(
             option.label,
             icon,
-            UiMessage::SetSortBy(option.value),
+            LibraryUiMessage::SetSortBy(option.value).into(),
         ));
     }
 

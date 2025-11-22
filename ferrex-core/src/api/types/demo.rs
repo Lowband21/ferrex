@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::types::{ids::LibraryID, library::LibraryType};
+use crate::types::{ids::LibraryId, library::LibraryType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DemoStatus {
@@ -18,7 +18,7 @@ impl DemoStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DemoLibraryStatus {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub name: String,
     pub library_type: LibraryType,
     pub root: PathBuf,

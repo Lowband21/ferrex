@@ -10,8 +10,10 @@ mod primitive;
 mod render_pipeline;
 pub use render_pipeline::PosterFace;
 
-use crate::domains::ui::messages::UiMessage;
-use crate::infra::widgets::poster::poster_animation_types::PosterAnimationType;
+use crate::{
+    domains::ui::messages::UiMessage,
+    infra::shader_widgets::poster::poster_animation_types::PosterAnimationType,
+};
 
 use iced::{Color, Element, Length, widget::image::Handle};
 

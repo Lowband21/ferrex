@@ -11,7 +11,7 @@ pub use super::details::{
 };
 pub use super::files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
 pub use super::filter_types::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
-pub use super::ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+pub use super::ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
 pub use super::image_request::{
     BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, PosterKind,
     PosterSize, Priority, ProfileSize,

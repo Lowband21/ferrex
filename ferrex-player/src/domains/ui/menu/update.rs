@@ -3,7 +3,7 @@ use crate::{
     domains::ui::menu::{
         MENU_KEEPALIVE_MS, PosterMenuMessage, PosterMenuState,
     },
-    infra::widgets::poster::PosterFace,
+    infra::shader_widgets::poster::PosterFace,
     state::State,
 };
 

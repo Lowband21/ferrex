@@ -1,24 +1,27 @@
-use iced::Subscription;
+use crate::{
+    common::messages::DomainMessage,
+    domains::ui::{
+        messages::UiMessage, shell_ui::UiShellMessage,
+        window_ui::WindowUiMessage, windows::WindowKind,
+    },
+    state::State,
+};
 
-use crate::common::messages::DomainMessage;
-use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::windows::WindowKind;
-use crate::state::State;
+use iced::Subscription;
 
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subs: Vec<Subscription<DomainMessage>> = Vec::new();
 
-    subs.push(
-        iced::window::close_events()
-            .map(|id| DomainMessage::Ui(UiMessage::RawWindowClosed(id))),
-    );
+    subs.push(iced::window::close_events().map(|id| {
+        DomainMessage::Ui(UiShellMessage::RawWindowClosed(id).into())
+    }));
 
     // If the main window Id is not known yet (single-window mode),
     // capture the first Opened event and record it.
     if state.windows.get(WindowKind::Main).is_none() {
         subs.push(iced::window::events().map(|(id, event)| match event {
             iced::window::Event::Opened { .. } => {
-                DomainMessage::Ui(UiMessage::MainWindowOpened(id))
+                DomainMessage::Ui(UiShellMessage::MainWindowOpened(id).into())
             }
             _ => DomainMessage::NoOp,
         }));
@@ -28,21 +31,29 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subs.push(iced::window::events().with(main_id).map(
             |(tracked_id, (id, event))| match event {
                 iced::window::Event::Moved(position) if id == tracked_id => {
-                    DomainMessage::Ui(UiMessage::WindowMoved(Some(position)))
+                    DomainMessage::Ui(
+                        WindowUiMessage::WindowMoved(Some(position)).into(),
+                    )
                 }
                 iced::window::Event::Opened { position, .. }
                     if id == tracked_id =>
                 {
-                    DomainMessage::Ui(UiMessage::WindowMoved(position))
+                    DomainMessage::Ui(
+                        WindowUiMessage::WindowMoved(position).into(),
+                    )
                 }
                 iced::window::Event::Resized(size) if id == tracked_id => {
-                    DomainMessage::Ui(UiMessage::WindowResized(size))
+                    DomainMessage::Ui(
+                        WindowUiMessage::WindowResized(size).into(),
+                    )
                 }
                 iced::window::Event::Focused if id == tracked_id => {
-                    DomainMessage::Ui(UiMessage::MainWindowFocused)
+                    DomainMessage::Ui(UiShellMessage::MainWindowFocused.into())
                 }
                 iced::window::Event::Unfocused if id == tracked_id => {
-                    DomainMessage::Ui(UiMessage::MainWindowUnfocused)
+                    DomainMessage::Ui(
+                        UiShellMessage::MainWindowUnfocused.into(),
+                    )
                 }
                 _ => DomainMessage::NoOp,
             },
@@ -53,7 +64,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subs.push(iced::window::events().with(search_id).map(
             |(tracked_id, (id, event))| match event {
                 iced::window::Event::Focused if id == tracked_id => {
-                    DomainMessage::Ui(UiMessage::FocusSearchInput)
+                    DomainMessage::Ui(UiShellMessage::FocusSearchInput.into())
                 }
                 _ => DomainMessage::NoOp,
             },

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::details::LibraryReference;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use crate::types::library::LibraryType;
 use crate::types::media::{
     EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
@@ -67,14 +67,14 @@ impl LibraryMediaCache {
 /// Fetch a particular media item from a library
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchMediaRequest {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub media_id: MediaID,
 }
 
 /// Fetch multiple media items from a library
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchMediaRequest {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub media_ids: Vec<MediaID>,
 }
 
@@ -88,7 +88,7 @@ pub struct BatchMediaResponse {
 /// Request payload for manual metadata matching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManualMatchRequest {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub media_id: MediaID,
     pub tmdb_id: u64,
 }

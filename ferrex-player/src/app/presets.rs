@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use ferrex_model::LibraryId;
 use iced::{Preset, Task};
 use uuid::Uuid;
 
@@ -13,6 +14,7 @@ use crate::domains::auth::types::{
     AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
 };
 use crate::domains::settings::state::{PreferencesState, SettingsView};
+use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::types::ViewState;
 use crate::domains::ui::views::settings::device_management::{
     DeviceManagementState, UserDevice,
@@ -165,10 +167,9 @@ fn library_loaded_preset(
             Some(sample_admin_permissions());
         state.domains.ui.state.view = ViewState::Library;
 
-        state.domains.ui.state.current_library_id =
-            Some(ferrex_core::player_prelude::LibraryID::new());
-        state.domains.ui.state.display_mode =
-            crate::domains::ui::types::DisplayMode::Library;
+        let new_id = LibraryId::new();
+        state.domains.ui.state.current_library_id = Some(new_id);
+        state.domains.ui.state.scope = Scope::Library(new_id);
 
         (state, Task::none())
     })

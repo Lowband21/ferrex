@@ -1,7 +1,7 @@
 use crate::{
     common::ui_utils::{icon_text, lucide_font},
-    domains::ui::messages::UiMessage,
     domains::ui::theme,
+    domains::ui::{messages::UiMessage, shell_ui::UiShellMessage},
     state::State,
 };
 use ferrex_core::player_prelude::TranscodingStatus;
@@ -33,7 +33,7 @@ pub fn view_loading_video<'a>(
                     .spacing(5)
                     .align_y(iced::Alignment::Center),
             )
-            .on_press(UiMessage::NavigateBack)
+            .on_press(UiShellMessage::NavigateBack.into())
             .style(theme::Button::Secondary.style()),
         )
         .padding(20),

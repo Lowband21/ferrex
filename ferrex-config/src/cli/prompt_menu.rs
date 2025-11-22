@@ -108,8 +108,9 @@ pub fn run_prompt_menu(
                 if answer.trim().is_empty() {
                     state.media_root = None;
                 } else {
-                    validation::validate_media_root(&answer)
-                        .map_err(|e| anyhow!("Invalid media root path: {}", e))?;
+                    validation::validate_media_root(&answer).map_err(|e| {
+                        anyhow!("Invalid media root path: {}", e)
+                    })?;
                     state.media_root = Some(PathBuf::from(answer.trim()));
                 }
             }

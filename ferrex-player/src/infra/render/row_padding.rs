@@ -13,7 +13,7 @@ pub fn compute_padded_stride(width: u32, bytes_per_pixel: u32) -> usize {
     if row == 0 {
         return 0;
     }
-    ((row + align - 1) / align) * align
+    row.div_ceil(align) * align
 }
 
 /// Pads an RGBA image buffer to a 256-byte aligned stride.
@@ -57,7 +57,9 @@ mod tests {
             let stride = compute_padded_stride(width, 4);
             assert_eq!(stride % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize, 0);
             let unpadded = width as usize * 4;
-            if unpadded % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize == 0 {
+            if unpadded
+                .is_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
+            {
                 assert_eq!(stride, unpadded);
             } else {
                 assert!(stride > unpadded);
@@ -72,7 +74,7 @@ mod tests {
         let height = 3u32;
         let row = (width * 4) as usize;
 
-        let mut src = vec![0u8; (row * height as usize) as usize];
+        let mut src = vec![0u8; row * height as usize];
         for y in 0..height as usize {
             for x in 0..row {
                 // Give each row a distinct pattern

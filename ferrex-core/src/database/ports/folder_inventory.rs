@@ -6,7 +6,7 @@ use crate::database::traits::{
     FolderInventory, FolderProcessingStatus, FolderScanFilters,
 };
 use crate::error::Result;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 #[async_trait]
 pub trait FolderInventoryRepository: Send + Sync {
@@ -28,17 +28,17 @@ pub trait FolderInventoryRepository: Send + Sync {
     ) -> Result<()>;
     async fn get_folder_inventory(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<FolderInventory>>;
     async fn upsert_folder(&self, folder: &FolderInventory) -> Result<Uuid>;
     async fn cleanup_stale_folders(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         stale_after_hours: i32,
     ) -> Result<u32>;
     async fn get_folder_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &Path,
     ) -> Result<Option<FolderInventory>>;
     async fn update_folder_stats(

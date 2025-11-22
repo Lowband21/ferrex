@@ -3,6 +3,7 @@ use crate::domains::auth::security::SecureCredential;
 use crate::domains::settings::messages::SettingsMessage;
 use crate::domains::settings::state::SettingsView as SettingsSubview;
 use crate::domains::ui;
+use crate::domains::ui::shell_ui::UiShellMessage;
 use crate::state::State;
 use iced::Task;
 
@@ -106,6 +107,6 @@ pub fn handle_back_to_home(state: &mut State) -> DomainUpdateResult {
 
     // Send direct UI domain message to navigate home
     DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-        ui::messages::UiMessage::NavigateHome,
+        UiShellMessage::NavigateHome.into(),
     )))
 }

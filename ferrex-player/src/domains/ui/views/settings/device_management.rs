@@ -3,8 +3,9 @@
 //! Allows users to view and manage their authenticated devices
 
 use crate::{
-    common::ui_utils::icon_text, domains::ui::messages::UiMessage,
-    domains::ui::theme, state::State,
+    common::ui_utils::icon_text,
+    domains::ui::{messages::UiMessage, settings_ui::SettingsUiMessage, theme},
+    state::State,
 };
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Border, Element, Length, Theme};
@@ -98,7 +99,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(UiMessage::BackToSettings)
+            .on_press(SettingsUiMessage::BackToSettings.into())
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
             Space::new().width(20),
@@ -114,7 +115,7 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(UiMessage::RefreshDevices)
+            .on_press(SettingsUiMessage::RefreshDevices.into())
             .style(theme::Button::Secondary.style())
             .padding([6, 12]),
         ]
@@ -188,7 +189,7 @@ fn create_error_view<'a>(error: &'a str) -> Element<'a, UiMessage> {
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().height(15),
             button("Retry")
-                .on_press(UiMessage::RefreshDevices)
+                .on_press(SettingsUiMessage::RefreshDevices.into())
                 .style(theme::Button::Primary.style())
                 .padding([8, 16]),
         ]
@@ -348,7 +349,12 @@ fn create_device_card<'a>(device: &'a UserDevice) -> Element<'a, UiMessage> {
                         ]
                         .align_y(iced::Alignment::Center),
                     )
-                    .on_press(UiMessage::RevokeDevice(device.device_id.clone()))
+                    .on_press(
+                        SettingsUiMessage::RevokeDevice(
+                            device.device_id.clone(),
+                        )
+                        .into(),
+                    )
                     .style(theme::Button::Danger.style())
                     .padding([6, 12]),
                 )

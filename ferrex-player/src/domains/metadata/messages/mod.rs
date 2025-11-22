@@ -3,8 +3,8 @@ pub mod image_loading_subscription;
 pub mod subscription;
 pub mod subscriptions;
 
-use crate::infra::api_types::{Media, SeriesReference};
 use ferrex_core::player_prelude::{ImageRequest, MediaID};
+use ferrex_model::{Media, SeriesReference};
 
 #[derive(Clone)]
 pub enum MetadataMessage {

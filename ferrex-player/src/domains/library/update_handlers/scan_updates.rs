@@ -2,14 +2,14 @@ use crate::domains::library::messages::LibraryMessage;
 use crate::domains::library::server;
 use crate::state::State;
 use ferrex_core::player_prelude::{
-    LibraryID, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto,
+    LibraryId, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto,
 };
 use iced::Task;
 use uuid::Uuid;
 
 pub fn handle_scan_library(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
 ) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
     Task::perform(
@@ -34,7 +34,7 @@ pub fn handle_scan_library(
 
 pub fn handle_pause_scan(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
@@ -56,7 +56,7 @@ pub fn handle_pause_scan(
 
 pub fn handle_resume_scan(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
@@ -78,7 +78,7 @@ pub fn handle_resume_scan(
 
 pub fn handle_cancel_scan(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Task<LibraryMessage> {
     let api_service = state.api_service.clone();
@@ -224,24 +224,14 @@ pub fn remove_scan(state: &mut State, scan_id: Uuid) {
     log::info!("Removed scan {} from active tracking", scan_id);
 }
 
-fn map_status(
-    status: &str,
-) -> Option<crate::infra::api_types::ScanLifecycleStatus> {
+fn map_status(status: &str) -> Option<ScanLifecycleStatus> {
     match status {
-        "pending" => {
-            Some(crate::infra::api_types::ScanLifecycleStatus::Pending)
-        }
-        "running" => {
-            Some(crate::infra::api_types::ScanLifecycleStatus::Running)
-        }
-        "paused" => Some(crate::infra::api_types::ScanLifecycleStatus::Paused),
-        "completed" => {
-            Some(crate::infra::api_types::ScanLifecycleStatus::Completed)
-        }
-        "failed" => Some(crate::infra::api_types::ScanLifecycleStatus::Failed),
-        "canceled" | "cancelled" => {
-            Some(crate::infra::api_types::ScanLifecycleStatus::Canceled)
-        }
+        "pending" => Some(ScanLifecycleStatus::Pending),
+        "running" => Some(ScanLifecycleStatus::Running),
+        "paused" => Some(ScanLifecycleStatus::Paused),
+        "completed" => Some(ScanLifecycleStatus::Completed),
+        "failed" => Some(ScanLifecycleStatus::Failed),
+        "canceled" | "cancelled" => Some(ScanLifecycleStatus::Canceled),
         _ => None,
     }
 }

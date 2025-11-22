@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use crate::chrono::{DateTime, Utc};
 use crate::media::Media;
 
-use super::ids::LibraryID;
+use super::ids::LibraryId;
 
 /// Read-only operations for library-like types
 pub trait LibraryLike {
     fn needs_scan(&self) -> bool;
-    fn get_id(&self) -> LibraryID;
+    fn get_id(&self) -> LibraryId;
     fn get_name(&self) -> &str;
     fn get_type(&self) -> LibraryType;
     fn get_paths(&self) -> Vec<PathBuf>; // Returns owned for compatibility with archived types
@@ -50,7 +50,7 @@ pub trait LibraryLikeMut: LibraryLike {
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct Library {
-    pub id: LibraryID,
+    pub id: LibraryId,
     pub name: String,
     pub library_type: LibraryType,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::VecPathBuf))]
@@ -108,7 +108,7 @@ impl LibraryLike for Library {
         }
     }
 
-    fn get_id(&self) -> LibraryID {
+    fn get_id(&self) -> LibraryId {
         self.id
     }
 
@@ -173,7 +173,7 @@ impl LibraryLikeMut for Library {
     ) -> Self {
         let now = Utc::now();
         Self {
-            id: LibraryID::new(),
+            id: LibraryId::new(),
             name,
             library_type,
             paths,
@@ -236,7 +236,7 @@ impl LibraryLikeMut for Library {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LibraryScanResult {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub library_name: String,
     pub total_files: usize,
     pub new_files: usize,
@@ -252,7 +252,7 @@ pub use archived::ArchivedLibraryExt;
 #[cfg(feature = "rkyv")]
 mod archived {
     use super::*;
-    use crate::ids::ArchivedLibraryID;
+    use crate::ids::ArchivedLibraryId;
     use crate::media::{ArchivedMedia, ArchivedMovieReference};
     use rkyv::{option::ArchivedOption, vec::ArchivedVec};
 
@@ -290,7 +290,7 @@ mod archived {
     }
 
     impl ArchivedLibrary {
-        pub fn get_id(&self) -> ArchivedLibraryID {
+        pub fn get_id(&self) -> ArchivedLibraryId {
             self.id
         }
 

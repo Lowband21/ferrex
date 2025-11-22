@@ -17,7 +17,8 @@ pub fn validate_media_root(path: &str) -> Result<(), String> {
         || trimmed.starts_with("../")
         || (trimmed.len() >= 3
             && trimmed.chars().nth(1) == Some(':')
-            && (trimmed.chars().nth(2) == Some('\\') || trimmed.chars().nth(2) == Some('/')));
+            && (trimmed.chars().nth(2) == Some('\\')
+                || trimmed.chars().nth(2) == Some('/')));
 
     if !looks_like_path {
         return Err(format!(
@@ -84,8 +85,12 @@ mod tests {
 
     #[test]
     fn test_validate_tmdb_api_key_valid() {
-        assert!(validate_tmdb_api_key("3cb2d7e5faad13c2ae258607483d2de1").is_ok());
-        assert!(validate_tmdb_api_key("abcdef1234567890abcdef1234567890").is_ok());
+        assert!(
+            validate_tmdb_api_key("3cb2d7e5faad13c2ae258607483d2de1").is_ok()
+        );
+        assert!(
+            validate_tmdb_api_key("abcdef1234567890abcdef1234567890").is_ok()
+        );
         assert!(validate_tmdb_api_key("12345678901234567890").is_ok()); // 20 chars
         assert!(validate_tmdb_api_key("").is_ok()); // Empty is ok
     }
@@ -93,7 +98,13 @@ mod tests {
     #[test]
     fn test_validate_tmdb_api_key_invalid() {
         assert!(validate_tmdb_api_key("tooshort").is_err()); // < 20 chars
-        assert!(validate_tmdb_api_key("has-dashes-not-allowed-123456789012").is_err());
-        assert!(validate_tmdb_api_key("has/slashes/1234567890123456789012").is_err());
+        assert!(
+            validate_tmdb_api_key("has-dashes-not-allowed-123456789012")
+                .is_err()
+        );
+        assert!(
+            validate_tmdb_api_key("has/slashes/1234567890123456789012")
+                .is_err()
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::types::details::MediaDetailsOption;
 use crate::types::files::MediaFile;
-use crate::types::ids::{LibraryID, MovieID, SeriesID};
+use crate::types::ids::{LibraryId, MovieID, SeriesID};
 use crate::types::media::{MovieReference, SeriesReference};
 use crate::types::titles::{MovieTitle, SeriesTitle};
 use crate::types::urls::{MovieURL, SeriesURL};
@@ -197,7 +197,7 @@ impl TmdbApiProvider {
             .into_iter()
             .map(|r| MovieReference {
                 id: MovieID::new_uuid(),
-                library_id: LibraryID(uuid::Uuid::nil()), // Search results aren't tied to a library yet
+                library_id: LibraryId(uuid::Uuid::nil()), // Search results aren't tied to a library yet
                 tmdb_id: r.inner.id,
                 title: MovieTitle::new(r.inner.title).unwrap(),
                 details: MediaDetailsOption::Endpoint(format!(
@@ -246,7 +246,7 @@ impl TmdbApiProvider {
 
             let reference = SeriesReference {
                 id: SeriesID::new_uuid(),
-                library_id: LibraryID(uuid::Uuid::nil()),
+                library_id: LibraryId(uuid::Uuid::nil()),
                 tmdb_id: item.inner.id,
                 title,
                 details: MediaDetailsOption::Endpoint(format!(

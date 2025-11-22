@@ -1,14 +1,16 @@
 use super::library_filter_panel::library_filter_panel;
 use crate::{
     domains::ui::{
-        DisplayMode,
+        feedback_ui::FeedbackMessage,
+        interaction_ui::InteractionMessage,
         messages::UiMessage,
+        shell_ui::Scope,
         theme,
         views::{
-            all::view_all_content,
             grid::{
                 virtual_movie_references_grid, virtual_series_references_grid,
             },
+            home::view_home_content,
         },
         widgets::{collect_cached_handles_for_media, texture_preloader},
     },
@@ -75,7 +77,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                         text(error).color(theme::MediaServerTheme::ERROR),
                         Space::new().width(Length::Fill),
                         button("×")
-                            .on_press(UiMessage::ClearError)
+                            .on_press(FeedbackMessage::ClearError.into())
                             .style(theme::Button::Text.style()),
                     ]
                     .align_y(iced::Alignment::Center),
@@ -120,12 +122,12 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
             .into()
         } else {
             // Check display mode FIRST to ensure Curated mode always shows all content
-            let library_content = match state.domains.ui.state.display_mode {
-                DisplayMode::Curated => {
+            let library_content = match state.domains.ui.state.scope {
+                Scope::Home => {
                     // Always show all content in Curated mode, regardless of library selection
-                    view_all_content(state)
+                    view_home_content(state)
                 }
-                DisplayMode::Library => {
+                Scope::Library(_) => {
                     // Use the tab system to get the active tab
                     use crate::domains::ui::tabs::TabState;
                     use crate::infra::api_types::LibraryType;
@@ -168,7 +170,10 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
-                                    UiMessage::TabGridScrolled,
+                                    |vp| {
+                                        InteractionMessage::TabGridScrolled(vp)
+                                            .into()
+                                    },
                                     state,
                                 );
 
@@ -206,7 +211,10 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
-                                    UiMessage::TabGridScrolled,
+                                    |vp| {
+                                        InteractionMessage::TabGridScrolled(vp)
+                                            .into()
+                                    },
                                     state,
                                 );
 
@@ -214,15 +222,15 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                 grid
                             }
                         },
-                        TabState::All(_all_state) => {
+                        TabState::Home(_all_state) => {
                             // Use the AllViewModel from all_state
-                            view_all_content(state)
+                            view_home_content(state)
                         }
                     }
                 }
                 _ => {
                     // Other modes not implemented yet
-                    view_all_content(state)
+                    view_home_content(state)
                 }
             };
 

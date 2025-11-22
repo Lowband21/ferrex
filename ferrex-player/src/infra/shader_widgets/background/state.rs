@@ -1,15 +1,36 @@
 //! Background shader state management
 
-use super::transitions::{
-    BackdropTransitionState, ColorTransitionState, GradientTransitionState,
-    generate_random_gradient_center,
+use crate::{
+    common::ViewState,
+    domains::ui::{
+        types::BackdropAspectMode,
+        views::library_controls_bar,
+        widgets::{BackgroundEffect, DepthLayout, background_shader},
+    },
+    infra::{
+        constants::layout::{backdrop, detail, header},
+        shader_widgets::background::{
+            BackgroundShader, DepthRegion, EdgeTransition,
+            transitions::{
+                BackdropTransitionState, ColorTransitionState,
+                GradientTransitionState, generate_random_gradient_center,
+            },
+        },
+    },
 };
-pub use super::types::BackdropAspectMode;
-use super::widgets::background_shader::{
-    BackgroundEffect, BackgroundShader, DepthLayout, background_shader,
-};
-use crate::domains::ui::views::library_controls_bar;
-use crate::infra::constants::layout::{detail, header};
+
+/// Computed backdrop dimensions - single source of truth for positioning
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BackdropDimensions {
+    /// Full backdrop height in pixels (window_width / display_aspect)
+    pub height: f32,
+    /// Y coordinate where content should start (at backdrop bottom)
+    pub content_start_y: f32,
+    /// Height for button container positioning within backdrop
+    pub button_height: f32,
+    /// Coverage in UV space (0.0-1.0) for shader
+    pub coverage_uv: f32,
+}
 
 /// Persistent state for the background shader
 #[derive(Debug, Clone)]
@@ -47,7 +68,7 @@ impl Default for BackgroundShaderState {
                 crate::infra::constants::layout::backdrop::SOURCE_ASPECT,
             ),
             backdrop_aspect_mode: BackdropAspectMode::default(),
-            backdrop_fade_start: 0.75,
+            backdrop_fade_start: 0.92,
             backdrop_fade_end: 1.0,
             scroll_offset: 0.0,
             gradient_center: initial_center,
@@ -79,10 +100,7 @@ impl BackgroundShaderState {
     /// Build a configured background shader instance for the provided view state.
     /// All shared properties (color, offsets, depth layout) are sourced from this persistent state
     /// so call sites do not need to manually wire them each frame.
-    pub fn build_shader(
-        &self,
-        view: &super::types::ViewState,
-    ) -> BackgroundShader {
+    pub fn build_shader(&self, view: &ViewState) -> BackgroundShader {
         let mut shader = background_shader()
             .colors(self.primary_color, self.secondary_color)
             .scroll_offset(self.scroll_offset)
@@ -101,10 +119,10 @@ impl BackgroundShaderState {
 
         if matches!(
             view,
-            super::types::ViewState::MovieDetail { .. }
-                | super::types::ViewState::SeriesDetail { .. }
-                | super::types::ViewState::SeasonDetail { .. }
-                | super::types::ViewState::EpisodeDetail { .. }
+            ViewState::MovieDetail { .. }
+                | ViewState::SeriesDetail { .. }
+                | ViewState::SeasonDetail { .. }
+                | ViewState::EpisodeDetail { .. }
         ) {
             shader = shader.header_offset(header::HEIGHT);
         }
@@ -120,14 +138,11 @@ impl BackgroundShaderState {
     /// Updates depth regions based on the current view and window size
     pub fn update_depth_lines(
         &mut self,
-        view: &super::types::ViewState,
+        view: &ViewState,
         window_width: f32,
         window_height: f32,
         current_library_id: Option<uuid::Uuid>,
     ) {
-        use super::types::ViewState;
-        use super::widgets::background_shader::{DepthRegion, EdgeTransition};
-
         self.depth_layout.regions.clear();
 
         log::debug!(
@@ -175,12 +190,12 @@ impl BackgroundShaderState {
             | ViewState::EpisodeDetail { .. } => {
                 // Account for scroll offset
                 let scroll_offset = self.scroll_offset;
-                // Calculate dynamic backdrop height based on aspect mode and window dimensions
-                let backdrop_aspect =
-                    self.calculate_display_aspect(window_width, window_height);
-                let backdrop_height = window_width / backdrop_aspect;
-                // Content top is just backdrop height since header is outside scrollable
-                let content_top = backdrop_height - scroll_offset;
+                // Use centralized backdrop dimensions calculation
+                let backdrop_dims = self
+                    .calculate_backdrop_dimensions(window_width, window_height);
+                let backdrop_height = backdrop_dims.height;
+                // Content top is backdrop height minus scroll offset
+                let content_top = backdrop_dims.content_start_y - scroll_offset;
                 let poster_width = detail::POSTER_WIDTH;
                 let poster_height = detail::POSTER_HEIGHT;
                 let poster_padding = detail::POSTER_PADDING;
@@ -270,23 +285,37 @@ impl BackgroundShaderState {
             BackdropAspectMode::Force21x9 => 2.37, // Always use 21:9
         }
     }*/
-    /// Calculate content offset for detail views based on backdrop dimensions with known window height
+    /// Calculate all backdrop dimensions - SINGLE SOURCE OF TRUTH
+    ///
+    /// This method should be used by both UI layout code and shader setup
+    /// to ensure consistent positioning across the entire system.
+    pub fn calculate_backdrop_dimensions(
+        &self,
+        window_width: f32,
+        window_height: f32,
+    ) -> BackdropDimensions {
+        let display_aspect =
+            self.calculate_display_aspect(window_width, window_height);
+        let height = window_width / display_aspect;
+        let coverage_uv = (height / window_height).min(1.0);
+
+        BackdropDimensions {
+            height,
+            content_start_y: height, // Content starts exactly at backdrop bottom
+            button_height: height - backdrop::BUTTON_BOTTOM_MARGIN,
+            coverage_uv,
+        }
+    }
+
+    /// Calculate content offset for detail views based on backdrop dimensions
     pub fn calculate_content_offset_height(
         &self,
         window_width: f32,
         window_height: f32,
     ) -> f32 {
-        use crate::infra::constants::layout::header;
-
-        // Calculate the display aspect based on current mode and actual window dimensions
-        let backdrop_aspect =
-            self.calculate_display_aspect(window_width, window_height);
-
-        // Calculate the backdrop height based on window width
-        let backdrop_height = window_width / backdrop_aspect;
-
-        // Content starts after header + backdrop
-        backdrop_height - header::HEIGHT - 25.0
+        let dims =
+            self.calculate_backdrop_dimensions(window_width, window_height);
+        dims.content_start_y - header::HEIGHT
     }
 
     /// Calculate the display aspect ratio based on mode and window dimensions
@@ -320,12 +349,12 @@ impl BackgroundShaderState {
     }
 
     /// Reset colors to specific view defaults
-    pub fn reset_to_view_colors(&mut self, view: &super::types::ViewState) {
+    pub fn reset_to_view_colors(&mut self, view: &ViewState) {
         match view {
-            super::types::ViewState::Library
-            | super::types::ViewState::LibraryManagement
-            | super::types::ViewState::AdminDashboard
-            | super::types::ViewState::UserSettings => {
+            ViewState::Library
+            | ViewState::LibraryManagement
+            | ViewState::AdminDashboard
+            | ViewState::UserSettings => {
                 // All these views use library default colors
                 self.reset_to_library_colors();
             }

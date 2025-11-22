@@ -7,7 +7,7 @@ use tokio::fs;
 use crate::domain::media::tv_parser::TvParser;
 use crate::error::{MediaError, Result};
 use crate::scan::orchestration::classification::FolderClassifier;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use crate::types::library::LibraryType;
 use tracing::info;
 
@@ -24,7 +24,7 @@ use crate::scan::orchestration::scan_cursor::{
 /// Context supplied to folder scans so they can infer parent relationships.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FolderScanContext {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub folder_path_norm: String,
     pub parent: ParentDescriptors,
     pub reason: ScanReason,
@@ -438,7 +438,7 @@ mod tests {
             DefaultFolderScanActor, FolderScanActor, FolderScanCommand,
             FolderScanContext, FolderScanJob, ParentDescriptors, ScanReason,
         },
-        types::{LibraryID, LibraryType, MovieID},
+        types::{LibraryId, LibraryType, MovieID},
     };
 
     fn make_command(
@@ -446,7 +446,7 @@ mod tests {
         parent: ParentDescriptors,
     ) -> FolderScanCommand {
         let folder_path_norm = path.to_string_lossy().to_string();
-        let library_id = LibraryID(Uuid::now_v7());
+        let library_id = LibraryId(Uuid::now_v7());
         FolderScanCommand {
             job: FolderScanJob {
                 library_id,

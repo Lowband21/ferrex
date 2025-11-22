@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::{ids::LibraryID, image::MediaImages, library::LibraryType};
+use super::{ids::LibraryId, image::MediaImages, library::LibraryType};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -635,7 +635,7 @@ pub struct ExternalIds {
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq, Hash)))]
 pub struct LibraryReference {
-    pub id: LibraryID,
+    pub id: LibraryId,
     pub name: String,
     pub library_type: LibraryType,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::VecPathBuf))]

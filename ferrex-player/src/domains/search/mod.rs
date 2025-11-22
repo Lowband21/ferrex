@@ -102,7 +102,7 @@ impl SearchDomain {
                     Task::none()
                 }
             }
-            CrossDomainEvent::LibrarySelectAll => {
+            CrossDomainEvent::LibrarySelectHome => {
                 // Already global; just rerun if needed.
                 if !self.state.query.is_empty() {
                     Task::done(DomainMessage::Search(

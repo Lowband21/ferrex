@@ -1,35 +1,35 @@
 //! Tab management system for independent state per library/view
 //!
 //! This module provides a tab-based architecture where each library
-//! and the "All" view have completely independent state, including
+//! and the Home view have completely independent state, including
 //! scroll positions, grid states, and cached content.
 
-use ferrex_core::player_prelude::LibraryID;
+use ferrex_core::player_prelude::LibraryId;
 use std::fmt;
 
-pub mod all_focus;
+pub mod home_focus;
 pub mod manager;
 pub mod state;
 
-pub use all_focus::{AllFocusState, ordered_keys_for_all_view};
+pub use home_focus::{HomeFocusState, ordered_keys_for_home};
 pub use manager::TabManager;
-pub use state::{AllTabState, LibraryTabState, TabState};
+pub use state::{HomeTabState, LibraryTabState, TabState};
 
 /// Unique identifier for each tab in the application
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TabId {
-    /// The "All" tab showing curated content from all libraries
+    /// The Home tab showing curated content from all libraries
     #[default]
-    All,
+    Home,
 
     /// A specific library tab
-    Library(LibraryID),
+    Library(LibraryId),
 }
 
 impl TabId {
-    /// Check if this is the All tab
+    /// Check if this is the Home tab
     pub fn is_all(&self) -> bool {
-        matches!(self, TabId::All)
+        matches!(self, TabId::Home)
     }
 
     /// Check if this is a library tab
@@ -38,10 +38,10 @@ impl TabId {
     }
 
     /// Get the library ID if this is a library tab
-    pub fn library_id(&self) -> Option<LibraryID> {
+    pub fn library_id(&self) -> Option<LibraryId> {
         match self {
             TabId::Library(id) => Some(*id),
-            TabId::All => None,
+            TabId::Home => None,
         }
     }
 }
@@ -49,14 +49,14 @@ impl TabId {
 impl fmt::Display for TabId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TabId::All => write!(f, "All"),
+            TabId::Home => write!(f, "Home"),
             TabId::Library(id) => write!(f, "Library({})", id),
         }
     }
 }
 
-impl From<LibraryID> for TabId {
-    fn from(library_id: LibraryID) -> Self {
+impl From<LibraryId> for TabId {
+    fn from(library_id: LibraryId) -> Self {
         TabId::Library(library_id)
     }
 }

@@ -58,13 +58,12 @@ pub fn select_next_episode_for_series(
     let watch_state_opt = state.domains.media.state.get_watch_state();
 
     // 1) First in-progress episode in canonical order
-    if let Some(watch_state) = watch_state_opt.as_ref() {
-        if let Some(in_prog) = episodes
+    if let Some(watch_state) = watch_state_opt.as_ref()
+        && let Some(in_prog) = episodes
             .iter()
             .find(|e| watch_state.in_progress.contains_key(&e.id.to_uuid()))
-        {
-            return Some(in_prog.id);
-        }
+    {
+        return Some(in_prog.id);
     }
 
     // 2) First unwatched (neither in_progress nor completed)
@@ -111,13 +110,12 @@ pub fn select_next_episode_for_season(
     let watch_state_opt = state.domains.media.state.get_watch_state();
 
     // 1) First in-progress
-    if let Some(watch_state) = watch_state_opt.as_ref() {
-        if let Some(in_prog) = episodes
+    if let Some(watch_state) = watch_state_opt.as_ref()
+        && let Some(in_prog) = episodes
             .iter()
             .find(|e| watch_state.in_progress.contains_key(&e.id.to_uuid()))
-        {
-            return Some(in_prog.id);
-        }
+    {
+        return Some(in_prog.id);
     }
 
     // 2) First unwatched
@@ -192,10 +190,10 @@ pub fn next_episode_by_order(
     );
 
     // Find current index and return the next
-    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
-        if idx + 1 < episodes.len() {
-            return Some(episodes[idx + 1].id);
-        }
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id)
+        && idx + 1 < episodes.len()
+    {
+        return Some(episodes[idx + 1].id);
     }
     None
 }
@@ -217,10 +215,10 @@ pub fn previous_episode_by_order(
         &current.series_id,
     );
 
-    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
-        if idx > 0 {
-            return Some(episodes[idx - 1].id);
-        }
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id)
+        && idx > 0
+    {
+        return Some(episodes[idx - 1].id);
     }
     None
 }
@@ -236,10 +234,10 @@ pub fn next_episode_by_order_with_repo(
 
     let episodes = ordered_series_episodes(accessor, &current.series_id);
 
-    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
-        if idx + 1 < episodes.len() {
-            return Some(episodes[idx + 1].id);
-        }
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id)
+        && idx + 1 < episodes.len()
+    {
+        return Some(episodes[idx + 1].id);
     }
     None
 }
@@ -255,10 +253,10 @@ pub fn previous_episode_by_order_with_repo(
 
     let episodes = ordered_series_episodes(accessor, &current.series_id);
 
-    if let Some(idx) = episodes.iter().position(|e| e.id == current.id) {
-        if idx > 0 {
-            return Some(episodes[idx - 1].id);
-        }
+    if let Some(idx) = episodes.iter().position(|e| e.id == current.id)
+        && idx > 0
+    {
+        return Some(episodes[idx - 1].id);
     }
     None
 }

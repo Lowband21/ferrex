@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, ArchivedModel,
-    EpisodeReference, Library, LibraryID, Media, MediaIDLike, MediaLike,
+    EpisodeReference, Library, LibraryId, Media, MediaIDLike, MediaLike,
     MediaType, SeasonID, SeasonReference, SeriesID, SortBy, SortOrder,
 };
 use rkyv::{rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec};
@@ -612,7 +612,7 @@ impl MediaRepo {
     /// Internal method to get all media from a library
     pub(super) fn get_library_media_internal(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> RepositoryResult<Vec<Media>> {
         let mut results = Vec::new();
 
@@ -815,7 +815,7 @@ impl MediaRepo {
     /// Get a specific library by ID
     pub(super) fn get_library_internal(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Option<Library> {
         let archived_libraries = unsafe {
             // SAFETY: We hold the buffer through Arc, it won't be dropped while we're using it

@@ -35,9 +35,10 @@ pub fn handle_detail_view_scrolled(
     // TODO: This is cumbersome, fix it
     let uuid = state
         .domains
-        .library
+        .ui
         .state
-        .current_library_id
+        .scope
+        .lib_id()
         .map(|library_id| library_id.to_uuid());
 
     // Update depth lines to move with the scrolled content
@@ -78,7 +79,7 @@ pub fn handle_tab_grid_scrolled(
                 // Update the grid state for virtual scrolling calculations
                 lib_state.update_scroll(viewport);
             }
-            TabState::All(_all_state) => {
+            TabState::Home(_all_state) => {
                 // All tab uses carousel, not virtual grid - no grid state to update
             }
         }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 /// Global knobs that tune orchestrator behaviour.
 ///
@@ -50,7 +50,7 @@ pub struct QueueConfig {
     pub default_library_weight: u32,
     /// Optional per-library overrides.
     #[serde(default)]
-    pub library_overrides: HashMap<LibraryID, LibraryQueuePolicy>,
+    pub library_overrides: HashMap<LibraryId, LibraryQueuePolicy>,
 }
 
 impl Default for QueueConfig {

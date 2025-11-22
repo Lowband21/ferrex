@@ -12,7 +12,10 @@ use crate::{
             },
         },
         player::video::load_video,
-        ui::{self, messages::UiMessage},
+        ui::{
+            self, messages::UiMessage, playback_ui::PlaybackMessage,
+            shell_ui::UiShellMessage,
+        },
     },
     infra::constants::player_controls,
 };
@@ -92,7 +95,7 @@ pub fn update_player(
                     PlayerMessage::ResetAfterStop,
                 )),
                 Task::done(DomainMessage::Ui(
-                    ui::messages::UiMessage::NavigateBack,
+                    UiShellMessage::NavigateBack.into(),
                 )),
             ]);
 
@@ -126,7 +129,7 @@ pub fn update_player(
                     PlayerMessage::ResetAfterStop,
                 )),
                 Task::done(DomainMessage::Ui(
-                    ui::messages::UiMessage::NavigateHome,
+                    UiShellMessage::NavigateHome.into(),
                 )),
             ]);
 
@@ -210,7 +213,7 @@ pub fn update_player(
                     PlayerMessage::ResetAfterStop,
                 )),
                 Task::done(DomainMessage::Ui(
-                    ui::messages::UiMessage::NavigateBack,
+                    UiShellMessage::NavigateBack.into(),
                 )),
             ]);
 
@@ -469,8 +472,10 @@ pub fn update_player(
                                 ),
                             )),
                             Task::done(DomainMessage::Ui(
-                                ui::messages::UiMessage::PlayMediaWithId(
-                                    MediaID::Episode(next_ep),
+                                UiMessage::Playback(
+                                    PlaybackMessage::PlayMediaWithId(
+                                        MediaID::Episode(next_ep),
+                                    ),
                                 ),
                             )),
                         ]);
@@ -489,7 +494,7 @@ pub fn update_player(
                         PlayerMessage::ResetAfterStop,
                     )),
                     Task::done(DomainMessage::Ui(
-                        ui::messages::UiMessage::NavigateBack,
+                        UiShellMessage::NavigateBack.into(),
                     )),
                 ]);
                 DomainUpdateResult::task(tasks)
@@ -500,7 +505,7 @@ pub fn update_player(
                         PlayerMessage::ResetAfterStop,
                     )),
                     Task::done(DomainMessage::Ui(
-                        ui::messages::UiMessage::NavigateBack,
+                        UiShellMessage::NavigateBack.into(),
                     )),
                 ]);
                 DomainUpdateResult::task(tasks)
@@ -935,17 +940,17 @@ pub fn update_player(
                 };
 
                 let play_msg = if external_active {
-                    ui::messages::UiMessage::PlayMediaWithIdInMpv(
+                    UiMessage::Playback(PlaybackMessage::PlayMediaWithIdInMpv(
                         ferrex_core::player_prelude::MediaID::Episode(
                             next_ep_id,
                         ),
-                    )
+                    ))
                 } else {
-                    ui::messages::UiMessage::PlayMediaWithId(
+                    UiMessage::Playback(PlaybackMessage::PlayMediaWithId(
                         ferrex_core::player_prelude::MediaID::Episode(
                             next_ep_id,
                         ),
-                    )
+                    ))
                 };
 
                 let tasks = Task::batch(vec![
@@ -1029,17 +1034,19 @@ pub fn update_player(
                     };
 
                     let play_msg = if external_active {
-                        ui::messages::UiMessage::PlayMediaWithIdInMpv(
-                            ferrex_core::player_prelude::MediaID::Episode(
-                                prev_ep_id,
+                        UiMessage::Playback(
+                            PlaybackMessage::PlayMediaWithIdInMpv(
+                                ferrex_core::player_prelude::MediaID::Episode(
+                                    prev_ep_id,
+                                ),
                             ),
                         )
                     } else {
-                        ui::messages::UiMessage::PlayMediaWithId(
+                        UiMessage::Playback(PlaybackMessage::PlayMediaWithId(
                             ferrex_core::player_prelude::MediaID::Episode(
                                 prev_ep_id,
                             ),
-                        )
+                        ))
                     };
 
                     let tasks = Task::batch(vec![
@@ -1216,11 +1223,11 @@ pub fn update_player(
                                     state.last_valid_duration,
                                 ),
                             )),
-                            Task::done(DomainMessage::Ui(
-                                UiMessage::PlayMediaWithIdInMpv(
+                            Task::done(DomainMessage::Ui(UiMessage::Playback(
+                                PlaybackMessage::PlayMediaWithIdInMpv(
                                     MediaID::Episode(next_ep),
                                 ),
-                            )),
+                            ))),
                         ]);
                         return DomainUpdateResult::task(tasks);
                     }
@@ -1247,7 +1254,7 @@ pub fn update_player(
                         PlayerMessage::ResetAfterStop,
                     )),
                     Task::done(DomainMessage::Ui(
-                        ui::messages::UiMessage::NavigateBack,
+                        UiShellMessage::NavigateBack.into(),
                     )),
                 ]);
 
@@ -1261,7 +1268,7 @@ pub fn update_player(
                         PlayerMessage::ResetAfterStop,
                     )),
                     Task::done(DomainMessage::Ui(
-                        ui::messages::UiMessage::NavigateBack,
+                        UiShellMessage::NavigateBack.into(),
                     )),
                 ]);
                 DomainUpdateResult::task(tasks)
@@ -1327,7 +1334,7 @@ pub fn update_player(
 
                         // Navigate back to previous view
                         let nav_task = Task::done(DomainMessage::Ui(
-                            ui::messages::UiMessage::NavigateBack,
+                            UiShellMessage::NavigateBack.into(),
                         ));
 
                         // Emit RestoreWindow event and return tasks

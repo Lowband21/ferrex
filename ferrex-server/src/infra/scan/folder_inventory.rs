@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use ferrex_core::{
     database::traits::{FolderInventory, FolderProcessingStatus},
     domain::users::user::User,
-    types::LibraryID,
+    types::LibraryId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -137,7 +137,7 @@ pub async fn get_folder_inventory(
     let all_folders = state
         .unit_of_work()
         .folder_inventory
-        .get_folder_inventory(LibraryID(library_id))
+        .get_folder_inventory(LibraryId(library_id))
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);
@@ -202,7 +202,7 @@ pub async fn get_scan_progress(
     let folders = state
         .unit_of_work()
         .folder_inventory
-        .get_folder_inventory(LibraryID(library_id))
+        .get_folder_inventory(LibraryId(library_id))
         .await
         .map_err(|e| {
             tracing::error!("Failed to get folder inventory: {:?}", e);

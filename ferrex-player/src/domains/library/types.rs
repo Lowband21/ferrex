@@ -1,11 +1,11 @@
 //! Library domain types
 
-use ferrex_core::player_prelude::LibraryID;
+use ferrex_core::player_prelude::LibraryId;
 
 /// Library form data for creating/editing libraries
 #[derive(Debug, Clone)]
 pub struct LibraryFormData {
-    pub id: LibraryID,
+    pub id: LibraryId,
     pub name: String,
     pub library_type: String,
     pub paths: String, // comma-separated paths as entered by user

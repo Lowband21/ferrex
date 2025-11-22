@@ -320,7 +320,7 @@ mod tests {
         EnhancedMovieDetails, ExternalIds, SpokenLanguage,
     };
     use crate::types::files::MediaFile;
-    use crate::types::ids::{LibraryID, MovieID};
+    use crate::types::ids::{LibraryId, MovieID};
     use crate::types::image::MediaImages;
     use crate::types::titles::MovieTitle;
     use crate::types::urls::{MovieURL, UrlLike};
@@ -371,7 +371,7 @@ mod tests {
 
         MovieReference {
             id: MovieID::new(),
-            library_id: LibraryID::new(),
+            library_id: LibraryId::new(),
             tmdb_id: 12345,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(
@@ -386,7 +386,7 @@ mod tests {
                 discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 media_file_metadata: None,
-                library_id: LibraryID::new(),
+                library_id: LibraryId::new(),
             },
             theme_color: None,
         }

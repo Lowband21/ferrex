@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::types::files::MediaFile;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaFileSortField {
@@ -48,7 +48,7 @@ impl MediaFileSort {
 
 #[derive(Debug, Clone, Default)]
 pub struct MediaFileFilter {
-    pub library_id: Option<LibraryID>,
+    pub library_id: Option<LibraryId>,
     pub path_prefix: Option<String>,
     pub extension_in: Vec<String>,
     pub min_size: Option<u64>,
@@ -104,7 +104,7 @@ pub trait MediaFilesWritePort: Send + Sync {
     async fn delete_by_id(&self, id: Uuid) -> Result<()>;
     async fn delete_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &str,
     ) -> Result<()>;
     async fn update_technical_metadata(
@@ -114,7 +114,7 @@ pub trait MediaFilesWritePort: Send + Sync {
     ) -> Result<()>;
     async fn move_by_path(
         &self,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
         _old_path: &str,
         _new_path: &str,
     ) -> Result<Uuid> {

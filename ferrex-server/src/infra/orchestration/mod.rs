@@ -44,7 +44,7 @@ use ferrex_core::scan::orchestration::{
     },
     scheduler::ReadyCountEntry,
 };
-use ferrex_core::types::LibraryID;
+use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
@@ -168,7 +168,7 @@ impl ScanOrchestrator {
 
     pub async fn command_library(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         command: LibraryActorCommand,
     ) -> Result<()> {
         self.runtime
@@ -306,7 +306,7 @@ impl ScanOrchestrator {
             return Ok(());
         }
 
-        let mut totals: HashMap<(LibraryID, JobPriority), usize> =
+        let mut totals: HashMap<(LibraryId, JobPriority), usize> =
             HashMap::new();
         let mut ready_total = 0usize;
 

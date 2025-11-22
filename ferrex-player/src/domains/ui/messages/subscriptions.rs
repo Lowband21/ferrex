@@ -1,6 +1,10 @@
 use std::time::{Duration, Instant};
 
 use super::UiMessage;
+use crate::domains::ui::shell_ui::Scope;
+use crate::domains::ui::{
+    background_ui::BackgroundMessage, interaction_ui::InteractionMessage,
+};
 
 use crate::{
     common::messages::DomainMessage,
@@ -10,8 +14,9 @@ use crate::{
             motion_controller::messages::{
                 Direction as Dir, MotionMessage as KM,
             },
+            shell_ui::UiShellMessage,
             tabs::{TabId, TabState},
-            types::{DisplayMode, ViewState},
+            types::ViewState,
             views::virtual_carousel::{
                 messages::VirtualCarouselMessage as VCM, types::CarouselKey,
             },
@@ -54,7 +59,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(iced::window::close_requests().with(search_id).map(
             |(search_id, id)| {
                 if id == search_id {
-                    DomainMessage::Ui(UiMessage::CloseSearchWindow)
+                    DomainMessage::Ui(UiShellMessage::CloseSearchWindow.into())
                 } else {
                     DomainMessage::NoOp
                 }
@@ -64,7 +69,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     let in_grid_context = state.search_window_id.is_none()
         && matches!(state.domains.ui.state.view, ViewState::Library)
-        && matches!(state.domains.ui.state.display_mode, DisplayMode::Library)
+        && matches!(state.domains.ui.state.scope, Scope::Library(_))
         && matches!(state.tab_manager.active_tab_id(), TabId::Library(_));
 
     if in_grid_context {
@@ -138,7 +143,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         // Track mouse movement globally to gate hover-driven focus switches
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                DomainMessage::Ui(UiMessage::MouseMoved)
+                DomainMessage::Ui(InteractionMessage::MouseMoved.into())
             }
             _ => DomainMessage::NoOp,
         }));
@@ -146,8 +151,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // All tab focus navigation (Up/Down to move between carousels)
     let in_all_curated = state.search_window_id.is_none()
-        && matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
-        && matches!(state.tab_manager.active_tab_id(), TabId::All);
+        && matches!(state.domains.ui.state.scope, Scope::Home)
+        && matches!(state.tab_manager.active_tab_id(), TabId::Home);
     if in_all_curated {
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
@@ -160,12 +165,12 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 }
                 use iced::keyboard::key::Named;
                 match key {
-                    Key::Named(Named::ArrowDown) => {
-                        DomainMessage::Ui(UiMessage::AllFocusNext)
-                    }
-                    Key::Named(Named::ArrowUp) => {
-                        DomainMessage::Ui(UiMessage::AllFocusPrev)
-                    }
+                    Key::Named(Named::ArrowDown) => DomainMessage::Ui(
+                        InteractionMessage::HomeFocusNext.into(),
+                    ),
+                    Key::Named(Named::ArrowUp) => DomainMessage::Ui(
+                        InteractionMessage::HomeFocusPrev.into(),
+                    ),
                     _ => DomainMessage::NoOp,
                 }
             }
@@ -178,7 +183,11 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             iced::time::every(std::time::Duration::from_nanos(
                 performance_config::scrolling::TICK_NS,
             ))
-            .map(|_| DomainMessage::Ui(UiMessage::KineticScroll(KM::Tick))),
+            .map(|_| {
+                DomainMessage::Ui(
+                    InteractionMessage::KineticScroll(KM::Tick).into(),
+                )
+            }),
         );
     }
 
@@ -196,10 +205,10 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 _ => Vec::new(),
             };
         // If in All view (curated), include its active carousel key
-        if matches!(state.domains.ui.state.display_mode, DisplayMode::Curated)
-            && matches!(state.tab_manager.active_tab_id(), TabId::All)
-            && let Some(TabState::All(all_state)) =
-                state.tab_manager.get_tab(TabId::All)
+        if matches!(state.domains.ui.state.scope, Scope::Home)
+            && matches!(state.tab_manager.active_tab_id(), TabId::Home)
+            && let Some(TabState::Home(all_state)) =
+                state.tab_manager.get_tab(TabId::Home)
             && let Some(k) = all_state.focus.active_carousel.clone()
         {
             keys.push(k);
@@ -238,15 +247,17 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // Vertical snapping for All view focus changes and poster keep alive
     if in_all_curated
-        && let Some(TabState::All(all_state)) =
-            state.tab_manager.get_tab(TabId::All)
+        && let Some(TabState::Home(all_state)) =
+            state.tab_manager.get_tab(TabId::Home)
         && all_state.focus.vertical_animator.is_active()
     {
         subscriptions.push(
             iced::time::every(Duration::from_nanos(
                 virtual_carousel::motion::TICK_NS,
             ))
-            .map(|_| DomainMessage::Ui(UiMessage::AllFocusTick)),
+            .map(|_| {
+                DomainMessage::Ui(InteractionMessage::HomeFocusTick.into())
+            }),
         );
     }
 
@@ -296,7 +307,11 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     {
         subscriptions.push(
             iced::time::every(std::time::Duration::from_nanos(8_333_333)) // ~120 FPS
-                .map(|_| DomainMessage::Ui(UiMessage::UpdateTransitions)),
+                .map(|_| {
+                    DomainMessage::Ui(
+                        BackgroundMessage::UpdateTransitions.into(),
+                    )
+                }),
         );
     }
 
@@ -369,13 +384,16 @@ fn main_window_grid_key_handler(
             }
             match key {
                 Key::Named(Named::ArrowDown) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::Start(Dir::Down)),
+                    InteractionMessage::KineticScroll(KM::Start(Dir::Down))
+                        .into(),
                 )),
                 Key::Named(Named::ArrowUp) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::Start(Dir::Up)),
+                    InteractionMessage::KineticScroll(KM::Start(Dir::Up))
+                        .into(),
                 )),
                 Key::Named(Named::Shift) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::SetBoost(true)),
+                    InteractionMessage::KineticScroll(KM::SetBoost(true))
+                        .into(),
                 )),
                 _ => None,
             }
@@ -390,13 +408,15 @@ fn main_window_grid_key_handler(
             }
             match key {
                 Key::Named(Named::ArrowDown) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::Stop(Dir::Down)),
+                    InteractionMessage::KineticScroll(KM::Stop(Dir::Down))
+                        .into(),
                 )),
                 Key::Named(Named::ArrowUp) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::Stop(Dir::Up)),
+                    InteractionMessage::KineticScroll(KM::Stop(Dir::Up)).into(),
                 )),
                 Key::Named(Named::Shift) => Some(DomainMessage::Ui(
-                    UiMessage::KineticScroll(KM::SetBoost(false)),
+                    InteractionMessage::KineticScroll(KM::SetBoost(false))
+                        .into(),
                 )),
                 _ => None,
             }

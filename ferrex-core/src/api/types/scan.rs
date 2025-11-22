@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use std::fmt;
 use uuid::Uuid;
 
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use crate::types::media_events::ScanProgressEvent;
 
 /// Lifecycle state of a background scan job
@@ -31,7 +31,7 @@ pub enum ScanLifecycleStatus {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq)))]
 pub struct ScanSnapshotDto {
     pub scan_id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub status: ScanLifecycleStatus,
     pub completed_items: u64,
     pub total_items: u64,

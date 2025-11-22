@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use crate::{
     error::{MediaError, Result},
     types::{
-        ids::LibraryID,
+        ids::LibraryId,
         library::{Library, LibraryType},
     },
 };
@@ -40,7 +40,7 @@ static DEMO_CONTEXT: OnceCell<DemoContext> = OnceCell::new();
 pub struct DemoContext {
     root: PathBuf,
     policy: DemoPolicy,
-    libraries: Mutex<HashMap<LibraryID, DemoRuntimeMetadata>>,
+    libraries: Mutex<HashMap<LibraryId, DemoRuntimeMetadata>>,
 }
 
 impl DemoContext {
@@ -60,13 +60,13 @@ impl DemoContext {
         &self.policy
     }
 
-    pub fn register_library(&self, id: LibraryID, meta: DemoRuntimeMetadata) {
+    pub fn register_library(&self, id: LibraryId, meta: DemoRuntimeMetadata) {
         if let Ok(mut guard) = self.libraries.lock() {
             guard.insert(id, meta);
         }
     }
 
-    pub fn libraries(&self) -> Vec<(LibraryID, DemoRuntimeMetadata)> {
+    pub fn libraries(&self) -> Vec<(LibraryId, DemoRuntimeMetadata)> {
         self.libraries
             .lock()
             .map(|map| {
@@ -123,7 +123,7 @@ pub fn clear_registered_libraries() {
 }
 
 /// Check if the provided library ID belongs to the demo runtime.
-pub fn is_demo_library(id: &LibraryID) -> bool {
+pub fn is_demo_library(id: &LibraryId) -> bool {
     context()
         .and_then(|ctx| ctx.libraries.lock().ok())
         .map(|map| map.contains_key(id))
@@ -132,7 +132,7 @@ pub fn is_demo_library(id: &LibraryID) -> bool {
 
 /// Returns whether zero-length files are permitted for the given library.
 /// When the demo feature is disabled this always returns `false`.
-pub fn allow_zero_length_for(id: &LibraryID) -> bool {
+pub fn allow_zero_length_for(id: &LibraryId) -> bool {
     let ctx = match context() {
         Some(ctx) => ctx,
         None => return false,
@@ -156,7 +156,7 @@ pub fn library_from_plan(plan: &DemoLibraryPlan) -> Library {
     use uuid::Uuid;
 
     Library {
-        id: LibraryID(Uuid::now_v7()),
+        id: LibraryId(Uuid::now_v7()),
         name: plan.name.clone(),
         library_type: plan.library_type,
         paths: vec![plan.root_path.clone()],
@@ -176,7 +176,7 @@ pub fn library_from_plan(plan: &DemoLibraryPlan) -> Library {
 /// Basic descriptor used to report demo libraries at runtime.
 #[derive(Debug, Clone)]
 pub struct DemoLibraryDescriptor {
-    pub id: LibraryID,
+    pub id: LibraryId,
     pub name: String,
     pub library_type: LibraryType,
     pub root: PathBuf,

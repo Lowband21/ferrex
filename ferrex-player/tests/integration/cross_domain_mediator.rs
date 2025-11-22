@@ -4,8 +4,9 @@
 //! in routing cross-domain events between domains.
 
 use ferrex_core::domain::users::rbac::UserPermissions;
-use ferrex_core::player_prelude::LibraryID;
+use ferrex_core::player_prelude::LibraryId;
 use ferrex_player::common::messages::{CrossDomainEvent, DomainUpdateResult};
+use ferrex_player::domains::ui::shell_ui::Scope;
 use ferrex_player::state::State;
 use iced::Task;
 use uuid::Uuid;
@@ -123,12 +124,13 @@ async fn test_auth_command_completion_routing() {
 #[tokio::test]
 async fn test_library_selection_updates_state() {
     let mut state = State::default();
-    let library_id = LibraryID::new();
+    let library_id = LibraryId::new();
 
     // Verify initial state
     assert_eq!(
-        state.domains.library.state.current_library_id, None,
-        "Library should start with no selection"
+        state.domains.ui.state.scope,
+        Scope::Home,
+        "Should start with Home scope"
     );
 
     // Process LibrarySelected event
@@ -139,30 +141,31 @@ async fn test_library_selection_updates_state() {
 
     // Verify state was updated
     assert_eq!(
-        state.domains.library.state.current_library_id,
-        Some(library_id),
-        "Library ID should be stored in state"
+        state.domains.ui.state.scope,
+        Scope::Library(library_id),
+        "Scope should be set to Library with the selected ID"
     );
 }
 
-/// Test that LibrarySelectAll clears the library selection
+/// Test that LibrarySelectHome clears the library selection
 #[tokio::test]
-async fn test_library_select_all_clears_selection() {
+async fn test_library_select_home_clears_selection() {
     let mut state = State::default();
 
     // Set an initial library selection
-    state.domains.library.state.current_library_id = Some(LibraryID::new());
+    state.domains.ui.state.scope = Scope::Library(LibraryId::new());
 
-    // Process LibrarySelectAll event
+    // Process LibrarySelectHome event
     let _ = ferrex_player::common::messages::cross_domain::handle_event(
         &mut state,
-        CrossDomainEvent::LibrarySelectAll,
+        CrossDomainEvent::LibrarySelectHome,
     );
 
     // Verify selection was cleared
     assert_eq!(
-        state.domains.library.state.current_library_id, None,
-        "LibrarySelectAll should clear the library selection"
+        state.domains.ui.state.scope,
+        Scope::Home,
+        "LibrarySelectHome should set scope to Home"
     );
 }
 
@@ -243,9 +246,9 @@ mod event_ordering_tests {
 
         // Events that modify the same state
         let events = vec![
-            CrossDomainEvent::LibrarySelected(LibraryID::new()),
-            CrossDomainEvent::LibrarySelectAll,
-            CrossDomainEvent::LibrarySelected(LibraryID::new()),
+            CrossDomainEvent::LibrarySelected(LibraryId::new()),
+            CrossDomainEvent::LibrarySelectHome,
+            CrossDomainEvent::LibrarySelected(LibraryId::new()),
         ];
 
         // Process in order
@@ -259,8 +262,8 @@ mod event_ordering_tests {
         // Final state should reflect the last event
         // (Third event should have overwritten the effects of first two)
         assert!(
-            state.domains.library.state.current_library_id.is_some(),
-            "Last LibrarySelected should set the library ID"
+            matches!(state.domains.ui.state.scope, Scope::Library(_)),
+            "Last LibrarySelected should set the scope to Library"
         );
     }
 }

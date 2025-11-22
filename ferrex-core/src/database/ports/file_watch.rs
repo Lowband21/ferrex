@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::database::traits::FileWatchEvent;
 use crate::error::Result;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 /// Repository for persisting file system change events detected by watchers.
 #[async_trait]
@@ -12,7 +12,7 @@ pub trait FileWatchEventRepository: Send + Sync {
 
     async fn get_unprocessed_events(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>>;
 

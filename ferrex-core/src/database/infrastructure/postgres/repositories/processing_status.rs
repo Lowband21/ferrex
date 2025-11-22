@@ -10,7 +10,7 @@ use crate::{
         traits::MediaProcessingStatus,
     },
     error::{MediaError, Result},
-    types::{files::MediaFile, ids::LibraryID},
+    types::{files::MediaFile, ids::LibraryId},
 };
 
 #[derive(Clone, Debug)]
@@ -137,7 +137,7 @@ impl PostgresProcessingStatusRepository {
 
     pub async fn fetch_unprocessed(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>> {
@@ -176,7 +176,7 @@ impl PostgresProcessingStatusRepository {
                         .flatten();
                     files.push(MediaFile {
                         id: row.id,
-                        library_id: LibraryID(row.library_id),
+                        library_id: LibraryId(row.library_id),
                         path: PathBuf::from(row.file_path),
                         filename: row.filename,
                         size: row.file_size as u64,
@@ -222,7 +222,7 @@ impl PostgresProcessingStatusRepository {
                         .flatten();
                     files.push(MediaFile {
                         id: row.id,
-                        library_id: LibraryID(row.library_id),
+                        library_id: LibraryId(row.library_id),
                         path: PathBuf::from(row.file_path),
                         filename: row.filename,
                         size: row.file_size as u64,
@@ -260,7 +260,7 @@ impl PostgresProcessingStatusRepository {
                         .flatten();
                     files.push(MediaFile {
                         id: row.id,
-                        library_id: LibraryID(row.library_id),
+                        library_id: LibraryId(row.library_id),
                         path: PathBuf::from(row.file_path),
                         filename: row.filename,
                         size: row.file_size as u64,
@@ -298,7 +298,7 @@ impl PostgresProcessingStatusRepository {
                         .flatten();
                     files.push(MediaFile {
                         id: row.id,
-                        library_id: LibraryID(row.library_id),
+                        library_id: LibraryId(row.library_id),
                         path: PathBuf::from(row.file_path),
                         filename: row.filename,
                         size: row.file_size as u64,
@@ -318,7 +318,7 @@ impl PostgresProcessingStatusRepository {
 
     pub async fn fetch_failed(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         max_retries: i32,
     ) -> Result<Vec<MediaFile>> {
         let rows = sqlx::query!(
@@ -350,7 +350,7 @@ impl PostgresProcessingStatusRepository {
 
             files.push(MediaFile {
                 id: row.id,
-                library_id: LibraryID(row.library_id),
+                library_id: LibraryId(row.library_id),
                 path: PathBuf::from(row.file_path),
                 filename: row.filename,
                 size: row.file_size as u64,
@@ -401,7 +401,7 @@ impl ProcessingStatusRepository for PostgresProcessingStatusRepository {
 
     async fn get_unprocessed_files(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>> {
@@ -410,7 +410,7 @@ impl ProcessingStatusRepository for PostgresProcessingStatusRepository {
 
     async fn get_failed_files(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         max_retries: i32,
     ) -> Result<Vec<MediaFile>> {
         self.fetch_failed(library_id, max_retries).await

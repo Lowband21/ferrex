@@ -5,7 +5,7 @@ use crate::state::State;
 use chrono::Utc;
 use ferrex_core::{
     api::types::{CreateLibraryRequest, UpdateLibraryRequest},
-    types::{ids::LibraryID, library::LibraryType},
+    types::{ids::LibraryId, library::LibraryType},
 };
 use iced::Task;
 use std::path::PathBuf;
@@ -147,7 +147,7 @@ pub fn handle_library_updated(
 
 pub fn handle_delete_library(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
     _server_url: String,
 ) -> Task<LibraryMessage> {
     let api = state.api_service.clone();
@@ -166,7 +166,7 @@ pub fn handle_delete_library(
 
 pub fn handle_library_deleted(
     state: &mut State,
-    result: Result<LibraryID, String>,
+    result: Result<LibraryId, String>,
 ) -> Task<LibraryMessage> {
     match result {
         Ok(library_id) => {
@@ -174,10 +174,9 @@ pub fn handle_library_deleted(
                 "Deleted library: {} - refreshing libraries",
                 library_id
             );
-            if state.domains.library.state.current_library_id.as_ref()
-                == Some(&library_id)
-            {
-                state.domains.library.state.current_library_id = None;
+            if state.domains.ui.state.scope.lib_id() == Some(library_id) {
+                state.domains.ui.state.scope =
+                    crate::domains::ui::shell_ui::Scope::Home;
             }
             Task::perform(
                 super::library_loaded::fetch_libraries(
@@ -229,7 +228,7 @@ pub fn handle_show_library_form(
         None => {
             // Creating new library
             crate::domains::library::types::LibraryFormData {
-                id: LibraryID::new(),
+                id: LibraryId::new(),
                 name: String::new(),
                 library_type: "Movies".to_string(),
                 paths: String::new(),
@@ -252,7 +251,7 @@ pub fn handle_hide_library_form(state: &mut State) -> Task<LibraryMessage> {
 /// Delete a library and recreate it with the same properties, triggering a fresh bulk scan.
 pub fn handle_reset_library(
     state: &mut State,
-    library_id: LibraryID,
+    library_id: LibraryId,
 ) -> Task<LibraryMessage> {
     use rkyv::{deserialize, rancor::Error};
 
@@ -445,7 +444,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
             id: if form_data.editing {
                 form_data.id
             } else {
-                LibraryID::new()
+                LibraryId::new()
             },
             name: form_data.name.trim().to_string(),
             library_type,
@@ -476,7 +475,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
             let api = state.api_service.clone();
             Task::perform(
                 async move {
-                    let req = crate::infra::api_types::UpdateLibraryRequest {
+                    let req = UpdateLibraryRequest {
                         name: Some(library.name.clone()),
                         paths: Some(
                             library

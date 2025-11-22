@@ -40,7 +40,7 @@ use crate::scan::orchestration::LibraryActorHandle;
 use crate::scan::orchestration::LibraryRootsId;
 use crate::scan::orchestration::config::WatchConfig;
 use crate::scan::orchestration::scan_cursor::normalize_path;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 /// Version field stamped on emitted `FileSystemEvent`s.
 pub const EVENT_VERSION: u16 = 1;
 
@@ -79,14 +79,14 @@ impl From<WatchConfig> for FsWatchConfig {
 
 /// Observer hook for surfacing watcher errors.
 pub trait FsWatchObserver: Send + Sync {
-    fn on_error(&self, library_id: LibraryID, error: &str);
+    fn on_error(&self, library_id: LibraryId, error: &str);
 }
 
 /// No-op observer used when metrics instrumentation is not wired up.
 pub struct NoopFsWatchObserver;
 
 impl FsWatchObserver for NoopFsWatchObserver {
-    fn on_error(&self, _library_id: LibraryID, _error: &str) {}
+    fn on_error(&self, _library_id: LibraryId, _error: &str) {}
 }
 
 impl fmt::Debug for NoopFsWatchObserver {
@@ -99,7 +99,7 @@ impl fmt::Debug for NoopFsWatchObserver {
 pub struct FsWatchService<O: FsWatchObserver = NoopFsWatchObserver> {
     config: FsWatchConfig,
     observer: Arc<O>,
-    libraries: Arc<RwLock<HashMap<LibraryID, LibraryWatch>>>,
+    libraries: Arc<RwLock<HashMap<LibraryId, LibraryWatch>>>,
 }
 
 impl<O: FsWatchObserver + 'static> fmt::Debug for FsWatchService<O> {
@@ -142,7 +142,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
     /// debounced and forwarded directly to the actor handle.
     pub async fn register_library(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         roots: Vec<(LibraryRootsId, PathBuf)>,
         actor: LibraryActorHandle,
     ) -> Result<()> {
@@ -225,7 +225,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
     }
 
     /// Stop watching the specified library.
-    pub async fn unregister_library(&self, library_id: LibraryID) {
+    pub async fn unregister_library(&self, library_id: LibraryId) {
         if let Some(watch) = self.libraries.write().await.remove(&library_id) {
             watch.shutdown();
         }
@@ -309,7 +309,7 @@ impl fmt::Debug for WatchMessage {
 }
 
 fn spawn_watch_loop<O: FsWatchObserver + 'static>(
-    library_id: LibraryID,
+    library_id: LibraryId,
     roots: Vec<(LibraryRootsId, PathBuf)>,
     observer: Arc<O>,
     actor: LibraryActorHandle,
@@ -422,7 +422,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
 
 async fn flush_pending<O: FsWatchObserver + 'static>(
     observer: Arc<O>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     pending: &mut HashMap<LibraryRootsId, Vec<FileSystemEvent>>,
     actor: &LibraryActorHandle,
 ) -> Result<()> {
@@ -451,7 +451,7 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
 
 async fn dispatch_events<O: FsWatchObserver + 'static>(
     observer: Arc<O>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     actor: &LibraryActorHandle,
     root_id: LibraryRootsId,
     events: Vec<FileSystemEvent>,
@@ -492,7 +492,7 @@ async fn dispatch_events<O: FsWatchObserver + 'static>(
 }
 
 fn convert_event(
-    library_id: LibraryID,
+    library_id: LibraryId,
     roots: &[(LibraryRootsId, PathBuf)],
     event: Event,
 ) -> Option<(LibraryRootsId, FileSystemEvent)> {
@@ -621,7 +621,7 @@ fn sanitize_path(root: &Path, path: &Path) -> Option<PathBuf> {
 }
 
 fn overflow_for_roots(
-    library_id: LibraryID,
+    library_id: LibraryId,
     roots: &[(LibraryRootsId, PathBuf)],
 ) -> Vec<(LibraryRootsId, Vec<FileSystemEvent>)> {
     roots
@@ -810,7 +810,7 @@ mod tests {
         LibraryActorEvent, LibraryActorHandle, LibraryActorState,
         LibraryRootsId,
     };
-    use crate::types::ids::LibraryID;
+    use crate::types::ids::LibraryId;
 
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -851,7 +851,7 @@ mod tests {
 
         let actor: LibraryActorHandle =
             Arc::new(Mutex::new(Box::new(DummyActor)));
-        let library_id = LibraryID::new();
+        let library_id = LibraryId::new();
         service
             .register_library(
                 library_id,

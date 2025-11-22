@@ -8,7 +8,7 @@ use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
 use axum::{Extension, Json, extract::State};
 use ferrex_core::types::library::Library;
-use ferrex_core::types::{LibraryID, LibraryType};
+use ferrex_core::types::{LibraryId, LibraryType};
 use ferrex_core::{api::types::ApiResponse, domain::users::user::User};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -360,7 +360,7 @@ pub async fn seed_database(
         && let Some(path) = request.library_path
     {
         let library = Library {
-            id: LibraryID::new(),
+            id: LibraryId::new(),
             name: "Test Library".to_string(),
             library_type: LibraryType::Movies,
             paths: vec![PathBuf::from(path.clone())],

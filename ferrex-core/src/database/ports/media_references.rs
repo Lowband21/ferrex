@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     error::Result,
     types::{
-        EpisodeID, EpisodeReference, LibraryID, Media, MovieID, MovieReference,
+        EpisodeID, EpisodeReference, LibraryId, Media, MovieID, MovieReference,
         SeasonID, SeasonReference, SeriesID, SeriesReference,
         library::LibraryType,
     },
@@ -62,20 +62,20 @@ pub trait MediaReferencesRepository: Send + Sync {
 
     async fn get_library_media_references(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
     ) -> Result<Vec<Media>>;
     async fn get_library_series(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<SeriesReference>>;
     async fn get_library_seasons(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<SeasonReference>>;
     async fn get_library_episodes(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<EpisodeReference>>;
 
     async fn get_movie_references_bulk(
@@ -102,12 +102,12 @@ pub trait MediaReferencesRepository: Send + Sync {
     ) -> Result<Option<MovieReference>>;
     async fn get_series_by_tmdb_id(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>>;
     async fn find_series_by_name(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         name: &str,
     ) -> Result<Option<SeriesReference>>;
 

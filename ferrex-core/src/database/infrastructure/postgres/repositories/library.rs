@@ -9,7 +9,7 @@ use crate::{
     error::{MediaError, Result},
     types::{
         details::LibraryReference,
-        ids::LibraryID,
+        ids::LibraryId,
         library::{Library, LibraryType},
     },
 };
@@ -46,7 +46,7 @@ impl PostgresLibraryRepository {
 
 #[async_trait]
 impl LibraryRepository for PostgresLibraryRepository {
-    async fn create_library(&self, library: Library) -> Result<LibraryID> {
+    async fn create_library(&self, library: Library) -> Result<LibraryId> {
         let paths: Vec<String> = library
             .paths
             .iter()
@@ -91,7 +91,7 @@ impl LibraryRepository for PostgresLibraryRepository {
         Ok(library.id)
     }
 
-    async fn get_library(&self, id: LibraryID) -> Result<Option<Library>> {
+    async fn get_library(&self, id: LibraryId) -> Result<Option<Library>> {
         let row = sqlx::query!(
             r#"
             SELECT
@@ -129,7 +129,7 @@ impl LibraryRepository for PostgresLibraryRepository {
             })?;
 
         Ok(Some(Library {
-            id: LibraryID(row.id),
+            id: LibraryId(row.id),
             name: row.name,
             library_type,
             paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -181,7 +181,7 @@ impl LibraryRepository for PostgresLibraryRepository {
             };
 
             libraries.push(Library {
-                id: LibraryID(row.id),
+                id: LibraryId(row.id),
                 name: row.name,
                 library_type,
                 paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -203,7 +203,7 @@ impl LibraryRepository for PostgresLibraryRepository {
 
     async fn update_library(
         &self,
-        id: LibraryID,
+        id: LibraryId,
         library: Library,
     ) -> Result<()> {
         let paths: Vec<String> = library
@@ -250,7 +250,7 @@ impl LibraryRepository for PostgresLibraryRepository {
         Ok(())
     }
 
-    async fn delete_library(&self, id: LibraryID) -> Result<()> {
+    async fn delete_library(&self, id: LibraryId) -> Result<()> {
         sqlx::query!("DELETE FROM libraries WHERE id = $1", id.as_uuid())
             .execute(self.pool())
             .await
@@ -261,7 +261,7 @@ impl LibraryRepository for PostgresLibraryRepository {
         Ok(())
     }
 
-    async fn update_library_last_scan(&self, id: LibraryID) -> Result<()> {
+    async fn update_library_last_scan(&self, id: LibraryId) -> Result<()> {
         sqlx::query!(
             "UPDATE libraries SET last_scan = NOW(), updated_at = NOW() WHERE id = $1",
             id.as_uuid()
@@ -289,7 +289,7 @@ impl LibraryRepository for PostgresLibraryRepository {
             };
 
             libraries.push(LibraryReference {
-                id: LibraryID(row.id),
+                id: LibraryId(row.id),
                 name: row.name,
                 library_type,
                 paths: row.paths.into_iter().map(PathBuf::from).collect(),
@@ -323,7 +323,7 @@ impl LibraryRepository for PostgresLibraryRepository {
             })?;
 
         Ok(LibraryReference {
-            id: LibraryID(row.id),
+            id: LibraryId(row.id),
             name: row.name,
             library_type,
             paths: row.paths.into_iter().map(PathBuf::from).collect(),

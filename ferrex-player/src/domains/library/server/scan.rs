@@ -1,5 +1,5 @@
 use ferrex_core::player_prelude::{
-    ActiveScansResponse, LatestProgressResponse, LibraryID,
+    ActiveScansResponse, LatestProgressResponse, LibraryId,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
     StartScanRequest,
 };
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub async fn start_library_scan(
     client: Arc<dyn ApiService>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     correlation_id: Option<Uuid>,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
     client
@@ -23,7 +23,7 @@ pub async fn start_library_scan(
 
 pub async fn pause_library_scan(
     client: Arc<dyn ApiService>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
     client
@@ -34,7 +34,7 @@ pub async fn pause_library_scan(
 
 pub async fn resume_library_scan(
     client: Arc<dyn ApiService>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
     client
@@ -45,7 +45,7 @@ pub async fn resume_library_scan(
 
 pub async fn cancel_library_scan(
     client: Arc<dyn ApiService>,
-    library_id: LibraryID,
+    library_id: LibraryId,
     scan_id: Uuid,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
     client

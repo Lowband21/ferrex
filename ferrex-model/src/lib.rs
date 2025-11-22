@@ -43,7 +43,7 @@ pub use details::{
 pub use error::{ModelError, Result as ModelResult};
 pub use files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
 pub use filter_types::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
-pub use ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID};
+pub use ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
 pub use image_request::{
     BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, PosterKind,
     PosterSize, Priority, ProfileSize,

@@ -1,7 +1,7 @@
 //! Search domain types and state management
 
 use ferrex_core::query::types::SearchField;
-use ferrex_model::LibraryID;
+use ferrex_model::LibraryId;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -47,7 +47,7 @@ pub struct SearchResult {
     /// Which field matched the search
     pub match_field: SearchField,
     /// Library this result belongs to
-    pub library_id: Option<LibraryID>,
+    pub library_id: Option<LibraryId>,
 }
 
 /// Search cache entry
@@ -103,7 +103,7 @@ pub struct SearchState {
     /// Error message if search failed
     pub error: Option<String>,
     /// Selected library for search scope
-    pub library_id: Option<LibraryID>,
+    pub library_id: Option<LibraryId>,
     /// Search fields to include
     pub search_fields: Vec<SearchField>,
     /// Enable fuzzy matching

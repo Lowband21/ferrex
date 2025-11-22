@@ -1,23 +1,29 @@
-use crate::common::ui_utils::icon_text;
-use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::widgets::image_for;
-use crate::infra::constants::layout::carousel::ITEM_SPACING;
-use crate::infra::constants::poster::CORNER_RADIUS;
-use crate::infra::widgets::poster::poster_animation_types::{
-    AnimationBehavior, PosterAnimationType,
+use crate::{
+    common::ui_utils::icon_text,
+    domains::ui::{
+        background_ui::BackgroundMessage, messages::UiMessage, theme,
+        widgets::image_for,
+    },
+    infra::{
+        constants::{layout::carousel::ITEM_SPACING, poster::CORNER_RADIUS},
+        shader_widgets::poster::poster_animation_types::{
+            AnimationBehavior, PosterAnimationType,
+        },
+    },
+    state::State,
 };
-use crate::{domains::ui::theme, state::State};
 
 use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize, ImageType};
+
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
+
 use lucide_icons::Icon;
-use rkyv::deserialize;
-use rkyv::option::ArchivedOption;
-use rkyv::rancor::Error;
+
+use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
 
 #[cfg_attr(
     any(
@@ -160,7 +166,7 @@ pub fn create_backdrop_aspect_button<'a>(
     };
 
     button(text(aspect_button_text).size(14))
-        .on_press(UiMessage::ToggleBackdropAspectMode)
+        .on_press(BackgroundMessage::ToggleBackdropAspectMode.into())
         .style(theme::Button::BackdropControl.style())
         .padding([4, 8])
         .into()

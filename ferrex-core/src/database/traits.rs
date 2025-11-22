@@ -1,5 +1,5 @@
 use crate::domain::media::image::MediaImageKind;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use chrono::{DateTime, Utc};
 #[cfg(feature = "rkyv")]
 use rkyv::{
@@ -33,7 +33,7 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanState {
     pub id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub scan_type: ScanType,
     pub status: ScanStatus,
     pub total_folders: i32,
@@ -80,7 +80,7 @@ pub enum FileWatchEventType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWatchEvent {
     pub id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub event_type: FileWatchEventType,
     pub file_path: String,
     pub old_path: Option<String>,
@@ -99,7 +99,7 @@ pub struct MediaFilters {
     pub season: Option<u32>,
     pub order_by: Option<String>,
     pub limit: Option<u64>,
-    pub library_id: Option<LibraryID>,
+    pub library_id: Option<LibraryId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -242,7 +242,7 @@ pub enum ScanPriority {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderInventory {
     pub id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub folder_path: String,
     pub folder_type: FolderType,
     pub parent_folder_id: Option<Uuid>,
@@ -275,7 +275,7 @@ pub struct FolderInventory {
 
 #[derive(Debug, Clone, Default)]
 pub struct FolderScanFilters {
-    pub library_id: Option<LibraryID>,
+    pub library_id: Option<LibraryId>,
     pub processing_status: Option<FolderProcessingStatus>,
     pub folder_type: Option<FolderType>,
     pub max_attempts: Option<i32>,

@@ -228,6 +228,12 @@ pub mod backdrop {
     /// 0.05 means take only 5% of the crop from top, 95% from bottom
     /// This shows mostly the top portion of the image (titles, logos, sky)
     pub const CROP_BIAS_TOP_ULTRAWIDE: f32 = 0.05;
+
+    /// Full coverage factor - display the complete calculated backdrop height
+    pub const COVERAGE_FACTOR: f32 = 1.0;
+
+    /// Margin from backdrop bottom edge for button positioning (pixels)
+    pub const BUTTON_BOTTOM_MARGIN: f32 = 20.0;
 }
 
 /// Detail view layout constants

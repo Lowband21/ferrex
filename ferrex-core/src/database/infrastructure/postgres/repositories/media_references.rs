@@ -8,7 +8,7 @@ use crate::{
         EnhancedMovieDetails, MediaDetailsOption, MediaFile, TmdbDetails,
     },
     types::{
-        ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+        ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
         library::LibraryType,
         media::{
             EpisodeReference, Media, MovieReference, SeasonReference,
@@ -89,7 +89,7 @@ impl PostgresMediaReferencesRepository {
 
             Ok(Some((movie_ref, metadata)))
         } else {
-            let library_id = LibraryID(row.try_get("library_id")?);
+            let library_id = LibraryId(row.try_get("library_id")?);
 
             let technical_metadata: Option<serde_json::Value> =
                 row.try_get("technical_metadata").ok();
@@ -148,7 +148,7 @@ impl PostgresMediaReferencesRepository {
 impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     async fn get_library_media_references(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
     ) -> Result<Vec<Media>> {
         let mut media = Vec::new();
@@ -352,7 +352,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
     async fn get_library_series(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<SeriesReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
@@ -433,7 +433,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
     async fn get_library_seasons(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<SeasonReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
@@ -524,7 +524,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
     async fn get_library_episodes(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> Result<Vec<EpisodeReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
@@ -857,7 +857,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
     async fn get_series_by_tmdb_id(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         tmdb_id: u64,
     ) -> Result<Option<SeriesReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
@@ -886,7 +886,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
     async fn find_series_by_name(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         name: &str,
     ) -> Result<Option<SeriesReference>> {
         // Normalize an input "slug" in Rust to avoid repeating logic in many callers.
@@ -958,7 +958,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
             Ok(Some(SeriesReference {
                 id: SeriesID(row.id),
-                library_id: LibraryID(row.library_id),
+                library_id: LibraryId(row.library_id),
                 tmdb_id,
                 title: SeriesTitle::new(row.title)?,
                 details: MediaDetailsOption::Endpoint(format!(

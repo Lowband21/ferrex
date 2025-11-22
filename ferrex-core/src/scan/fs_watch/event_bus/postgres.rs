@@ -14,7 +14,7 @@ use super::{FileChangeCursor, FileChangeEventBus, FileChangeEventStream};
 use crate::database::postgres::PostgresDatabase;
 use crate::database::traits::{FileWatchEvent, FileWatchEventType};
 use crate::error::{MediaError, Result};
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 const DEFAULT_FETCH_LIMIT: i64 = 256;
 const DEFAULT_CHANNEL_CAPACITY: usize = 512;
@@ -116,7 +116,7 @@ impl FileWatchEventRow {
         let event_type = str_to_event_type(&self.event_type)?;
         Some(FileWatchEvent {
             id: self.id,
-            library_id: LibraryID(self.library_id),
+            library_id: LibraryId(self.library_id),
             event_type,
             file_path: self.file_path,
             old_path: self.old_path,
@@ -132,7 +132,7 @@ impl FileWatchEventRow {
 
 async fn fetch_events_after(
     pool: &PgPool,
-    library_id: LibraryID,
+    library_id: LibraryId,
     last_detected_at: Option<DateTime<Utc>>,
     last_event_id: Option<Uuid>,
     limit: i64,
@@ -189,7 +189,7 @@ async fn fetch_events_after(
 async fn fetch_event(
     pool: &PgPool,
     event_id: Uuid,
-) -> Result<Option<(LibraryID, DateTime<Utc>)>> {
+) -> Result<Option<(LibraryId, DateTime<Utc>)>> {
     let result = sqlx::query_as::<_, (Uuid, DateTime<Utc>)>(
         "SELECT library_id, detected_at FROM file_watch_events WHERE id = $1",
     )
@@ -202,7 +202,7 @@ async fn fetch_event(
         ))
     })?;
 
-    Ok(result.map(|(library, detected_at)| (LibraryID(library), detected_at)))
+    Ok(result.map(|(library, detected_at)| (LibraryId(library), detected_at)))
 }
 
 async fn upsert_cursor(pool: &PgPool, cursor: &FileChangeCursor) -> Result<()> {
@@ -240,7 +240,7 @@ async fn upsert_cursor(pool: &PgPool, cursor: &FileChangeCursor) -> Result<()> {
 async fn load_cursor(
     pool: &PgPool,
     group: &str,
-    library_id: LibraryID,
+    library_id: LibraryId,
 ) -> Result<Option<FileChangeCursor>> {
     let row = sqlx::query_as::<
         _,
@@ -264,7 +264,7 @@ async fn load_cursor(
         |(stored_group, stored_library, last_event_id, last_detected_at)| {
             FileChangeCursor {
                 group: stored_group,
-                library_id: LibraryID(stored_library),
+                library_id: LibraryId(stored_library),
                 last_event_id,
                 last_detected_at,
             }
@@ -358,7 +358,7 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
     async fn subscribe(
         &self,
         group: &str,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<FileChangeEventStream> {
         let cursor = load_cursor(self.pool(), group, library_id).await?;
         let initial_detected_at =
@@ -443,14 +443,14 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
     async fn get_cursor(
         &self,
         group: &str,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Option<FileChangeCursor>> {
         load_cursor(self.pool(), group, library_id).await
     }
 
     async fn get_unprocessed_events(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
         let rows = sqlx::query_as::<_, FileWatchEventRow>(

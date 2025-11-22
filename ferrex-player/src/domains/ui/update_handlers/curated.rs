@@ -18,17 +18,15 @@ use crate::{
             },
         },
     },
-    infra::{
-        api_types::{
-            EpisodeID, LibraryType, Media, MediaID, MovieID, SeasonID, SeriesID,
-        },
-        constants::curated::{HEAD_WINDOW, MAX_CAROUSEL_ITEMS},
-    },
+    infra::constants::curated::{HEAD_WINDOW, MAX_CAROUSEL_ITEMS},
     state::State,
 };
 
 use ferrex_core::player_prelude::{
-    LibraryID, PosterKind, PosterSize, SortBy, SortOrder, compare_media,
+    LibraryId, PosterKind, PosterSize, SortBy, SortOrder, compare_media,
+};
+use ferrex_model::{
+    EpisodeID, LibraryType, Media, MediaID, MovieID, SeasonID, SeriesID,
 };
 use log::info;
 
@@ -74,7 +72,7 @@ fn k_way_merge_top(
     limit: usize,
 ) -> Vec<Uuid> {
     // Collect per-library sorted id lists
-    let mut per_lib_ids: Vec<(&LibraryID, Vec<Uuid>, usize)> = Vec::new();
+    let mut per_lib_ids: Vec<(&LibraryId, Vec<Uuid>, usize)> = Vec::new();
     for (lib_id, lt) in state.tab_manager.library_info() {
         if *lt != lib_type {
             continue;
@@ -273,8 +271,8 @@ pub fn recompute_and_init_curated_carousels(state: &mut State) {
     let width = state.window_size.width.max(1.0);
 
     // Apply to AllTabState in a short mutable borrow
-    if let TabState::All(all_state) =
-        state.tab_manager.get_or_create_tab(TabId::All)
+    if let TabState::Home(all_state) =
+        state.tab_manager.get_or_create_tab(TabId::Home)
     {
         all_state.continue_watching = lists.continue_watching.clone();
         all_state.recent_movies = lists.recent_movies.clone();
@@ -322,8 +320,8 @@ pub fn emit_initial_curated_snapshots(state: &mut State) {
     else {
         return;
     };
-    let all_state = match state.tab_manager.get_tab(TabId::All) {
-        Some(TabState::All(s)) => s,
+    let all_state = match state.tab_manager.get_tab(TabId::Home) {
+        Some(TabState::Home(s)) => s,
         _ => return,
     };
 

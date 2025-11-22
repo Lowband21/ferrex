@@ -248,7 +248,7 @@ mod tests {
         types::{
             details::{EnhancedMovieDetails, TmdbDetails},
             files::MediaFile,
-            ids::{LibraryID, MovieID},
+            ids::{LibraryId, MovieID},
             titles::MovieTitle,
             urls::{MovieURL, UrlLike},
         },
@@ -259,7 +259,7 @@ mod tests {
     fn create_test_movie(has_details: bool) -> MovieReference {
         MovieReference {
             id: MovieID::new(),
-            library_id: LibraryID::new(),
+            library_id: LibraryId::new(),
             tmdb_id: 123,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
             details: if has_details {
@@ -314,7 +314,7 @@ mod tests {
                 discovered_at: chrono::Utc::now(),
                 created_at: chrono::Utc::now(),
                 media_file_metadata: None,
-                library_id: LibraryID::new(),
+                library_id: LibraryId::new(),
             },
             theme_color: None,
         }

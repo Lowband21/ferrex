@@ -2,8 +2,9 @@
 //!
 //! Allows users to manage their PIN, password, and trusted devices
 
-use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::theme;
+use crate::domains::ui::{
+    messages::UiMessage, settings_ui::SettingsUiMessage, theme,
+};
 use crate::state::State;
 use iced::widget::{Space, button, column, container, text};
 use iced::{Element, Length};
@@ -81,7 +82,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
                     .color(theme::MediaServerTheme::SUCCESS),
                 Space::new().height(10),
                 button("Manage Devices")
-                    .on_press(UiMessage::ShowDeviceManagement)
+                    .on_press(SettingsUiMessage::ShowDeviceManagement.into())
                     .style(theme::Button::Secondary.style())
                     .padding([10, 20]),
             ]
@@ -92,7 +93,7 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         .width(Length::Fill),
         Space::new().height(30),
         button("Back")
-            .on_press(UiMessage::BackToSettings)
+            .on_press(SettingsUiMessage::BackToSettings.into())
             .style(theme::Button::Secondary.style())
             .padding([10, 20]),
     ]

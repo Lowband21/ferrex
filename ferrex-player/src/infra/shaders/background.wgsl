@@ -549,74 +549,68 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Backdrop gradient - render radial gradient first, then overlay backdrop
         let gradient_center = globals.gradient_center.xy;
         let dist = length(uv - gradient_center);
-        let angle_from_center = atan2(uv.y - gradient_center.y, uv.x - gradient_center.x);
-        let wave_distortion = sin(angle_from_center * 4.0 + time * 0.2) * 0.02;
         let gradient_radius = 1.2;
-        let t = smoothstep(0.0, gradient_radius, dist + wave_distortion);
+        let t = smoothstep(0.0, gradient_radius, dist);
 
         // Base gradient color
         color = mix(primary_bg, secondary_bg, t);
-
-        // Add subtle depth with darker areas near edges
-        let edge_fade = 1.0 - smoothstep(0.8, 1.2, length(centered_uv));
-        color *= 0.95 + 0.05 * edge_fade;
 
         // Now overlay the backdrop texture on top of the gradient
         // Extract actual viewport dimensions from the projection matrix
         let viewport_width = 2.0 / globals.transform[0][0];
         let viewport_height = 2.0 / abs(globals.transform[1][1]);
 
-        // Get aspect mode from texture_params.w (0.0 = auto, 1.0 = force 21:9)
-        let aspect_mode = globals.texture_params.w;
+        // Get aspect mode from scale_and_effect.w (0.0 = auto, 1.0 = force 21:9)
+        let aspect_mode = globals.scale_and_effect.w;
         let window_aspect = viewport_width / viewport_height;
 
-        // Determine display aspect ratio based on mode and window dimensions
-        var display_aspect: f32;
+        // Determine crop parameters based on mode and window dimensions
         var crop_factor_to_use: f32;
         var crop_bias_to_use: f32;
 
         if (aspect_mode > 0.5) {
             // Force 21:9 mode
-            display_aspect = 21.0 / 9.0; // 2.333...
             crop_factor_to_use = 16.0 / 21.0; // 0.762
             crop_bias_to_use = 0.3; // 30% from top
         } else {
             // Auto mode - choose based on window aspect
             if (window_aspect >= 1.0) {
                 // Wide window - use 30:9 ultra-wide
-                display_aspect = 30.0 / 9.0; // 3.333...
                 crop_factor_to_use = 16.0 / 30.0; // 0.533
                 crop_bias_to_use = 0.05; // Only 5% from top - very aggressive top crop
             } else {
                 // Tall window - use 21:9
-                display_aspect = 21.0 / 9.0; // 2.333...
                 crop_factor_to_use = 16.0 / 21.0; // 0.762
                 crop_bias_to_use = 0.3; // 30% from top
             }
         }
 
-        let backdrop_height = viewport_width / display_aspect;
-
         // Get header offset from uniform buffer
         let header_offset = globals.texture_params.z;
         let header_offset_uv = header_offset / viewport_height;
 
-        // Calculate what portion of the screen the backdrop should cover
-        let backdrop_screen_coverage = min(backdrop_height / viewport_height, 1.0);
+        // Use pre-calculated backdrop coverage from Rust (single source of truth)
+        let backdrop_screen_coverage = globals.texture_params.w;
+
+        // Calculate visible backdrop height (from header to content start)
+        let backdrop_visible_height = (backdrop_screen_coverage - header_offset_uv) * viewport_height;
 
         // Apply scroll offset (add to make backdrop scroll with content)
         let scroll_offset_uv = globals.texture_params.y / viewport_height;
         let scrolled_uv_y = uv.y + scroll_offset_uv;
 
         // Check if we're in the backdrop region (accounting for header offset)
-        if (scrolled_uv_y >= header_offset_uv && scrolled_uv_y <= header_offset_uv + backdrop_screen_coverage) {
+        // backdrop_screen_coverage represents the Y position (in UV space) where backdrop ends
+        // This is calculated from window top, so the region is [header_offset_uv, backdrop_screen_coverage]
+        let backdrop_region_height = backdrop_screen_coverage - header_offset_uv;
+        if (scrolled_uv_y >= header_offset_uv && scrolled_uv_y <= backdrop_screen_coverage) {
             // Map screen UV to texture UV for just the backdrop region
-            // Subtract header offset to get position relative to backdrop start
-            let backdrop_uv_y = (scrolled_uv_y - header_offset_uv) / backdrop_screen_coverage;
+            // Map [header_offset_uv, backdrop_screen_coverage] to [0, 1]
+            let backdrop_uv_y = (scrolled_uv_y - header_offset_uv) / backdrop_region_height;
 
             // Calculate aspect ratios
             let texture_aspect = globals.texture_params.x;
-            let backdrop_aspect = viewport_width / backdrop_height;
+            let backdrop_aspect = viewport_width / backdrop_visible_height;
 
             var texture_uv = vec2<f32>(uv.x, backdrop_uv_y);
 
@@ -648,40 +642,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }
             }
 
-            // Sample the backdrop texture
+            // Sample the backdrop texture and render directly (hard transition, no fade)
             let backdrop_color = textureSample(backdrop_texture, texture_sampler, texture_uv);
-
-            // Calculate fade for backdrop blending using configured fade window
-            let fade_start_param = globals.scale_and_effect.z;
-            let fade_end_param = globals.scale_and_effect.w;
-
-            var fade_start_ratio = clamp(fade_start_param, 0.0, 1.0);
-            var fade_end_ratio = clamp(fade_end_param, 0.0, 1.0);
-
-            // Fall back to sensible defaults when parameters are unset or invalid
-            if (!(fade_end_param > fade_start_param + 0.001)) {
-                if (display_aspect > 2.5) {
-                    fade_start_ratio = 0.85;
-                } else {
-                    fade_start_ratio = 0.75;
-                }
-                fade_end_ratio = 1.0;
-            } else if (fade_end_ratio <= fade_start_ratio) {
-                fade_end_ratio = min(1.0, fade_start_ratio + 0.05);
-            }
-
-            let backdrop_fade_start = fade_start_ratio * backdrop_screen_coverage;
-            let backdrop_fade_end = fade_end_ratio * backdrop_screen_coverage;
-            let local_fade_factor = smoothstep(backdrop_fade_start, backdrop_fade_end, scrolled_uv_y);
-
-            // Calculate backdrop blend alpha (opposite of shadow fade)
-            let backdrop_alpha = (1.0 - local_fade_factor) * globals.transition_params.y;
-            let smooth_alpha = backdrop_alpha * (2.0 - backdrop_alpha);
-
-            // Blend backdrop with gradient
-            // When smooth_alpha is 1.0, result is pure backdrop
-            // When smooth_alpha is 0.0, result is pure gradient
-            color = mix(color, backdrop_color.rgb, smooth_alpha);
+            color = backdrop_color.rgb;
         }
     }
 

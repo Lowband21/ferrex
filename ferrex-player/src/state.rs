@@ -4,7 +4,7 @@
 //! keeping only the view models and cross-cutting concerns at the top level.
 
 use crate::{
-    common::{focus::FocusManager, messages::DomainMessage},
+    common::focus::FocusManager,
     domains::{
         DomainRegistry,
         auth::{AuthDomainState, AuthManager},
@@ -17,10 +17,9 @@ use crate::{
         streaming::StreamingDomainState,
         ui::{
             MotionController, UIDomainState,
-            background_state::BackgroundShaderState,
             scroll_manager::ScrollPositionManager,
+            shell_ui::Scope,
             tabs::{TabId, TabManager},
-            types::DisplayMode,
             views::{
                 carousel::CarouselState,
                 virtual_carousel::{CarouselFocus, CarouselRegistry},
@@ -33,24 +32,24 @@ use crate::{
         ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
-        constants::animation::DEFAULT_DURATION_MS,
         repository::{
             accessor::{Accessor, ReadOnly, ReadWrite},
             repository::MediaRepo,
+            yoke_cache::YokeCache,
         },
         services::{
             api::ApiService, settings::SettingsApiAdapter,
             streaming::StreamingApiAdapter,
             user_management::UserAdminApiAdapter,
         },
+        shader_widgets::background::state::BackgroundShaderState,
     },
 };
 
 use ferrex_core::player_prelude::{
-    LibraryID, SortBy, SortOrder, UiResolution, UiWatchStatus,
+    LibraryId, SortBy, SortOrder, UiResolution, UiWatchStatus,
 };
 
-use iced::Task;
 use parking_lot::{RwLock as StdRwLock, lock_api::RwLock};
 use std::{
     collections::{HashMap, HashSet},
@@ -145,56 +144,51 @@ impl State {
             image_service.clone(),
         );
 
-        let ui_state =
-            UIDomainState {
-                view: crate::domains::ui::types::ViewState::Library,
-                repo_accessor: ui_accessor.clone(),
-                // New zero-copy fields
-                movie_yoke_cache:
-                    crate::domains::ui::yoke_cache::YokeCache::new(2048),
-                series_yoke_cache:
-                    crate::domains::ui::yoke_cache::YokeCache::new(256),
-                season_yoke_cache:
-                    crate::domains::ui::yoke_cache::YokeCache::new(512),
-                episode_yoke_cache:
-                    crate::domains::ui::yoke_cache::YokeCache::new(2048),
+        let ui_state = UIDomainState {
+            view: crate::domains::ui::types::ViewState::Library,
+            repo_accessor: ui_accessor.clone(),
+            // New zero-copy fields
+            movie_yoke_cache: YokeCache::new(2048),
+            series_yoke_cache: YokeCache::new(256),
+            season_yoke_cache: YokeCache::new(512),
+            episode_yoke_cache: YokeCache::new(2048),
 
-                movies_carousel: CarouselState::new(0),
-                tv_carousel: CarouselState::new(0),
+            movies_carousel: CarouselState::new(0),
+            tv_carousel: CarouselState::new(0),
 
-                display_mode: DisplayMode::Curated,
-                sort_by: SortBy::Title,
-                sort_order: SortOrder::Ascending,
-                loading: false,
-                error_message: None,
-                window_size: iced::Size::new(1280.0, 720.0),
-                expanded_shows: HashSet::new(),
-                hovered_media_id: None,
-                theme_color_cache: RwLock::new(HashMap::new()),
-                current_library_id: None,
-                last_prefetch_tick: None,
-                scroll_manager: ScrollPositionManager::default(),
-                background_shader_state: BackgroundShaderState::default(),
-                search_query: String::new(),
-                show_library_menu: false,
-                library_menu_target: None,
-                is_fullscreen: false,
-                show_filter_panel: false,
-                selected_genres: Vec::new(),
-                selected_decade: None,
-                selected_resolution: UiResolution::Any,
-                selected_watch_status: UiWatchStatus::Any,
-                show_seasons_carousel: None,
-                season_episodes_carousel: None,
-                show_clear_database_confirm: false,
-                navigation_history: Vec::new(),
-                poster_anim_active_until: None,
-                motion_controller: MotionController::new(),
-                carousel_registry: CarouselRegistry::new(),
-                carousel_focus: CarouselFocus::new(),
-                poster_menu_open: None,
-                poster_menu_states: HashMap::new(),
-            };
+            scope: Scope::Home,
+            sort_by: SortBy::Title,
+            sort_order: SortOrder::Ascending,
+            loading: false,
+            error_message: None,
+            window_size: iced::Size::new(1280.0, 720.0),
+            expanded_shows: HashSet::new(),
+            hovered_media_id: None,
+            theme_color_cache: RwLock::new(HashMap::new()),
+            current_library_id: None,
+            last_prefetch_tick: None,
+            scroll_manager: ScrollPositionManager::default(),
+            background_shader_state: BackgroundShaderState::default(),
+            search_query: String::new(),
+            show_library_menu: false,
+            library_menu_target: None,
+            is_fullscreen: false,
+            show_filter_panel: false,
+            selected_genres: Vec::new(),
+            selected_decade: None,
+            selected_resolution: UiResolution::Any,
+            selected_watch_status: UiWatchStatus::Any,
+            show_seasons_carousel: None,
+            season_episodes_carousel: None,
+            show_clear_database_confirm: false,
+            navigation_history: Vec::new(),
+            poster_anim_active_until: None,
+            motion_controller: MotionController::new(),
+            carousel_registry: CarouselRegistry::new(),
+            carousel_focus: CarouselFocus::new(),
+            poster_menu_open: None,
+            poster_menu_states: HashMap::new(),
+        };
 
         // Create settings service adapter
         let api_arc = Arc::new(api_client.clone());
@@ -262,8 +256,8 @@ impl State {
         // Create tab manager (NEW ARCHITECTURE)
         let mut tab_manager = TabManager::new(ui_accessor.clone());
         // Initialize and activate the All tab at startup
-        tab_manager.get_or_create_tab(crate::domains::ui::tabs::TabId::All);
-        tab_manager.set_active_tab(crate::domains::ui::tabs::TabId::All);
+        tab_manager.get_or_create_tab(crate::domains::ui::tabs::TabId::Home);
+        tab_manager.set_active_tab(crate::domains::ui::tabs::TabId::Home);
         tab_manager.refresh_active_tab();
         log::info!(
             "[Startup] Initialized and activated All tab for curated view"
@@ -304,8 +298,8 @@ impl State {
     }
 
     /// Helper method to get current library ID
-    pub fn current_library_id(&self) -> Option<LibraryID> {
-        self.domains.library.state.current_library_id
+    pub fn current_library_id(&self) -> Option<LibraryId> {
+        self.domains.ui.state.scope.lib_id()
     }
 
     /// Update TabManager with library information

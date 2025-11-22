@@ -1,12 +1,15 @@
-use crate::common::ui_utils::{Icon, icon_text};
-use crate::domains::ui::views::grid::macros::parse_hex_color;
-use crate::infra::api_types::MediaDetailsOption;
-use crate::infra::widgets::poster::poster_animation_types::{
-    AnimationBehavior, PosterAnimationType,
-};
 use crate::{
-    domains::ui::components, domains::ui::messages::UiMessage,
-    domains::ui::theme, domains::ui::widgets::image_for::image_for,
+    common::ui_utils::{Icon, icon_text},
+    domains::ui::{
+        components, messages::UiMessage, playback_ui::PlaybackMessage, theme,
+        views::grid::macros::parse_hex_color, widgets::image_for::image_for,
+    },
+    infra::{
+        api_types::MediaDetailsOption,
+        shader_widgets::poster::{
+            PosterFace, poster_animation_types::AnimationBehavior,
+        },
+    },
     state::State,
 };
 
@@ -19,13 +22,13 @@ use ferrex_core::{
         util_types::{ImageSize, ImageType},
     },
 };
+
 use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, scrollable, text},
 };
-use rkyv::deserialize;
-use rkyv::option::ArchivedOption;
-use rkyv::rancor::Error;
+
+use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
 
 #[cfg_attr(
     any(
@@ -50,8 +53,8 @@ pub fn view_movie_detail<'a>(
                 deserialize::<Option<String>, Error>(&movie.theme_color)
                     .unwrap();
 
-            // Create the main content with proper spacing from top
-            let mut content = column![].spacing(20);
+            // Create the main content - no spacing at top level to avoid offset issues
+            let mut content = column![];
 
             // Add dynamic spacing at the top based on backdrop dimensions
             let window_width = state.window_size.width;
@@ -81,23 +84,15 @@ pub fn view_movie_detail<'a>(
 
             // Apply poster menu face/rotation if menu is open for this media
             let poster_id = media_id.to_uuid();
-            let (face, rotation_override) = if let Some(menu_state) = state
-                .domains
-                .ui
-                .state
-                .poster_menu_states
-                .get(&poster_id)
+            let (face, rotation_override) = if let Some(menu_state) =
+                state.domains.ui.state.poster_menu_states.get(&poster_id)
             {
-                (
-                    menu_state.face_for_render(),
-                    Some(menu_state.angle),
-                )
-            } else if state.domains.ui.state.poster_menu_open
-                == Some(poster_id)
+                (menu_state.face_for_render(), Some(menu_state.angle))
+            } else if state.domains.ui.state.poster_menu_open == Some(poster_id)
             {
-                (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+                (PosterFace::Back, Some(std::f32::consts::PI))
             } else {
-                (crate::infra::widgets::poster::PosterFace::Front, None)
+                (PosterFace::Front, None)
             };
             poster_element = poster_element.face(face);
             if let Some(rot) = rotation_override {
@@ -271,8 +266,10 @@ pub fn view_movie_detail<'a>(
 
             let button_row =
                 crate::domains::ui::components::create_action_button_row(
-                    UiMessage::PlayMediaWithId(media_id),
-                    Some(UiMessage::PlayMediaWithIdInMpv(media_id)),
+                    PlaybackMessage::PlayMediaWithId(media_id).into(),
+                    Some(
+                        PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
+                    ),
                     vec![], // No additional buttons yet
                 );
 
@@ -483,27 +480,25 @@ pub fn view_movie_detail<'a>(
             // Create the main content container
             let content_container = container(content).width(Length::Fill);
 
-            // Calculate backdrop dimensions
+            // Calculate backdrop dimensions using centralized method
             let window_width = state.window_size.width;
             let window_height = state.window_size.height;
-            let display_aspect = state
+            let backdrop_dims = state
                 .domains
                 .ui
                 .state
                 .background_shader_state
-                .calculate_display_aspect(window_width, window_height);
-            let backdrop_height = window_width / display_aspect;
-            //let header_offset = constants::layout::header::HEIGHT;
+                .calculate_backdrop_dimensions(window_width, window_height);
 
             // Create aspect ratio toggle button
             let aspect_button =
                 components::create_backdrop_aspect_button(state);
 
-            // Position the button at bottom-right of backdrop with small margin
+            // Position the button at bottom-right of backdrop
             let button_container = container(aspect_button)
                 .padding([0, 20])
                 .width(Length::Fill)
-                .height(Length::Fixed(backdrop_height - 22.5))
+                .height(Length::Fixed(backdrop_dims.button_height))
                 .align_x(iced::alignment::Horizontal::Right)
                 .align_y(iced::alignment::Vertical::Bottom);
 

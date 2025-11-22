@@ -1,7 +1,7 @@
 use super::{
     details::{MediaDetailsOption, TmdbDetails},
     files::MediaFile,
-    ids::{EpisodeID, LibraryID, MovieID, SeasonID, SeriesID},
+    ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
     numbers::{EpisodeNumber, SeasonNumber},
     titles::{MovieTitle, SeriesTitle},
     urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL},
@@ -40,7 +40,7 @@ pub enum Media {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct MovieReference {
     pub id: MovieID,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub tmdb_id: u64,
     pub title: MovieTitle,
     pub details: MediaDetailsOption,
@@ -63,7 +63,7 @@ pub struct MovieReference {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct SeriesReference {
     pub id: SeriesID,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub tmdb_id: u64,
     pub title: SeriesTitle,
     pub details: MediaDetailsOption,
@@ -93,7 +93,7 @@ pub struct SeriesReference {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct SeasonReference {
     pub id: SeasonID,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub season_number: SeasonNumber,
     pub series_id: SeriesID, // Link to parent series
     pub tmdb_series_id: u64,
@@ -124,7 +124,7 @@ pub struct SeasonReference {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct EpisodeReference {
     pub id: EpisodeID,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub episode_number: EpisodeNumber,
     pub season_number: SeasonNumber,
     pub season_id: SeasonID, // Link to parent season

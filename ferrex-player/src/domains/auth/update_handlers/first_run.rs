@@ -6,8 +6,9 @@ use crate::domains::auth::types::{
     AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
 };
 use crate::infra::api_client::SetupStatus;
-use crate::infra::api_types::{ConfirmClaimResponse, StartClaimResponse};
+use crate::infra::api_types::ConfirmClaimResponse;
 use crate::state::State;
+use ferrex_core::player_prelude::StartClaimResponse;
 use ferrex_core::{
     domain::users::auth::domain::value_objects::SessionScope,
     player_prelude as core,

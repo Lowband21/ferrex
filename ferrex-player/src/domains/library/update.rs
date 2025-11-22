@@ -18,7 +18,7 @@ use iced::Task;
 use std::collections::{HashMap, HashSet};
 
 use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, LibraryID, MediaIDLike, MediaOps,
+    ImageRequest, ImageSize, ImageType, LibraryId, MediaIDLike, MediaOps,
     Priority, ScanLifecycleStatus, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
@@ -641,9 +641,7 @@ pub fn update_library(
 
         LibraryMessage::ScanCurrentLibrary => {
             // Scan the currently selected library if one is selected
-            if let Some(library_id) =
-                state.domains.library.state.current_library_id
-            {
+            if let Some(library_id) = state.domains.ui.state.scope.lib_id() {
                 log::info!("Scanning library: {}", library_id);
                 let task =
                     super::update_handlers::scan_updates::handle_scan_library(
@@ -705,7 +703,7 @@ pub fn update_library(
         }
 
         LibraryMessage::MediaDeleted(id) => {
-            let mut touched_libraries: HashSet<LibraryID> = HashSet::new();
+            let mut touched_libraries: HashSet<LibraryId> = HashSet::new();
 
             let library_for_refresh =
                 match state.domains.library.state.repo_accessor.get(&id) {
@@ -774,7 +772,7 @@ pub fn update_library(
     }
 }
 
-fn media_library_id(media: &Media) -> Option<LibraryID> {
+fn media_library_id(media: &Media) -> Option<LibraryId> {
     match media {
         Media::Movie(movie) => Some(movie.library_id),
         Media::Series(series) => Some(series.library_id),
@@ -826,7 +824,7 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
 
 fn refresh_tabs_for_libraries(
     state: &mut State,
-    libraries: &HashSet<LibraryID>,
+    libraries: &HashSet<LibraryId>,
 ) -> bool {
     if libraries.is_empty() {
         return false;
@@ -896,14 +894,14 @@ fn apply_demo_status(state: &mut State, status: DemoStatus) {
 
 fn apply_discovered_media_to_tabs(
     state: &mut State,
-    additions: &HashMap<LibraryID, Vec<Media>>,
-) -> HashSet<LibraryID> {
+    additions: &HashMap<LibraryId, Vec<Media>>,
+) -> HashSet<LibraryId> {
     if additions.is_empty() {
         return HashSet::new();
     }
 
     let active_tab = state.tab_manager.active_tab_id();
-    let mut inline_updated: HashSet<LibraryID> = HashSet::new();
+    let mut inline_updated: HashSet<LibraryId> = HashSet::new();
 
     for (library_id, media_items) in additions {
         let tab_id = TabId::Library(*library_id);
@@ -931,8 +929,8 @@ fn apply_discovered_media_to_tabs(
 
 fn mark_tabs_after_media_changes(
     state: &mut State,
-    libraries: &HashSet<LibraryID>,
-    inline_updated: &HashSet<LibraryID>,
+    libraries: &HashSet<LibraryId>,
+    inline_updated: &HashSet<LibraryId>,
 ) -> bool {
     if libraries.is_empty() {
         return false;

@@ -27,7 +27,7 @@ use crate::scan::orchestration::{
 };
 use crate::{
     error::{MediaError, Result},
-    types::ids::LibraryID,
+    types::ids::LibraryId,
 };
 
 use crate::scan::orchestration::actors::LibraryActorCommand;
@@ -54,7 +54,7 @@ where
     dispatcher: Arc<dyn JobDispatcher>,
     correlations: CorrelationCache,
     scheduler: WeightedFairScheduler,
-    library_actors: Arc<RwLock<HashMap<LibraryID, LibraryActorHandle>>>,
+    library_actors: Arc<RwLock<HashMap<LibraryId, LibraryActorHandle>>>,
     mailbox_tx:
         Arc<Mutex<Option<tokio::sync::mpsc::Sender<OrchestratorCommand>>>>,
     // Runtime supervision
@@ -173,7 +173,7 @@ where
 
     pub async fn register_library_actor(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         actor: LibraryActorHandle,
     ) -> Result<()> {
         let mut guard = self.library_actors.write().await;
@@ -183,13 +183,13 @@ where
 
     pub async fn library_actor(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Option<LibraryActorHandle> {
         let guard = self.library_actors.read().await;
         guard.get(&library_id).cloned()
     }
 
-    pub async fn library_ids(&self) -> Vec<LibraryID> {
+    pub async fn library_ids(&self) -> Vec<LibraryId> {
         let guard = self.library_actors.read().await;
         guard.keys().cloned().collect()
     }
@@ -240,7 +240,7 @@ where
 #[derive(Clone, Debug)]
 pub enum OrchestratorCommand {
     Library {
-        library_id: LibraryID,
+        library_id: LibraryId,
         command: LibraryActorCommand,
     },
 }
@@ -1104,7 +1104,7 @@ where
 {
     pub async fn submit_library_command(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         command: LibraryActorCommand,
     ) -> Result<()> {
         let tx = {
@@ -1124,7 +1124,7 @@ where
 
 /// Lightweight handle for mailbox runner internals.
 pub struct OrchestratorRuntimeHandle {
-    library_actors: Arc<RwLock<HashMap<LibraryID, LibraryActorHandle>>>,
+    library_actors: Arc<RwLock<HashMap<LibraryId, LibraryActorHandle>>>,
 }
 
 impl fmt::Debug for OrchestratorRuntimeHandle {
@@ -1294,7 +1294,7 @@ mod tests {
     use crate::scan::orchestration::lease::JobLease;
     use crate::scan::orchestration::persistence::PostgresQueueService;
     use crate::scan::orchestration::runtime::InProcJobEventBus;
-    use crate::types::ids::LibraryID;
+    use crate::types::ids::LibraryId;
     use async_trait::async_trait;
     use chrono::Utc;
     use sqlx::PgPool;
@@ -1308,9 +1308,9 @@ mod tests {
 
     #[derive(Default)]
     struct DispatcherState {
-        active: HashMap<LibraryID, usize>,
-        max_seen: HashMap<LibraryID, usize>,
-        completions: Vec<(LibraryID, JobPriority)>,
+        active: HashMap<LibraryId, usize>,
+        max_seen: HashMap<LibraryId, usize>,
+        completions: Vec<(LibraryId, JobPriority)>,
     }
 
     impl fmt::Debug for DispatcherState {
@@ -1323,7 +1323,7 @@ mod tests {
         }
     }
 
-    async fn ensure_library(pool: &PgPool, id: LibraryID, name: &str) {
+    async fn ensure_library(pool: &PgPool, id: LibraryId, name: &str) {
         let paths = vec!["/tmp".to_string()];
         sqlx::query!(
             "INSERT INTO libraries (id, name, library_type, paths) VALUES ($1, $2, $3, $4)",
@@ -1372,8 +1372,8 @@ mod tests {
     }
 
     struct DispatcherSnapshot {
-        max_inflight: HashMap<LibraryID, usize>,
-        completions: Vec<(LibraryID, JobPriority)>,
+        max_inflight: HashMap<LibraryId, usize>,
+        completions: Vec<(LibraryId, JobPriority)>,
     }
 
     impl fmt::Debug for DispatcherSnapshot {
@@ -1459,7 +1459,7 @@ mod tests {
     }
 
     fn make_scan_request(
-        library_id: LibraryID,
+        library_id: LibraryId,
         sequence: usize,
         priority: JobPriority,
     ) -> EnqueueRequest {
@@ -1482,8 +1482,8 @@ mod tests {
     }
 
     fn max_consecutive_library(
-        events: &[(LibraryID, JobPriority)],
-        library: LibraryID,
+        events: &[(LibraryId, JobPriority)],
+        library: LibraryId,
     ) -> usize {
         let mut max_run = 0usize;
         let mut current = 0usize;
@@ -1500,7 +1500,7 @@ mod tests {
 
     #[sqlx::test]
     async fn scheduler_observer_skips_ready_for_merged_events(pool: PgPool) {
-        let library_id = LibraryID::new();
+        let library_id = LibraryId::new();
 
         let mut config = OrchestratorConfig::default();
         config.queue.max_parallel_scans = 0;
@@ -1648,8 +1648,8 @@ mod tests {
 
     #[sqlx::test]
     async fn scheduler_respects_caps_and_prevents_starvation(pool: PgPool) {
-        let lib_a = LibraryID::new();
-        let lib_b = LibraryID::new();
+        let lib_a = LibraryId::new();
+        let lib_b = LibraryId::new();
 
         ensure_library(&pool, lib_a, "scheduler_caps_a").await;
         ensure_library(&pool, lib_b, "scheduler_caps_b").await;
@@ -1767,8 +1767,8 @@ mod tests {
 
     #[sqlx::test]
     async fn scheduler_selector_balances_by_library_and_priority(pool: PgPool) {
-        let lib_a = LibraryID::new();
-        let lib_b = LibraryID::new();
+        let lib_a = LibraryId::new();
+        let lib_b = LibraryId::new();
 
         ensure_library(&pool, lib_a, "scheduler_balance_a").await;
         ensure_library(&pool, lib_b, "scheduler_balance_b").await;

@@ -68,9 +68,10 @@ fn main() -> iced::Result {
 
         let lib_id = state
             .domains
-            .library
+            .ui
             .state
-            .current_library_id
+            .scope
+            .lib_id()
             .map(|library_id| library_id.to_uuid());
 
         // Initialize depth lines for the default library view
@@ -201,7 +202,10 @@ fn main() -> iced::Result {
                 auth_task,
                 open.map(|_| DomainMessage::NoOp),
                 Task::done(DomainMessage::Ui(
-                    domains::ui::messages::UiMessage::MainWindowOpened(main_id),
+                    domains::ui::shell_ui::UiShellMessage::MainWindowOpened(
+                        main_id,
+                    )
+                    .into(),
                 )),
             ]);
 

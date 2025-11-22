@@ -12,7 +12,7 @@ use ferrex_core::{
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
         CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-        Library, LibraryID, Media, MediaQuery, MediaRootBrowseResponse,
+        Library, LibraryId, Media, MediaQuery, MediaRootBrowseResponse,
         MediaWithStatus, NextEpisode, ScanCommandAcceptedResponse,
         ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
         SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
@@ -55,41 +55,41 @@ pub trait ApiService: Send + Sync + Debug {
     async fn create_library(
         &self,
         request: CreateLibraryRequest,
-    ) -> RepositoryResult<LibraryID>;
+    ) -> RepositoryResult<LibraryId>;
     /// Update a library on the server
     async fn update_library(
         &self,
-        id: LibraryID,
+        id: LibraryId,
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()>;
     /// Delete a library on the server
-    async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()>;
+    async fn delete_library(&self, id: LibraryId) -> RepositoryResult<()>;
 
     /// Start a library scan
     async fn start_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: StartScanRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 
     /// Pause an active library scan
     async fn pause_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 
     /// Resume a paused library scan
     async fn resume_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 
     /// Cancel an active library scan
     async fn cancel_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse>;
 

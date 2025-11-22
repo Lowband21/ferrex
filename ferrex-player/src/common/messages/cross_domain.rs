@@ -8,7 +8,11 @@ use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::{
         auth, library, player,
-        ui::{self, scroll_manager::ScrollStateExt},
+        ui::{
+            self,
+            scroll_manager::ScrollStateExt,
+            shell_ui::{Scope, UiShellMessage},
+        },
     },
     state::State,
 };
@@ -135,7 +139,7 @@ pub fn handle_event(
 
         // Library events
         CrossDomainEvent::LibrarySelected(library_id) => {
-            state.domains.library.state.current_library_id = Some(library_id);
+            state.domains.ui.state.scope = Scope::Library(library_id);
 
             // Restore scroll state for the new library context
             let scroll_task =
@@ -152,8 +156,8 @@ pub fn handle_event(
                 // [MediaStoreNotifier] RefreshViewModels no longer needed here
             ])
         }
-        CrossDomainEvent::LibrarySelectAll => {
-            state.domains.library.state.current_library_id = None;
+        CrossDomainEvent::LibrarySelectHome => {
+            state.domains.ui.state.scope = Scope::Home;
 
             // Restore scroll state for the global context (all libraries)
             let scroll_task = state.restore_library_scroll_state(None);
@@ -161,7 +165,7 @@ pub fn handle_event(
             // Broadcast the event to all domains (e.g., UI switches to Curated)
             let broadcast = state
                 .domains
-                .handle_event(CrossDomainEvent::LibrarySelectAll);
+                .handle_event(CrossDomainEvent::LibrarySelectHome);
 
             Task::batch(vec![
                 scroll_task,
@@ -355,9 +359,9 @@ pub fn handle_event(
                 "[CrossDomain] Cleanup event {:?} - handled by domain event handlers",
                 event
             );
-            // Special handling for ClearLibraries to reset current_library_id
+            // Special handling for ClearLibraries to reset scope to Home
             if matches!(event, CrossDomainEvent::ClearLibraries) {
-                state.domains.library.state.current_library_id = None;
+                state.domains.ui.state.scope = Scope::Home;
             }
             Task::none()
         }
@@ -460,19 +464,19 @@ pub fn handle_event(
             // Convert to appropriate UI navigation message based on media type
             use crate::infra::api_types::Media;
 
-            let ui_message = match media_ref {
+            let ui_message: ui::messages::UiMessage = match media_ref {
                 Media::Movie(movie) => {
-                    ui::messages::UiMessage::ViewMovieDetails(movie.id)
+                    UiShellMessage::ViewMovieDetails(movie.id).into()
                 }
                 Media::Series(series) => {
-                    ui::messages::UiMessage::ViewTvShow(series.id)
+                    UiShellMessage::ViewTvShow(series.id).into()
                 }
-                Media::Season(season) => ui::messages::UiMessage::ViewSeason(
-                    season.series_id,
-                    season.id,
-                ),
+                Media::Season(season) => {
+                    UiShellMessage::ViewSeason(season.series_id, season.id)
+                        .into()
+                }
                 Media::Episode(episode) => {
-                    ui::messages::UiMessage::ViewEpisode(episode.id)
+                    UiShellMessage::ViewEpisode(episode.id).into()
                 }
             };
 
@@ -586,7 +590,7 @@ fn handle_library_refresh_request(state: &State) -> Task<DomainMessage> {
     }
 
     // If we have a current library, refresh its content
-    if let Some(_library_id) = state.domains.library.state.current_library_id {
+    if let Some(_library_id) = state.domains.ui.state.scope.lib_id() {
         tasks.push(Task::done(DomainMessage::Library(
             library::messages::LibraryMessage::RefreshLibrary,
         )));

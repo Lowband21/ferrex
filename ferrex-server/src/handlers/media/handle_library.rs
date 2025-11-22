@@ -11,7 +11,7 @@ use ferrex_core::query::{
     types::{SortBy, SortOrder},
 };
 use ferrex_core::types::{
-    Library, LibraryID, LibraryReference, Media, MediaDetailsOption, MediaID,
+    Library, LibraryId, LibraryReference, Media, MediaDetailsOption, MediaID,
 };
 use ferrex_core::{
     api::types::{
@@ -602,7 +602,7 @@ pub async fn create_library_handler(
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("Creating new library: {}", request.name);
 
-    let library_id = LibraryID::new();
+    let library_id = LibraryId::new();
     info!("Generated library ID: {}", library_id);
 
     let library = Library {
@@ -715,7 +715,7 @@ pub async fn update_library_handler(
     let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
     let libraries_repo = state.unit_of_work().libraries.clone();
 
-    let mut library = match libraries_repo.get_library(LibraryID(uuid)).await {
+    let mut library = match libraries_repo.get_library(LibraryId(uuid)).await {
         Ok(Some(lib)) => lib,
         Ok(None) => {
             return Ok(Json(ApiResponse::error(
@@ -744,7 +744,7 @@ pub async fn update_library_handler(
     library.updated_at = chrono::Utc::now();
 
     match libraries_repo
-        .update_library(LibraryID(uuid), library)
+        .update_library(LibraryId(uuid), library)
         .await
     {
         Ok(_) => {
@@ -771,7 +771,7 @@ pub async fn delete_library_handler(
     match state
         .unit_of_work()
         .libraries
-        .delete_library(LibraryID(library_uuid))
+        .delete_library(LibraryId(library_uuid))
         .await
     {
         Ok(_) => {

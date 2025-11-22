@@ -2,30 +2,20 @@
 //!
 //! Wraps the existing ApiClient to provide a trait-based interface
 
-use async_trait::async_trait;
-use rkyv::rancor::Error;
-use rkyv::util::AlignedVec;
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use uuid::Uuid;
-
-use crate::infra::ApiClient;
-use crate::infra::api_client::SetupStatus;
-use crate::infra::api_types::{ConfirmClaimResponse, StartClaimResponse};
 #[cfg(feature = "demo")]
 use crate::infra::api_types::{DemoResetRequest, DemoStatus};
-use crate::infra::repository::{RepositoryError, RepositoryResult};
-use crate::infra::services::api::ApiService;
-use ferrex_core::api::routes::{
-    utils::replace_param,
-    v1::{self, admin::MEDIA_ROOT_BROWSER},
+use crate::infra::{
+    ApiClient,
+    api_client::SetupStatus,
+    api_types::ConfirmClaimResponse,
+    repository::{RepositoryError, RepositoryResult},
+    services::api::ApiService,
 };
+
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
-    LibraryID, LibraryMediaResponse, Media, MediaID, MediaQuery,
+    LibraryId, LibraryMediaResponse, Media, MediaID, MediaQuery,
     MediaRootBrowseResponse, MediaWithStatus, NextEpisode,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
     SeasonWatchStatus, SeriesWatchStatus, SortBy, SortOrder, StartScanRequest,
@@ -33,7 +23,26 @@ use ferrex_core::player_prelude::{
     UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
+use ferrex_core::{
+    api::routes::{
+        utils::replace_param,
+        v1::{self, admin::MEDIA_ROOT_BROWSER},
+    },
+    player_prelude::StartClaimResponse,
+};
+
+use rkyv::{rancor::Error, util::AlignedVec};
+
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use async_trait::async_trait;
 use parking_lot::RwLock;
+use serde::Deserialize;
+use uuid::Uuid;
 
 const FILTER_INDICES_CACHE_TTL: Duration = Duration::from_secs(30);
 
@@ -504,7 +513,7 @@ impl ApiService for ApiClientAdapter {
     async fn create_library(
         &self,
         request: CreateLibraryRequest,
-    ) -> RepositoryResult<LibraryID> {
+    ) -> RepositoryResult<LibraryId> {
         self.client
             .post(v1::libraries::COLLECTION, &request)
             .await
@@ -513,7 +522,7 @@ impl ApiService for ApiClientAdapter {
 
     async fn update_library(
         &self,
-        id: LibraryID,
+        id: LibraryId,
         request: UpdateLibraryRequest,
     ) -> RepositoryResult<()> {
         let path = replace_param(
@@ -529,7 +538,7 @@ impl ApiService for ApiClientAdapter {
         Ok(())
     }
 
-    async fn delete_library(&self, id: LibraryID) -> RepositoryResult<()> {
+    async fn delete_library(&self, id: LibraryId) -> RepositoryResult<()> {
         let path = replace_param(
             v1::libraries::ITEM,
             "{id}",
@@ -545,7 +554,7 @@ impl ApiService for ApiClientAdapter {
 
     async fn start_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: StartScanRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         let path = replace_param(
@@ -561,7 +570,7 @@ impl ApiService for ApiClientAdapter {
 
     async fn pause_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         let path = replace_param(
@@ -577,7 +586,7 @@ impl ApiService for ApiClientAdapter {
 
     async fn resume_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         let path = replace_param(
@@ -593,7 +602,7 @@ impl ApiService for ApiClientAdapter {
 
     async fn cancel_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
         let path = replace_param(

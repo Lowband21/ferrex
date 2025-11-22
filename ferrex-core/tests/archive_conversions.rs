@@ -6,7 +6,7 @@ use ferrex_contracts::{
 };
 use ferrex_core::infrastructure::archive::ArchivedModel;
 use ferrex_model::{
-    LibraryID, MovieID,
+    LibraryId, MovieID,
     chrono::Timelike,
     details::MediaDetailsOption,
     files::{MediaFile, MediaFileMetadata},
@@ -19,7 +19,7 @@ use rkyv::{rancor::Error as RkyvError, to_bytes};
 use uuid::Uuid;
 
 struct SampleMovie {
-    library_id: LibraryID,
+    library_id: LibraryId,
     media: Media,
 }
 
@@ -31,7 +31,7 @@ fn truncated_now() -> ferrex_model::chrono::DateTime<ferrex_model::chrono::Utc>
 }
 
 fn sample_movie() -> SampleMovie {
-    let library_id = LibraryID::new();
+    let library_id = LibraryId::new();
     let movie_id = MovieID::new();
     let now = truncated_now();
 

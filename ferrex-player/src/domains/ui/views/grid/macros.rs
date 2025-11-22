@@ -443,8 +443,8 @@ macro_rules! media_card {
         // Wrap the image element with precise hover detection
         // This tracks only the actual poster bounds, not the container
         let image_with_hover = iced::widget::mouse_area(image_element)
-            .on_enter($crate::domains::ui::messages::UiMessage::MediaHovered($image_key))
-            .on_exit($crate::domains::ui::messages::UiMessage::MediaUnhovered($image_key));
+            .on_enter($crate::domains::ui::interaction_ui::InteractionMessage::MediaHovered($image_key).into())
+            .on_exit($crate::domains::ui::interaction_ui::InteractionMessage::MediaUnhovered($image_key).into());
 
         // Create the poster element.
         // Navigation/click handling is driven by the image_for widget's `on_click`;

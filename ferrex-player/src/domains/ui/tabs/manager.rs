@@ -1,7 +1,7 @@
 //! Tab manager for coordinating multiple independent tab states
 
 use ferrex_core::player_prelude::{
-    ArchivedMediaID, LibraryID, SortBy, SortOrder,
+    ArchivedMediaID, LibraryId, SortBy, SortOrder,
 };
 use std::collections::HashMap;
 
@@ -23,7 +23,7 @@ pub struct TabManager {
 
     /// Library information for creating new tabs
     /// This is cached to avoid needing to query library domain
-    library_info: HashMap<LibraryID, LibraryType>,
+    library_info: HashMap<LibraryId, LibraryType>,
 }
 
 #[cfg_attr(
@@ -40,11 +40,11 @@ impl TabManager {
         let mut tabs = HashMap::new();
 
         // Always start with the All tab (without repo accessor initially)
-        tabs.insert(TabId::All, TabState::new_all(repo_accessor.clone()));
+        tabs.insert(TabId::Home, TabState::new_all(repo_accessor.clone()));
 
         Self {
             tabs,
-            active_tab: TabId::All,
+            active_tab: TabId::Home,
             repo_accessor,
             library_info: HashMap::new(),
         }
@@ -53,7 +53,7 @@ impl TabManager {
     /// Register library information for tab creation
     pub fn register_library(
         &mut self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
     ) {
         self.library_info.insert(library_id, library_type);
@@ -79,7 +79,7 @@ impl TabManager {
             .tabs
             .keys()
             .filter(|tab_id| match tab_id {
-                TabId::All => true,
+                TabId::Home => true,
                 TabId::Library(id) => self.library_info.contains_key(id),
             })
             .cloned()
@@ -89,7 +89,7 @@ impl TabManager {
 
         // If active tab was removed, switch to All
         if !self.tabs.contains_key(&self.active_tab) {
-            self.active_tab = TabId::All;
+            self.active_tab = TabId::Home;
         }
     }
 
@@ -98,7 +98,7 @@ impl TabManager {
         // If tab doesn't exist, create it
         if !self.tabs.contains_key(&tab_id) {
             match tab_id {
-                TabId::All => {
+                TabId::Home => {
                     // All tab should always exist, but create if needed
                     //self.tabs
                     //    .insert(tab_id, TabState::new_all(self.repo_accessor.as_ref()));
@@ -122,7 +122,7 @@ impl TabManager {
                             "Attempted to create tab for unregistered library: {}",
                             library_id
                         );
-                        return self.tabs.get_mut(&TabId::All).unwrap();
+                        return self.tabs.get_mut(&TabId::Home).unwrap();
                     }
                 }
             }
@@ -194,7 +194,7 @@ impl TabManager {
     pub fn set_active_tab(&mut self, tab_id: TabId) -> bool {
         // Check if this is a valid tab
         match tab_id {
-            TabId::All => {
+            TabId::Home => {
                 self.active_tab = tab_id;
                 true
             }
@@ -277,7 +277,7 @@ impl TabManager {
         if let Some(tab) = self.get_tab_mut(tab_id) {
             match tab {
                 TabState::Library(state) => state.mark_needs_refresh(),
-                TabState::All(_) => {
+                TabState::Home(_) => {
                     // AllTabState refresh is handled differently
                 }
             }
@@ -289,7 +289,7 @@ impl TabManager {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
                 TabState::Library(state) => state.mark_needs_refresh(),
-                TabState::All(_) => {
+                TabState::Home(_) => {
                     // AllTabState refresh is handled differently
                 }
             }
@@ -300,7 +300,7 @@ impl TabManager {
     pub fn refresh_active_tab(&mut self) {
         match self.get_active_tab() {
             TabState::Library(state) => state.refresh_from_repo(),
-            TabState::All(state) => {
+            TabState::Home(state) => {
                 // Refresh All view model
                 //state.view_model.refresh_from_repo();
             }
@@ -312,7 +312,7 @@ impl TabManager {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
                 TabState::Library(state) => state.refresh_from_repo(),
-                TabState::All(state) => {} //state.view_model.refresh_from_repo(),
+                TabState::Home(state) => {} //state.view_model.refresh_from_repo(),
             }
         }
     }
@@ -333,7 +333,7 @@ impl TabManager {
     }
 
     /// Get all tab info
-    pub fn library_info(&self) -> &HashMap<LibraryID, LibraryType> {
+    pub fn library_info(&self) -> &HashMap<LibraryId, LibraryType> {
         &self.library_info
     }
 

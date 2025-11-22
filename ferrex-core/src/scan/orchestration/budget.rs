@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc};
 
 use crate::error::Result;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 /// Different types of workloads that can be budget-limited
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub enum WorkloadType {
 #[derive(Debug)]
 pub struct BudgetToken {
     pub workload: WorkloadType,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub acquired_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -55,14 +55,14 @@ pub trait WorkloadBudget: Send + Sync {
     async fn try_acquire(
         &self,
         workload: WorkloadType,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Option<Arc<BudgetToken>>>;
 
     /// Acquire a budget token, waiting if necessary
     async fn acquire(
         &self,
         workload: WorkloadType,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Arc<BudgetToken>>;
 
     /// Release a budget token back to the pool
@@ -130,7 +130,7 @@ impl WorkloadBudget for InMemoryBudget {
     async fn try_acquire(
         &self,
         workload: WorkloadType,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Option<Arc<BudgetToken>>> {
         let mut state = self.state.lock().await;
 
@@ -167,7 +167,7 @@ impl WorkloadBudget for InMemoryBudget {
     async fn acquire(
         &self,
         workload: WorkloadType,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Arc<BudgetToken>> {
         // For now, just keep trying with a small delay
         loop {

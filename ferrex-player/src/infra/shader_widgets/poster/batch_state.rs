@@ -5,24 +5,28 @@
 //! the widget `encode_batch` phase and lazily uploaded during `prepare` once the
 //! frame budget and texture cache state are known.
 
-use crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME;
-use crate::infra::widgets::poster::poster_animation_types::{
-    AnimatedPosterBounds, PosterAnimationType,
+use crate::infra::{
+    constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME,
+    shader_widgets::poster::{
+        poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
+        render_pipeline::{
+            PosterFace, create_batch_instance, create_placeholder_instance,
+        },
+    },
 };
-use super::render_pipeline::{
-    create_batch_instance, create_placeholder_instance, PosterFace,
+
+use iced::{Color, Point, Rectangle as LayoutRect, widget::image::Handle};
+use iced_wgpu::{
+    primitive::{
+        PrepareContext, PrimitiveBatchState, RenderContext,
+        buffer_manager::InstanceBufferManager,
+    },
+    wgpu,
 };
+
+use std::{collections::HashMap, sync::Arc, time::Instant};
+
 use bytemuck::{Pod, Zeroable};
-use iced::widget::image::Handle;
-use iced::{Color, Point, Rectangle as LayoutRect};
-use iced_wgpu::primitive::{
-    PrepareContext, PrimitiveBatchState, RenderContext,
-    buffer_manager::InstanceBufferManager,
-};
-use iced_wgpu::{AtlasRegion, core, wgpu};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 
 /// GPU instance payload for a poster primitive.
 #[repr(C)]
@@ -186,7 +190,8 @@ impl PosterBatchState {
                 push_constant_ranges: &[],
             });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Poster Front Pipeline (Batched)"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -325,7 +330,11 @@ impl PosterBatchState {
         }
     }
 
-    fn push_group_instance(&mut self, face: PosterFace, group: Arc<wgpu::BindGroup>) {
+    fn push_group_instance(
+        &mut self,
+        face: PosterFace,
+        group: Arc<wgpu::BindGroup>,
+    ) {
         let groups = match face {
             PosterFace::Front => &mut self.groups_front,
             PosterFace::Back => &mut self.groups_back,
@@ -737,14 +746,16 @@ impl PrimitiveBatchState for PosterBatchState {
             self.instance_manager_back.add_instance(instance);
         }
 
-        let pending_before_upload_front = self.instance_manager_front.pending_count();
+        let pending_before_upload_front =
+            self.instance_manager_front.pending_count();
         let upload_result_front = self.instance_manager_front.upload(
             context.device,
             context.encoder,
             context.belt,
         );
 
-        let pending_before_upload_back = self.instance_manager_back.pending_count();
+        let pending_before_upload_back =
+            self.instance_manager_back.pending_count();
         let upload_result_back = self.instance_manager_back.upload(
             context.device,
             context.encoder,
@@ -883,9 +894,8 @@ impl PrimitiveBatchState for PosterBatchState {
     }
 
     fn instance_count(&self) -> usize {
-        let uploaded =
-            self.instance_manager_front.instance_count()
-                + self.instance_manager_back.instance_count();
+        let uploaded = self.instance_manager_front.instance_count()
+            + self.instance_manager_back.instance_count();
         let staged = self.instance_manager_front.pending_count()
             + self.instance_manager_back.pending_count()
             + self.pending_instances_front.len()

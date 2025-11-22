@@ -3,7 +3,7 @@ use crate::{
     common::ui_utils::{Icon, icon_text},
     domains::{
         library::{media_root_browser, types::LibraryFormData},
-        ui::{messages::UiMessage, theme},
+        ui::{messages::UiMessage, settings_ui::SettingsUiMessage, theme},
     },
     state::State,
 };
@@ -42,7 +42,7 @@ pub fn view_library_form<'a>(
                 .spacing(5)
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(UiMessage::HideLibraryForm)
+            .on_press(SettingsUiMessage::HideLibraryForm.into())
             .style(theme::Button::Secondary.style()),
             Space::new().width(Length::Fill),
             text(if form_data.editing {
@@ -91,15 +91,17 @@ pub fn view_library_form<'a>(
     // Library Name
     form_content = form_content.push(
         column![
-            text("Library Name")
-                .size(14)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            text_input("Enter library name", &form_data.name)
-                .on_input(UiMessage::UpdateLibraryFormName)
-                .id(ids::library_form_name())
-                .padding(10)
-                .size(16),
-        ]
+                text("Library Name")
+                    .size(14)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                text_input("Enter library name", &form_data.name)
+                    .on_input(
+                        |s| SettingsUiMessage::UpdateLibraryFormName(s).into()
+                    )
+                    .id(ids::library_form_name())
+                    .padding(10)
+                    .size(16),
+            ]
         .spacing(5),
     );
 
@@ -114,14 +116,24 @@ pub fn view_library_form<'a>(
                     "Movies",
                     "Movies",
                     Some(form_data.library_type.as_str()),
-                    |value| UiMessage::UpdateLibraryFormType(value.to_string())
+                    |value| {
+                        SettingsUiMessage::UpdateLibraryFormType(
+                            value.to_string(),
+                        )
+                        .into()
+                    }
                 ),
                 Space::new().width(Length::Fixed(30.0)),
                 radio(
                     "TV Shows",
                     "TvShows",
                     Some(form_data.library_type.as_str()),
-                    |value| UiMessage::UpdateLibraryFormType(value.to_string())
+                    |value| {
+                        SettingsUiMessage::UpdateLibraryFormType(
+                            value.to_string(),
+                        )
+                        .into()
+                    }
                 ),
             ]
             .spacing(20)
@@ -142,7 +154,7 @@ pub fn view_library_form<'a>(
                 "e.g., /media/movies, /mnt/storage/films",
                 &form_data.paths
             )
-            .on_input(UiMessage::UpdateLibraryFormPaths)
+            .on_input(|s| SettingsUiMessage::UpdateLibraryFormPaths(s).into())
             .id(ids::library_form_paths())
             .padding(10)
             .size(16),
@@ -173,9 +185,12 @@ pub fn view_library_form<'a>(
     form_content = form_content.push(
         row![
             button("Browse Server Media Root")
-                .on_press(UiMessage::LibraryMediaRoot(
-                    media_root_browser::Message::Open
-                ))
+                .on_press(
+                    SettingsUiMessage::LibraryMediaRoot(
+                        media_root_browser::Message::Open
+                    )
+                    .into()
+                )
                 .style(theme::Button::Secondary.style()),
             Space::new().width(Length::Fixed(12.0)),
             root_info.width(Length::Fill),
@@ -194,7 +209,9 @@ pub fn view_library_form<'a>(
                 .size(12)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
             text_input("60", &form_data.scan_interval_minutes)
-                .on_input(UiMessage::UpdateLibraryFormScanInterval)
+                .on_input(|s| {
+                    SettingsUiMessage::UpdateLibraryFormScanInterval(s).into()
+                })
                 .id(ids::library_form_scan_interval())
                 .padding(10)
                 .size(16),
@@ -205,14 +222,16 @@ pub fn view_library_form<'a>(
     // Enabled checkbox
     form_content = form_content.push(
         checkbox("Enable this library", form_data.enabled)
-            .on_toggle(|_| UiMessage::ToggleLibraryFormEnabled)
+            .on_toggle(|_| SettingsUiMessage::ToggleLibraryFormEnabled.into())
             .text_size(16),
     );
 
     if !form_data.editing {
         form_content = form_content.push(
             checkbox("Start initial scan after creation", form_data.start_scan)
-                .on_toggle(|_| UiMessage::ToggleLibraryFormStartScan)
+                .on_toggle(|_| {
+                    SettingsUiMessage::ToggleLibraryFormStartScan.into()
+                })
                 .text_size(16),
         );
     }
@@ -237,7 +256,7 @@ pub fn view_library_form<'a>(
         row![
             Space::new().width(Length::Fill),
             button("Cancel")
-                .on_press(UiMessage::HideLibraryForm)
+                .on_press(SettingsUiMessage::HideLibraryForm.into())
                 .style(theme::Button::Secondary.style()),
             Space::new().width(Length::Fixed(10.0)),
             button(if form_data.editing {
@@ -245,7 +264,7 @@ pub fn view_library_form<'a>(
             } else {
                 "Create Library"
             })
-            .on_press(UiMessage::SubmitLibraryForm)
+            .on_press(SettingsUiMessage::SubmitLibraryForm.into())
             .style(theme::Button::Primary.style()),
         ]
         .align_y(iced::Alignment::Center),
@@ -276,9 +295,12 @@ fn media_root_browser_modal<'a>(state: &'a State) -> Element<'a, UiMessage> {
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().width(Length::Fill),
         button("Close")
-            .on_press(UiMessage::LibraryMediaRoot(
-                media_root_browser::Message::Close
-            ))
+            .on_press(
+                SettingsUiMessage::LibraryMediaRoot(
+                    media_root_browser::Message::Close
+                )
+                .into()
+            )
             .style(theme::Button::Secondary.style())
             .padding([6, 14]),
     ]
@@ -310,9 +332,14 @@ fn media_root_browser_modal<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     Some(crumb.relative_path.clone())
                 };
                 button(text(crumb.label))
-                    .on_press(UiMessage::LibraryMediaRoot(
-                        media_root_browser::Message::Browse { path: target },
-                    ))
+                    .on_press(
+                        SettingsUiMessage::LibraryMediaRoot(
+                            media_root_browser::Message::Browse {
+                                path: target,
+                            },
+                        )
+                        .into(),
+                    )
                     .style(theme::Button::Secondary.style())
                     .padding([4, 10])
                     .into()
@@ -423,9 +450,12 @@ fn render_media_root_entry(
         };
         actions = actions.push(
             button("Open")
-                .on_press(UiMessage::LibraryMediaRoot(
-                    media_root_browser::Message::Browse { path: target },
-                ))
+                .on_press(
+                    SettingsUiMessage::LibraryMediaRoot(
+                        media_root_browser::Message::Browse { path: target },
+                    )
+                    .into(),
+                )
                 .style(theme::Button::Secondary.style())
                 .padding([6, 12]),
         );
@@ -433,11 +463,14 @@ fn render_media_root_entry(
         if name != ".." {
             actions = actions.push(
                 button("Select")
-                    .on_press(UiMessage::LibraryMediaRoot(
-                        media_root_browser::Message::PathSelected(
-                            relative_path.clone(),
-                        ),
-                    ))
+                    .on_press(
+                        SettingsUiMessage::LibraryMediaRoot(
+                            media_root_browser::Message::PathSelected(
+                                relative_path.clone(),
+                            ),
+                        )
+                        .into(),
+                    )
                     .style(theme::Button::Primary.style())
                     .padding([6, 12]),
             );

@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     error::Result,
-    types::{ids::LibraryID, prelude::LibraryReference},
+    types::{ids::LibraryId, prelude::LibraryReference},
 };
 
 use super::folder::is_media_file_path;
@@ -210,7 +210,7 @@ pub struct FileSystemEvent {
     pub version: u16,
     pub correlation_id: Option<Uuid>,
     pub idempotency_key: String,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub path_key: String,
     pub fingerprint: Option<String>,
     pub path: PathBuf,
@@ -888,7 +888,7 @@ mod tests {
     fn make_event(
         path: &Path,
         kind: FileSystemEventKind,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> FileSystemEvent {
         make_event_with_correlation(path, kind, library_id, None)
     }
@@ -896,7 +896,7 @@ mod tests {
     fn make_event_with_correlation(
         path: &Path,
         kind: FileSystemEventKind,
-        library_id: LibraryID,
+        library_id: LibraryId,
         correlation: Option<Uuid>,
     ) -> FileSystemEvent {
         let path_key = normalize_path(path);
@@ -923,7 +923,7 @@ mod tests {
         root: PathBuf,
     ) -> DefaultLibraryActor<RecordingQueue, NoopActorObserver, NoopPublisher>
     {
-        let library_id = LibraryID::new();
+        let library_id = LibraryId::new();
         let reference = LibraryReference {
             id: library_id,
             name: "Test".into(),
@@ -953,7 +953,7 @@ mod tests {
         NoopActorObserver,
         RecordingPublisher,
     > {
-        let library_id = LibraryID::new();
+        let library_id = LibraryId::new();
         let reference = LibraryReference {
             id: library_id,
             name: "Test".into(),

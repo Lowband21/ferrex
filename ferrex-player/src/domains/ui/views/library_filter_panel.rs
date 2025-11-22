@@ -8,6 +8,7 @@ use lucide_icons::Icon;
 use crate::{
     common::ui_utils::icon_text_with_size,
     domains::ui::{
+        library_ui::LibraryUiMessage,
         messages::UiMessage,
         theme::{self, MediaServerTheme},
     },
@@ -39,7 +40,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
             ))
             .padding([6, 12])
             .style(filter_chip_style(is_selected))
-            .on_press(UiMessage::ToggleFilterGenre(*genre));
+            .on_press(LibraryUiMessage::ToggleFilterGenre(*genre).into());
             chunk_row = chunk_row.push(chip);
         }
 
@@ -50,7 +51,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let decades = UiDecade::all();
     let selected_decade = ui_state.selected_decade;
     let decade_pick = pick_list(decades, selected_decade, |opt| {
-        UiMessage::SetFilterDecade(opt)
+        LibraryUiMessage::SetFilterDecade(opt).into()
     })
     .placeholder("Decade")
     .width(Length::Fixed(140.0));
@@ -59,7 +60,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let resolutions = UiResolution::all();
     let res_pick =
         pick_list(resolutions, Some(ui_state.selected_resolution), |opt| {
-            UiMessage::SetFilterResolution(opt)
+            LibraryUiMessage::SetFilterResolution(opt).into()
         })
         .placeholder("Resolution")
         .width(Length::Fixed(140.0));
@@ -69,7 +70,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let ws_pick = pick_list(
         watch_statuses,
         Some(ui_state.selected_watch_status),
-        UiMessage::SetFilterWatchStatus,
+        |opt| LibraryUiMessage::SetFilterWatchStatus(opt).into(),
     )
     .placeholder("Watch Status")
     .width(Length::Fixed(160.0));
@@ -102,10 +103,10 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
     let actions = row![
         button(text("Clear"))
-            .on_press(UiMessage::ClearFilters)
+            .on_press(LibraryUiMessage::ClearFilters.into())
             .style(theme::Button::Text.style()),
         button(text("Apply"))
-            .on_press(UiMessage::ApplyFilters)
+            .on_press(LibraryUiMessage::ApplyFilters.into())
             .style(theme::Button::Primary.style()),
     ]
     .spacing(12);
@@ -118,7 +119,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
         button(icon_text_with_size(Icon::X, 16.0))
             .padding([6, 8])
             .style(theme::Button::Icon.style())
-            .on_press(UiMessage::ToggleFilterPanel),
+            .on_press(LibraryUiMessage::ToggleFilterPanel.into()),
     ]
     .align_y(Alignment::Center);
 

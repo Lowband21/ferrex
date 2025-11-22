@@ -7,7 +7,7 @@ pub fn handle_refresh_library(state: &mut State) -> Task<LibraryMessage> {
     // Loading state handled at higher level
 
     // Refresh current library's media references
-    if let Some(_library_id) = &state.domains.library.state.current_library_id {
+    if let Some(_library_id) = state.domains.ui.state.scope.lib_id() {
         // Media loading handled at higher level
         Task::none()
     } else {

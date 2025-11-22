@@ -1,15 +1,18 @@
 use crate::common::messages::{CrossDomainEvent, DomainUpdateResult};
 
 use crate::state::State;
-use ferrex_core::player_prelude::LibraryID;
+use ferrex_core::player_prelude::LibraryId;
 use iced::Task;
 
 pub fn handle_select_library(
     state: &mut State,
-    library_id: Option<LibraryID>,
+    library_id: Option<LibraryId>,
 ) -> DomainUpdateResult {
-    // Update library selection
-    state.domains.library.state.current_library_id = library_id;
+    // Update scope based on library selection
+    state.domains.ui.state.scope = match library_id {
+        Some(id) => crate::domains::ui::shell_ui::Scope::Library(id),
+        None => crate::domains::ui::shell_ui::Scope::Home,
+    };
 
     if let Some(library_id) = library_id {
         log::info!("Selected library: {}", library_id);

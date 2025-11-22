@@ -13,7 +13,10 @@ use crate::{
     common::ui_utils::{Icon, icon_text},
     domains::{
         settings::state::SettingsView,
-        ui::{theme, widgets::background_shader::UiMessage},
+        ui::{
+            messages::UiMessage, settings_ui::SettingsUiMessage,
+            shell_ui::UiShellMessage, theme,
+        },
     },
     state::State,
 };
@@ -75,7 +78,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 ]
                 .align_y(iced::Alignment::Center)
             )
-            .on_press(UiMessage::NavigateHome)
+            .on_press(UiShellMessage::NavigateHome.into())
             .style(theme::Button::Secondary.style())
             .padding([8, 16]),
             Space::new().width(20),
@@ -103,28 +106,28 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
             "👤",
             "Profile",
             "Manage your display name and avatar",
-            UiMessage::ShowUserProfile,
+            SettingsUiMessage::ShowUserProfile.into(),
         ),
         // Preferences section
         create_settings_section(
             "⚙️",
             "Preferences",
             "Customize your viewing experience",
-            UiMessage::ShowUserPreferences,
+            SettingsUiMessage::ShowUserPreferences.into(),
         ),
         // Security section
         create_settings_section(
             "🔐",
             "Security",
             "Change PIN, manage devices",
-            UiMessage::ShowUserSecurity,
+            SettingsUiMessage::ShowUserSecurity.into(),
         ),
         // Device management section
         create_settings_section(
             "📱",
             "Device Management",
             "View and manage trusted devices",
-            UiMessage::ShowDeviceManagement,
+            SettingsUiMessage::ShowDeviceManagement.into(),
         ),
         // Theme section (inline toggle)
         container(
@@ -170,7 +173,9 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     toggler(
                         state.domains.settings.preferences.auto_login_enabled
                     )
-                    .on_toggle(UiMessage::ToggleAutoLogin),
+                    .on_toggle(|enabled| {
+                        SettingsUiMessage::ToggleAutoLogin(enabled).into()
+                    }),
                 ]
                 .align_y(iced::Alignment::Center),
             ]
@@ -188,7 +193,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
             ]
             .align_y(iced::Alignment::Center),
         )
-        .on_press(UiMessage::Logout)
+        .on_press(SettingsUiMessage::Logout.into())
         .style(theme::Button::Danger.style())
         .padding([12, 20])
         .width(Length::Fixed(150.0)),

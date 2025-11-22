@@ -2,21 +2,23 @@ use crate::domains::media::selectors;
 use crate::domains::ui::components;
 use crate::domains::ui::views::grid::macros::parse_hex_color;
 use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
-use crate::infra::api_types::{
-    EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
-    SeasonReference, SeriesID,
-};
+use crate::infra::shader_widgets::poster::PosterFace;
+use crate::infra::shader_widgets::poster::poster_animation_types::AnimationBehavior;
 use crate::{
     domains::ui::{
-        messages::UiMessage, theme, views::grid::macros::ThemeColorAccess,
+        messages::UiMessage, playback_ui::PlaybackMessage,
+        shell_ui::UiShellMessage, theme, views::grid::macros::ThemeColorAccess,
         widgets::image_for::image_for,
     },
     media_card,
     state::State,
 };
-use crate::infra::widgets::poster::poster_animation_types::AnimationBehavior;
 use ferrex_core::player_prelude::{
     EpisodeLike, MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
+};
+use ferrex_model::{
+    EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
+    SeasonReference, SeriesID,
 };
 use iced::{
     Element, Length,
@@ -98,7 +100,7 @@ pub fn view_series_detail<'a>(
 
     //let media_id = MediaID::Series(SeriesID(series_id.to_uuid()));
 
-    let mut content = column![].spacing(20);
+    let mut content = column![];
 
     // Add dynamic spacing at the top based on backdrop dimensions
     let window_width = state.window_size.width;
@@ -136,21 +138,14 @@ pub fn view_series_detail<'a>(
         poster = poster.theme_color(color);
     }
     let poster_id = media_id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&poster_id)
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (
-            menu_state.face_for_render(),
-            Some(menu_state.angle),
-        )
+        (menu_state.face_for_render(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
-        (crate::infra::widgets::poster::PosterFace::Front, None)
+        (PosterFace::Front, None)
     };
     poster = poster.face(face);
     if let Some(rot) = rotation_override {
@@ -251,8 +246,8 @@ pub fn view_series_detail<'a>(
     // Play/Resume button – uses identity endpoint when available, falls back to local selection
     if selectors::select_next_episode_for_series(state, series_id).is_some() {
         let button_row = components::create_action_button_row(
-            UiMessage::PlaySeriesNextEpisode(series_id),
-            Some(UiMessage::PlaySeriesNextEpisode(series_id)),
+            PlaybackMessage::PlaySeriesNextEpisode(series_id).into(),
+            Some(PlaybackMessage::PlaySeriesNextEpisode(series_id).into()),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -329,7 +324,11 @@ pub fn view_series_detail<'a>(
                                     fallback: "📺",
                                 },
                                 size: Medium,
-                                on_click: UiMessage::ViewSeason(s.series_id, s.id),
+                                on_click: UiShellMessage::ViewSeason(
+                                    s.series_id,
+                                    s.id,
+                                )
+                                .into(),
                                 on_play: UiMessage::NoOp,
                                 hover_icon: lucide_icons::Icon::List,
                                 is_hovered: false,
@@ -345,26 +344,25 @@ pub fn view_series_detail<'a>(
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
-    // Calculate backdrop dimensions
+    // Calculate backdrop dimensions using centralized method
     let window_width = state.window_size.width;
     let window_height = state.window_size.height;
-    let display_aspect = state
+    let backdrop_dims = state
         .domains
         .ui
         .state
         .background_shader_state
-        .calculate_display_aspect(window_width, window_height);
-    let backdrop_height = window_width / display_aspect;
+        .calculate_backdrop_dimensions(window_width, window_height);
 
     // Create aspect ratio toggle button
     let aspect_button =
         crate::domains::ui::components::create_backdrop_aspect_button(state);
 
-    // Position the button at bottom-right of backdrop with small margin
+    // Position the button at bottom-right of backdrop
     let button_container = container(aspect_button)
         .padding([0, 20])
         .width(Length::Fill)
-        .height(Length::Fixed(backdrop_height - 22.5))
+        .height(Length::Fixed(backdrop_dims.button_height))
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom);
 
@@ -444,7 +442,7 @@ pub fn view_season_detail<'a>(
     };
     let season = season_yoke_arc.get();
 
-    let mut content = column![].spacing(20);
+    let mut content = column![];
 
     // Add dynamic spacing at the top based on backdrop dimensions
     let window_width = state.window_size.width;
@@ -471,21 +469,14 @@ pub fn view_season_detail<'a>(
         poster = poster.theme_color(color);
     }
     let poster_id = season.id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&poster_id)
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (
-            menu_state.face_for_render(),
-            Some(menu_state.angle),
-        )
+        (menu_state.face_for_render(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
-        (crate::infra::widgets::poster::PosterFace::Front, None)
+        (PosterFace::Front, None)
     };
     poster = poster.face(face);
     if let Some(rot) = rotation_override {
@@ -521,10 +512,14 @@ pub fn view_season_detail<'a>(
         selectors::select_next_episode_for_season(state, *season_id)
     {
         let button_row = components::create_action_button_row(
-            UiMessage::PlayMediaWithId(MediaID::Episode(next_ep_id)),
-            Some(UiMessage::PlayMediaWithIdInMpv(MediaID::Episode(
-                next_ep_id,
-            ))),
+            PlaybackMessage::PlayMediaWithId(MediaID::Episode(next_ep_id))
+                .into(),
+            Some(
+                PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(
+                    next_ep_id,
+                ))
+                .into(),
+            ),
             vec![],
         );
         details = details.push(Space::new().height(10));
@@ -600,8 +595,14 @@ pub fn view_season_detail<'a>(
                                     fallback: "🎞",
                                 },
                                 size: Wide,
-                                on_click: UiMessage::PlayMediaWithId(MediaID::Episode(e.id)),
-                                on_play: UiMessage::PlayMediaWithId(MediaID::Episode(e.id)),
+                                on_click: PlaybackMessage::PlayMediaWithId(
+                                    MediaID::Episode(e.id),
+                                )
+                                .into(),
+                                on_play: PlaybackMessage::PlayMediaWithId(
+                                    MediaID::Episode(e.id),
+                                )
+                                .into(),
                                 hover_icon: lucide_icons::Icon::Play,
                                 is_hovered: false,
                             }
@@ -617,26 +618,25 @@ pub fn view_season_detail<'a>(
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
-    // Calculate backdrop dimensions
+    // Calculate backdrop dimensions using centralized method
     let window_width = state.window_size.width;
     let window_height = state.window_size.height;
-    let display_aspect = state
+    let backdrop_dims = state
         .domains
         .ui
         .state
         .background_shader_state
-        .calculate_display_aspect(window_width, window_height);
-    let backdrop_height = window_width / display_aspect;
+        .calculate_backdrop_dimensions(window_width, window_height);
 
     // Create aspect ratio toggle button
     let aspect_button =
         crate::domains::ui::components::create_backdrop_aspect_button(state);
 
-    // Position the button at bottom-right of backdrop with small margin
+    // Position the button at bottom-right of backdrop
     let button_container = container(aspect_button)
         .padding([0, 20])
         .width(Length::Fill)
-        .height(Length::Fixed(backdrop_height - 22.5))
+        .height(Length::Fixed(backdrop_dims.button_height))
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom);
 
@@ -720,7 +720,7 @@ pub fn view_episode_detail<'a>(
         .background_shader_state
         .calculate_content_offset_height(window_width, window_height);
 
-    let mut content = column![].spacing(20).padding(20);
+    let mut content = column![].padding(20);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
     // Episode still image
@@ -731,21 +731,14 @@ pub fn view_episode_detail<'a>(
         .height(Length::Fixed(360.0))
         .priority(Priority::Visible);
     let poster_id = episode.id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&poster_id)
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (
-            menu_state.face_for_render(),
-            Some(menu_state.angle),
-        )
+        (menu_state.face_for_render(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (crate::infra::widgets::poster::PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
-        (crate::infra::widgets::poster::PosterFace::Front, None)
+        (PosterFace::Front, None)
     };
     still = still.face(face);
     if let Some(rot) = rotation_override {
@@ -802,12 +795,16 @@ pub fn view_episode_detail<'a>(
 
     // Play button
     let button_row = components::create_action_button_row(
-        UiMessage::PlayMediaWithId(MediaID::Episode(EpisodeID(
+        PlaybackMessage::PlayMediaWithId(MediaID::Episode(EpisodeID(
             episode.id.to_uuid(),
-        ))),
-        Some(UiMessage::PlayMediaWithIdInMpv(MediaID::Episode(
-            EpisodeID(episode.id.to_uuid()),
-        ))),
+        )))
+        .into(),
+        Some(
+            PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
+                episode.id.to_uuid(),
+            )))
+            .into(),
+        ),
         vec![],
     );
     details = details.push(Space::new().height(10));
@@ -835,24 +832,23 @@ pub fn view_episode_detail<'a>(
     // Create the main content container
     let content_container = container(content).width(Length::Fill);
 
-    // Calculate backdrop dimensions
-    let display_aspect = state
+    // Calculate backdrop dimensions using centralized method
+    let backdrop_dims = state
         .domains
         .ui
         .state
         .background_shader_state
-        .calculate_display_aspect(window_width, window_height);
-    let backdrop_height = window_width / display_aspect;
+        .calculate_backdrop_dimensions(window_width, window_height);
 
     // Create aspect ratio toggle button
     let aspect_button =
         crate::domains::ui::components::create_backdrop_aspect_button(state);
 
-    // Position the button at bottom-right of backdrop with small margin
+    // Position the button at bottom-right of backdrop
     let button_container = container(aspect_button)
         .padding([0, 20])
         .width(Length::Fill)
-        .height(Length::Fixed(backdrop_height - 22.5))
+        .height(Length::Fixed(backdrop_dims.button_height))
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom);
 

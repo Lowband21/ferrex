@@ -1,17 +1,17 @@
-use crate::infra::{
-    widgets::poster::batch_state::{self, PosterInstance},
-    widgets::poster::{
-        Instant,
-        poster_animation_types::{
-            self, PosterAnimationType, calculate_animation_state,
-        },
+use crate::infra::shader_widgets::poster::{
+    Instant,
+    batch_state::{self, PosterInstance},
+    poster_animation_types::{
+        self, PosterAnimationType, calculate_animation_state,
     },
 };
-use bytemuck::{Pod, Zeroable};
+
 use iced::{Color, Point, Rectangle, wgpu};
 use iced_wgpu::AtlasRegion;
-use std::collections::HashMap;
-use std::sync::Arc;
+
+use std::{collections::HashMap, sync::Arc};
+
+use bytemuck::{Pod, Zeroable};
 
 const ATLAS_SIZE: f32 = 2048.0;
 

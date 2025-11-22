@@ -17,7 +17,7 @@ use ferrex_core::scan::orchestration::{
 use ferrex_core::types::events::ScanSseEventType;
 use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_core::types::{
-    LibraryID, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
+    LibraryId, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
     ScanStageLatencySummary,
 };
 use serde::{Deserialize, Serialize};
@@ -145,7 +145,7 @@ impl ScanControlPlane {
     #[instrument(skip(self))]
     pub async fn start_library_scan(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         correlation_id: Option<Uuid>,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
         let library = self
@@ -396,7 +396,7 @@ impl ScanEventKind {
 
 struct ScanRun {
     scan_id: Uuid,
-    library_id: LibraryID,
+    library_id: LibraryId,
     correlation_id: Uuid,
     state: Mutex<ScanRunState>,
     tx: broadcast::Sender<ScanBroadcastFrame>,
@@ -409,7 +409,7 @@ struct ScanRun {
 #[derive(Debug)]
 struct ScanRunState {
     scan_id: Uuid,
-    library_id: LibraryID,
+    library_id: LibraryId,
     phase: ScanPhase,
     status: ScanLifecycleStatus,
     completed_items: u64,
@@ -517,7 +517,7 @@ impl ScanRun {
     fn new(
         inner: Arc<ScanControlPlaneInner>,
         scan_id: Uuid,
-        library_id: LibraryID,
+        library_id: LibraryId,
         correlation_id: Uuid,
         mode: StartMode,
     ) -> Arc<Self> {
@@ -565,7 +565,7 @@ impl ScanRun {
         self.correlation_id
     }
 
-    fn library_id(&self) -> LibraryID {
+    fn library_id(&self) -> LibraryId {
         self.library_id
     }
 
@@ -2469,7 +2469,7 @@ impl ScanRunAggregatorInner {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanHistoryEntry {
     pub scan_id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub status: ScanLifecycleStatus,
     pub completed_items: u64,
     pub total_items: u64,
@@ -2480,7 +2480,7 @@ pub struct ScanHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanSnapshot {
     pub scan_id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub status: ScanLifecycleStatus,
     pub completed_items: u64,
     pub total_items: u64,

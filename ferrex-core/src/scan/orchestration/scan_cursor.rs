@@ -13,19 +13,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::Result;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 /// Unique identifier for a scan cursor.
 #[derive(
     Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct ScanCursorId {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub path_hash: u64,
 }
 
 impl ScanCursorId {
-    pub fn new(library_id: LibraryID, paths: &Vec<PathBuf>) -> Self {
+    pub fn new(library_id: LibraryId, paths: &Vec<PathBuf>) -> Self {
         let mut hasher = DefaultHasher::new();
         paths.hash(&mut hasher);
         Self {
@@ -146,19 +146,19 @@ pub trait ScanCursorRepository: Send + Sync {
     /// Get all cursors for a library.
     async fn list_by_library(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
     ) -> Result<Vec<ScanCursor>>;
 
     /// Store or update a cursor.
     async fn upsert(&self, cursor: ScanCursor) -> Result<()>;
 
     /// Delete cursors for a library.
-    async fn delete_by_library(&self, library_id: LibraryID) -> Result<usize>;
+    async fn delete_by_library(&self, library_id: LibraryId) -> Result<usize>;
 
     /// Get cursors that haven't been scanned recently.
     async fn list_stale(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         older_than: DateTime<Utc>,
     ) -> Result<Vec<ScanCursor>>;
 }

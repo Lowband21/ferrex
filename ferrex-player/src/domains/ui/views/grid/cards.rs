@@ -7,15 +7,16 @@
 use crate::common::text;
 use crate::{
     domains::ui::{
-        messages::UiMessage, theme, views::grid::macros::parse_hex_color,
-        widgets::image_for,
+        interaction_ui::InteractionMessage, messages::UiMessage,
+        playback_ui::PlaybackMessage, shell_ui::UiShellMessage, theme,
+        views::grid::macros::parse_hex_color, widgets::image_for,
     },
     infra::{
-        api_types::WatchProgress, constants::poster::CORNER_RADIUS,
+        constants::poster::CORNER_RADIUS,
         repository::MaybeYoked,
-        widgets::{
-            poster::poster_animation_types::AnimationBehavior,
+        shader_widgets::{
             poster::PosterFace,
+            poster::poster_animation_types::AnimationBehavior,
         },
     },
     state::State,
@@ -24,6 +25,7 @@ use crate::{
 use ferrex_core::player_prelude::{
     ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike,
     MediaOps, MovieID, MovieLike, Priority, SeriesID, SeriesLike,
+    WatchProgress,
 };
 
 use iced::widget::text::Wrapping;
@@ -175,11 +177,18 @@ pub fn movie_reference_card_with_state<'a>(
                                 Priority::Preload
                             })
                             .is_hovered(is_hovered)
-                            .on_click(UiMessage::ViewMovieDetails(movie_id))
+                            .on_click(
+                                UiShellMessage::ViewMovieDetails(movie_id)
+                                    .into(),
+                            )
                             .into();
                         let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(UiMessage::MediaHovered(uuid))
-                            .on_exit(UiMessage::MediaUnhovered(uuid));
+                            .on_enter(
+                                InteractionMessage::MediaHovered(uuid).into(),
+                            )
+                            .on_exit(
+                                InteractionMessage::MediaUnhovered(uuid).into(),
+                            );
                         let poster_element = image_with_hover;
                         let text_content = column![
                             text("...").size(14),
@@ -228,8 +237,8 @@ pub fn movie_reference_card_with_state<'a>(
         .priority(priority)
         .skip_request(true)
         .is_hovered(is_hovered)
-        .on_play(UiMessage::PlayMediaWithId(media_id))
-        .on_click(UiMessage::ViewMovieDetails(movie_id));
+        .on_play(PlaybackMessage::PlayMediaWithId(media_id).into())
+        .on_click(UiShellMessage::ViewMovieDetails(movie_id).into());
 
     // Add theme color if available
     if let Some(theme_color_str) = theme_color {
@@ -269,17 +278,10 @@ pub fn movie_reference_card_with_state<'a>(
     }
 
     let poster_id = movie_id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&poster_id)
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (
-            menu_state.face_for_render(),
-            Some(menu_state.angle),
-        )
+        (menu_state.face_for_render(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
@@ -295,8 +297,8 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
-        .on_enter(UiMessage::MediaHovered(movie_id.to_uuid()))
-        .on_exit(UiMessage::MediaUnhovered(movie_id.to_uuid()));
+        .on_enter(InteractionMessage::MediaHovered(movie_id.to_uuid()).into())
+        .on_exit(InteractionMessage::MediaUnhovered(movie_id.to_uuid()).into());
     let poster_element = image_with_hover;
 
     let title = truncate(&mut movie.title().to_string());
@@ -406,11 +408,17 @@ pub fn series_reference_card_with_state<'a>(
                                 Priority::Preload
                             })
                             .is_hovered(is_hovered)
-                            .on_click(UiMessage::ViewTvShow(series_id))
+                            .on_click(
+                                UiShellMessage::ViewTvShow(series_id).into(),
+                            )
                             .into();
                         let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(UiMessage::MediaHovered(uuid))
-                            .on_exit(UiMessage::MediaUnhovered(uuid));
+                            .on_enter(
+                                InteractionMessage::MediaHovered(uuid).into(),
+                            )
+                            .on_exit(
+                                InteractionMessage::MediaUnhovered(uuid).into(),
+                            );
                         let poster_element = image_with_hover;
                         let text_content = column![
                             text("...").size(14),
@@ -465,8 +473,8 @@ pub fn series_reference_card_with_state<'a>(
         .priority(priority)
         .is_hovered(is_hovered)
         .skip_request(true)
-        .on_play(UiMessage::PlaySeriesNextEpisode(series_id))
-        .on_click(UiMessage::ViewTvShow(series_id));
+        .on_play(PlaybackMessage::PlaySeriesNextEpisode(series_id).into())
+        .on_click(UiShellMessage::ViewTvShow(series_id).into());
 
     // Add theme color if available
     if let Some(theme_color_str) = &theme_color {
@@ -499,17 +507,10 @@ pub fn series_reference_card_with_state<'a>(
     }
 
     let poster_id = series_id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&poster_id)
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (
-            menu_state.face_for_render(),
-            Some(menu_state.angle),
-        )
+        (menu_state.face_for_render(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
@@ -523,8 +524,10 @@ pub fn series_reference_card_with_state<'a>(
     let image_element: Element<'_, UiMessage> = img.into();
 
     let image_with_hover = mouse_area(image_element)
-        .on_enter(UiMessage::MediaHovered(series_id.to_uuid()))
-        .on_exit(UiMessage::MediaUnhovered(series_id.to_uuid()));
+        .on_enter(InteractionMessage::MediaHovered(series_id.to_uuid()).into())
+        .on_exit(
+            InteractionMessage::MediaUnhovered(series_id.to_uuid()).into(),
+        );
     let poster_element = image_with_hover;
 
     let text_content = column![
@@ -632,8 +635,8 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
                 fallback: "📺",
             },
             size: Medium,
-            on_click: Message::ViewSeason(season_id,season_id),
-            on_play: Message::ViewSeason(season_id, season_id),
+            on_click: UiShellMessage::ViewSeason(season_id, season_id).into(),
+            on_play: UiShellMessage::ViewSeason(season_id, season_id).into(),
             hover_icon: lucide_icons::Icon::List,
             is_hovered: is_hovered,
         }

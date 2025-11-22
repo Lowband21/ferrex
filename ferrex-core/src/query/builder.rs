@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 use crate::{api::types::ScalarRange, domain::watch::WatchStatusFilter};
 use uuid::Uuid;
 
@@ -87,7 +87,7 @@ impl MediaQueryBuilder {
     }
 
     /// Filter by library
-    pub fn in_library(mut self, library_id: LibraryID) -> Self {
+    pub fn in_library(mut self, library_id: LibraryId) -> Self {
         self.query.filters.library_ids.push(library_id.to_uuid());
         self
     }
@@ -203,7 +203,7 @@ impl MediaQuery {
 
     /// Create a library browse query
     pub fn browse_library(
-        library_id: LibraryID,
+        library_id: LibraryId,
         page: usize,
         per_page: usize,
     ) -> Self {

@@ -1,14 +1,14 @@
 //! Tab state definitions for independent tab management
 
-use crate::domains::ui::view_models::AllViewModel;
+use crate::domains::ui::view_models::HomeViewModel;
 use crate::domains::ui::views::grid::VirtualGridState;
 use crate::infra::api_types::{LibraryType, Media};
 // no poster-checking helpers needed; core compare_media handles poster-first
-use super::AllFocusState;
+use super::HomeFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedMovieReference,
-    ArchivedSeriesReference, LibraryID, MediaID, MediaIDLike, MediaOps,
+    ArchivedSeriesReference, LibraryId, MediaID, MediaIDLike, MediaOps,
     MovieID, SeriesID, SortBy, SortOrder, compare_media,
 };
 use iced::widget::Id;
@@ -19,8 +19,8 @@ use uuid::Uuid;
 /// State for an individual tab
 #[derive(Debug)]
 pub enum TabState {
-    /// State for the "All" tab showing curated content
-    All(AllTabState),
+    /// State for the home tab showing curated content
+    Home(HomeTabState),
 
     /// State for a library-specific tab
     Library(LibraryTabState),
@@ -35,14 +35,14 @@ pub enum TabState {
     profiling::all_functions
 )]
 impl TabState {
-    /// Create a new All tab state
+    /// Create a new Home tab state
     pub fn new_all(accessor: Accessor<ReadOnly>) -> Self {
-        TabState::All(AllTabState::new(accessor))
+        TabState::Home(HomeTabState::new(accessor))
     }
 
     /// Create a new Library tab state
     pub fn new_library(
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
         accessor: Accessor<ReadOnly>,
     ) -> Self {
@@ -57,7 +57,7 @@ impl TabState {
     pub fn grid_state(&self) -> Option<&VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&state.grid_state),
-            TabState::All(_) => None,
+            TabState::Home(_) => None,
         }
     }
 
@@ -65,7 +65,7 @@ impl TabState {
     pub fn grid_state_mut(&mut self) -> Option<&mut VirtualGridState> {
         match self {
             TabState::Library(state) => Some(&mut state.grid_state),
-            TabState::All(_) => None,
+            TabState::Home(_) => None,
         }
     }
 
@@ -73,8 +73,8 @@ impl TabState {
     pub fn get_visible_items(&self) -> Vec<ArchivedMediaID> {
         match self {
             TabState::Library(state) => state.get_visible_items(),
-            TabState::All(_) => {
-                // All tab uses carousel view, not virtual grid
+            TabState::Home(_) => {
+                // Home  tab uses carousel view, not virtual grid
                 // Return empty for now - could be extended to return carousel visible items
                 Vec::new()
             }
@@ -82,7 +82,7 @@ impl TabState {
     }
 
     /// Get the visible positions for this tab (movie libraries). Returns None if not a library tab.
-    pub fn get_visible_positions(&self) -> Option<(LibraryID, Vec<u32>)> {
+    pub fn get_visible_positions(&self) -> Option<(LibraryId, Vec<u32>)> {
         match self {
             TabState::Library(state) => Some(state.get_visible_positions()),
             _ => None,
@@ -150,11 +150,11 @@ impl LibraryTabState {
     }
 }
 
-/// State for the "All" tab showing curated content
+/// State for the "Home" tab showing curated content
 #[derive(Debug)]
-pub struct AllTabState {
-    /// The All view model (existing implementation)
-    pub view_model: AllViewModel,
+pub struct HomeTabState {
+    /// The Home view model (existing implementation)
+    pub view_model: HomeViewModel,
 
     /// Navigation history specific to this tab
     pub navigation_history: Vec<String>,
@@ -170,22 +170,22 @@ pub struct AllTabState {
     /// Curated: recently released series (by release/first_air date desc)
     pub released_series: Vec<uuid::Uuid>,
 
-    /// Focus and vertical scroll animation state for the All view
-    pub focus: AllFocusState,
+    /// Focus and vertical scroll animation state for the Home view
+    pub focus: HomeFocusState,
 }
 
-impl AllTabState {
-    /// Create a new All tab state
+impl HomeTabState {
+    /// Create a new Home tab state
     pub fn new(accessor: Accessor<ReadOnly>) -> Self {
         Self {
-            view_model: AllViewModel::new(accessor),
+            view_model: HomeViewModel::new(accessor),
             navigation_history: Vec::new(),
             continue_watching: Vec::new(),
             recent_movies: Vec::new(),
             recent_series: Vec::new(),
             released_movies: Vec::new(),
             released_series: Vec::new(),
-            focus: AllFocusState::new(),
+            focus: HomeFocusState::new(),
         }
     }
 
@@ -199,7 +199,7 @@ impl AllTabState {
 #[derive(Debug)]
 pub struct LibraryTabState {
     /// The library ID this tab represents
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
 
     /// The type of library (Movies or TvShows)
     pub library_type: LibraryType,
@@ -267,7 +267,7 @@ impl CachedMedia {
 impl LibraryTabState {
     /// Create a new library tab state
     pub fn new(
-        library_id: LibraryID,
+        library_id: LibraryId,
         library_type: LibraryType,
         accessor: Accessor<ReadOnly>,
     ) -> Self {
@@ -591,7 +591,7 @@ impl LibraryTabState {
     }
 
     /// Compute visible positions for the archived slice (Phase 1, movies: filter top-level by library type)
-    pub fn get_visible_positions(&self) -> (LibraryID, Vec<u32>) {
+    pub fn get_visible_positions(&self) -> (LibraryId, Vec<u32>) {
         let range = self.grid_state.visible_range.clone();
         // Positions are simply the indices inside the filtered top-level slice range
         // Align with how get_visible_items filters by media type

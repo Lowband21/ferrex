@@ -117,22 +117,6 @@ pub struct LayoutRegions {
     pub content_padding: f32,
 }
 
-/// Display mode for library-centric content organization
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum DisplayMode {
-    /// Show curated collections in carousels (all libraries)
-    #[default]
-    Curated,
-    /// Show content from current selected library
-    Library,
-    /// Show recommended content (future feature)
-    Recommended,
-    /// Show recently added content across all libraries
-    RecentlyAdded,
-    /// Show continue watching content
-    ContinueWatching,
-}
-
 /// Backdrop aspect ratio mode
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum BackdropAspectMode {

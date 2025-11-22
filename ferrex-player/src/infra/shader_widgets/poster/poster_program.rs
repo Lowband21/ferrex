@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     domains::ui::messages::UiMessage,
-    infra::widgets::poster::poster_animation_types::{
+    infra::shader_widgets::poster::poster_animation_types::{
         AnimatedPosterBounds, PosterAnimationType,
     },
 };

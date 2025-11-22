@@ -1,6 +1,6 @@
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{messages::UiMessage, theme},
+    domains::ui::{library_ui::LibraryUiMessage, messages::UiMessage, theme},
 };
 use iced::{
     Element, Length,
@@ -40,7 +40,7 @@ pub fn filter_button<'a>(
                 .padding([0, 12])
                 .center_y(Length::Fill),
         )
-        .on_press(UiMessage::ToggleFilterPanel)
+        .on_press(LibraryUiMessage::ToggleFilterPanel.into())
         .style(button_style)
         .height(Length::Fixed(36.0)),
     )

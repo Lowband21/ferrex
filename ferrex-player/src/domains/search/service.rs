@@ -1,17 +1,15 @@
 //! Search service for executing global, server-backed queries
 
-use ferrex_core::player_prelude::{
-    LibraryID, MediaQueryBuilder, MediaWithStatus, SearchField,
-};
-use ferrex_model::{MediaDetailsOption, TmdbDetails};
 use std::sync::Arc;
 
-use crate::infra::api_types::{Media, MovieReference, SeriesReference};
 use crate::infra::services::api::ApiService;
 
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchResult, SearchStrategy};
 use chrono::Datelike;
+use ferrex_core::player_prelude::{MediaWithStatus, SearchField};
+use ferrex_core::query::MediaQueryBuilder;
+use ferrex_model::{LibraryId, Media, MovieReference, SeriesReference};
 use std::time::Instant;
 
 const SERVER_SEARCH_LIMIT: usize = 50;
@@ -55,7 +53,7 @@ impl SearchService {
         query: &str,
         fields: &[SearchField],
         strategy: SearchStrategy,
-        library_id: Option<LibraryID>,
+        library_id: Option<LibraryId>,
         fuzzy: bool,
     ) -> Result<Vec<SearchResult>, String> {
         match strategy {
@@ -76,7 +74,7 @@ impl SearchService {
         query: &str,
         fields: &[SearchField],
         strategy: SearchStrategy,
-        library_id: Option<LibraryID>,
+        library_id: Option<LibraryId>,
         fuzzy: bool,
     ) -> (Result<Vec<SearchResult>, String>, SearchPerformanceMetrics) {
         let start = Instant::now();
@@ -365,7 +363,7 @@ impl SearchService {
         &self,
         query: &str,
         fields: &[SearchField],
-        library_id: Option<LibraryID>,
+        library_id: Option<LibraryId>,
         _fuzzy: bool,
     ) -> Result<Vec<SearchResult>, String> {
         let api_service = self.api_service.as_ref().ok_or_else(|| {
@@ -427,7 +425,7 @@ impl SearchService {
         &self,
         query: &str,
         fields: &[SearchField],
-        library_id: Option<LibraryID>,
+        library_id: Option<LibraryId>,
         fuzzy: bool,
     ) -> Result<Vec<SearchResult>, String> {
         // Start with client search

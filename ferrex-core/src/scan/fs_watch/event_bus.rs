@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::database::ports::file_watch::FileWatchEventRepository;
 use crate::database::traits::FileWatchEvent;
 use crate::error::{MediaError, Result};
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 pub mod postgres;
 pub use postgres::PostgresFileChangeEventBus;
@@ -23,7 +23,7 @@ pub type FileChangeEventStream =
 #[derive(Debug, Clone)]
 pub struct FileChangeCursor {
     pub group: String,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub last_event_id: Option<Uuid>,
     pub last_detected_at: Option<DateTime<Utc>>,
 }
@@ -35,7 +35,7 @@ pub trait FileChangeEventBus: Send + Sync {
     async fn subscribe(
         &self,
         _group: &str,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
     ) -> Result<FileChangeEventStream> {
         Err(MediaError::Internal(
             "FileChangeEventBus::subscribe not implemented".into(),
@@ -57,7 +57,7 @@ pub trait FileChangeEventBus: Send + Sync {
     async fn get_cursor(
         &self,
         _group: &str,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
     ) -> Result<Option<FileChangeCursor>> {
         Err(MediaError::Internal(
             "FileChangeEventBus::get_cursor not implemented".into(),
@@ -66,7 +66,7 @@ pub trait FileChangeEventBus: Send + Sync {
 
     async fn get_unprocessed_events(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>>;
 
@@ -104,7 +104,7 @@ impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
     async fn subscribe(
         &self,
         _group: &str,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
     ) -> Result<FileChangeEventStream> {
         Err(MediaError::Internal(
             "LegacyDatabaseFileChangeEventBus does not support durable subscribe".into(),
@@ -128,14 +128,14 @@ impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
     async fn get_cursor(
         &self,
         _group: &str,
-        _library_id: LibraryID,
+        _library_id: LibraryId,
     ) -> Result<Option<FileChangeCursor>> {
         Ok(None)
     }
 
     async fn get_unprocessed_events(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
         self.repository

@@ -1,20 +1,18 @@
-//! ViewModel for the "All" view that shows carousels
+//! ViewModel for the Home view that shows carousels
 
 use ferrex_core::player_prelude::{Media, MovieID, SeriesID};
+use ferrex_model::{MediaID, MovieReference, SeriesReference};
 use uuid::Uuid;
 
 use super::{ViewModel, VisibleItems};
 use crate::{
     domains::ui::views::carousel::CarouselState,
-    infra::{
-        api_types::{MediaID, MovieReference, SeriesReference},
-        repository::accessor::{Accessor, ReadOnly},
-    },
+    infra::repository::accessor::{Accessor, ReadOnly},
 };
 
 /// ViewModel for the All view (shows movie and TV carousels)
 #[derive(Debug)]
-pub struct AllViewModel {
+pub struct HomeViewModel {
     accessor: Accessor<ReadOnly>,
 
     /// Current library filter (None = all libraries)
@@ -45,7 +43,7 @@ pub struct AllViewModel {
     ),
     profiling::all_functions
 )]
-impl AllViewModel {
+impl HomeViewModel {
     /// Create a new AllViewModel
     pub fn new(accessor: Accessor<ReadOnly>) -> Self {
         // Initial load from store
@@ -109,7 +107,7 @@ impl AllViewModel {
     }
 }
 
-impl ViewModel for AllViewModel {
+impl ViewModel for HomeViewModel {
     /*
     fn refresh_from_repo(&mut self) {
         log::info!(

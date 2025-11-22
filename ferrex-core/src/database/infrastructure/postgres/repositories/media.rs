@@ -12,7 +12,7 @@ use crate::database::ports::media_files::{
 use crate::database::traits::{MediaFilters, MediaStats};
 use crate::error::{MediaError, Result};
 use crate::types::files::{MediaFile, MediaFileMetadata};
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 #[derive(Clone, Debug)]
 pub struct PostgresMediaRepository {
@@ -66,7 +66,7 @@ impl MediaFilesWritePort for PostgresMediaRepository {
 
     async fn delete_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &str,
     ) -> Result<()> {
         self.delete_media_by_path(library_id, path).await
@@ -238,7 +238,7 @@ impl PostgresMediaRepository {
             discovered_at: row.try_get("discovered_at")?,
             created_at: row.try_get("created_at")?,
             media_file_metadata,
-            library_id: LibraryID(row.try_get("library_id")?),
+            library_id: LibraryId(row.try_get("library_id")?),
         })
     }
 
@@ -346,7 +346,7 @@ impl PostgresMediaRepository {
             discovered_at: row.discovered_at,
             created_at: row.created_at,
             media_file_metadata,
-            library_id: LibraryID(row.library_id),
+            library_id: LibraryId(row.library_id),
         }))
     }
 
@@ -392,7 +392,7 @@ impl PostgresMediaRepository {
             discovered_at: row.discovered_at,
             created_at: row.created_at,
             media_file_metadata,
-            library_id: LibraryID(row.library_id),
+            library_id: LibraryId(row.library_id),
         }))
     }
 
@@ -523,7 +523,7 @@ impl PostgresMediaRepository {
 
     pub async fn delete_media_by_path(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         path: &str,
     ) -> Result<()> {
         sqlx::query!(

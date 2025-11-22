@@ -1,5 +1,6 @@
 use crate::domains::auth::permissions::StatePermissionExt;
 use crate::domains::ui::messages::UiMessage;
+use crate::domains::ui::settings_ui::SettingsUiMessage;
 use crate::domains::ui::theme;
 use crate::infra::api_types::AdminUserInfo;
 use crate::state::State;
@@ -118,7 +119,7 @@ fn user_row(user: &AdminUserInfo) -> Element<'_, UiMessage> {
         button("Delete")
             .style(theme::Button::Danger.style())
             .padding([6, 10])
-            .on_press(UiMessage::UserAdminDelete(user.id)),
+            .on_press(SettingsUiMessage::UserAdminDelete(user.id).into()),
     ]
     .align_y(iced::Alignment::Center);
 

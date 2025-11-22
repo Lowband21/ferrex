@@ -22,7 +22,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
-use super::{prompt_menu::menu_label, state::MenuItem, state::PromptState, validation};
+use super::{
+    prompt_menu::menu_label, state::MenuItem, state::PromptState, validation,
+};
 use crate::util::parse_bool;
 
 /// Source of key/input events so tests can drive the TUI without a real tty.

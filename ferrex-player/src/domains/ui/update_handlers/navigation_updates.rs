@@ -2,11 +2,15 @@ use iced::Task;
 use rkyv::option::ArchivedOption;
 
 use super::super::views::carousel::CarouselState;
+use crate::domains::ui::shell_ui::Scope;
 use crate::infra::constants::layout::carousel::{
     HORIZONTAL_PADDING_TOTAL, ITEM_SPACING,
 };
 use crate::{
-    domains::ui::{ViewState, messages::UiMessage, types, views::grid::macros},
+    domains::ui::{
+        ViewState, messages::UiMessage, shell_ui::UiShellMessage, types,
+        views::grid::macros,
+    },
     state::State,
 };
 use ferrex_core::{
@@ -45,9 +49,10 @@ fn prepare_depth_regions_for_transition(
     // TODO: This is cumbersome, fix it
     let uuid = state
         .domains
-        .library
+        .ui
         .state
-        .current_library_id
+        .scope
+        .lib_id()
         .map(|library_id| library_id.to_uuid());
 
     state
@@ -61,75 +66,6 @@ fn prepare_depth_regions_for_transition(
             state.window_size.height,
             uuid,
         );
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-pub fn handle_view_details(
-    state: &mut State,
-    media: MediaID,
-) -> Task<UiMessage> {
-    // Save current view to navigation history
-    state
-        .domains
-        .ui
-        .state
-        .navigation_history
-        .push(state.domains.ui.state.view.clone());
-
-    // Save current scroll position before navigating away
-    save_current_scroll_state(state);
-
-    /* TODO: Get media for details views
-    // Determine if it's a movie or TV episode
-    if media.is_tv_episode() {
-        state.domains.ui.state.view = ViewState::EpisodeDetail {
-            episode_id: EpisodeID::new(media.id.clone())
-                .unwrap_or_else(|_| EpisodeID::new("unknown".to_string()).unwrap()),
-            backdrop_handle: None,
-        };
-    } else {
-        // NEW ARCHITECTURE: Find movie in MediaStore
-        let movie_id = MovieID::new(media.id.clone())
-            .unwrap_or_else(|_| MovieID::new("unknown".to_string()).unwrap());
-        let media_id = MediaID::Movie(movie_id);
-
-        if let Ok(store) = state.domains.media.state.media_store.read() {
-            // TODO: Media state reference outside of media domain
-            if let Some(Media::Movie(movie)) = store.get(&media_id) {
-                state.domains.ui.state.view = ViewState::MovieDetail {
-                    movie: movie.clone(),
-                    backdrop_handle: None,
-                };
-            } else {
-                log::error!("Movie not found in MediaStore: {}", media.id);
-                state.domains.ui.state.error_message =
-                    Some(format!("Movie not found: {}", media.display_title()));
-            }
-        }
-    } */
-
-    // Update depth regions for the new detail view
-    // TODO: Please don't push this
-    state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .update_depth_lines(
-            &state.domains.ui.state.view,
-            state.window_size.width,
-            state.window_size.height,
-            None,
-        );
-
-    Task::none()
 }
 
 #[cfg_attr(
@@ -843,10 +779,7 @@ pub fn handle_view_episode(
 pub fn handle_navigate_home(state: &mut State) -> Task<UiMessage> {
     state.domains.ui.state.view = ViewState::Library;
 
-    state.domains.library.state.current_library_id = None;
-
-    // Refresh media to show all libraries
-    Task::done(UiMessage::AggregateAllLibraries)
+    Task::done(UiShellMessage::SelectScope(Scope::Home).into())
 }
 
 #[cfg_attr(
@@ -919,7 +852,7 @@ pub fn handle_toggle_backdrop_aspect_mode(
 )]
 fn save_current_scroll_state(state: &mut State) {
     let current_view = state.domains.ui.state.view.clone();
-    let library_id = state.domains.library.state.current_library_id;
+    let library_id = state.domains.ui.state.scope.lib_id();
 
     match current_view {
         ViewState::Library => {

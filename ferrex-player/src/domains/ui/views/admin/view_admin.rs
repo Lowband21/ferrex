@@ -5,8 +5,11 @@
 
 use crate::{
     common::ui_utils::icon_text,
-    domains::auth::permissions::StatePermissionExt,
-    domains::ui::messages::UiMessage, domains::ui::theme, state::State,
+    domains::{
+        auth::permissions::StatePermissionExt,
+        ui::{messages::UiMessage, settings_ui::SettingsUiMessage, theme},
+    },
+    state::State,
 };
 use iced::{
     Element, Length,
@@ -38,7 +41,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(40),
                 button("Back to Library")
-                    .on_press(UiMessage::HideAdminDashboard)
+                    .on_press(SettingsUiMessage::HideAdminDashboard.into())
                     .style(theme::Button::Secondary.style())
                     .padding([12, 20]),
             ]
@@ -62,7 +65,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     .spacing(5)
                     .align_y(iced::Alignment::Center)
             )
-            .on_press(UiMessage::HideAdminDashboard)
+            .on_press(SettingsUiMessage::HideAdminDashboard.into())
             .style(theme::Button::Secondary.style()),
             Space::new().width(Length::Fill),
             text("Admin Dashboard")
@@ -103,7 +106,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
                     button("Manage Libraries")
-                        .on_press(UiMessage::ShowLibraryManagement)
+                        .on_press(SettingsUiMessage::ShowLibraryManagement.into())
                         .style(theme::Button::Primary.style())
                         .padding([12, 20])
                         .width(Length::Fill),
@@ -141,7 +144,7 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
                     button("Manage Users")
-                        .on_press(UiMessage::ShowUserManagement)
+                        .on_press(SettingsUiMessage::ShowUserManagement.into())
                         .style(theme::Button::Primary.style())
                         .padding([12, 20])
                         .width(Length::Fill),
@@ -214,7 +217,9 @@ pub fn view_admin_dashboard(state: &State) -> Element<'_, UiMessage> {
                     .align_y(iced::Alignment::Center),
                     Space::new().height(20),
                     button("Dev Tools")
-                        .on_press(UiMessage::ShowClearDatabaseConfirm)
+                        .on_press(
+                            SettingsUiMessage::ShowClearDatabaseConfirm.into()
+                        )
                         .style(theme::Button::Danger.style())
                         .padding([12, 20])
                         .width(Length::Fill),

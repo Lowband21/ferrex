@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 use super::config::{LibraryQueuePolicy, PriorityWeights, QueueConfig};
 use super::job::JobPriority;
@@ -16,7 +16,7 @@ use super::job::JobPriority;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SchedulingReservation {
     pub id: Uuid,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub priority: JobPriority,
 }
 
@@ -78,7 +78,7 @@ impl fmt::Debug for LibraryState {
 struct QueueDefaults {
     default_cap: usize,
     default_weight: u32,
-    overrides: HashMap<LibraryID, LibraryQueuePolicy>,
+    overrides: HashMap<LibraryId, LibraryQueuePolicy>,
 }
 
 impl QueueDefaults {
@@ -90,7 +90,7 @@ impl QueueDefaults {
         }
     }
 
-    fn policy_for(&self, library_id: LibraryID) -> LibraryQueuePolicy {
+    fn policy_for(&self, library_id: LibraryId) -> LibraryQueuePolicy {
         self.overrides.get(&library_id).cloned().unwrap_or_default()
     }
 }
@@ -106,7 +106,7 @@ impl fmt::Debug for QueueDefaults {
 }
 
 struct ReservationState {
-    library_id: LibraryID,
+    library_id: LibraryId,
     priority: JobPriority,
     weight_debt: i32,
 }
@@ -122,7 +122,7 @@ impl fmt::Debug for ReservationState {
 }
 
 struct SchedulerState {
-    libraries: HashMap<LibraryID, LibraryState>,
+    libraries: HashMap<LibraryId, LibraryState>,
     reservations: HashMap<Uuid, ReservationState>,
     next_priority_index: usize,
 }
@@ -138,7 +138,7 @@ impl SchedulerState {
 
     fn ensure_library(
         &mut self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         defaults: &QueueDefaults,
     ) -> &mut LibraryState {
         self.libraries.entry(library_id).or_insert_with(|| {
@@ -149,8 +149,8 @@ impl SchedulerState {
     fn select_for_priority(
         &mut self,
         priority: JobPriority,
-    ) -> Option<(LibraryID, i32)> {
-        let mut selected: Option<(LibraryID, i32)> = None;
+    ) -> Option<(LibraryId, i32)> {
+        let mut selected: Option<(LibraryId, i32)> = None;
         let mut total_weight = 0i32;
 
         for (library_id, state) in self.libraries.iter_mut() {
@@ -258,7 +258,7 @@ impl fmt::Debug for WeightedFairScheduler {
 /// Bulk ready counts used to prime the scheduler without emitting one event per job.
 #[derive(Clone, Debug)]
 pub struct ReadyCountEntry {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub priority: JobPriority,
     pub count: usize,
 }
@@ -279,7 +279,7 @@ impl WeightedFairScheduler {
 
     pub async fn record_ready(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         priority: JobPriority,
     ) {
         let mut state = self.state.lock().await;
@@ -307,7 +307,7 @@ impl WeightedFairScheduler {
 
     pub async fn record_enqueued(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         priority: JobPriority,
     ) {
         self.record_ready(library_id, priority).await;
@@ -380,19 +380,19 @@ impl WeightedFairScheduler {
         }
     }
 
-    pub async fn release(&self, library_id: LibraryID) {
+    pub async fn release(&self, library_id: LibraryId) {
         let mut state = self.state.lock().await;
         if let Some(library) = state.libraries.get_mut(&library_id) {
             library.inflight = library.inflight.saturating_sub(1);
         }
     }
 
-    pub async fn record_completed(&self, library_id: LibraryID) {
+    pub async fn record_completed(&self, library_id: LibraryId) {
         self.release(library_id).await;
     }
 
     #[cfg(test)]
-    pub async fn snapshot(&self) -> HashMap<LibraryID, (usize, usize)> {
+    pub async fn snapshot(&self) -> HashMap<LibraryId, (usize, usize)> {
         let state = self.state.lock().await;
         state
             .libraries

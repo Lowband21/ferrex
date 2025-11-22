@@ -7,7 +7,7 @@ use crate::{
     infra::constants::layout::header::HEIGHT,
     state::State,
 };
-use ferrex_core::player_prelude::{LibraryID, UiResolution, UiWatchStatus};
+use ferrex_core::player_prelude::{LibraryId, UiResolution, UiWatchStatus};
 use iced::{Element, Length, widget::container};
 use uuid::Uuid;
 
@@ -25,7 +25,7 @@ pub fn view_library_controls_bar<'a>(
     state: &'a State,
     selected_library: Option<Uuid>,
 ) -> Option<Element<'a, UiMessage>> {
-    // Only show controls for specific libraries, not the "All" view
+    // Only show controls for specific libraries, not the Home view
     selected_library?;
 
     // Get current sort settings from state
@@ -35,7 +35,7 @@ pub fn view_library_controls_bar<'a>(
 
     let item_count = selected_library
         .and_then(|library_uuid| {
-            let library_id = LibraryID(library_uuid);
+            let library_id = LibraryId(library_uuid);
             state
                 .tab_manager
                 .get_tab(TabId::Library(library_id))

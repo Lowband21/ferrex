@@ -2,8 +2,8 @@ use iced::{Point, Task, window};
 
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::search::types::SearchMode;
-use crate::domains::ui::messages as ui;
 use crate::domains::ui::windows::WindowKind;
+use crate::domains::ui::{messages as ui, shell_ui::UiShellMessage};
 use crate::infra::constants::layout;
 use crate::state::State;
 
@@ -77,7 +77,7 @@ pub fn open_search(
     state.search_window_id = Some(id);
 
     tasks.push(open.map(|opened| {
-        DomainMessage::Ui(ui::UiMessage::SearchWindowOpened(opened))
+        DomainMessage::Ui(UiShellMessage::SearchWindowOpened(opened).into())
     }));
 
     DomainUpdateResult::task(Task::batch(tasks))

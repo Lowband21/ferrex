@@ -2,45 +2,60 @@
 //!
 //! Contains all UI-related state and logic
 
-pub mod background_state;
+pub mod background_ui;
 pub mod components;
+pub mod feedback_ui;
+pub mod header_ui;
+pub mod interaction_ui;
+pub mod library_ui;
 pub mod menu;
 pub mod messages;
 pub mod motion_controller;
+pub mod playback_ui;
 pub mod scroll_manager;
+pub mod settings_ui;
+pub mod shell_ui;
 pub mod tabs;
 pub mod theme;
-pub mod transitions;
 pub mod types;
 pub mod update;
 pub mod update_handlers;
 pub mod utils;
+pub mod view_model_ui;
 pub mod view_models;
 pub mod views;
 pub mod widgets;
+pub mod window_ui;
 pub mod windows;
-pub mod yoke_cache;
 
 pub use motion_controller::MotionController;
 
-use self::menu::PosterMenuState;
-use self::views::carousel::CarouselState;
-use self::views::virtual_carousel::{CarouselFocus, CarouselRegistry};
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::ui::{
-        background_state::BackgroundShaderState,
+        menu::PosterMenuState,
         messages::UiMessage as UIMessage,
         scroll_manager::ScrollPositionManager,
-        types::{DisplayMode, ViewState},
+        shell_ui::Scope,
+        types::ViewState,
+        view_model_ui::ViewModelMessage,
+        views::{
+            carousel::CarouselState,
+            virtual_carousel::{CarouselFocus, CarouselRegistry},
+        },
     },
-    infra::repository::{
-        EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
-        accessor::{Accessor, ReadOnly},
+    infra::{
+        repository::{
+            EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
+            accessor::{Accessor, ReadOnly},
+            yoke_cache::YokeCache,
+        },
+        shader_widgets::background::state::BackgroundShaderState,
     },
 };
+
 use ferrex_core::player_prelude::{
-    LibraryID, SortBy, SortOrder, UiDecade, UiGenre, UiResolution,
+    LibraryId, SortBy, SortOrder, UiDecade, UiGenre, UiResolution,
     UiWatchStatus,
 };
 
@@ -48,7 +63,6 @@ use iced::Task;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use uuid::Uuid;
-use yoke_cache::YokeCache;
 
 /// UI domain state
 #[derive(Debug)]
@@ -65,7 +79,7 @@ pub struct UIDomainState {
     pub movies_carousel: CarouselState,
     pub tv_carousel: CarouselState,
 
-    pub display_mode: DisplayMode,
+    pub scope: Scope,
     pub sort_by: SortBy,
     pub sort_order: SortOrder,
     pub loading: bool,
@@ -76,7 +90,7 @@ pub struct UIDomainState {
 
     pub theme_color_cache: parking_lot::RwLock<HashMap<Uuid, iced::Color>>,
 
-    pub current_library_id: Option<LibraryID>,
+    pub current_library_id: Option<LibraryId>,
 
     pub last_prefetch_tick: Option<Instant>,
     pub scroll_manager: ScrollPositionManager,
@@ -161,66 +175,83 @@ impl UIDomain {
                     "UI domain handling LibraryChanged event for library {}",
                     library_id
                 );
+
                 // Store the library ID in UI domain state
                 self.state.current_library_id = Some(*library_id);
+
                 // Library has been selected - now switch to Library display mode
-                self.state.display_mode = DisplayMode::Library;
+                self.state.scope = Scope::Library(*library_id);
+
                 // Reset view state when library changes
                 self.state.expanded_shows.clear();
                 self.state.hovered_media_id = None;
+
                 // Update filters - this already triggers refresh, no need to call RefreshViewModels
-                Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::UpdateViewModelFilters.into(),
+                ))
             }
-            CrossDomainEvent::LibrarySelectAll => {
+            CrossDomainEvent::LibrarySelectHome => {
                 log::info!("UI domain handling LibrarySelectAll event");
+
                 // Clear library selection - show all libraries
                 self.state.current_library_id = None;
-                self.state.display_mode = DisplayMode::Curated;
+                self.state.scope = Scope::Home;
+
                 // Reset view state
                 self.state.expanded_shows.clear();
                 self.state.hovered_media_id = None;
+
                 // Update filters - this already triggers refresh, no need to call RefreshViewModels
-                Task::done(DomainMessage::Ui(UIMessage::UpdateViewModelFilters))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::UpdateViewModelFilters.into(),
+                ))
             }
             CrossDomainEvent::RequestLibraryRefresh => {
                 // This is for actual data refresh, not just filter changes
-                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::RefreshViewModels.into(),
+                ))
             }
             CrossDomainEvent::SeriesChildrenChanged(series_id) => {
                 // Invalidate cached yoke for the series and refresh
                 self.state.series_yoke_cache.remove(&series_id.to_uuid());
-                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::RefreshViewModels.into(),
+                ))
             }
             CrossDomainEvent::SeasonChildrenChanged(season_id) => {
                 // Invalidate cached yoke for the season and refresh
                 self.state.season_yoke_cache.remove(&season_id.to_uuid());
-                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::RefreshViewModels.into(),
+                ))
             }
             CrossDomainEvent::RequestViewModelRefresh => {
                 // Refresh all ViewModels when media has been loaded
                 log::info!(
                     "UI domain received RequestViewModelRefresh event - display_mode: {:?}, current_library_id: {:?}",
-                    self.state.display_mode,
+                    self.state.scope,
                     self.state.current_library_id
                 );
 
                 // Ensure we're in a valid display mode
-                if matches!(self.state.display_mode, DisplayMode::Curated) {
+                if matches!(self.state.scope, Scope::Home) {
                     // Good - show all libraries
                     log::info!("UI: In Curated mode - will show all libraries");
-                } else if matches!(
-                    self.state.display_mode,
-                    DisplayMode::Library
-                ) && self.state.current_library_id.is_none()
+                } else if matches!(self.state.scope, Scope::Library(_))
+                    && self.state.current_library_id.is_none()
                 {
                     // Bad state - Library mode but no library selected
                     log::warn!(
                         "UI: In Library mode but no library selected - switching to Curated"
                     );
-                    self.state.display_mode = DisplayMode::Curated;
+                    self.state.scope = Scope::Home;
                 }
 
-                Task::done(DomainMessage::Ui(UIMessage::RefreshViewModels))
+                Task::done(DomainMessage::Ui(
+                    ViewModelMessage::RefreshViewModels.into(),
+                ))
             }
             _ => Task::none(),
         }

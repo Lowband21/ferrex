@@ -7,7 +7,7 @@ use crate::{
         traits::MediaProcessingStatus,
     },
     error::Result,
-    types::{LibraryID, MediaFile},
+    types::{LibraryId, MediaFile},
 };
 
 use uuid::Uuid;
@@ -51,7 +51,7 @@ impl<'a> ProcessingStatusRepository<'a> {
 
     pub async fn fetch_unprocessed(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         status_type: &str,
         limit: i32,
     ) -> Result<Vec<MediaFile>> {
@@ -63,7 +63,7 @@ impl<'a> ProcessingStatusRepository<'a> {
 
     pub async fn fetch_failed(
         &self,
-        library_id: LibraryID,
+        library_id: LibraryId,
         max_retries: i32,
     ) -> Result<Vec<MediaFile>> {
         self.db

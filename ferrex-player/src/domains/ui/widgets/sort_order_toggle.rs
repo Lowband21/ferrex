@@ -1,6 +1,8 @@
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{SortOrder, messages::UiMessage, theme},
+    domains::ui::{
+        SortOrder, library_ui::LibraryUiMessage, messages::UiMessage, theme,
+    },
 };
 use iced::{
     Element, Length,
@@ -30,7 +32,7 @@ pub fn sort_order_toggle<'a>(
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
         )
-        .on_press(UiMessage::ToggleSortOrder)
+        .on_press(LibraryUiMessage::ToggleSortOrder.into())
         .style(theme::Button::HeaderIcon.style())
         .width(Length::Fixed(36.0))
         .height(Length::Fixed(36.0)),

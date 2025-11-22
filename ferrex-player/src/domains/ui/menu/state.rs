@@ -1,4 +1,5 @@
-use crate::infra::widgets::poster::PosterFace;
+use crate::infra::shader_widgets::poster::PosterFace;
+
 use std::time::Instant;
 
 const ANGULAR_IMPULSE: f32 = 5.0;

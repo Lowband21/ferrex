@@ -203,7 +203,7 @@ pub fn restore_all_tab_carousel_scroll_positions(
     let mut tasks: Vec<Task<UiMessage>> = Vec::new();
 
     // Use the ordered list of carousels currently in the All view to avoid touching unrelated keys
-    let keys = crate::domains::ui::tabs::ordered_keys_for_all_view(state);
+    let keys = crate::domains::ui::tabs::ordered_keys_for_home(state);
     for key in keys {
         // Skip if no state or no saved position
         let Some(vc) = state.domains.ui.state.carousel_registry.get_mut(&key)

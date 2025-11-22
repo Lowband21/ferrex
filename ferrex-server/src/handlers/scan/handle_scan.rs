@@ -15,7 +15,7 @@ use ferrex_core::api::types::{
 use ferrex_core::database::traits::ImageLookupParams;
 use ferrex_core::domain::media::image::MediaImageKind;
 use ferrex_core::types::ids::{MovieID, SeriesID};
-use ferrex_core::types::{LibraryID, MediaEvent, ScanProgressEvent};
+use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
@@ -85,7 +85,7 @@ pub async fn start_scan_handler(
 ) -> Result<impl IntoResponse, ScanHttpError> {
     let accepted = state
         .scan_control()
-        .start_library_scan(LibraryID(library_id), request.correlation_id)
+        .start_library_scan(LibraryId(library_id), request.correlation_id)
         .await?;
 
     Ok((

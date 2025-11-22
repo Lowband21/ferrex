@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedModel, EpisodeReference,
-    Library, LibraryID, LibraryType, Media, MediaID, MediaIDLike, MediaLike,
+    Library, LibraryId, LibraryType, Media, MediaID, MediaIDLike, MediaLike,
     MediaOps, SeasonID, SeasonLike, SeasonReference, SeriesID, SortBy,
     SortOrder,
 };
@@ -162,7 +162,7 @@ impl<R: ReadCap> Accessor<R> {
     /// Get all media from a library
     pub fn get_library_media(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| repo.get_library_media_internal(library_id))
     }
@@ -189,7 +189,7 @@ impl<R: ReadCap> Accessor<R> {
     /// Get items by positions into the archived library media slice (index-based access)
     pub fn get_by_positions(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
         positions: &[u32],
     ) -> RepositoryResult<Vec<Media>> {
         self.with_repo(|repo| {
@@ -262,7 +262,7 @@ impl<R: ReadCap> Accessor<R> {
     /// Get a specific library by ID
     pub fn get_library(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> RepositoryResult<Option<Library>> {
         self.with_repo(|repo| Ok(repo.get_library_internal(library_id)))
     }
@@ -288,7 +288,7 @@ impl<R: ReadCap> Accessor<R> {
     // TODO: Fix these clones
     pub fn get_sorted_index_by_library(
         &self,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
         sort_by: SortBy,
         sort_order: SortOrder,
     ) -> RepositoryResult<Vec<Uuid>> {
@@ -401,7 +401,7 @@ impl<R: WriteCap> Accessor<R> {
     pub fn upsert(
         &self,
         media: Media,
-        library_id: &LibraryID,
+        library_id: &LibraryId,
     ) -> RepositoryResult<()> {
         self.with_repo_mut(|repo| {
             let id = media.media_id().to_uuid();

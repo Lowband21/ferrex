@@ -8,6 +8,7 @@ use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
 use crate::common::messages::DomainMessage;
 use crate::domains::search::types::{SearchMode, SearchResult};
+use crate::domains::ui::shell_ui::UiShellMessage;
 use crate::domains::ui::theme::{Button as ButtonStyle, MediaServerTheme};
 use crate::domains::ui::windows::focus::SEARCH_WINDOW_INPUT_ID;
 use crate::infra::api_types::Media;
@@ -142,20 +143,14 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
         text_input("Search...", &search_state.query)
             .id(TextInputId::new(SEARCH_WINDOW_INPUT_ID))
             .on_input(|value| DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(
-                    value
-                ),
+                UiShellMessage::UpdateSearchQuery(value).into(),
             ))
-            .on_submit(DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::ExecuteSearch,
-            ))
+            .on_submit(DomainMessage::Ui(UiShellMessage::ExecuteSearch.into(),))
             .padding(Padding::from([12.0, 16.0]))
             .size(16)
             .width(Length::FillPortion(4)),
         button(text("Search").size(15))
-            .on_press(DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::ExecuteSearch,
-            ))
+            .on_press(DomainMessage::Ui(UiShellMessage::ExecuteSearch.into(),))
             .style(ButtonStyle::Primary.style())
             .width(Length::FillPortion(1))
             .height(Length::Fixed(46.0)),
@@ -677,18 +672,14 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
         text_input("Search...", &search_state.query)
             .id(TextInputId::new(SEARCH_WINDOW_INPUT_ID))
             .on_input(|v| DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::UpdateSearchQuery(v)
+                UiShellMessage::UpdateSearchQuery(v).into()
             ))
-            .on_submit(DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::ExecuteSearch
-            ))
+            .on_submit(DomainMessage::Ui(UiShellMessage::ExecuteSearch.into()))
             .padding(Padding::from([12.0, 14.0]))
             .size(14)
             .width(Length::Fill),
         button(text("Search").size(14))
-            .on_press(DomainMessage::Ui(
-                crate::domains::ui::messages::UiMessage::ExecuteSearch
-            ))
+            .on_press(DomainMessage::Ui(UiShellMessage::ExecuteSearch.into()))
             .style(ButtonStyle::Primary.style()),
     ]
     .spacing(8)

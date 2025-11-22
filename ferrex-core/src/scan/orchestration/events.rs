@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{error::Result, types::ids::LibraryID};
+use crate::{error::Result, types::ids::LibraryId};
 
 use super::{
     job::{
@@ -18,7 +18,7 @@ pub struct EventMeta {
     pub version: u16,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path_key: Option<String>,
 }
@@ -26,7 +26,7 @@ pub struct EventMeta {
 impl EventMeta {
     pub fn new(
         correlation_id: Option<Uuid>,
-        library_id: LibraryID,
+        library_id: LibraryId,
         idempotency_key: impl Into<String>,
         path_key: Option<String>,
     ) -> Self {
@@ -117,7 +117,7 @@ impl JobEvent {
 
     pub fn from_job(
         correlation_id: Option<Uuid>,
-        library_id: LibraryID,
+        library_id: LibraryId,
         idempotency_key: String,
         path_key: Option<String>,
         payload: JobEventPayload,
@@ -141,7 +141,7 @@ pub trait JobEventPublisher: Send + Sync {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ScanEvent {
     FolderDiscovered {
-        library_id: LibraryID,
+        library_id: LibraryId,
         folder_path: String,
         parent: super::actors::messages::ParentDescriptors,
         /// Why this folder should be scanned; used to determine priority

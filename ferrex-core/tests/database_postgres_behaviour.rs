@@ -9,12 +9,12 @@ use ferrex_core::database::postgres_ext::processing_status::ProcessingStatusRepo
 use ferrex_core::database::traits::{
     FolderProcessingStatus, FolderScanFilters, MediaProcessingStatus,
 };
-use ferrex_core::types::LibraryID;
+use ferrex_core::types::LibraryId;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-fn fixture_library_id() -> LibraryID {
-    LibraryID(Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap())
+fn fixture_library_id() -> LibraryId {
+    LibraryId(Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap())
 }
 
 fn fixture_media_file(id: &str) -> Uuid {

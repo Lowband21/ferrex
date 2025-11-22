@@ -2,13 +2,13 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use super::LibraryID;
+use super::LibraryId;
 use crate::chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScanRequest {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub force_refresh: bool,
 }
 

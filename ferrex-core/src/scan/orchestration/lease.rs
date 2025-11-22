@@ -6,7 +6,7 @@ use super::{
     JobKind,
     job::{JobPriority, JobRecord},
 };
-use crate::types::ids::LibraryID;
+use crate::types::ids::LibraryId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct LeaseId(pub Uuid);
@@ -58,7 +58,7 @@ pub struct DequeueRequest {
 /// Scheduler-provided hint to bias the queue towards a library/priority.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct QueueSelector {
-    pub library_id: LibraryID,
+    pub library_id: LibraryId,
     pub priority: JobPriority,
 }
 

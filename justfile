@@ -235,23 +235,23 @@ log-player-warn: prep-logs
 # Test
 [no-cd]
 test args="" pt_args="":
-    RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast --quiet {{ args }} -- {{ pt_args }}
+    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast --quiet {{ args }} -- {{ pt_args }}
 
 [no-cd]
 log-tests args="" pt_args=test_output: prep-logs
-    RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast {{ args }} -- {{ pt_args }}
+    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast {{ args }} -- {{ pt_args }}
 
 [no-cd]
 test-player:
-    RUSTFLAGS=-Awarnings cargo test -p ferrex-player --no-fail-fast
+    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-player --no-fail-fast
 
 [no-cd]
 test-server:
-    RUSTFLAGS=-Awarnings cargo test -p ferrex-server --no-fail-fast
+    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-server --no-fail-fast
 
 [no-cd]
 test-core:
-    RUSTFLAGS=-Awarnings cargo test -p ferrex-core --no-fail-fast
+    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-core --no-fail-fast
 
 # Format
 [no-cd]
@@ -356,16 +356,16 @@ run-server-demo:
 # sqlx
 [no-cd]
 prepare $SQLX_OFFLINE="false":
-    DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx prepare --workspace -- --all-features --all-targets
+    DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx prepare --workspace -- --all-features --all-targets
 
 [confirm]
 [no-cd]
 migrate:
-    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx migrate run
+    cd ferrex-core && DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx migrate run
 
 [no-cd]
 reset:
-    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER:-postgres}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST:-localhost}:${DATABASE_PORT:-5432}/${DATABASE_NAME:-ferrex}" cargo sqlx database reset
+    cd ferrex-core && DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx database reset
 
 # Git
 [no-cd]
