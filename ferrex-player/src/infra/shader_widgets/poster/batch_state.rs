@@ -301,10 +301,18 @@ impl PosterBatchState {
 
     /// Adds a primitive captured during encoding.
     pub fn enqueue(&mut self, pending: PendingPrimitive) {
+        const POSITION_EPSILON: f32 = 0.5;
+
+        // Deduplicate by (id, position) to allow same content at different screen locations
+        // while preventing accidental double-renders of the exact same widget
         if let Some(existing) = self
             .pending_primitives
             .iter_mut()
-            .find(|candidate| candidate.id == pending.id)
+            .find(|candidate| {
+                candidate.id == pending.id
+                    && (candidate.bounds.x - pending.bounds.x).abs() < POSITION_EPSILON
+                    && (candidate.bounds.y - pending.bounds.y).abs() < POSITION_EPSILON
+            })
         {
             *existing = pending;
         } else {
