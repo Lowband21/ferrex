@@ -3,6 +3,7 @@ use super::{
     render_pipeline::PosterFace,
 };
 use crate::{
+    domains::ui::menu::MenuButton,
     domains::ui::messages::UiMessage,
     infra::shader_widgets::poster::poster_animation_types::{
         AnimatedPosterBounds, PosterAnimationType,
@@ -231,7 +232,33 @@ impl Program<UiMessage> for PosterProgram {
                         let norm_x = mouse_pos.x / bounds.width;
                         let norm_y = mouse_pos.y / bounds.height;
 
-                        // Check which button was clicked
+                        // Check if we're on the backface (menu mode)
+                        if self.face == PosterFace::Back {
+                            // Backface menu button click detection
+                            if let Some(target) = self.menu_target {
+                                if MenuButton::in_x_bounds(norm_x) {
+                                    if let Some(button) = MenuButton::from_position(norm_y) {
+                                        if !button.is_disabled() {
+                                            log::debug!("Backface menu button clicked: {:?}", button);
+                                            return Some(iced::widget::Action::publish(
+                                                UiMessage::PosterMenu(
+                                                    crate::domains::ui::menu::PosterMenuMessage::ButtonClicked(
+                                                        target,
+                                                        button,
+                                                    ),
+                                                ),
+                                            ));
+                                        } else {
+                                            log::debug!("Disabled button clicked: {:?}", button);
+                                        }
+                                    }
+                                }
+                            }
+                            // Click on backface but not on a button - do nothing or close menu
+                            return None;
+                        }
+
+                        // Front face button detection (existing logic)
                         // Center play button (circle with 8% radius at center)
                         // Note: Unlike shader, we don't need aspect ratio adjustment in click detection
                         // because norm_x and norm_y are already normalized to widget bounds

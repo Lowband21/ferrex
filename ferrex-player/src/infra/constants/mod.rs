@@ -2,6 +2,7 @@
 
 pub mod curated;
 pub mod layout;
+pub mod menu;
 pub mod performance_config;
 pub mod player;
 pub mod virtual_carousel;

@@ -2,7 +2,7 @@ pub mod messages;
 pub mod state;
 pub mod update;
 
-pub use messages::PosterMenuMessage;
+pub use messages::{MenuButton, PosterMenuMessage};
 pub use state::PosterMenuState;
 pub use update::poster_menu_update;
 
