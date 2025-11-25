@@ -53,8 +53,8 @@ pub mod animation {
 
     /// Duration of the texture opacity cross-fade (milliseconds)
     /// Quick fade for transitioning from placeholder to actual poster
-    pub const TEXTURE_FADE_INITIAL_DURATION_MS: u64 = 1000;
-    pub const TEXTURE_FADE_DURATION_MS: u64 = 500;
+    pub const TEXTURE_FADE_INITIAL_DURATION_MS: u64 = 600;
+    pub const TEXTURE_FADE_DURATION_MS: u64 = 400;
 }
 
 /// Grid layout constants

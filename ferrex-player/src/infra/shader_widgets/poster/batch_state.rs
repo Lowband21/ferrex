@@ -6,7 +6,7 @@
 //! frame budget and texture cache state are known.
 
 use crate::infra::{
-    constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME,
+    render::upload_budget::{TimingBasedBudget, UploadBudgetConfig},
     shader_widgets::poster::{
         poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
         render_pipeline::{
@@ -94,7 +94,7 @@ pub struct PosterBatchState {
     globals_bind_group: Option<wgpu::BindGroup>,
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     sampler: Arc<wgpu::Sampler>,
-    uploads_this_frame: u32,
+    upload_budget: TimingBasedBudget,
     loaded_times: HashMap<u64, Instant>,
     // Avoid log flooding: remember last layer we logged per instance id
     logged_layers: HashMap<u64, i32>,
@@ -239,12 +239,11 @@ impl PosterBatchState {
         device: &wgpu::Device,
         atlas_layout: Arc<wgpu::BindGroupLayout>,
     ) {
-        if let Some(existing) = &self.atlas_bind_group_layout {
-            if Arc::ptr_eq(existing, &atlas_layout)
-                && self.render_pipeline_back.is_some()
-            {
-                return;
-            }
+        if let Some(existing) = &self.atlas_bind_group_layout
+            && Arc::ptr_eq(existing, &atlas_layout)
+            && self.render_pipeline_back.is_some()
+        {
+            return;
         }
 
         let pipeline_layout =
@@ -469,7 +468,9 @@ impl PrimitiveBatchState for PosterBatchState {
             globals_bind_group: None,
             globals_bind_group_layout,
             sampler,
-            uploads_this_frame: 0,
+            upload_budget: TimingBasedBudget::new(UploadBudgetConfig::for_hz(
+                120,
+            )),
             loaded_times: HashMap::new(),
             logged_layers: HashMap::new(),
             groups_front: Vec::new(),
@@ -484,6 +485,7 @@ impl PrimitiveBatchState for PosterBatchState {
     fn prepare(&mut self, context: &mut PrepareContext<'_>) {
         self.groups_front.clear();
         self.groups_back.clear();
+        self.upload_budget.begin_frame();
 
         if let Some(image_cache) = context.resources.image_cache() {
             // Mutable access is required so cached lookups register cache hits
@@ -506,37 +508,36 @@ impl PrimitiveBatchState for PosterBatchState {
 
                 if !was_cached {
                     // Diagnostic: log computed row/padded stride for non-256-aligned widths
-                    if log::log_enabled!(log::Level::Debug) {
-                        if let Some(dims) =
+                    if log::log_enabled!(log::Level::Debug)
+                        && let Some(dims) =
                             image_cache.measure_image(&pending.handle)
-                        {
-                            let width = dims.width;
-                            let height = dims.height;
-                            if width > 0 && height > 0 {
-                                let row_bytes = width as usize * 4;
-                                let align =
-                                    wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-                                let padded = if row_bytes == 0 {
-                                    0
-                                } else {
-                                    ((row_bytes + align - 1) / align) * align
-                                };
-                                if row_bytes % align != 0 {
-                                    log::debug!(
-                                        "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
-                                        width,
-                                        height,
-                                        row_bytes,
-                                        padded,
-                                        align,
-                                        width,
-                                        height
-                                    );
-                                }
+                    {
+                        let width = dims.width;
+                        let height = dims.height;
+                        if width > 0 && height > 0 {
+                            let row_bytes = width as usize * 4;
+                            let align =
+                                wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+                            let padded = if row_bytes == 0 {
+                                0
+                            } else {
+                                row_bytes.div_ceil(align) * align
+                            };
+                            if !row_bytes.is_multiple_of(align) {
+                                log::debug!(
+                                    "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
+                                    width,
+                                    height,
+                                    row_bytes,
+                                    padded,
+                                    align,
+                                    width,
+                                    height
+                                );
                             }
                         }
                     }
-                    if self.uploads_this_frame >= MAX_UPLOADS_PER_FRAME {
+                    if !self.upload_budget.can_upload() {
                         // Over budget: draw a placeholder instance and, if we
                         // have seen any atlas bind group already, use it.
                         let instance = create_placeholder_instance(
@@ -572,14 +573,17 @@ impl PrimitiveBatchState for PosterBatchState {
                         continue;
                     }
 
-                    self.uploads_this_frame += 1;
-                    // Attempt upload and get bind group
-                    if let Some((_entry, group)) = image_cache.upload_raster(
+                    // Timed upload with budget tracking
+                    let upload_start = Instant::now();
+                    let upload_result = image_cache.upload_raster(
                         context.device,
                         context.encoder,
                         context.belt,
                         &pending.handle,
-                    ) {
+                    );
+                    self.upload_budget.record_upload(upload_start.elapsed());
+
+                    if let Some((_entry, group)) = upload_result {
                         bind_group = Some(group.clone());
                         last_group = Some(group.clone());
                     }
@@ -663,7 +667,7 @@ impl PrimitiveBatchState for PosterBatchState {
                         pending.id,
                         layer_i32,
                         was_cached,
-                        self.uploads_this_frame,
+                        self.upload_budget.uploads_this_frame(),
                         region.uv_min[0],
                         region.uv_min[1],
                         region.uv_max[0],
@@ -692,16 +696,16 @@ impl PrimitiveBatchState for PosterBatchState {
                 // Track groups by atlas bind group. If none obtained yet, try to
                 // fallback to the main atlas bind group by triggering an upload_raster
                 // call (which will provide it if available).
-                if bind_group.is_none() {
-                    if let Some((_entry, group)) = image_cache.upload_raster(
+                if bind_group.is_none()
+                    && let Some((_entry, group)) = image_cache.upload_raster(
                         context.device,
                         context.encoder,
                         context.belt,
                         &pending.handle,
-                    ) {
-                        bind_group = Some(group.clone());
-                        last_group = Some(group.clone());
-                    }
+                    )
+                {
+                    bind_group = Some(group.clone());
+                    last_group = Some(group.clone());
                 }
 
                 // If we still do not have a bind group, associate this instance
@@ -888,7 +892,7 @@ impl PrimitiveBatchState for PosterBatchState {
         self.pending_instances_front.clear();
         self.pending_instances_back.clear();
         self.pending_primitives.clear();
-        self.uploads_this_frame = 0;
+        self.upload_budget.end_frame();
         self.groups_front.clear();
         self.groups_back.clear();
     }
