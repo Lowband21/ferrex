@@ -490,22 +490,9 @@ fn image_loader_stream_concurrent(
 
                             inflight.push(task);
 
-                            // Adaptive pacing: relax gap when queue is short (<=2)
-                            const MIN_GAP_MS_DEFAULT: u64 = 12;
-                            let queue_len = crate::infra::service_registry::get_image_service()
-                                .map(|svc| svc.get().queue_len())
-                                .unwrap_or(0);
-                            let gap_ms = if queue_len <= 2 {
-                                0
-                            } else {
-                                MIN_GAP_MS_DEFAULT
-                            };
-                            if gap_ms > 0 {
-                                tokio::time::sleep(
-                                    std::time::Duration::from_millis(gap_ms),
-                                )
-                                .await;
-                            }
+                            // No artificial spawn gap - the concurrent limit already
+                            // prevents overwhelming the server, and gaps add cumulative
+                            // latency for large queues
                             last_spawn_time = Some(std::time::Instant::now());
                         }
 
@@ -521,6 +508,21 @@ fn image_loader_stream_concurrent(
                                     MetadataMessage::NoOp
                                 }
                             };
+
+                            // Periodically adapt concurrency based on observed latency
+                            // (runs roughly every 8 completions to avoid overhead)
+                            static ADAPT_COUNTER: std::sync::atomic::AtomicU32 =
+                                std::sync::atomic::AtomicU32::new(0);
+                            if ADAPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8
+                                == 0
+                            {
+                                if let Some(svc) =
+                                    crate::infra::service_registry::get_image_service()
+                                {
+                                    svc.get().adapt_concurrency();
+                                }
+                            }
+
                             return Some((
                                 msg,
                                 ImageLoaderState::Running {

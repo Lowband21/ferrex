@@ -138,8 +138,8 @@ pub fn start_planner(
                 image_service.request_image(req.clone().with_priority(*prio));
             }
 
-            const CANCELLATION_GRACE_MS: u64 = 150;
-            const MAX_CANCEL_PER_TICK: usize = 2;
+            const CANCELLATION_GRACE_MS: u64 = 75;
+            const MAX_CANCEL_PER_TICK: usize = 6;
 
             if state.in_flight >= image_service.max_concurrent() {
                 let mut cancelled = 0usize;

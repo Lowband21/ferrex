@@ -61,6 +61,10 @@ pub struct UnifiedImageService {
 
     // Rolling telemetry for latency and depth tracking
     telemetry: Arc<Telemetry>,
+
+    // Counter for proportional retry scheduling
+    // Every Nth request allows a retry slot to prevent starvation
+    retry_slot_counter: Arc<AtomicUsize>,
 }
 
 // Minimum delay between retry attempts for transient (e.g., 404) failures
@@ -87,6 +91,7 @@ impl UnifiedImageService {
             max_concurrent: Arc::new(AtomicUsize::new(max_concurrent)),
             inflight_cancellers: Arc::new(DashMap::new()),
             telemetry: Arc::new(Telemetry::default()),
+            retry_slot_counter: Arc::new(AtomicUsize::new(0)),
         };
 
         (service, load_receiver)
@@ -499,77 +504,84 @@ impl UnifiedImageService {
             return None;
         }
 
-        // Strategy:
-        // 1) Prefer first-attempts (retry_count == 0) that are not loading.
-        // 2) If any first-attempts exist in queue or are currently loading,
-        //    do not schedule retries yet; keep slot idle until the first wave completes.
-        // 3) Otherwise, allow a retry request.
+        // Optimized strategy using iter() instead of pop-all-reinsert:
+        // 1) Fast path: check if top item is fresh and not loading (O(1))
+        // 2) Slow path: scan with iter() to find candidates (O(n) scan, O(log n) remove)
+        // 3) Proportional scheduling: allow 20% of slots for retries
 
-        let mut popped: Vec<(ImageRequest, u8)> =
-            Vec::with_capacity(queue.len());
-        let mut fresh_candidate: Option<(ImageRequest, u8)> = None;
-        let mut retry_candidate: Option<(ImageRequest, u8)> = None;
-        let mut any_fresh_in_queue = false;
-
-        while let Some((request, prio)) = queue.pop() {
-            let is_loading = self.loading.contains_key(&request);
-            let retry_count_opt = self
-                .cache
-                .get(&request)
-                .map(|entry| entry.retry_count)
-                .unwrap_or(0);
-            let is_fresh = retry_count_opt == 0;
-
-            if is_fresh {
-                any_fresh_in_queue = true;
-            }
-
-            if !is_loading {
-                if is_fresh && fresh_candidate.is_none() {
-                    fresh_candidate = Some((request.clone(), prio));
-                    // Do not reinsert the selected candidate
-                } else if !is_fresh && retry_candidate.is_none() {
-                    retry_candidate = Some((request.clone(), prio));
-                    popped.push((request, prio));
-                } else {
-                    popped.push((request, prio));
-                }
-            } else {
-                popped.push((request, prio));
-            }
-        }
-
-        // Check if any first-attempts are currently loading
-        let mut any_fresh_in_loading = false;
-        for entry in self.loading.iter() {
-            let req = entry.key();
-            if let Some(cache_entry) = self.cache.get(req) {
-                if cache_entry.retry_count == 0 {
-                    any_fresh_in_loading = true;
-                    break;
+        // Fast path: check if the highest-priority item is immediately usable
+        if let Some((top_request, _prio)) = queue.peek() {
+            if !self.loading.contains_key(top_request) {
+                let retry_count = self
+                    .cache
+                    .get(top_request)
+                    .map(|e| e.retry_count)
+                    .unwrap_or(0);
+                if retry_count == 0 {
+                    // Top item is fresh and not loading - use it directly
+                    return queue.pop().map(|(req, _)| req);
                 }
             }
         }
 
-        // Reinsert all retained items
-        for (req, prio) in popped.drain(..) {
-            queue.push(req, prio);
+        // Slow path: scan for candidates without removing items
+        let mut fresh_candidate: Option<ImageRequest> = None;
+        let mut retry_candidate: Option<ImageRequest> = None;
+
+        for (request, _prio) in queue.iter() {
+            let is_loading = self.loading.contains_key(request);
+            if is_loading {
+                continue;
+            }
+
+            let retry_count =
+                self.cache.get(request).map(|e| e.retry_count).unwrap_or(0);
+            let is_fresh = retry_count == 0;
+
+            if is_fresh && fresh_candidate.is_none() {
+                fresh_candidate = Some(request.clone());
+            } else if !is_fresh && retry_candidate.is_none() {
+                retry_candidate = Some(request.clone());
+            }
+
+            // Early exit if we have both candidates
+            if fresh_candidate.is_some() && retry_candidate.is_some() {
+                break;
+            }
         }
 
-        if let Some((req, _prio)) = fresh_candidate {
-            return Some(req);
+        // Proportional scheduling: 20% of slots go to retries
+        // This prevents retry starvation during continuous scrolling
+        let use_retry_slot = self.should_use_retry_slot();
+
+        // If we have both candidates and this is a retry slot, prefer retry
+        if use_retry_slot {
+            if let Some(ref retry) = retry_candidate {
+                queue.remove(retry);
+                return Some(retry.clone());
+            }
         }
 
-        if any_fresh_in_queue || any_fresh_in_loading {
-            // Hold off on retries until the first wave completes
-            return None;
+        // Otherwise, prefer fresh candidate
+        if let Some(ref fresh) = fresh_candidate {
+            queue.remove(fresh);
+            return Some(fresh.clone());
         }
 
-        if let Some((req, _prio)) = retry_candidate {
-            return Some(req);
+        // Fall back to retry if no fresh available
+        if let Some(ref retry) = retry_candidate {
+            queue.remove(retry);
+            return Some(retry.clone());
         }
 
         None
+    }
+
+    /// Determines if the current request slot should be used for a retry.
+    /// Returns true for ~20% of calls (every 5th request).
+    fn should_use_retry_slot(&self) -> bool {
+        let counter = self.retry_slot_counter.fetch_add(1, Ordering::Relaxed);
+        (counter % 5) == 0
     }
 
     pub fn cleanup_stale_entries(&self, max_age: std::time::Duration) {
@@ -674,9 +686,74 @@ impl UnifiedImageService {
         }
     }
 
-    /// Adjust maximum concurrent loads (PR4; defined early for completeness).
+    /// Adjust maximum concurrent loads.
     pub fn set_max_concurrent(&self, n: usize) {
         self.max_concurrent.store(n.max(1), Ordering::SeqCst);
+    }
+
+    /// Outer bounds
+    const MIN_CONCURRENT: usize = 2;
+    const MAX_CONCURRENT: usize = 32;
+
+    /// Adjusts concurrency based on observed load latency.
+    /// Uses a target-relative approach: compares current latency to a learned baseline.
+    /// Includes hysteresis to prevent oscillation and faster convergence when far from target.
+    pub fn adapt_concurrency(&self) {
+        let Some(median_ms) = self.telemetry.median_load_ms() else {
+            return; // Not enough samples yet
+        };
+
+        log::info!("median_ms: {}", median_ms);
+
+        let current = self.max_concurrent.load(Ordering::Relaxed);
+        let queue_depth = self.queue_len();
+
+        // Safety: if queue is backing up significantly, reduce concurrency regardless of latency
+        // This catches cases where high concurrency causes system-wide slowdown
+        if queue_depth > 50 && current > Self::MIN_CONCURRENT {
+            let reduced = (current / 2).max(Self::MIN_CONCURRENT);
+            log::info!(
+                "Adaptive concurrency: {} → {} (queue backup: {} items)",
+                current,
+                reduced,
+                queue_depth
+            );
+            self.max_concurrent.store(reduced, Ordering::SeqCst);
+            return;
+        }
+
+        // Target latency: we want sub-200ms loads for good UX
+        // - Below 80ms: definitely have headroom, can increase
+        // - Above 400ms: definitely saturated, should decrease
+        // - 120-400ms: stable zone with hysteresis
+        const TARGET_LOW_MS: u64 = 80;
+        const TARGET_HIGH_MS: u64 = 400;
+
+        // Calculate adjustment magnitude based on how far we are from target
+        // Faster convergence when clearly outside the stable zone
+        let new_concurrent = if median_ms < TARGET_LOW_MS {
+            // Well below target - increase, faster if very low latency
+            let step = if median_ms < TARGET_LOW_MS / 2 { 2 } else { 1 };
+            (current + step).min(Self::MAX_CONCURRENT)
+        } else if median_ms > TARGET_HIGH_MS {
+            // Well above target - decrease, faster if very high latency
+            let step = if median_ms > TARGET_HIGH_MS * 2 { 2 } else { 1 };
+            current.saturating_sub(step).max(Self::MIN_CONCURRENT)
+        } else {
+            // In stable zone - no change (hysteresis)
+            current
+        };
+
+        if new_concurrent != current {
+            log::debug!(
+                "Adaptive concurrency: {} → {} (median latency {}ms, queue {})",
+                current,
+                new_concurrent,
+                median_ms,
+                queue_depth
+            );
+            self.max_concurrent.store(new_concurrent, Ordering::SeqCst);
+        }
     }
 
     /// Register a cancellation sender for an in-flight request.
@@ -803,5 +880,16 @@ impl Telemetry {
         }
         let rank = ((sorted.len() as f64 - 1.0) * pct).round() as usize;
         sorted[rank.min(sorted.len() - 1)]
+    }
+
+    /// Returns the median load latency in ms, or None if insufficient samples.
+    fn median_load_ms(&self) -> Option<u64> {
+        let data = self.load_ms.lock().ok()?;
+        if data.len() < 8 {
+            return None;
+        }
+        let mut sorted: Vec<u64> = data.iter().copied().collect();
+        sorted.sort_unstable();
+        Some(Self::percentile(&sorted, 0.5))
     }
 }
