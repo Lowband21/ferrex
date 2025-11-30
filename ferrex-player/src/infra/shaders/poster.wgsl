@@ -178,7 +178,14 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     // Calculate texture coordinates in atlas space
     // vertex_pos is 0-1 in widget space, map to atlas UV coordinates
-    let is_backface = select(0.0, 1.0, rotation_y >= 1.5708); // >= PI/2 (90 degrees), branchless
+    // Normalize rotation to [0, 2*PI) range to match face_from_angle() in state.rs
+    // This ensures consistent front/back determination during multi-rotation hold animation
+    let pi = 3.14159265359;
+    let pi_2 = 1.5707963268;
+    let two_pi = 2.0 * pi;
+    let normalized_rotation = rotation_y - floor(rotation_y / two_pi) * two_pi;
+    // Back face is when normalized rotation is in [PI/2, 3*PI/2)
+    let is_backface = select(0.0, 1.0, normalized_rotation >= pi_2 && normalized_rotation < pi + pi_2);
     let widget_u = mix(vertex_pos.x, 1.0 - vertex_pos.x, is_backface);
     let widget_v = vertex_pos.y;
 

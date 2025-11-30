@@ -4,8 +4,8 @@
 //! movies, TV shows, seasons, and episodes with consistent styling, animations,
 //! and loading states.
 
-use crate::common::text;
 use crate::{
+    common::text,
     domains::ui::{
         interaction_ui::InteractionMessage, messages::UiMessage,
         playback_ui::PlaybackMessage, shell_ui::UiShellMessage, theme,
@@ -14,10 +14,7 @@ use crate::{
     infra::{
         constants::poster::CORNER_RADIUS,
         repository::MaybeYoked,
-        shader_widgets::{
-            poster::PosterFace,
-            poster::poster_animation_types::AnimationBehavior,
-        },
+        shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
     },
     state::State,
 };
@@ -281,7 +278,7 @@ pub fn movie_reference_card_with_state<'a>(
     let (face, rotation_override) = if let Some(menu_state) =
         state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (menu_state.face_for_render(), Some(menu_state.angle))
+        (menu_state.face_from_angle(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
@@ -510,7 +507,7 @@ pub fn series_reference_card_with_state<'a>(
     let (face, rotation_override) = if let Some(menu_state) =
         state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (menu_state.face_for_render(), Some(menu_state.angle))
+        (menu_state.face_from_angle(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {

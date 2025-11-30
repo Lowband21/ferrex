@@ -1,5 +1,7 @@
-use iced_wgpu::primitive::{
-    BatchEncodeContext, BatchPrimitive, PrimitiveBatchState,
+use crate::infra::shader_widgets::poster::{
+    PosterFace,
+    batch_state::{PendingPrimitive, PosterBatchState},
+    animation::{AnimatedPosterBounds, PosterAnimationType},
 };
 
 use iced::{
@@ -8,14 +10,11 @@ use iced::{
     wgpu,
     widget::{image::Handle, shader::Primitive},
 };
+use iced_wgpu::primitive::{
+    BatchEncodeContext, BatchPrimitive, PrimitiveBatchState,
+};
 
 use std::time::Instant;
-
-use super::{
-    batch_state::{PendingPrimitive, PosterBatchState},
-    poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
-    render_pipeline::PosterFace,
-};
 
 #[derive(Debug, Clone)]
 pub struct PosterPrimitive {
@@ -33,7 +32,7 @@ pub struct PosterPrimitive {
     pub progress: Option<f32>,
     pub progress_color: Color,
     pub rotation_override: Option<f32>,
-    pub face: super::render_pipeline::PosterFace,
+    pub face: PosterFace,
 }
 
 impl PosterPrimitive {

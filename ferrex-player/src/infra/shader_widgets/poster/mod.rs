@@ -1,18 +1,23 @@
 //! Shader-based poster widget for Iced
 //!
 //! This implementation uses GPU shaders for true rounded rectangle clipping
-//! with anti-aliasing, providing better performance than Canvas-based approaches.
+//! with anti-aliasing, providing better performance than Canvas-based approaches
+//! and greater flexibility in rendering and functionality.
+
+pub mod font_atlas;
+pub mod animation;
+pub mod render_pipeline;
+pub mod state;
 
 mod batch_state;
-pub mod poster_animation_types;
-mod poster_program;
 mod primitive;
-mod render_pipeline;
-pub use render_pipeline::PosterFace;
+mod program;
+
+pub use state::PosterFace;
 
 use crate::{
     domains::ui::messages::UiMessage,
-    infra::shader_widgets::poster::poster_animation_types::PosterAnimationType,
+    infra::shader_widgets::poster::animation::PosterAnimationType,
 };
 
 use iced::{Color, Element, Length, widget::image::Handle};
@@ -41,7 +46,7 @@ pub struct Poster {
     load_time: Option<Instant>,
     opacity: f32,
     theme_color: Color,
-    bounds: Option<poster_animation_types::AnimatedPosterBounds>,
+    bounds: Option<animation::AnimatedPosterBounds>,
     is_hovered: bool,
     on_play: Option<UiMessage>,
     on_edit: Option<UiMessage>,
@@ -131,7 +136,7 @@ impl Poster {
     /// Sets animated bounds with padding
     pub fn with_animated_bounds(
         mut self,
-        bounds: poster_animation_types::AnimatedPosterBounds,
+        bounds: animation::AnimatedPosterBounds,
     ) -> Self {
         self.bounds = Some(bounds);
         // Use layout bounds for stable grid positioning
@@ -209,7 +214,7 @@ pub fn poster(handle: Handle, id: Option<u64>) -> Poster {
 
 impl<'a> From<Poster> for Element<'a, UiMessage> {
     fn from(image: Poster) -> Self {
-        let shader = iced::widget::shader(poster_program::PosterProgram {
+        let shader = iced::widget::shader(program::PosterProgram {
             id: image.id,
             menu_target: image.menu_target,
             handle: image.handle,

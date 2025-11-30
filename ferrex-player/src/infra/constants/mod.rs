@@ -1,6 +1,7 @@
 //! Constants module for centralized configuration values
 
 pub mod curated;
+pub mod flip;
 pub mod layout;
 pub mod menu;
 pub mod performance_config;

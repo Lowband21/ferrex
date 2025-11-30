@@ -8,10 +8,10 @@
 use crate::infra::{
     render::upload_budget::{TimingBasedBudget, UploadBudgetConfig},
     shader_widgets::poster::{
-        poster_animation_types::{AnimatedPosterBounds, PosterAnimationType},
-        render_pipeline::{
-            PosterFace, create_batch_instance, create_placeholder_instance,
-        },
+        PosterFace,
+        animation::{AnimatedPosterBounds, PosterAnimationType},
+        font_atlas::FontAtlas,
+        render_pipeline::{create_batch_instance, create_placeholder_instance},
     },
 };
 
@@ -23,6 +23,8 @@ use iced_wgpu::{
     },
     wgpu,
 };
+
+use wgpu::util::DeviceExt;
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -95,11 +97,16 @@ pub struct PosterBatchState {
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     sampler: Arc<wgpu::Sampler>,
     upload_budget: TimingBasedBudget,
-    loaded_times: HashMap<u64, Instant>,
+    loaded_times: HashMap<(u64, PosterFace), Instant>,
     // Avoid log flooding: remember last layer we logged per instance id
     logged_layers: HashMap<u64, i32>,
     groups_front: Vec<PosterGroup>,
     groups_back: Vec<PosterGroup>,
+    // Font atlas for SDF text rendering
+    font_atlas: Option<FontAtlas>,
+    font_atlas_texture: Option<wgpu::Texture>,
+    font_atlas_view: Option<wgpu::TextureView>,
+    font_atlas_uploaded: bool,
 }
 
 impl PosterBatchState {
@@ -303,15 +310,17 @@ impl PosterBatchState {
     pub fn enqueue(&mut self, pending: PendingPrimitive) {
         const POSITION_EPSILON: f32 = 0.5;
 
-        // Deduplicate by (id, position) to allow same content at different screen locations
-        // while preventing accidental double-renders of the exact same widget
-        if let Some(existing) = self
-            .pending_primitives
-            .iter_mut()
-            .find(|candidate| {
+        // Deduplicate by (id, position, face) to allow same content at different screen locations
+        // while preventing accidental double-renders of the exact same widget.
+        // Face is included to prevent front/back primitives from replacing each other during animation.
+        if let Some(existing) =
+            self.pending_primitives.iter_mut().find(|candidate| {
                 candidate.id == pending.id
-                    && (candidate.bounds.x - pending.bounds.x).abs() < POSITION_EPSILON
-                    && (candidate.bounds.y - pending.bounds.y).abs() < POSITION_EPSILON
+                    && (candidate.bounds.x - pending.bounds.x).abs()
+                        < POSITION_EPSILON
+                    && (candidate.bounds.y - pending.bounds.y).abs()
+                        < POSITION_EPSILON
+                    && candidate.face == pending.face
             })
         {
             *existing = pending;
@@ -444,6 +453,19 @@ impl PrimitiveBatchState for PosterBatchState {
                         ),
                         count: None,
                     },
+                    // Font atlas SDF texture for text rendering
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                 ],
             }),
         );
@@ -459,6 +481,49 @@ impl PrimitiveBatchState for PosterBatchState {
                 mipmap_filter: wgpu::FilterMode::Linear,
                 ..wgpu::SamplerDescriptor::default()
             }));
+
+        // Generate font atlas for SDF text rendering
+        let (font_atlas, font_atlas_texture, font_atlas_view) =
+            match FontAtlas::generate() {
+                Ok(atlas) => {
+                    let texture =
+                        device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("Font Atlas SDF Texture"),
+                            size: wgpu::Extent3d {
+                                width: atlas.width,
+                                height: atlas.height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        });
+
+                    // Texture data will be uploaded in prepare() where we have queue access
+                    let view =
+                        texture.create_view(&wgpu::TextureViewDescriptor {
+                            label: Some("Font Atlas SDF View"),
+                            ..Default::default()
+                        });
+
+                    log::info!(
+                        "Font atlas generated: {}x{} with {} glyphs",
+                        atlas.width,
+                        atlas.height,
+                        atlas.glyphs.len()
+                    );
+
+                    (Some(atlas), Some(texture), Some(view))
+                }
+                Err(e) => {
+                    log::error!("Failed to generate font atlas: {}", e);
+                    (None, None, None)
+                }
+            };
 
         Self {
             pending_primitives: Vec::new(),
@@ -483,6 +548,10 @@ impl PrimitiveBatchState for PosterBatchState {
             logged_layers: HashMap::new(),
             groups_front: Vec::new(),
             groups_back: Vec::new(),
+            font_atlas,
+            font_atlas_texture,
+            font_atlas_view,
+            font_atlas_uploaded: false,
         }
     }
 
@@ -642,7 +711,7 @@ impl PrimitiveBatchState for PosterBatchState {
                     PosterAnimationType::None
                         | PosterAnimationType::PlaceholderSunken
                 ) {
-                    let entry = self.loaded_times.entry(pending.id);
+                    let entry = self.loaded_times.entry((pending.id, pending.face));
 
                     load_time_ref = match (pending.load_time, entry) {
                         (Some(explicit), _) => Some(explicit),
@@ -820,6 +889,137 @@ impl PrimitiveBatchState for PosterBatchState {
                 }));
         }
 
+        // Upload font atlas texture data if not yet uploaded
+        if !self.font_atlas_uploaded {
+            if let (Some(atlas), Some(texture)) =
+                (&self.font_atlas, &self.font_atlas_texture)
+            {
+                // Calculate padded row size for wgpu alignment
+                let bytes_per_row = atlas.width * 4;
+                let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+                let padded_bytes_per_row =
+                    bytes_per_row.div_ceil(align) * align;
+                let total_size = (padded_bytes_per_row * atlas.height) as usize;
+
+                // Create padded data
+                let mut padded_data = vec![0u8; total_size];
+                for y in 0..atlas.height as usize {
+                    let src_start = y * (atlas.width * 4) as usize;
+                    let src_end = src_start + (atlas.width * 4) as usize;
+                    let dst_start = y * padded_bytes_per_row as usize;
+                    let dst_end = dst_start + (atlas.width * 4) as usize;
+                    padded_data[dst_start..dst_end].copy_from_slice(
+                        &atlas.texture_data[src_start..src_end],
+                    );
+                }
+
+                // Create staging buffer with mapped data
+                let staging_buffer = context.device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("Font Atlas Staging Buffer"),
+                        contents: &padded_data,
+                        usage: wgpu::BufferUsages::COPY_SRC,
+                    },
+                );
+
+                // Copy buffer to texture
+                context.encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &staging_buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(padded_bytes_per_row),
+                            rows_per_image: Some(atlas.height),
+                        },
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: atlas.width,
+                        height: atlas.height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+
+                self.font_atlas_uploaded = true;
+                log::info!(
+                    "Font atlas texture uploaded: {}x{} ({} bytes)",
+                    atlas.width,
+                    atlas.height,
+                    total_size
+                );
+            } else if self.font_atlas_texture.is_none() {
+                // Create fallback 1x1 white texture if font atlas failed
+                let fallback_data = [255u8, 255, 255, 255];
+                let fallback_texture =
+                    context.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Font Atlas Fallback Texture"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+
+                // Create staging buffer for fallback
+                let staging_buffer = context.device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("Font Atlas Fallback Staging"),
+                        contents: &fallback_data,
+                        usage: wgpu::BufferUsages::COPY_SRC,
+                    },
+                );
+
+                // Copy to fallback texture
+                context.encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &staging_buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(4),
+                            rows_per_image: Some(1),
+                        },
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &fallback_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                );
+
+                let fallback_view = fallback_texture.create_view(
+                    &wgpu::TextureViewDescriptor {
+                        label: Some("Font Atlas Fallback View"),
+                        ..Default::default()
+                    },
+                );
+
+                self.font_atlas_texture = Some(fallback_texture);
+                self.font_atlas_view = Some(fallback_view);
+                self.font_atlas_uploaded = true;
+                log::warn!(
+                    "Using fallback font atlas texture (font atlas generation failed)"
+                );
+            }
+        }
+
         if let Some(buffer) = &self.globals_buffer {
             context
                 .belt
@@ -832,7 +1032,10 @@ impl PrimitiveBatchState for PosterBatchState {
                 )
                 .copy_from_slice(bytemuck::bytes_of(&globals));
 
-            if self.globals_bind_group.is_none() {
+            // Only create bind group when we have the font atlas texture view
+            if self.globals_bind_group.is_none()
+                && let Some(font_atlas_view) = &self.font_atlas_view
+            {
                 self.globals_bind_group =
                     Some(context.device.create_bind_group(
                         &wgpu::BindGroupDescriptor {
@@ -850,6 +1053,13 @@ impl PrimitiveBatchState for PosterBatchState {
                                     resource: wgpu::BindingResource::Sampler(
                                         &self.sampler,
                                     ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource:
+                                        wgpu::BindingResource::TextureView(
+                                            font_atlas_view,
+                                        ),
                                 },
                             ],
                         },

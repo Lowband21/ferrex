@@ -11,19 +11,23 @@ use crate::{
         service_registry,
         shader_widgets::poster::{
             Poster, PosterFace, poster,
-            poster_animation_types::{
+            animation::{
                 AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
             },
         },
     },
 };
+
 use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, ImageType, MediaIDLike, Priority,
 };
+
 use ferrex_model::{
     EpisodeReference, MovieReference, SeasonReference, SeriesReference,
 };
+
 use iced::{Color, Element, Length, widget::image::Handle};
+
 use lucide_icons::Icon;
 use rand::random;
 use std::hash::{Hash, Hasher};

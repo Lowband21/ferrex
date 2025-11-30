@@ -1,7 +1,7 @@
 use crate::infra::shader_widgets::poster::{
-    Instant,
+    Instant, PosterFace,
     batch_state::{self, PosterInstance},
-    poster_animation_types::{
+    animation::{
         self, PosterAnimationType, calculate_animation_state,
     },
 };
@@ -14,12 +14,6 @@ use std::{collections::HashMap, sync::Arc};
 use bytemuck::{Pod, Zeroable};
 
 const ATLAS_SIZE: f32 = 2048.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PosterFace {
-    Front,
-    Back,
-}
 
 /// Global uniform data (viewport transform)
 #[repr(C)]
@@ -329,7 +323,7 @@ pub(crate) fn create_batch_instance(
     load_time: Option<&Instant>,
     opacity: f32,
     theme_color: Color,
-    animated_bounds: Option<&poster_animation_types::AnimatedPosterBounds>,
+    animated_bounds: Option<&animation::AnimatedPosterBounds>,
     is_hovered: bool,
     mouse_position: Option<Point>,
     progress: Option<f32>,
@@ -535,7 +529,7 @@ pub fn create_placeholder_instance(
     bounds: &Rectangle,
     radius: f32,
     theme_color: Color,
-    animated_bounds: Option<&poster_animation_types::AnimatedPosterBounds>,
+    animated_bounds: Option<&animation::AnimatedPosterBounds>,
     progress: Option<f32>,
     progress_color: Color,
     _face: PosterFace,

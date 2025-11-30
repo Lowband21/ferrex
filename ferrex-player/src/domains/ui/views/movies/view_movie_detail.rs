@@ -6,9 +6,7 @@ use crate::{
     },
     infra::{
         api_types::MediaDetailsOption,
-        shader_widgets::poster::{
-            PosterFace, poster_animation_types::AnimationBehavior,
-        },
+        shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
     },
     state::State,
 };
@@ -87,7 +85,7 @@ pub fn view_movie_detail<'a>(
             let (face, rotation_override) = if let Some(menu_state) =
                 state.domains.ui.state.poster_menu_states.get(&poster_id)
             {
-                (menu_state.face_for_render(), Some(menu_state.angle))
+                (menu_state.face_from_angle(), Some(menu_state.angle))
             } else if state.domains.ui.state.poster_menu_open == Some(poster_id)
             {
                 (PosterFace::Back, Some(std::f32::consts::PI))

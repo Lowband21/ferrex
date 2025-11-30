@@ -4,9 +4,9 @@ use std::time::Instant;
 use crate::{
     common::messages::DomainUpdateResult,
     domains::ui::{
-        background_ui::BackgroundMessage, menu::MENU_KEEPALIVE_MS,
-        types::BackdropAspectMode,
+        background_ui::BackgroundMessage, types::BackdropAspectMode,
     },
+    infra::constants::menu::MENU_KEEPALIVE_MS,
     state::State,
 };
 

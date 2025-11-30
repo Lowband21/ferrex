@@ -6,7 +6,7 @@ use crate::{
     },
     infra::{
         constants::{layout::carousel::ITEM_SPACING, poster::CORNER_RADIUS},
-        shader_widgets::poster::poster_animation_types::{
+        shader_widgets::poster::animation::{
             AnimationBehavior, PosterAnimationType,
         },
     },

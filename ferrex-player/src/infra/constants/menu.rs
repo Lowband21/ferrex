@@ -1,9 +1,12 @@
-//! Menu button layout constants for poster backface menu.
+//! Menu constants for poster backface menu.
 //!
 //! These constants define the normalized (0.0-1.0) coordinates for menu buttons.
 //! They MUST be kept in sync with `ferrex-player/src/infra/shaders/poster_back.wgsl`.
 //!
 //! Run `cargo test shader_menu_constants_sync` to verify synchronization.
+
+pub const MENU_AUTO_CLOSE_MS: u64 = 1000;
+pub const MENU_KEEPALIVE_MS: u64 = 1200;
 
 /// Horizontal padding from poster edges (normalized 0-1).
 /// Set to 0.0 for full-width buttons.

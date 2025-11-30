@@ -362,8 +362,8 @@ macro_rules! media_card {
         }
     ) => {{
         use $crate::domains::ui::views::grid::types::*;
-        use $crate::domains::ui::widgets::poster::poster_animation_types::PosterAnimationType;
-        use $crate::domains::ui::widgets::poster::poster_animation_types::AnimationBehavior;
+        use $crate::domains::ui::widgets::poster::animation::PosterAnimationType;
+        use $crate::domains::ui::widgets::poster::animation::AnimationBehavior;
         use $crate::domains::ui::theme;
         use iced::{
             widget::{button, column, container, text},

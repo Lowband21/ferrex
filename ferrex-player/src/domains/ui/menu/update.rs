@@ -1,9 +1,9 @@
 use crate::{
     common::messages::DomainUpdateResult,
-    domains::ui::menu::{
-        MenuButton, MENU_KEEPALIVE_MS, PosterMenuMessage, PosterMenuState,
+    domains::ui::menu::{MenuButton, PosterMenuMessage, PosterMenuState},
+    infra::{
+        constants::menu::MENU_KEEPALIVE_MS, shader_widgets::poster::PosterFace,
     },
-    infra::shader_widgets::poster::PosterFace,
     state::State,
 };
 
@@ -28,8 +28,7 @@ fn handle_button_click(
         .poster_menu_states
         .entry(media_id)
         .or_insert_with(|| PosterMenuState::new(now));
-    entry.hold_active = false;
-    entry.apply_impulse(PosterFace::Front, now);
+    entry.force_to(now, PosterFace::Front);
 
     // Log the action for now - actual dispatch will be wired to domain messages
     match button {
@@ -64,83 +63,45 @@ pub fn poster_menu_update(
     let now = Instant::now();
 
     match menu_msg {
-        PosterMenuMessage::Toggle(media_id) => {
-            let was_open = ui_state.poster_menu_open;
-
-            // Close previous open target if different
-            if let Some(open_id) = was_open {
-                if open_id != media_id {
-                    let entry = ui_state
-                        .poster_menu_states
-                        .entry(open_id)
-                        .or_insert_with(|| PosterMenuState::new(now));
-                    entry.apply_impulse(PosterFace::Front, now);
-                    entry.hold_active = false;
-                }
-            }
-
-            ui_state.poster_menu_open = Some(media_id);
+        PosterMenuMessage::Close(media_id) => {
+            // Force close target poster
             let entry = ui_state
                 .poster_menu_states
                 .entry(media_id)
                 .or_insert_with(|| PosterMenuState::new(now));
-            entry.apply_impulse(PosterFace::Back, now);
-        }
-        PosterMenuMessage::Close(media_id) => {
+            entry.force_to(now, PosterFace::Front);
+
+            // Clear open menu state
             if ui_state.poster_menu_open == Some(media_id) {
                 ui_state.poster_menu_open = None;
             }
+        }
+        PosterMenuMessage::Start(media_id) => {
+            // Close previous open poster if exists
+            if let Some(open_id) = ui_state.poster_menu_open
+                && open_id != media_id
+            {
+                let entry_prev = ui_state
+                    .poster_menu_states
+                    .entry(open_id)
+                    .or_insert_with(|| PosterMenuState::new(now));
+                entry_prev.force_to(now, PosterFace::Front);
+            }
+
+            // Start hold on target poster
             let entry = ui_state
                 .poster_menu_states
                 .entry(media_id)
                 .or_insert_with(|| PosterMenuState::new(now));
-            entry.hold_active = false;
-            entry.apply_impulse(PosterFace::Front, now);
+            entry.mark_begin(now);
+
+            // Always set poster_menu_open to the provided target
+            ui_state.poster_menu_open = Some(media_id);
         }
-        PosterMenuMessage::HoldStart(media_id) => {
-            if let Some(open_id) = ui_state.poster_menu_open {
-                if open_id == media_id {
-                    // Toggle closed if already open
-                    ui_state.poster_menu_open = None;
-                    let entry = ui_state
-                        .poster_menu_states
-                        .entry(media_id)
-                        .or_insert_with(|| PosterMenuState::new(now));
-                    entry.apply_impulse(PosterFace::Front, now);
-                    entry.hold_active = true;
-                    entry.target_face = PosterFace::Front;
-                } else {
-                    // Close previous, open new
-                    let entry_prev = ui_state
-                        .poster_menu_states
-                        .entry(open_id)
-                        .or_insert_with(|| PosterMenuState::new(now));
-                    entry_prev.apply_impulse(PosterFace::Front, now);
-                    entry_prev.hold_active = false;
-                    ui_state.poster_menu_open = Some(media_id);
-                    let entry = ui_state
-                        .poster_menu_states
-                        .entry(media_id)
-                        .or_insert_with(|| PosterMenuState::new(now));
-                    entry.apply_impulse(PosterFace::Back, now);
-                    entry.hold_active = true;
-                    entry.target_face = PosterFace::Back;
-                }
-            } else {
-                ui_state.poster_menu_open = Some(media_id);
-                let entry = ui_state
-                    .poster_menu_states
-                    .entry(media_id)
-                    .or_insert_with(|| PosterMenuState::new(now));
-                entry.apply_impulse(PosterFace::Back, now);
-                entry.hold_active = true;
-                entry.target_face = PosterFace::Back;
-            }
-        }
-        PosterMenuMessage::HoldEnd(media_id) => {
+        PosterMenuMessage::End(media_id) => {
             if let Some(entry) = ui_state.poster_menu_states.get_mut(&media_id)
             {
-                entry.hold_active = false;
+                entry.mark_end(now);
             }
         }
         PosterMenuMessage::ButtonClicked(media_id, button) => {

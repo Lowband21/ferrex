@@ -1,19 +1,23 @@
-use super::{
-    ensure_batch_registration, primitive::PosterPrimitive,
-    render_pipeline::PosterFace,
-};
 use crate::{
-    domains::ui::menu::MenuButton,
-    domains::ui::messages::UiMessage,
-    infra::shader_widgets::poster::poster_animation_types::{
-        AnimatedPosterBounds, PosterAnimationType,
+    domains::ui::{
+        menu::{MenuButton, PosterMenuMessage},
+        messages::UiMessage,
+    },
+    infra::shader_widgets::poster::{
+        PosterFace,
+        animation::{AnimatedPosterBounds, PosterAnimationType},
+        ensure_batch_registration,
+        primitive::PosterPrimitive,
+        state::PosterState,
     },
 };
+
 use iced::{
     Color, Event, Point, Rectangle,
     advanced::mouse,
     widget::{image::Handle, shader::Program},
 };
+
 use std::time::Instant;
 
 /// A shader program for rendering poster images
@@ -37,19 +41,6 @@ pub struct PosterProgram {
     pub on_options: Option<UiMessage>,
     pub on_click: Option<UiMessage>,
     pub face: PosterFace,
-}
-
-/// State for tracking mouse position within the shader widget
-#[derive(Debug, Clone, Default)]
-pub struct PosterState {
-    /// Current mouse position relative to widget bounds
-    pub mouse_position: Option<Point>,
-    /// Whether mouse is over the widget
-    pub is_hovered: bool,
-    /// Whether the primary button was pressed inside this widget
-    pub pressed_inside: bool,
-    /// Whether the right button was pressed inside this widget
-    pub right_pressed_inside: bool,
 }
 
 impl Program<UiMessage> for PosterProgram {
@@ -206,13 +197,7 @@ impl Program<UiMessage> for PosterProgram {
                     state.pressed_inside = false;
 
                     // Verify cursor position is available and still within bounds.
-                    let cursor_pos = if let Some(cursor_pos) = cursor.position()
-                    {
-                        cursor_pos
-                    } else {
-                        // No cursor position available, ignore release
-                        return None;
-                    };
+                    let cursor_pos = cursor.position()?;
 
                     if !bounds.contains(cursor_pos) {
                         // Released outside widget; treat as cancelled click.
@@ -235,23 +220,29 @@ impl Program<UiMessage> for PosterProgram {
                         // Check if we're on the backface (menu mode)
                         if self.face == PosterFace::Back {
                             // Backface menu button click detection
-                            if let Some(target) = self.menu_target {
-                                if MenuButton::in_x_bounds(norm_x) {
-                                    if let Some(button) = MenuButton::from_position(norm_y) {
-                                        if !button.is_disabled() {
-                                            log::debug!("Backface menu button clicked: {:?}", button);
-                                            return Some(iced::widget::Action::publish(
+                            if let Some(target) = self.menu_target
+                                && MenuButton::in_x_bounds(norm_x)
+                                && let Some(button) =
+                                    MenuButton::from_position(norm_y)
+                            {
+                                if !button.is_disabled() {
+                                    log::debug!(
+                                        "Backface menu button clicked: {:?}",
+                                        button
+                                    );
+                                    return Some(iced::widget::Action::publish(
                                                 UiMessage::PosterMenu(
-                                                    crate::domains::ui::menu::PosterMenuMessage::ButtonClicked(
+                                                    PosterMenuMessage::ButtonClicked(
                                                         target,
                                                         button,
                                                     ),
                                                 ),
                                             ));
-                                        } else {
-                                            log::debug!("Disabled button clicked: {:?}", button);
-                                        }
-                                    }
+                                } else {
+                                    log::debug!(
+                                        "Disabled button clicked: {:?}",
+                                        button
+                                    );
                                 }
                             }
                             // Click on backface but not on a button - do nothing or close menu
@@ -310,19 +301,16 @@ impl Program<UiMessage> for PosterProgram {
                     }
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Right) => {
-                    if let Some(target) = self.menu_target {
-                        if let Some(cursor_pos) = cursor.position()
-                            && bounds.contains(cursor_pos)
-                        {
-                            state.right_pressed_inside = true;
-                            return Some(iced::widget::Action::publish(
-                                UiMessage::PosterMenu(
-                                    crate::domains::ui::menu::PosterMenuMessage::HoldStart(
-                                        target,
-                                    ),
-                                ),
-                            ));
-                        }
+                    if let Some(target) = self.menu_target
+                        && let Some(cursor_pos) = cursor.position()
+                        && bounds.contains(cursor_pos)
+                    {
+                        state.right_pressed_inside = true;
+                        return Some(iced::widget::Action::publish(
+                            UiMessage::PosterMenu(PosterMenuMessage::Start(
+                                target,
+                            )),
+                        ));
                     }
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Right) => {
@@ -330,11 +318,9 @@ impl Program<UiMessage> for PosterProgram {
                         state.right_pressed_inside = false;
                         if let Some(target) = self.menu_target {
                             return Some(iced::widget::Action::publish(
-                                UiMessage::PosterMenu(
-                                    crate::domains::ui::menu::PosterMenuMessage::HoldEnd(
-                                        target,
-                                    ),
-                                ),
+                                UiMessage::PosterMenu(PosterMenuMessage::End(
+                                    target,
+                                )),
                             ));
                         }
                     }
@@ -362,11 +348,9 @@ impl Program<UiMessage> for PosterProgram {
                         state.right_pressed_inside = false;
                         if let Some(target) = self.menu_target {
                             return Some(iced::widget::Action::publish(
-                                UiMessage::PosterMenu(
-                                    crate::domains::ui::menu::PosterMenuMessage::HoldEnd(
-                                        target,
-                                    ),
-                                ),
+                                UiMessage::PosterMenu(PosterMenuMessage::End(
+                                    target,
+                                )),
                             ));
                         }
                     }

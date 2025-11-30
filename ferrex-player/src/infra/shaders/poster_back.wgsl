@@ -37,7 +37,147 @@ struct VertexOutput {
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas_sampler: sampler;
+@group(0) @binding(2) var font_atlas: texture_2d<f32>;
 @group(1) @binding(0) var atlas_texture: texture_2d_array<f32>;
+
+// ============================================================================
+// Font Atlas Configuration
+// These must match the values in font_atlas.rs
+// ============================================================================
+const FONT_ATLAS_SIZE: f32 = 512.0;
+const FONT_GLYPH_SIZE: f32 = 48.0;
+const FONT_SDF_PADDING: f32 = 8.0;
+const FONT_CELL_SIZE: f32 = FONT_GLYPH_SIZE + FONT_SDF_PADDING * 2.0; // 64
+const FONT_GLYPHS_PER_ROW: i32 = 8; // 512 / 64 = 8
+
+// Character set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-:!?"
+// Index mapping for common menu characters
+fn char_to_glyph_index(c: i32) -> i32 {
+    // A-Z: 0-25
+    // 0-9: 26-35
+    // space: 36
+    // .: 37
+    // -: 38
+    // :: 39
+    // !: 40
+    // ?: 41
+    return c;
+}
+
+// Get UV coordinates for a glyph from the font atlas
+fn get_glyph_uv(glyph_index: i32) -> vec4<f32> {
+    let col = glyph_index % FONT_GLYPHS_PER_ROW;
+    let row = glyph_index / FONT_GLYPHS_PER_ROW;
+
+    let cell_u = f32(col) * FONT_CELL_SIZE / FONT_ATLAS_SIZE;
+    let cell_v = f32(row) * FONT_CELL_SIZE / FONT_ATLAS_SIZE;
+    let cell_size_uv = FONT_CELL_SIZE / FONT_ATLAS_SIZE;
+
+    return vec4<f32>(cell_u, cell_v, cell_u + cell_size_uv, cell_v + cell_size_uv);
+}
+
+// Sample the SDF font atlas and return the distance field value
+fn sample_font_sdf(uv: vec2<f32>) -> f32 {
+    let sample = textureSample(font_atlas, atlas_sampler, uv);
+    // SDF is stored in all channels (grayscale), 0.5 = edge
+    return sample.r;
+}
+
+// Render a single character from the font atlas
+// Returns coverage (0-1)
+// aspect: poster width/height ratio (used to correct for non-square coordinates)
+fn render_char(pos: vec2<f32>, char_pos: vec2<f32>, glyph_index: i32, char_scale: f32, aspect: f32) -> f32 {
+    let glyph_uv = get_glyph_uv(glyph_index);
+
+    // Calculate local position within the character cell
+    // Apply aspect ratio correction to X to maintain proper character proportions
+    let local = vec2<f32>(
+        (pos.x - char_pos.x) * aspect / char_scale,
+        (pos.y - char_pos.y) / char_scale
+    );
+
+    // Map to UV space (centered in cell)
+    let uv = vec2<f32>(
+        mix(glyph_uv.x, glyph_uv.z, local.x + 0.5),
+        mix(glyph_uv.y, glyph_uv.w, local.y + 0.5)
+    );
+
+    // Check bounds
+    if any(uv < vec2<f32>(glyph_uv.x, glyph_uv.y)) || any(uv > vec2<f32>(glyph_uv.z, glyph_uv.w)) {
+        return 0.0;
+    }
+
+    // Sample SDF
+    let sdf = sample_font_sdf(uv);
+
+    // Convert SDF to coverage with anti-aliasing
+    // SDF: 0.5 = edge, >0.5 = inside, <0.5 = outside
+    let edge = 0.5;
+    let softness = 0.1; // Controls anti-aliasing width
+    return smoothstep(edge - softness, edge + softness, sdf);
+}
+
+// Render a string label using the font atlas
+// aspect: poster width/height ratio (used to correct for non-square coordinates)
+fn render_atlas_label(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
+    let btn_y_center = BUTTON_Y_START + (f32(btn_index) + 0.5) * BUTTON_HEIGHT;
+    let label_right = 0.85; // Right edge anchor for text alignment
+
+    var coverage = 0.0;
+    let char_scale = size * 1.5;
+    let char_spacing = size * 0.9;  // Spacing between character centers
+
+    // Character indices: A=0, B=1, ..., Z=25, 0=26, ..., 9=35, space=36
+    // Right-aligned: last character positioned at label_right
+    // PLAY (4 chars)
+    if btn_index == BTN_PLAY {
+        let start_x = label_right - 3.0 * char_spacing; // 4 chars: positions 0,1,2,3
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 15, char_scale, aspect)); // P
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 11, char_scale, aspect)); // L
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 0, char_scale, aspect)); // A
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 24, char_scale, aspect)); // Y
+    }
+    // DETAILS (7 chars)
+    else if btn_index == BTN_DETAILS {
+        let start_x = label_right - 6.0 * char_spacing; // 7 chars: positions 0-6
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 3, char_scale, aspect)); // D
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 4, char_scale, aspect)); // E
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 19, char_scale, aspect)); // T
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 0, char_scale, aspect)); // A
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 4.0, btn_y_center), 8, char_scale, aspect)); // I
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 5.0, btn_y_center), 11, char_scale, aspect)); // L
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 6.0, btn_y_center), 18, char_scale, aspect)); // S
+    }
+    // WATCHED (7 chars)
+    else if btn_index == BTN_WATCHED {
+        let start_x = label_right - 6.0 * char_spacing; // 7 chars: positions 0-6
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 22, char_scale, aspect)); // W
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 0, char_scale, aspect)); // A
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 19, char_scale, aspect)); // T
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 2, char_scale, aspect)); // C
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 4.0, btn_y_center), 7, char_scale, aspect)); // H
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 5.0, btn_y_center), 4, char_scale, aspect)); // E
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 6.0, btn_y_center), 3, char_scale, aspect)); // D
+    }
+    // SOON (4 chars - placeholder for disabled button)
+    else if btn_index == BTN_WATCHLIST {
+        let start_x = label_right - 3.0 * char_spacing; // 4 chars: positions 0-3
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 18, char_scale, aspect)); // S
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 14, char_scale, aspect)); // O
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 14, char_scale, aspect)); // O
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 13, char_scale, aspect)); // N
+    }
+    // EDIT (4 chars)
+    else if btn_index == BTN_EDIT {
+        let start_x = label_right - 3.0 * char_spacing; // 4 chars: positions 0-3
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 4, char_scale, aspect)); // E
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 3, char_scale, aspect)); // D
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 8, char_scale, aspect)); // I
+        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 19, char_scale, aspect)); // T
+    }
+
+    return coverage;
+}
 
 fn vertex_position(vertex_index: u32) -> vec2<f32> {
     let x = f32(vertex_index & 1u);
@@ -415,10 +555,12 @@ fn render_label(pos: vec2<f32>, btn_index: i32, size: f32) -> f32 {
 }
 
 // Render button icon - returns coverage (0-1)
-fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32) -> f32 {
+// aspect: poster width/height ratio (used to correct for non-square coordinates)
+fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
     let btn_y_center = BUTTON_Y_START + (f32(btn_index) + 0.5) * BUTTON_HEIGHT;
     let icon_x = 0.15; // Left side with padding
-    let local_p = vec2<f32>(pos.x - icon_x, pos.y - btn_y_center);
+    // Apply aspect ratio to X for proper proportions, flip Y for SDF math convention (Y-up)
+    let local_p = vec2<f32>((pos.x - icon_x) * aspect, -(pos.y - btn_y_center));
 
     var d = 1000.0;
     let icon_size = size;
@@ -523,8 +665,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         let is_grayed = (i == BTN_WATCHLIST) || (i == BTN_EDIT);
         let is_hovered = (i == hovered_btn) && !is_grayed;
 
-        // Icon (on left side)
-        let icon_coverage = render_icon(pos, i, 0.04);
+        // Icon (on left side) - pass aspect ratio for proper proportions
+        let icon_coverage = render_icon(pos, i, 0.04, aspect);
         if icon_coverage > 0.0 {
             var icon_color: vec3<f32>;
             if is_grayed {
@@ -537,8 +679,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
             final_rgb = mix(final_rgb, icon_color, icon_coverage);
         }
 
-        // Label text (centered)
-        let label_coverage = render_label(pos, i, 0.06);
+        // Label text (centered) - using font atlas SDF, pass aspect ratio
+        let label_coverage = render_atlas_label(pos, i, 0.06, aspect);
         if label_coverage > 0.0 {
             var label_color: vec3<f32>;
             if is_grayed {

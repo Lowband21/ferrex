@@ -1,25 +1,35 @@
-use crate::domains::media::selectors;
-use crate::domains::ui::components;
-use crate::domains::ui::views::grid::macros::parse_hex_color;
-use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
-use crate::infra::shader_widgets::poster::PosterFace;
-use crate::infra::shader_widgets::poster::poster_animation_types::AnimationBehavior;
+use std::f32::consts::PI;
+
 use crate::{
-    domains::ui::{
-        messages::UiMessage, playback_ui::PlaybackMessage,
-        shell_ui::UiShellMessage, theme, views::grid::macros::ThemeColorAccess,
-        widgets::image_for::image_for,
+    domains::{
+        media::selectors,
+        ui::{
+            components,
+            messages::UiMessage,
+            playback_ui::PlaybackMessage,
+            shell_ui::UiShellMessage,
+            theme,
+            views::{
+                grid::macros::{ThemeColorAccess, parse_hex_color},
+                virtual_carousel::{self, types::CarouselKey},
+            },
+            widgets::image_for::image_for,
+        },
     },
+    infra::shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
     media_card,
     state::State,
 };
+
 use ferrex_core::player_prelude::{
     EpisodeLike, MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
 };
+
 use ferrex_model::{
     EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
     SeasonReference, SeriesID,
 };
+
 use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, text},
@@ -141,9 +151,9 @@ pub fn view_series_detail<'a>(
     let (face, rotation_override) = if let Some(menu_state) =
         state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (menu_state.face_for_render(), Some(menu_state.angle))
+        (menu_state.face_from_angle(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
     };
@@ -472,9 +482,9 @@ pub fn view_season_detail<'a>(
     let (face, rotation_override) = if let Some(menu_state) =
         state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (menu_state.face_for_render(), Some(menu_state.angle))
+        (menu_state.face_from_angle(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
     };
@@ -734,9 +744,9 @@ pub fn view_episode_detail<'a>(
     let (face, rotation_override) = if let Some(menu_state) =
         state.domains.ui.state.poster_menu_states.get(&poster_id)
     {
-        (menu_state.face_for_render(), Some(menu_state.angle))
+        (menu_state.face_from_angle(), Some(menu_state.angle))
     } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
-        (PosterFace::Back, Some(std::f32::consts::PI))
+        (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
     };
