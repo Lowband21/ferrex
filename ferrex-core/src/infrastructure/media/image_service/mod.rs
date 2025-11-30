@@ -163,6 +163,35 @@ impl ImageService {
             .map(|key| image_type_folder(&key.image_type))
             .unwrap_or("untyped");
 
+        // Write-once guard: if this variant is already cached, don't overwrite it.
+        // This prevents race conditions where a server is serving a file while
+        // the scanner tries to overwrite it.
+        if let Some(ref key) = context {
+            if self.images.is_media_image_variant_cached(key).await? {
+                // Check if the file still exists on disk
+                if let Some(existing) = self
+                    .images
+                    .get_image_variant(image_record.id, variant_name)
+                    .await?
+                {
+                    let path = PathBuf::from(&existing.file_path);
+                    if path.exists() {
+                        debug!(
+                            "Variant {} already cached (write-once), returning existing path",
+                            variant_name
+                        );
+                        return Ok(path);
+                    }
+                }
+                // File is missing but DB says cached - auto-invalidate and regenerate
+                warn!(
+                    "Variant marked cached but file missing, auto-invalidating and regenerating: {:?}/{}",
+                    key.image_type, key.variant
+                );
+                self.images.invalidate_media_image_variant(key).await?;
+            }
+        }
+
         if let Some(existing) = self
             .images
             .get_image_variant(image_record.id, variant_name)
@@ -282,8 +311,10 @@ impl ImageService {
         );
         let file_path = variant_dir.join(&filename);
 
-        // Write atomically: write to a temporary file, fsync, then rename.
-        // This prevents readers from observing partial files during concurrent access.
+        // Write atomically: write to a temporary file, fsync, then hard_link.
+        // Using hard_link instead of rename ensures we NEVER overwrite an existing file.
+        // This is critical for write-once semantics to prevent race conditions where
+        // a server is reading a file while the scanner would otherwise overwrite it.
         // Use a unique temp name to avoid collisions when concurrent writers target
         // the same destination path (e.g., orchestrator + on-demand request).
         let tmp_path = file_path
@@ -294,22 +325,33 @@ impl ImageService {
                 .await
                 .map_err(MediaError::Io)?;
             f.write_all(&bytes).await.map_err(MediaError::Io)?;
-            // Ensure file contents are durable before rename
+            // Ensure file contents are durable before linking
             f.sync_all().await.map_err(MediaError::Io)?;
         }
-        // Best-effort: fsync the parent directory to persist the rename operation
+        // Best-effort: fsync the parent directory to persist the link operation
         if let Some(parent) = file_path.parent()
             && let Ok(dir) = tokio::fs::File::open(parent).await
         {
-            let _ = dir.sync_all().await; // ignore errors; rename below is still atomic
+            let _ = dir.sync_all().await; // ignore errors; hard_link below is still atomic
         }
-        match tokio::fs::rename(&tmp_path, &file_path).await {
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Another concurrent writer won the race; discard our temp file and use the existing one.
+        // Use hard_link to atomically "publish" the file.
+        // hard_link fails with AlreadyExists if target exists, preventing overwrites.
+        match tokio::fs::hard_link(&tmp_path, &file_path).await {
+            Ok(_) => {
+                // Successfully linked; remove the temp file name (inode is now at final path)
                 let _ = tokio::fs::remove_file(&tmp_path).await;
             }
-            Err(e) => return Err(MediaError::Io(e)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // File already exists - another writer won the race or write-once guard was bypassed
+                // This is fine; discard our temp file and use the existing one.
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                debug!("File already exists (hard_link check): {:?}", file_path);
+            }
+            Err(e) => {
+                // Clean up temp file on error
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(MediaError::Io(e));
+            }
         }
 
         let (width, height) = match self.get_image_dimensions(&bytes) {
@@ -1068,6 +1110,110 @@ impl ImageService {
         }
 
         Ok(None)
+    }
+
+    /// Invalidate a cached variant, allowing it to be re-downloaded.
+    /// Also removes the file from disk if it exists.
+    pub async fn invalidate_variant(
+        &self,
+        key: &MediaImageVariantKey,
+    ) -> Result<()> {
+        // Look up the file path before invalidating
+        let params = ImageLookupParams {
+            media_type: key.media_type.clone(),
+            media_id: key.media_id.to_string(),
+            image_type: key.image_type.clone(),
+            index: key.order_index as u32,
+            variant: Some(key.variant.clone()),
+        };
+
+        if let Some((image_record, _)) =
+            self.images.lookup_image_variant(&params).await?
+        {
+            if let Some(variant) = self
+                .images
+                .get_image_variant(image_record.id, &key.variant)
+                .await?
+            {
+                let file_path = PathBuf::from(&variant.file_path);
+                // Delete file from disk
+                if file_path.exists() {
+                    tokio::fs::remove_file(&file_path)
+                        .await
+                        .map_err(MediaError::Io)?;
+                    info!("Removed cached file for invalidation: {:?}", file_path);
+                }
+            }
+        }
+
+        // Mark as uncached in DB
+        self.images.invalidate_media_image_variant(key).await?;
+        info!("Invalidated variant cache: {:?}/{}", key.image_type, key.variant);
+
+        Ok(())
+    }
+
+    /// Invalidate all cached variants for a media item.
+    /// Also removes the files from disk.
+    /// Returns the number of variants invalidated.
+    pub async fn invalidate_all_variants(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<u32> {
+        // Get all variants for this media item
+        let variants = self
+            .images
+            .list_media_image_variants(media_type, media_id)
+            .await?;
+
+        let mut removed_count = 0u32;
+        for record in &variants {
+            if !record.cached {
+                continue;
+            }
+
+            // Look up file path
+            let params = ImageLookupParams {
+                media_type: record.key.media_type.clone(),
+                media_id: record.key.media_id.to_string(),
+                image_type: record.key.image_type.clone(),
+                index: record.key.order_index as u32,
+                variant: Some(record.key.variant.clone()),
+            };
+
+            if let Some((image_record, _)) =
+                self.images.lookup_image_variant(&params).await?
+            {
+                if let Some(variant) = self
+                    .images
+                    .get_image_variant(image_record.id, &record.key.variant)
+                    .await?
+                {
+                    let file_path = PathBuf::from(&variant.file_path);
+                    if file_path.exists() {
+                        if let Err(e) = tokio::fs::remove_file(&file_path).await {
+                            warn!("Failed to remove cached file {:?}: {}", file_path, e);
+                        } else {
+                            removed_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mark all as uncached in DB
+        let db_count = self
+            .images
+            .invalidate_all_media_image_variants(media_type, media_id)
+            .await?;
+
+        info!(
+            "Invalidated {} variants for {}/{} ({} files removed)",
+            db_count, media_type, media_id, removed_count
+        );
+
+        Ok(db_count)
     }
 
     /// Calculate SHA256 hash of image data

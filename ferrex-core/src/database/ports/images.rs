@@ -111,6 +111,28 @@ pub trait ImageRepository: Send + Sync {
         theme_color: Option<&str>,
     ) -> Result<()>;
 
+    /// Check if a media image variant is already cached (cached=true in DB).
+    /// Used for write-once semantics to prevent race conditions.
+    async fn is_media_image_variant_cached(
+        &self,
+        key: &MediaImageVariantKey,
+    ) -> Result<bool>;
+
+    /// Invalidate a cached media image variant, setting cached=false.
+    /// This allows the variant to be re-downloaded on next request.
+    async fn invalidate_media_image_variant(
+        &self,
+        key: &MediaImageVariantKey,
+    ) -> Result<()>;
+
+    /// Invalidate all cached variants for a media item.
+    /// Used for user-triggered cache refresh.
+    async fn invalidate_all_media_image_variants(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<u32>;
+
     // Maintenance
     async fn cleanup_orphaned_images(&self) -> Result<u32>;
     async fn get_image_cache_stats(

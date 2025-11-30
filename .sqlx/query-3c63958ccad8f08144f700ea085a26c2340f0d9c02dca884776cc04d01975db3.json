@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT cached\n            FROM media_image_variants\n            WHERE media_type = $1\n              AND media_id = $2\n              AND image_type = $3\n              AND order_index = $4\n              AND variant = $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cached",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3c63958ccad8f08144f700ea085a26c2340f0d9c02dca884776cc04d01975db3"
+}

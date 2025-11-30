@@ -765,6 +765,107 @@ impl ImageRepository for PostgresImageRepository {
         Ok(())
     }
 
+    async fn is_media_image_variant_cached(
+        &self,
+        key: &MediaImageVariantKey,
+    ) -> Result<bool> {
+        let row = sqlx::query!(
+            r#"
+            SELECT cached
+            FROM media_image_variants
+            WHERE media_type = $1
+              AND media_id = $2
+              AND image_type = $3
+              AND order_index = $4
+              AND variant = $5
+            "#,
+            key.media_type,
+            key.media_id,
+            key.image_type.as_str(),
+            key.order_index,
+            key.variant
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to check media image variant cached status: {}",
+                e
+            ))
+        })?;
+
+        Ok(row.map(|r| r.cached).unwrap_or(false))
+    }
+
+    async fn invalidate_media_image_variant(
+        &self,
+        key: &MediaImageVariantKey,
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE media_image_variants
+            SET cached = false, cached_at = NULL
+            WHERE media_type = $1
+              AND media_id = $2
+              AND image_type = $3
+              AND order_index = $4
+              AND variant = $5
+            "#,
+            key.media_type,
+            key.media_id,
+            key.image_type.as_str(),
+            key.order_index,
+            key.variant
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to invalidate media image variant: {}",
+                e
+            ))
+        })?;
+
+        debug!(
+            "Invalidated media image variant: {:?}/{}",
+            key.image_type, key.variant
+        );
+
+        Ok(())
+    }
+
+    async fn invalidate_all_media_image_variants(
+        &self,
+        media_type: &str,
+        media_id: Uuid,
+    ) -> Result<u32> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE media_image_variants
+            SET cached = false, cached_at = NULL
+            WHERE media_type = $1 AND media_id = $2 AND cached = true
+            "#,
+            media_type,
+            media_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to invalidate all media image variants: {}",
+                e
+            ))
+        })?;
+
+        let count = result.rows_affected() as u32;
+        info!(
+            "Invalidated {} cached variants for {}/{}",
+            count, media_type, media_id
+        );
+
+        Ok(count)
+    }
+
     async fn cleanup_orphaned_images(&self) -> Result<u32> {
         let result = sqlx::query!(
             r#"

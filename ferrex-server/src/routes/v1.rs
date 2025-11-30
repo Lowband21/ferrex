@@ -14,6 +14,7 @@ use crate::{
         handle_websocket::websocket_handler,
         media::{
             handle_image::serve_image_handler,
+            handle_refresh_images::refresh_images_handler,
             handle_library::{
                 create_library_handler, delete_library_handler,
                 get_libraries_with_media_handler, get_library_handler,
@@ -324,6 +325,7 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
 fn create_metadata_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route(v1::images::SERVE, get(serve_image_handler))
+        .route(v1::images::REFRESH, post(refresh_images_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

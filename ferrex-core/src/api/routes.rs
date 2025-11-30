@@ -122,6 +122,9 @@ pub mod v1 {
     pub mod images {
         pub const SERVE: &str =
             v1_path!("/images/{type}/{id}/{category}/{index}");
+        /// Refresh (invalidate) all cached images for a media item
+        pub const REFRESH: &str =
+            v1_path!("/media/{type}/{id}/refresh-images");
     }
 
     pub mod stream {

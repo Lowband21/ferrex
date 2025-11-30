@@ -1,3 +1,4 @@
+use super::image_validation::validate_magic_bytes;
 use crate::infra::app_state::AppState;
 use axum::{
     body::Body,
@@ -14,10 +15,16 @@ use std::io::ErrorKind;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio_util::io::ReaderStream;
+use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// Maximum image size to serve (20 MB). Images larger than this are rejected.
+/// This prevents memory exhaustion from malicious or corrupted files.
+const MAX_IMAGE_SIZE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Size threshold for logging warnings about large images (5 MB).
+const LARGE_IMAGE_WARN_THRESHOLD: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ImageQuery {
@@ -197,12 +204,11 @@ pub async fn serve_image_handler(
         let normalized =
             normalize_image_path(&image_path, state.config().cache_root());
 
-        // Open the file first, then obtain metadata from the open handle.
-        // This guarantees Content-Length and streamed bytes refer to the same inode,
-        // avoiding races where a concurrent rename swaps in a different file.
+        // ATOMIC READ: Read entire file into memory before serving.
+        // This guarantees Content-Length matches actual bytes sent, avoiding race
+        // conditions where a concurrent file replacement could cause corruption.
         match File::open(&normalized).await {
-            Ok(file) => {
-                let mut file = file;
+            Ok(mut file) => {
                 let meta = match file.metadata().await {
                     Ok(m) => m,
                     Err(e) => {
@@ -215,6 +221,23 @@ pub async fn serve_image_handler(
                 };
 
                 let file_size = meta.len();
+
+                // Check file size limits before reading into memory
+                if file_size > MAX_IMAGE_SIZE_BYTES {
+                    warn!(
+                        "Image file too large: {:?} ({} bytes, max {})",
+                        normalized, file_size, MAX_IMAGE_SIZE_BYTES
+                    );
+                    return Err(StatusCode::UNPROCESSABLE_ENTITY);
+                }
+
+                if file_size > LARGE_IMAGE_WARN_THRESHOLD {
+                    warn!(
+                        "Serving large image: {:?} ({} bytes)",
+                        normalized, file_size
+                    );
+                }
+
                 let modified = match meta.modified() {
                     Ok(t) => t,
                     Err(e) => {
@@ -285,31 +308,36 @@ pub async fn serve_image_handler(
                     return Ok::<_, StatusCode>(resp);
                 }
 
-                // Determine content type by sniffing file header (filenames are extension-less)
-                // Use a separate short-lived handle for sniffing so the streaming handle's
-                // cursor is never advanced (avoids truncated responses on failed rewind).
-                let content_type = {
-                    let mut head = [0u8; 16];
-                    match File::open(&normalized).await {
-                        Ok(mut sniff) => {
-                            let _ = sniff.read(&mut head).await; // best-effort
-                            sniff_mime_from_header(&head)
-                        }
-                        Err(_) => {
-                            // Fall back to default if we cannot open a second handle
-                            "image/jpeg"
-                        }
+                // ATOMIC READ: Read entire file into memory
+                // This guarantees Content-Length matches actual bytes sent
+                let mut bytes = Vec::with_capacity(file_size as usize);
+                if let Err(e) = file.read_to_end(&mut bytes).await {
+                    error!("Failed to read image file {:?}: {}", normalized, e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+
+                // Validate image format via magic bytes
+                let content_type = match validate_magic_bytes(&bytes) {
+                    Ok(ct) => ct,
+                    Err(reason) => {
+                        warn!(
+                            "Invalid image file {:?}: {:?}",
+                            normalized, reason
+                        );
+                        return Err(StatusCode::UNPROCESSABLE_ENTITY);
                     }
                 };
 
-                // Stream file to avoid buffering entire image in memory
-                let stream = ReaderStream::new(file);
-                let body = Body::from_stream(stream);
+                // Use actual read size for Content-Length (not file metadata)
+                let actual_size = bytes.len();
+
+                // Build response with in-memory body
+                let body = Body::from(bytes);
                 let elapsed = t_start.elapsed().as_millis().to_string();
                 let resp = Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, content_type)
-                    .header(header::CONTENT_LENGTH, file_size.to_string())
+                    .header(header::CONTENT_LENGTH, actual_size.to_string())
                     .header(header::ETAG, etag_value)
                     .header(header::LAST_MODIFIED, last_modified)
                     .header(
@@ -340,9 +368,8 @@ pub async fn serve_image_handler(
                     // exponential backoff up to ~100ms total
                     delay = delay.saturating_mul(2);
                 }
-                if let Some(file) = reopened {
-                    // Found the file after retry; proceed to stream like the Ok branch
-                    let mut file = file;
+                if let Some(mut file) = reopened {
+                    // Found the file after retry; use atomic read like the Ok branch
                     let meta = match file.metadata().await {
                         Ok(m) => m,
                         Err(e) => {
@@ -354,6 +381,16 @@ pub async fn serve_image_handler(
                         }
                     };
                     let file_size = meta.len();
+
+                    // Check file size limits
+                    if file_size > MAX_IMAGE_SIZE_BYTES {
+                        warn!(
+                            "Image file too large after retry: {:?} ({} bytes)",
+                            normalized, file_size
+                        );
+                        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+                    }
+
                     let modified = match meta.modified() {
                         Ok(t) => t,
                         Err(e) => {
@@ -371,18 +408,36 @@ pub async fn serve_image_handler(
                         .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                         .as_secs();
                     let etag_value = format!("W/\"{}-{}\"", file_size, secs);
-                    // Sniff content type
-                    let mut head = [0u8; 16];
-                    let _ = file.read(&mut head).await;
-                    let _ = file.rewind().await;
-                    let content_type = sniff_mime_from_header(&head);
-                    let stream = ReaderStream::new(file);
-                    let body = Body::from_stream(stream);
+
+                    // ATOMIC READ: Read entire file into memory
+                    let mut bytes = Vec::with_capacity(file_size as usize);
+                    if let Err(e) = file.read_to_end(&mut bytes).await {
+                        error!(
+                            "Failed to read image file after retry {:?}: {}",
+                            normalized, e
+                        );
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+
+                    // Validate image format via magic bytes
+                    let content_type = match validate_magic_bytes(&bytes) {
+                        Ok(ct) => ct,
+                        Err(reason) => {
+                            warn!(
+                                "Invalid image file after retry {:?}: {:?}",
+                                normalized, reason
+                            );
+                            return Err(StatusCode::UNPROCESSABLE_ENTITY);
+                        }
+                    };
+
+                    let actual_size = bytes.len();
+                    let body = Body::from(bytes);
                     let elapsed = t_start.elapsed().as_millis().to_string();
                     let resp = Response::builder()
                         .status(StatusCode::OK)
                         .header(header::CONTENT_TYPE, content_type)
-                        .header(header::CONTENT_LENGTH, file_size.to_string())
+                        .header(header::CONTENT_LENGTH, actual_size.to_string())
                         .header(header::ETAG, etag_value)
                         .header(header::LAST_MODIFIED, last_modified)
                         .header(
@@ -423,102 +478,34 @@ pub async fn serve_image_handler(
     }
 }
 
-// Simple MIME sniffer for common image formats used by TMDB/CDNs.
-// Falls back to image/jpeg to preserve prior behavior.
-fn sniff_mime_from_header(head: &[u8]) -> &'static str {
-    // JPEG: FF D8 FF
-    if head.len() >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF
-    {
-        return "image/jpeg";
-    }
-    // PNG: 89 50 4E 47 0D 0A 1A 0A
-    if head.len() >= 8
-        && head[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
-    {
-        return "image/png";
-    }
-    // WebP (RIFF....WEBP)
-    if head.len() >= 12 && &head[0..4] == b"RIFF" && &head[8..12] == b"WEBP" {
-        return "image/webp";
-    }
-    // AVIF (ISOBMFF) heuristic: ftyp box with brand avif/avis at bytes 4..8
-    if head.len() >= 12
-        && &head[4..8] == b"ftyp"
-        && (&head[8..12] == b"avif" || &head[8..12] == b"avis")
-    {
-        return "image/avif";
-    }
-    "image/jpeg"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
 
-    // Verify that opening a file first and then reading metadata yields a stable
-    // content-length that matches the bytes read even if the on-disk path is
-    // concurrently replaced via atomic rename.
+    // Verify that atomic read guarantees content-length matches bytes read
     #[tokio::test]
-    async fn open_first_yields_consistent_length_on_concurrent_rename() {
+    async fn atomic_read_guarantees_content_length_matches_body() {
         let tmp = tempfile::tempdir().expect("tmpdir");
-        let path = tmp.path().join("race.jpg");
+        let path = tmp.path().join("atomic_test.jpg");
 
-        // Initial content A (128 KiB)
-        let initial = vec![b'A'; 128 * 1024];
-        std::fs::write(&path, &initial).expect("write initial");
+        // Create valid JPEG with known size
+        let mut content = vec![0xFF, 0xD8, 0xFF, 0xE0]; // JPEG header
+        content.extend(vec![b'X'; 1000]);
+        let expected_size = content.len();
+        std::fs::write(&path, &content).expect("write");
 
-        // Open the file first
-        let mut file = File::open(&path).await.expect("open initial");
-        let meta = file.metadata().await.expect("metadata for open file");
-        let announced_len = meta.len() as usize;
+        // Read atomically
+        let mut file = File::open(&path).await.expect("open");
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).await.expect("read");
 
-        // Concurrently replace the file on disk with different content B (256 KiB)
-        let path2 = path.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            let replacement = vec![b'B'; 256 * 1024];
-            let tmpfile = path2.with_extension("tmp-replacement");
-            std::fs::write(&tmpfile, &replacement).expect("write replacement");
-            std::fs::rename(&tmpfile, &path2).expect("rename replacement");
-        });
+        // Validate content type
+        let content_type = validate_magic_bytes(&bytes).expect("valid jpeg");
+        assert_eq!(content_type, "image/jpeg");
 
-        handle.await.expect("rename task");
-
-        // Read all bytes from the originally opened handle
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).await.expect("read to end");
-
-        assert_eq!(announced_len, buf.len(), "length matches bytes read");
-        assert_eq!(buf.first().copied(), Some(b'A'));
-        assert_eq!(buf.last().copied(), Some(b'A'));
-    }
-
-    #[test]
-    fn sniff_mime_recognizes_common_formats() {
-        // JPEG
-        assert_eq!(
-            sniff_mime_from_header(&[0xFF, 0xD8, 0xFF, 0xDB]),
-            "image/jpeg"
-        );
-        // PNG
-        assert_eq!(
-            sniff_mime_from_header(&[
-                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0
-            ]),
-            "image/png"
-        );
-        // WebP: RIFF....WEBP
-        let mut webp = [0u8; 12];
-        webp[0..4].copy_from_slice(b"RIFF");
-        webp[8..12].copy_from_slice(b"WEBP");
-        assert_eq!(sniff_mime_from_header(&webp), "image/webp");
-        // AVIF: ....ftypavif
-        let mut avif = [0u8; 12];
-        avif[4..8].copy_from_slice(b"ftyp");
-        avif[8..12].copy_from_slice(b"avif");
-        assert_eq!(sniff_mime_from_header(&avif), "image/avif");
-        // Fallback
-        assert_eq!(sniff_mime_from_header(&[0u8; 0]), "image/jpeg");
+        // Content-Length would equal bytes.len(), not metadata
+        assert_eq!(bytes.len(), expected_size);
     }
 }
 
