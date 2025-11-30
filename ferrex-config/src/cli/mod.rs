@@ -159,7 +159,45 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
 
     let db_admin_user = db_admin_user_default.clone();
 
-    let rotate_db = opts.rotate.rotates_db() || opts.force;
+    // DB credentials can ONLY be safely rotated when:
+    // 1. This is initial setup (no existing DB), OR
+    // 2. --reset-db is used (volume deleted, so new creds work)
+    //
+    // Standalone --rotate db is disabled because PostgreSQL stores passwords in
+    // pg_authid. Without deleting the volume, the old password remains in the DB
+    // while the env file has the new password, causing authentication failures.
+    //
+    // TODO: Implement ALTER ROLE support to allow DB credential rotation without
+    // data loss. This would require:
+    // - Connecting to the running PostgreSQL instance
+    // - Running: ALTER ROLE ferrex_app PASSWORD 'new_password';
+    // - Running: ALTER ROLE postgres PASSWORD 'new_password';
+    // - Then updating the env file
+    //
+    // The internal env var FERREX_INTERNAL_DB_RESET is set by init_spec.rs when
+    // calling init after --reset-db. This signals that the volume was deleted
+    // and DB credential rotation is safe.
+    let db_reset_confirmed = std::env::var("FERREX_INTERNAL_DB_RESET").is_ok();
+    if opts.rotate == RotateTarget::Db && !db_reset_confirmed {
+        bail!(
+            "Standalone --rotate db is not supported.\n\
+             DB credentials can only be rotated with `stack up --reset-db` (which deletes all data).\n\
+             Future: ALTER ROLE support would allow rotation without data loss."
+        );
+    }
+    if opts.rotate == RotateTarget::All && !db_reset_confirmed {
+        eprintln!(
+            "Warning: --rotate all specified, but DB credentials will NOT be rotated."
+        );
+        eprintln!(
+            "DB rotation requires `stack up --reset-db` to safely delete the volume first."
+        );
+        eprintln!("Only AUTH credentials will be rotated.");
+    }
+
+    // Note: --force does NOT rotate DB credentials (only AUTH).
+    // DB rotation happens only via --rotate db (passed by --reset-db path with env var).
+    let rotate_db = opts.rotate.rotates_db() && db_reset_confirmed;
 
     let (database_app_password, app_rotated) = resolve_secret_with_sources(
         &existing_env,
@@ -189,8 +227,25 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
         rotated_keys.push("DATABASE_ADMIN_PASSWORD".to_string());
     }
 
-    let database_url_host = env_database_url.clone().unwrap_or_else(|| {
-        build_postgres_url(
+    let database_url_host = match (env_database_url.as_ref(), app_rotated) {
+        // Existing URL and password was rotated: update password in existing URL
+        (Some(existing_url), true) => {
+            update_url_password(existing_url, &database_app_password)
+                .unwrap_or_else(|| build_postgres_url(
+                    &db_host,
+                    db_port,
+                    &db_user,
+                    &database_app_password,
+                    &db_name,
+                )
+                .unwrap_or_else(|| format!(
+                    "postgresql://{db_user}:{database_app_password}@{db_host}:{db_port}/{db_name}"
+                )))
+        }
+        // Existing URL and password NOT rotated: preserve as-is
+        (Some(existing_url), false) => existing_url.clone(),
+        // No existing URL: build from components
+        (None, _) => build_postgres_url(
             &db_host,
             db_port,
             &db_user,
@@ -199,11 +254,28 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
         )
         .unwrap_or_else(|| format!(
             "postgresql://{db_user}:{database_app_password}@{db_host}:{db_port}/{db_name}"
-        ))
-    });
+        )),
+    };
 
-    let database_url_admin = env_database_url_admin.clone().unwrap_or_else(|| {
-        build_postgres_url(
+    let database_url_admin = match (env_database_url_admin.as_ref(), admin_rotated) {
+        // Existing URL and password was rotated: update password in existing URL
+        (Some(existing_url), true) => {
+            update_url_password(existing_url, &database_admin_password)
+                .unwrap_or_else(|| build_postgres_url(
+                    &db_host,
+                    db_port,
+                    &db_admin_user,
+                    &database_admin_password,
+                    &db_name,
+                )
+                .unwrap_or_else(|| format!(
+                    "postgresql://{db_admin_user}:{database_admin_password}@{db_host}:{db_port}/{db_name}"
+                )))
+        }
+        // Existing URL and password NOT rotated: preserve as-is
+        (Some(existing_url), false) => existing_url.clone(),
+        // No existing URL: build from components
+        (None, _) => build_postgres_url(
             &db_host,
             db_port,
             &db_admin_user,
@@ -212,11 +284,28 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
         )
         .unwrap_or_else(|| format!(
             "postgresql://{db_admin_user}:{database_admin_password}@{db_host}:{db_port}/{db_name}"
-        ))
-    });
+        )),
+    };
 
-    let database_url_container = env_database_url_container.clone().unwrap_or_else(|| {
-        build_postgres_url(
+    let database_url_container = match (env_database_url_container.as_ref(), app_rotated) {
+        // Existing URL and password was rotated: update password in existing URL
+        (Some(existing_url), true) => {
+            update_url_password(existing_url, &database_app_password)
+                .unwrap_or_else(|| build_postgres_url(
+                    &db_container_host_default,
+                    db_port,
+                    &db_user,
+                    &database_app_password,
+                    &db_name,
+                )
+                .unwrap_or_else(|| format!(
+                    "postgresql://{db_user}:{database_app_password}@{db_container_host_default}:{db_port}/{db_name}"
+                )))
+        }
+        // Existing URL and password NOT rotated: preserve as-is
+        (Some(existing_url), false) => existing_url.clone(),
+        // No existing URL: build from components
+        (None, _) => build_postgres_url(
             &db_container_host_default,
             db_port,
             &db_user,
@@ -225,8 +314,8 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
         )
         .unwrap_or_else(|| format!(
             "postgresql://{db_user}:{database_app_password}@{db_container_host_default}:{db_port}/{db_name}"
-        ))
-    });
+        )),
+    };
 
     let default_redis_url_host = env_redis_url_host
         .or_else(|| Some("redis://127.0.0.1:6379".to_string()));
@@ -466,14 +555,7 @@ fn load_env_map(path: &Path) -> Result<HashMap<String, String>> {
     }
 
     let mut map = HashMap::new();
-
-    let env_path = if path.eq(Path::new(".env")) {
-        dotenvy::dotenv()?
-    } else {
-        path.to_path_buf()
-    };
-
-    for entry in dotenvy::from_path_iter(env_path)? {
+    for entry in dotenvy::from_path_iter(path)? {
         let (key, value) = entry?;
         map.insert(key, value);
     }
@@ -493,6 +575,14 @@ fn build_postgres_url(
     url.set_username(user).ok()?;
     url.set_password(Some(password)).ok()?;
     Some(url.to_string())
+}
+
+/// Update the password in an existing PostgreSQL URL, preserving all other components.
+/// Returns None if the URL cannot be parsed or password cannot be set.
+fn update_url_password(url: &str, new_password: &str) -> Option<String> {
+    let mut parsed = Url::parse(url).ok()?;
+    parsed.set_password(Some(new_password)).ok()?;
+    Some(parsed.to_string())
 }
 
 fn resolve_secret_with_sources(
@@ -528,6 +618,12 @@ fn resolve_secret_with_sources(
         return Ok((normalized, false));
     }
 
+    // Final fallback - log a warning since this shouldn't happen
+    tracing::warn!(
+        key = %key,
+        "No existing credential found, generating new secret. \
+         This is expected for initial setup, but may indicate a bug if the credential should exist."
+    );
     Ok((generate_secret(len), true))
 }
 
@@ -631,6 +727,24 @@ pub async fn run_config_check(opts: &CheckOptions) -> Result<()> {
     match check_tls_strategy(&config, opts) {
         Ok(message) => successes.push(message),
         Err(err) => failures.push(format!("tls configuration invalid: {err}")),
+    }
+
+    // Credential consistency check
+    if let Some(env_path) = &opts.env_file {
+        let env_map =
+            crate::env_writer::read_env_map(env_path).unwrap_or_default();
+        let kv: Vec<(String, String)> = env_map.into_iter().collect();
+        let cred_errors = validation::validate_credential_consistency(&kv);
+        if cred_errors.is_empty() {
+            successes.push("credential consistency".to_string());
+        } else {
+            for err in cred_errors {
+                failures.push(format!(
+                    "credential error: {} (hint: {})",
+                    err.message, err.hint
+                ));
+            }
+        }
     }
 
     for success in successes {

@@ -183,6 +183,37 @@ CACHE_DIR={}
         Ok(())
     }
 
+    fn stack_up_reset_db(&self, server_mode: &str) -> anyhow::Result<()> {
+        eprintln!(
+            "  → Bringing stack up with --reset-db (server: {})...",
+            server_mode
+        );
+        let mut cmd = self.bin();
+        cmd.arg("stack")
+            .arg("up")
+            .arg("--env-file")
+            .arg(&self.env_file)
+            .arg("--mode")
+            .arg("local")
+            .arg("--profile")
+            .arg("dev")
+            .arg("--server")
+            .arg(server_mode)
+            .arg("--non-interactive")
+            .arg("--advanced")
+            .arg("--reset-db");
+
+        let status = cmd.status()?;
+        if !status.success() {
+            anyhow::bail!(
+                "stack up --reset-db failed with exit code: {}",
+                status
+            );
+        }
+        eprintln!("  ✓ Stack up with --reset-db completed");
+        Ok(())
+    }
+
     fn stack_down(&self, clean: bool) -> anyhow::Result<()> {
         eprintln!("  → Bringing stack down (clean: {})...", clean);
         let mut cmd = self.bin();
@@ -513,6 +544,54 @@ fn stack_host_mode_roundtrip() -> anyhow::Result<()> {
     harness.stack_up("host", true)?;
     harness.status()?;
     harness.check()?;
+    harness.stack_down(true)?;
+    eprintln!("✓ Test passed\n");
+    Ok(())
+}
+
+/// Regression test for shell environment variable precedence bug.
+///
+/// This tests the scenario where:
+/// 1. `stack up --reset-db` regenerates DB credentials and writes them to .env
+/// 2. A subsequent `stack up --clean` should use the NEW credentials from .env
+///
+/// Previously, this would fail because:
+/// - The justfile loads .env into shell BEFORE running commands
+/// - Init subprocess writes new credentials to .env
+/// - But the parent shell still has old credentials
+/// - Docker-compose gives shell vars precedence over --env-file
+/// - Result: postgres initialized with old creds, server tries new creds → auth failure
+///
+/// The fix ensures compose commands explicitly load the .env file into the command
+/// environment, overriding any stale shell-inherited variables.
+#[test]
+#[ignore]
+fn stack_reset_db_then_clean_succeeds() -> anyhow::Result<()> {
+    eprintln!("\n=== Test: stack_reset_db_then_clean_succeeds ===");
+    eprintln!("(Regression test for shell env var precedence bug)");
+    let _g = serial_guard();
+    if !docker_available() {
+        eprintln!("skipping: docker not available");
+        return Ok(());
+    }
+
+    eprintln!("→ Setting up test harness with temp directories and ports...");
+    let harness = Harness::new()?;
+
+    // Step 1: Initial bring-up with --reset-db (generates new credentials)
+    eprintln!("\n--- Phase 1: Initial stack up with --reset-db ---");
+    harness.stack_up_reset_db("docker")?;
+    harness.status()?;
+    harness.check()?;
+
+    // Step 2: Bring up again with just --clean (should use credentials from .env)
+    // This is the scenario that was failing before the fix.
+    eprintln!("\n--- Phase 2: Second stack up with --clean (no reset-db) ---");
+    harness.stack_up("docker", true)?;
+    harness.status()?;
+    harness.check()?;
+
+    // Cleanup
     harness.stack_down(true)?;
     eprintln!("✓ Test passed\n");
     Ok(())

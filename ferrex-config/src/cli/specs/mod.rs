@@ -23,7 +23,7 @@ use tokio::{
     process::Command,
     time::{Duration, Instant, sleep},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Abstract command representation so we can test without spawning processes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +45,10 @@ impl CommandSpec {
             inherit_stdio: false,
         }
     }
+
+    pub fn to_command(spec: &CommandSpec) -> Command {
+        to_command(spec)
+    }
 }
 
 pub fn to_command(spec: &CommandSpec) -> Command {
@@ -62,6 +66,40 @@ pub fn to_command(spec: &CommandSpec) -> Command {
         cmd.stderr(std::process::Stdio::inherit());
     }
     cmd
+}
+
+pub async fn spawn_spec(spec: &CommandSpec) -> Result<Option<u32>> {
+    let child = to_command(spec)
+        .spawn()
+        .with_context(|| format!("failed to spawn {}", spec.program))?;
+    Ok(child.id())
+}
+
+pub async fn run_spec(spec: &CommandSpec) -> Result<std::process::ExitStatus> {
+    let status = to_command(spec)
+        .status()
+        .await
+        .with_context(|| format!("failed to run {}", spec.program))?;
+    Ok(status)
+}
+
+pub async fn run_spec_inherit(
+    spec: &CommandSpec,
+) -> Result<std::process::ExitStatus> {
+    let mut spec = spec.clone();
+    spec.inherit_stdio = true;
+    run_spec(&spec).await
+}
+
+pub async fn run_spec_with_output(
+    spec: &CommandSpec,
+) -> Result<(std::process::ExitStatus, String)> {
+    let output = to_command(spec)
+        .output()
+        .await
+        .with_context(|| format!("failed to run {}", spec.program))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    Ok((output.status, stdout))
 }
 
 pub fn reset_db_volume_spec(project_name: &str) -> CommandSpec {
@@ -104,6 +142,33 @@ pub fn compose_base_spec(
         spec.args.push("--env-file".into());
         spec.args.push(env_file.display().to_string());
     }
+
+    // Load entire .env file into command environment to override any stale
+    // shell-inherited variables. This fixes the bug where `just` loads old
+    // .env values into shell before init regenerates credentials, and
+    // docker-compose gives shell vars precedence over --env-file.
+    if env_file.exists() {
+        match read_env_map(env_file) {
+            Ok(env_map) => {
+                debug!(
+                    env_file = %env_file.display(),
+                    var_count = env_map.len(),
+                    "Loading .env file into compose command environment"
+                );
+                for (key, value) in env_map {
+                    spec.env.push((key, value));
+                }
+            }
+            Err(err) => {
+                warn!(
+                    env_file = %env_file.display(),
+                    error = %err,
+                    "Failed to read .env file for environment override"
+                );
+            }
+        }
+    }
+
     spec.env
         .push(("COMPOSE_PROJECT_NAME".into(), project_name.into()));
     spec.env
@@ -147,6 +212,7 @@ pub fn compose_down_spec(
 pub fn compose_up_docker_spec(
     opts: &options::StackOptions,
     project_name: &str,
+    force_recreate: bool,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         opts.mode,
@@ -157,8 +223,13 @@ pub fn compose_up_docker_spec(
         project_name,
         true,
     );
-    spec.args
-        .extend(["up".into(), "-d".into(), "--build".into()]);
+    spec.args.extend(["up".into(), "-d".into()]);
+    if opts.clean {
+        spec.args.push("--build".into());
+    }
+    if force_recreate {
+        spec.args.push("--force-recreate".into());
+    }
     spec
 }
 
@@ -210,22 +281,6 @@ pub fn compose_up_services_spec(
     spec
 }
 
-pub async fn run_spec(spec: &CommandSpec) -> Result<std::process::ExitStatus> {
-    let status = to_command(spec)
-        .status()
-        .await
-        .with_context(|| format!("failed to run {}", spec.program))?;
-    Ok(status)
-}
-
-pub async fn run_spec_inherit(
-    spec: &CommandSpec,
-) -> Result<std::process::ExitStatus> {
-    let mut spec = spec.clone();
-    spec.inherit_stdio = true;
-    run_spec(&spec).await
-}
-
 pub fn compose_running_services_spec(
     mode: StackMode,
     env_file: &Path,
@@ -250,17 +305,6 @@ pub fn compose_running_services_spec(
         "status=running".into(),
     ]);
     spec
-}
-
-pub async fn run_spec_with_output(
-    spec: &CommandSpec,
-) -> Result<(std::process::ExitStatus, String)> {
-    let output = to_command(spec)
-        .output()
-        .await
-        .with_context(|| format!("failed to run {}", spec.program))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    Ok((output.status, stdout))
 }
 
 pub async fn wait_for_services(
@@ -369,13 +413,6 @@ pub fn host_db_spec(
 
     spec.inherit_stdio = true;
     Ok(spec)
-}
-
-pub async fn spawn_spec(spec: &CommandSpec) -> Result<Option<u32>> {
-    let child = to_command(spec)
-        .spawn()
-        .with_context(|| format!("failed to spawn {}", spec.program))?;
-    Ok(child.id())
 }
 
 pub async fn kill_pid(pid: u32) -> Result<()> {
@@ -502,7 +539,23 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
     }
 
     if opts.reset_db {
-        // TODO: Add a confirm prompt for this
+        // Confirmation prompt for destructive operation
+        if !opts.init_non_interactive && !opts.skip_confirmation {
+            let auto_confirm =
+                std::env::var("FERREX_INIT_AUTO_CONFIRM").is_ok();
+            if !auto_confirm {
+                use dialoguer::{Confirm, console::Term};
+                let confirmed = Confirm::new()
+                    .with_prompt(
+                        "WARNING: This will delete the database volume and all data. Continue?"
+                    )
+                    .default(false)
+                    .interact_on(&Term::stderr())?;
+                if !confirmed {
+                    bail!("Database reset cancelled by user");
+                }
+            }
+        }
         info!("Resetting Database Volume!");
         let reset = reset_db_volume_spec(&project_name);
         let _ = run_spec(&reset).await?;
@@ -510,7 +563,7 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
 
     let (host_server_pid, pid_file) = match opts.server_mode {
         ServerMode::Docker => {
-            let up = compose_up_docker_spec(opts, &project_name);
+            let up = compose_up_docker_spec(opts, &project_name, opts.reset_db);
             // Capture output for better error reporting
             let status = run_spec_inherit(&up).await?;
             if !status.success() {

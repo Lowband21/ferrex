@@ -36,6 +36,7 @@ ferrex-core = { path = "../ferrex-core" }
 tempfile.workspace = true
 tokio.workspace = true
 regex.workspace = true
+urlencoding = "2.1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }

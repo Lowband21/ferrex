@@ -45,7 +45,7 @@ up *args: ensure-installed
     ferrex-init stack up {{ args }}
 
 [no-cd]
-down args='--env-file=".env" --mode="local" --profile="release" --wild="auto" --clean': ensure-installed
+down *args='--clean': ensure-installed
     ferrex-init stack down {{ args }}
 
 [no-cd]

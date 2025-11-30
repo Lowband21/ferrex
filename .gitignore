@@ -28,6 +28,7 @@ out/
 dist-windows/
 build-windows/lib/
 build-windows/bin/
+*.pid
 
 # Logs
 *.log

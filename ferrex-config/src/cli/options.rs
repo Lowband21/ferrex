@@ -22,6 +22,8 @@ pub struct StackOptions {
     pub force_init: bool,
     pub project_name_override: Option<String>,
     pub tailscale_serve: bool,
+    /// Skip confirmation prompts for destructive operations (--yes flag).
+    pub skip_confirmation: bool,
 }
 
 impl Default for StackOptions {
@@ -41,6 +43,7 @@ impl Default for StackOptions {
             force_init: false,
             project_name_override: None,
             tailscale_serve: false,
+            skip_confirmation: false,
         }
     }
 }

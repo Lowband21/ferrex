@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::bail;
+use tracing::{error, info, warn};
+
 use crate::cli::options;
 
 /// Derive a stable compose project name from the env file location.
@@ -53,16 +56,38 @@ pub fn host_pid_file_path(env_file: &Path, project_name: &str) -> PathBuf {
 }
 
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
+    match std::env::var("WORKSPACE_ROOT") {
+        Ok(root) => PathBuf::from(root),
+        Err(_) => match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(err) => {
+                error!(
+                    "Failed to get current working dir. Check permissions and that path still exists. Error: {:#?}",
+                    err
+                );
+                warn!("Defaulting to path from '.'");
+                PathBuf::from(".")
+            }
+        },
+    }
 }
 
 pub fn compose_root() -> PathBuf {
-    if let Ok(root) = std::env::var("FERREX_COMPOSE_ROOT") {
-        PathBuf::from(root)
-    } else {
-        workspace_root()
+    match std::env::var("FERREX_COMPOSE_ROOT") {
+        Ok(root) => {
+            info!(
+                "Loaded compose root folder from FERREX_COMPOSE_ROOT as {}",
+                root
+            );
+            PathBuf::from(root)
+        }
+        Err(_) => {
+            let workspace_root = workspace_root();
+            info!(
+                "FERREX_COMPOSE_ROOT not found, defaulting to workspace root at {:#?}.",
+                workspace_root
+            );
+            workspace_root
+        }
     }
 }

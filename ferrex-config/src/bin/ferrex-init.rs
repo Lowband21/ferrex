@@ -251,6 +251,12 @@ enum StackAction {
             help = "Run tailscale serve after stack up (tailscale mode only)"
         )]
         tailscale_serve: Option<bool>,
+        #[arg(
+            long,
+            short = 'y',
+            help = "Skip confirmation prompts for destructive operations"
+        )]
+        yes: bool,
     },
     Down {
         #[arg(long, default_value = ".env")]
@@ -536,11 +542,15 @@ async fn main() -> Result<()> {
                 force_init,
                 project,
                 tailscale_serve,
+                yes,
             } => {
                 let tailscale_serve = tailscale_serve.unwrap_or(match mode {
                     StackModeArg::Tailscale => true,
                     StackModeArg::Local => false,
                 });
+
+                let clean = if reset_db { true } else { clean };
+                let force_init = if reset_db { true } else { force_init };
 
                 let opts = StackOptions {
                     env_file,
@@ -557,6 +567,7 @@ async fn main() -> Result<()> {
                     init_advanced: advanced,
                     force_init,
                     tailscale_serve,
+                    skip_confirmation: yes,
                 };
                 let outcome = stack_up(&opts).await?;
                 print_stack_outcome("up", &outcome);
@@ -755,6 +766,7 @@ fn stack_opts_from_args(
         project_name_override: project,
         tailscale_serve,
         init_tui: true,
+        skip_confirmation: false,
     }
 }
 

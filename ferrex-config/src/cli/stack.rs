@@ -66,9 +66,28 @@ mod tests {
 
     #[test]
     fn placeholder_detection_matches_patterns() {
-        let s = "DATABASE_PASSWORD=changeme_pw";
+        // Placeholder in a recognized secret field should trigger
+        let s = "DATABASE_APP_PASSWORD=changeme_pw";
         assert!(env_contents_have_placeholders(s));
+
+        // Placeholder in AUTH fields should trigger
+        let s = "AUTH_PASSWORD_PEPPER=changeme_test";
+        assert!(env_contents_have_placeholders(s));
+
+        // MEDIA_ROOT with /change/me placeholder should trigger
+        let s = "MEDIA_ROOT=/change/me";
+        assert!(env_contents_have_placeholders(s));
+
+        // Non-placeholder values should not trigger
         let s = "MEDIA_ROOT=/data\nCUSTOM=ok";
+        assert!(!env_contents_have_placeholders(s));
+
+        // Placeholder-like values in non-secret fields should NOT trigger
+        let s = "CUSTOM_FIELD=changeme_ignored";
+        assert!(!env_contents_have_placeholders(s));
+
+        // Comments with placeholder patterns should NOT trigger
+        let s = "# changeme_comment\nDATABASE_APP_PASSWORD=real_password";
         assert!(!env_contents_have_placeholders(s));
     }
 
@@ -88,13 +107,14 @@ mod tests {
             project_name_override: None,
             tailscale_serve: false,
             init_tui: false,
+            skip_confirmation: false,
         }
     }
 
     #[test]
     fn compose_up_docker_spec_includes_files_and_envs() {
         let opts = sample_opts();
-        let spec = compose_up_docker_spec(&opts, "ferrex-test");
+        let spec = compose_up_docker_spec(&opts, "ferrex-test", false);
         assert_eq!(spec.program, "docker");
         assert!(spec.args.starts_with(&["compose".into(), "-f".into(),]));
         assert!(
@@ -103,7 +123,14 @@ mod tests {
         );
         assert!(spec.args.contains(&"--env-file".into()));
         assert!(spec.args.contains(&"up".into()));
-        assert!(spec.args.contains(&"--build".into()));
+        assert!(
+            !spec.args.contains(&"--build".into()),
+            "--build should not be included when clean is false"
+        );
+        assert!(
+            !spec.args.contains(&"--force-recreate".into()),
+            "force-recreate should not be included when false"
+        );
 
         let env: HashMap<_, _> = spec.env.iter().cloned().collect();
         assert_eq!(
@@ -113,6 +140,27 @@ mod tests {
         assert_eq!(env.get("FERREX_BUILD_PROFILE"), Some(&"release".into()));
         assert_eq!(env.get("FERREX_ENABLE_WILD"), Some(&"1".into()));
         assert_eq!(env.get("RUST_LOG"), Some(&"info".into()));
+    }
+
+    #[test]
+    fn compose_up_docker_spec_includes_build_when_clean() {
+        let mut opts = sample_opts();
+        opts.clean = true;
+        let spec = compose_up_docker_spec(&opts, "ferrex-test", false);
+        assert!(
+            spec.args.contains(&"--build".into()),
+            "--build should be included when clean is true"
+        );
+    }
+
+    #[test]
+    fn compose_up_docker_spec_force_recreate_when_reset_db() {
+        let opts = sample_opts();
+        let spec = compose_up_docker_spec(&opts, "ferrex-test", true);
+        assert!(
+            spec.args.contains(&"--force-recreate".into()),
+            "force-recreate should be included when reset_db is true"
+        );
     }
 
     #[test]
