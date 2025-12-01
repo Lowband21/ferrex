@@ -45,12 +45,16 @@ use crate::{
         },
     },
     infra::{
+        constants::layout::calculations::ScaledLayout,
+        design_tokens::{ScalingContext, SizeProvider},
         repository::{
             EpisodeYoke, MovieYoke, SeasonYoke, SeriesYoke,
             accessor::{Accessor, ReadOnly},
             yoke_cache::YokeCache,
         },
-        shader_widgets::background::state::BackgroundShaderState,
+        shader_widgets::{
+            background::state::BackgroundShaderState, poster::PosterInstanceKey,
+        },
     },
 };
 
@@ -85,8 +89,17 @@ pub struct UIDomainState {
     pub loading: bool,
     pub error_message: Option<String>,
     pub window_size: iced::Size,
+
+    // UI scaling state
+    /// Composable scaling context (user preference, system DPI, accessibility)
+    pub scaling_context: ScalingContext,
+    /// Pre-computed scaled token values (fonts, spacing, icons, animations)
+    pub size_provider: SizeProvider,
+    /// Pre-computed scaled layout dimensions for virtual grids/carousels
+    pub scaled_layout: ScaledLayout,
+
     pub expanded_shows: HashSet<String>,
-    pub hovered_media_id: Option<Uuid>,
+    pub hovered_media_id: Option<PosterInstanceKey>,
 
     pub theme_color_cache: parking_lot::RwLock<HashMap<Uuid, iced::Color>>,
 
@@ -134,8 +147,8 @@ pub struct UIDomainState {
     pub carousel_focus: CarouselFocus,
 
     // Poster menu open state (single target for now)
-    pub poster_menu_open: Option<Uuid>,
-    pub poster_menu_states: HashMap<Uuid, PosterMenuState>,
+    pub poster_menu_open: Option<PosterInstanceKey>,
+    pub poster_menu_states: HashMap<PosterInstanceKey, PosterMenuState>,
 }
 
 impl UIDomainState {}

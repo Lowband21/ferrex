@@ -282,6 +282,11 @@ pub fn update_settings_ui(
         SettingsUiMessage::AutoLoginToggled(_result) => {
                 DomainUpdateResult::task(Task::none())
             }
+        SettingsUiMessage::SetUserScale(user_scale) => {
+                DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                    SettingsMessage::SetUserScale(user_scale),
+                )))
+            }
         SettingsUiMessage::LoadDevices => {
                 DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                     SettingsMessage::LoadDevices,

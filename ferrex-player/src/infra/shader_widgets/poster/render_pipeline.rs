@@ -1,10 +1,8 @@
 use crate::infra::shader_widgets::poster::{
     Instant, PosterFace,
+    animation::{self, PosterAnimationType, calculate_animation_state},
     batch_state::{self, PosterInstance},
-    animation::{
-        self, PosterAnimationType, calculate_animation_state,
-    },
-    font_atlas::{pack_title, pack_meta},
+    font_atlas::{pack_meta, pack_title},
 };
 
 use iced::{Color, Point, Rectangle, wgpu};
@@ -481,12 +479,10 @@ pub(crate) fn create_batch_instance(
     let [prog_r, prog_g, prog_b, _] = progress_color.into_linear();
 
     // Pack title and meta text for GPU
-    let (title_chars, title_len) = title
-        .map(|t| pack_title(t))
-        .unwrap_or(([0xFFFFFFFF; 6], 0));
-    let (meta_chars, meta_len) = meta
-        .map(|m| pack_meta(m))
-        .unwrap_or(([0xFFFFFFFF; 4], 0));
+    let (title_chars, title_len) =
+        title.map(|t| pack_title(t)).unwrap_or(([0xFFFFFFFF; 6], 0));
+    let (meta_chars, meta_len) =
+        meta.map(|m| pack_meta(m)).unwrap_or(([0xFFFFFFFF; 4], 0));
 
     PosterInstance {
         position_and_size: [
@@ -621,7 +617,7 @@ pub fn create_placeholder_instance(
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer: 0,
         _pad_atlas_layer: [0, 0, 0],
-        title_chars: [0xFFFFFFFF; 6],  // No text for placeholder
+        title_chars: [0xFFFFFFFF; 6], // No text for placeholder
         meta_chars: [0xFFFFFFFF; 4],
         text_params: [0.0, 0.0, 0.0, 0.0],
     }

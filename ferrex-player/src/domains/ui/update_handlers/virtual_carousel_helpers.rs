@@ -45,11 +45,13 @@ pub fn init_all_tab_virtual_carousels(state: &mut State) {
                     CarouselKey::LibrarySeries(lib_id.to_uuid())
                 }
             };
+            let scale = state.domains.ui.state.scaled_layout.scale;
             state.domains.ui.state.carousel_registry.ensure_default(
                 key.clone(),
                 total,
                 width,
                 CarouselConfig::poster_defaults(),
+                scale,
             );
 
             // Restore saved scroll position state (actual scroll_to happens in separate function)

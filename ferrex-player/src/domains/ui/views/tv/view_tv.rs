@@ -16,7 +16,9 @@ use crate::{
             widgets::image_for::image_for,
         },
     },
-    infra::shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
+    infra::shader_widgets::poster::{
+        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+    },
     media_card,
     state::State,
 };
@@ -47,6 +49,9 @@ pub fn view_series_detail<'a>(
     state: &'a State,
     series_id: SeriesID,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
+
     // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
     let series_uuid = series_id.to_uuid();
     let series_yoke_arc = match state
@@ -85,11 +90,11 @@ pub fn view_series_detail<'a>(
                     return container(
                         column![
                             text("Media Not Found")
-                                .size(24)
+                                .size(fonts.title)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
                             Space::new().height(10),
                             text("Repository error:")
-                                .size(16)
+                                .size(fonts.body)
                                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
                         ]
                         .spacing(10)
@@ -129,7 +134,7 @@ pub fn view_series_detail<'a>(
     // Title
     details = details.push(
         text(series.title().to_string())
-            .size(32)
+            .size(fonts.display)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
@@ -148,11 +153,14 @@ pub fn view_series_detail<'a>(
         poster = poster.theme_color(color);
     }
     let poster_id = media_id.to_uuid();
+    let instance_key = PosterInstanceKey::standalone(poster_id);
     let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&poster_id)
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
     {
         (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
         (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
@@ -239,7 +247,7 @@ pub fn view_series_detail<'a>(
             .sum();
         details = details.push(
             text(format!("{} Seasons • {} Episodes", season_count, total_eps))
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
     }
@@ -248,7 +256,7 @@ pub fn view_series_detail<'a>(
     if let Some(rating) = rating {
         details = details.push(
             text(format!("★ {:.1}", rating))
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::ACCENT_BLUE),
         );
     }
@@ -270,7 +278,7 @@ pub fn view_series_detail<'a>(
         details = details.push(
             container(
                 text(desc.to_string())
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             )
             .width(Length::Fill)
@@ -284,7 +292,7 @@ pub fn view_series_detail<'a>(
     {
         details = details.push(
             text(format!("Genres: {}", series_details.genres().join(", ")))
-                .size(14)
+                .size(fonts.caption)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
     }
@@ -347,6 +355,8 @@ pub fn view_series_detail<'a>(
                     })
                 },
                 false,
+                fonts,
+                scaled_layout,
             );
             content = content.push(section);
         }
@@ -396,6 +406,9 @@ pub fn view_season_detail<'a>(
     _series_id: &'a SeriesID,
     season_id: &'a SeasonID,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
+
     // Resolve season yoke via UI cache with lazy fetch
     let season_uuid = season_id.to_uuid();
     let season_yoke_arc = match state
@@ -432,11 +445,11 @@ pub fn view_season_detail<'a>(
                 return container(
                     column![
                         text("Media Not Found")
-                            .size(24)
+                            .size(fonts.title)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                         Space::new().height(10),
                         text("Repository error:")
-                            .size(16)
+                            .size(fonts.body)
                             .color(theme::MediaServerTheme::TEXT_SUBDUED),
                     ]
                     .spacing(10)
@@ -479,11 +492,18 @@ pub fn view_season_detail<'a>(
         poster = poster.theme_color(color);
     }
     let poster_id = season.id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&poster_id)
+    let season_instance_key = PosterInstanceKey::standalone(poster_id);
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&season_instance_key)
     {
         (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&season_instance_key)
+    {
         (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
@@ -506,14 +526,14 @@ pub fn view_season_detail<'a>(
     };
     details = details.push(
         text(title)
-            .size(32)
+            .size(fonts.display)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
     let episode_count = season.num_episodes();
     details = details.push(
         text(format!("{} Episodes", episode_count))
-            .size(16)
+            .size(fonts.body)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     );
 
@@ -544,7 +564,7 @@ pub fn view_season_detail<'a>(
         details = details.push(
             container(
                 text(desc.to_string())
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             )
             .width(Length::Fill)
@@ -620,6 +640,8 @@ pub fn view_season_detail<'a>(
                     })
                 },
                 false,
+                fonts,
+                scaled_layout,
             );
             content = content.push(ep_section);
         }
@@ -669,6 +691,8 @@ pub fn view_episode_detail<'a>(
     state: &'a State,
     episode_id: &'a EpisodeID,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     // Try to get episode yoke from cache or fetch on-demand
     let ep_uuid = episode_id.to_uuid();
     let episode_yoke_arc =
@@ -700,11 +724,11 @@ pub fn view_episode_detail<'a>(
                     return container(
                         column![
                             text("Media Not Found")
-                                .size(24)
+                                .size(fonts.title)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
                             Space::new().height(10),
                             text("Repository error:")
-                                .size(16)
+                                .size(fonts.body)
                                 .color(theme::MediaServerTheme::TEXT_SUBDUED),
                         ]
                         .spacing(10)
@@ -741,11 +765,18 @@ pub fn view_episode_detail<'a>(
         .height(Length::Fixed(360.0))
         .priority(Priority::Visible);
     let poster_id = episode.id.to_uuid();
-    let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&poster_id)
+    let episode_instance_key = PosterInstanceKey::standalone(poster_id);
+    let (face, rotation_override) = if let Some(menu_state) = state
+        .domains
+        .ui
+        .state
+        .poster_menu_states
+        .get(&episode_instance_key)
     {
         (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&episode_instance_key)
+    {
         (PosterFace::Back, Some(PI))
     } else {
         (PosterFace::Front, None)
@@ -781,7 +812,7 @@ pub fn view_episode_detail<'a>(
     let title = ep_name.unwrap_or_else(|| format!("Episode {}", ep_number));
     details = details.push(
         text(format!("S{:02}E{:02}: {}", season_number, ep_number, title))
-            .size(28)
+            .size(fonts.title_lg)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
@@ -798,7 +829,7 @@ pub fn view_episode_detail<'a>(
     if !info_parts.is_empty() {
         details = details.push(
             text(info_parts.join(" • "))
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
     }
@@ -826,7 +857,7 @@ pub fn view_episode_detail<'a>(
         details = details.push(
             container(
                 text(desc.to_string())
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             )
             .width(Length::Fill)

@@ -409,11 +409,13 @@ pub fn handle_view_series(
             };
             let key = CarouselKey::ShowSeasons(series_id.to_uuid());
             let config = CarouselConfig::poster_defaults();
+            let scale = state.domains.ui.state.scaled_layout.scale;
             state.domains.ui.state.carousel_registry.ensure_default(
                 key,
                 total_seasons,
                 state.window_size.width.max(1.0),
                 config,
+                scale,
             );
         }
 
@@ -598,11 +600,13 @@ pub fn handle_view_season(
             };
             let key = CarouselKey::SeasonEpisodes(season.id().to_uuid());
             let config = CarouselConfig::episode_defaults();
+            let scale = state.domains.ui.state.scaled_layout.scale;
             state.domains.ui.state.carousel_registry.ensure_default(
                 key,
                 total_eps,
                 state.window_size.width.max(1.0),
                 config,
+                scale,
             );
         }
 

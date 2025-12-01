@@ -27,6 +27,7 @@ use iced::{
     profiling::function
 )]
 pub fn view_credential_entry<'a>(
+    state: &'a crate::state::State,
     user: &'a User,
     input_type: &'a CredentialType,
     input: &'a SecureCredential,
@@ -36,6 +37,7 @@ pub fn view_credential_entry<'a>(
     attempts_remaining: Option<u8>,
     loading: bool,
 ) -> Element<'a, DomainMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
     let mut content = column![
         // User info
         container(
@@ -61,7 +63,7 @@ pub fn view_credential_entry<'a>(
         .height(Length::Fixed(80.0))
         .align_y(iced::alignment::Vertical::Center),
         spacing(),
-        title(&user.display_name),
+        title(&user.display_name, fonts.title_lg),
         text(format!("@{}", user.username))
             .size(16)
             .style(|theme: &Theme| {
@@ -77,7 +79,7 @@ pub fn view_credential_entry<'a>(
 
     // Error message
     if let Some(err) = error {
-        content = content.push(error_message(err));
+        content = content.push(error_message(err, fonts.caption));
         content = content.push(Space::new().height(Length::Fixed(12.0)));
     }
 
@@ -168,9 +170,9 @@ pub fn view_credential_entry<'a>(
         || (matches!(input_type, CredentialType::Pin { .. })
             && input.len() != 4)
     {
-        primary_button(submit_label)
+        primary_button(submit_label, fonts.body)
     } else {
-        primary_button(submit_label)
+        primary_button(submit_label, fonts.body)
             .on_press(DomainMessage::Auth(auth::AuthMessage::SubmitCredential))
     };
 
@@ -180,7 +182,7 @@ pub fn view_credential_entry<'a>(
 
     // Back button
     content = content.push(
-        secondary_button("Back")
+        secondary_button("Back", fonts.body)
             .on_press(DomainMessage::Auth(auth::AuthMessage::Back)),
     );
 
@@ -198,6 +200,7 @@ pub fn view_credential_entry<'a>(
     profiling::function
 )]
 pub fn view_pre_auth_login<'a>(
+    state: &'a crate::state::State,
     username: &'a str,
     password: &'a SecureCredential,
     show_password: bool,
@@ -205,10 +208,11 @@ pub fn view_pre_auth_login<'a>(
     error: Option<&'a str>,
     loading: bool,
 ) -> Element<'a, DomainMessage> {
-    let mut content = column![title("Sign in"), spacing(),];
+    let fonts = &state.domains.ui.state.size_provider.font;
+    let mut content = column![title("Sign in", fonts.title_lg), spacing(),];
 
     if let Some(err) = error {
-        content = content.push(error_message(err));
+        content = content.push(error_message(err, fonts.caption));
         content = content.push(Space::new().height(Length::Fixed(12.0)));
     }
 
@@ -267,9 +271,9 @@ pub fn view_pre_auth_login<'a>(
     // Submit button
     let submit_label = if loading { "Signing in..." } else { "Sign In" };
     let submit_button = if loading {
-        primary_button(submit_label)
+        primary_button(submit_label, fonts.body)
     } else {
-        primary_button(submit_label)
+        primary_button(submit_label, fonts.body)
             .on_press(DomainMessage::Auth(auth::AuthMessage::PreAuthSubmit))
     };
 

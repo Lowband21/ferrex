@@ -32,6 +32,8 @@ use crate::{
         ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
+        constants::layout::calculations::ScaledLayout,
+        design_tokens::{ScalingContext, SizeProvider},
         repository::{
             accessor::{Accessor, ReadOnly, ReadWrite},
             repository::MediaRepo,
@@ -162,6 +164,12 @@ impl State {
             loading: false,
             error_message: None,
             window_size: iced::Size::new(1280.0, 720.0),
+
+            // UI scaling - start with default context (all scales at 1.0)
+            scaling_context: ScalingContext::default(),
+            size_provider: SizeProvider::default(),
+            scaled_layout: ScaledLayout::default(),
+
             expanded_shows: HashSet::new(),
             hovered_media_id: None,
             theme_color_cache: RwLock::new(HashMap::new()),

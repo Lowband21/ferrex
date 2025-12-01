@@ -104,6 +104,9 @@ pub fn update_settings(
         SettingsMessage::AutoLoginToggled(result) => {
             preferences::handle_auto_login_toggled(state, result)
         }
+        SettingsMessage::SetUserScale(user_scale) => {
+            preferences::handle_set_user_scale(state, user_scale)
+        }
 
         // Profile
         SettingsMessage::UpdateDisplayName(name) => {

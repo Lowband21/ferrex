@@ -25,9 +25,9 @@ pub use crate::types::watch::{
 // device/auth abstractions will hook in once stabilized.
 pub use crate::domain::users::rbac::{Permission, Role, UserPermissions};
 pub use crate::domain::users::user::{
-    AuthToken, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
+    AuthToken, LoginRequest, PlaybackPreferences, PlaybackQuality,
     RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference,
-    UiPreferences, User, UserPreferences,
+    UiPreferences, User, UserPreferences, UserScale,
 };
 
 pub use crate::types::media_events::{

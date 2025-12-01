@@ -52,6 +52,7 @@ pub fn view(
     if !state.is_authenticated {
         log::debug!("[Auth] Not authenticated, showing auth view");
         let auth_content = view_auth(
+            state,
             &state.domains.auth.state.auth_flow,
             state.domains.auth.state.user_permissions.as_ref(),
         )

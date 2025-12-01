@@ -26,9 +26,31 @@ use iced_wgpu::{
 
 use wgpu::util::DeviceExt;
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::Instant,
+};
 
 use bytemuck::{Pod, Zeroable};
+
+// Thread-safe storage for text scale, bridging UI state to GPU renderer.
+// Default is 1.0f32 (0x3F800000 in IEEE 754).
+static TEXT_SCALE_BITS: AtomicU32 = AtomicU32::new(0x3F800000);
+
+/// Set the text scale factor for poster title/meta rendering.
+/// Called from settings when the user changes their scale preference.
+pub fn set_text_scale(scale: f32) {
+    TEXT_SCALE_BITS.store(scale.to_bits(), Ordering::Relaxed);
+}
+
+/// Get the current text scale factor.
+fn get_text_scale() -> f32 {
+    f32::from_bits(TEXT_SCALE_BITS.load(Ordering::Relaxed))
+}
 
 /// GPU instance payload for a poster primitive.
 #[repr(C)]
@@ -46,9 +68,9 @@ pub struct PosterInstance {
     pub _pad_atlas_layer: [i32; 3],
     // Text data: packed character indices for title and meta
     // Each u32 contains 4 character indices (8 bits each)
-    pub title_chars: [u32; 6],    // 24 chars max
-    pub meta_chars: [u32; 4],     // 16 chars max
-    pub text_params: [f32; 4],    // [title_len, meta_len, reserved, reserved]
+    pub title_chars: [u32; 6], // 24 chars max
+    pub meta_chars: [u32; 4],  // 16 chars max
+    pub text_params: [f32; 4], // [title_len, meta_len, reserved, reserved]
 }
 
 /// Batched primitive metadata captured during encoding.
@@ -85,7 +107,9 @@ struct Globals {
     atlas_is_srgb: f32,
     // Whether the render target is sRGB (GPU will encode on write)
     target_is_srgb: f32,
-    _padding: [f32; 5],
+    // UI text scale for poster title/meta (from unified scaling infrastructure)
+    text_scale: f32,
+    _padding: [f32; 4],
 }
 
 /// Handles instanced draws for batched posters.
@@ -175,17 +199,17 @@ impl PosterBatchState {
             wgpu::VertexAttribute {
                 offset: 144,
                 shader_location: 9,
-                format: wgpu::VertexFormat::Uint32x4,  // title_chars[0..4]
+                format: wgpu::VertexFormat::Uint32x4, // title_chars[0..4]
             },
             wgpu::VertexAttribute {
                 offset: 160,
                 shader_location: 10,
-                format: wgpu::VertexFormat::Uint32x2,  // title_chars[4..6]
+                format: wgpu::VertexFormat::Uint32x2, // title_chars[4..6]
             },
             wgpu::VertexAttribute {
                 offset: 168,
                 shader_location: 11,
-                format: wgpu::VertexFormat::Uint32x4,  // meta_chars
+                format: wgpu::VertexFormat::Uint32x4, // meta_chars
             },
             wgpu::VertexAttribute {
                 offset: 184,
@@ -814,7 +838,8 @@ impl PrimitiveBatchState for PosterBatchState {
                     PosterAnimationType::None
                         | PosterAnimationType::PlaceholderSunken
                 ) {
-                    let entry = self.loaded_times.entry((pending.id, pending.face));
+                    let entry =
+                        self.loaded_times.entry((pending.id, pending.face));
 
                     load_time_ref = match (pending.load_time, entry) {
                         (Some(explicit), _) => Some(explicit),
@@ -894,8 +919,7 @@ impl PrimitiveBatchState for PosterBatchState {
                 // with the last known group (placeholders use invalid UVs).
                 let Some(group_arc) = bind_group.or_else(|| last_group.clone())
                 else {
-                    // No group at all this frame: instance was already enqueued.
-                    // It will be skipped in render until a group becomes available in a later frame.
+                    // No group available this frame (can happen on first frame before any textures load)
                     continue;
                 };
 
@@ -923,6 +947,34 @@ impl PrimitiveBatchState for PosterBatchState {
             for pending in std::mem::take(&mut self.pending_primitives) {
                 self.push_placeholder(&pending);
             }
+        }
+
+        // Validate group counts match instance counts (debug assertion)
+        #[cfg(debug_assertions)]
+        {
+            let front_instance_count = self.pending_instances_front.len();
+            let back_instance_count = self.pending_instances_back.len();
+            let front_group_total: usize = self
+                .groups_front
+                .iter()
+                .map(|g| g.instance_count as usize)
+                .sum();
+            let back_group_total: usize = self
+                .groups_back
+                .iter()
+                .map(|g| g.instance_count as usize)
+                .sum();
+
+            debug_assert_eq!(
+                front_instance_count, front_group_total,
+                "Front instance count mismatch: {} instances vs {} in groups",
+                front_instance_count, front_group_total
+            );
+            debug_assert_eq!(
+                back_instance_count, back_group_total,
+                "Back instance count mismatch: {} instances vs {} in groups",
+                back_instance_count, back_group_total
+            );
         }
 
         for instance in self.pending_instances_front.drain(..) {
@@ -980,7 +1032,8 @@ impl PrimitiveBatchState for PosterBatchState {
             scale_factor: context.scale_factor,
             atlas_is_srgb,
             target_is_srgb,
-            _padding: [0.0; 5],
+            text_scale: get_text_scale(),
+            _padding: [0.0; 4],
         };
 
         if self.globals_buffer.is_none() {
@@ -1177,8 +1230,25 @@ impl PrimitiveBatchState for PosterBatchState {
         &self,
         render_pass: &mut wgpu::RenderPass<'_>,
         context: &mut RenderContext<'_>,
-        range: std::ops::Range<u32>,
+        _range: std::ops::Range<u32>,
     ) {
+        // IMPORTANT: We ignore the range parameter and always render ALL instances.
+        //
+        // When a poster flips from front to back face, the front buffer indices shift
+        // (what was at index 8 might now be at index 7). Iced's batching system splits
+        // rendering into passes with different scissor rects based on instance indices.
+        // If we used the range, flipped posters would cause adjacent carousels' first
+        // posters to render in the wrong scissor region and get clipped.
+        //
+        // By rendering all instances every pass, each instance renders at its correct
+        // position and the scissor rect naturally clips what's off-screen.
+        let front_count = self.instance_manager_front.instance_count() as u32;
+        let back_count = self.instance_manager_back.instance_count() as u32;
+
+        // Use full range for both faces
+        let full_front_range = 0..front_count;
+        let full_back_range = 0..back_count;
+
         Self::render_face(
             &self.instance_manager_front,
             &self.groups_front,
@@ -1186,7 +1256,7 @@ impl PrimitiveBatchState for PosterBatchState {
             self.globals_bind_group.as_ref(),
             render_pass,
             context,
-            range.clone(),
+            full_front_range,
         );
 
         Self::render_face(
@@ -1196,11 +1266,12 @@ impl PrimitiveBatchState for PosterBatchState {
             self.globals_bind_group.as_ref(),
             render_pass,
             context,
-            range.clone(),
+            full_back_range,
         );
 
-        // Render text (title/meta) after poster faces
-        self.render_text(render_pass, context, range);
+        // Render text (title/meta) after poster faces - also use full range
+        let total_count = front_count + back_count;
+        self.render_text(render_pass, context, 0..total_count);
     }
 
     fn trim(&mut self) {
@@ -1318,7 +1389,12 @@ impl PosterBatchState {
         render_pass.set_bind_group(0, globals_bind_group, &[]);
 
         let scissor = context.scissor_rect;
-        render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
+        render_pass.set_scissor_rect(
+            scissor.x,
+            scissor.y,
+            scissor.width,
+            scissor.height,
+        );
 
         // Render text for FRONT instances
         if let Some(buffer) = self.instance_manager_front.buffer() {

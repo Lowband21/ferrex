@@ -19,18 +19,27 @@ macro_rules! virtual_reference_grid {
         pub fn $name<'a>(
             item_index: &[Uuid],
             grid_state: &super::VirtualGridState,
-            hovered_media_id: &Option<Uuid>,
-            on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> $crate::domains::ui::messages::UiMessage + 'a,
+            hovered_media_id: &Option<
+                $crate::infra::shader_widgets::poster::PosterInstanceKey,
+            >,
+            on_scroll: impl Fn(
+                iced::widget::scrollable::Viewport,
+            ) -> $crate::domains::ui::messages::UiMessage
+            + 'a,
             state: &'a $crate::state::State,
         ) -> iced::Element<'a, $crate::domains::ui::messages::UiMessage> {
             let len = item_index.len();
             //let reference_grid = iced::debug::time($profiler_label);
             use iced::{
-                widget::{column, container, row, scrollable, text, Space},
                 Length,
+                widget::{Space, column, container, row, scrollable, text},
             };
             // Profile grid rendering operations
-            #[cfg(any(feature = "profile-with-puffin", feature = "profile-with-tracy", feature = "profile-with-tracing"))]
+            #[cfg(any(
+                feature = "profile-with-puffin",
+                feature = "profile-with-tracy",
+                feature = "profile-with-tracing"
+            ))]
             profiling::scope!("View::Grid::Total");
 
             // let is_scrolling = if let Some(last_scroll) = state.domains.ui.state.last_scroll_time {
@@ -49,14 +58,16 @@ macro_rules! virtual_reference_grid {
                 log::trace!("First item in grid");
             } */
 
-            use $crate::infra::constants::{grid, poster};
+            use $crate::infra::constants::grid;
 
             // Don't add spacing here since ROW_HEIGHT already includes spacing
             let mut content = column![].spacing(0).width(Length::Fill);
 
             // Defensive check: ensure we have valid columns
             if grid_state.columns == 0 {
-                log::error!("Grid state has 0 columns! This should never happen.");
+                log::error!(
+                    "Grid state has 0 columns! This should never happen."
+                );
                 return container(text("Grid configuration error"))
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -75,7 +86,8 @@ macro_rules! virtual_reference_grid {
             let start_row = grid_state.visible_range.start / grid_state.columns;
             if start_row > 0 {
                 let spacer_height = start_row as f32 * grid_state.row_height;
-                content = content.push(Space::new().height(Length::Fixed(spacer_height)));
+                content = content
+                    .push(Space::new().height(Length::Fixed(spacer_height)));
             }
 
             let watch_state_opt = state.domains.media.state.get_watch_state();
@@ -88,44 +100,43 @@ macro_rules! virtual_reference_grid {
 
                 for col in 0..grid_state.columns {
                     let item_idx = row_idx * grid_state.columns + col;
-                    if item_idx < len && item_idx < grid_state.visible_range.end {
+                    if item_idx < len && item_idx < grid_state.visible_range.end
+                    {
                         //let item = &items[item_idx];
 
-                        let is_visible =
-                            item_idx >= grid_state.visible_range.start
-                                && item_idx < grid_state.visible_range.end;
+                        let is_visible = item_idx
+                            >= grid_state.visible_range.start
+                            && item_idx < grid_state.visible_range.end;
 
                         let item_id = item_index[item_idx];
 
-                        let item_watch_progress = if let Some(watch_state) = watch_state_opt {
-                            watch_state.get_watch_progress(&item_id)
-                        } else {
-                            None
-                        };
+                        let item_watch_progress =
+                            if let Some(watch_state) = watch_state_opt {
+                                watch_state.get_watch_progress(&item_id)
+                            } else {
+                                None
+                            };
 
                         // Call the card creation function with visibility info
+                        // Grid views don't have carousel context, so pass None
                         let card = $create_card(
                             item_id,
                             hovered_media_id,
                             is_visible,
                             item_watch_progress,
+                            None, // No carousel key for grid views
                             state,
                         );
 
-                        // Use container dimensions that account for animation padding
-                        let (container_width, _container_height) =
-                            $crate::infra::constants::calculations::get_container_dimensions(1.0);
+                        // Use container dimensions from scaled layout
+                        let scaled_layout =
+                            &state.domains.ui.state.scaled_layout;
+                        let container_width = scaled_layout.container_width;
 
-                        // Debug logging to verify container dimensions
-                        //if item_idx == 0 {
-                        //    log::info!("Grid container dimensions: {}x{} (includes animation padding)", container_width, container_height);
-                        //    log::info!("Base poster size: {}x{}", poster::BASE_WIDTH, poster::BASE_HEIGHT);
-                        //    log::info!("Horizontal animation padding per side: {}", $crate::constants::animation::calculate_horizontal_padding(poster::BASE_WIDTH));
-                        //}
-
-                        // Use total card height with animation padding
-                        let total_card_height = poster::TOTAL_CARD_HEIGHT
-                            + 2.0 * $crate::infra::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
+                        // Use total card height with animation padding from scaled layout
+                        let total_card_height = scaled_layout
+                            .poster_total_height
+                            + 2.0 * scaled_layout.v_animation_padding;
 
                         row_content = row_content.push(
                             container(card)
@@ -135,29 +146,38 @@ macro_rules! virtual_reference_grid {
                         );
                     } else if item_idx < len {
                         // Placeholder for items not yet visible but in the row
-                        let (container_width, _) =
-                            $crate::infra::constants::calculations::get_container_dimensions(1.0);
-                        let total_card_height = poster::TOTAL_CARD_HEIGHT
-                            + 2.0 * $crate::infra::constants::animation::calculate_vertical_padding(poster::BASE_HEIGHT);
+                        let scaled_layout =
+                            &state.domains.ui.state.scaled_layout;
+                        let container_width = scaled_layout.container_width;
+                        let total_card_height = scaled_layout
+                            .poster_total_height
+                            + 2.0 * scaled_layout.v_animation_padding;
                         row_content = row_content.push(
-                            container(Space::new().width(
-                                container_width,
-                            ).height(
-                                total_card_height,
-                            ))
-                            .style($crate::domains::ui::theme::Container::Default.style()),
+                            container(
+                                Space::new()
+                                    .width(container_width)
+                                    .height(total_card_height),
+                            )
+                            .style(
+                                $crate::domains::ui::theme::Container::Default
+                                    .style(),
+                            ),
                         );
                     }
                 }
 
                 // Fill remaining columns with empty space only if this is the last row and it's incomplete
                 if row_idx == total_rows - 1 {
-                    let items_in_last_row = len - (row_idx * grid_state.columns);
+                    let items_in_last_row =
+                        len - (row_idx * grid_state.columns);
                     if items_in_last_row < grid_state.columns {
+                        let scaled_layout =
+                            &state.domains.ui.state.scaled_layout;
                         for _ in items_in_last_row..grid_state.columns {
-                            let (container_width, _) =
-                                $crate::infra::constants::calculations::get_container_dimensions(1.0);
-                            row_content = row_content.push(Space::new().width(container_width));
+                            row_content = row_content.push(
+                                Space::new()
+                                    .width(scaled_layout.container_width),
+                            );
                         }
                     }
                 }
@@ -175,8 +195,10 @@ macro_rules! virtual_reference_grid {
             // Add spacer for rows below viewport
             let remaining_rows = total_rows.saturating_sub(end_row);
             if remaining_rows > 0 {
-                let spacer_height = remaining_rows as f32 * grid_state.row_height;
-                content = content.push(Space::new().height(Length::Fixed(spacer_height)));
+                let spacer_height =
+                    remaining_rows as f32 * grid_state.row_height;
+                content = content
+                    .push(Space::new().height(Length::Fixed(spacer_height)));
             }
 
             // Add some padding at the bottom
@@ -200,9 +222,7 @@ macro_rules! virtual_reference_grid {
             .direction(scrollable::Direction::Vertical(
                 scrollable::Scrollbar::default(),
             ))
-            .on_scroll(move |viewport| {
-                on_scroll(viewport)
-            })
+            .on_scroll(move |viewport| on_scroll(viewport))
             .width(Length::Fill)
             .height(Length::Fill)
             .style($crate::domains::ui::theme::Scrollable::style());
@@ -442,9 +462,11 @@ macro_rules! media_card {
 
         // Wrap the image element with precise hover detection
         // This tracks only the actual poster bounds, not the container
+        let hover_instance_key = $crate::infra::shader_widgets::poster::PosterInstanceKey::standalone($image_key);
+        let unhover_instance_key = hover_instance_key.clone();
         let image_with_hover = iced::widget::mouse_area(image_element)
-            .on_enter($crate::domains::ui::interaction_ui::InteractionMessage::MediaHovered($image_key).into())
-            .on_exit($crate::domains::ui::interaction_ui::InteractionMessage::MediaUnhovered($image_key).into());
+            .on_enter($crate::domains::ui::interaction_ui::InteractionMessage::MediaHovered(hover_instance_key).into())
+            .on_exit($crate::domains::ui::interaction_ui::InteractionMessage::MediaUnhovered(unhover_instance_key).into());
 
         // Create the poster element.
         // Navigation/click handling is driven by the image_for widget's `on_click`;

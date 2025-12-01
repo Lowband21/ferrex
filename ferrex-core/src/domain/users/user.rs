@@ -222,7 +222,8 @@ pub struct UiPreferences {
     /// Show poster titles on hover only
     pub poster_titles_on_hover: bool,
     /// Grid size preference for library view
-    pub library_grid_size: GridSize,
+    #[serde(alias = "library_grid_size")]
+    pub library_user_scale: UserScale,
     /// Show recently watched section
     pub show_recently_watched: bool,
     /// Show continue watching section
@@ -235,7 +236,7 @@ impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             poster_titles_on_hover: false,
-            library_grid_size: GridSize::Medium,
+            library_user_scale: UserScale::Medium,
             show_recently_watched: true,
             show_continue_watching: true,
             sidebar_collapsed: false,
@@ -244,19 +245,39 @@ impl Default for UiPreferences {
 }
 
 /// Grid size options for library view
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum GridSize {
-    Small,  // More items per row
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum UserScale {
+    Small, // More items per row
+    #[default]
     Medium, // Default
-    Large,  // Fewer items per row
+    Large, // Fewer items per row
+    Custom(f32),
 }
 
-impl std::fmt::Display for GridSize {
+impl std::fmt::Display for UserScale {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Small => write!(f, "Small"),
             Self::Medium => write!(f, "Medium"),
             Self::Large => write!(f, "Large"),
+            Self::Custom(scale) => write!(f, "Scale: {:#?}", scale),
+        }
+    }
+}
+
+impl UserScale {
+    /// Get the UI scale factor for this grid size
+    ///
+    /// - Small: 0.8 (more items visible, denser layout)
+    /// - Medium: 1.0 (default scale)
+    /// - Large: 1.2 (fewer items visible, larger posters)
+    /// - Custom: X (Arbitrary size scaling factor)
+    pub fn scale_factor(&self) -> f32 {
+        match self {
+            Self::Small => 0.7,
+            Self::Medium => 1.0,
+            Self::Large => 1.3,
+            Self::Custom(scale) => *scale,
         }
     }
 }

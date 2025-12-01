@@ -21,6 +21,7 @@ use ferrex_core::player_prelude::{
 const GENRES_PER_ROW: usize = 4;
 
 pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
     let ui_state = &state.domains.ui.state;
 
     let mut genre_groups = column![].spacing(8).width(Length::Fill);
@@ -31,16 +32,17 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
         for genre in chunk {
             let is_selected =
                 ui_state.selected_genres.iter().any(|x| x == genre);
-            let chip = button(text(genre.to_string()).size(14).color(
-                if is_selected {
-                    MediaServerTheme::TEXT_PRIMARY
-                } else {
-                    MediaServerTheme::TEXT_SECONDARY
-                },
-            ))
-            .padding([6, 12])
-            .style(filter_chip_style(is_selected))
-            .on_press(LibraryUiMessage::ToggleFilterGenre(*genre).into());
+            let chip =
+                button(text(genre.to_string()).size(fonts.caption).color(
+                    if is_selected {
+                        MediaServerTheme::TEXT_PRIMARY
+                    } else {
+                        MediaServerTheme::TEXT_SECONDARY
+                    },
+                ))
+                .padding([6, 12])
+                .style(filter_chip_style(is_selected))
+                .on_press(LibraryUiMessage::ToggleFilterGenre(*genre).into());
             chunk_row = chunk_row.push(chip);
         }
 
@@ -78,21 +80,21 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let selects = row![
         column![
             text("Decade")
-                .size(12)
+                .size(fonts.small)
                 .color(MediaServerTheme::TEXT_SECONDARY),
             decade_pick,
         ]
         .spacing(4),
         column![
             text("Resolution")
-                .size(12)
+                .size(fonts.small)
                 .color(MediaServerTheme::TEXT_SECONDARY),
             res_pick,
         ]
         .spacing(4),
         column![
             text("Watch Status")
-                .size(12)
+                .size(fonts.small)
                 .color(MediaServerTheme::TEXT_SECONDARY),
             ws_pick,
         ]
@@ -113,7 +115,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
     let header = row![
         text("Filters")
-            .size(18)
+            .size(fonts.body_lg)
             .color(MediaServerTheme::TEXT_PRIMARY),
         Space::new().width(Length::Fill),
         button(icon_text_with_size(Icon::X, 16.0))
@@ -127,7 +129,7 @@ pub fn library_filter_panel<'a>(state: &'a State) -> Element<'a, UiMessage> {
         header,
         column![
             text("Genres")
-                .size(12)
+                .size(fonts.small)
                 .color(MediaServerTheme::TEXT_SECONDARY),
             genre_groups,
         ]

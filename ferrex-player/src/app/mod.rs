@@ -37,6 +37,7 @@ pub fn application(
             // - Otherwise, render an empty container until window id is set.
             if !state.is_authenticated {
                 crate::domains::ui::views::auth::view_auth(
+                    state,
                     &state.domains.auth.state.auth_flow,
                     state.domains.auth.state.user_permissions.as_ref(),
                 )
@@ -107,6 +108,7 @@ pub fn application_with_presets(
         } else {
             if !state.is_authenticated {
                 crate::domains::ui::views::auth::view_auth(
+                    state,
                     &state.domains.auth.state.auth_flow,
                     state.domains.auth.state.user_permissions.as_ref(),
                 )

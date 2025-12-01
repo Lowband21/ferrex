@@ -6,6 +6,7 @@ use super::components::{
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::ui::views::carousel::CarouselState;
+use crate::state::State;
 use ferrex_core::player_prelude::UserPermissions;
 
 use iced::{
@@ -98,21 +99,24 @@ pub enum UserCarouselMessage {
 
 /// Shows the user selection carousel
 pub fn view_user_carousel<'a>(
-    state: &'a UserCarouselState,
+    app_state: &'a State,
+    carousel_state: &'a UserCarouselState,
     user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
-    let mut content = column![title("Select User"), spacing(),];
+    let fonts = &app_state.domains.ui.state.size_provider.font;
+
+    let mut content = column![title("Select User", fonts.title_lg), spacing(),];
 
     // Show error if present
-    if let Some(error) = &state.error {
-        content = content.push(error_message(error));
+    if let Some(error) = &carousel_state.error {
+        content = content.push(error_message(error, fonts.caption));
         content = content.push(spacing());
     }
 
     // User carousel
-    if state.users.is_empty() {
+    if carousel_state.users.is_empty() {
         content = content.push(
-            container(text("No users found").size(16).style(
+            container(text("No users found").size(fonts.body).style(
                 |theme: &Theme| text::Style {
                     color: Some(
                         theme.extended_palette().background.strong.text,
@@ -124,7 +128,13 @@ pub fn view_user_carousel<'a>(
             .align_x(iced::alignment::Horizontal::Center),
         );
     } else {
-        let carousel = create_user_carousel(state, user_permissions);
+        let carousel = create_user_carousel(
+            carousel_state,
+            user_permissions,
+            fonts.display,
+            fonts.caption,
+            fonts.subtitle,
+        );
         content = content.push(carousel);
     }
 
@@ -134,10 +144,13 @@ pub fn view_user_carousel<'a>(
 
 /// View for user selection that creates its own carousel state
 pub fn view_user_selection_with_carousel<'a>(
+    app_state: &'a State,
     users: &'a Vec<crate::domains::auth::dto::UserListItemDto>,
     error: Option<&'a str>,
     user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
+    let fonts = &app_state.domains.ui.state.size_provider.font;
+
     // Create a static carousel state that will persist between renders
     static CAROUSEL_STATE: std::sync::OnceLock<
         std::sync::Mutex<CarouselState>,
@@ -158,18 +171,18 @@ pub fn view_user_selection_with_carousel<'a>(
         state.set_total_items(users.len());
     }
 
-    let mut content = column![title("Select User"), spacing(),];
+    let mut content = column![title("Select User", fonts.title_lg), spacing(),];
 
     // Show error if present
     if let Some(err) = error {
-        content = content.push(error_message(err));
+        content = content.push(error_message(err, fonts.caption));
         content = content.push(spacing());
     }
 
     // User carousel
     if users.is_empty() {
         content = content.push(
-            container(text("No users found").size(16).style(
+            container(text("No users found").size(fonts.body).style(
                 |theme: &Theme| text::Style {
                     color: Some(
                         theme.extended_palette().background.strong.text,
@@ -181,7 +194,13 @@ pub fn view_user_selection_with_carousel<'a>(
             .align_x(iced::alignment::Horizontal::Center),
         );
     } else {
-        let carousel = create_user_carousel_from_data(users, user_permissions);
+        let carousel = create_user_carousel_from_data(
+            users,
+            user_permissions,
+            fonts.display,
+            fonts.caption,
+            fonts.subtitle,
+        );
         content = content.push(carousel);
     }
 
@@ -193,6 +212,9 @@ pub fn view_user_selection_with_carousel<'a>(
 fn create_user_carousel<'a>(
     state: &'a UserCarouselState,
     user_permissions: Option<&'a UserPermissions>,
+    plus_icon_size: f32,
+    name_size: f32,
+    nav_icon_size: f32,
 ) -> Element<'a, DomainMessage> {
     let carousel_state = &state.carousel_state;
 
@@ -201,7 +223,7 @@ fn create_user_carousel<'a>(
         button(
             text(icon_char(Icon::ChevronLeft))
                 .font(lucide_font())
-                .size(20),
+                .size(nav_icon_size),
         )
         .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(
             state.users[0].id,
@@ -212,7 +234,7 @@ fn create_user_carousel<'a>(
         button(
             text(icon_char(Icon::ChevronLeft))
                 .font(lucide_font())
-                .size(20),
+                .size(nav_icon_size),
         )
         .padding(8)
         .style(button_style_disabled)
@@ -222,7 +244,7 @@ fn create_user_carousel<'a>(
         button(
             text(icon_char(Icon::ChevronRight))
                 .font(lucide_font())
-                .size(20),
+                .size(nav_icon_size),
         )
         .on_press(DomainMessage::Auth(auth::AuthMessage::SelectUser(
             state.users[0].id,
@@ -233,7 +255,7 @@ fn create_user_carousel<'a>(
         button(
             text(icon_char(Icon::ChevronRight))
                 .font(lucide_font())
-                .size(20),
+                .size(nav_icon_size),
         )
         .padding(8)
         .style(button_style_disabled)
@@ -249,7 +271,12 @@ fn create_user_carousel<'a>(
     for (index, user) in state.users.iter().enumerate() {
         if visible_range.contains(&index) {
             let is_selected = state.selected_index == Some(index);
-            user_row = user_row.push(create_user_avatar(user, is_selected));
+            user_row = user_row.push(create_user_avatar(
+                user,
+                is_selected,
+                plus_icon_size,
+                name_size,
+            ));
         }
     }
 
@@ -258,7 +285,8 @@ fn create_user_carousel<'a>(
         && (permissions.has_role("admin")
             || permissions.has_permission("users:create"))
     {
-        user_row = user_row.push(create_add_user_button());
+        user_row =
+            user_row.push(create_add_user_button(plus_icon_size, name_size));
     }
 
     // Create scrollable carousel
@@ -299,13 +327,21 @@ fn create_user_carousel<'a>(
 fn create_user_carousel_from_data<'a>(
     users: &'a Vec<crate::domains::auth::dto::UserListItemDto>,
     user_permissions: Option<&'a UserPermissions>,
+    plus_icon_size: f32,
+    name_size: f32,
+    _nav_icon_size: f32,
 ) -> Element<'a, DomainMessage> {
     // Create a simple carousel without state management
     let mut user_row = row![].spacing(20.0);
 
     // Add all user items (no virtualization for simplicity)
     for user in users.iter() {
-        user_row = user_row.push(create_user_avatar(user, false));
+        user_row = user_row.push(create_user_avatar(
+            user,
+            false,
+            plus_icon_size,
+            name_size,
+        ));
     }
 
     // Add "Add User" button for admins
@@ -313,7 +349,8 @@ fn create_user_carousel_from_data<'a>(
         && (permissions.has_role("admin")
             || permissions.has_permission("users:create"))
     {
-        user_row = user_row.push(create_add_user_button());
+        user_row =
+            user_row.push(create_add_user_button(plus_icon_size, name_size));
     }
 
     // Create scrollable carousel
@@ -335,11 +372,14 @@ fn create_user_carousel_from_data<'a>(
 fn create_user_avatar<'a>(
     user: &'a crate::domains::auth::dto::UserListItemDto,
     is_selected: bool,
+    avatar_size: f32,
+    name_size: f32,
 ) -> Element<'a, DomainMessage> {
     let avatar_content = column![
         // Avatar circle
         container(
-            text(user.display_name.chars().next().unwrap_or('U')).size(32)
+            text(user.display_name.chars().next().unwrap_or('U'))
+                .size(avatar_size)
         )
         .width(Length::Fixed(80.0))
         .height(Length::Fixed(80.0))
@@ -364,7 +404,7 @@ fn create_user_avatar<'a>(
         Space::new().height(8),
         // User name
         text(&user.display_name)
-            .size(14)
+            .size(name_size)
             .align_x(iced::alignment::Horizontal::Center)
             .style(move |theme: &Theme| text::Style {
                 color: Some(if is_selected {
@@ -445,11 +485,16 @@ fn button_style_disabled(
 }
 
 /// Create an "Add User" button for admin users
-fn create_add_user_button<'a>() -> Element<'a, DomainMessage> {
+fn create_add_user_button<'a>(
+    icon_size: f32,
+    label_size: f32,
+) -> Element<'a, DomainMessage> {
     let add_user_content = column![
         // Add icon circle
-        container(text("+").size(48).style(|theme: &Theme| text::Style {
-            color: Some(theme.extended_palette().primary.base.text),
+        container(text("+").size(icon_size).style(|theme: &Theme| {
+            text::Style {
+                color: Some(theme.extended_palette().primary.base.text),
+            }
         }))
         .width(Length::Fixed(80.0))
         .height(Length::Fixed(80.0))
@@ -470,7 +515,7 @@ fn create_add_user_button<'a>() -> Element<'a, DomainMessage> {
         Space::new().height(8),
         // "Add User" text
         text("Add User")
-            .size(14)
+            .size(label_size)
             .align_x(iced::alignment::Horizontal::Center)
             .style(|theme: &Theme| text::Style {
                 color: Some(theme.extended_palette().background.base.text),

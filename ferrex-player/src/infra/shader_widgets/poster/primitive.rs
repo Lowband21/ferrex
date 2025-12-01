@@ -1,7 +1,7 @@
 use crate::infra::shader_widgets::poster::{
     PosterFace,
-    batch_state::{PendingPrimitive, PosterBatchState},
     animation::{AnimatedPosterBounds, PosterAnimationType},
+    batch_state::{PendingPrimitive, PosterBatchState},
 };
 
 use iced::{

@@ -56,6 +56,8 @@ pub fn view_user_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
     profiling::function
 )]
 fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     // RUS-136: Get current user from auth domain state instead of auth_manager
     let current_user: Option<User> = match &state.domains.auth.state.auth_flow {
         crate::domains::auth::types::AuthenticationFlow::Authenticated {
@@ -72,9 +74,9 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         row![
             button(
                 row![
-                    icon_text(Icon::ChevronLeft).size(20),
+                    icon_text(Icon::ChevronLeft).size(fonts.subtitle),
                     Space::new().width(5),
-                    text("Back").size(16)
+                    text("Back").size(fonts.body)
                 ]
                 .align_y(iced::Alignment::Center)
             )
@@ -83,13 +85,13 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
             .padding([8, 16]),
             Space::new().width(20),
             text("User Settings")
-                .size(28)
+                .size(fonts.title_lg)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
             Space::new().width(Length::Fill),
             if let Some(user) = &current_user {
                 Element::new(
                     text(format!("Logged in as: {}", user.display_name))
-                        .size(16)
+                        .size(fonts.body)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 )
             } else {
@@ -103,6 +105,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let sections = column![
         // Profile section
         create_settings_section(
+            fonts,
             "👤",
             "Profile",
             "Manage your display name and avatar",
@@ -110,6 +113,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         ),
         // Preferences section
         create_settings_section(
+            fonts,
             "⚙️",
             "Preferences",
             "Customize your viewing experience",
@@ -117,6 +121,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         ),
         // Security section
         create_settings_section(
+            fonts,
             "🔐",
             "Security",
             "Change PIN, manage devices",
@@ -124,6 +129,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         ),
         // Device management section
         create_settings_section(
+            fonts,
             "📱",
             "Device Management",
             "View and manage trusted devices",
@@ -133,14 +139,14 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         container(
             column![
                 row![
-                    text("🎨").size(24),
+                    text("🎨").size(fonts.title),
                     Space::new().width(15),
                     column![
                         text("Dark Mode")
-                            .size(18)
+                            .size(fonts.body_lg)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                         text("Toggle between light and dark themes")
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
                     .spacing(5),
@@ -158,14 +164,14 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
         container(
             column![
                 row![
-                    text("🔓").size(24),
+                    text("🔓").size(fonts.title),
                     Space::new().width(15),
                     column![
                         text("Auto-login")
-                            .size(18)
+                            .size(fonts.body_lg)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                         text("Automatically log in on this device")
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     ]
                     .spacing(5),
@@ -189,7 +195,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
             row![
                 icon_text(Icon::LogOut),
                 Space::new().width(10),
-                text("Logout").size(16),
+                text("Logout").size(fonts.body),
             ]
             .align_y(iced::Alignment::Center),
         )
@@ -217,6 +223,7 @@ fn view_main_settings<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
 /// Helper to create a settings section card
 fn create_settings_section<'a>(
+    fonts: &'a crate::infra::design_tokens::FontTokens,
     icon: &'a str,
     title: &'a str,
     description: &'a str,
@@ -225,20 +232,20 @@ fn create_settings_section<'a>(
     button(
         container(
             row![
-                text(icon).size(24),
+                text(icon).size(fonts.title),
                 Space::new().width(15),
                 column![
                     text(title)
-                        .size(18)
+                        .size(fonts.body_lg)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     text(description)
-                        .size(14)
+                        .size(fonts.caption)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 ]
                 .spacing(5),
                 Space::new().width(Length::Fill),
                 icon_text(Icon::ChevronRight)
-                    .size(20)
+                    .size(fonts.subtitle)
                     .color(theme::MediaServerTheme::TEXT_SUBDUED),
             ]
             .align_y(iced::Alignment::Center),

@@ -6,7 +6,7 @@ struct Globals {
     scale_factor: f32,
     atlas_is_srgb: f32,
     target_is_srgb: f32,
-    _padding3: f32,
+    text_scale: f32,
     _padding4: vec4<f32>,
 }
 

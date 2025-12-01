@@ -4,8 +4,8 @@
 //! with anti-aliasing, providing better performance than Canvas-based approaches
 //! and greater flexibility in rendering and functionality.
 
-pub mod font_atlas;
 pub mod animation;
+pub mod font_atlas;
 pub mod render_pipeline;
 pub mod state;
 
@@ -13,7 +13,8 @@ mod batch_state;
 mod primitive;
 mod program;
 
-pub use state::PosterFace;
+pub use batch_state::set_text_scale;
+pub use state::{PosterFace, PosterInstanceKey};
 
 use crate::{
     domains::ui::messages::UiMessage,
@@ -37,7 +38,7 @@ fn ensure_batch_registration() {
 /// A widget that displays a poster with rounded corners using GPU shaders
 pub struct Poster {
     id: u64,
-    menu_target: Option<uuid::Uuid>,
+    menu_target: Option<PosterInstanceKey>,
     handle: Handle,
     radius: f32,
     width: Length,
@@ -66,14 +67,15 @@ impl Poster {
     /// Creates a new rounded image with a single handle
     pub fn new(handle: Handle, id: Option<u64>) -> Self {
         use crate::domains::ui::theme::MediaServerTheme;
+        use crate::infra::constants::layout::poster;
 
         Self {
             id: id.unwrap_or(0),
             menu_target: None,
             handle,
-            radius: crate::infra::constants::layout::poster::CORNER_RADIUS,
-            width: Length::Fixed(200.0),
-            height: Length::Fixed(300.0),
+            radius: poster::CORNER_RADIUS,
+            width: Length::Fixed(poster::BASE_WIDTH),
+            height: Length::Fixed(poster::BASE_HEIGHT),
             animation: PosterAnimationType::None,
             load_time: None,
             opacity: 1.0,
@@ -188,9 +190,9 @@ impl Poster {
         self
     }
 
-    /// Sets the menu target (media id) for right-click toggles
-    pub fn menu_target(mut self, media_id: uuid::Uuid) -> Self {
-        self.menu_target = Some(media_id);
+    /// Sets the menu target (instance key) for right-click toggles
+    pub fn menu_target(mut self, instance_key: PosterInstanceKey) -> Self {
+        self.menu_target = Some(instance_key);
         self
     }
 

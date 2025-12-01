@@ -14,13 +14,13 @@ use crate::{
         handle_websocket::websocket_handler,
         media::{
             handle_image::serve_image_handler,
-            handle_refresh_images::refresh_images_handler,
             handle_library::{
                 create_library_handler, delete_library_handler,
                 get_libraries_with_media_handler, get_library_handler,
                 get_library_media_handler, get_library_sorted_indices_handler,
                 post_library_filtered_indices_handler, update_library_handler,
             },
+            handle_refresh_images::refresh_images_handler,
             handle_search::query_media_handler,
         },
         scan::handle_scan::{

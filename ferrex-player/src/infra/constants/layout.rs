@@ -268,7 +268,126 @@ pub mod header {
 
 /// Helper functions for layout calculations
 pub mod calculations {
-    use super::{grid, poster};
+    use super::{animation, grid, poster};
+
+    /// Runtime-computed layout values for current scale
+    ///
+    /// This struct pre-computes all scale-dependent layout values to avoid
+    /// repeated calculations during rendering. It's the single source of truth
+    /// for scaled dimensions used by virtual grids, carousels, and cards.
+    ///
+    /// ## Usage
+    ///
+    /// Create once when scale changes and store in UI state:
+    /// ```rust,ignore
+    /// state.domains.ui.state.scaled_layout = ScaledLayout::new(scale);
+    /// ```
+    ///
+    /// Access during rendering:
+    /// ```rust,ignore
+    /// let width = state.domains.ui.state.scaled_layout.poster_width;
+    /// ```
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct ScaledLayout {
+        /// The scale factor used to compute these values
+        pub scale: f32,
+        /// Scaled poster width (BASE_WIDTH * scale)
+        pub poster_width: f32,
+        /// Scaled poster height (BASE_HEIGHT * scale)
+        pub poster_height: f32,
+        /// Scaled text area height below poster
+        pub text_area_height: f32,
+        /// Total card height including text area (poster + text + gap)
+        pub poster_total_height: f32,
+        /// Row height for virtual grid (includes animation padding)
+        pub row_height: f32,
+        /// Container width including animation padding
+        pub container_width: f32,
+        /// Container height including animation padding
+        pub container_height: f32,
+        /// Horizontal animation padding (for hover effects)
+        pub h_animation_padding: f32,
+        /// Vertical animation padding (for hover effects)
+        pub v_animation_padding: f32,
+        /// Scaled corner radius for poster cards
+        pub corner_radius: f32,
+    }
+
+    impl ScaledLayout {
+        /// Create a new ScaledLayout for the given scale factor
+        pub fn new(scale: f32) -> Self {
+            let poster_width = poster::BASE_WIDTH * scale;
+            let poster_height = poster::BASE_HEIGHT * scale;
+            let text_area_height = poster::TEXT_AREA_HEIGHT * scale;
+            let corner_radius = poster::CORNER_RADIUS * scale;
+
+            // Match the TOTAL_CARD_HEIGHT calculation: BASE_HEIGHT + TEXT_AREA_HEIGHT + 5.0
+            let poster_total_height =
+                poster_height + text_area_height + 5.0 * scale;
+
+            // Calculate animation padding for hover effects
+            let h_padding =
+                animation::calculate_horizontal_padding(poster_width);
+            let v_padding =
+                animation::calculate_vertical_padding(poster_height);
+
+            // Container dimensions include animation padding on both sides
+            let container_width = poster_width + h_padding * 2.0;
+            let container_height = poster_height + v_padding * 2.0;
+
+            // Row height matches virtual_grid::ROW_HEIGHT formula but scaled
+            let row_height = poster_total_height + 2.0 * v_padding;
+
+            Self {
+                scale,
+                poster_width,
+                poster_height,
+                text_area_height,
+                poster_total_height,
+                row_height,
+                container_width,
+                container_height,
+                h_animation_padding: h_padding,
+                v_animation_padding: v_padding,
+                corner_radius,
+            }
+        }
+
+        /// Create layout at default scale (1.0)
+        pub fn default_scale() -> Self {
+            Self::new(1.0)
+        }
+
+        /// Get effective spacing for grid (currently not scaled)
+        pub fn grid_spacing(&self) -> f32 {
+            grid::EFFECTIVE_SPACING
+        }
+
+        /// Get minimum viewport padding (currently not scaled)
+        pub fn min_viewport_padding(&self) -> f32 {
+            grid::MIN_VIEWPORT_PADDING
+        }
+
+        /// Calculate columns for a given viewport width using this layout's scale
+        pub fn calculate_columns(&self, viewport_width: f32) -> usize {
+            calculate_columns(viewport_width, self.scale)
+        }
+
+        /// Calculate grid padding for centering
+        pub fn calculate_grid_padding(
+            &self,
+            viewport_width: f32,
+            columns: usize,
+        ) -> f32 {
+            calculate_grid_padding(viewport_width, columns, self.scale)
+        }
+    }
+
+    impl Default for ScaledLayout {
+        fn default() -> Self {
+            Self::default_scale()
+        }
+    }
 
     /// Calculate the number of columns that fit in a given viewport width
     pub fn calculate_columns(viewport_width: f32, scale: f32) -> usize {

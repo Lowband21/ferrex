@@ -1,3 +1,5 @@
+use ferrex_core::player_prelude::UserScale;
+
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
     // Navigation
@@ -6,6 +8,9 @@ pub enum SettingsMessage {
     ShowSecurity,
     BackToMain,
     BackToHome,
+
+    // Preferences - UI Scale
+    SetUserScale(UserScale),
 
     // Security - Password
     ShowChangePassword,
@@ -86,6 +91,7 @@ impl SettingsMessage {
             // Preferences
             Self::ToggleAutoLogin(_) => "Settings::ToggleAutoLogin",
             Self::AutoLoginToggled(_) => "Settings::AutoLoginToggled",
+            Self::SetUserScale(_) => "Settings::SetUserScale",
 
             // Profile
             Self::UpdateDisplayName(_) => "Settings::UpdateDisplayName",

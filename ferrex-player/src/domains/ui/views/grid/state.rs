@@ -1,5 +1,6 @@
 use iced::widget::{Id, scrollable};
 
+use crate::infra::constants::layout::calculations::ScaledLayout;
 use std::ops::Range;
 
 /// Grid-based virtual list for media cards
@@ -203,6 +204,60 @@ impl VirtualGridState {
                 self.columns
             );
             // DO NOT call calculate_visible_range() here - viewport_height may be stale
+        }
+    }
+
+    /// Update grid dimensions based on a new scale factor
+    ///
+    /// This method should be called when the UI scale changes (user preference
+    /// or system DPI). It updates row height and item width, then recalculates
+    /// columns based on the current viewport width.
+    pub fn update_for_scale(&mut self, scaled_layout: &ScaledLayout) {
+        let old_row_height = self.row_height;
+        let old_item_width = self.item_width;
+        let old_columns = self.columns;
+
+        // Update dimensions from scaled layout
+        self.row_height = scaled_layout.row_height;
+        self.item_width = scaled_layout.poster_width;
+
+        // Recalculate columns for current viewport
+        self.columns = scaled_layout.calculate_columns(self.viewport_width);
+
+        log::info!(
+            "Grid scale updated: row_height {} -> {}, item_width {} -> {}, columns {} -> {}",
+            old_row_height,
+            self.row_height,
+            old_item_width,
+            self.item_width,
+            old_columns,
+            self.columns
+        );
+
+        // Recalculate visible range with new dimensions
+        self.calculate_visible_range();
+        self.needs_refresh = true;
+    }
+
+    /// Update columns on window resize using a ScaledLayout
+    pub fn resize_with_scale(
+        &mut self,
+        width: f32,
+        scaled_layout: &ScaledLayout,
+    ) {
+        log::debug!("Resize with scale: updating columns for width {}", width);
+
+        let old_columns = self.columns;
+        self.columns = scaled_layout.calculate_columns(width);
+        self.item_width = scaled_layout.poster_width;
+        self.row_height = scaled_layout.row_height;
+
+        if old_columns != self.columns {
+            log::debug!(
+                "Columns changed from {} to {}, visible range will be updated when scrollable reports viewport",
+                old_columns,
+                self.columns
+            );
         }
     }
 }

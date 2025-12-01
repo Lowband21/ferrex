@@ -1,5 +1,6 @@
 pub mod update;
 
+use ferrex_core::player_prelude::UserScale;
 use ferrex_model::{Library, LibraryId};
 pub use update::update_settings_ui;
 
@@ -79,6 +80,7 @@ pub enum SettingsUiMessage {
     // User preferences
     ToggleAutoLogin(bool),
     AutoLoginToggled(Result<bool, String>), // Proxy for Auth::Logout
+    SetUserScale(UserScale),                // Proxy for Settings::SetUserScale
 
     // Library management proxies
     ShowLibraryForm(Option<Library>), // Proxy for Library::ShowLibraryForm
@@ -176,6 +178,7 @@ impl SettingsUiMessage {
             // User preferences
             Self::ToggleAutoLogin(_) => "UI::ToggleAutoLogin",
             Self::AutoLoginToggled(_) => "UI::AutoLoginToggled",
+            Self::SetUserScale(_) => "UI::SetUserScale",
 
             // Library management proxies
             Self::ShowLibraryForm(_) => "UI::ShowLibraryForm",
@@ -404,6 +407,9 @@ impl std::fmt::Debug for SettingsUiMessage {
             }
             SettingsUiMessage::CancelLibraryScan(library_id, scan_id) => {
                 write!(f, "UI::CancelLibraryScan({}, {})", library_id, scan_id)
+            }
+            SettingsUiMessage::SetUserScale(size) => {
+                write!(f, "UI::SetUserScale({:?})", size)
             }
         }
     }

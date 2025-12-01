@@ -4,7 +4,7 @@ use crate::{
         messages::UiMessage,
     },
     infra::shader_widgets::poster::{
-        PosterFace,
+        PosterFace, PosterInstanceKey,
         animation::{AnimatedPosterBounds, PosterAnimationType},
         ensure_batch_registration,
         primitive::PosterPrimitive,
@@ -24,7 +24,7 @@ use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct PosterProgram {
     pub id: u64,
-    pub menu_target: Option<uuid::Uuid>,
+    pub menu_target: Option<PosterInstanceKey>,
     pub handle: Handle,
     pub radius: f32,
     pub animation: PosterAnimationType,
@@ -226,7 +226,7 @@ impl Program<UiMessage> for PosterProgram {
                         // Check if we're on the backface (menu mode)
                         if self.face == PosterFace::Back {
                             // Backface menu button click detection
-                            if let Some(target) = self.menu_target
+                            if let Some(ref target) = self.menu_target
                                 && MenuButton::in_x_bounds(norm_x)
                                 && let Some(button) =
                                     MenuButton::from_position(norm_y)
@@ -239,7 +239,7 @@ impl Program<UiMessage> for PosterProgram {
                                     return Some(iced::widget::Action::publish(
                                                 UiMessage::PosterMenu(
                                                     PosterMenuMessage::ButtonClicked(
-                                                        target,
+                                                        target.clone(),
                                                         button,
                                                     ),
                                                 ),
@@ -307,14 +307,14 @@ impl Program<UiMessage> for PosterProgram {
                     }
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Right) => {
-                    if let Some(target) = self.menu_target
+                    if let Some(ref target) = self.menu_target
                         && let Some(cursor_pos) = cursor.position()
                         && bounds.contains(cursor_pos)
                     {
                         state.right_pressed_inside = true;
                         return Some(iced::widget::Action::publish(
                             UiMessage::PosterMenu(PosterMenuMessage::Start(
-                                target,
+                                target.clone(),
                             )),
                         ));
                     }
@@ -322,10 +322,10 @@ impl Program<UiMessage> for PosterProgram {
                 mouse::Event::ButtonReleased(mouse::Button::Right) => {
                     if state.right_pressed_inside {
                         state.right_pressed_inside = false;
-                        if let Some(target) = self.menu_target {
+                        if let Some(ref target) = self.menu_target {
                             return Some(iced::widget::Action::publish(
                                 UiMessage::PosterMenu(PosterMenuMessage::End(
-                                    target,
+                                    target.clone(),
                                 )),
                             ));
                         }
@@ -352,10 +352,10 @@ impl Program<UiMessage> for PosterProgram {
                     state.pressed_inside = false;
                     if state.right_pressed_inside {
                         state.right_pressed_inside = false;
-                        if let Some(target) = self.menu_target {
+                        if let Some(ref target) = self.menu_target {
                             return Some(iced::widget::Action::publish(
                                 UiMessage::PosterMenu(PosterMenuMessage::End(
-                                    target,
+                                    target.clone(),
                                 )),
                             ));
                         }

@@ -32,6 +32,8 @@ use uuid::Uuid;
     profiling::function
 )]
 fn library_loading() -> Element<'static, UiMessage> {
+    // Note: This function returns 'static Element, so it cannot access state.
+    // Font sizes remain hardcoded here as semantic tokens require state access.
     container(
         column![
             text("Media Library")
@@ -63,6 +65,8 @@ fn library_loading() -> Element<'static, UiMessage> {
     profiling::function
 )]
 pub fn view_library(state: &State) -> Element<'_, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     // debug timing disabled in tests to simplify renderer unification
 
     if state.loading {
@@ -98,11 +102,11 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                     container(
                         column![
                             text("No media files found")
-                                .size(18)
+                                .size(fonts.body_lg)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
                             Space::new().height(20),
                             text("Click 'Scan Library' to find media files")
-                                .size(14)
+                                .size(fonts.caption)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
                         ]
                         .align_x(iced::Alignment::Center)

@@ -87,16 +87,26 @@ impl CarouselRegistry {
     }
 
     /// Convenience helper for creating a default state given basic parameters.
+    ///
+    /// The `scale` parameter is used to scale card dimensions when the config
+    /// specifies a `card_size`. Pass `1.0` for unscaled or use the effective
+    /// scale from `ScalingContext`.
     pub fn ensure_default(
         &mut self,
         key: CarouselKey,
         total_items: usize,
         viewport_width: f32,
         config: CarouselConfig,
+        scale: f32,
     ) -> &mut VirtualCarouselState {
         // Create if missing
         let state = self.states.entry(key).or_insert_with(|| {
-            VirtualCarouselState::new(total_items, viewport_width, config)
+            VirtualCarouselState::new(
+                total_items,
+                viewport_width,
+                config,
+                scale,
+            )
         });
 
         // Always bring dynamic properties up to date even if the state already exists.

@@ -25,15 +25,16 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
 
     state.window_size = size;
 
-    // Update all tab grids with new window width
+    // Update all tab grids with new window width using current scale
     // This only updates column count - the scrollable widget will report actual viewport dimensions
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
     for tab_id in state.tab_manager.tab_ids() {
         if let Some(tab) = state.tab_manager.get_tab_mut(tab_id)
             && let Some(grid_state) = tab.grid_state_mut()
         {
-            // Use resize() which only updates columns based on width
+            // Use resize_with_scale() to ensure columns are calculated with current scale
             // The scrollable widget will report actual viewport dimensions via TabGridScrolled
-            grid_state.resize(size.width);
+            grid_state.resize_with_scale(size.width, scaled_layout);
         }
     }
 

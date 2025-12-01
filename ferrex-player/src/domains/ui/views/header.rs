@@ -34,6 +34,8 @@ use lucide_icons::Icon;
     profiling::function
 )]
 pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     match &state.domains.ui.state.view {
         ViewState::Library => {
             // New header layout: Left (Home, Back if history exists, Library tabs), Center (Search), Right (Controls)
@@ -131,7 +133,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                         row![
                             icon_text_with_size(Icon::FileScan, 16.0),
                             text(format!(" {}", active_count))
-                                .size(14)
+                                .size(fonts.caption as f32)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
                         ]
                         .spacing(6)
@@ -460,7 +462,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     // Base layer: centered title
                     container(
                         text("Admin Dashboard")
-                            .size(20)
+                            .size(fonts.subtitle as f32)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .width(Length::Fill)
@@ -546,7 +548,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .push(
                     container(
                         text("User Settings")
-                            .size(20)
+                            .size(fonts.subtitle as f32)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .width(Length::Fill)
@@ -610,7 +612,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     // Base layer: centered title
                     container(
                         text("Library Management")
-                            .size(20)
+                            .size(fonts.subtitle as f32)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .width(Length::Fill)
@@ -671,7 +673,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .push(
                     container(
                         text("User Management")
-                            .size(20)
+                            .size(fonts.subtitle as f32)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .width(Length::Fill)
@@ -701,14 +703,19 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
 fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {
     use crate::domains::ui::tabs::TabId;
 
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     if !state.domains.ui.state.repo_accessor.is_initialized() {
         // No libraries configured - show only curated view
         row![
-            button(container(text("Home").size(14)).center_y(Length::Fill))
-                .on_press(UiShellMessage::SelectScope(Scope::Home).into())
-                .style(theme::Button::HeaderIcon.style())
-                .padding([0, 16])
-                .height(HEIGHT),
+            button(
+                container(text("Home").size(fonts.caption))
+                    .center_y(Length::Fill)
+            )
+            .on_press(UiShellMessage::SelectScope(Scope::Home).into())
+            .style(theme::Button::HeaderIcon.style())
+            .padding([0, 16])
+            .height(HEIGHT),
         ]
         .into()
     } else {
@@ -725,12 +732,15 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
         // Add Home tab - shows curated collections from all libraries
         tabs_vec.push(
-            button(container(text("Home").size(14)).center_y(Length::Fill))
-                .on_press(UiShellMessage::SelectScope(Scope::Home).into())
-                .style(all_button_style)
-                .padding([0, 16])
-                .height(HEIGHT)
-                .into(),
+            button(
+                container(text("Home").size(fonts.caption))
+                    .center_y(Length::Fill),
+            )
+            .on_press(UiShellMessage::SelectScope(Scope::Home).into())
+            .style(all_button_style)
+            .padding([0, 16])
+            .height(HEIGHT)
+            .into(),
         );
 
         // Add individual library tabs
@@ -758,14 +768,17 @@ fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {
             };
 
             tabs_vec.push(
-                button(container(text(name).size(14)).center_y(Length::Fill))
-                    .on_press(
-                        UiShellMessage::SelectScope(Scope::Library(id)).into(),
-                    )
-                    .style(button_style)
-                    .padding([0, 16])
-                    .height(HEIGHT)
-                    .into(),
+                button(
+                    container(text(name).size(fonts.caption))
+                        .center_y(Length::Fill),
+                )
+                .on_press(
+                    UiShellMessage::SelectScope(Scope::Library(id)).into(),
+                )
+                .style(button_style)
+                .padding([0, 16])
+                .height(HEIGHT)
+                .into(),
             );
         }
         row(tabs_vec).into()

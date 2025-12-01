@@ -1,3 +1,4 @@
+use ferrex_core::player_prelude::UserScale;
 use serde::{Deserialize, Serialize};
 
 /// Settings domain state
@@ -86,12 +87,26 @@ pub struct ProfileState {
 }
 
 /// Preferences state
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PreferencesState {
     pub auto_login_enabled: bool,
     pub theme: ThemePreference,
+    /// UI grid size / scale preference
+    pub user_scale: UserScale,
     pub loading: bool,
     pub error: Option<String>,
+}
+
+impl Default for PreferencesState {
+    fn default() -> Self {
+        Self {
+            auto_login_enabled: false,
+            theme: ThemePreference::default(),
+            user_scale: UserScale::Medium, // Default to medium scale
+            loading: false,
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

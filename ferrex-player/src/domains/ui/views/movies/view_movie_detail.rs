@@ -6,7 +6,9 @@ use crate::{
     },
     infra::{
         api_types::MediaDetailsOption,
-        shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
+        shader_widgets::poster::{
+            PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+        },
     },
     state::State,
 };
@@ -40,6 +42,8 @@ pub fn view_movie_detail<'a>(
     state: &'a State,
     movie_id: MovieID,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     // Borrow from UI yoke cache to satisfy lifetime 'a
     let movie_uuid = movie_id.to_uuid();
     match state.domains.ui.state.movie_yoke_cache.peek(&movie_uuid) {
@@ -82,11 +86,13 @@ pub fn view_movie_detail<'a>(
 
             // Apply poster menu face/rotation if menu is open for this media
             let poster_id = media_id.to_uuid();
+            let instance_key = PosterInstanceKey::standalone(poster_id);
             let (face, rotation_override) = if let Some(menu_state) =
-                state.domains.ui.state.poster_menu_states.get(&poster_id)
+                state.domains.ui.state.poster_menu_states.get(&instance_key)
             {
                 (menu_state.face_from_angle(), Some(menu_state.angle))
-            } else if state.domains.ui.state.poster_menu_open == Some(poster_id)
+            } else if state.domains.ui.state.poster_menu_open.as_ref()
+                == Some(&instance_key)
             {
                 (PosterFace::Back, Some(std::f32::consts::PI))
             } else {
@@ -107,7 +113,7 @@ pub fn view_movie_detail<'a>(
             // Title
             details = details.push(
                 text(movie.title.to_string())
-                    .size(32)
+                    .size(fonts.display)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             );
 
@@ -155,7 +161,7 @@ pub fn view_movie_detail<'a>(
                 if !directors.is_empty() {
                     details = details.push(
                         text(format!("Directed by {}", directors.join(", ")))
-                            .size(10)
+                            .size(fonts.micro)
                             .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     );
                 }
@@ -215,7 +221,7 @@ pub fn view_movie_detail<'a>(
             if !info_parts.is_empty() {
                 details = details.push(
                     text(info_parts.join(" • "))
-                        .size(14)
+                        .size(fonts.caption)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 );
             }
@@ -231,7 +237,7 @@ pub fn view_movie_detail<'a>(
                         .join(", ");
                     details = details.push(
                         text(genre_text)
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     );
                 }
@@ -240,11 +246,11 @@ pub fn view_movie_detail<'a>(
                 if let Some(rating) = movie_details.vote_average {
                     let mut rating_row = row![
                         text("★")
-                            .size(16)
+                            .size(fonts.body)
                             .color(theme::MediaServerTheme::WARNING),
                         Space::new().width(5),
                         text(format!("{:.1}", rating))
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY)
                     ]
                     .spacing(3)
@@ -253,7 +259,7 @@ pub fn view_movie_detail<'a>(
                     if let Some(votes) = movie_details.vote_count {
                         rating_row = rating_row.push(
                             text(format!(" ({} votes)", votes))
-                                .size(12)
+                                .size(fonts.small)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
                         );
                     }
@@ -279,9 +285,10 @@ pub fn view_movie_detail<'a>(
                 // Synopsis
                 if let Some(desc) = &movie_details.overview {
                     details = details.push(Space::new().height(20));
-                    details = details.push(text("Synopsis").size(20));
+                    details =
+                        details.push(text("Synopsis").size(fonts.subtitle));
                     details = details.push(
-                        container(text(desc.to_string()).size(14))
+                        container(text(desc.to_string()).size(fonts.caption))
                             .padding(10)
                             .width(Length::Fill),
                     );
@@ -297,10 +304,10 @@ pub fn view_movie_detail<'a>(
                         details = details.push(Space::new().height(15));
                         details = details.push(row![
                             text("Production: ")
-                                .size(14)
+                                .size(fonts.caption)
                                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
                             text(companies)
-                                .size(14)
+                                .size(fonts.caption)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
                         ]);
                     }
@@ -328,7 +335,7 @@ pub fn view_movie_detail<'a>(
                 {
                     let resolution_card = container(
                         text(format!("{}×{}", width, height))
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .padding(10)
@@ -341,10 +348,10 @@ pub fn view_movie_detail<'a>(
                 if let ArchivedOption::Some(codec) = &metadata.video_codec {
                     let video_card = container(
                         row![
-                            icon_text(Icon::Film).size(14),
+                            icon_text(Icon::Film).size(fonts.caption),
                             Space::new().width(5),
                             text(codec.to_string())
-                                .size(14)
+                                .size(fonts.caption)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
                         ]
                         .align_y(iced::Alignment::Center),
@@ -359,10 +366,10 @@ pub fn view_movie_detail<'a>(
                 if let ArchivedOption::Some(codec) = &metadata.audio_codec {
                     let audio_card = container(
                         row![
-                            icon_text(Icon::Volume2).size(14),
+                            icon_text(Icon::Volume2).size(fonts.caption),
                             Space::new().width(5),
                             text(codec.to_string())
-                                .size(14)
+                                .size(fonts.caption)
                                 .color(theme::MediaServerTheme::TEXT_PRIMARY)
                         ]
                         .align_y(iced::Alignment::Center),
@@ -378,7 +385,7 @@ pub fn view_movie_detail<'a>(
                     let mbps = bitrate.to_native() as f64 / 1_000_000.0;
                     let bitrate_card = container(
                         text(format!("{:.1} Mbps", mbps))
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .padding(10)
@@ -391,7 +398,7 @@ pub fn view_movie_detail<'a>(
                 if let ArchivedOption::Some(framerate) = metadata.framerate {
                     let fps_card = container(
                         text(format!("{:.2} fps", framerate))
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .padding(10)
@@ -405,7 +412,7 @@ pub fn view_movie_detail<'a>(
                     / (1024.0 * 1024.0 * 1024.0);
                 let size_card = container(
                     text(format!("{:.2} GB", size_gb))
-                        .size(14)
+                        .size(fonts.caption)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 )
                 .padding(10)
@@ -433,7 +440,7 @@ pub fn view_movie_detail<'a>(
 
                     let hdr_card = container(
                         text(hdr_text)
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::ACCENT_BLUE),
                     )
                     .padding(10)
@@ -446,7 +453,7 @@ pub fn view_movie_detail<'a>(
                     // Show bit depth even if not HDR
                     let bit_card = container(
                         text(format!("{}bit", bit_depth))
-                            .size(14)
+                            .size(fonts.caption)
                             .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     )
                     .padding(10)
@@ -509,11 +516,11 @@ pub fn view_movie_detail<'a>(
         _ => container(
             column![
                 text("Media Not Found")
-                    .size(24)
+                    .size(fonts.title)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(10),
                 text("Repository error: yoke not loaded.")
-                    .size(16)
+                    .size(fonts.body)
                     .color(theme::MediaServerTheme::TEXT_SUBDUED),
             ]
             .spacing(10)

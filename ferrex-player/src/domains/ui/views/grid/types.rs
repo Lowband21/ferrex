@@ -19,7 +19,7 @@ pub enum CardSize {
 }
 
 impl CardSize {
-    /// Get the width and height for this card size
+    /// Get the base width and height for this card size (unscaled)
     pub fn dimensions(&self) -> (f32, f32) {
         match self {
             CardSize::Small => (150.0, 225.0),
@@ -30,7 +30,13 @@ impl CardSize {
         }
     }
 
-    /// Get the corner radius appropriate for this size
+    /// Get scaled width and height for this card size
+    pub fn scaled_dimensions(&self, scale: f32) -> (f32, f32) {
+        let (w, h) = self.dimensions();
+        (w * scale, h * scale)
+    }
+
+    /// Get the corner radius appropriate for this size (unscaled)
     pub fn radius(&self) -> f32 {
         match self {
             CardSize::Small => 4.0,
@@ -42,6 +48,11 @@ impl CardSize {
                 (w / 200.0 * 8.0).clamp(4.0, 16.0)
             }
         }
+    }
+
+    /// Get scaled corner radius for this card size
+    pub fn scaled_radius(&self, scale: f32) -> f32 {
+        self.radius() * scale
     }
 
     /// Get appropriate text sizes for this card size

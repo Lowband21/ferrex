@@ -54,10 +54,13 @@ pub fn auth_card<'a>(
 }
 
 /// Creates a primary button with consistent styling
-pub fn primary_button<'a>(label: &'a str) -> Button<'a, DomainMessage> {
+pub fn primary_button<'a>(
+    label: &'a str,
+    font_size: f32,
+) -> Button<'a, DomainMessage> {
     button(
         text(label)
-            .size(16)
+            .size(font_size)
             .align_x(iced::alignment::Horizontal::Center),
     )
     .width(Length::Fill)
@@ -106,10 +109,13 @@ pub fn primary_button<'a>(label: &'a str) -> Button<'a, DomainMessage> {
 }
 
 /// Creates a secondary button with consistent styling
-pub fn secondary_button<'a>(label: &'a str) -> Button<'a, DomainMessage> {
+pub fn secondary_button<'a>(
+    label: &'a str,
+    font_size: f32,
+) -> Button<'a, DomainMessage> {
     button(
         text(label)
-            .size(16)
+            .size(font_size)
             .align_x(iced::alignment::Horizontal::Center),
     )
     .width(Length::Fill)
@@ -162,10 +168,17 @@ pub fn secondary_button<'a>(label: &'a str) -> Button<'a, DomainMessage> {
 }
 
 /// Creates an error message display
-pub fn error_message<'a>(error: &'a str) -> Container<'a, DomainMessage> {
-    container(text(error).size(14).style(|theme: &Theme| text::Style {
-        color: Some(theme.extended_palette().danger.base.color),
-    }))
+pub fn error_message<'a>(
+    error: &'a str,
+    font_size: f32,
+) -> Container<'a, DomainMessage> {
+    container(
+        text(error)
+            .size(font_size)
+            .style(|theme: &Theme| text::Style {
+                color: Some(theme.extended_palette().danger.base.color),
+            }),
+    )
     .width(Length::Fill)
     .padding([8, 12])
     .style(|theme: &Theme| {
@@ -183,17 +196,23 @@ pub fn error_message<'a>(error: &'a str) -> Container<'a, DomainMessage> {
 }
 
 /// Creates a title text element
-pub fn title<'a>(text_content: &'a str) -> Element<'a, DomainMessage> {
+pub fn title<'a>(
+    text_content: &'a str,
+    font_size: f32,
+) -> Element<'a, DomainMessage> {
     text(text_content)
-        .size(28)
+        .size(font_size)
         .align_x(iced::alignment::Horizontal::Center)
         .into()
 }
 
 /// Creates a subtitle text element
-pub fn subtitle<'a>(text_content: &'a str) -> Element<'a, DomainMessage> {
+pub fn subtitle<'a>(
+    text_content: &'a str,
+    font_size: f32,
+) -> Element<'a, DomainMessage> {
     text(text_content)
-        .size(16)
+        .size(font_size)
         .style(|theme: &Theme| text::Style {
             color: Some(theme.extended_palette().background.strong.text),
         })

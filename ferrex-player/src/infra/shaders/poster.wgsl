@@ -6,7 +6,7 @@ struct Globals {
     scale_factor: f32,       // 4 bytes
     atlas_is_srgb: f32,      // 4 bytes (1.0 if atlas texture is sRGB)
     target_is_srgb: f32,     // 4 bytes (1.0 if render target is sRGB)
-    _padding3: f32,          // 4 bytes padding
+    text_scale: f32,         // 4 bytes (UI text scale for poster titles)
     _padding4: vec4<f32>,    // 16 bytes padding - total struct is 96 bytes
 }
 

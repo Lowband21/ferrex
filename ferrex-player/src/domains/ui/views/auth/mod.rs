@@ -38,15 +38,16 @@ pub use user_selection::view_user_selection;
     profiling::function
 )]
 pub fn view_auth<'a>(
+    state: &'a crate::state::State,
     auth_flow: &'a AuthenticationFlow,
     user_permissions: Option<&'a UserPermissions>,
 ) -> Element<'a, DomainMessage> {
     use AuthenticationFlow::*;
 
     match auth_flow {
-        CheckingSetup => view_loading_users(), // Show loading while checking
+        CheckingSetup => view_loading_users(state), // Show loading while checking
 
-        CheckingAutoLogin => view_loading_users(), // Show loading while checking auto-login
+        CheckingAutoLogin => view_loading_users(state), // Show loading while checking auto-login
 
         PreAuthLogin {
             username,
@@ -56,6 +57,7 @@ pub fn view_auth<'a>(
             error,
             loading,
         } => view_pre_auth_login(
+            state,
             username,
             password,
             *show_password,
@@ -90,16 +92,17 @@ pub fn view_auth<'a>(
             *setup_token_required,
         ),
 
-        LoadingUsers => view_loading_users(),
+        LoadingUsers => view_loading_users(state),
 
         SelectingUser { users, error } => view_user_selection_with_carousel(
+            state,
             users,
             error.as_deref(),
             user_permissions,
         ),
 
         CheckingDevice { user } => {
-            view_loading_users() // Show loading while checking device
+            view_loading_users(state) // Show loading while checking device
         }
 
         EnteringCredentials {
@@ -112,6 +115,7 @@ pub fn view_auth<'a>(
             attempts_remaining,
             loading,
         } => view_credential_entry(
+            state,
             user,
             input_type,
             input,
@@ -127,11 +131,11 @@ pub fn view_auth<'a>(
             pin,
             confirm_pin,
             error,
-        } => view_pin_setup(user, pin, confirm_pin, error.as_deref()),
+        } => view_pin_setup(state, user, pin, confirm_pin, error.as_deref()),
 
         Authenticated { user, mode } => {
             // This state should not render auth views - the app should show main content
-            view_loading_users() // Fallback
+            view_loading_users(state) // Fallback
         }
     }
 }

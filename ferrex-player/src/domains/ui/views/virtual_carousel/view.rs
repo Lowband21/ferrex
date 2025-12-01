@@ -15,6 +15,7 @@ use crate::domains::ui::{messages::UiMessage, theme};
 use lucide_icons::Icon;
 
 use super::{state::VirtualCarouselState, types::CarouselKey};
+use crate::infra::constants::calculations::ScaledLayout;
 use crate::infra::constants::virtual_carousel::layout as vcl;
 
 /// Build a virtual carousel view for a given key/state. Placeholder only.
@@ -26,6 +27,8 @@ pub fn virtual_carousel<'a, F>(
     state: &VirtualCarouselState,
     create_item: F,
     is_active: bool,
+    fonts: &crate::infra::design_tokens::FontTokens,
+    scaled_layout: &ScaledLayout,
 ) -> Element<'a, UiMessage>
 where
     F: Fn(usize) -> Option<Element<'a, UiMessage>>,
@@ -38,7 +41,7 @@ where
         button(
             text(icon_char(Icon::ChevronLeft))
                 .font(lucide_font())
-                .size(20)
+                .size(fonts.subtitle)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
         )
         .on_press(UiMessage::VirtualCarousel(
@@ -50,7 +53,7 @@ where
         button(
             text(icon_char(Icon::ChevronLeft))
                 .font(lucide_font())
-                .size(20)
+                .size(fonts.subtitle)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
         )
         .padding(8)
@@ -61,7 +64,7 @@ where
         button(
             text(icon_char(Icon::ChevronRight))
                 .font(lucide_font())
-                .size(20)
+                .size(fonts.subtitle)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
         )
         .on_press(UiMessage::VirtualCarousel(
@@ -73,7 +76,7 @@ where
         button(
             text(icon_char(Icon::ChevronRight))
                 .font(lucide_font())
-                .size(20)
+                .size(fonts.subtitle)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
         )
         .padding(8)
@@ -86,9 +89,10 @@ where
         theme::MediaServerTheme::TEXT_PRIMARY
     };
 
+    let h_padding = scaled_layout.min_viewport_padding();
     let header = container(
         row![
-            text(title).size(24).color(title_color),
+            text(title).size(fonts.title).color(title_color),
             Space::new().width(Length::Fill),
             row![left_button, Space::new().width(5), right_button]
                 .align_y(iced::Alignment::Center)
@@ -96,7 +100,7 @@ where
         .align_y(iced::Alignment::Center)
         .width(Length::Fill),
     )
-    .padding([0, 20]);
+    .padding([0, h_padding as u16]);
 
     // Build windowed row with spacers
     let stride = state.item_width + state.item_spacing;
@@ -160,12 +164,14 @@ where
             )
         })
         .width(Length::Fill)
-        .height(Length::Fixed(370.0));
+        .height(Length::Fixed(scaled_layout.row_height));
 
     // Apply horizontal padding; no additional styling for active state
-    let scroll_padded = container(scroll).padding([0, 20]);
-    let section = column![header, Space::new().height(10), scroll_padded]
-        .width(Length::Fill);
+    let scroll_padded = container(scroll).padding([0, h_padding as u16]);
+    let header_spacing = vcl::HEADER_SCROLL_SPACING * scaled_layout.scale;
+    let section =
+        column![header, Space::new().height(header_spacing), scroll_padded]
+            .width(Length::Fill);
 
     // Wrap section with mouse_area to track hover for focus
     let section_with_hover = mouse_area(section)
@@ -178,9 +184,9 @@ where
 
     if is_active {
         // Add a slim left accent rail matching the section height
-        let rail_h = vcl::HEADER_HEIGHT_EST
-            + vcl::HEADER_SCROLL_SPACING
-            + vcl::SCROLL_HEIGHT;
+        let rail_h = (vcl::HEADER_HEIGHT_EST + vcl::HEADER_SCROLL_SPACING)
+            * scaled_layout.scale
+            + scaled_layout.row_height;
         let rail = container(Space::new().height(Length::Fixed(rail_h)))
             .width(Length::Fixed(3.0))
             .style(rail_style);

@@ -7,7 +7,7 @@ struct Globals {
     scale_factor: f32,
     atlas_is_srgb: f32,
     target_is_srgb: f32,
-    _padding3: f32,
+    text_scale: f32,
     _padding4: vec4<f32>,
 }
 
@@ -229,9 +229,9 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
 
     var coverage = 0.0;
 
-    // Title line configuration
-    let title_font_size = 13.0;
-    let title_y = 16.0;  // Baseline Y position from top of zone (ascenders extend ~12px above)
+    // Title line configuration (base 14px from FontTokens.caption, scaled)
+    let title_font_size = 14.0 * globals.text_scale;
+    let title_y = 16.0 * globals.text_scale;  // Baseline Y position from top of zone
     let title_spacing = title_font_size * 0.65;  // Character spacing (monospace-ish)
 
     // Render title characters
@@ -247,9 +247,9 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
         coverage = max(coverage, char_coverage);
     }
 
-    // Meta line configuration (smaller, positioned below title)
-    let meta_font_size = 11.0;
-    let meta_y = 34.0;  // Baseline Y position from top of zone
+    // Meta line configuration (base 12px from FontTokens.small, scaled)
+    let meta_font_size = 12.0 * globals.text_scale;
+    let meta_y = 34.0 * globals.text_scale;  // Baseline Y position from top of zone
     let meta_spacing = meta_font_size * 0.65;
 
     var meta_coverage = 0.0;

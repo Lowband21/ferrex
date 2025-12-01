@@ -282,35 +282,41 @@ pub fn recompute_and_init_curated_carousels(state: &mut State) {
     }
 
     // Ensure registry states for each curated carousel
+    let scale = state.domains.ui.state.scaled_layout.scale;
     state.domains.ui.state.carousel_registry.ensure_default(
         CarouselKey::Custom("ContinueWatching"),
         lists.continue_watching.len(),
         width,
         CarouselConfig::poster_defaults(),
+        scale,
     );
     state.domains.ui.state.carousel_registry.ensure_default(
         CarouselKey::Custom("RecentlyAddedMovies"),
         lists.recent_movies.len(),
         width,
         CarouselConfig::poster_defaults(),
+        scale,
     );
     state.domains.ui.state.carousel_registry.ensure_default(
         CarouselKey::Custom("RecentlyAddedSeries"),
         lists.recent_series.len(),
         width,
         CarouselConfig::poster_defaults(),
+        scale,
     );
     state.domains.ui.state.carousel_registry.ensure_default(
         CarouselKey::Custom("RecentlyReleasedMovies"),
         lists.released_movies.len(),
         width,
         CarouselConfig::poster_defaults(),
+        scale,
     );
     state.domains.ui.state.carousel_registry.ensure_default(
         CarouselKey::Custom("RecentlyReleasedSeries"),
         lists.released_series.len(),
         width,
         CarouselConfig::poster_defaults(),
+        scale,
     );
 }
 

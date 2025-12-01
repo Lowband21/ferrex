@@ -27,7 +27,7 @@ pub fn update_background_ui(
                     menu_active = true;
                 }
                 // Keep entry if still active or still targeted for open face
-                active || ui_state.poster_menu_open == Some(*id)
+                active || ui_state.poster_menu_open.as_ref() == Some(id)
             });
             if menu_active {
                 ui_state.poster_anim_active_until = Some(

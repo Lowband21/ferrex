@@ -145,6 +145,7 @@ fn auth_devices_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
         state.domains.settings.preferences = PreferencesState {
             auto_login_enabled: true,
             theme: Default::default(),
+            user_scale: Default::default(),
             loading: false,
             error: None,
         };

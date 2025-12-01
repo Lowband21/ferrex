@@ -345,7 +345,10 @@ impl ImageService {
                 // File already exists - another writer won the race or write-once guard was bypassed
                 // This is fine; discard our temp file and use the existing one.
                 let _ = tokio::fs::remove_file(&tmp_path).await;
-                debug!("File already exists (hard_link check): {:?}", file_path);
+                debug!(
+                    "File already exists (hard_link check): {:?}",
+                    file_path
+                );
             }
             Err(e) => {
                 // Clean up temp file on error
@@ -1141,14 +1144,20 @@ impl ImageService {
                     tokio::fs::remove_file(&file_path)
                         .await
                         .map_err(MediaError::Io)?;
-                    info!("Removed cached file for invalidation: {:?}", file_path);
+                    info!(
+                        "Removed cached file for invalidation: {:?}",
+                        file_path
+                    );
                 }
             }
         }
 
         // Mark as uncached in DB
         self.images.invalidate_media_image_variant(key).await?;
-        info!("Invalidated variant cache: {:?}/{}", key.image_type, key.variant);
+        info!(
+            "Invalidated variant cache: {:?}/{}",
+            key.image_type, key.variant
+        );
 
         Ok(())
     }
@@ -1192,8 +1201,12 @@ impl ImageService {
                 {
                     let file_path = PathBuf::from(&variant.file_path);
                     if file_path.exists() {
-                        if let Err(e) = tokio::fs::remove_file(&file_path).await {
-                            warn!("Failed to remove cached file {:?}: {}", file_path, e);
+                        if let Err(e) = tokio::fs::remove_file(&file_path).await
+                        {
+                            warn!(
+                                "Failed to remove cached file {:?}: {}",
+                                file_path, e
+                            );
                         } else {
                             removed_count += 1;
                         }

@@ -17,21 +17,23 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
+pub fn view_user_security<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     let content = column![
         text("Security Settings")
-            .size(24)
+            .size(fonts.title)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(20),
         // PIN management
         container(
             column![
                 text("PIN Settings")
-                    .size(20)
+                    .size(fonts.subtitle)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 Space::new().height(10),
                 text("Your PIN is used for quick access on trusted devices")
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(15),
                 button("Change PIN")
@@ -48,11 +50,11 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         container(
             column![
                 text("Password")
-                    .size(20)
+                    .size(fonts.subtitle)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 Space::new().height(10),
                 text("Change your account password")
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(15),
                 button("Change Password")
@@ -69,16 +71,16 @@ pub fn view_user_security<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         container(
             column![
                 text("Trusted Devices")
-                    .size(20)
+                    .size(fonts.subtitle)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 Space::new().height(10),
                 text("Devices that can use PIN login")
-                    .size(14)
+                    .size(fonts.caption)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().height(15),
                 // TODO: List trusted devices
                 text("This device: Trusted ✓")
-                    .size(16)
+                    .size(fonts.body)
                     .color(theme::MediaServerTheme::SUCCESS),
                 Space::new().height(10),
                 button("Manage Devices")

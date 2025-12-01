@@ -54,13 +54,13 @@ pub fn update_interaction_ui(
                 .record_mouse_move(std::time::Instant::now());
             DomainUpdateResult::task(Task::none())
         }
-        InteractionMessage::MediaHovered(media_id) => {
-            state.domains.ui.state.hovered_media_id = Some(media_id);
+        InteractionMessage::MediaHovered(instance_key) => {
+            state.domains.ui.state.hovered_media_id = Some(instance_key);
             DomainUpdateResult::task(Task::none())
         }
-        InteractionMessage::MediaUnhovered(media_id) => {
+        InteractionMessage::MediaUnhovered(instance_key) => {
             if state.domains.ui.state.hovered_media_id.as_ref()
-                == Some(&media_id)
+                == Some(&instance_key)
             {
                 state.domains.ui.state.hovered_media_id = None;
             }

@@ -2,33 +2,36 @@ use crate::{
     common::messages::DomainUpdateResult,
     domains::ui::menu::{MenuButton, PosterMenuMessage, PosterMenuState},
     infra::{
-        constants::menu::MENU_KEEPALIVE_MS, shader_widgets::poster::PosterFace,
+        constants::menu::MENU_KEEPALIVE_MS,
+        shader_widgets::poster::{PosterFace, PosterInstanceKey},
     },
     state::State,
 };
 
 use iced::Task;
 use std::time::Instant;
-use uuid::Uuid;
 
 /// Handle a menu button click - close menu and dispatch action
 fn handle_button_click(
     state: &mut State,
-    media_id: Uuid,
+    instance_key: PosterInstanceKey,
     button: MenuButton,
     now: Instant,
 ) -> DomainUpdateResult {
     let ui_state = &mut state.domains.ui.state;
 
     // Close the menu (flip back to front)
-    if ui_state.poster_menu_open == Some(media_id) {
+    if ui_state.poster_menu_open.as_ref() == Some(&instance_key) {
         ui_state.poster_menu_open = None;
     }
     let entry = ui_state
         .poster_menu_states
-        .entry(media_id)
+        .entry(instance_key.clone())
         .or_insert_with(|| PosterMenuState::new(now));
     entry.force_to(now, PosterFace::Front);
+
+    // Extract media_id for actual operations
+    let media_id = instance_key.media_id;
 
     // Log the action for now - actual dispatch will be wired to domain messages
     match button {
@@ -63,27 +66,27 @@ pub fn poster_menu_update(
     let now = Instant::now();
 
     match menu_msg {
-        PosterMenuMessage::Close(media_id) => {
+        PosterMenuMessage::Close(instance_key) => {
             // Force close target poster
             let entry = ui_state
                 .poster_menu_states
-                .entry(media_id)
+                .entry(instance_key.clone())
                 .or_insert_with(|| PosterMenuState::new(now));
             entry.force_to(now, PosterFace::Front);
 
             // Clear open menu state
-            if ui_state.poster_menu_open == Some(media_id) {
+            if ui_state.poster_menu_open.as_ref() == Some(&instance_key) {
                 ui_state.poster_menu_open = None;
             }
         }
-        PosterMenuMessage::Start(media_id) => {
+        PosterMenuMessage::Start(instance_key) => {
             // Close previous open poster if exists
-            if let Some(open_id) = ui_state.poster_menu_open
-                && open_id != media_id
+            if let Some(ref open_key) = ui_state.poster_menu_open
+                && open_key != &instance_key
             {
                 let entry_prev = ui_state
                     .poster_menu_states
-                    .entry(open_id)
+                    .entry(open_key.clone())
                     .or_insert_with(|| PosterMenuState::new(now));
                 entry_prev.force_to(now, PosterFace::Front);
             }
@@ -91,21 +94,22 @@ pub fn poster_menu_update(
             // Start hold on target poster
             let entry = ui_state
                 .poster_menu_states
-                .entry(media_id)
+                .entry(instance_key.clone())
                 .or_insert_with(|| PosterMenuState::new(now));
             entry.mark_begin(now);
 
             // Always set poster_menu_open to the provided target
-            ui_state.poster_menu_open = Some(media_id);
+            ui_state.poster_menu_open = Some(instance_key);
         }
-        PosterMenuMessage::End(media_id) => {
-            if let Some(entry) = ui_state.poster_menu_states.get_mut(&media_id)
+        PosterMenuMessage::End(instance_key) => {
+            if let Some(entry) =
+                ui_state.poster_menu_states.get_mut(&instance_key)
             {
                 entry.mark_end(now);
             }
         }
-        PosterMenuMessage::ButtonClicked(media_id, button) => {
-            return handle_button_click(state, media_id, button, now);
+        PosterMenuMessage::ButtonClicked(instance_key, button) => {
+            return handle_button_click(state, instance_key, button, now);
         }
     }
 

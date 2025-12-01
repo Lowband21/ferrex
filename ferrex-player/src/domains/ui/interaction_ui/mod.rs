@@ -1,7 +1,8 @@
 pub mod update;
 
-use crate::domains::ui::{
-    messages::UiMessage, motion_controller::MotionMessage,
+use crate::{
+    domains::ui::{messages::UiMessage, motion_controller::MotionMessage},
+    infra::shader_widgets::poster::PosterInstanceKey,
 };
 use iced::widget::scrollable;
 
@@ -24,8 +25,8 @@ pub enum InteractionMessage {
 
     // Mouse tracking for focus gating
     MouseMoved,
-    MediaHovered(uuid::Uuid),
-    MediaUnhovered(uuid::Uuid),
+    MediaHovered(PosterInstanceKey),
+    MediaUnhovered(PosterInstanceKey),
 }
 
 impl From<InteractionMessage> for UiMessage {
@@ -71,8 +72,12 @@ impl std::fmt::Debug for InteractionMessage {
             Self::HomeFocusTick => write!(f, "UI::AllFocusTick"),
             Self::KineticScroll(_) => write!(f, "UI::KineticScroll"),
             Self::MouseMoved => write!(f, "UI::MouseMoved"),
-            Self::MediaHovered(id) => write!(f, "UI::MediaHovered({id})"),
-            Self::MediaUnhovered(id) => write!(f, "UI::MediaUnhovered({id})"),
+            Self::MediaHovered(key) => {
+                write!(f, "UI::MediaHovered({:?})", key.media_id)
+            }
+            Self::MediaUnhovered(key) => {
+                write!(f, "UI::MediaUnhovered({:?})", key.media_id)
+            }
         }
     }
 }

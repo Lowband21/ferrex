@@ -7,14 +7,21 @@
 use crate::{
     common::text,
     domains::ui::{
-        interaction_ui::InteractionMessage, messages::UiMessage,
-        playback_ui::PlaybackMessage, shell_ui::UiShellMessage, theme,
-        views::grid::macros::parse_hex_color, widgets::image_for,
+        interaction_ui::InteractionMessage,
+        messages::UiMessage,
+        playback_ui::PlaybackMessage,
+        shell_ui::UiShellMessage,
+        theme,
+        views::{
+            grid::macros::parse_hex_color, virtual_carousel::types::CarouselKey,
+        },
+        widgets::image_for,
     },
     infra::{
-        constants::poster::CORNER_RADIUS,
         repository::MaybeYoked,
-        shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
+        shader_widgets::poster::{
+            PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+        },
     },
     state::State,
 };
@@ -43,14 +50,16 @@ use uuid::Uuid;
 )]
 pub fn create_movie_card<'a>(
     movie_id: Uuid,
-    hovered_media_id: &Option<Uuid>,
+    hovered_media_id: &Option<PosterInstanceKey>,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
+    carousel_key: Option<&CarouselKey>,
     state: &'a State,
 ) -> Element<'a, UiMessage> {
+    let instance_key = PosterInstanceKey::new(movie_id, carousel_key.cloned());
     let is_hovered = hovered_media_id
         .as_ref()
-        .map(|id| id == &movie_id)
+        .map(|key| key == &instance_key)
         .unwrap_or(false);
 
     movie_reference_card_with_state(
@@ -59,6 +68,7 @@ pub fn create_movie_card<'a>(
         is_hovered,
         is_visible,
         watch_progress,
+        carousel_key,
     )
 }
 
@@ -72,14 +82,16 @@ pub fn create_movie_card<'a>(
 )]
 pub fn create_series_card<'a>(
     series_id: Uuid,
-    hovered_media_id: &Option<Uuid>,
+    hovered_media_id: &Option<PosterInstanceKey>,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
+    carousel_key: Option<&CarouselKey>,
     state: &'a State,
 ) -> Element<'a, UiMessage> {
+    let instance_key = PosterInstanceKey::new(series_id, carousel_key.cloned());
     let is_hovered = hovered_media_id
         .as_ref()
-        .map(|id| id == &series_id)
+        .map(|key| key == &instance_key)
         .unwrap_or(false);
 
     series_reference_card_with_state(
@@ -88,6 +100,7 @@ pub fn create_series_card<'a>(
         is_hovered,
         is_visible,
         watch_progress,
+        carousel_key,
     )
 }
 
@@ -105,107 +118,128 @@ pub fn movie_reference_card_with_state<'a>(
     is_hovered: bool,
     is_visible: bool,
     watch_progress: Option<WatchProgress>,
+    carousel_key: Option<&CarouselKey>,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
+    // Get scaled layout for dynamic poster dimensions
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
+
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
-    let yoke_arc: Arc<crate::infra::repository::MovieYoke> =
-        match state.domains.ui.state.movie_yoke_cache.peek_ref(&uuid) {
-            Some(arc) => arc.clone(),
-            _ => {
-                // Lazily fetch from repo and insert into cache
-                match state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_movie_yoke(&MediaID::Movie(movie_id))
-                {
-                    Ok(yoke) => {
-                        let arc = Arc::new(yoke);
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .movie_yoke_cache
-                            .insert(uuid, arc.clone());
-                        arc
-                    }
-                    Err(e) => {
-                        // If this UUID actually belongs to a Series, gracefully fall back
-                        // to the series card builder to avoid a dangling placeholder and
-                        // to ensure images/types flow correctly without panics.
-                        match state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_series_yoke(&MediaID::Series(SeriesID(uuid)))
-                        {
-                            Ok(_) => {
-                                return series_reference_card_with_state(
-                                    state,
-                                    SeriesID(uuid),
-                                    is_hovered,
-                                    is_visible,
-                                    watch_progress,
-                                );
-                            }
-                            _ => (),
-                        }
-
-                        log::warn!(
-                            "Failed to fetch movie yoke for {}: {:?}",
-                            uuid,
-                            e
+    let yoke_arc: Arc<crate::infra::repository::MovieYoke> = match state
+        .domains
+        .ui
+        .state
+        .movie_yoke_cache
+        .peek_ref(&uuid)
+    {
+        Some(arc) => arc.clone(),
+        _ => {
+            // Lazily fetch from repo and insert into cache
+            match state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_movie_yoke(&MediaID::Movie(movie_id))
+            {
+                Ok(yoke) => {
+                    let arc = Arc::new(yoke);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .movie_yoke_cache
+                        .insert(uuid, arc.clone());
+                    arc
+                }
+                Err(e) => {
+                    // If this UUID actually belongs to a Series, gracefully fall back
+                    // to the series card builder to avoid a dangling placeholder and
+                    // to ensure images/types flow correctly without panics.
+                    if state
+                        .domains
+                        .ui
+                        .state
+                        .repo_accessor
+                        .get_series_yoke(&MediaID::Series(SeriesID(uuid)))
+                        .is_ok()
+                    {
+                        return series_reference_card_with_state(
+                            state,
+                            SeriesID(uuid),
+                            is_hovered,
+                            is_visible,
+                            watch_progress,
+                            carousel_key,
                         );
-                        let placeholder_img: Element<'_, UiMessage> =
-                        image_for(movie_id.to_uuid())
-                            .size(ImageSize::Poster)
-                            .image_type(ImageType::Movie)
-                            .radius(CORNER_RADIUS)
-                            .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(300.0))
-                            .animation_behavior(AnimationBehavior::default())
-                            .placeholder(lucide_icons::Icon::Film)
-                            .priority(if is_hovered || is_visible {
-                                Priority::Visible
-                            } else {
-                                Priority::Preload
-                            })
-                            .is_hovered(is_hovered)
-                            .on_click(
-                                UiShellMessage::ViewMovieDetails(movie_id)
-                                    .into(),
-                            )
-                            .into();
-                        let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(
-                                InteractionMessage::MediaHovered(uuid).into(),
-                            )
-                            .on_exit(
-                                InteractionMessage::MediaUnhovered(uuid).into(),
-                            );
-                        let poster_element = image_with_hover;
-                        let text_content = column![
-                            text("...").size(14),
-                            text(" ")
-                                .size(12)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        ]
-                        .spacing(2);
-                        return column![
-                            poster_element,
-                            container(text_content)
-                                .padding(5)
-                                .width(Length::Fixed(200.0))
-                                .height(Length::Fixed(60.0))
-                        ]
-                        .spacing(5)
-                        .into();
                     }
+
+                    log::warn!(
+                        "Failed to fetch movie yoke for {}: {:?}",
+                        uuid,
+                        e
+                    );
+                    let instance_key =
+                        PosterInstanceKey::new(uuid, carousel_key.cloned());
+                    let mut placeholder_widget = image_for(movie_id.to_uuid())
+                        .size(ImageSize::Poster)
+                        .image_type(ImageType::Movie)
+                        .radius(scaled_layout.corner_radius)
+                        .width(Length::Fixed(scaled_layout.poster_width))
+                        .height(Length::Fixed(scaled_layout.poster_height))
+                        .animation_behavior(AnimationBehavior::default())
+                        .placeholder(lucide_icons::Icon::Film)
+                        .priority(if is_hovered || is_visible {
+                            Priority::Visible
+                        } else {
+                            Priority::Preload
+                        })
+                        .is_hovered(is_hovered)
+                        .on_click(
+                            UiShellMessage::ViewMovieDetails(movie_id).into(),
+                        );
+                    if let Some(key) = carousel_key {
+                        placeholder_widget =
+                            placeholder_widget.carousel_key(key.clone());
+                    }
+                    let placeholder_img: Element<'_, UiMessage> =
+                        placeholder_widget.into();
+                    let image_with_hover = mouse_area(placeholder_img)
+                        .on_enter(
+                            InteractionMessage::MediaHovered(
+                                instance_key.clone(),
+                            )
+                            .into(),
+                        )
+                        .on_exit(
+                            InteractionMessage::MediaUnhovered(instance_key)
+                                .into(),
+                        );
+                    let poster_element = image_with_hover;
+                    let text_content = column![
+                        text("...").size(fonts.caption),
+                        text(" ")
+                            .size(fonts.small)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(2);
+                    return column![
+                        poster_element,
+                        container(text_content)
+                            .padding(5)
+                            .width(Length::Fixed(scaled_layout.poster_width))
+                            .height(Length::Fixed(
+                                scaled_layout.text_area_height
+                            ))
+                    ]
+                    .spacing(5)
+                    .into();
                 }
             }
-        };
+        }
+    };
     let movie = yoke_arc.get();
 
     let media_id = movie.media_id();
@@ -225,9 +259,9 @@ pub fn movie_reference_card_with_state<'a>(
     let mut img = image_for(media_id.to_uuid())
         .size(ImageSize::Poster)
         .image_type(ImageType::Movie)
-        .radius(CORNER_RADIUS)
-        .width(Length::Fixed(200.0))
-        .height(Length::Fixed(300.0))
+        .radius(scaled_layout.corner_radius)
+        .width(Length::Fixed(scaled_layout.poster_width))
+        .height(Length::Fixed(scaled_layout.poster_height))
         .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
@@ -273,12 +307,21 @@ pub fn movie_reference_card_with_state<'a>(
         img = img.progress(progress.as_percentage());
     }
 
-    let poster_id = movie_id.to_uuid();
+    // Set carousel key for unique instance identification
+    if let Some(key) = carousel_key {
+        img = img.carousel_key(key.clone());
+    }
+
+    // Create instance key for menu state lookup
+    let instance_key =
+        PosterInstanceKey::new(movie_id.to_uuid(), carousel_key.cloned());
     let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&poster_id)
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
     {
         (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
         (PosterFace::Front, None)
@@ -300,11 +343,11 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Wrap with hover detection
     let image_with_hover = mouse_area(image_element)
-        .on_enter(InteractionMessage::MediaHovered(movie_id.to_uuid()).into())
-        .on_exit(InteractionMessage::MediaUnhovered(movie_id.to_uuid()).into());
+        .on_enter(InteractionMessage::MediaHovered(instance_key.clone()).into())
+        .on_exit(InteractionMessage::MediaUnhovered(instance_key).into());
 
     // Return just the poster with shader-rendered text below
-    // The shader text zone extends 50px below the poster bounds
+    // The shader text zone extends below the poster bounds
     image_with_hover.into()
 }
 
@@ -322,103 +365,126 @@ pub fn series_reference_card_with_state<'a>(
     is_hovered: bool,
     is_visible: bool,
     _watch_status: Option<WatchProgress>, // Number of remaining episodes equal to integer from watch_status, individual episode watch progress can be passed with the decimal part
+    carousel_key: Option<&CarouselKey>,
 ) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
+    // Get scaled layout for dynamic poster dimensions
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
+
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
-    let yoke_arc: Arc<crate::infra::repository::SeriesYoke> =
-        match state.domains.ui.state.series_yoke_cache.peek_ref(&uuid) {
-            Some(arc) => arc.clone(),
-            _ => {
-                // Lazily fetch from repo and insert into cache (do not remove handlers or legacy comments)
-                match state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_series_yoke(&MediaID::Series(series_id))
-                {
-                    Ok(yoke) => {
-                        let arc = Arc::new(yoke);
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .series_yoke_cache
-                            .insert(uuid, arc.clone());
-                        arc
-                    }
-                    Err(e) => {
-                        // If this UUID actually belongs to a Movie, gracefully fall back
-                        // to the movie card builder.
-                        if let Ok(_) = state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_movie_yoke(&MediaID::Movie(MovieID(uuid)))
-                        {
-                            return movie_reference_card_with_state(
-                                state,
-                                MovieID(uuid),
-                                is_hovered,
-                                is_visible,
-                                _watch_status,
-                            );
-                        }
-
-                        log::warn!(
-                            "Failed to fetch series yoke for {}: {:?}",
-                            uuid,
-                            e
+    let yoke_arc: Arc<crate::infra::repository::SeriesYoke> = match state
+        .domains
+        .ui
+        .state
+        .series_yoke_cache
+        .peek_ref(&uuid)
+    {
+        Some(arc) => arc.clone(),
+        _ => {
+            // Lazily fetch from repo and insert into cache (do not remove handlers or legacy comments)
+            match state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_series_yoke(&MediaID::Series(series_id))
+            {
+                Ok(yoke) => {
+                    let arc = Arc::new(yoke);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .series_yoke_cache
+                        .insert(uuid, arc.clone());
+                    arc
+                }
+                Err(e) => {
+                    // If this UUID actually belongs to a Movie, gracefully fall back
+                    // to the movie card builder.
+                    if state
+                        .domains
+                        .ui
+                        .state
+                        .repo_accessor
+                        .get_movie_yoke(&MediaID::Movie(MovieID(uuid)))
+                        .is_ok()
+                    {
+                        return movie_reference_card_with_state(
+                            state,
+                            MovieID(uuid),
+                            is_hovered,
+                            is_visible,
+                            _watch_status,
+                            carousel_key,
                         );
-                        // Fallback placeholder card preserving mouse handlers
-                        let placeholder_img: Element<'_, UiMessage> =
-                        image_for(series_id.to_uuid())
-                            .size(ImageSize::Poster)
-                            .image_type(ImageType::Series)
-                            .radius(CORNER_RADIUS)
-                            .width(Length::Fixed(200.0))
-                            .height(Length::Fixed(300.0))
-                            .animation_behavior(AnimationBehavior::default())
-                            .placeholder(lucide_icons::Icon::Tv)
-                            .priority(if is_hovered || is_visible {
-                                Priority::Visible
-                            } else {
-                                Priority::Preload
-                            })
-                            .is_hovered(is_hovered)
-                            .on_click(
-                                UiShellMessage::ViewTvShow(series_id).into(),
-                            )
-                            .into();
-                        let image_with_hover = mouse_area(placeholder_img)
-                            .on_enter(
-                                InteractionMessage::MediaHovered(uuid).into(),
-                            )
-                            .on_exit(
-                                InteractionMessage::MediaUnhovered(uuid).into(),
-                            );
-                        let poster_element = image_with_hover;
-                        let text_content = column![
-                            text("...").size(14),
-                            text(" ")
-                                .size(12)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        ]
-                        .spacing(2);
-                        return column![
-                            poster_element,
-                            container(text_content)
-                                .padding(5)
-                                .width(Length::Fixed(200.0))
-                                .height(Length::Fixed(60.0))
-                        ]
-                        .spacing(5)
-                        .into();
                     }
+
+                    log::warn!(
+                        "Failed to fetch series yoke for {}: {:?}",
+                        uuid,
+                        e
+                    );
+                    // Fallback placeholder card preserving mouse handlers
+                    let instance_key =
+                        PosterInstanceKey::new(uuid, carousel_key.cloned());
+                    let mut placeholder_widget = image_for(series_id.to_uuid())
+                        .size(ImageSize::Poster)
+                        .image_type(ImageType::Series)
+                        .radius(scaled_layout.corner_radius)
+                        .width(Length::Fixed(scaled_layout.poster_width))
+                        .height(Length::Fixed(scaled_layout.poster_height))
+                        .animation_behavior(AnimationBehavior::default())
+                        .placeholder(lucide_icons::Icon::Tv)
+                        .priority(if is_hovered || is_visible {
+                            Priority::Visible
+                        } else {
+                            Priority::Preload
+                        })
+                        .is_hovered(is_hovered)
+                        .on_click(UiShellMessage::ViewTvShow(series_id).into());
+                    if let Some(key) = carousel_key {
+                        placeholder_widget =
+                            placeholder_widget.carousel_key(key.clone());
+                    }
+                    let placeholder_img: Element<'_, UiMessage> =
+                        placeholder_widget.into();
+                    let image_with_hover = mouse_area(placeholder_img)
+                        .on_enter(
+                            InteractionMessage::MediaHovered(
+                                instance_key.clone(),
+                            )
+                            .into(),
+                        )
+                        .on_exit(
+                            InteractionMessage::MediaUnhovered(instance_key)
+                                .into(),
+                        );
+                    let poster_element = image_with_hover;
+                    let text_content = column![
+                        text("...").size(fonts.caption),
+                        text(" ")
+                            .size(fonts.small)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                    ]
+                    .spacing(2);
+                    return column![
+                        poster_element,
+                        container(text_content)
+                            .padding(5)
+                            .width(Length::Fixed(scaled_layout.poster_width))
+                            .height(Length::Fixed(
+                                scaled_layout.text_area_height
+                            ))
+                    ]
+                    .spacing(5)
+                    .into();
                 }
             }
-        };
+        }
+    };
     let series = yoke_arc.get();
 
     let _media_id = series.media_id();
@@ -444,9 +510,9 @@ pub fn series_reference_card_with_state<'a>(
     let mut img = image_for(series_id.to_uuid())
         .size(ImageSize::Poster)
         .image_type(ImageType::Series)
-        .radius(CORNER_RADIUS)
-        .width(Length::Fixed(200.0))
-        .height(Length::Fixed(300.0))
+        .radius(scaled_layout.corner_radius)
+        .width(Length::Fixed(scaled_layout.poster_width))
+        .height(Length::Fixed(scaled_layout.poster_height))
         .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
@@ -485,12 +551,21 @@ pub fn series_reference_card_with_state<'a>(
         }
     }
 
-    let poster_id = series_id.to_uuid();
+    // Set carousel key for unique instance identification
+    if let Some(key) = carousel_key {
+        img = img.carousel_key(key.clone());
+    }
+
+    // Create instance key for menu state lookup
+    let instance_key =
+        PosterInstanceKey::new(series_id.to_uuid(), carousel_key.cloned());
     let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&poster_id)
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
     {
         (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open == Some(poster_id) {
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
         (PosterFace::Back, Some(std::f32::consts::PI))
     } else {
         (PosterFace::Front, None)
@@ -510,13 +585,11 @@ pub fn series_reference_card_with_state<'a>(
     let image_element: Element<'_, UiMessage> = img.into();
 
     let image_with_hover = mouse_area(image_element)
-        .on_enter(InteractionMessage::MediaHovered(series_id.to_uuid()).into())
-        .on_exit(
-            InteractionMessage::MediaUnhovered(series_id.to_uuid()).into(),
-        );
+        .on_enter(InteractionMessage::MediaHovered(instance_key.clone()).into())
+        .on_exit(InteractionMessage::MediaUnhovered(instance_key).into());
 
     // Return just the poster with shader-rendered text below
-    // The shader text zone extends 50px below the poster bounds
+    // The shader text zone extends below the poster bounds
     image_with_hover.into()
 }
 

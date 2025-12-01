@@ -6,7 +6,7 @@ use crate::domains::ui::{
     messages::UiMessage, settings_ui::SettingsUiMessage, theme,
 };
 use crate::state::State;
-use ferrex_core::player_prelude::{GridSize, PlaybackQuality, ResumeBehavior};
+use ferrex_core::player_prelude::{PlaybackQuality, ResumeBehavior, UserScale};
 use iced::widget::{
     Space, button, column, container, pick_list, row, slider, text, toggler,
 };
@@ -20,20 +20,22 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
+pub fn view_user_preferences<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     let content = column![
         text("Preferences")
-            .size(24)
+            .size(fonts.title)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(20),
         // Playback section
         text("Playback")
-            .size(20)
+            .size(fonts.subtitle)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(10),
         row![
             text("Auto-play next episode")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(true) // TODO: Connect to preferences
@@ -43,7 +45,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(10),
         row![
             text("Preferred quality")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             pick_list(
@@ -64,7 +66,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(10),
         row![
             text("Resume behavior")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             pick_list(
@@ -82,12 +84,12 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(20),
         // Subtitles section
         text("Subtitles")
-            .size(20)
+            .size(fonts.subtitle)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(10),
         row![
             text("Show subtitles by default")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences
@@ -97,13 +99,13 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(10),
         column![
             text("Subtitle size")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             row![
-                text("Small").size(14),
+                text("Small").size(fonts.caption),
                 slider(0.5..=2.0, 1.0, |_| UiMessage::NoOp)
                     .width(Length::Fixed(200.0)),
-                text("Large").size(14),
+                text("Large").size(fonts.caption),
             ]
             .spacing(10)
             .align_y(iced::Alignment::Center),
@@ -112,18 +114,18 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(20),
         // UI section
         text("User Interface")
-            .size(20)
+            .size(fonts.subtitle)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(10),
         row![
             text("Library grid size")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             pick_list(
-                vec![GridSize::Small, GridSize::Medium, GridSize::Large],
-                Some(GridSize::Medium),
-                |_| UiMessage::NoOp, // TODO: Implement grid size change
+                vec![UserScale::Small, UserScale::Medium, UserScale::Large],
+                Some(state.domains.settings.preferences.user_scale.clone()),
+                |size| SettingsUiMessage::SetUserScale(size).into(),
             )
             .width(Length::Fixed(150.0)),
         ]
@@ -131,7 +133,7 @@ pub fn view_user_preferences<'a>(_state: &'a State) -> Element<'a, UiMessage> {
         Space::new().height(10),
         row![
             text("Show poster titles on hover")
-                .size(16)
+                .size(fonts.body)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
             Space::new().width(Length::Fill),
             toggler(false) // TODO: Connect to preferences

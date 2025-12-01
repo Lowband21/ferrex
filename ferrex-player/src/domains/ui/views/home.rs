@@ -9,6 +9,7 @@ use crate::domains::ui::views::grid::{
 use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
 use crate::infra::LibraryType;
 use crate::infra::constants::virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS;
+use crate::infra::shader_widgets::poster::PosterInstanceKey;
 use crate::state::State;
 use ferrex_core::player_prelude::PosterKind;
 use ferrex_core::player_prelude::{MediaID, MovieID, SeriesID};
@@ -28,6 +29,9 @@ use std::time::Instant;
     profiling::function
 )]
 pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+    let scaled_layout = &state.domains.ui.state.scaled_layout;
+
     #[cfg(any(
         feature = "profile-with-puffin",
         feature = "profile-with-tracy",
@@ -37,7 +41,10 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
     let watch_state_opt = state.domains.media.state.get_watch_state();
 
-    let mut content = column![].spacing(30).padding(20);
+    // Scale the section gap and page padding based on user scaling preference
+    let section_gap = 30.0 * scaled_layout.scale;
+    let page_padding = 20.0 * scaled_layout.scale;
+    let mut content = column![].spacing(section_gap).padding(page_padding);
     let mut added_count = 0;
 
     log::debug!(
@@ -66,6 +73,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
                 let ids_for_emit = ids.clone();
+                let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
                     "Continue Watching",
@@ -73,13 +81,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     vc_state,
                     move |idx| {
                         ids_for_closure.get(idx).and_then(|uuid| {
+                            let instance_key = PosterInstanceKey::new(
+                                *uuid,
+                                Some(key_for_card.clone()),
+                            );
                             let is_hovered = state
                                 .domains
                                 .ui
                                 .state
                                 .hovered_media_id
                                 .as_ref()
-                                == Some(uuid);
+                                == Some(&instance_key);
                             let item_watch_progress =
                                 if let Some(watch_state) = watch_state_opt {
                                     watch_state.get_watch_progress(uuid)
@@ -96,6 +108,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                     is_hovered,
                                     false,
                                     item_watch_progress,
+                                    Some(&key_for_card),
                                 ));
                             }
                             if acc
@@ -108,12 +121,15 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                     is_hovered,
                                     false,
                                     item_watch_progress,
+                                    Some(&key_for_card),
                                 ));
                             }
                             None
                         })
                     },
                     is_active,
+                    fonts,
+                    scaled_layout,
                 );
                 // Emit a snapshot for the currently visible window (mixed Movie/Series)
                 if let Some(vc) =
@@ -167,6 +183,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
                 let ids_for_emit = ids.clone();
+                let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
                     "Recently Added Movies",
@@ -174,13 +191,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     vc_state,
                     move |idx| {
                         ids_for_closure.get(idx).map(|uuid| {
+                            let instance_key = PosterInstanceKey::new(
+                                *uuid,
+                                Some(key_for_card.clone()),
+                            );
                             let is_hovered = state
                                 .domains
                                 .ui
                                 .state
                                 .hovered_media_id
                                 .as_ref()
-                                == Some(uuid);
+                                == Some(&instance_key);
                             let item_watch_progress =
                                 if let Some(watch_state) = watch_state_opt {
                                     watch_state.get_watch_progress(uuid)
@@ -193,10 +214,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                 is_hovered,
                                 false,
                                 item_watch_progress,
+                                Some(&key_for_card),
                             )
                         })
                     },
                     is_active,
+                    fonts,
+                    scaled_layout,
                 );
                 vchelper::emit_snapshot_for_carousel_simple(
                     state,
@@ -227,6 +251,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
                 let ids_for_emit = ids.clone();
+                let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
                     "Recently Added Series",
@@ -234,13 +259,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     vc_state,
                     move |idx| {
                         ids_for_closure.get(idx).map(|uuid| {
+                            let instance_key = PosterInstanceKey::new(
+                                *uuid,
+                                Some(key_for_card.clone()),
+                            );
                             let is_hovered = state
                                 .domains
                                 .ui
                                 .state
                                 .hovered_media_id
                                 .as_ref()
-                                == Some(uuid);
+                                == Some(&instance_key);
                             let item_watch_progress =
                                 if let Some(watch_state) = watch_state_opt {
                                     watch_state.get_watch_progress(uuid)
@@ -253,10 +282,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                 is_hovered,
                                 false,
                                 item_watch_progress,
+                                Some(&key_for_card),
                             )
                         })
                     },
                     is_active,
+                    fonts,
+                    scaled_layout,
                 );
                 vchelper::emit_snapshot_for_carousel_simple(
                     state,
@@ -287,6 +319,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
                 let ids_for_emit = ids.clone();
+                let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
                     "Recently Released Movies",
@@ -294,13 +327,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     vc_state,
                     move |idx| {
                         ids_for_closure.get(idx).map(|uuid| {
+                            let instance_key = PosterInstanceKey::new(
+                                *uuid,
+                                Some(key_for_card.clone()),
+                            );
                             let is_hovered = state
                                 .domains
                                 .ui
                                 .state
                                 .hovered_media_id
                                 .as_ref()
-                                == Some(uuid);
+                                == Some(&instance_key);
                             let item_watch_progress =
                                 if let Some(watch_state) = watch_state_opt {
                                     watch_state.get_watch_progress(uuid)
@@ -313,10 +350,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                 is_hovered,
                                 false,
                                 item_watch_progress,
+                                Some(&key_for_card),
                             )
                         })
                     },
                     is_active,
+                    fonts,
+                    scaled_layout,
                 );
                 vchelper::emit_snapshot_for_carousel_simple(
                     state,
@@ -347,6 +387,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
                 let ids_for_emit = ids.clone();
+                let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
                     "Recently Released Series",
@@ -354,13 +395,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     vc_state,
                     move |idx| {
                         ids_for_closure.get(idx).map(|uuid| {
+                            let instance_key = PosterInstanceKey::new(
+                                *uuid,
+                                Some(key_for_card.clone()),
+                            );
                             let is_hovered = state
                                 .domains
                                 .ui
                                 .state
                                 .hovered_media_id
                                 .as_ref()
-                                == Some(uuid);
+                                == Some(&instance_key);
                             let item_watch_progress =
                                 if let Some(watch_state) = watch_state_opt {
                                     watch_state.get_watch_progress(uuid)
@@ -373,10 +418,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                 is_hovered,
                                 false,
                                 item_watch_progress,
+                                Some(&key_for_card),
                             )
                         })
                     },
                     is_active,
+                    fonts,
+                    scaled_layout,
                 );
                 vchelper::emit_snapshot_for_carousel_simple(
                     state,
@@ -425,6 +473,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                         let total = ids.len();
                         let ids_for_closure = ids.clone();
                         let ids_for_emit = ids.clone();
+                        let key_for_card = key.clone();
                         let carousel = virtual_carousel::virtual_carousel(
                             key.clone(),
                             "Movies",
@@ -432,13 +481,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             vc_state,
                             move |idx| {
                                 ids_for_closure.get(idx).map(|uuid| {
+                                    let instance_key = PosterInstanceKey::new(
+                                        *uuid,
+                                        Some(key_for_card.clone()),
+                                    );
                                     let is_hovered = state
                                         .domains
                                         .ui
                                         .state
                                         .hovered_media_id
                                         .as_ref()
-                                        == Some(uuid);
+                                        == Some(&instance_key);
 
                                     let item_watch_progress =
                                         if let Some(watch_state) =
@@ -455,10 +508,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                         is_hovered,
                                         false,
                                         item_watch_progress,
+                                        Some(&key_for_card),
                                     )
                                 })
                             },
                             is_active,
+                            fonts,
+                            scaled_layout,
                         );
                         vchelper::emit_snapshot_for_carousel_simple(
                             state,
@@ -498,6 +554,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                         let total = ids.len();
                         let ids_for_closure = ids.clone();
                         let ids_for_emit = ids.clone();
+                        let key_for_card = key.clone();
                         let carousel = virtual_carousel::virtual_carousel(
                             key.clone(),
                             "TV Shows",
@@ -505,13 +562,17 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             vc_state,
                             move |idx| {
                                 ids_for_closure.get(idx).map(|uuid| {
+                                    let instance_key = PosterInstanceKey::new(
+                                        *uuid,
+                                        Some(key_for_card.clone()),
+                                    );
                                     let is_hovered = state
                                         .domains
                                         .ui
                                         .state
                                         .hovered_media_id
                                         .as_ref()
-                                        == Some(uuid);
+                                        == Some(&instance_key);
 
                                     let item_watch_progress =
                                         if let Some(watch_state) =
@@ -528,10 +589,13 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                                         is_hovered,
                                         false,
                                         item_watch_progress,
+                                        Some(&key_for_card),
                                     )
                                 })
                             },
                             is_active,
+                            fonts,
+                            scaled_layout,
                         );
                         vchelper::emit_snapshot_for_carousel_simple(
                             state,
@@ -554,10 +618,10 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 column![
                     text("📁").size(64),
                     text("No media files found")
-                        .size(24)
+                        .size(fonts.title)
                         .color(theme::MediaServerTheme::TEXT_PRIMARY),
                     text("Click 'Scan Library' to search for media files")
-                        .size(16)
+                        .size(fonts.body)
                         .color(theme::MediaServerTheme::TEXT_SECONDARY)
                 ]
                 .spacing(10)

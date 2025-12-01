@@ -192,7 +192,7 @@ pub mod player_prelude;
 //     pub use super::types::*;
 //     pub use super::user::AuthError as UserAuthError;
 //     pub use super::user::{
-//         AuthToken, Claims, GridSize, LoginRequest, PlaybackPreferences, PlaybackQuality,
+//         AuthToken, Claims, UserScale, LoginRequest, PlaybackPreferences, PlaybackQuality,
 //         RegisterRequest, ResumeBehavior, SubtitlePreferences, ThemePreference, UiPreferences, User,
 //         UserPreferences, UserSession, UserUpdateRequest, ValidationError,
 //     };

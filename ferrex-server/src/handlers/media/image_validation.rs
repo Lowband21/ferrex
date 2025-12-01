@@ -16,13 +16,16 @@ pub enum InvalidReason {
 
 /// Validate image bytes by checking magic bytes.
 /// Returns the detected content type if valid.
-pub fn validate_magic_bytes(data: &[u8]) -> Result<&'static str, InvalidReason> {
+pub fn validate_magic_bytes(
+    data: &[u8],
+) -> Result<&'static str, InvalidReason> {
     if data.len() < 4 {
         return Err(InvalidReason::TooSmall);
     }
 
     // JPEG: FF D8 FF
-    if data.len() >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+    if data.len() >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
+    {
         return Ok("image/jpeg");
     }
 
@@ -79,10 +82,7 @@ mod tests {
     #[test]
     fn test_validate_png_magic() {
         let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        assert!(matches!(
-            validate_magic_bytes(&png_header),
-            Ok("image/png")
-        ));
+        assert!(matches!(validate_magic_bytes(&png_header), Ok("image/png")));
     }
 
     #[test]
@@ -90,10 +90,7 @@ mod tests {
         let mut webp = [0u8; 12];
         webp[0..4].copy_from_slice(b"RIFF");
         webp[8..12].copy_from_slice(b"WEBP");
-        assert!(matches!(
-            validate_magic_bytes(&webp),
-            Ok("image/webp")
-        ));
+        assert!(matches!(validate_magic_bytes(&webp), Ok("image/webp")));
     }
 
     #[test]
@@ -101,19 +98,13 @@ mod tests {
         let mut avif = [0u8; 12];
         avif[4..8].copy_from_slice(b"ftyp");
         avif[8..12].copy_from_slice(b"avif");
-        assert!(matches!(
-            validate_magic_bytes(&avif),
-            Ok("image/avif")
-        ));
+        assert!(matches!(validate_magic_bytes(&avif), Ok("image/avif")));
     }
 
     #[test]
     fn test_validate_gif_magic() {
         let gif_header = b"GIF89a";
-        assert!(matches!(
-            validate_magic_bytes(gif_header),
-            Ok("image/gif")
-        ));
+        assert!(matches!(validate_magic_bytes(gif_header), Ok("image/gif")));
     }
 
     #[test]

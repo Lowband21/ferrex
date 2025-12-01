@@ -41,14 +41,19 @@ pub struct VirtualCarouselState {
 
 impl VirtualCarouselState {
     /// Create a new VirtualCarouselState with defaults from a config preset.
+    ///
+    /// The `scale` parameter is used to scale card dimensions when `config.card_size`
+    /// is provided. Pass `1.0` for unscaled, or use the effective scale from
+    /// `ScalingContext` for user-preference-aware scaling.
     pub fn new(
         total_items: usize,
         viewport_width: f32,
         config: CarouselConfig,
+        scale: f32,
     ) -> Self {
         let computed_item_width = {
             if let Some(card_size) = config.card_size {
-                let (w, _h) = card_size.dimensions();
+                let (w, _h) = card_size.scaled_dimensions(scale);
                 if config.include_animation_padding {
                     let pad = crate::infra::constants::animation::calculate_horizontal_padding(w);
                     w + 2.0 * pad
@@ -56,7 +61,8 @@ impl VirtualCarouselState {
                     w
                 }
             } else {
-                config.item_width
+                // Scale the explicit item_width as well
+                config.item_width * scale
             }
         };
         let mut s = Self {
@@ -77,6 +83,16 @@ impl VirtualCarouselState {
         };
         s.recompute_metrics();
         s
+    }
+
+    /// Create a new VirtualCarouselState with default scale (1.0).
+    /// Convenience method for backwards compatibility.
+    pub fn new_unscaled(
+        total_items: usize,
+        viewport_width: f32,
+        config: CarouselConfig,
+    ) -> Self {
+        Self::new(total_items, viewport_width, config, 1.0)
     }
 
     /// Set absolute horizontal scroll offset and update index + visible range.

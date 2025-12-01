@@ -222,6 +222,7 @@ impl TabManager {
         tab_id: TabId,
         scroll_manager: &mut crate::domains::ui::scroll_manager::ScrollPositionManager,
         window_width: f32,
+        scaled_layout: &crate::infra::constants::layout::calculations::ScaledLayout,
     ) -> bool {
         // Save current tab's scroll position if it's different from the new tab
         if self.active_tab != tab_id {
@@ -242,8 +243,8 @@ impl TabManager {
             if let Some(tab) = self.get_tab_mut(tab_id)
                 && let Some(grid_state) = tab.grid_state_mut()
             {
-                // Update columns based on current window width
-                grid_state.resize(window_width);
+                // Update columns based on current window width using scaled layout
+                grid_state.resize_with_scale(window_width, scaled_layout);
 
                 // Restore the tab's scroll position from ScrollPositionManager
                 if let Some(scroll_state) =

@@ -138,10 +138,12 @@ pub fn update_shell_ui(
 
             // 3. Tab management with scroll restoration
             let tab_id = scope.to_tab_id();
+            let scaled_layout = &state.domains.ui.state.scaled_layout;
             state.tab_manager.set_active_tab_with_scroll(
                 tab_id,
                 &mut state.domains.ui.state.scroll_manager,
                 state.window_size.width,
+                scaled_layout,
             );
             state.tab_manager.set_active_sort(
                 state.domains.ui.state.sort_by,
@@ -370,10 +372,13 @@ pub fn update_shell_ui(
                             };
 
                             // Use the scroll-aware tab switching which automatically restores position
+                            let scaled_layout =
+                                &state.domains.ui.state.scaled_layout;
                             state.tab_manager.set_active_tab_with_scroll(
                                 tab_id,
                                 &mut state.domains.ui.state.scroll_manager,
                                 state.window_size.width,
+                                scaled_layout,
                             );
                             state.tab_manager.set_active_sort(
                                 state.domains.ui.state.sort_by,

@@ -17,21 +17,25 @@ use iced::{Element, Length};
     ),
     profiling::function
 )]
-pub fn view_user_profile<'a>(_state: &'a State) -> Element<'a, UiMessage> {
+pub fn view_user_profile<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+
     let content = column![
         text("Profile Settings")
-            .size(24)
+            .size(fonts.title)
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         Space::new().height(20),
         text("Display Name")
-            .size(16)
+            .size(fonts.body)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        text_input("Enter display name", "").padding(10).size(16),
+        text_input("Enter display name", "")
+            .padding(10)
+            .size(fonts.body),
         Space::new().height(15),
         text("Email (Optional)")
-            .size(16)
+            .size(fonts.body)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        text_input("Enter email", "").padding(10).size(16),
+        text_input("Enter email", "").padding(10).size(fonts.body),
         Space::new().height(30),
         row![
             button("Cancel")

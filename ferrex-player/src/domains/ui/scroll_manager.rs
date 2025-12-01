@@ -611,12 +611,14 @@ impl ScrollStateExt for crate::state::State {
         &mut self,
         library_id: Option<LibraryId>,
     ) -> Task<DomainMessage> {
+        let scaled_layout = &self.domains.ui.state.scaled_layout;
         if library_id.is_some() {
             if let Some(lib_id) = library_id {
                 self.tab_manager.set_active_tab_with_scroll(
                     crate::domains::ui::tabs::TabId::Library(lib_id),
                     &mut self.domains.ui.state.scroll_manager,
                     self.window_size.width,
+                    scaled_layout,
                 );
             }
         } else {
@@ -624,6 +626,7 @@ impl ScrollStateExt for crate::state::State {
                 crate::domains::ui::tabs::TabId::Home,
                 &mut self.domains.ui.state.scroll_manager,
                 self.window_size.width,
+                scaled_layout,
             );
         }
 

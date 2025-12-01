@@ -5,15 +5,19 @@
 
 use crate::{
     domains::{
-        metadata::image_service::FirstDisplayHint, ui::messages::UiMessage,
+        metadata::image_service::FirstDisplayHint,
+        ui::{
+            messages::UiMessage, views::virtual_carousel::types::CarouselKey,
+        },
     },
     infra::{
         service_registry,
         shader_widgets::poster::{
-            Poster, PosterFace, poster,
+            Poster, PosterFace, PosterInstanceKey,
             animation::{
                 AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
             },
+            poster,
         },
     },
 };
@@ -38,7 +42,7 @@ use uuid::Uuid;
 struct CachedImageData {
     handle: Handle,
     loaded_at: Option<std::time::Instant>,
-    request_hash: u64,
+    instance_hash: u64,
 }
 
 /// A declarative image widget that integrates with UnifiedImageService
@@ -70,6 +74,8 @@ pub struct ImageFor {
     // Text rendered below the poster by the shader
     title: Option<String>,
     meta: Option<String>,
+    // Carousel context for unique poster instance identification
+    carousel_key: Option<CarouselKey>,
 }
 
 impl ImageFor {
@@ -83,13 +89,14 @@ impl ImageFor {
         profiling::function
     )]
     pub fn new(media_id: Uuid) -> Self {
+        use crate::infra::constants::layout::poster;
         Self {
             media_id,
             size: ImageSize::Poster,
             image_type: ImageType::Movie,
-            radius: crate::infra::constants::layout::poster::CORNER_RADIUS,
-            width: Length::Fixed(185.0),
-            height: Length::Fixed(278.0),
+            radius: poster::CORNER_RADIUS,
+            width: Length::Fixed(poster::BASE_WIDTH),
+            height: Length::Fixed(poster::BASE_HEIGHT),
             // Might want to use a different default icon
             placeholder_icon: Icon::FileArchive,
             placeholder_text: None,
@@ -109,6 +116,7 @@ impl ImageFor {
             skip_request: false,
             title: None,
             meta: None,
+            carousel_key: None,
         }
     }
 
@@ -264,6 +272,13 @@ impl ImageFor {
         self.meta = Some(meta.into());
         self
     }
+
+    /// Set the carousel context for unique poster instance identification.
+    /// This is used to differentiate the same media appearing in multiple carousels.
+    pub fn carousel_key(mut self, key: CarouselKey) -> Self {
+        self.carousel_key = Some(key);
+        self
+    }
 }
 
 /// Helper function to create an image widget
@@ -306,19 +321,22 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 .with_priority(image.priority)
                 .with_index(image.image_index);
 
-        // Calculate request hash for cache invalidation
-        let request_hash = {
+        // Calculate instance hash for cache invalidation and widget identity.
+        // Includes carousel_key so the same media in different carousels gets
+        // unique primitive IDs for correct batch deduplication.
+        let instance_hash = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             request.media_id.hash(&mut hasher);
             request.size.hash(&mut hasher);
             request.image_index.hash(&mut hasher);
-            //(request.priority as u8).hash(&mut hasher);
+            // Include carousel context for unique instance identity
+            image.carousel_key.hash(&mut hasher);
             hasher.finish()
         };
 
         // Fast path: Check if we have cached data and it's still valid
         if let Some(cached) = &image.cached_data
-            && cached.request_hash == request_hash
+            && cached.instance_hash == instance_hash
         {
             // Profile cache reuse (fast path)
             #[cfg(any(
@@ -331,12 +349,11 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             // Reuse cached data without service lookup or DashMap access
             return create_shader_from_cached(
                 cached.handle.clone(),
-                request_hash,
+                instance_hash,
                 cached.loaded_at,
                 image.animation,
                 &image,
                 bounds,
-                image.media_id,
             );
         }
 
@@ -364,7 +381,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     image.cached_data = Some(CachedImageData {
                         handle: handle.clone(),
                         loaded_at,
-                        request_hash,
+                        instance_hash,
                     });
 
                     let animation_behavior = match hint {
@@ -377,12 +394,18 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         None => image.animation,
                     };
 
-                    let mut shader: Poster = poster(handle, Some(request_hash))
-                        .radius(image.radius)
-                        .with_animated_bounds(bounds)
-                        .is_hovered(image.is_hovered)
-                        .menu_target(image.media_id)
-                        .face(image.face.unwrap_or(PosterFace::Front));
+                    let instance_key = PosterInstanceKey::new(
+                        image.media_id,
+                        image.carousel_key.clone(),
+                    );
+
+                    let mut shader: Poster =
+                        poster(handle, Some(instance_hash))
+                            .radius(image.radius)
+                            .with_animated_bounds(bounds)
+                            .is_hovered(image.is_hovered)
+                            .menu_target(instance_key)
+                            .face(image.face.unwrap_or(PosterFace::Front));
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);
@@ -462,7 +485,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                                 && !svc.get().is_queued(&request)
                             {
                                 let req = request.clone();
-                                let req_hash = request_hash;
+                                let req_hash = instance_hash;
                                 // schedule delayed check
                                 std::thread::spawn(move || {
                                     std::thread::sleep(
@@ -495,12 +518,16 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         }
                     }
 
+                    let instance_key = PosterInstanceKey::new(
+                        image.media_id,
+                        image.carousel_key.clone(),
+                    );
                     create_loading_placeholder(
                         bounds,
                         image.radius,
                         image.theme_color,
-                        request_hash,
-                        image.media_id,
+                        instance_hash,
+                        instance_key,
                         image.face.unwrap_or(PosterFace::Front),
                         image.rotation_y,
                     )
@@ -508,12 +535,16 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             }
         } else {
             // Service not initialized, show loading state
+            let instance_key = PosterInstanceKey::new(
+                image.media_id,
+                image.carousel_key.clone(),
+            );
             create_loading_placeholder(
                 bounds,
                 image.radius,
                 image.theme_color,
-                request_hash,
-                image.media_id,
+                instance_hash,
+                instance_key,
                 image.face.unwrap_or(PosterFace::Front),
                 image.rotation_y,
             )
@@ -531,19 +562,21 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
 )]
 fn create_shader_from_cached<'a>(
     handle: Handle,
-    request_hash: u64,
+    instance_hash: u64,
     loaded_at: Option<std::time::Instant>,
     animation: AnimationBehavior,
     image: &ImageFor,
     bounds: AnimatedPosterBounds,
-    media_id: uuid::Uuid,
 ) -> Element<'a, UiMessage> {
+    // Create instance key from media_id and carousel_key
+    let instance_key =
+        PosterInstanceKey::new(image.media_id, image.carousel_key.clone());
     // Check if we should skip atlas upload for VeryFast scrolling
-    let mut shader = poster(handle, Some(request_hash))
+    let mut shader = poster(handle, Some(instance_hash))
         .radius(image.radius)
         .with_animated_bounds(bounds)
         .is_hovered(image.is_hovered)
-        .menu_target(media_id)
+        .menu_target(instance_key)
         .face(image.face.unwrap_or(PosterFace::Front));
 
     // Set theme color if provided
@@ -610,8 +643,8 @@ fn create_loading_placeholder<'a>(
     bounds: AnimatedPosterBounds,
     radius: f32,
     theme_color: Option<Color>,
-    request_hash: u64,
-    media_id: uuid::Uuid,
+    instance_hash: u64,
+    instance_key: PosterInstanceKey,
     face: PosterFace,
     rotation_override: Option<f32>,
 ) -> Element<'a, UiMessage> {
@@ -631,13 +664,13 @@ fn create_loading_placeholder<'a>(
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
     // Use the request hash so the placeholder shares identity with the texture once it loads.
-    let mut poster = poster(placeholder_handle, Some(request_hash))
+    let mut poster = poster(placeholder_handle, Some(instance_hash))
         .radius(radius)
         .with_animated_bounds(bounds)
         .theme_color(color)
         .with_animation(PosterAnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
-        .menu_target(media_id)
+        .menu_target(instance_key)
         .face(face);
 
     if let Some(rot) = rotation_override {

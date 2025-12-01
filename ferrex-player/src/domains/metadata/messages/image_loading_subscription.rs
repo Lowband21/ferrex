@@ -513,7 +513,10 @@ fn image_loader_stream_concurrent(
                             // (runs roughly every 8 completions to avoid overhead)
                             static ADAPT_COUNTER: std::sync::atomic::AtomicU32 =
                                 std::sync::atomic::AtomicU32::new(0);
-                            if ADAPT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8
+                            if ADAPT_COUNTER.fetch_add(
+                                1,
+                                std::sync::atomic::Ordering::Relaxed,
+                            ) % 8
                                 == 0
                             {
                                 if let Some(svc) =
