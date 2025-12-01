@@ -56,6 +56,10 @@ pub struct Poster {
     progress_color: Color,       // Color for the progress bar
     rotation_y: Option<f32>,
     face: PosterFace,
+    /// Title text to render below the poster (max 24 chars)
+    title: Option<String>,
+    /// Meta text (e.g., year) to render below the title (max 16 chars)
+    meta: Option<String>,
 }
 
 impl Poster {
@@ -84,6 +88,8 @@ impl Poster {
             progress_color: MediaServerTheme::ACCENT_BLUE, // Default to theme blue
             rotation_y: None,
             face: PosterFace::Front,
+            title: None,
+            meta: None,
         }
     }
 
@@ -205,6 +211,30 @@ impl Poster {
         self.face = face;
         self
     }
+
+    /// Sets the title text to render below the poster
+    /// Text is truncated to 24 characters max
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        let title_str = title.into();
+        self.title = if title_str.is_empty() {
+            None
+        } else {
+            Some(title_str.chars().take(24).collect())
+        };
+        self
+    }
+
+    /// Sets the meta text (e.g., year) to render below the title
+    /// Text is truncated to 16 characters max
+    pub fn meta(mut self, meta: impl Into<String>) -> Self {
+        let meta_str = meta.into();
+        self.meta = if meta_str.is_empty() {
+            None
+        } else {
+            Some(meta_str.chars().take(16).collect())
+        };
+        self
+    }
 }
 
 /// Helper function to create a rounded image widget
@@ -233,6 +263,8 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
             on_click: image.on_click,
             rotation_y: image.rotation_y,
             face: image.face,
+            title: image.title,
+            meta: image.meta,
         })
         .width(image.width)
         .height(image.height);

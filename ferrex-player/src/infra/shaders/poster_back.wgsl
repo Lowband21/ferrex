@@ -44,23 +44,18 @@ struct VertexOutput {
 // Font Atlas Configuration
 // These must match the values in font_atlas.rs
 // ============================================================================
-const FONT_ATLAS_SIZE: f32 = 512.0;
-const FONT_GLYPH_SIZE: f32 = 48.0;
+const FONT_ATLAS_WIDTH: f32 = 1024.0;
+const FONT_ATLAS_HEIGHT: f32 = 512.0;  // 6 rows * 80px = 480 → 512
+const FONT_GLYPH_SIZE: f32 = 64.0;
 const FONT_SDF_PADDING: f32 = 8.0;
-const FONT_CELL_SIZE: f32 = FONT_GLYPH_SIZE + FONT_SDF_PADDING * 2.0; // 64
-const FONT_GLYPHS_PER_ROW: i32 = 8; // 512 / 64 = 8
+const FONT_CELL_SIZE: f32 = 80.0;  // 64 + 8*2
+const FONT_GLYPHS_PER_ROW: i32 = 12; // floor(1024 / 80) = 12
 
-// Character set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-:!?"
-// Index mapping for common menu characters
+// Character set: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-:!?'&,"
+// Index mapping (see font_atlas.rs for authoritative mapping):
+// A-Z: 0-25, a-z: 26-51, 0-9: 52-61, space: 62, punctuation: 63-70
+// NOTE: Menu labels only use A-Z (0-25), so direct indices work
 fn char_to_glyph_index(c: i32) -> i32 {
-    // A-Z: 0-25
-    // 0-9: 26-35
-    // space: 36
-    // .: 37
-    // -: 38
-    // :: 39
-    // !: 40
-    // ?: 41
     return c;
 }
 
@@ -69,11 +64,12 @@ fn get_glyph_uv(glyph_index: i32) -> vec4<f32> {
     let col = glyph_index % FONT_GLYPHS_PER_ROW;
     let row = glyph_index / FONT_GLYPHS_PER_ROW;
 
-    let cell_u = f32(col) * FONT_CELL_SIZE / FONT_ATLAS_SIZE;
-    let cell_v = f32(row) * FONT_CELL_SIZE / FONT_ATLAS_SIZE;
-    let cell_size_uv = FONT_CELL_SIZE / FONT_ATLAS_SIZE;
+    let cell_u = f32(col) * FONT_CELL_SIZE / FONT_ATLAS_WIDTH;
+    let cell_v = f32(row) * FONT_CELL_SIZE / FONT_ATLAS_HEIGHT;
+    let cell_size_u = FONT_CELL_SIZE / FONT_ATLAS_WIDTH;
+    let cell_size_v = FONT_CELL_SIZE / FONT_ATLAS_HEIGHT;
 
-    return vec4<f32>(cell_u, cell_v, cell_u + cell_size_uv, cell_v + cell_size_uv);
+    return vec4<f32>(cell_u, cell_v, cell_u + cell_size_u, cell_v + cell_size_v);
 }
 
 // Sample the SDF font atlas and return the distance field value
@@ -110,24 +106,26 @@ fn render_char(pos: vec2<f32>, char_pos: vec2<f32>, glyph_index: i32, char_scale
     // Sample SDF
     let sdf = sample_font_sdf(uv);
 
-    // Convert SDF to coverage with anti-aliasing
-    // SDF: 0.5 = edge, >0.5 = inside, <0.5 = outside
-    let edge = 0.5;
-    let softness = 0.1; // Controls anti-aliasing width
-    return smoothstep(edge - softness, edge + softness, sdf);
+    // Scale-aware anti-aliasing
+    // char_scale relates to screen size; calculate proper edge softness
+    let screen_px_per_sdf_px = char_scale / (FONT_CELL_SIZE / FONT_ATLAS_WIDTH);
+    let sdf_units_per_screen_px = 1.0 / (screen_px_per_sdf_px * FONT_SDF_PADDING);
+    let edge_softness = clamp(sdf_units_per_screen_px * 0.5, 0.01, 0.5);
+
+    return smoothstep(0.5 - edge_softness, 0.5 + edge_softness, sdf);
 }
 
 // Render a string label using the font atlas
 // aspect: poster width/height ratio (used to correct for non-square coordinates)
 fn render_atlas_label(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
     let btn_y_center = BUTTON_Y_START + (f32(btn_index) + 0.5) * BUTTON_HEIGHT;
-    let label_right = 0.85; // Right edge anchor for text alignment
+    let label_right = 0.9; // 0.85; // Right edge anchor for text alignment
 
     var coverage = 0.0;
     let char_scale = size * 1.5;
     let char_spacing = size * 0.9;  // Spacing between character centers
 
-    // Character indices: A=0, B=1, ..., Z=25, 0=26, ..., 9=35, space=36
+    // Character indices: A=0..Z=25 (menu only uses uppercase)
     // Right-aligned: last character positioned at label_right
     // PLAY (4 chars)
     if btn_index == BTN_PLAY {

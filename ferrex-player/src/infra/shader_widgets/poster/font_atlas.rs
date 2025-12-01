@@ -5,17 +5,50 @@
 
 use std::collections::HashMap;
 
-/// Embedded monospace font (JetBrains Mono Regular)
-/// Using a subset for menu labels: A-Z, 0-9, and common punctuation
-const EMBEDDED_FONT: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf");
+/// Embedded monospace font (JetBrains Mono Bold)
+/// Available fonts in assets/fonts/:
+///   - JetBrainsMono-Regular.ttf, JetBrainsMono-Bold.ttf
+///   - FiraCode-Regular.ttf, FiraCode-Bold.ttf
+// const EMBEDDED_FONT: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Bold.ttf");
+const EMBEDDED_FONT: &[u8] =
+    include_bytes!("../../../../assets/fonts/FiraCode-Bold.ttf");
 
 /// Characters to include in the atlas
-const ATLAS_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-:!?";
+/// Layout: A-Z (0-25), a-z (26-51), 0-9 (52-61), space (62), punctuation (63+)
+const ATLAS_CHARS: &str =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-:!?'&,";
+
+/// Total number of characters in the atlas
+pub const ATLAS_CHAR_COUNT: usize = 71;
+
+/// Convert a character to its glyph index in the atlas
+/// Returns space index (62) for unknown characters
+pub fn char_to_glyph_index(c: char) -> u8 {
+    match c {
+        'A'..='Z' => (c as u8) - b'A',      // 0-25
+        'a'..='z' => 26 + (c as u8) - b'a', // 26-51
+        '0'..='9' => 52 + (c as u8) - b'0', // 52-61
+        ' ' => 62,
+        '.' => 63,
+        '-' => 64,
+        ':' => 65,
+        '!' => 66,
+        '?' => 67,
+        '\'' => 68,
+        '&' => 69,
+        ',' => 70,
+        _ => 62, // Unknown -> space
+    }
+}
 
 /// SDF generation parameters
-const ATLAS_SIZE: u32 = 512;
-const GLYPH_SIZE: f32 = 48.0; // Render size for SDF generation
-const SDF_PADDING: u32 = 8;   // Padding around each glyph for SDF spread
+const ATLAS_SIZE: u32 = 1024;
+const GLYPH_SIZE: f32 = 64.0; // Render size for SDF generation (higher = sharper)
+const SDF_PADDING: u32 = 8; // Padding for SDF spread (enables quality AA and effects)
+
+/// Baseline position within each cell, as fraction from top (0.75 = 75% down)
+/// This ensures all glyphs share a common baseline regardless of their height
+const BASELINE_FRACTION: f32 = 0.75;
 
 /// Glyph metrics for shader-side text rendering
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +66,7 @@ pub struct GlyphMetrics {
 }
 
 /// Font atlas containing SDF texture data and glyph metrics
+#[derive(Debug, Clone)]
 pub struct FontAtlas {
     /// RGBA texture data (SDF in R channel, others set to same value)
     pub texture_data: Vec<u8>,
@@ -52,7 +86,9 @@ impl FontAtlas {
     }
 
     /// Generate atlas from font bytes
-    pub fn generate_from_bytes(font_bytes: &[u8]) -> Result<Self, FontAtlasError> {
+    pub fn generate_from_bytes(
+        font_bytes: &[u8],
+    ) -> Result<Self, FontAtlasError> {
         use fontdue::{Font, FontSettings};
 
         // Parse font
@@ -61,16 +97,19 @@ impl FontAtlas {
 
         // Calculate atlas layout
         let chars: Vec<char> = ATLAS_CHARS.chars().collect();
-        let glyphs_per_row = (ATLAS_SIZE / (GLYPH_SIZE as u32 + SDF_PADDING * 2)) as usize;
-        let rows_needed = (chars.len() + glyphs_per_row - 1) / glyphs_per_row;
+        let glyphs_per_row =
+            (ATLAS_SIZE / (GLYPH_SIZE as u32 + SDF_PADDING * 2)) as usize;
+        let rows_needed = chars.len().div_ceil(glyphs_per_row);
 
         let atlas_width = ATLAS_SIZE;
-        let atlas_height = ((rows_needed as u32) * (GLYPH_SIZE as u32 + SDF_PADDING * 2))
+        let atlas_height = ((rows_needed as u32)
+            * (GLYPH_SIZE as u32 + SDF_PADDING * 2))
             .next_power_of_two()
             .max(256);
 
         // Create atlas buffer (RGBA)
-        let mut texture_data = vec![0u8; (atlas_width * atlas_height * 4) as usize];
+        let mut texture_data =
+            vec![0u8; (atlas_width * atlas_height * 4) as usize];
         let mut glyphs = HashMap::new();
 
         let cell_size = GLYPH_SIZE as u32 + SDF_PADDING * 2;
@@ -87,31 +126,63 @@ impl FontAtlas {
 
             if metrics.width == 0 || metrics.height == 0 {
                 // Space or empty glyph
-                glyphs.insert(ch, GlyphMetrics {
-                    uv: [0.0, 0.0, 0.0, 0.0],
-                    advance: metrics.advance_width / GLYPH_SIZE,
-                    bearing_x: 0.0,
-                    bearing_y: 0.0,
-                    width: 0.0,
-                    height: 0.0,
-                });
+                glyphs.insert(
+                    ch,
+                    GlyphMetrics {
+                        uv: [0.0, 0.0, 0.0, 0.0],
+                        advance: metrics.advance_width / GLYPH_SIZE,
+                        bearing_x: 0.0,
+                        bearing_y: 0.0,
+                        width: 0.0,
+                        height: 0.0,
+                    },
+                );
                 continue;
             }
 
             // Generate SDF from bitmap
-            let sdf = generate_sdf(&bitmap, metrics.width, metrics.height, SDF_PADDING as usize);
+            let sdf = generate_sdf(
+                &bitmap,
+                metrics.width,
+                metrics.height,
+                SDF_PADDING as usize,
+            );
             let sdf_width = metrics.width + SDF_PADDING as usize * 2;
             let sdf_height = metrics.height + SDF_PADDING as usize * 2;
 
-            // Copy SDF to atlas
+            // Calculate baseline-aligned position within cell
+            // baseline_in_cell is where the baseline should be (in pixels from cell top)
+            let baseline_in_cell =
+                (cell_size as f32 * BASELINE_FRACTION) as i32;
+
+            // metrics.ymin is the offset from baseline to bottom of glyph (negative for descenders)
+            // glyph top relative to baseline = -(height + ymin) = -height - ymin
+            // So glyph top in cell = baseline_in_cell - height - ymin
+            // SDF top = glyph top - padding
+            let glyph_y_offset = baseline_in_cell
+                - (metrics.height as i32)
+                - metrics.ymin
+                - (SDF_PADDING as i32);
+
+            // Copy SDF to atlas with baseline-aligned positioning
             for sy in 0..sdf_height {
                 for sx in 0..sdf_width {
                     let atlas_x = cell_x as usize + sx;
-                    let atlas_y = cell_y as usize + sy;
+                    let atlas_y_signed =
+                        cell_y as i32 + glyph_y_offset + sy as i32;
 
-                    if atlas_x < atlas_width as usize && atlas_y < atlas_height as usize {
+                    // Skip if outside atlas bounds
+                    if atlas_y_signed < 0 {
+                        continue;
+                    }
+                    let atlas_y = atlas_y_signed as usize;
+
+                    if atlas_x < atlas_width as usize
+                        && atlas_y < atlas_height as usize
+                    {
                         let sdf_val = sdf[sy * sdf_width + sx];
-                        let pixel_idx = (atlas_y * atlas_width as usize + atlas_x) * 4;
+                        let pixel_idx =
+                            (atlas_y * atlas_width as usize + atlas_x) * 4;
 
                         // Store SDF in all channels (grayscale)
                         texture_data[pixel_idx] = sdf_val;
@@ -126,20 +197,27 @@ impl FontAtlas {
             let u_min = cell_x as f32 / atlas_width as f32;
             let v_min = cell_y as f32 / atlas_height as f32;
             let u_max = (cell_x + sdf_width as u32) as f32 / atlas_width as f32;
-            let v_max = (cell_y + sdf_height as u32) as f32 / atlas_height as f32;
+            let v_max =
+                (cell_y + sdf_height as u32) as f32 / atlas_height as f32;
 
-            glyphs.insert(ch, GlyphMetrics {
-                uv: [u_min, v_min, u_max, v_max],
-                advance: metrics.advance_width / GLYPH_SIZE,
-                bearing_x: (metrics.xmin as f32 - SDF_PADDING as f32) / GLYPH_SIZE,
-                bearing_y: (metrics.ymin as f32 - SDF_PADDING as f32) / GLYPH_SIZE,
-                width: sdf_width as f32 / GLYPH_SIZE,
-                height: sdf_height as f32 / GLYPH_SIZE,
-            });
+            glyphs.insert(
+                ch,
+                GlyphMetrics {
+                    uv: [u_min, v_min, u_max, v_max],
+                    advance: metrics.advance_width / GLYPH_SIZE,
+                    bearing_x: (metrics.xmin as f32 - SDF_PADDING as f32)
+                        / GLYPH_SIZE,
+                    bearing_y: (metrics.ymin as f32 - SDF_PADDING as f32)
+                        / GLYPH_SIZE,
+                    width: sdf_width as f32 / GLYPH_SIZE,
+                    height: sdf_height as f32 / GLYPH_SIZE,
+                },
+            );
         }
 
         // Get line height from font metrics
-        let line_height = font.horizontal_line_metrics(GLYPH_SIZE)
+        let line_height = font
+            .horizontal_line_metrics(GLYPH_SIZE)
             .map(|m| m.new_line_size / GLYPH_SIZE)
             .unwrap_or(1.2);
 
@@ -154,10 +232,9 @@ impl FontAtlas {
 
     /// Get glyph metrics for a character (returns space metrics for unknown chars)
     pub fn get_glyph(&self, ch: char) -> GlyphMetrics {
-        // Try uppercase first for menu labels
+        // Try exact character first, then fallback to space
         self.glyphs
-            .get(&ch.to_ascii_uppercase())
-            .or_else(|| self.glyphs.get(&ch))
+            .get(&ch)
             .or_else(|| self.glyphs.get(&' '))
             .copied()
             .unwrap_or(GlyphMetrics {
@@ -168,6 +245,19 @@ impl FontAtlas {
                 width: 0.0,
                 height: 0.0,
             })
+    }
+
+    /// Calculate the rendered width of a string in normalized units (relative to font size)
+    /// Returns (width, char_count) where char_count is capped at max_chars
+    pub fn measure_text(&self, text: &str, max_chars: usize) -> (f32, usize) {
+        let mut width = 0.0;
+        let mut count = 0;
+        for ch in text.chars().take(max_chars) {
+            let glyph = self.get_glyph(ch);
+            width += glyph.advance;
+            count += 1;
+        }
+        (width, count)
     }
 
     /// Generate glyph data buffer for shader uniform
@@ -190,8 +280,54 @@ impl FontAtlas {
     }
 }
 
+/// Pack a string into an array of u32s for GPU upload.
+/// Each u32 contains 4 character indices (8 bits each).
+/// Returns (packed_data, actual_char_count).
+pub fn pack_string(text: &str, max_chars: usize) -> (Vec<u32>, usize) {
+    let word_count = max_chars.div_ceil(4);
+    let mut packed = vec![0xFFFFFFFF_u32; word_count]; // Fill with 0xFF (null marker)
+
+    let mut count = 0;
+    for (i, ch) in text.chars().take(max_chars).enumerate() {
+        let idx = char_to_glyph_index(ch);
+        let word_index = i / 4;
+        let byte_offset = (i % 4) * 8;
+        // Clear the byte position and set the new value
+        packed[word_index] = (packed[word_index] & !(0xFF << byte_offset))
+            | ((idx as u32) << byte_offset);
+        count += 1;
+    }
+
+    (packed, count)
+}
+
+/// Pack a title string (max 24 chars) into 6 u32s
+pub fn pack_title(text: &str) -> ([u32; 6], usize) {
+    let (packed, count) = pack_string(text, 24);
+    let mut result = [0xFFFFFFFF_u32; 6];
+    for (i, &val) in packed.iter().take(6).enumerate() {
+        result[i] = val;
+    }
+    (result, count)
+}
+
+/// Pack a meta string (max 16 chars) into 4 u32s
+pub fn pack_meta(text: &str) -> ([u32; 4], usize) {
+    let (packed, count) = pack_string(text, 16);
+    let mut result = [0xFFFFFFFF_u32; 4];
+    for (i, &val) in packed.iter().take(4).enumerate() {
+        result[i] = val;
+    }
+    (result, count)
+}
+
 /// Generate SDF from a grayscale bitmap
-fn generate_sdf(bitmap: &[u8], width: usize, height: usize, padding: usize) -> Vec<u8> {
+fn generate_sdf(
+    bitmap: &[u8],
+    width: usize,
+    height: usize,
+    padding: usize,
+) -> Vec<u8> {
     let sdf_width = width + padding * 2;
     let sdf_height = height + padding * 2;
     let mut sdf = vec![0u8; sdf_width * sdf_height];
@@ -206,7 +342,11 @@ fn generate_sdf(bitmap: &[u8], width: usize, height: usize, padding: usize) -> V
             // Check if this pixel is inside the glyph
             let bx = sx as i32 - padding as i32;
             let by = sy as i32 - padding as i32;
-            let inside = if bx >= 0 && bx < width as i32 && by >= 0 && by < height as i32 {
+            let inside = if bx >= 0
+                && bx < width as i32
+                && by >= 0
+                && by < height as i32
+            {
                 bitmap[by as usize * width + bx as usize] > 127
             } else {
                 false
@@ -219,10 +359,13 @@ fn generate_sdf(bitmap: &[u8], width: usize, height: usize, padding: usize) -> V
                     let check_bx = bx + dx;
                     let check_by = by + dy;
 
-                    let check_inside = if check_bx >= 0 && check_bx < width as i32
-                        && check_by >= 0 && check_by < height as i32
+                    let check_inside = if check_bx >= 0
+                        && check_bx < width as i32
+                        && check_by >= 0
+                        && check_by < height as i32
                     {
-                        bitmap[check_by as usize * width + check_bx as usize] > 127
+                        bitmap[check_by as usize * width + check_bx as usize]
+                            > 127
                     } else {
                         false
                     };
@@ -242,7 +385,8 @@ fn generate_sdf(bitmap: &[u8], width: usize, height: usize, padding: usize) -> V
                 0.5 - (min_dist / max_dist) * 0.5
             };
 
-            sdf[sy * sdf_width + sx] = (normalized.clamp(0.0, 1.0) * 255.0) as u8;
+            sdf[sy * sdf_width + sx] =
+                (normalized.clamp(0.0, 1.0) * 255.0) as u8;
         }
     }
 
@@ -258,8 +402,12 @@ pub enum FontAtlasError {
 impl std::fmt::Display for FontAtlasError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FontAtlasError::FontParse(e) => write!(f, "Failed to parse font: {}", e),
-            FontAtlasError::AtlasGeneration(e) => write!(f, "Failed to generate atlas: {}", e),
+            FontAtlasError::FontParse(e) => {
+                write!(f, "Failed to parse font: {}", e)
+            }
+            FontAtlasError::AtlasGeneration(e) => {
+                write!(f, "Failed to generate atlas: {}", e)
+            }
         }
     }
 }
@@ -275,11 +423,8 @@ mod tests {
         // This test will fail until we have the font file
         // For now, just test the SDF generation
         let bitmap = vec![
-            0, 0, 0, 0, 0,
-            0, 255, 255, 255, 0,
-            0, 255, 255, 255, 0,
-            0, 255, 255, 255, 0,
-            0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 255, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255,
+            255, 255, 0, 0, 0, 0, 0, 0,
         ];
         let sdf = generate_sdf(&bitmap, 5, 5, 2);
         assert_eq!(sdf.len(), 9 * 9);

@@ -25,9 +25,8 @@ use ferrex_core::player_prelude::{
     WatchProgress,
 };
 
-use iced::widget::text::Wrapping;
 use iced::{
-    Alignment, Element, Length,
+    Element, Length,
     widget::{column, container, mouse_area},
 };
 
@@ -289,6 +288,13 @@ pub fn movie_reference_card_with_state<'a>(
         img = img.rotation_y(rot);
     }
 
+    // Add title and meta text to be rendered by the shader
+    let title = truncate(&mut movie.title().to_string());
+    img = img.title(title);
+    if let Some(year) = movie.release_year() {
+        img = img.meta(year.to_string());
+    }
+
     // Create the full card manually to match media_card! structure
     let image_element: Element<'_, UiMessage> = img.into();
 
@@ -296,34 +302,10 @@ pub fn movie_reference_card_with_state<'a>(
     let image_with_hover = mouse_area(image_element)
         .on_enter(InteractionMessage::MediaHovered(movie_id.to_uuid()).into())
         .on_exit(InteractionMessage::MediaUnhovered(movie_id.to_uuid()).into());
-    let poster_element = image_with_hover;
 
-    let title = truncate(&mut movie.title().to_string());
-
-    // Create text content
-    let text_content = column![
-        text(title)
-            .align_x(Alignment::Center)
-            .width(Length::Fixed(200.0))
-            .size(13)
-            .wrapping(Wrapping::None),
-        text(movie.release_year().unwrap_or("932").to_string())
-            .align_x(Alignment::Center)
-            .width(Length::Fixed(200.0))
-            .size(12)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    ]
-    .spacing(2);
-
-    column![
-        poster_element,
-        container(text_content)
-            .padding([5, 0])
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(60.0))
-    ]
-    .spacing(5)
-    .into()
+    // Return just the poster with shader-rendered text below
+    // The shader text zone extends 50px below the poster bounds
+    image_with_hover.into()
 }
 
 #[cfg_attr(
@@ -518,6 +500,13 @@ pub fn series_reference_card_with_state<'a>(
         img = img.rotation_y(rot);
     }
 
+    // Add title and meta text to be rendered by the shader
+    let title = truncate(&mut series.title().to_string());
+    img = img.title(title);
+    if let Some(year) = details_opt.get_release_year() {
+        img = img.meta(year.to_string());
+    }
+
     let image_element: Element<'_, UiMessage> = img.into();
 
     let image_with_hover = mouse_area(image_element)
@@ -525,28 +514,10 @@ pub fn series_reference_card_with_state<'a>(
         .on_exit(
             InteractionMessage::MediaUnhovered(series_id.to_uuid()).into(),
         );
-    let poster_element = image_with_hover;
 
-    let text_content = column![
-        text(series.title().to_string())
-            .align_x(Alignment::Center)
-            .wrapping(Wrapping::None)
-            .size(14),
-        text(details_opt.get_release_year().unwrap_or(932))
-            .size(12)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    ]
-    .spacing(2);
-
-    column![
-        poster_element,
-        container(text_content)
-            .padding(5)
-            .width(Length::Fixed(200.0))
-            .height(Length::Fixed(60.0))
-    ]
-    .spacing(5)
-    .into()
+    // Return just the poster with shader-rendered text below
+    // The shader text zone extends 50px below the poster bounds
+    image_with_hover.into()
 }
 
 /*

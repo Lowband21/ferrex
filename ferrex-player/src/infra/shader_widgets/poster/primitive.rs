@@ -33,6 +33,10 @@ pub struct PosterPrimitive {
     pub progress_color: Color,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
+    /// Title text to render below the poster
+    pub title: Option<String>,
+    /// Meta text (e.g., year) to render below the title
+    pub meta: Option<String>,
 }
 
 impl PosterPrimitive {
@@ -101,6 +105,8 @@ impl BatchPrimitive for PosterPrimitive {
             progress_color: self.progress_color,
             rotation_override: self.rotation_override,
             face: self.face,
+            title: self.title.clone(),
+            meta: self.meta.clone(),
         });
 
         true

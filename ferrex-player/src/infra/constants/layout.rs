@@ -16,10 +16,10 @@ pub mod poster {
     pub const CORNER_RADIUS: f32 = 6.0;
 
     /// Text area height below poster
-    pub const TEXT_AREA_HEIGHT: f32 = 60.0;
+    pub const TEXT_AREA_HEIGHT: f32 = 30.0;
 
     /// Total card height including text area
-    pub const TOTAL_CARD_HEIGHT: f32 = BASE_HEIGHT + TEXT_AREA_HEIGHT + 5.0; // 365px
+    pub const TOTAL_CARD_HEIGHT: f32 = BASE_HEIGHT + TEXT_AREA_HEIGHT;
 }
 
 /// Animation-related constants
@@ -63,7 +63,7 @@ pub mod grid {
     pub const EFFECTIVE_SPACING: f32 = 15.0;
 
     /// Minimum padding on each side of the viewport
-    pub const MIN_VIEWPORT_PADDING: f32 = 40.0;
+    pub const MIN_VIEWPORT_PADDING: f32 = 10.0; // 40.0;
 
     /// Total horizontal padding (left + right)
     pub const TOTAL_HORIZONTAL_PADDING: f32 = MIN_VIEWPORT_PADDING * 2.0;
@@ -72,17 +72,17 @@ pub mod grid {
     pub const MIN_COLUMNS: usize = 1;
 
     /// Maximum number of columns in a grid
-    pub const MAX_COLUMNS: usize = 16;
+    pub const MAX_COLUMNS: usize = 32; // 16;
 
     /// Spacing between rows in virtual grid
-    pub const ROW_SPACING: f32 = 50.0;
+    pub const ROW_SPACING: f32 = 15.0; // 50.0;
 
     /// Additional padding at bottom of grid
     /// Increased to ensure last row is fully visible with text area
     pub const BOTTOM_PADDING: f32 = 100.0;
 
     /// Top padding to prevent posters from touching the header
-    pub const TOP_PADDING: f32 = 20.0;
+    pub const TOP_PADDING: f32 = 30.0;
 }
 
 /// Virtual list/grid specific constants

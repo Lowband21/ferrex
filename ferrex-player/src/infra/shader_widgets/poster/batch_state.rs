@@ -44,6 +44,11 @@ pub struct PosterInstance {
     pub atlas_uvs: [f32; 4],
     pub atlas_layer: i32,
     pub _pad_atlas_layer: [i32; 3],
+    // Text data: packed character indices for title and meta
+    // Each u32 contains 4 character indices (8 bits each)
+    pub title_chars: [u32; 6],    // 24 chars max
+    pub meta_chars: [u32; 4],     // 16 chars max
+    pub text_params: [f32; 4],    // [title_len, meta_len, reserved, reserved]
 }
 
 /// Batched primitive metadata captured during encoding.
@@ -64,6 +69,10 @@ pub struct PendingPrimitive {
     pub progress_color: Color,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
+    /// Title text to render below the poster
+    pub title: Option<String>,
+    /// Meta text (e.g., year) to render below the title
+    pub meta: Option<String>,
 }
 
 /// globals uniform buffer layout shared with the WGSL shader.
@@ -107,12 +116,16 @@ pub struct PosterBatchState {
     font_atlas_texture: Option<wgpu::Texture>,
     font_atlas_view: Option<wgpu::TextureView>,
     font_atlas_uploaded: bool,
+    // Text rendering pipeline
+    shader_text: Arc<wgpu::ShaderModule>,
+    render_pipeline_text: Option<Arc<wgpu::RenderPipeline>>,
 }
 
 impl PosterBatchState {
-    /// Vertex layout describing the 9 vec4 instance attributes.
+    /// Vertex layout describing instance attributes including text data.
     fn vertex_buffer_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRS: [wgpu::VertexAttribute; 9] = [
+        const ATTRS: [wgpu::VertexAttribute; 13] = [
+            // Original 9 attributes
             wgpu::VertexAttribute {
                 offset: 0,
                 shader_location: 0,
@@ -157,6 +170,27 @@ impl PosterBatchState {
                 offset: 128,
                 shader_location: 8,
                 format: wgpu::VertexFormat::Sint32,
+            },
+            // Text data attributes (locations 9-12)
+            wgpu::VertexAttribute {
+                offset: 144,
+                shader_location: 9,
+                format: wgpu::VertexFormat::Uint32x4,  // title_chars[0..4]
+            },
+            wgpu::VertexAttribute {
+                offset: 160,
+                shader_location: 10,
+                format: wgpu::VertexFormat::Uint32x2,  // title_chars[4..6]
+            },
+            wgpu::VertexAttribute {
+                offset: 168,
+                shader_location: 11,
+                format: wgpu::VertexFormat::Uint32x4,  // meta_chars
+            },
+            wgpu::VertexAttribute {
+                offset: 184,
+                shader_location: 12,
+                format: wgpu::VertexFormat::Float32x4, // text_params
             },
         ];
 
@@ -306,6 +340,62 @@ impl PosterBatchState {
         self.atlas_bind_group_layout = Some(atlas_layout);
     }
 
+    /// Lazily creates the text render pipeline for title/meta rendering.
+    /// Text uses only the globals bind group (which includes the font atlas).
+    fn ensure_pipeline_text(&mut self, device: &wgpu::Device) {
+        if self.render_pipeline_text.is_some() {
+            return;
+        }
+
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Poster Text Pipeline Layout"),
+                bind_group_layouts: &[&self.globals_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Poster Text Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.shader_text,
+                    entry_point: Some("vs_text"),
+                    buffers: &[Self::vertex_buffer_layout()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader_text,
+                    entry_point: Some("fs_text"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
+        self.render_pipeline_text = Some(Arc::new(pipeline));
+    }
+
     /// Adds a primitive captured during encoding.
     pub fn enqueue(&mut self, pending: PendingPrimitive) {
         const POSITION_EPSILON: f32 = 0.5;
@@ -420,6 +510,16 @@ impl PrimitiveBatchState for PosterBatchState {
             wgpu::ShaderModuleDescriptor {
                 label: Some("Poster Back Shader (Batched)"),
                 source: wgpu::ShaderSource::Wgsl(shader_src_back.into()),
+            },
+        ));
+
+        // Text shader for title/meta rendering (no 3D rotation)
+        let shader_text = Arc::new(device.create_shader_module(
+            wgpu::ShaderModuleDescriptor {
+                label: Some("Poster Text Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../../shaders/poster_text.wgsl").into(),
+                ),
             },
         ));
 
@@ -552,6 +652,8 @@ impl PrimitiveBatchState for PosterBatchState {
             font_atlas_texture,
             font_atlas_view,
             font_atlas_uploaded: false,
+            shader_text,
+            render_pipeline_text: None,
         }
     }
 
@@ -570,6 +672,7 @@ impl PrimitiveBatchState for PosterBatchState {
             let atlas_layout = image_cache.texture_layout();
             self.ensure_pipeline_front(context.device, atlas_layout.clone());
             self.ensure_pipeline_back(context.device, atlas_layout.clone());
+            self.ensure_pipeline_text(context.device);
 
             // Keep track of the last atlas bind group we saw this frame so we can
             // reuse it when we draw placeholders for images that missed the budget.
@@ -768,6 +871,8 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.progress_color,
                     pending.rotation_override,
                     pending.face,
+                    pending.title.as_deref(),
+                    pending.meta.as_deref(),
                 );
 
                 // Track groups by atlas bind group. If none obtained yet, try to
@@ -1091,8 +1196,11 @@ impl PrimitiveBatchState for PosterBatchState {
             self.globals_bind_group.as_ref(),
             render_pass,
             context,
-            range,
+            range.clone(),
         );
+
+        // Render text (title/meta) after poster faces
+        self.render_text(render_pass, context, range);
     }
 
     fn trim(&mut self) {
@@ -1187,6 +1295,54 @@ impl PosterBatchState {
             offset = group_end;
             if offset >= end {
                 break;
+            }
+        }
+    }
+
+    /// Renders text (title/meta) for all poster instances (both front and back faces).
+    /// Text stays fixed below the poster regardless of flip state.
+    fn render_text(
+        &self,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        context: &mut RenderContext<'_>,
+        range: std::ops::Range<u32>,
+    ) {
+        let (Some(globals_bind_group), Some(pipeline)) = (
+            self.globals_bind_group.as_ref(),
+            self.render_pipeline_text.as_ref(),
+        ) else {
+            return;
+        };
+
+        render_pass.set_pipeline(pipeline);
+        render_pass.set_bind_group(0, globals_bind_group, &[]);
+
+        let scissor = context.scissor_rect;
+        render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
+
+        // Render text for FRONT instances
+        if let Some(buffer) = self.instance_manager_front.buffer() {
+            let count = self.instance_manager_front.instance_count() as u32;
+            if count > 0 {
+                let start = range.start.min(count);
+                let end = range.end.min(count);
+                if start < end {
+                    render_pass.set_vertex_buffer(0, buffer.slice(..));
+                    render_pass.draw(0..4, start..end);
+                }
+            }
+        }
+
+        // Render text for BACK instances (text stays visible when poster is flipped)
+        if let Some(buffer) = self.instance_manager_back.buffer() {
+            let count = self.instance_manager_back.instance_count() as u32;
+            if count > 0 {
+                let start = range.start.min(count);
+                let end = range.end.min(count);
+                if start < end {
+                    render_pass.set_vertex_buffer(0, buffer.slice(..));
+                    render_pass.draw(0..4, start..end);
+                }
             }
         }
     }

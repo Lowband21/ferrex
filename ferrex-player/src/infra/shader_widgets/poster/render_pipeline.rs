@@ -4,6 +4,7 @@ use crate::infra::shader_widgets::poster::{
     animation::{
         self, PosterAnimationType, calculate_animation_state,
     },
+    font_atlas::{pack_title, pack_meta},
 };
 
 use iced::{Color, Point, Rectangle, wgpu};
@@ -330,6 +331,8 @@ pub(crate) fn create_batch_instance(
     progress_color: Color,
     rotation_override: Option<f32>,
     _face: PosterFace,
+    title: Option<&str>,
+    meta: Option<&str>,
 ) -> batch_state::PosterInstance {
     // Extract UV coordinates and layer from the atlas entry
     let (mut uv_min, mut uv_max, layer) = if let Some(region) = atlas_region {
@@ -477,6 +480,14 @@ pub(crate) fn create_batch_instance(
     let [theme_r, theme_g, theme_b, _] = theme_color.into_linear();
     let [prog_r, prog_g, prog_b, _] = progress_color.into_linear();
 
+    // Pack title and meta text for GPU
+    let (title_chars, title_len) = title
+        .map(|t| pack_title(t))
+        .unwrap_or(([0xFFFFFFFF; 6], 0));
+    let (meta_chars, meta_len) = meta
+        .map(|m| pack_meta(m))
+        .unwrap_or(([0xFFFFFFFF; 4], 0));
+
     PosterInstance {
         position_and_size: [
             poster_position[0],
@@ -513,6 +524,9 @@ pub(crate) fn create_batch_instance(
         atlas_uvs: [uv_min[0], uv_min[1], uv_max[0], uv_max[1]],
         atlas_layer: layer as i32,
         _pad_atlas_layer: [0, 0, 0],
+        title_chars,
+        meta_chars,
+        text_params: [title_len as f32, meta_len as f32, 0.0, 0.0],
     }
 }
 
@@ -607,5 +621,8 @@ pub fn create_placeholder_instance(
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer: 0,
         _pad_atlas_layer: [0, 0, 0],
+        title_chars: [0xFFFFFFFF; 6],  // No text for placeholder
+        meta_chars: [0xFFFFFFFF; 4],
+        text_params: [0.0, 0.0, 0.0, 0.0],
     }
 }

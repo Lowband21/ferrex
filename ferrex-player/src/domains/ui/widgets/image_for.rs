@@ -67,6 +67,9 @@ pub struct ImageFor {
     cached_data: Option<CachedImageData>,
     // If true, do not enqueue a network request on cache miss.
     skip_request: bool,
+    // Text rendered below the poster by the shader
+    title: Option<String>,
+    meta: Option<String>,
 }
 
 impl ImageFor {
@@ -104,6 +107,8 @@ impl ImageFor {
             face: None,
             cached_data: None,
             skip_request: false,
+            title: None,
+            meta: None,
         }
     }
 
@@ -245,6 +250,18 @@ impl ImageFor {
     /// will render only a placeholder. Useful when metadata lacks a poster.
     pub fn skip_request(mut self, skip: bool) -> Self {
         self.skip_request = skip;
+        self
+    }
+
+    /// Set the title text to render below the poster (max 24 chars)
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Set the meta text (year, rating, etc.) to render below the title (max 16 chars)
+    pub fn meta(mut self, meta: impl Into<String>) -> Self {
+        self.meta = Some(meta.into());
         self
     }
 }
@@ -412,6 +429,14 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         shader = shader.progress_color(progress_color);
                     }
 
+                    // Set title/meta text for shader rendering
+                    if let Some(title) = &image.title {
+                        shader = shader.title(title.clone());
+                    }
+                    if let Some(meta) = &image.meta {
+                        shader = shader.meta(meta.clone());
+                    }
+
                     shader.into()
                 }
                 _ => {
@@ -560,6 +585,14 @@ fn create_shader_from_cached<'a>(
         shader = shader.progress(progress);
         let progress_color = Color::from_rgb(0.0, 0.47, 1.0);
         shader = shader.progress_color(progress_color);
+    }
+
+    // Set title/meta text for shader rendering
+    if let Some(title) = &image.title {
+        shader = shader.title(title.clone());
+    }
+    if let Some(meta) = &image.meta {
+        shader = shader.meta(meta.clone());
     }
 
     shader.into()

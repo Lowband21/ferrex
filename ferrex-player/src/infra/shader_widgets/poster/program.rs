@@ -41,6 +41,10 @@ pub struct PosterProgram {
     pub on_options: Option<UiMessage>,
     pub on_click: Option<UiMessage>,
     pub face: PosterFace,
+    /// Title text to render below the poster
+    pub title: Option<String>,
+    /// Meta text (e.g., year) to render below the title
+    pub meta: Option<String>,
 }
 
 impl Program<UiMessage> for PosterProgram {
@@ -89,6 +93,8 @@ impl Program<UiMessage> for PosterProgram {
             progress_color: self.progress_color,
             rotation_override: self.rotation_y,
             face: self.face,
+            title: self.title.clone(),
+            meta: self.meta.clone(),
         }
     }
 
