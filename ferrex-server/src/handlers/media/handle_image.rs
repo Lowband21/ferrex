@@ -9,6 +9,7 @@ use axum::{
 use ferrex_core::database::traits::ImageLookupParams;
 use ferrex_core::domain::media::image::MediaImageKind;
 use ferrex_core::infrastructure::media::image_service::TmdbImageSize;
+use ferrex_model::ImageSize;
 use httpdate::{fmt_http_date, parse_http_date};
 use serde::Deserialize;
 use std::io::ErrorKind;
@@ -28,8 +29,11 @@ const LARGE_IMAGE_WARN_THRESHOLD: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ImageQuery {
+    /// Typed ImageSize enum from ferrex-model (preferred)
+    image_size: Option<ImageSize>,
     /// Legacy TMDB size (e.g., w185, w500, original)
     size: Option<String>,
+    /// Legacy width hint
     w: Option<u32>,
     max_width: Option<u32>,
     /// Preferred output format (future use): avif|webp|jpeg
@@ -59,11 +63,12 @@ pub async fn serve_image_handler(
 ) -> impl IntoResponse {
     let t_start = std::time::Instant::now();
     debug!(
-        "Image request: type={}, id={}, category={}, index={}, size={:?}, w={:?}, fmt={:?}, quality={:?}",
+        "Image request: type={}, id={}, category={}, index={}, image_size={:?}, size={:?}, w={:?}, fmt={:?}, quality={:?}",
         media_type,
         media_id,
         category,
         index,
+        query.image_size,
         query.size,
         query.w.or(query.max_width),
         query.fmt,
@@ -626,11 +631,18 @@ fn determine_variant_plan(
     category: &MediaImageKind,
     query: &ImageQuery,
 ) -> VariantPlan {
+    // Prefer typed ImageSize enum (carries full semantic info)
+    if let Some(ref image_size) = query.image_size {
+        return variant_plan_from_image_size(category, image_size);
+    }
+
+    // Legacy: width hint
     if let Some(w) = query.w.or(query.max_width) {
         let variant = map_width_to_tmdb_variant(category, w).to_string();
         return variant_plan_exact(variant, None);
     }
 
+    // Legacy: string size parameter
     if let Some(size_value) = query.size.as_ref().filter(|s| !s.is_empty()) {
         let trimmed = size_value.trim();
         let normalized = trimmed.to_ascii_lowercase();
@@ -664,6 +676,25 @@ fn determine_variant_plan(
     }
 
     auto_plan_for_category(category, None)
+}
+
+/// Create variant plan from typed ImageSize enum
+fn variant_plan_from_image_size(
+    category: &MediaImageKind,
+    image_size: &ImageSize,
+) -> VariantPlan {
+    let target_width = image_size.width().map(|w| w as u32);
+    let variant = match target_width {
+        Some(w) => map_width_to_tmdb_variant(category, w).to_string(),
+        None => "original".to_string(), // Original variants have no width
+    };
+
+    VariantPlan {
+        requested_header: Some(format!("{:?}", image_size)),
+        lookup_variant: Some(variant.clone()),
+        ensure_variants: vec![variant],
+        target_width,
+    }
 }
 
 fn variant_plan_exact(variant: String, header: Option<String>) -> VariantPlan {

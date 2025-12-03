@@ -343,8 +343,8 @@ impl ExtrasParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::image_types::modname::MediaType;
     use crate::types::library::LibraryType;
-    use crate::types::util_types::MediaType;
     use std::path::PathBuf;
 
     #[test]

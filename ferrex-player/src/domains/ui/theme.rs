@@ -4,6 +4,7 @@ use iced::{
 };
 
 use crate::domains::ui::types::ViewState;
+use crate::infra::theme::{accent, accent_glow, accent_hover};
 use crate::state::State;
 
 /// Pure black theme with high contrast electric blue accents
@@ -18,9 +19,12 @@ impl MediaServerTheme {
     //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.20, 0.05, 0.30);
     // pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.12, 0.05, 0.16);
     pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.01, 0.01, 0.01);
-    pub const ACCENT_BLUE: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
-    pub const ACCENT_BLUE_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
-    pub const ACCENT_BLUE_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
+    // pub const ACCENT: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
+    // pub const ACCENT_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
+    // pub const ACCENT_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
+    pub const ACCENT: Color = Color::from_rgb(0.867, 0.0, 0.867);
+    pub const ACCENT_HOVER: Color = Color::from_rgb(0.9, 0.0, 0.9);
+    pub const ACCENT_GLOW: Color = Color::from_rgba(0.867, 0.5, 0.867, 0.3);
 
     // Grays
     pub const CARD_BG: Color = Color::from_rgb(0.1, 0.1, 0.1); // #1A1A1A
@@ -59,7 +63,7 @@ impl MediaServerTheme {
         // Default to an opaque background to avoid app-wide transparency.
         palette.background = Self::BACKGROUND;
         palette.text = Self::TEXT_PRIMARY;
-        palette.primary = Self::ACCENT_BLUE;
+        palette.primary = Self::ACCENT;
         palette.success = Self::SUCCESS;
         palette.danger = Self::ERROR;
 
@@ -119,7 +123,7 @@ impl MediaServerTheme {
             Self::BACKGROUND
         };
         palette.text = Self::TEXT_PRIMARY;
-        palette.primary = Self::ACCENT_BLUE;
+        palette.primary = Self::ACCENT;
         palette.success = Self::SUCCESS;
         palette.danger = Self::ERROR;
 
@@ -170,12 +174,12 @@ impl Container {
                     MediaServerTheme::CARD_HOVER,
                 )),
                 border: Border {
-                    color: MediaServerTheme::ACCENT_BLUE,
+                    color: accent(),
                     width: 1.0,
                     radius: 8.0.into(),
                 },
                 shadow: Shadow {
-                    color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                    color: accent_glow(),
                     offset: iced::Vector::new(0.0, 0.0),
                     blur_radius: 10.0,
                 },
@@ -183,16 +187,14 @@ impl Container {
             },
             Container::ProgressBar => |_| container::Style {
                 text_color: None,
-                background: Some(Background::Color(
-                    MediaServerTheme::ACCENT_BLUE,
-                )),
+                background: Some(Background::Color(accent())),
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
                     radius: 2.0.into(),
                 },
                 shadow: Shadow {
-                    color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                    color: accent_glow(),
                     offset: iced::Vector::new(0.0, 0.0),
                     blur_radius: 4.0,
                 },
@@ -366,30 +368,30 @@ impl Button {
             Button::Primary => |_, status| {
                 let (background, shadow) = match status {
                     button::Status::Active => (
-                        MediaServerTheme::ACCENT_BLUE,
+                        accent(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
                     button::Status::Hovered => (
-                        MediaServerTheme::ACCENT_BLUE_HOVER,
+                        accent_hover(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 16.0,
                         },
                     ),
                     button::Status::Pressed => (
-                        Color::from_rgb(0.0, 0.4, 0.8),
+                        crate::infra::theme::darken(accent(), 0.2),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
-                    _ => (MediaServerTheme::ACCENT_BLUE, Shadow::default()),
+                    _ => (accent(), Shadow::default()),
                 };
 
                 button::Style {
@@ -407,30 +409,30 @@ impl Button {
             Button::HeaderTabActive => |_, status| {
                 let (background, shadow) = match status {
                     button::Status::Active => (
-                        MediaServerTheme::ACCENT_BLUE,
+                        accent(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
                     button::Status::Hovered => (
-                        MediaServerTheme::ACCENT_BLUE_HOVER,
+                        accent_hover(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 16.0,
                         },
                     ),
                     button::Status::Pressed => (
-                        Color::from_rgb(0.0, 0.4, 0.8),
+                        crate::infra::theme::darken(accent(), 0.2),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
-                    _ => (MediaServerTheme::ACCENT_BLUE, Shadow::default()),
+                    _ => (accent(), Shadow::default()),
                 };
 
                 button::Style {
@@ -448,30 +450,30 @@ impl Button {
             Button::HeaderMenuPrimary => |_, status| {
                 let (background, shadow) = match status {
                     button::Status::Active => (
-                        MediaServerTheme::ACCENT_BLUE,
+                        accent(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
                     button::Status::Hovered => (
-                        MediaServerTheme::ACCENT_BLUE_HOVER,
+                        accent_hover(),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 16.0,
                         },
                     ),
                     button::Status::Pressed => (
-                        Color::from_rgb(0.0, 0.4, 0.8),
+                        crate::infra::theme::darken(accent(), 0.2),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 8.0,
                         },
                     ),
-                    _ => (MediaServerTheme::ACCENT_BLUE, Shadow::default()),
+                    _ => (accent(), Shadow::default()),
                 };
 
                 button::Style {
@@ -492,10 +494,9 @@ impl Button {
                         MediaServerTheme::CARD_BG,
                         MediaServerTheme::BORDER_COLOR,
                     ),
-                    button::Status::Hovered => (
-                        MediaServerTheme::CARD_HOVER,
-                        MediaServerTheme::ACCENT_BLUE,
-                    ),
+                    button::Status::Hovered => {
+                        (MediaServerTheme::CARD_HOVER, accent())
+                    }
                     _ => (
                         MediaServerTheme::CARD_BG,
                         MediaServerTheme::BORDER_COLOR,
@@ -520,10 +521,9 @@ impl Button {
                         MediaServerTheme::CARD_BG,
                         MediaServerTheme::BORDER_COLOR,
                     ),
-                    button::Status::Hovered => (
-                        MediaServerTheme::CARD_HOVER,
-                        MediaServerTheme::ACCENT_BLUE,
-                    ),
+                    button::Status::Hovered => {
+                        (MediaServerTheme::CARD_HOVER, accent())
+                    }
                     _ => (
                         MediaServerTheme::CARD_BG,
                         MediaServerTheme::BORDER_COLOR,
@@ -616,7 +616,7 @@ impl Button {
             Button::Icon => |_, status| {
                 let background = match status {
                     button::Status::Hovered => {
-                        Some(Background::Color(MediaServerTheme::ACCENT_BLUE))
+                        Some(Background::Color(accent()))
                     }
                     _ => Some(Background::Color(Color::from_rgba(
                         1.0, 1.0, 1.0, 0.1,
@@ -642,9 +642,9 @@ impl Button {
             Button::PlayOverlay => |_, status| {
                 let (background, shadow) = match status {
                     button::Status::Hovered => (
-                        Some(Background::Color(MediaServerTheme::ACCENT_BLUE)),
+                        Some(Background::Color(accent())),
                         Shadow {
-                            color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                            color: accent_glow(),
                             offset: iced::Vector::new(0.0, 2.0),
                             blur_radius: 10.0,
                         },
@@ -691,7 +691,7 @@ impl Button {
                         Some(Background::Color(Color::from_rgba(
                             1.0, 1.0, 1.0, 0.08,
                         ))),
-                        MediaServerTheme::ACCENT_BLUE,
+                        accent(),
                     ),
                     _ => (None, MediaServerTheme::TEXT_SECONDARY),
                 };
@@ -711,23 +711,26 @@ impl Button {
             Button::DetailAction => |_, status| {
                 let (background, text_color) = match status {
                     button::Status::Active => (
-                        Some(Background::Color(Color::from_rgba(
-                            0.0, 0.5, 1.0, 0.1,
-                        ))), // Brighter blue glow
+                        Some(Background::Color(
+                            crate::infra::theme::with_alpha(accent(), 0.1),
+                        )),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Hovered => (
-                        Some(Background::Color(MediaServerTheme::ACCENT_BLUE)), // Solid blue on hover
+                        Some(Background::Color(accent())),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     button::Status::Pressed => (
-                        Some(Background::Color(Color::from_rgb(0.0, 0.4, 0.8))),
+                        Some(Background::Color(crate::infra::theme::darken(
+                            accent(),
+                            0.2,
+                        ))),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                     _ => (
-                        Some(Background::Color(Color::from_rgba(
-                            0.0, 0.5, 1.0, 0.08,
-                        ))),
+                        Some(Background::Color(
+                            crate::infra::theme::with_alpha(accent(), 0.08),
+                        )),
                         MediaServerTheme::TEXT_PRIMARY,
                     ),
                 };
@@ -762,7 +765,7 @@ impl Button {
                         Some(Background::Color(Color::from_rgba(
                             1.0, 1.0, 1.0, 0.08,
                         ))),
-                        MediaServerTheme::ACCENT_BLUE,
+                        accent(),
                     ),
                     _ => (None, MediaServerTheme::TEXT_SECONDARY),
                 };
@@ -842,10 +845,8 @@ impl Scrollable {
     pub fn style() -> fn(&Theme, scrollable::Status) -> scrollable::Style {
         |_, status| {
             let scroller_color = match status {
-                scrollable::Status::Hovered { .. } => {
-                    MediaServerTheme::ACCENT_BLUE_HOVER
-                }
-                _ => MediaServerTheme::ACCENT_BLUE,
+                scrollable::Status::Hovered { .. } => accent_hover(),
+                _ => accent(),
             };
 
             scrollable::Style {
@@ -899,16 +900,16 @@ impl Slider {
     pub fn style() -> fn(&Theme, slider::Status) -> slider::Style {
         |_, status| {
             let handle_color = match status {
-                slider::Status::Active => MediaServerTheme::ACCENT_BLUE,
-                slider::Status::Hovered => MediaServerTheme::ACCENT_BLUE_HOVER,
-                slider::Status::Dragged => MediaServerTheme::ACCENT_BLUE_HOVER,
+                slider::Status::Active => accent(),
+                slider::Status::Hovered => accent_hover(),
+                slider::Status::Dragged => accent_hover(),
             };
 
             slider::Style {
                 rail: slider::Rail {
                     backgrounds: (
                         Background::Color(MediaServerTheme::CARD_BG),
-                        Background::Color(MediaServerTheme::ACCENT_BLUE),
+                        Background::Color(accent()),
                     ),
                     width: 4.0,
                     border: Border {
@@ -944,12 +945,8 @@ impl TextInput {
                 text_input::Status::Active => {
                     (MediaServerTheme::BORDER_COLOR, 1.0)
                 }
-                text_input::Status::Hovered => {
-                    (MediaServerTheme::ACCENT_BLUE, 1.0)
-                }
-                text_input::Status::Focused { .. } => {
-                    (MediaServerTheme::ACCENT_BLUE, 2.0)
-                }
+                text_input::Status::Hovered => (accent(), 1.0),
+                text_input::Status::Focused { .. } => (accent(), 2.0),
                 text_input::Status::Disabled => {
                     (MediaServerTheme::BORDER_COLOR, 1.0)
                 }
@@ -972,7 +969,7 @@ impl TextInput {
                 icon: MediaServerTheme::TEXT_SECONDARY,
                 placeholder: MediaServerTheme::TEXT_DIMMED,
                 value: MediaServerTheme::TEXT_PRIMARY,
-                selection: MediaServerTheme::ACCENT_BLUE,
+                selection: accent(),
             }
         }
     }
@@ -1015,7 +1012,7 @@ impl TextInput {
                 icon: MediaServerTheme::TEXT_SECONDARY,
                 placeholder: MediaServerTheme::TEXT_DIMMED,
                 value: text_color,
-                selection: MediaServerTheme::ACCENT_BLUE,
+                selection: accent(),
             }
         }
     }

@@ -15,19 +15,20 @@ use crate::{
         shader_widgets::poster::{
             Poster, PosterFace, PosterInstanceKey,
             animation::{
-                AnimatedPosterBounds, AnimationBehavior, PosterAnimationType,
+                AnimatedPosterBounds, AnimationBehavior, AnimationConfig,
+                PosterAnimationType,
             },
             poster,
         },
+        theme::accent,
     },
 };
 
-use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, MediaIDLike, Priority,
-};
+use ferrex_core::player_prelude::{ImageRequest, MediaIDLike, Priority};
 
 use ferrex_model::{
-    EpisodeReference, MovieReference, SeasonReference, SeriesReference,
+    EpisodeReference, ImageSize, MediaType, MovieReference, SeasonReference,
+    SeriesReference,
 };
 
 use iced::{Color, Element, Length, widget::image::Handle};
@@ -50,7 +51,7 @@ struct CachedImageData {
 pub struct ImageFor {
     media_id: Uuid,
     size: ImageSize,
-    image_type: ImageType,
+    image_type: MediaType,
     radius: f32,
     width: Length,
     height: Length,
@@ -76,6 +77,8 @@ pub struct ImageFor {
     meta: Option<String>,
     // Carousel context for unique poster instance identification
     carousel_key: Option<CarouselKey>,
+    // Hover scale factor from AnimationConfig (for config-aware bounds)
+    hover_scale: Option<f32>,
 }
 
 impl ImageFor {
@@ -92,8 +95,8 @@ impl ImageFor {
         use crate::infra::constants::layout::poster;
         Self {
             media_id,
-            size: ImageSize::Poster,
-            image_type: ImageType::Movie,
+            size: ImageSize::poster(),
+            image_type: MediaType::Movie,
             radius: poster::CORNER_RADIUS,
             width: Length::Fixed(poster::BASE_WIDTH),
             height: Length::Fixed(poster::BASE_HEIGHT),
@@ -117,27 +120,23 @@ impl ImageFor {
             title: None,
             meta: None,
             carousel_key: None,
+            hover_scale: None,
         }
     }
 
     /// Set the image size/type to load
     pub fn size(mut self, size: ImageSize) -> Self {
         // Update dimensions based on size
-        let (w, h) = match size {
-            ImageSize::Thumbnail => (150.0, 225.0),
-            ImageSize::Poster => (185.0, 278.0),
-            ImageSize::Backdrop => (400.0, 225.0),
-            ImageSize::Full => (300.0, 450.0),
-            ImageSize::Profile => (120.0, 180.0),
-        };
-        self.width = Length::Fixed(w);
-        self.height = Length::Fixed(h);
+        if let Some((w, h)) = size.dimensions() {
+            self.width = Length::Fixed(w as f32);
+            self.height = Length::Fixed(h as f32);
+        }
         self.size = size;
         self
     }
 
     /// Set the image type to load
-    pub fn image_type(mut self, image_type: ImageType) -> Self {
+    pub fn image_type(mut self, image_type: MediaType) -> Self {
         self.image_type = image_type;
         self
     }
@@ -197,6 +196,15 @@ impl ImageFor {
     /// Set a custom animation behavior.
     pub fn animation_behavior(mut self, behavior: AnimationBehavior) -> Self {
         self.animation = behavior;
+        self
+    }
+
+    /// Set the default fade animation using explicit config from RuntimeConfig.
+    /// This is the preferred method when animation timing is user-configurable.
+    /// Also extracts hover_scale for config-aware bounds calculation.
+    pub fn with_animation_config(mut self, config: &AnimationConfig) -> Self {
+        self.animation = AnimationBehavior::fade_slow_then_quick_with(config);
+        self.hover_scale = Some(config.hover_scale);
         self
     }
 
@@ -313,7 +321,19 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
         };
 
         // Create animated bounds for proper sizing
-        let bounds = AnimatedPosterBounds::new(width, height);
+        // Use config-aware bounds if hover_scale was set via with_animation_config
+        let bounds = if let Some(hover_scale) = image.hover_scale {
+            AnimatedPosterBounds::new_with_config(
+                width,
+                height,
+                &AnimationConfig {
+                    hover_scale,
+                    ..AnimationConfig::default()
+                },
+            )
+        } else {
+            AnimatedPosterBounds::new(width, height)
+        };
 
         // Create the image request
         let request =
@@ -433,12 +453,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                                 + std::time::Duration::from_millis(jitter_ms);
                             animation_behavior.select(Some(jittered))
                         }
-                        // If we lack a timestamp, prefer at least a fade over none.
-                        None => PosterAnimationType::Fade {
-                            duration: std::time::Duration::from_millis(
-                                crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
-                            ),
-                        },
+                        // If we lack a timestamp, use the repeat animation (configured fade)
+                        None => animation_behavior.select(None),
                     };
 
                     shader = shader.with_animation(selected_animation);
@@ -446,10 +462,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     // Set progress indicator if provided
                     if let Some(progress) = image.progress {
                         shader = shader.progress(progress);
-
-                        let progress_color = Color::from_rgb(0.0, 0.47, 1.0); // Default blue
-
-                        shader = shader.progress_color(progress_color);
+                        shader = shader.progress_color(accent());
                     }
 
                     // Set title/meta text for shader rendering
@@ -600,15 +613,12 @@ fn create_shader_from_cached<'a>(
     let selected_animation = match loaded_at {
         Some(load_time) => {
             let jitter_ms: u64 = (random::<u8>() as u64) % 21; // 0-20ms
-            let jittered = load_time + std::time::Duration::from_millis(jitter_ms);
+            let jittered =
+                load_time + std::time::Duration::from_millis(jitter_ms);
             animation.select(Some(jittered))
         }
-        // If we lack a timestamp, prefer at least a fade over none.
-        None => PosterAnimationType::Fade {
-            duration: std::time::Duration::from_millis(
-                crate::infra::constants::layout::animation::TEXTURE_FADE_DURATION_MS,
-            ),
-        },
+        // If we lack a timestamp, use the repeat animation (configured fade)
+        None => animation.select(None),
     };
 
     shader = shader.with_animation(selected_animation);
@@ -616,8 +626,7 @@ fn create_shader_from_cached<'a>(
     // Set progress indicator if provided
     if let Some(progress) = image.progress {
         shader = shader.progress(progress);
-        let progress_color = Color::from_rgb(0.0, 0.47, 1.0);
-        shader = shader.progress_color(progress_color);
+        shader = shader.progress_color(accent());
     }
 
     // Set title/meta text for shader rendering
@@ -694,7 +703,7 @@ impl ImageForExt for MovieReference {
         );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Film)
-            .image_type(ImageType::Movie)
+            .image_type(MediaType::Movie)
     }
 }
 
@@ -707,7 +716,7 @@ impl ImageForExt for SeriesReference {
         );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Tv)
-            .image_type(ImageType::Series)
+            .image_type(MediaType::Series)
     }
 }
 
@@ -720,7 +729,7 @@ impl ImageForExt for SeasonReference {
         );
         image_for(self.id.to_uuid())
             .placeholder(Icon::Tv)
-            .image_type(ImageType::Season)
+            .image_type(MediaType::Season)
     }
 }
 
@@ -737,6 +746,6 @@ impl ImageForExt for EpisodeReference {
         );
         image_for(self.id.to_uuid())
             .placeholder(Icon::FileImage)
-            .image_type(ImageType::Episode)
+            .image_type(MediaType::Episode)
     }
 }

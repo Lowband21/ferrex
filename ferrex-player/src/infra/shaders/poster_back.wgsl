@@ -33,6 +33,7 @@ struct VertexOutput {
     @location(5) layer: f32,
     @location(6) mouse_pos: vec2<f32>,
     @location(7) aspect_ratio: f32,
+    @location(8) progress_color: vec3<f32>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -248,6 +249,7 @@ fn vs_main_back(input: VertexInput) -> VertexOutput {
     output.layer = f32(input.atlas_layer);
     output.mouse_pos = mouse_pos; // Already normalized to 0-1 by Rust
     output.aspect_ratio = size.x / size.y;
+    output.progress_color = input.progress_color_and_padding.xyz;
     return output;
 }
 
@@ -585,6 +587,18 @@ fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
     return 1.0 - smoothstep(0.0, aa * 1.5, d);
 }
 
+// Aspect-corrected rounded rect SDF for uniform border thickness
+fn rounded_rect_sdf_aspect(p: vec2<f32>, radius_normalized: f32, aspect: f32) -> f32 {
+    // p is in range 0-1, with (0.5, 0.5) at center
+    // Correct for aspect ratio so corners are truly circular
+    let centered = p - vec2<f32>(0.5);
+    let corrected = vec2<f32>(centered.x * aspect, centered.y);
+    let half_size = vec2<f32>(0.5 * aspect, 0.5);
+    let radius = radius_normalized * aspect; // Scale radius with aspect
+    let d = abs(corrected) - half_size + radius;
+    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - radius;
+}
+
 @fragment
 fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
     let pos = input.local_pos;
@@ -611,8 +625,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
     let desaturated = mix(bg_rgb, vec3<f32>(luminance), 0.6);
     let frosted_bg = desaturated * 0.25;
 
-    // Outer card rounded rect
-    let card_dist = rounded_rect_sdf_normalized(pos, input.corner_radius_normalized);
+    // Outer card rounded rect - use aspect-corrected SDF for uniform border
+    let card_dist = rounded_rect_sdf_aspect(pos, input.corner_radius_normalized, aspect);
     let card_aa = max(1e-3, fwidth(card_dist));
     let card_coverage = 1.0 - smoothstep(0.0, card_aa, card_dist);
 
@@ -663,6 +677,9 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         let is_grayed = (i == BTN_WATCHLIST) || (i == BTN_EDIT);
         let is_hovered = (i == hovered_btn) && !is_grayed;
 
+        // Darkened accent color for hovered icons/text
+        let accent_darkened = input.progress_color * 0.7;
+
         // Icon (on left side) - pass aspect ratio for proper proportions
         let icon_coverage = render_icon(pos, i, 0.04, aspect);
         if icon_coverage > 0.0 {
@@ -670,7 +687,7 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
             if is_grayed {
                 icon_color = vec3<f32>(0.35, 0.35, 0.38);
             } else if is_hovered {
-                icon_color = vec3<f32>(1.0, 1.0, 1.0);
+                icon_color = accent_darkened;
             } else {
                 icon_color = vec3<f32>(0.85, 0.87, 0.92);
             }
@@ -684,7 +701,7 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
             if is_grayed {
                 label_color = vec3<f32>(0.35, 0.35, 0.38);
             } else if is_hovered {
-                label_color = vec3<f32>(1.0, 1.0, 1.0);
+                label_color = accent_darkened;
             } else {
                 label_color = vec3<f32>(0.8, 0.82, 0.88);
             }
@@ -707,14 +724,13 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply card coverage and opacity
     var final_color = to_premul(vec4<f32>(final_rgb, final_alpha)) * (card_coverage * input.opacity);
 
-    // Card outer border (subtle)
-    let border_px = 1.5;
-    let w = border_px * card_aa;
-    let inner = smoothstep(-w, -w + card_aa, card_dist);
-    let edge = 1.0 - smoothstep(0.0, card_aa, card_dist);
-    let border_alpha = clamp(min(inner, edge), 0.0, 1.0);
-    if border_alpha > 0.0 {
-        let border_rgb = mix(final_rgb, vec3<f32>(0.7, 0.8, 0.9), 0.5);
+    // Card outer border (accent color) - thin line exactly at the edge
+    let border_aa = max(1e-3, fwidth(card_dist));
+    let border_thickness = border_aa * 1.5; // ~1.5 pixels
+    // Border is centered on the edge (dist = 0), extending slightly in and out
+    let border_alpha = smoothstep(border_thickness, 0.0, abs(card_dist)) * card_coverage;
+    if border_alpha > 0.01 {
+        let border_rgb = input.progress_color;
         let border_pm = vec4<f32>(border_rgb * border_alpha, border_alpha);
         final_color = over(border_pm, final_color);
     }

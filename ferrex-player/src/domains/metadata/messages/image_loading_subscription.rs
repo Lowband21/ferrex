@@ -1,10 +1,17 @@
 use super::MetadataMessage;
 use crate::infra::services::api::ApiService;
-use ferrex_core::api::routes::{utils, v1};
-use ferrex_core::player_prelude::{ImageSize, ImageType};
-use futures::FutureExt;
-use futures::stream::FuturesUnordered;
-use futures::{StreamExt, stream};
+
+use ferrex_core::{
+    api::routes::{utils, v1},
+    player_prelude::ImageSize,
+};
+
+use ferrex_model::MediaType;
+use futures::{
+    StreamExt,
+    stream::{self, FuturesUnordered},
+};
+
 use iced::Subscription;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -150,35 +157,35 @@ fn image_loader_stream_concurrent(
                                     // Build media type/id mapping (including Person)
                                     let (media_type, id) =
                                         match &request_for_fetch.image_type {
-                                            ImageType::Movie => (
+                                            MediaType::Movie => (
                                                 "movie",
                                                 request_for_fetch
                                                     .media_id
                                                     .hyphenated()
                                                     .encode_lower(&mut buf),
                                             ),
-                                            ImageType::Series => (
+                                            MediaType::Series => (
                                                 "series",
                                                 request_for_fetch
                                                     .media_id
                                                     .hyphenated()
                                                     .encode_lower(&mut buf),
                                             ),
-                                            ImageType::Season => (
+                                            MediaType::Season => (
                                                 "season",
                                                 request_for_fetch
                                                     .media_id
                                                     .hyphenated()
                                                     .encode_lower(&mut buf),
                                             ),
-                                            ImageType::Episode => (
+                                            MediaType::Episode => (
                                                 "episode",
                                                 request_for_fetch
                                                     .media_id
                                                     .hyphenated()
                                                     .encode_lower(&mut buf),
                                             ),
-                                            ImageType::Person => (
+                                            MediaType::Person => (
                                                 "person",
                                                 request_for_fetch
                                                     .media_id
@@ -189,11 +196,10 @@ fn image_loader_stream_concurrent(
 
                                     let size = request_for_fetch.size;
                                     let category = match size {
-                                        ImageSize::Poster => "poster",
-                                        ImageSize::Backdrop => "backdrop",
-                                        ImageSize::Thumbnail => "thumbnail",
-                                        ImageSize::Full => "poster",
-                                        ImageSize::Profile => "cast",
+                                        ImageSize::Poster(_) => "poster",
+                                        ImageSize::Backdrop(_) => "backdrop",
+                                        ImageSize::Thumbnail(_) => "thumbnail",
+                                        ImageSize::Profile(_) => "cast",
                                     };
 
                                     if srv.is_empty() {
@@ -215,30 +221,18 @@ fn image_loader_stream_concurrent(
                                         ) {
                                             // Episode stills are wide thumbnails (16:9)
                                             (
-                                                ImageType::Episode,
-                                                ImageSize::Thumbnail,
+                                                MediaType::Episode,
+                                                ImageSize::Thumbnail(_),
                                             ) => (400, 225),
                                             // Default: derive from model dimensions
                                             _ => {
-                                                let (w, h) = size.dimensions();
-                                                let (mut wi, mut hi) =
-                                                    (w as u32, h as u32);
-                                                if wi == 0 || hi == 0 {
-                                                    // Legacy fallbacks for dynamic sizes
-                                                    match size {
-                                                        ImageSize::Full => {
-                                                            wi = 300;
-                                                            hi = 450;
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                                // As a safety net, ensure non-zero
-                                                if wi == 0 || hi == 0 {
+                                                if let Some((w, h)) =
+                                                    size.dimensions()
+                                                {
+                                                    (w, h)
+                                                } else {
                                                     // Conservative generic 2:3 default
                                                     (185, 278)
-                                                } else {
-                                                    (wi, hi)
                                                 }
                                             }
                                         }
@@ -257,12 +251,16 @@ fn image_loader_stream_concurrent(
                                         ],
                                     );
 
-                                    // Ask server for the closest variant at or above target width.
-                                    // Server maps `w` to recognized TMDB sizes and falls back.
-                                    let width_param = target_w.to_string();
+                                    // Pass the full ImageSize enum to the server for semantic info.
+                                    // Server can use this to make better decisions about which variant to serve.
+                                    let image_size_json =
+                                        serde_json::to_string(&size)
+                                            .unwrap_or_else(|_| {
+                                                target_w.to_string()
+                                            });
                                     let result = api.as_ref().get_bytes(
                                         &path,
-                                        Some(("w", &width_param)),
+                                        Some(("image_size", &image_size_json)),
                                     );
                                     match result.await {
                                         Ok(bytes) => {
@@ -274,8 +272,8 @@ fn image_loader_stream_concurrent(
                                                 );
                                                 log::error!("{}", msg);
                                                 let full_url = format!(
-                                                    "{}{}?w={}",
-                                                    srv, path, target_w
+                                                    "{}{}?image_size={}",
+                                                    srv, path, image_size_json
                                                 );
                                                 crate::infra::image_log::log_fetch_failure_once(
                                                     request_for_fetch.media_id,
@@ -343,8 +341,8 @@ fn image_loader_stream_concurrent(
                                                 );
                                                 log::error!("{}", msg);
                                                 let full_url = format!(
-                                                    "{}{}?w={}",
-                                                    srv, path, target_w
+                                                    "{}{}?image_size={}",
+                                                    srv, path, image_size_json
                                                 );
                                                 crate::infra::image_log::log_fetch_failure_once(
                                                     request_for_fetch.media_id,
@@ -371,8 +369,10 @@ fn image_loader_stream_concurrent(
                                                         );
                                                         log::error!("{}", msg);
                                                         let full_url = format!(
-                                                            "{}{}?w={}",
-                                                            srv, path, target_w
+                                                            "{}{}?image_size={}",
+                                                            srv,
+                                                            path,
+                                                            image_size_json
                                                         );
                                                         crate::infra::image_log::log_fetch_failure_once(
                                                         request_for_fetch.media_id,
@@ -408,8 +408,8 @@ fn image_loader_stream_concurrent(
                                                 );
                                                 log::error!("{}", msg);
                                                 let full_url = format!(
-                                                    "{}{}?w={}",
-                                                    srv, path, target_w
+                                                    "{}{}?image_size={}",
+                                                    srv, path, image_size_json
                                                 );
                                                 crate::infra::image_log::log_fetch_failure_once(
                                                     request_for_fetch.media_id,
@@ -434,8 +434,8 @@ fn image_loader_stream_concurrent(
 
                                             // Temporary diagnostics: log one-time successful fetch
                                             let full_url = format!(
-                                                "{}{}?w={}",
-                                                srv, path, target_w
+                                                "{}{}?image_size={}",
+                                                srv, path, image_size_json
                                             );
                                             crate::infra::image_log::log_fetch_once(
                                                 request_for_fetch.media_id,
@@ -458,8 +458,8 @@ fn image_loader_stream_concurrent(
                                             log::error!("{}", msg);
                                             // Temporary diagnostics: log one-time fetch failure
                                             let full_url = format!(
-                                                "{}{}?w={}",
-                                                srv, path, target_w
+                                                "{}{}?image_size={}",
+                                                srv, path, image_size_json
                                             );
                                             crate::infra::image_log::log_fetch_failure_once(
                                                 request_for_fetch.media_id,

@@ -3,7 +3,7 @@ use ferrex_model::media::{
     EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
 };
 use ferrex_model::media_id::MediaID;
-use ferrex_model::util_types::MediaType;
+use ferrex_model::media_type::MediaType;
 
 // A trait that allows us to treat archived and non-archived media references as the same type
 pub trait MediaLike {

@@ -5,12 +5,15 @@
 pub mod adapters;
 pub mod api_client;
 pub mod api_types;
+pub mod color;
 pub mod config;
 pub mod constants;
 pub mod design_tokens;
 pub mod image_log;
 pub mod render;
+pub mod runtime_config;
 pub mod shader_widgets;
+pub mod theme;
 
 // New profiling modules (feature-gated)
 #[cfg(any(

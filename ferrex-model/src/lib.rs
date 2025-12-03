@@ -16,11 +16,11 @@ pub mod files;
 pub mod filter_types;
 pub mod ids;
 pub mod image;
-pub mod image_request;
 pub mod library;
 pub mod media;
 pub mod media_events;
 pub mod media_id;
+pub mod media_type;
 pub mod numbers;
 pub mod prelude;
 #[cfg(feature = "rkyv")]
@@ -29,7 +29,6 @@ pub mod scan;
 pub mod titles;
 pub mod transcoding;
 pub mod urls;
-pub mod util_types;
 pub mod watch;
 
 // Intentionally curated re-exports for downstream consumers.
@@ -44,9 +43,11 @@ pub use error::{ModelError, Result as ModelResult};
 pub use files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
 pub use filter_types::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
 pub use ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
-pub use image_request::{
-    BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, PosterKind,
-    PosterSize, Priority, ProfileSize,
+pub use image::{
+    BackdropKind, EpisodeStillSize, ImageRequest, PosterKind, Priority,
+};
+pub use image::{
+    BackdropSize, EpisodeSize, ImageSize, PosterSize, ProfileSize,
 };
 #[cfg(feature = "rkyv")]
 pub use library::{ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryType};
@@ -65,10 +66,10 @@ pub use media_events::{
 #[cfg(feature = "rkyv")]
 pub use media_id::ArchivedMediaID;
 pub use media_id::MediaID;
+pub use media_type::MediaType;
 pub use transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
-pub use util_types::{ImageSize, ImageType, MediaType};
 pub use watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
     SeasonWatchStatus, SeriesWatchStatus,

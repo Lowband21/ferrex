@@ -52,6 +52,54 @@ fn get_text_scale() -> f32 {
     f32::from_bits(TEXT_SCALE_BITS.load(Ordering::Relaxed))
 }
 
+/// Default duration of hover scale transition in milliseconds (fallback)
+const DEFAULT_HOVER_TRANSITION_MS: u64 = 150;
+
+/// Tracks hover scale transition state for smooth animations
+#[derive(Debug, Clone, Copy)]
+struct HoverTransition {
+    /// When the transition started
+    start_time: Instant,
+    /// Whether transitioning to hovered (true) or unhovered (false)
+    to_hovered: bool,
+    /// The hover_scale value to use (from AnimatedPosterBounds)
+    hover_scale: f32,
+    /// Transition duration in milliseconds (from AnimatedPosterBounds)
+    transition_ms: u64,
+}
+
+impl HoverTransition {
+    /// Calculate current hover progress (0.0 = not hovered, 1.0 = fully hovered)
+    fn progress(&self) -> f32 {
+        let elapsed_ms = self.start_time.elapsed().as_millis() as f32;
+        let duration_ms = self.transition_ms as f32;
+        let raw_progress = (elapsed_ms / duration_ms).clamp(0.0, 1.0);
+
+        // Apply easing: ease-out for hover-in, ease-in for hover-out
+        let eased = if self.to_hovered {
+            // ease-out-cubic: 1 - (1-t)^3
+            let t = 1.0 - raw_progress;
+            1.0 - t * t * t
+        } else {
+            // ease-in-cubic: t^3
+            raw_progress * raw_progress * raw_progress
+        };
+
+        if self.to_hovered { eased } else { 1.0 - eased }
+    }
+
+    /// Check if transition is complete
+    fn is_complete(&self) -> bool {
+        self.start_time.elapsed().as_millis() >= self.transition_ms as u128
+    }
+
+    /// Calculate effective scale based on current progress
+    fn effective_scale(&self) -> f32 {
+        let progress = self.progress();
+        1.0 + (self.hover_scale - 1.0) * progress
+    }
+}
+
 /// GPU instance payload for a poster primitive.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -133,6 +181,10 @@ pub struct PosterBatchState {
     loaded_times: HashMap<(u64, PosterFace), Instant>,
     // Avoid log flooding: remember last layer we logged per instance id
     logged_layers: HashMap<u64, i32>,
+    // Track hover state transitions for smooth scale animations
+    hover_transitions: HashMap<u64, HoverTransition>,
+    // Track previous hover state to detect changes
+    previous_hover_states: HashMap<u64, bool>,
     groups_front: Vec<PosterGroup>,
     groups_back: Vec<PosterGroup>,
     // Font atlas for SDF text rendering
@@ -479,6 +531,50 @@ impl PosterBatchState {
             }),
         }
     }
+
+    /// Compute smooth hover progress for a poster instance.
+    /// Tracks hover state changes and interpolates scale over time.
+    /// Returns progress from 0.0 (not hovered) to 1.0 (fully hovered).
+    fn compute_hover_progress(
+        &mut self,
+        id: u64,
+        is_hovered: bool,
+        hover_scale: f32,
+        hover_transition_ms: u64,
+    ) -> f32 {
+        let prev_hovered = self.previous_hover_states.get(&id).copied();
+
+        // Detect hover state change
+        let state_changed =
+            prev_hovered.map(|prev| prev != is_hovered).unwrap_or(true);
+
+        if state_changed {
+            // Start new transition
+            let transition = HoverTransition {
+                start_time: Instant::now(),
+                to_hovered: is_hovered,
+                hover_scale,
+                transition_ms: hover_transition_ms,
+            };
+            self.hover_transitions.insert(id, transition);
+            self.previous_hover_states.insert(id, is_hovered);
+        }
+
+        // Get current progress from transition (or default based on hover state)
+        if let Some(transition) = self.hover_transitions.get(&id) {
+            let progress = transition.progress();
+
+            // Clean up completed transitions that ended in unhovered state
+            if transition.is_complete() && !transition.to_hovered {
+                // Will be cleaned up next frame to avoid borrow issues
+            }
+
+            progress
+        } else {
+            // No transition, use instant state
+            if is_hovered { 1.0 } else { 0.0 }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -670,6 +766,8 @@ impl PrimitiveBatchState for PosterBatchState {
             )),
             loaded_times: HashMap::new(),
             logged_layers: HashMap::new(),
+            hover_transitions: HashMap::new(),
+            previous_hover_states: HashMap::new(),
             groups_front: Vec::new(),
             groups_back: Vec::new(),
             font_atlas,
@@ -881,6 +979,25 @@ impl PrimitiveBatchState for PosterBatchState {
                     self.logged_layers.insert(pending.id, layer_i32);
                 }
 
+                // Compute smooth hover progress for scale animation
+                let hover_scale = pending
+                    .animated_bounds
+                    .as_ref()
+                    .map(|b| b.hover_scale)
+                    .unwrap_or(1.05);
+                let hover_transition_ms = pending
+                    .animated_bounds
+                    .as_ref()
+                    .map(|b| b.hover_transition_ms)
+                    .unwrap_or(DEFAULT_HOVER_TRANSITION_MS);
+
+                let hover_progress = self.compute_hover_progress(
+                    pending.id,
+                    pending.is_hovered,
+                    hover_scale,
+                    hover_transition_ms,
+                );
+
                 let instance = create_batch_instance(
                     Some(region),
                     &pending.bounds,
@@ -891,6 +1008,7 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.theme_color,
                     pending.animated_bounds.as_ref(),
                     pending.is_hovered,
+                    hover_progress,
                     pending.mouse_position,
                     pending.progress,
                     pending.progress_color,

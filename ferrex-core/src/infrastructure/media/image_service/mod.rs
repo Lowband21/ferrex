@@ -166,30 +166,30 @@ impl ImageService {
         // Write-once guard: if this variant is already cached, don't overwrite it.
         // This prevents race conditions where a server is serving a file while
         // the scanner tries to overwrite it.
-        if let Some(ref key) = context {
-            if self.images.is_media_image_variant_cached(key).await? {
-                // Check if the file still exists on disk
-                if let Some(existing) = self
-                    .images
-                    .get_image_variant(image_record.id, variant_name)
-                    .await?
-                {
-                    let path = PathBuf::from(&existing.file_path);
-                    if path.exists() {
-                        debug!(
-                            "Variant {} already cached (write-once), returning existing path",
-                            variant_name
-                        );
-                        return Ok(path);
-                    }
+        if let Some(ref key) = context
+            && self.images.is_media_image_variant_cached(key).await?
+        {
+            // Check if the file still exists on disk
+            if let Some(existing) = self
+                .images
+                .get_image_variant(image_record.id, variant_name)
+                .await?
+            {
+                let path = PathBuf::from(&existing.file_path);
+                if path.exists() {
+                    debug!(
+                        "Variant {} already cached (write-once), returning existing path",
+                        variant_name
+                    );
+                    return Ok(path);
                 }
-                // File is missing but DB says cached - auto-invalidate and regenerate
-                warn!(
-                    "Variant marked cached but file missing, auto-invalidating and regenerating: {:?}/{}",
-                    key.image_type, key.variant
-                );
-                self.images.invalidate_media_image_variant(key).await?;
             }
+            // File is missing but DB says cached - auto-invalidate and regenerate
+            warn!(
+                "Variant marked cached but file missing, auto-invalidating and regenerating: {:?}/{}",
+                key.image_type, key.variant
+            );
+            self.images.invalidate_media_image_variant(key).await?;
         }
 
         if let Some(existing) = self
@@ -1132,23 +1132,18 @@ impl ImageService {
 
         if let Some((image_record, _)) =
             self.images.lookup_image_variant(&params).await?
-        {
-            if let Some(variant) = self
+            && let Some(variant) = self
                 .images
                 .get_image_variant(image_record.id, &key.variant)
                 .await?
-            {
-                let file_path = PathBuf::from(&variant.file_path);
-                // Delete file from disk
-                if file_path.exists() {
-                    tokio::fs::remove_file(&file_path)
-                        .await
-                        .map_err(MediaError::Io)?;
-                    info!(
-                        "Removed cached file for invalidation: {:?}",
-                        file_path
-                    );
-                }
+        {
+            let file_path = PathBuf::from(&variant.file_path);
+            // Delete file from disk
+            if file_path.exists() {
+                tokio::fs::remove_file(&file_path)
+                    .await
+                    .map_err(MediaError::Io)?;
+                info!("Removed cached file for invalidation: {:?}", file_path);
             }
         }
 
@@ -1395,6 +1390,14 @@ fn select_canonical_size(
     kind: &MediaImageKind,
     requested_variant: Option<&str>,
 ) -> TmdbImageSize {
+    // If explicitly requested and valid, use it - player's request is authoritative
+    if let Some(variant) = requested_variant
+        && let Some(size) = TmdbImageSize::from_str(variant)
+    {
+        return size;
+    }
+
+    // Fallback defaults by category (for auto/unspecified requests)
     match kind {
         MediaImageKind::Poster => TmdbImageSize::PosterW342,
         // Backdrops are displayed large; prefer original to avoid detail loss.
@@ -1402,12 +1405,7 @@ fn select_canonical_size(
         MediaImageKind::Thumbnail => TmdbImageSize::StillW300,
         MediaImageKind::Logo => TmdbImageSize::Original,
         MediaImageKind::Cast => TmdbImageSize::ProfileW185,
-        MediaImageKind::Other(_) => {
-            // Fall back to requested if parsable; else original
-            requested_variant
-                .and_then(TmdbImageSize::from_str)
-                .unwrap_or(TmdbImageSize::Original)
-        }
+        MediaImageKind::Other(_) => TmdbImageSize::Original,
     }
 }
 

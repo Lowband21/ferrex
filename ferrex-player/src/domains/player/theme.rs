@@ -3,6 +3,8 @@ use iced::{
     widget::{button, container, pick_list, slider, text, toggler},
 };
 
+use crate::infra::theme::{accent, accent_hover, brighten, with_alpha};
+
 // Container styles
 pub fn container_player(_theme: &iced::Theme) -> container::Style {
     container::Style {
@@ -172,7 +174,7 @@ pub fn container_seek_bar_buffered(_theme: &iced::Theme) -> container::Style {
 
 pub fn container_seek_bar_progress(_theme: &iced::Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.0, 0.5, 1.0))),
+        background: Some(Background::Color(accent())),
         ..Default::default()
     }
 }
@@ -259,24 +261,20 @@ pub fn button_player_active(
 ) -> button::Style {
     match status {
         button::Status::Active => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                0.0, 0.5, 1.0, 0.01,
-            ))),
-            text_color: Color::from_rgb(0.0, 0.6, 1.0),
+            background: Some(Background::Color(with_alpha(accent(), 0.01))),
+            text_color: accent_hover(),
             border: Border {
-                color: Color::from_rgba(0.0, 0.5, 1.0, 0.1),
+                color: with_alpha(accent(), 0.1),
                 width: 1.0,
                 radius: 4.0.into(),
             },
             ..Default::default()
         },
         button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                0.0, 0.5, 1.0, 0.4,
-            ))),
-            text_color: Color::from_rgb(0.0, 0.7, 1.0),
+            background: Some(Background::Color(with_alpha(accent(), 0.4))),
+            text_color: brighten(accent_hover(), 0.1),
             border: Border {
-                color: Color::from_rgba(0.0, 0.5, 1.0, 0.6),
+                color: with_alpha(accent(), 0.6),
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -367,17 +365,13 @@ pub fn button_menu_item(
             ..Default::default()
         },
         button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                0.0, 0.5, 1.0, 0.2,
-            ))),
+            background: Some(Background::Color(with_alpha(accent(), 0.2))),
             text_color: Color::WHITE,
             border: Border::default(),
             ..Default::default()
         },
         button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                0.0, 0.5, 1.0, 0.3,
-            ))),
+            background: Some(Background::Color(with_alpha(accent(), 0.3))),
             text_color: Color::WHITE,
             border: Border::default(),
             ..Default::default()
@@ -411,15 +405,15 @@ pub fn slider_seek(
     status: slider::Status,
 ) -> slider::Style {
     let handle_color = match status {
-        slider::Status::Active => Color::from_rgb(0.0, 0.5, 1.0),
-        slider::Status::Hovered => Color::from_rgb(0.0, 0.6, 1.0),
-        slider::Status::Dragged => Color::from_rgb(0.0, 0.7, 1.0),
+        slider::Status::Active => accent(),
+        slider::Status::Hovered => accent_hover(),
+        slider::Status::Dragged => brighten(accent_hover(), 0.1),
     };
 
     slider::Style {
         rail: slider::Rail {
             backgrounds: (
-                Background::Color(Color::from_rgb(0.0, 0.5, 1.0)),
+                Background::Color(accent()),
                 Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.3)),
             ),
             width: 4.0,
@@ -589,7 +583,7 @@ pub fn toggler_dark(
 
     toggler::Style {
         background: if is_toggled {
-            Color::from_rgb(0.0, 0.5, 1.0)
+            accent()
         } else {
             Color::from_rgba(1.0, 1.0, 1.0, 0.2)
         },

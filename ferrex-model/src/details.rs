@@ -1,8 +1,9 @@
+use crate::image::MediaImages;
 use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::{ids::LibraryId, image::MediaImages, library::LibraryType};
+use super::{ids::LibraryId, library::LibraryType};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

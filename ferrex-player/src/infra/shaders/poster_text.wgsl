@@ -38,6 +38,7 @@ struct VertexOutput {
     @location(4) text_params: vec4<f32>,
     @location(5) poster_width: f32,
     @location(6) opacity: f32,
+    @location(7) text_zone_height: f32,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -74,6 +75,7 @@ fn vs_text(input: VertexInput) -> VertexOutput {
     let position = input.position_and_size.xy;
     let size = input.position_and_size.zw;
     let opacity = input.radius_opacity_rotation_anim.y;
+    let scale = input.scale_shadow_glow_type.x;  // Per-instance scale (hover or animation)
     let title_len = input.text_params.x;
     let meta_len = input.text_params.y;
 
@@ -85,9 +87,16 @@ fn vs_text(input: VertexInput) -> VertexOutput {
 
     let vertex_pos = vertex_position(input.vertex_index);
 
-    // Text zone is BELOW the poster, same width, no rotation applied
-    let text_zone_start = vec2<f32>(position.x, position.y + size.y);
-    let text_zone_size = vec2<f32>(size.x, TEXT_ZONE_HEIGHT);
+    // Calculate scaled poster bounds (poster scales around its center)
+    let center = position + size * 0.5;
+    let scaled_size = size * scale;
+    let scaled_position = center - scaled_size * 0.5;
+
+    // Text zone is BELOW the SCALED poster, same width as scaled poster, no rotation applied
+    // Scale text zone height with text_scale to accommodate larger text at high scales
+    let scaled_text_zone_height = TEXT_ZONE_HEIGHT * globals.text_scale;
+    let text_zone_start = vec2<f32>(scaled_position.x, scaled_position.y + scaled_size.y);
+    let text_zone_size = vec2<f32>(scaled_size.x, scaled_text_zone_height);
     let position_final = text_zone_start + vertex_pos * text_zone_size;
 
     // Standard orthographic projection (NO flip rotation)
@@ -103,8 +112,9 @@ fn vs_text(input: VertexInput) -> VertexOutput {
     output.title_chars_1 = input.title_chars_1;
     output.meta_chars = input.meta_chars;
     output.text_params = input.text_params;
-    output.poster_width = size.x;
+    output.poster_width = scaled_size.x;  // Use scaled width for text layout
     output.opacity = opacity;
+    output.text_zone_height = scaled_text_zone_height;
 
     return output;
 }
@@ -223,8 +233,9 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Convert from 0-1 normalized to pixel coordinates within text zone
+    // Use scaled text zone height passed from vertex shader
     let pixel_x = input.local_pos.x * poster_width;
-    let pixel_y = input.local_pos.y * TEXT_ZONE_HEIGHT;
+    let pixel_y = input.local_pos.y * input.text_zone_height;
     let pixel_pos = vec2<f32>(pixel_x, pixel_y);
 
     var coverage = 0.0;
@@ -233,6 +244,8 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
     let title_font_size = 14.0 * globals.text_scale;
     let title_y = 16.0 * globals.text_scale;  // Baseline Y position from top of zone
     let title_spacing = title_font_size * 0.65;  // Character spacing (monospace-ish)
+    // Scale left padding to accommodate larger glyphs at high scales
+    let scaled_left_padding = TEXT_LEFT_PADDING * globals.text_scale;
 
     // Render title characters
     for (var i = 0; i < title_len && i < 24; i = i + 1) {
@@ -241,7 +254,7 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
             break;  // Null terminator
         }
 
-        let char_x = TEXT_LEFT_PADDING + f32(i) * title_spacing;
+        let char_x = scaled_left_padding + f32(i) * title_spacing;
         let char_pos = vec2<f32>(char_x, title_y);
         let char_coverage = render_char(pixel_pos, char_pos, i32(glyph_idx), title_font_size);
         coverage = max(coverage, char_coverage);
@@ -259,7 +272,7 @@ fn fs_text(input: VertexOutput) -> @location(0) vec4<f32> {
             break;
         }
 
-        let char_x = TEXT_LEFT_PADDING + f32(i) * meta_spacing;
+        let char_x = scaled_left_padding + f32(i) * meta_spacing;
         let char_pos = vec2<f32>(char_x, meta_y);
         let char_coverage = render_char(pixel_pos, char_pos, i32(glyph_idx), meta_font_size);
         meta_coverage = max(meta_coverage, char_coverage);

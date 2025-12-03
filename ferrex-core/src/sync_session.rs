@@ -1,5 +1,5 @@
 use crate::types::media_id::MediaID;
-use crate::types::util_types::MediaType;
+use ferrex_model::MediaType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

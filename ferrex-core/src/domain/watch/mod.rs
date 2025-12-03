@@ -4,12 +4,12 @@
 //! so downstream crates can import via `crate::domain::watch::*` while legacy
 //! paths continue to work through compatibility shims.
 
-use crate::types::util_types::MediaType;
 // Re-export identity types from model for convenience
 pub use crate::types::watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
     SeasonWatchStatus, SeriesWatchStatus,
 };
+use ferrex_model::MediaType;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},

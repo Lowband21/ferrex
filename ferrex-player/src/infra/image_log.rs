@@ -1,5 +1,5 @@
 use dashmap::{DashMap, DashSet};
-use ferrex_core::player_prelude::ImageSize;
+use ferrex_model::ImageSize;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
@@ -29,11 +29,10 @@ fn title_for(media_id: &Uuid) -> String {
 
 fn size_label(size: &ImageSize) -> &'static str {
     match size {
-        ImageSize::Thumbnail => "Thumbnail",
-        ImageSize::Poster => "Poster",
-        ImageSize::Backdrop => "Backdrop",
-        ImageSize::Full => "Full",
-        ImageSize::Profile => "Profile",
+        ImageSize::Thumbnail(_) => "Thumbnail",
+        ImageSize::Poster(_) => "Poster",
+        ImageSize::Backdrop(_) => "Backdrop",
+        ImageSize::Profile(_) => "Profile",
     }
 }
 

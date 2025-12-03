@@ -12,9 +12,11 @@ pub use super::details::{
 pub use super::files::{MediaFile, MediaFileMetadata, ParsedMediaInfo};
 pub use super::filter_types::{UiDecade, UiGenre, UiResolution, UiWatchStatus};
 pub use super::ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
-pub use super::image_request::{
-    BackdropKind, BackdropSize, EpisodeStillSize, ImageRequest, PosterKind,
-    PosterSize, Priority, ProfileSize,
+pub use super::image::{
+    BackdropKind, EpisodeStillSize, ImageRequest, PosterKind, Priority,
+};
+pub use super::image::{
+    BackdropSize, EpisodeSize, ImageSize, PosterSize, ProfileSize,
 };
 #[cfg(feature = "rkyv")]
 pub use super::library::{
@@ -35,7 +37,6 @@ pub use super::media_id::MediaID;
 pub use super::transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,
 };
-pub use super::util_types::{ImageSize, ImageType, MediaType};
 pub use super::watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
     SeasonWatchStatus, SeriesWatchStatus,

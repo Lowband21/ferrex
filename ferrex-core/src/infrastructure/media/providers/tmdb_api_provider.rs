@@ -73,8 +73,10 @@ pub enum Media {
 
 const TMDB_IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
 
+/// TMDB-specific poster size variants for API URL construction.
+/// These represent the actual sizes available from TMDB's image CDN.
 #[derive(Debug, Clone, Copy)]
-pub enum PosterSize {
+pub enum TmdbPosterSize {
     W92,
     W154,
     W185,
@@ -84,35 +86,36 @@ pub enum PosterSize {
     Original,
 }
 
-impl PosterSize {
+impl TmdbPosterSize {
     pub fn as_str(&self) -> &'static str {
         match self {
-            PosterSize::W92 => "w92",
-            PosterSize::W154 => "w154",
-            PosterSize::W185 => "w185",
-            PosterSize::W342 => "w342",
-            PosterSize::W500 => "w500",
-            PosterSize::W780 => "w780",
-            PosterSize::Original => "original",
+            TmdbPosterSize::W92 => "w92",
+            TmdbPosterSize::W154 => "w154",
+            TmdbPosterSize::W185 => "w185",
+            TmdbPosterSize::W342 => "w342",
+            TmdbPosterSize::W500 => "w500",
+            TmdbPosterSize::W780 => "w780",
+            TmdbPosterSize::Original => "original",
         }
     }
 }
 
+/// TMDB-specific backdrop size variants for API URL construction.
 #[derive(Debug, Clone, Copy)]
-pub enum BackdropSize {
+pub enum TmdbBackdropSize {
     W300,
     W780,
     W1280,
     Original,
 }
 
-impl BackdropSize {
+impl TmdbBackdropSize {
     pub fn as_str(&self) -> &'static str {
         match self {
-            BackdropSize::W300 => "w300",
-            BackdropSize::W780 => "w780",
-            BackdropSize::W1280 => "w1280",
-            BackdropSize::Original => "original",
+            TmdbBackdropSize::W300 => "w300",
+            TmdbBackdropSize::W780 => "w780",
+            TmdbBackdropSize::W1280 => "w1280",
+            TmdbBackdropSize::Original => "original",
         }
     }
 }
@@ -525,12 +528,16 @@ impl TmdbApiProvider {
     }
 
     /// Build a poster URL from a poster path
-    pub fn get_poster_url(&self, path: &str, size: PosterSize) -> String {
+    pub fn get_poster_url(&self, path: &str, size: TmdbPosterSize) -> String {
         format!("{}/{}{}", TMDB_IMAGE_BASE, size.as_str(), path)
     }
 
     /// Build a backdrop URL from a backdrop path
-    pub fn get_backdrop_url(&self, path: &str, size: BackdropSize) -> String {
+    pub fn get_backdrop_url(
+        &self,
+        path: &str,
+        size: TmdbBackdropSize,
+    ) -> String {
         format!("{}/{}{}", TMDB_IMAGE_BASE, size.as_str(), path)
     }
 }

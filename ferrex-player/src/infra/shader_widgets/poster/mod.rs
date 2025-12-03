@@ -13,6 +13,9 @@ mod batch_state;
 mod primitive;
 mod program;
 
+pub use animation::{
+    AnimationConfig, set_hover_scale, set_hover_transition_ms,
+};
 pub use batch_state::set_text_scale;
 pub use state::{PosterFace, PosterInstanceKey};
 
@@ -66,8 +69,8 @@ pub struct Poster {
 impl Poster {
     /// Creates a new rounded image with a single handle
     pub fn new(handle: Handle, id: Option<u64>) -> Self {
-        use crate::domains::ui::theme::MediaServerTheme;
         use crate::infra::constants::layout::poster;
+        use crate::infra::theme::accent;
 
         Self {
             id: id.unwrap_or(0),
@@ -87,7 +90,7 @@ impl Poster {
             on_options: None,
             on_click: None,
             progress: None,
-            progress_color: MediaServerTheme::ACCENT_BLUE, // Default to theme blue
+            progress_color: accent(), // Default to dynamic accent color
             rotation_y: None,
             face: PosterFace::Front,
             title: None,

@@ -5,10 +5,10 @@ pub use ferrex_core::player_prelude::{
     ConfirmClaimRequest, ConfirmClaimResponse, CreateLibraryRequest,
     CreateUserRequest, DemoLibraryStatus, DemoResetRequest, DemoStatus,
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeID, EpisodeReference,
-    FetchMediaRequest, ImageData, ImageRequest, ImageSize, ImageType, Library,
-    LibraryId, LibraryMediaCache, LibraryMediaResponse, LibraryReference,
-    LibraryType, Media, MediaDetailsOption, MediaFile, MediaFileMetadata,
-    MediaID, MovieID, MovieReference, ParsedMediaInfo, Priority,
+    FetchMediaRequest, ImageData, ImageRequest, ImageSize, Library, LibraryId,
+    LibraryMediaCache, LibraryMediaResponse, LibraryReference, LibraryType,
+    Media, MediaDetailsOption, MediaFile, MediaFileMetadata, MediaID, MovieID,
+    MovieReference, ParsedMediaInfo, Priority,
 };
 
 /// Helper to check if we need to fetch full details

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use ferrex_model::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_model::media_id::MediaID;
-use ferrex_model::util_types::MediaType;
+use ferrex_model::media_type::MediaType;
 
 const UUID_STR_LEN: usize = 36;
 

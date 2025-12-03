@@ -324,6 +324,7 @@ pub(crate) fn create_batch_instance(
     theme_color: Color,
     animated_bounds: Option<&animation::AnimatedPosterBounds>,
     is_hovered: bool,
+    hover_progress: f32,
     mouse_position: Option<Point>,
     progress: Option<f32>,
     progress_color: Color,
@@ -397,7 +398,10 @@ pub(crate) fn create_batch_instance(
             anim => anim,
         };
 
-        calculate_animation_state(animation, elapsed, opacity)
+        // Get hover_scale from animated_bounds or use default
+        let hover_scale =
+            animated_bounds.map(|b| b.hover_scale).unwrap_or(1.05);
+        calculate_animation_state(animation, elapsed, opacity, hover_scale)
     } else {
         (
             0.7_f32,
@@ -444,10 +448,24 @@ pub(crate) fn create_batch_instance(
     };
     let show_border = 1.0; // Always show border
 
+    // Apply hover scale with smooth transition
+    // Hover scale should be independent of flip animation state
+    let hover_scale = animated_bounds.map(|b| b.hover_scale).unwrap_or(1.05);
+    let hover_contribution = 1.0 + (hover_scale - 1.0) * hover_progress;
+
+    let effective_scale = if animation_complete {
+        // After animation, just use hover contribution
+        hover_contribution
+    } else {
+        // During animation, use the larger of animation scale or hover contribution
+        // This ensures hover scale is maintained during flips triggered while hovered
+        scale.max(hover_contribution)
+    };
+
     // Calculate mouse position
     let mouse_pos_normalized = if let Some(mouse_pos) = mouse_position {
-        let scaled_poster_width = poster_size[0] * scale;
-        let scaled_poster_height = poster_size[1] * scale;
+        let scaled_poster_width = poster_size[0] * effective_scale;
+        let scaled_poster_height = poster_size[1] * effective_scale;
         let widget_to_poster_offset_x = if animated_bounds.is_some() {
             (bounds.width - scaled_poster_width) / 2.0
         } else {
@@ -499,7 +517,7 @@ pub(crate) fn create_batch_instance(
         ],
         theme_color_zdepth: [theme_r, theme_g, theme_b, z_depth],
         scale_shadow_glow_type: [
-            scale,
+            effective_scale,
             shadow_intensity,
             border_glow,
             animation.as_u32() as f32,

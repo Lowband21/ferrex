@@ -20,8 +20,8 @@ pub fn handle_unified_image_loaded(
         .mark_loaded(&request, handle.clone());
 
     // Keep UI alive briefly to allow poster animations to play smoothly
-    if matches!(request.size, ImageSize::Poster)
-        || matches!(request.size, ImageSize::Thumbnail)
+    if matches!(request.size, ImageSize::Poster(_))
+        || matches!(request.size, ImageSize::Thumbnail(_))
     {
         use std::time::{Duration, Instant};
         let until = Instant::now()
@@ -40,7 +40,7 @@ pub fn handle_unified_image_loaded(
         (
             crate::domains::ui::types::ViewState::MovieDetail { movie, .. },
             MediaID::Movie(id),
-            ImageSize::Backdrop,
+            ImageSize::backdrop(),
         ) if &movie.id == id => {
             log::info!("Loaded backdrop for current movie detail view");
             true
@@ -48,7 +48,7 @@ pub fn handle_unified_image_loaded(
         (
             crate::domains::ui::types::ViewState::TvShowDetail { series_id, .. },
             MediaID::Series(id),
-            ImageSize::Backdrop,
+            ImageSize::backdrop(),
         ) if series_id == id => {
             log::info!("Loaded backdrop for current TV show detail view");
             true
@@ -56,7 +56,7 @@ pub fn handle_unified_image_loaded(
         (
             crate::domains::ui::types::ViewState::SeasonDetail { season_id, .. },
             MediaID::Season(id),
-            ImageSize::Backdrop,
+            ImageSize::backdrop(),
         ) if season_id == id => {
             log::info!("Loaded backdrop for current season detail view");
             true

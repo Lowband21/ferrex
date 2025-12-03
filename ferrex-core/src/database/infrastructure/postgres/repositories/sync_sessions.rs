@@ -9,7 +9,7 @@ use crate::database::ports::sync_sessions::SyncSessionsRepository;
 use crate::{
     error::{MediaError, Result},
     sync_session::{Participant, PlaybackState, SyncSession},
-    types::util_types::MediaType,
+    types::media_type::MediaType,
 };
 
 #[derive(Clone, Debug)]

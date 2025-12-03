@@ -266,7 +266,7 @@ fn resolve_image_request(
     }
 
     let kind = fallback_kind.unwrap_or(PosterKind::Movie);
-    ImageRequest::poster(id, kind, PosterSize::Standard)
+    ImageRequest::poster(id, kind, PosterSize::W300)
 }
 
 #[cfg(test)]

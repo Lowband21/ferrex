@@ -398,7 +398,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Calculate SDF and AA coverage once for reuse
     let dist = rounded_rect_sdf_normalized(input.local_pos, input.corner_radius_normalized);
-    let aa = max(1e-3, fwidth(dist));
+    // Use gradient length instead of fwidth for direction-independent AA
+    let grad = vec2<f32>(dpdx(dist), dpdy(dist));
+    let aa = max(1e-3, length(grad));
     let coverage = 1.0 - smoothstep(0.0, aa, dist);
 
     // FAST PATH: Skip expensive calculations for non-hovered, non-animating posters
@@ -409,15 +411,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Base color in pre-multiplied space with coverage and opacity
         var final_color = to_premul(vec4<f32>(linear_rgb, alpha)) * (coverage * input.opacity);
 
-        // Pixel-accurate inside-only border using SDF-aware fwidth
+        // Pixel-accurate inside-only border with consistent corner thickness
         {
-            let d = dist;
-            let d_aa = max(1e-3, fwidth(d));
             let border_px = select(1.2, 1.6, is_hovered > 0.5);
-            let w = border_px * d_aa;
+            let w = border_px * aa;
 
-            let inner = smoothstep(-w, -w + d_aa, d);
-            let edge = 1.0 - smoothstep(0.0, d_aa, d);
+            let inner = smoothstep(-w, -w + aa, dist);
+            let edge = 1.0 - smoothstep(0.0, aa, dist);
             let border_alpha = clamp(min(inner, edge), 0.0, 1.0);
 
             if border_alpha > 0.0 {
@@ -455,17 +455,22 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
 
-        // Progress bar at bottom after animation completes
+        // Progress bar at bottom after animation completes (extends to bottom edge)
         if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
-            let bar_start_y = 1.0 - 0.03;
+            let bar_height = 0.03;  // 3% of poster height
+            // Small epsilon buffer to avoid floating-point precision issues at boundary
+            // (when geometry is pixel-aligned, some pixels exactly at the boundary may fail >= check)
+            let bar_start_y = 1.0 - bar_height - 0.001;
+
+            // Only render in the bar region and inside poster bounds
+            // No SDF-based AA - dist < 0 naturally clips to poster shape
             if input.local_pos.y >= bar_start_y && dist < 0.0 {
-                let edge_fade = smoothstep(0.0, -0.01, dist);
                 if input.local_pos.x <= input.progress {
-                    let a = 0.8 * edge_fade;
+                    let a = 0.8;
                     let bar_pm = vec4<f32>(input.progress_color * a, a);
                     final_color = over(bar_pm, final_color);
                 } else {
-                    let a = 0.4 * edge_fade;
+                    let a = 0.4;
                     let bg_pm = vec4<f32>(vec3<f32>(0.0), a);
                     final_color = over(bg_pm, final_color);
                 }
@@ -540,15 +545,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Always render border - pixel-accurate, inside-only
+    // Pixel-accurate inside-only border with consistent corner thickness
     {
-        let d = dist;
-        let d_aa = max(1e-3, fwidth(d));
         let border_px = select(1.2, 1.6, is_hovered > 0.5);
-        let w = border_px * d_aa;
+        let w = border_px * aa;
 
-        let inner = smoothstep(-w, -w + d_aa, d);
-        let edge = 1.0 - smoothstep(0.0, d_aa, d);
+        let inner = smoothstep(-w, -w + aa, dist);
+        let edge = 1.0 - smoothstep(0.0, aa, dist);
         let border_alpha = clamp(min(inner, edge), 0.0, 1.0);
 
         if border_alpha > 0.0 {
@@ -597,33 +600,21 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Render progress bar at bottom for in-progress media (after animation completes)
+    // Render progress bar at bottom for in-progress media (extends to bottom edge)
     if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
-        // Progress bar dimensions
-        let bar_height = 0.02; // 2% of poster height
-        let bar_margin = 0.01; // 1% margin from bottom
+        let bar_height = 0.03;  // 3% of poster height (no bottom margin)
+        // Small epsilon buffer to avoid floating-point precision issues at boundary
+        // (when geometry is pixel-aligned, some pixels exactly at the boundary may fail >= check)
+        let bar_start_y = 1.0 - bar_height - 0.001;
 
-        // Check if we're in the progress bar area (use widget space)
-        if input.local_pos.y > (1.0 - bar_height - bar_margin) {
-            // Calculate progress bar boundaries
-            let bar_start_y = 1.0 - bar_height - bar_margin;
-            let bar_end_y = 1.0 - bar_margin;
-
-            // Check if we're within the bar height
-            if input.local_pos.y >= bar_start_y && input.local_pos.y <= bar_end_y {
-                // Only show bar within poster bounds (including rounded corners)
-                if dist < 0.0 {
-                    // Apply smooth fade at the very edges for anti-aliasing
-                    let edge_fade = smoothstep(0.0, -0.01, dist);
-
-                    // Use select for branchless progress bar rendering
-                    let is_filled = input.local_pos.x <= input.progress;
-                    let bar_alpha = select(0.4, 0.8, is_filled) * edge_fade;
-                    let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_filled);
-                    let bar_pm = vec4<f32>(bar_rgb * bar_alpha, bar_alpha);
-                    final_color = over(bar_pm, final_color);
-                }
-            }
+        // Check if we're in the progress bar area
+        // No SDF-based AA - dist < 0 naturally clips to poster shape
+        if input.local_pos.y >= bar_start_y && dist < 0.0 {
+            let is_filled = input.local_pos.x <= input.progress;
+            let bar_alpha = select(0.4, 0.8, is_filled);
+            let bar_rgb = select(vec3<f32>(0.0, 0.0, 0.0), input.progress_color, is_filled);
+            let bar_pm = vec4<f32>(bar_rgb * bar_alpha, bar_alpha);
+            final_color = over(bar_pm, final_color);
         }
     }
 

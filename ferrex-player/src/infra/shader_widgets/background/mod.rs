@@ -1329,9 +1329,9 @@ impl BackgroundShader {
         } else {
             // Fallback to default theme colors
             use crate::domains::ui::theme::MediaServerTheme;
+            use crate::infra::theme::{accent, with_alpha};
             self.primary_color = MediaServerTheme::BLACK;
-            self.secondary_color =
-                MediaServerTheme::ACCENT_BLUE.scale_alpha(0.2);
+            self.secondary_color = with_alpha(accent(), 0.2);
         }
         self
     }
