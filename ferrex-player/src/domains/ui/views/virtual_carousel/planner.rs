@@ -9,7 +9,7 @@ use crate::{
     domains::metadata::demand_planner::{
         DemandContext, DemandRequestKind, DemandSnapshot,
     },
-    infra::constants::virtual_carousel,
+    infra::runtime_config::RuntimeConfig,
 };
 
 use ferrex_core::player_prelude::{EpisodeStillSize, PosterKind};
@@ -26,6 +26,7 @@ pub fn collect_ranges_ids<F>(
     state: &VirtualCarouselState,
     _total_items: usize,
     ids_fn: F,
+    rc: &RuntimeConfig,
 ) -> (Vec<Uuid>, Vec<Uuid>, Vec<Uuid>)
 where
     F: Fn(usize) -> Option<Uuid>,
@@ -39,8 +40,8 @@ where
         }
     }
 
-    let prefetch =
-        state.prefetch_range(virtual_carousel::windows::PREFETCH_ITEMS);
+    let prefetch_items = rc.carousel_prefetch_items();
+    let prefetch = state.prefetch_range(prefetch_items);
     let mut prefetch_ids: Vec<Uuid> = Vec::new();
     for i in prefetch.clone() {
         if let Some(id) = ids_fn(i) {
@@ -49,10 +50,8 @@ where
     }
     prefetch_ids.retain(|id| !visible_ids.contains(id));
 
-    let background = state.background_range(
-        virtual_carousel::windows::PREFETCH_ITEMS,
-        virtual_carousel::windows::BACKGROUND_ITEMS,
-    );
+    let background_items = rc.carousel_background_items();
+    let background = state.background_range(prefetch_items, background_items);
     let mut background_ids: Vec<Uuid> = Vec::new();
     for i in background.clone() {
         if let Some(id) = ids_fn(i) {
@@ -71,12 +70,13 @@ pub fn snapshot_for_visible<F>(
     ids_fn: F,
     poster_kind: Option<PosterKind>,
     context: Option<DemandContext>,
+    rc: &RuntimeConfig,
 ) -> DemandSnapshot
 where
     F: Fn(usize) -> Option<Uuid>,
 {
     let (visible_ids, prefetch_ids, background_ids) =
-        collect_ranges_ids(state, total_items, ids_fn);
+        collect_ranges_ids(state, total_items, ids_fn, rc);
 
     DemandSnapshot {
         visible_ids,

@@ -141,6 +141,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             vc,
                             total,
                             |i| ids_for_emit.get(i).copied(),
+                            &state.runtime_config,
                         );
                     pre.retain(|id| !vis.contains(id));
                     back.retain(|id| !vis.contains(id) && !pre.contains(id));

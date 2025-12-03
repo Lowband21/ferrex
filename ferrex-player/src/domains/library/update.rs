@@ -14,12 +14,13 @@ use crate::{
 use super::messages::LibraryMessage;
 use crate::domains::auth::types::AuthenticationFlow;
 use crate::domains::library::LibrariesLoadState;
+use ferrex_model::{ImageSize, MediaType};
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 
 use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, LibraryId, MediaIDLike, MediaOps,
-    Priority, ScanLifecycleStatus, ScanSnapshotDto,
+    ImageRequest, LibraryId, MediaIDLike, Priority, ScanLifecycleStatus,
+    ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use ferrex_model::library::LibraryType;
@@ -786,8 +787,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Movie(movie) => Some(
             ImageRequest::new(
                 movie.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Movie,
+                ImageSize::poster(),
+                MediaType::Movie,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -795,8 +796,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Series(series) => Some(
             ImageRequest::new(
                 series.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Series,
+                ImageSize::poster(),
+                MediaType::Series,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -804,8 +805,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Season(season) => Some(
             ImageRequest::new(
                 season.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Season,
+                ImageSize::poster(),
+                MediaType::Season,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -813,8 +814,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Episode(episode) => Some(
             ImageRequest::new(
                 *episode.id.as_uuid(),
-                ImageSize::Thumbnail,
-                ImageType::Episode,
+                ImageSize::thumbnail(),
+                MediaType::Episode,
             )
             .with_priority(Priority::Visible)
             .with_index(0),

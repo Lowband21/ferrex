@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use super::UiMessage;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::{
-    background_ui::BackgroundMessage, interaction_ui::InteractionMessage,
+    background_ui::BackgroundMessage, feedback_ui::FeedbackMessage,
+    interaction_ui::InteractionMessage,
 };
 
 use crate::{
@@ -312,6 +313,14 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                         BackgroundMessage::UpdateTransitions.into(),
                     )
                 }),
+        );
+    }
+
+    // Toast expiry subscription - tick every 100ms when toasts are active
+    if state.domains.ui.state.toast_manager.has_toasts() {
+        subscriptions.push(
+            iced::time::every(Duration::from_millis(100))
+                .map(|_| DomainMessage::Ui(FeedbackMessage::ToastTick.into())),
         );
     }
 

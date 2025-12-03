@@ -46,3 +46,26 @@ impl Default for MotionControllerConfig {
         }
     }
 }
+
+impl MotionControllerConfig {
+    /// Create grid scrolling config from runtime settings.
+    pub fn from_runtime_config(
+        rc: &crate::infra::runtime_config::RuntimeConfig,
+    ) -> Self {
+        use crate::infra::constants::performance_config::scrolling as grid_cfg;
+        Self {
+            // These are kept static (not exposed in settings UI)
+            tick_ns: grid_cfg::TICK_NS,
+            accel_tau_ms: grid_cfg::ACCEL_TAU_MS,
+            accel_tau_to_ramp_ratio: grid_cfg::ACCEL_TAU_TO_RAMP_RATIO,
+            min_units_per_s_stop: grid_cfg::MIN_ROWS_PER_S_STOP,
+            // These come from runtime config
+            decay_tau_ms: rc.scroll_decay_tau_ms(),
+            base_units_per_s: rc.scroll_base_velocity(),
+            max_units_per_s: rc.scroll_max_velocity(),
+            ramp_ms: rc.scroll_ramp_ms(),
+            easing_kind: rc.scroll_easing().to_u8(),
+            boost_multiplier: rc.scroll_boost_multiplier(),
+        }
+    }
+}

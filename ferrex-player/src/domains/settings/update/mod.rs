@@ -5,6 +5,7 @@ pub mod profile;
 pub mod security;
 
 use super::messages::SettingsMessage;
+use super::sections;
 use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
@@ -30,7 +31,22 @@ pub fn update_settings(
     profiling::scope!(crate::infra::profiling_scopes::scopes::SETTINGS_UPDATE);
 
     match message {
-        // Navigation
+        // Navigation (new unified sidebar)
+        SettingsMessage::NavigateToSection(section) => {
+            navigation::handle_navigate_to_section(state, section)
+        }
+
+        // Sub-domain routing (new)
+        SettingsMessage::Playback(msg) => {
+            sections::playback::update(state, msg)
+        }
+        SettingsMessage::Display(msg) => sections::display::update(state, msg),
+        SettingsMessage::Theme(msg) => sections::theme::update(state, msg),
+        SettingsMessage::Performance(msg) => {
+            sections::performance::update(state, msg)
+        }
+
+        // Navigation (legacy)
         SettingsMessage::ShowProfile => navigation::handle_show_profile(state),
         SettingsMessage::ShowPreferences => {
             navigation::handle_show_preferences(state)
@@ -106,6 +122,9 @@ pub fn update_settings(
         }
         SettingsMessage::SetUserScale(user_scale) => {
             preferences::handle_set_user_scale(state, user_scale)
+        }
+        SettingsMessage::SetScalePreset(preset) => {
+            preferences::handle_set_scale_preset(state, preset)
         }
 
         // Profile

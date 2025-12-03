@@ -72,7 +72,8 @@ pub fn handle_virtual_carousel_message(
 
                 // Compute nearest aligned boundary in pixel space and decide if it's close enough
                 let stride = (vc.item_width + vc.item_spacing).max(1.0);
-                let commit_threshold = stride * snap::SNAP_EPSILON_FRACTION;
+                let commit_threshold =
+                    stride * state.runtime_config.snap_epsilon_fraction();
                 let i_floor = vc
                     .index_position
                     .floor()
@@ -185,6 +186,7 @@ pub fn handle_virtual_carousel_message(
                                     |i| seasons.get(i).map(|s| s.id.to_uuid()),
                                     Some(PosterKind::Season),
                                     None,
+                                    &state.runtime_config,
                                 );
                                 handle.send(snap);
                             }
@@ -208,9 +210,12 @@ pub fn handle_virtual_carousel_message(
                             state.domains.ui.state.carousel_registry.get(&key)
                         {
                             let (vis, mut pre, mut back) =
-                                planner::collect_ranges_ids(vc, total, |i| {
-                                    episodes.get(i).map(|e| e.id.to_uuid())
-                                });
+                                planner::collect_ranges_ids(
+                                    vc,
+                                    total,
+                                    |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                                    &state.runtime_config,
+                                );
                             // Build context for all ids
                             // Combine and deduplicate
                             pre.retain(|id| !vis.contains(id));
@@ -261,6 +266,7 @@ pub fn handle_virtual_carousel_message(
                                 |i| ids.get(i).copied(),
                                 Some(PosterKind::Movie),
                                 None,
+                                &state.runtime_config,
                             );
                             handle.send(snap);
                         }
@@ -293,6 +299,7 @@ pub fn handle_virtual_carousel_message(
                                 |i| ids.get(i).copied(),
                                 Some(PosterKind::Series),
                                 None,
+                                &state.runtime_config,
                             );
                             handle.send(snap);
                         }
@@ -322,6 +329,7 @@ pub fn handle_virtual_carousel_message(
                                                 vc,
                                                 total,
                                                 |i| ids.get(i).copied(),
+                                                &state.runtime_config,
                                             );
                                         pre.retain(|id| !vis.contains(id));
                                         back.retain(|id| {
@@ -330,6 +338,11 @@ pub fn handle_virtual_carousel_message(
                                         });
 
                                         let mut ctx = DemandContext::default();
+                                        let library_quality = state
+                                            .domains
+                                            .settings
+                                            .display
+                                            .library_poster_quality;
                                         for id in vis.iter()
                                         //.chain(pre.iter())
                                         //.chain(back.iter())
@@ -348,12 +361,13 @@ pub fn handle_virtual_carousel_message(
                                                 )
                                             {
                                                 ctx.override_request(
-                                                        *id,
-                                                        DemandRequestKind::Poster {
-                                                            kind: PosterKind::Series,
-                                                            size: PosterSize::Standard,
-                                                        },
-                                                    );
+                                                    *id,
+                                                    DemandRequestKind::Poster {
+                                                        kind:
+                                                            PosterKind::Series,
+                                                        size: library_quality,
+                                                    },
+                                                );
                                             }
                                         }
                                         let snap = DemandSnapshot {
@@ -387,6 +401,7 @@ pub fn handle_virtual_carousel_message(
                                                 |i| ids.get(i).copied(),
                                                 Some(PosterKind::Movie),
                                                 None,
+                                                &state.runtime_config,
                                             );
                                         handle.send(snap);
                                     }
@@ -408,6 +423,7 @@ pub fn handle_virtual_carousel_message(
                                                 |i| ids.get(i).copied(),
                                                 Some(PosterKind::Series),
                                                 None,
+                                                &state.runtime_config,
                                             );
                                         handle.send(snap);
                                     }
@@ -429,6 +445,7 @@ pub fn handle_virtual_carousel_message(
                                                 |i| ids.get(i).copied(),
                                                 Some(PosterKind::Movie),
                                                 None,
+                                                &state.runtime_config,
                                             );
                                         handle.send(snap);
                                     }
@@ -450,6 +467,7 @@ pub fn handle_virtual_carousel_message(
                                                 |i| ids.get(i).copied(),
                                                 Some(PosterKind::Series),
                                                 None,
+                                                &state.runtime_config,
                                             );
                                         handle.send(snap);
                                     }
@@ -804,17 +822,18 @@ fn ensure_scroller_for_key<'a>(
     state: &'a mut State,
     key: &CarouselKey,
 ) -> &'a mut MotionController {
+    let rc = &state.runtime_config;
     let cfg = MotionControllerConfig {
         tick_ns: motion::TICK_NS,
         accel_tau_ms: 0, // derive from ramp ratio
         accel_tau_to_ramp_ratio: 0.4,
-        decay_tau_ms: motion::DECAY_TAU_MS,
-        base_units_per_s: motion::BASE_ITEMS_PER_S,
-        max_units_per_s: motion::MAX_ITEMS_PER_S,
+        decay_tau_ms: rc.carousel_decay_tau_ms(),
+        base_units_per_s: rc.carousel_base_velocity(),
+        max_units_per_s: rc.carousel_max_velocity(),
         min_units_per_s_stop: 0.08,
-        ramp_ms: motion::RAMP_MS,
-        easing_kind: motion::EASING_KIND,
-        boost_multiplier: motion::BOOST_MULTIPLIER,
+        ramp_ms: rc.carousel_ramp_ms(),
+        easing_kind: rc.carousel_easing().to_u8(),
+        boost_multiplier: rc.carousel_boost_multiplier(),
     };
 
     state
@@ -877,6 +896,12 @@ fn start_snap_to_page(
     key: CarouselKey,
     to_right: bool,
 ) -> Task<ui::UiMessage> {
+    // Read snap animation settings from runtime config
+    let rc = &state.runtime_config;
+    let snap_easing = rc.snap_easing().to_u8();
+    let snap_page_duration = rc.snap_page_duration_ms();
+    let snap_epsilon = rc.snap_epsilon_fraction();
+
     // Set keyboard focus to this carousel when user presses page chevrons
     state
         .domains
@@ -911,8 +936,8 @@ fn start_snap_to_page(
         };
         target_index = ti;
         target_x = vc.index_to_scroll(ti);
-        easing = snap::EASING_KIND;
-        duration_ms = snap::PAGE_DURATION_MS;
+        easing = snap_easing;
+        duration_ms = snap_page_duration;
         _scroll_id = vc.scrollable_id.clone();
         stride = (vc.item_width + vc.item_spacing).max(1.0);
         max_scroll = vc.max_scroll;
@@ -921,7 +946,7 @@ fn start_snap_to_page(
     // Set up animator
     {
         // Allow tiny moves if they land on the end boundary
-        let boundary_eps = stride * snap::SNAP_EPSILON_FRACTION;
+        let boundary_eps = stride * snap_epsilon;
         let near_end_target = (max_scroll - target_x).abs() <= boundary_eps;
         if (target_x - current_x).abs() <= boundary_eps && !near_end_target {
             return Task::none();
@@ -952,6 +977,12 @@ fn start_snap_to_step(
     key: CarouselKey,
     to_right: bool,
 ) -> Task<ui::UiMessage> {
+    // Read snap animation settings from runtime config
+    let rc = &state.runtime_config;
+    let snap_easing = rc.snap_easing().to_u8();
+    let snap_item_duration = rc.snap_item_duration_ms();
+    let snap_epsilon = rc.snap_epsilon_fraction();
+
     // Set keyboard focus to this carousel when user presses chevron buttons
     state
         .domains
@@ -986,7 +1017,7 @@ fn start_snap_to_step(
             state.domains.ui.state.carousel_registry.motion_state(&key);
         let eps = 1e-4;
         stride = (vc.item_width + vc.item_spacing).max(1.0);
-        let end_eps = stride * snap::SNAP_EPSILON_FRACTION;
+        let end_eps = stride * snap_epsilon;
 
         // If already at or targeting the end, ignore further right steps
         if to_right {
@@ -1063,15 +1094,15 @@ fn start_snap_to_step(
             target_x = vc.index_to_scroll(target_index);
         }
 
-        easing = snap::EASING_KIND;
-        duration_ms = snap::ITEM_DURATION_MS;
+        easing = snap_easing;
+        duration_ms = snap_item_duration;
         near_end_target = (vc.max_scroll - target_x).abs() <= end_eps;
         _scroll_id = vc.scrollable_id.clone();
     }
 
     // If there is effectively no movement and not targeting the end boundary, do nothing
     {
-        let boundary_eps = stride * snap::SNAP_EPSILON_FRACTION;
+        let boundary_eps = stride * snap_epsilon;
         if (target_x - current_x).abs() <= boundary_eps && !near_end_target {
             return Task::none();
         }
@@ -1101,6 +1132,13 @@ fn handle_release_snap_align(
     key: CarouselKey,
     dir: i32,
 ) -> Task<ui::UiMessage> {
+    // Read snap animation settings from runtime config
+    let rc = &state.runtime_config;
+    let snap_easing = rc.snap_easing().to_u8();
+    let snap_item_duration = rc.snap_item_duration_ms();
+    let snap_epsilon = rc.snap_epsilon_fraction();
+    let snap_hold_threshold = rc.snap_hold_threshold_ms();
+
     let held_ms = state
         .domains
         .ui
@@ -1124,7 +1162,7 @@ fn handle_release_snap_align(
         )
     };
 
-    let end_eps = stride * snap::SNAP_EPSILON_FRACTION;
+    let end_eps = stride * snap_epsilon;
 
     // Displacement-based heuristic: consider how far we moved during the hold
     let moved_units = state
@@ -1135,8 +1173,7 @@ fn handle_release_snap_align(
         .end_hold_moved_units(&key, current_x, stride)
         .unwrap_or(0.0);
 
-    if moved_units.abs() < 0.5 || (held_ms as u64) < snap::HOLD_TAP_THRESHOLD_MS
-    {
+    if moved_units.abs() < 0.5 || (held_ms as u64) < snap_hold_threshold {
         // Treat as tap: single step in the direction (robust to timing jitter)
         return start_snap_to_step(state, key, dir > 0);
     }
@@ -1188,12 +1225,7 @@ fn handle_release_snap_align(
         .carousel_registry
         .ensure_animator(&key);
 
-    anim.start(
-        current_x,
-        target_x,
-        snap::ITEM_DURATION_MS,
-        snap::EASING_KIND,
-    );
+    anim.start(current_x, target_x, snap_item_duration, snap_easing);
 
     state.domains.ui.state.carousel_registry.set_motion_state(
         &key,
@@ -1249,6 +1281,7 @@ fn maybe_send_snapshot_for_key(
                         |i| seasons.get(i).map(|s| s.id.to_uuid()),
                         Some(PosterKind::Season),
                         None,
+                        &state.runtime_config,
                     );
                     handle.send(snap);
                 }
@@ -1277,6 +1310,7 @@ fn maybe_send_snapshot_for_key(
                         |i| ids.get(i).copied(),
                         Some(PosterKind::Movie),
                         None,
+                        &state.runtime_config,
                     );
                     handle.send(snap);
                 }
@@ -1305,6 +1339,7 @@ fn maybe_send_snapshot_for_key(
                         |i| ids.get(i).copied(),
                         Some(PosterKind::Series),
                         None,
+                        &state.runtime_config,
                     );
                     handle.send(snap);
                 }
@@ -1322,10 +1357,12 @@ fn maybe_send_snapshot_for_key(
                     state.domains.ui.state.carousel_registry.get(key)
                 {
                     let total = episodes.len();
-                    let (vis, mut pre, mut back) =
-                        planner::collect_ranges_ids(vc, total, |i| {
-                            episodes.get(i).map(|e| e.id.to_uuid())
-                        });
+                    let (vis, mut pre, mut back) = planner::collect_ranges_ids(
+                        vc,
+                        total,
+                        |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                        &state.runtime_config,
+                    );
                     pre.retain(|id| !vis.contains(id));
                     back.retain(|id| !vis.contains(id) && !pre.contains(id));
                     let mut all = vis.clone();

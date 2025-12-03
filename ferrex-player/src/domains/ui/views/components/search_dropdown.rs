@@ -12,6 +12,7 @@ use crate::domains::ui::shell_ui::UiShellMessage;
 use crate::domains::ui::theme::{Button as ButtonStyle, MediaServerTheme};
 use crate::domains::ui::windows::focus::SEARCH_WINDOW_INPUT_ID;
 use crate::infra::api_types::Media;
+use crate::infra::theme::{accent, accent_glow};
 use crate::state::State;
 use ferrex_core::query::types::SearchField;
 
@@ -166,12 +167,12 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
                 MediaServerTheme::SOFT_GREY_MEDIUM,
             )),
             border: iced::Border {
-                color: MediaServerTheme::ACCENT_BLUE,
+                color: accent(),
                 width: 1.0,
                 radius: 10.0.into(),
             },
             shadow: iced::Shadow {
-                color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                color: accent_glow(),
                 offset: iced::Vector::default(),
                 blur_radius: 8.0,
             },
@@ -510,7 +511,7 @@ fn view_search_result(
             };
 
             let border_color = if is_selected {
-                MediaServerTheme::ACCENT_BLUE
+                accent()
             } else {
                 MediaServerTheme::BORDER_COLOR
             };
@@ -578,7 +579,7 @@ fn view_search_result(
                         },
                         shadow: if is_selected {
                             iced::Shadow {
-                                color: MediaServerTheme::ACCENT_BLUE_GLOW,
+                                color: accent_glow(),
                                 offset: iced::Vector::default(),
                                 blur_radius: 14.0,
                             }

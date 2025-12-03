@@ -10,6 +10,7 @@ pub mod library_filter_panel;
 pub mod loading;
 pub mod movies;
 pub mod settings;
+pub mod toast_overlay;
 pub mod tv;
 
 pub use auth::view_auth;

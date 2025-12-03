@@ -365,10 +365,12 @@ pub fn emit_initial_curated_snapshots(state: &mut State) {
                 };
                 handle.send(snap);
             } else {
-                let (vis, mut pre, mut back) =
-                    planner::collect_ranges_ids(vc, total, |i| {
-                        ids.get(i).copied()
-                    });
+                let (vis, mut pre, mut back) = planner::collect_ranges_ids(
+                    vc,
+                    total,
+                    |i| ids.get(i).copied(),
+                    &state.runtime_config,
+                );
                 pre.retain(|id| !vis.contains(id));
                 back.retain(|id| !vis.contains(id) && !pre.contains(id));
                 // Build explicit context for both Movie/Series ids in the union

@@ -39,6 +39,7 @@ use crate::{
             repository::MediaRepo,
             yoke_cache::YokeCache,
         },
+        runtime_config::RuntimeConfig,
         services::{
             api::ApiService, settings::SettingsApiAdapter,
             streaming::StreamingApiAdapter,
@@ -96,6 +97,9 @@ pub struct State {
 
     /// MediaRepo for new architecture - single source of truth for media/library data
     pub media_repo: Arc<StdRwLock<Option<MediaRepo>>>,
+
+    /// Runtime configuration for user-adjustable performance/animation settings
+    pub runtime_config: RuntimeConfig,
 }
 
 impl State {
@@ -169,6 +173,8 @@ impl State {
             scaling_context: ScalingContext::default(),
             size_provider: SizeProvider::default(),
             scaled_layout: ScaledLayout::default(),
+            scale_slider_preview: None,
+            scale_text_input: String::from("1.0"),
 
             expanded_shows: HashSet::new(),
             hovered_media_id: None,
@@ -196,6 +202,7 @@ impl State {
             carousel_focus: CarouselFocus::new(),
             poster_menu_open: None,
             poster_menu_states: HashMap::new(),
+            toast_manager: crate::domains::ui::feedback_ui::ToastManager::new(),
         };
 
         // Create settings service adapter
@@ -292,6 +299,7 @@ impl State {
             search_window_id: None,
             windows: WindowManager::new(),
             media_repo,
+            runtime_config: RuntimeConfig::new(),
         }
     }
 

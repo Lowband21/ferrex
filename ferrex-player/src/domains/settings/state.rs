@@ -4,7 +4,12 @@ use serde::{Deserialize, Serialize};
 /// Settings domain state
 #[derive(Debug, Clone, Default)]
 pub struct SettingsState {
+    /// Current section in the unified settings sidebar (new)
+    pub current_section: SettingsSection,
+
+    /// Current settings view (legacy - being replaced by SettingsSection)
     pub current_view: SettingsView,
+
     pub security: SecurityState,
     pub profile: ProfileState,
     pub preferences: PreferencesState,
@@ -12,7 +17,7 @@ pub struct SettingsState {
         crate::domains::ui::views::settings::device_management::DeviceManagementState,
 }
 
-/// Current settings view
+/// Current settings view (legacy - being replaced by SettingsSection)
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum SettingsView {
     #[default]
@@ -21,6 +26,95 @@ pub enum SettingsView {
     Preferences,
     Security,
     DeviceManagement,
+}
+
+// =============================================================================
+// New Settings Section Architecture
+// =============================================================================
+
+/// Settings section for the unified settings sidebar
+///
+/// This enum represents all available settings sections in the new unified
+/// settings view. Each variant corresponds to a sub-domain in sections/.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SettingsSection {
+    // User sections (always visible)
+    #[default]
+    Profile,
+    Playback,
+    Display,
+    Theme,
+    Performance,
+    Security,
+    Devices,
+
+    // Admin sections (permission-gated)
+    Libraries,
+    Users,
+    Server,
+}
+
+impl SettingsSection {
+    /// Check if this is an admin-only section
+    pub fn is_admin(&self) -> bool {
+        matches!(self, Self::Libraries | Self::Users | Self::Server)
+    }
+
+    /// Get the display label for this section
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Profile => "Profile",
+            Self::Playback => "Playback",
+            Self::Display => "Display",
+            Self::Theme => "Theme",
+            Self::Performance => "Performance",
+            Self::Security => "Security",
+            Self::Devices => "Devices",
+            Self::Libraries => "Libraries",
+            Self::Users => "Users",
+            Self::Server => "Server",
+        }
+    }
+
+    /// Get all user sections (always visible)
+    pub const fn user_sections() -> &'static [SettingsSection] {
+        &[
+            Self::Profile,
+            Self::Playback,
+            Self::Display,
+            Self::Theme,
+            Self::Performance,
+            Self::Security,
+            Self::Devices,
+        ]
+    }
+
+    /// Get all admin sections (permission-gated)
+    pub const fn admin_sections() -> &'static [SettingsSection] {
+        &[Self::Libraries, Self::Users, Self::Server]
+    }
+
+    /// Get all sections
+    pub const fn all() -> &'static [SettingsSection] {
+        &[
+            Self::Profile,
+            Self::Playback,
+            Self::Display,
+            Self::Theme,
+            Self::Performance,
+            Self::Security,
+            Self::Devices,
+            Self::Libraries,
+            Self::Users,
+            Self::Server,
+        ]
+    }
+}
+
+impl std::fmt::Display for SettingsSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
 }
 
 /// Security settings state

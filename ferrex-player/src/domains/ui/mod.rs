@@ -97,6 +97,10 @@ pub struct UIDomainState {
     pub size_provider: SizeProvider,
     /// Pre-computed scaled layout dimensions for virtual grids/carousels
     pub scaled_layout: ScaledLayout,
+    /// Preview value during slider drag (not applied to UI until release)
+    pub scale_slider_preview: Option<f32>,
+    /// Text input value for manual scale entry
+    pub scale_text_input: String,
 
     pub expanded_shows: HashSet<String>,
     pub hovered_media_id: Option<PosterInstanceKey>,
@@ -149,6 +153,9 @@ pub struct UIDomainState {
     // Poster menu open state (single target for now)
     pub poster_menu_open: Option<PosterInstanceKey>,
     pub poster_menu_states: HashMap<PosterInstanceKey, PosterMenuState>,
+
+    // Toast notification manager
+    pub toast_manager: feedback_ui::ToastManager,
 }
 
 impl UIDomainState {}

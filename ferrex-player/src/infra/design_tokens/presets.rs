@@ -1,7 +1,7 @@
 //! Named scale presets for common configurations
 //!
 //! Presets encapsulate common scaling configurations, making it easy to
-//! switch between modes (e.g., compact vs accessibility).
+//! switch between modes.
 
 use super::ScalingContext;
 
@@ -9,18 +9,13 @@ use super::ScalingContext;
 ///
 /// ## Available Presets
 ///
-/// | Preset              | Effective Scale | Use Case                      |
-/// |---------------------|-----------------|-------------------------------|
-/// | `Compact`           | 0.8x            | Dense layouts, power users    |
-/// | `Default`           | 1.0x            | Standard desktop usage        |
-/// | `Large`             | 1.2x            | Easier reading, larger UI     |
-/// | `AccessibilityLarge`| 1.5x            | Accessibility, low vision     |
-/// | `TenFoot`           | 1.5x            | TV/10-foot UI, couch viewing  |
-///
-/// ## Extension
-///
-/// Add new presets by adding variants to this enum and implementing
-/// the corresponding `to_context()` match arm.
+/// | Preset   | Scale | Use Case                      |
+/// |----------|-------|-------------------------------|
+/// | `Compact`| 0.8x  | Dense layouts, power users    |
+/// | `Default`| 1.0x  | Standard desktop usage        |
+/// | `Large`  | 1.2x  | Easier reading, larger UI     |
+/// | `Huge`   | 1.5x  | Extra large, accessibility    |
+/// | `TV`     | 2.0x  | TV/10-foot UI, couch viewing  |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScalePreset {
     /// Compact mode - 80% scale for dense layouts
@@ -29,10 +24,10 @@ pub enum ScalePreset {
     Default,
     /// Large - 120% scale for easier reading
     Large,
-    /// Accessibility large text - 150% scale
-    AccessibilityLarge,
-    /// TV/10-foot UI - optimized for couch viewing
-    TenFoot,
+    /// Huge - 150% scale for accessibility
+    Huge,
+    /// TV - 200% scale for 10-foot UI
+    TV,
 }
 
 impl ScalePreset {
@@ -42,12 +37,8 @@ impl ScalePreset {
             Self::Compact => ScalingContext::new().with_user_scale(0.8),
             Self::Default => ScalingContext::new(),
             Self::Large => ScalingContext::new().with_user_scale(1.2),
-            Self::AccessibilityLarge => {
-                ScalingContext::new().with_accessibility_scale(1.5)
-            }
-            Self::TenFoot => ScalingContext::new()
-                .with_user_scale(1.2)
-                .with_accessibility_scale(1.25),
+            Self::Huge => ScalingContext::new().with_user_scale(1.5),
+            Self::TV => ScalingContext::new().with_user_scale(2.0),
         }
     }
 
@@ -62,8 +53,8 @@ impl ScalePreset {
             Self::Compact => "Compact",
             Self::Default => "Default",
             Self::Large => "Large",
-            Self::AccessibilityLarge => "Accessibility (Large)",
-            Self::TenFoot => "TV / 10-foot",
+            Self::Huge => "Huge",
+            Self::TV => "TV",
         }
     }
 
@@ -73,8 +64,8 @@ impl ScalePreset {
             Self::Compact => "Dense layout for power users",
             Self::Default => "Standard desktop interface",
             Self::Large => "Larger elements for easier reading",
-            Self::AccessibilityLarge => "Extra large for accessibility needs",
-            Self::TenFoot => "Optimized for TV and couch viewing",
+            Self::Huge => "Extra large for accessibility needs",
+            Self::TV => "Optimized for TV and couch viewing",
         }
     }
 
@@ -83,8 +74,8 @@ impl ScalePreset {
         Self::Compact,
         Self::Default,
         Self::Large,
-        Self::AccessibilityLarge,
-        Self::TenFoot,
+        Self::Huge,
+        Self::TV,
     ];
 }
 
@@ -109,12 +100,8 @@ mod tests {
         assert!((ScalePreset::Compact.scale_factor() - 0.8).abs() < 0.001);
         assert!((ScalePreset::Default.scale_factor() - 1.0).abs() < 0.001);
         assert!((ScalePreset::Large.scale_factor() - 1.2).abs() < 0.001);
-        assert!(
-            (ScalePreset::AccessibilityLarge.scale_factor() - 1.5).abs()
-                < 0.001
-        );
-        // TenFoot: 1.2 * 1.25 = 1.5
-        assert!((ScalePreset::TenFoot.scale_factor() - 1.5).abs() < 0.001);
+        assert!((ScalePreset::Huge.scale_factor() - 1.5).abs() < 0.001);
+        assert!((ScalePreset::TV.scale_factor() - 2.0).abs() < 0.001);
     }
 
     #[test]
@@ -126,6 +113,6 @@ mod tests {
     #[test]
     fn test_display_name() {
         assert_eq!(ScalePreset::Compact.display_name(), "Compact");
-        assert_eq!(ScalePreset::TenFoot.display_name(), "TV / 10-foot");
+        assert_eq!(ScalePreset::TV.display_name(), "TV");
     }
 }

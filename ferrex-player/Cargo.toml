@@ -60,7 +60,15 @@ iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
 
 iced_aw = { git = "https://github.com/Lowband21/iced_aw_ferrex.git", default-features = false, features = [
   "menu",
+  "sidebar",
+  "number_input",
+  "slide_bar",
+  "drop_down",
+  "color_picker",
 ] }
+
+iced_toasts = { git = "https://github.com/Gomango999/iced-toasts.git" }
+  
 
 # Icons
 lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git", features = [
@@ -127,6 +135,9 @@ bytemuck = { version = "^1.23", features = ["derive"] }
 
 # Font rendering for SDF atlas generation
 fontdue = "0.9"
+
+# Color space conversions (HSLuv for perceptually uniform colors)
+hsluv = "0.3"
 
 # Advanced caching and concurrency
 dashmap.workspace = true

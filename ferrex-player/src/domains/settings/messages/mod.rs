@@ -1,8 +1,24 @@
 use ferrex_core::player_prelude::UserScale;
 
+use crate::domains::settings::sections::{
+    display::DisplayMessage, performance::PerformanceMessage,
+    playback::PlaybackMessage, theme::ThemeMessage,
+};
+use crate::domains::settings::state::SettingsSection;
+use crate::infra::design_tokens::ScalePreset;
+
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
-    // Navigation
+    // Navigation (new unified sidebar)
+    NavigateToSection(SettingsSection),
+
+    // Sub-domain routing (new)
+    Playback(PlaybackMessage),
+    Display(DisplayMessage),
+    Theme(ThemeMessage),
+    Performance(PerformanceMessage),
+
+    // Navigation (legacy - to be deprecated)
     ShowProfile,
     ShowPreferences,
     ShowSecurity,
@@ -11,6 +27,7 @@ pub enum SettingsMessage {
 
     // Preferences - UI Scale
     SetUserScale(UserScale),
+    SetScalePreset(ScalePreset),
 
     // Security - Password
     ShowChangePassword,
@@ -57,7 +74,16 @@ pub enum SettingsMessage {
 impl SettingsMessage {
     pub fn name(&self) -> &'static str {
         match self {
-            // Navigation
+            // Navigation (new)
+            Self::NavigateToSection(_) => "Settings::NavigateToSection",
+
+            // Sub-domain routing (new)
+            Self::Playback(msg) => msg.name(),
+            Self::Display(msg) => msg.name(),
+            Self::Theme(msg) => msg.name(),
+            Self::Performance(msg) => msg.name(),
+
+            // Navigation (legacy)
             Self::ShowProfile => "Settings::ShowProfile",
             Self::ShowPreferences => "Settings::ShowPreferences",
             Self::ShowSecurity => "Settings::ShowSecurity",
@@ -92,6 +118,7 @@ impl SettingsMessage {
             Self::ToggleAutoLogin(_) => "Settings::ToggleAutoLogin",
             Self::AutoLoginToggled(_) => "Settings::AutoLoginToggled",
             Self::SetUserScale(_) => "Settings::SetUserScale",
+            Self::SetScalePreset(_) => "Settings::SetScalePreset",
 
             // Profile
             Self::UpdateDisplayName(_) => "Settings::UpdateDisplayName",

@@ -4,7 +4,6 @@ use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 use crate::domains::ui::messages::UiMessage;
 use crate::domains::ui::tabs::{self, TabId, TabState};
 use crate::infra::constants::virtual_carousel::layout as vcl;
-use crate::infra::constants::virtual_carousel::snap as snap_consts;
 use crate::state::State;
 
 #[cfg_attr(
@@ -177,6 +176,10 @@ fn start_vertical_snap_to_key(
     state: &mut State,
     key: crate::domains::ui::views::virtual_carousel::types::CarouselKey,
 ) -> Task<UiMessage> {
+    // Read snap animation settings from runtime config
+    let snap_page_duration = state.runtime_config.snap_page_duration_ms();
+    let snap_easing = state.runtime_config.snap_easing().to_u8();
+
     let Some(TabState::Home(home_state)) =
         state.tab_manager.get_tab_mut(TabId::Home)
     else {
@@ -194,8 +197,8 @@ fn start_vertical_snap_to_key(
     home_state.focus.vertical_animator.start(
         current,
         target_y,
-        snap_consts::PAGE_DURATION_MS,
-        snap_consts::EASING_KIND,
+        snap_page_duration,
+        snap_easing,
     );
     // Motion ticks will drive the scroll via handle_home_focus_tick
     Task::none()
@@ -205,6 +208,10 @@ fn start_vertical_snap_to_y(
     state: &mut State,
     target_y: f32,
 ) -> Task<UiMessage> {
+    // Read snap animation settings from runtime config
+    let snap_page_duration = state.runtime_config.snap_page_duration_ms();
+    let snap_easing = state.runtime_config.snap_easing().to_u8();
+
     let Some(TabState::Home(home_state)) =
         state.tab_manager.get_tab_mut(TabId::Home)
     else {
@@ -217,8 +224,8 @@ fn start_vertical_snap_to_y(
     home_state.focus.vertical_animator.start(
         current,
         target_y,
-        snap_consts::PAGE_DURATION_MS,
-        snap_consts::EASING_KIND,
+        snap_page_duration,
+        snap_easing,
     );
     Task::none()
 }

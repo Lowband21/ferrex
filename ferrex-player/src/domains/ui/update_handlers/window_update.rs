@@ -72,9 +72,8 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
                 visible_ids.extend(slice.iter().copied());
             }
 
-            let pr = lib_state
-                .grid_state
-                .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+            let prefetch_rows = state.runtime_config.prefetch_rows_above();
+            let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
             let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
             if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                 prefetch_ids.extend(slice.iter().copied());
@@ -82,7 +81,7 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
 
             prefetch_ids.retain(|id| !visible_ids.contains(id));
             let br = lib_state.grid_state.get_background_range(
-                crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                prefetch_rows,
                 crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
             );
             let mut background_ids: Vec<uuid::Uuid> = Vec::new();
@@ -156,6 +155,7 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
                         |i| seasons.get(i).map(|s| s.id.to_uuid()),
                         Some(ferrex_core::player_prelude::PosterKind::Season),
                         None,
+                        &state.runtime_config,
                     );
                     if let Some(handle) =
                         state.domains.metadata.state.planner_handle.as_ref()
@@ -180,10 +180,12 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
                     .get_season_episodes(&SeasonID(season_id.to_uuid()))
                     .unwrap_or_else(|_| Vec::new());
                 let total = episodes.len();
-                let (vis, mut pre, mut back) =
-                    planner::collect_ranges_ids(vc, total, |i| {
-                        episodes.get(i).map(|e| e.id.to_uuid())
-                    });
+                let (vis, mut pre, mut back) = planner::collect_ranges_ids(
+                    vc,
+                    total,
+                    |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                    &state.runtime_config,
+                );
                 pre.retain(|id| !vis.contains(id));
                 back.retain(|id| !vis.contains(id) && !pre.contains(id));
                 let mut all = vis.clone();

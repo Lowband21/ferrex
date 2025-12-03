@@ -4,8 +4,9 @@ use std::sync::Arc;
 use ferrex_core::player_prelude::{
     ArchivedLibrary, ArchivedLibraryExt, ArchivedMedia, ArchivedModel,
     EpisodeReference, Library, LibraryId, Media, MediaIDLike, MediaLike,
-    MediaType, SeasonID, SeasonReference, SeriesID, SortBy, SortOrder,
+    SeasonID, SeasonReference, SeriesID, SortBy, SortOrder,
 };
+use ferrex_model::MediaType;
 use rkyv::{rancor::Error, to_bytes, util::AlignedVec, vec::ArchivedVec};
 use uuid::Uuid;
 use yoke::Yoke;

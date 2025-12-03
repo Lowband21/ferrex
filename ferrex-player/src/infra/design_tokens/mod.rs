@@ -5,16 +5,10 @@
 //!
 //! ## Architecture
 //!
-//! - `ScalingContext` - Composable scaling sources (user preference, DPI, accessibility)
+//! - `ScalingContext` - UI scale configuration with optional per-view override
 //! - `SizeProvider` - Central aggregator for all scaled token values
 //! - Token modules - Semantic definitions for fonts, spacing, icons, animations
 //! - `ScalePreset` - Named configurations for common use cases
-//!
-//! ## Extensibility
-//!
-//! - Add new token categories by creating new submodules
-//! - Add new scale sources by extending `ScalingContext`
-//! - Add presets for platform-specific or accessibility configurations
 //!
 //! ## Usage
 //!
@@ -39,27 +33,23 @@ pub use icons::IconTokens;
 pub use presets::ScalePreset;
 pub use spacing::SpacingTokens;
 
-/// Composable scaling context - multiple sources combine multiplicatively
+/// Scaling context for UI elements
 ///
-/// The effective scale is computed as:
-/// `user_scale * accessibility_scale`
-///
-/// Unless `view_override` is set, which takes precedence.
+/// The effective scale is the user_scale value clamped to [0.5, 3.0],
+/// unless `view_override` is set, which takes precedence.
 ///
 /// Note: System DPI scale is handled by Iced/winit at the rendering level,
 /// so it's not included here to avoid double-scaling on HiDPI displays.
 #[derive(Debug, Clone, Copy)]
 pub struct ScalingContext {
-    /// User preference scale (typically 0.8, 1.0, or 1.2 from UserScale)
+    /// User preference scale (0.5 to 3.0)
     pub user_scale: f32,
-    /// Accessibility scale factor (1.0 default, can be > 1.0 for large text mode)
-    pub accessibility_scale: f32,
-    /// Optional per-view override (None = use computed, Some = override)
+    /// Optional per-view override (None = use user_scale, Some = override)
     pub view_override: Option<f32>,
 }
 
 impl ScalingContext {
-    /// Create a new default scaling context (all scales at 1.0)
+    /// Create a new default scaling context (scale at 1.0)
     pub fn new() -> Self {
         Self::default()
     }
@@ -71,14 +61,7 @@ impl ScalingContext {
         self
     }
 
-    /// Builder: set accessibility scale
-    #[must_use]
-    pub fn with_accessibility_scale(mut self, scale: f32) -> Self {
-        self.accessibility_scale = scale;
-        self
-    }
-
-    /// Builder: set a per-view override that bypasses computed scale
+    /// Builder: set a per-view override that bypasses user scale
     #[must_use]
     pub fn with_override(mut self, scale: f32) -> Self {
         self.view_override = Some(scale);
@@ -92,15 +75,15 @@ impl ScalingContext {
         self
     }
 
-    /// Compute effective scale from all sources
+    /// Compute effective scale
     ///
     /// If `view_override` is set, returns that value (clamped).
-    /// Otherwise, multiplies user and accessibility scales together and clamps to [0.5, 3.0].
+    /// Otherwise, returns user_scale clamped to [0.5, 3.0].
     pub fn effective_scale(&self) -> f32 {
         if let Some(override_scale) = self.view_override {
             return override_scale.clamp(0.5, 3.0);
         }
-        (self.user_scale * self.accessibility_scale).clamp(0.5, 3.0)
+        self.user_scale.clamp(0.5, 3.0)
     }
 
     /// Create from a named preset
@@ -112,18 +95,12 @@ impl ScalingContext {
     pub fn set_user_scale(&mut self, scale: f32) {
         self.user_scale = scale;
     }
-
-    /// Update accessibility scale in place
-    pub fn set_accessibility_scale(&mut self, scale: f32) {
-        self.accessibility_scale = scale;
-    }
 }
 
 impl Default for ScalingContext {
     fn default() -> Self {
         Self {
             user_scale: 1.0,
-            accessibility_scale: 1.0,
             view_override: None,
         }
     }
@@ -235,9 +212,9 @@ mod tests {
     }
 
     #[test]
-    fn test_scales_multiply() {
+    fn test_user_scale_is_effective() {
         let context = ScalingContext::new().with_user_scale(1.2);
-        assert!((context.effective_scale() - 2.4).abs() < 0.001);
+        assert!((context.effective_scale() - 1.2).abs() < 0.001);
     }
 
     #[test]

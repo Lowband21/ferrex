@@ -9,20 +9,17 @@ use crate::{
         shader_widgets::poster::{
             PosterFace, PosterInstanceKey, animation::AnimationBehavior,
         },
+        theme::accent,
     },
     state::State,
 };
 
 use ferrex_core::{
     traits::id::MediaIDLike,
-    types::{
-        details::ArchivedMediaDetailsOption,
-        ids::MovieID,
-        image_request::Priority,
-        util_types::{ImageSize, ImageType},
-    },
+    types::{details::ArchivedMediaDetailsOption, ids::MovieID},
 };
 
+use ferrex_model::{ImageSize, MediaType, Priority};
 use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, scrollable, text},
@@ -71,8 +68,8 @@ pub fn view_movie_detail<'a>(
                 .push(Space::new().height(Length::Fixed(content_offset)));
 
             let mut poster_element = image_for(media_id.to_uuid())
-                .size(ImageSize::Full)
-                .image_type(ImageType::Movie)
+                .size(ImageSize::poster_large())
+                .image_type(MediaType::Movie)
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
                 .priority(Priority::Visible)
@@ -439,9 +436,7 @@ pub fn view_movie_detail<'a>(
                     }
 
                     let hdr_card = container(
-                        text(hdr_text)
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::ACCENT_BLUE),
+                        text(hdr_text).size(fonts.caption).color(accent()),
                     )
                     .padding(10)
                     .style(theme::Container::TechDetail.style());

@@ -12,6 +12,7 @@ use crate::{
         messages::UiMessage,
         theme::{self, MediaServerTheme},
     },
+    infra::theme::{accent, accent_hover},
     state::State,
 };
 use ferrex_core::player_prelude::{
@@ -159,22 +160,16 @@ fn filter_chip_style(
     move |_, status| {
         let (background, border_color, text_color) = if is_selected {
             match status {
-                button::Status::Hovered | button::Status::Pressed => (
-                    MediaServerTheme::ACCENT_BLUE_HOVER,
-                    MediaServerTheme::ACCENT_BLUE,
-                    MediaServerTheme::TEXT_PRIMARY,
-                ),
-                _ => (
-                    MediaServerTheme::ACCENT_BLUE,
-                    MediaServerTheme::ACCENT_BLUE,
-                    MediaServerTheme::TEXT_PRIMARY,
-                ),
+                button::Status::Hovered | button::Status::Pressed => {
+                    (accent_hover(), accent(), MediaServerTheme::TEXT_PRIMARY)
+                }
+                _ => (accent(), accent(), MediaServerTheme::TEXT_PRIMARY),
             }
         } else {
             match status {
                 button::Status::Hovered | button::Status::Pressed => (
                     MediaServerTheme::CARD_HOVER,
-                    MediaServerTheme::ACCENT_BLUE,
+                    accent(),
                     MediaServerTheme::TEXT_PRIMARY,
                 ),
                 _ => (

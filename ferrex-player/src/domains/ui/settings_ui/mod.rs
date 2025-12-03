@@ -6,13 +6,81 @@ pub use update::update_settings_ui;
 
 use crate::domains::{
     library::media_root_browser,
+    settings::{
+        sections::{
+            display::messages::DisplayMessage, theme::messages::ThemeMessage,
+        },
+        state::SettingsSection,
+    },
     ui::{messages::UiMessage, views::settings::device_management::UserDevice},
 };
+use crate::infra::design_tokens::ScalePreset;
 
 use uuid::Uuid;
 
+/// Sub-message for RuntimeConfig adjustments
+#[derive(Clone, Debug)]
+pub enum RuntimeConfigMessage {
+    // Grid Scrolling
+    ScrollDebounce(u64),
+    ScrollBaseVelocity(f32),
+    ScrollMaxVelocity(f32),
+    ScrollDecayTau(u64),
+    ScrollRamp(u64),
+    ScrollBoost(f32),
+
+    // Carousel Motion
+    CarouselBaseVelocity(f32),
+    CarouselMaxVelocity(f32),
+    CarouselDecayTau(u64),
+    CarouselRamp(u64),
+    CarouselBoost(f32),
+
+    // Snap Animations
+    SnapItemDuration(u64),
+    SnapPageDuration(u64),
+    SnapHoldThreshold(u64),
+    SnapEpsilon(f32),
+
+    // Animation Effects
+    HoverScale(f32),
+    HoverTransition(u64),
+    AnimationDuration(u64),
+    TextureFadeInitial(u64),
+    TextureFade(u64),
+
+    // GPU/Memory
+    TextureUploads(u32),
+    PrefetchRowsAbove(usize),
+    PrefetchRowsBelow(usize),
+    CarouselPrefetch(usize),
+    CarouselBackground(usize),
+    KeepAlive(u64),
+
+    // Player Seeking
+    SeekForwardCoarse(f64),
+    SeekBackwardCoarse(f64),
+    SeekForwardFine(f64),
+    SeekBackwardFine(f64),
+}
+
+impl From<RuntimeConfigMessage> for SettingsUiMessage {
+    fn from(msg: RuntimeConfigMessage) -> Self {
+        SettingsUiMessage::RuntimeConfig(msg)
+    }
+}
+
+impl From<RuntimeConfigMessage> for UiMessage {
+    fn from(msg: RuntimeConfigMessage) -> Self {
+        UiMessage::Settings(SettingsUiMessage::RuntimeConfig(msg))
+    }
+}
+
 #[derive(Clone)]
 pub enum SettingsUiMessage {
+    // Unified settings navigation (new sidebar)
+    NavigateToSection(SettingsSection),
+
     // Admin views
     ShowAdminDashboard,
     HideAdminDashboard,
@@ -81,6 +149,38 @@ pub enum SettingsUiMessage {
     ToggleAutoLogin(bool),
     AutoLoginToggled(Result<bool, String>), // Proxy for Auth::Logout
     SetUserScale(UserScale),                // Proxy for Settings::SetUserScale
+    SetScalePreset(ScalePreset), // Proxy for Settings::SetScalePreset
+    ScaleSliderPreview(f32),     // Preview during slider drag (UI-only)
+    ScaleTextInput(String),      // Text input field update (UI-only)
+
+    // Playback settings (seeking - String for domain validation)
+    SetSeekForwardCoarse(String),
+    SetSeekBackwardCoarse(String),
+    SetSeekForwardFine(String),
+    SetSeekBackwardFine(String),
+
+    // Display settings (String for domain validation)
+    SetPosterWidth(String),
+    SetPosterHeight(String),
+    SetCornerRadius(String),
+    SetGridSpacing(String),
+    SetRowSpacing(String),
+    SetHoverScale(String),
+    SetAnimationDuration(String),
+
+    // Performance settings (String for domain validation - legacy)
+    SetScrollDebounce(String),
+    SetScrollMaxVelocity(String),
+    SetScrollDecay(String),
+
+    // RuntimeConfig-based settings (sub-router)
+    RuntimeConfig(RuntimeConfigMessage),
+
+    // Display settings (sub-router)
+    Display(DisplayMessage),
+
+    // Theme settings (sub-router)
+    Theme(ThemeMessage),
 
     // Library management proxies
     ShowLibraryForm(Option<Library>), // Proxy for Library::ShowLibraryForm
@@ -112,6 +212,9 @@ impl From<SettingsUiMessage> for UiMessage {
 impl SettingsUiMessage {
     pub fn name(&self) -> &'static str {
         match self {
+            // Unified settings navigation
+            Self::NavigateToSection(_) => "UI::NavigateToSection",
+
             // Admin views
             Self::ShowAdminDashboard => "UI::ShowAdminDashboard",
             Self::HideAdminDashboard => "UI::HideAdminDashboard",
@@ -179,6 +282,38 @@ impl SettingsUiMessage {
             Self::ToggleAutoLogin(_) => "UI::ToggleAutoLogin",
             Self::AutoLoginToggled(_) => "UI::AutoLoginToggled",
             Self::SetUserScale(_) => "UI::SetUserScale",
+            Self::SetScalePreset(_) => "UI::SetScalePreset",
+            Self::ScaleSliderPreview(_) => "UI::ScaleSliderPreview",
+            Self::ScaleTextInput(_) => "UI::ScaleTextInput",
+
+            // Playback settings
+            Self::SetSeekForwardCoarse(_) => "UI::SetSeekForwardCoarse",
+            Self::SetSeekBackwardCoarse(_) => "UI::SetSeekBackwardCoarse",
+            Self::SetSeekForwardFine(_) => "UI::SetSeekForwardFine",
+            Self::SetSeekBackwardFine(_) => "UI::SetSeekBackwardFine",
+
+            // Display settings
+            Self::SetPosterWidth(_) => "UI::SetPosterWidth",
+            Self::SetPosterHeight(_) => "UI::SetPosterHeight",
+            Self::SetCornerRadius(_) => "UI::SetCornerRadius",
+            Self::SetGridSpacing(_) => "UI::SetGridSpacing",
+            Self::SetRowSpacing(_) => "UI::SetRowSpacing",
+            Self::SetHoverScale(_) => "UI::SetHoverScale",
+            Self::SetAnimationDuration(_) => "UI::SetAnimationDuration",
+
+            // Performance settings (legacy)
+            Self::SetScrollDebounce(_) => "UI::SetScrollDebounce",
+            Self::SetScrollMaxVelocity(_) => "UI::SetScrollMaxVelocity",
+            Self::SetScrollDecay(_) => "UI::SetScrollDecay",
+
+            // RuntimeConfig sub-router
+            Self::RuntimeConfig(_) => "UI::RuntimeConfig",
+
+            // Display settings sub-router
+            Self::Display(msg) => msg.name(),
+
+            // Theme settings sub-router
+            Self::Theme(msg) => msg.name(),
 
             // Library management proxies
             Self::ShowLibraryForm(_) => "UI::ShowLibraryForm",
@@ -209,6 +344,9 @@ impl SettingsUiMessage {
 impl std::fmt::Debug for SettingsUiMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SettingsUiMessage::NavigateToSection(section) => {
+                write!(f, "UI::NavigateToSection({:?})", section)
+            }
             SettingsUiMessage::ShowAdminDashboard => {
                 write!(f, "UI::ShowAdminDashboard")
             }
@@ -410,6 +548,72 @@ impl std::fmt::Debug for SettingsUiMessage {
             }
             SettingsUiMessage::SetUserScale(size) => {
                 write!(f, "UI::SetUserScale({:?})", size)
+            }
+            SettingsUiMessage::SetScalePreset(preset) => {
+                write!(f, "UI::SetScalePreset({:?})", preset)
+            }
+            SettingsUiMessage::ScaleSliderPreview(v) => {
+                write!(f, "UI::ScaleSliderPreview({:.2})", v)
+            }
+            SettingsUiMessage::ScaleTextInput(s) => {
+                write!(f, "UI::ScaleTextInput({})", s)
+            }
+
+            // Playback settings
+            SettingsUiMessage::SetSeekForwardCoarse(_) => {
+                write!(f, "UI::SetSeekForwardCoarse")
+            }
+            SettingsUiMessage::SetSeekBackwardCoarse(_) => {
+                write!(f, "UI::SetSeekBackwardCoarse")
+            }
+            SettingsUiMessage::SetSeekForwardFine(_) => {
+                write!(f, "UI::SetSeekForwardFine")
+            }
+            SettingsUiMessage::SetSeekBackwardFine(_) => {
+                write!(f, "UI::SetSeekBackwardFine")
+            }
+
+            // Display settings
+            SettingsUiMessage::SetPosterWidth(_) => {
+                write!(f, "UI::SetPosterWidth")
+            }
+            SettingsUiMessage::SetPosterHeight(_) => {
+                write!(f, "UI::SetPosterHeight")
+            }
+            SettingsUiMessage::SetCornerRadius(_) => {
+                write!(f, "UI::SetCornerRadius")
+            }
+            SettingsUiMessage::SetGridSpacing(_) => {
+                write!(f, "UI::SetGridSpacing")
+            }
+            SettingsUiMessage::SetRowSpacing(_) => {
+                write!(f, "UI::SetRowSpacing")
+            }
+            SettingsUiMessage::SetHoverScale(_) => {
+                write!(f, "UI::SetHoverScale")
+            }
+            SettingsUiMessage::SetAnimationDuration(_) => {
+                write!(f, "UI::SetAnimationDuration")
+            }
+
+            // Performance settings
+            SettingsUiMessage::SetScrollDebounce(_) => {
+                write!(f, "UI::SetScrollDebounce")
+            }
+            SettingsUiMessage::SetScrollMaxVelocity(_) => {
+                write!(f, "UI::SetScrollMaxVelocity")
+            }
+            SettingsUiMessage::SetScrollDecay(_) => {
+                write!(f, "UI::SetScrollDecay")
+            }
+            SettingsUiMessage::RuntimeConfig(msg) => {
+                write!(f, "UI::RuntimeConfig({:?})", msg)
+            }
+            SettingsUiMessage::Display(msg) => {
+                write!(f, "UI::Display({:?})", msg)
+            }
+            SettingsUiMessage::Theme(msg) => {
+                write!(f, "UI::Theme({:?})", msg)
             }
         }
     }

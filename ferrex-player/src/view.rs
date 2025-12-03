@@ -12,7 +12,7 @@ use crate::domains::ui::views::header::view_header;
 use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
-use crate::domains::ui::views::settings::view_user_settings;
+use crate::domains::ui::views::settings::view_unified_settings;
 use crate::domains::ui::views::tv::{
     view_episode_detail, view_season_detail, view_series_detail,
 };
@@ -20,7 +20,8 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state::State;
-use ferrex_core::player_prelude::{ImageRequest, ImageSize, ImageType};
+use ferrex_core::player_prelude::{ImageRequest, ImageSize};
+use ferrex_model::MediaType;
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
 
@@ -116,7 +117,7 @@ pub fn view(
             view_episode_detail(state, episode_id).map(DomainMessage::from)
         }
         ViewState::UserSettings => {
-            view_user_settings(state).map(DomainMessage::from)
+            view_unified_settings(state).map(DomainMessage::from)
         }
     };
 
@@ -221,24 +222,24 @@ pub fn view(
             ViewState::MovieDetail { movie_id, .. } => {
                 let request = ImageRequest::new(
                     movie_id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Movie,
+                    ImageSize::backdrop(),
+                    MediaType::Movie,
                 );
                 state.image_service.get(&request)
             }
             ViewState::SeriesDetail { series_id, .. } => {
                 let request = ImageRequest::new(
                     series_id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Series,
+                    ImageSize::backdrop(),
+                    MediaType::Series,
                 );
                 state.image_service.get(&request)
             }
             ViewState::SeasonDetail { season_id, .. } => {
                 let request = ImageRequest::new(
                     season_id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Season,
+                    ImageSize::backdrop(),
+                    MediaType::Season,
                 );
                 state.image_service.get(&request)
             }
@@ -280,7 +281,19 @@ pub fn view(
         content_with_header
     };
 
-    result
+    // Overlay toast notifications if any are active
+    if state.domains.ui.state.toast_manager.has_toasts() {
+        let toast_overlay =
+            crate::domains::ui::views::toast_overlay::view_toast_overlay(state);
+        Stack::new()
+            .push(result)
+            .push(toast_overlay.map(DomainMessage::from))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        result
+    }
 }
 
 #[cfg_attr(

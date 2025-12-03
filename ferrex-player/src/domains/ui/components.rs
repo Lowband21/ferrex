@@ -13,8 +13,9 @@ use crate::{
     state::State,
 };
 
-use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize, ImageType};
+use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize};
 
+use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
@@ -107,8 +108,8 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, UiMessage> {
     let profile_image: Element<'static, UiMessage> =
         if let Some(uuid) = profile_uuid {
             image_for(uuid)
-                .size(ImageSize::Profile)
-                .image_type(ImageType::Person)
+                .size(ImageSize::profile())
+                .image_type(MediaType::Person)
                 .animation_behavior(AnimationBehavior::constant(
                     PosterAnimationType::flip(),
                 ))

@@ -10,9 +10,10 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{
-    ImageRequest, ImageSize, ImageType, LibraryId, MediaIDLike, MediaOps,
-    Priority, SeasonID, SeriesID,
+    ImageRequest, ImageSize, LibraryId, MediaIDLike, MediaOps, Priority,
+    SeasonID, SeriesID,
 };
+use ferrex_model::MediaType;
 
 /// Result of applying media events to the repository
 #[derive(Debug, Default)]
@@ -170,8 +171,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Movie(movie) => Some(
             ImageRequest::new(
                 movie.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Movie,
+                ImageSize::poster(),
+                MediaType::Movie,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -179,8 +180,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Series(series) => Some(
             ImageRequest::new(
                 series.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Series,
+                ImageSize::poster(),
+                MediaType::Series,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -188,8 +189,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Season(season) => Some(
             ImageRequest::new(
                 season.id.to_uuid(),
-                ImageSize::Poster,
-                ImageType::Season,
+                ImageSize::poster(),
+                MediaType::Season,
             )
             .with_priority(Priority::Visible)
             .with_index(0),
@@ -197,8 +198,8 @@ fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
         Media::Episode(episode) => Some(
             ImageRequest::new(
                 *episode.id.as_uuid(),
-                ImageSize::Thumbnail,
-                ImageType::Episode,
+                ImageSize::thumbnail(),
+                MediaType::Episode,
             )
             .with_priority(Priority::Visible)
             .with_index(0),

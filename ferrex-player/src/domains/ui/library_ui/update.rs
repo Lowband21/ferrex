@@ -54,16 +54,15 @@ pub fn update_library_ui(
                 if let Some(slice) = lib_state.cached_index_ids.get(vr) {
                     visible_ids.extend(slice.iter().copied());
                 }
-                let pr = lib_state.grid_state.get_preload_range(
-                    layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                );
+                let prefetch_rows = state.runtime_config.prefetch_rows_above();
+                let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
                 let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                     prefetch_ids.extend(slice.iter().copied());
                 }
                 prefetch_ids.retain(|id| !visible_ids.contains(id));
                 let br = lib_state.grid_state.get_background_range(
-                    layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                    prefetch_rows,
                     layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                 );
                 let mut background_ids: Vec<uuid::Uuid> = Vec::new();
@@ -118,16 +117,15 @@ pub fn update_library_ui(
                 if let Some(slice) = lib_state.cached_index_ids.get(vr) {
                     visible_ids.extend(slice.iter().copied());
                 }
-                let pr = lib_state.grid_state.get_preload_range(
-                    layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                );
+                let prefetch_rows = state.runtime_config.prefetch_rows_above();
+                let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
                 let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                     prefetch_ids.extend(slice.iter().copied());
                 }
                 prefetch_ids.retain(|id| !visible_ids.contains(id));
                 let br = lib_state.grid_state.get_background_range(
-                    layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                    prefetch_rows,
                     layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                 );
                 let mut background_ids: Vec<uuid::Uuid> = Vec::new();
@@ -181,16 +179,17 @@ pub fn update_library_ui(
                     if let Some(slice) = lib_state.cached_index_ids.get(vr) {
                         visible_ids.extend(slice.iter().copied());
                     }
-                    let pr = lib_state.grid_state.get_preload_range(
-                        layout::virtual_grid::PREFETCH_ROWS_ABOVE,
-                    );
+                    let prefetch_rows =
+                        state.runtime_config.prefetch_rows_above();
+                    let pr =
+                        lib_state.grid_state.get_preload_range(prefetch_rows);
                     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                         prefetch_ids.extend(slice.iter().copied());
                     }
                     prefetch_ids.retain(|id| !visible_ids.contains(id));
                     let br = lib_state.grid_state.get_background_range(
-                        layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                        prefetch_rows,
                         layout::virtual_grid::BACKGROUND_ROWS_BELOW,
                     );
                     let mut background_ids: Vec<uuid::Uuid> = Vec::new();

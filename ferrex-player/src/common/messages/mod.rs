@@ -89,6 +89,14 @@ pub struct DomainUpdateResult {
 }
 
 impl DomainUpdateResult {
+    /// Create an empty result with no task and no events
+    pub fn none() -> Self {
+        Self {
+            task: Task::none(),
+            events: Vec::new(),
+        }
+    }
+
     /// Create a result with just a task
     pub fn task(task: Task<DomainMessage>) -> Self {
         Self {

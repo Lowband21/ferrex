@@ -4,7 +4,6 @@ use crate::domains::metadata::demand_planner::DemandSnapshot;
 use crate::infra::api_types::LibraryType;
 use crate::{
     domains::ui::{messages::UiMessage, tabs::TabState},
-    infra::constants::performance_config::scrolling::SCROLL_STOP_DEBOUNCE_MS,
     state::State,
 };
 use ferrex_core::player_prelude::PosterKind;
@@ -117,9 +116,8 @@ pub fn handle_tab_grid_scrolled(
                 visible_ids.extend(slice.iter().copied());
             }
 
-            let pr = lib_state
-                .grid_state
-                .get_preload_range(crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+            let prefetch_rows = state.runtime_config.prefetch_rows_above();
+            let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
             let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
             if let Some(slice) = lib_state.cached_index_ids.get(pr) {
                 prefetch_ids.extend(slice.iter().copied());
@@ -128,7 +126,7 @@ pub fn handle_tab_grid_scrolled(
             // Deduplicate
             prefetch_ids.retain(|id| !visible_ids.contains(id));
             let br = lib_state.grid_state.get_background_range(
-                crate::infra::constants::layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+                prefetch_rows,
                 crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
             );
             let mut background_ids: Vec<uuid::Uuid> = Vec::new();
@@ -157,14 +155,13 @@ pub fn handle_tab_grid_scrolled(
     }
 
     // Rate-limit yoke prefetch work to avoid hammering the repo accessor
+    let debounce_ms = state.runtime_config.scroll_debounce_ms();
     let should_prefetch = state
         .domains
         .ui
         .state
         .last_prefetch_tick
-        .map(|last| {
-            last.elapsed() >= Duration::from_millis(SCROLL_STOP_DEBOUNCE_MS / 2)
-        })
+        .map(|last| last.elapsed() >= Duration::from_millis(debounce_ms / 2))
         .unwrap_or(true);
 
     if should_prefetch {

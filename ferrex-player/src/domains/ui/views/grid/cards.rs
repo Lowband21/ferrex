@@ -27,11 +27,11 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{
-    ImageSize, ImageType, MediaDetailsOptionLike, MediaID, MediaIDLike,
-    MediaOps, MovieID, MovieLike, Priority, SeriesID, SeriesLike,
-    WatchProgress,
+    ImageSize, MediaDetailsOptionLike, MediaID, MediaIDLike, MediaOps, MovieID,
+    MovieLike, Priority, SeriesID, SeriesLike, WatchProgress,
 };
 
+use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{column, container, mouse_area},
@@ -184,8 +184,8 @@ pub fn movie_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(movie_id.to_uuid())
-                        .size(ImageSize::Poster)
-                        .image_type(ImageType::Movie)
+                        .size(ImageSize::poster())
+                        .image_type(MediaType::Movie)
                         .radius(scaled_layout.corner_radius)
                         .width(Length::Fixed(scaled_layout.poster_width))
                         .height(Length::Fixed(scaled_layout.poster_height))
@@ -257,8 +257,8 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Create image with watch progress and scroll tier
     let mut img = image_for(media_id.to_uuid())
-        .size(ImageSize::Poster)
-        .image_type(ImageType::Movie)
+        .size(ImageSize::poster())
+        .image_type(MediaType::Movie)
         .radius(scaled_layout.corner_radius)
         .width(Length::Fixed(scaled_layout.poster_width))
         .height(Length::Fixed(scaled_layout.poster_height))
@@ -431,8 +431,8 @@ pub fn series_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(series_id.to_uuid())
-                        .size(ImageSize::Poster)
-                        .image_type(ImageType::Series)
+                        .size(ImageSize::poster())
+                        .image_type(MediaType::Series)
                         .radius(scaled_layout.corner_radius)
                         .width(Length::Fixed(scaled_layout.poster_width))
                         .height(Length::Fixed(scaled_layout.poster_height))
@@ -508,8 +508,8 @@ pub fn series_reference_card_with_state<'a>(
 
     // Create image with scroll tier
     let mut img = image_for(series_id.to_uuid())
-        .size(ImageSize::Poster)
-        .image_type(ImageType::Series)
+        .size(ImageSize::poster())
+        .image_type(MediaType::Series)
         .radius(scaled_layout.corner_radius)
         .width(Length::Fixed(scaled_layout.poster_width))
         .height(Length::Fixed(scaled_layout.poster_height))
@@ -672,7 +672,7 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
             subtitle: "Blank",
             image: {
                 key: season_id,
-                type: Poster,
+                type: poster,
                 fallback: "📺",
             },
             size: Medium,

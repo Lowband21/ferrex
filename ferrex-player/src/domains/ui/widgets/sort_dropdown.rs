@@ -3,6 +3,7 @@ pub use self::sort_option::SortOption;
 use crate::domains::ui::{
     library_ui::LibraryUiMessage, messages::UiMessage, theme::MediaServerTheme,
 };
+use crate::infra::theme::accent;
 use ferrex_core::player_prelude::SortBy;
 use iced::{
     Background, Border, Color, Element, Length,
@@ -104,12 +105,12 @@ fn sort_dropdown_style(
         ),
         iced::widget::pick_list::Status::Hovered => (
             Color::from_rgba(0.15, 0.15, 0.15, 0.9),
-            MediaServerTheme::ACCENT_BLUE,
+            accent(),
             MediaServerTheme::TEXT_PRIMARY,
         ),
         iced::widget::pick_list::Status::Opened { is_hovered: _ } => (
             Color::from_rgba(0.15, 0.15, 0.15, 0.95),
-            MediaServerTheme::ACCENT_BLUE,
+            accent(),
             MediaServerTheme::TEXT_PRIMARY,
         ),
     };

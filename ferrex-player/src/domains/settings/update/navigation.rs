@@ -1,11 +1,58 @@
 use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::security::SecureCredential;
 use crate::domains::settings::messages::SettingsMessage;
-use crate::domains::settings::state::SettingsView as SettingsSubview;
+use crate::domains::settings::state::{
+    SettingsSection, SettingsView as SettingsSubview,
+};
 use crate::domains::ui;
 use crate::domains::ui::shell_ui::UiShellMessage;
 use crate::state::State;
 use iced::Task;
+
+/// Handle navigation to a settings section (new unified sidebar)
+pub fn handle_navigate_to_section(
+    state: &mut State,
+    section: SettingsSection,
+) -> DomainUpdateResult {
+    state.domains.settings.current_section = section;
+
+    // Clear sensitive data when navigating away from security
+    if section != SettingsSection::Security {
+        state.domains.settings.security.password_current =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.password_new =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.password_confirm =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.pin_current =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.pin_new =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.pin_confirm =
+            SecureCredential::new(String::new());
+        state.domains.settings.security.password_error = None;
+        state.domains.settings.security.pin_error = None;
+    }
+
+    // Trigger section-specific initialization if needed
+    match section {
+        SettingsSection::Security => {
+            // Check if user has PIN when entering security section
+            DomainUpdateResult::task(
+                Task::done(SettingsMessage::CheckUserHasPin)
+                    .map(DomainMessage::Settings),
+            )
+        }
+        SettingsSection::Devices => {
+            // Load devices when entering devices section
+            DomainUpdateResult::task(
+                Task::done(SettingsMessage::LoadDevices)
+                    .map(DomainMessage::Settings),
+            )
+        }
+        _ => DomainUpdateResult::task(Task::none()),
+    }
+}
 
 /// Handle showing profile view
 pub fn handle_show_profile(state: &mut State) -> DomainUpdateResult {

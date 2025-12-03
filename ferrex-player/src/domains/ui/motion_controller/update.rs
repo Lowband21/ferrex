@@ -37,6 +37,12 @@ fn handle_start(state: &mut State, dir: Direction) -> Task<UiMessage> {
         return Task::none();
     }
 
+    // Apply current runtime config for grid scrolling
+    let cfg = super::config::MotionControllerConfig::from_runtime_config(
+        &state.runtime_config,
+    );
+    state.domains.ui.state.motion_controller.set_config(cfg);
+
     let d = match dir {
         Direction::Up => -1,
         Direction::Down => 1,

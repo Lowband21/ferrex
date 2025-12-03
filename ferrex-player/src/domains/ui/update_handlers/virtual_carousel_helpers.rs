@@ -111,7 +111,14 @@ pub fn emit_snapshot_for_carousel_simple<F>(
             poster_kind,
         }
     } else {
-        planner::snapshot_for_visible(vc, total, ids_fn, poster_kind, None)
+        planner::snapshot_for_visible(
+            vc,
+            total,
+            ids_fn,
+            poster_kind,
+            None,
+            &state.runtime_config,
+        )
     };
 
     handle.send(snap);
@@ -126,10 +133,11 @@ pub fn build_mixed_poster_context(
     use crate::domains::metadata::demand_planner::{
         DemandContext, DemandRequestKind,
     };
-    use ferrex_core::player_prelude::PosterSize;
 
     let mut ctx = DemandContext::default();
     let acc = &state.domains.ui.state.repo_accessor;
+    let library_quality = state.domains.settings.display.library_poster_quality;
+
     for id in ids {
         // Try to detect series first; fall back to movie
         let is_series = acc
@@ -143,7 +151,7 @@ pub fn build_mixed_poster_context(
                 *id,
                 DemandRequestKind::Poster {
                     kind: PosterKind::Series,
-                    size: PosterSize::Standard,
+                    size: library_quality,
                 },
             );
         } else {
@@ -152,7 +160,7 @@ pub fn build_mixed_poster_context(
                 *id,
                 DemandRequestKind::Poster {
                     kind: PosterKind::Movie,
-                    size: PosterSize::Standard,
+                    size: library_quality,
                 },
             );
         }

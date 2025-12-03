@@ -1,6 +1,7 @@
 pub mod filter_button;
 pub mod image_for;
 pub mod library_menu;
+pub mod setting_controls;
 pub mod sort_dropdown;
 pub mod sort_order_toggle;
 pub mod texture_preloader;

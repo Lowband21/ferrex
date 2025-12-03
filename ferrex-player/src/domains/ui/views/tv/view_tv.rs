@@ -19,6 +19,7 @@ use crate::{
     infra::shader_widgets::poster::{
         PosterFace, PosterInstanceKey, animation::AnimationBehavior,
     },
+    infra::theme::accent,
     media_card,
     state::State,
 };
@@ -28,7 +29,7 @@ use ferrex_core::player_prelude::{
 };
 
 use ferrex_model::{
-    EpisodeID, ImageSize, ImageType, MediaID, Priority, SeasonID,
+    EpisodeID, ImageSize, MediaID, MediaType, Priority, SeasonID,
     SeasonReference, SeriesID,
 };
 
@@ -140,8 +141,8 @@ pub fn view_series_detail<'a>(
 
     // Apply theme color to poster if present
     let mut poster = image_for(media_id.to_uuid())
-        .size(ImageSize::Full)
-        .image_type(ImageType::Series)
+        .size(ImageSize::poster_large())
+        .image_type(MediaType::Series)
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
@@ -257,7 +258,7 @@ pub fn view_series_detail<'a>(
         details = details.push(
             text(format!("★ {:.1}", rating))
                 .size(fonts.body)
-                .color(theme::MediaServerTheme::ACCENT_BLUE),
+                .color(accent()),
         );
     }
 
@@ -338,7 +339,7 @@ pub fn view_series_detail<'a>(
                                 subtitle: subtitle_str.as_str(),
                                 image: {
                                     key: s.id.to_uuid(),
-                                    type: Poster,
+                                    type: poster,
                                     fallback: "📺",
                                 },
                                 size: Medium,
@@ -480,8 +481,8 @@ pub fn view_season_detail<'a>(
 
     // Poster element
     let mut poster = image_for(season.id.to_uuid())
-        .size(ImageSize::Poster)
-        .image_type(ImageType::Season)
+        .size(ImageSize::poster())
+        .image_type(MediaType::Season)
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
@@ -621,7 +622,7 @@ pub fn view_season_detail<'a>(
                                 subtitle: subtitle_str,
                                 image: {
                                     key: e.id.to_uuid(),
-                                    type: Thumbnail,
+                                    type: thumbnail,
                                     fallback: "🎞",
                                 },
                                 size: Wide,
@@ -759,8 +760,8 @@ pub fn view_episode_detail<'a>(
 
     // Episode still image
     let mut still = image_for(episode.id.to_uuid())
-        .size(ImageSize::Thumbnail)
-        .image_type(ImageType::Episode)
+        .size(ImageSize::thumbnail())
+        .image_type(MediaType::Episode)
         .width(Length::Fixed(640.0))
         .height(Length::Fixed(360.0))
         .priority(Priority::Visible);

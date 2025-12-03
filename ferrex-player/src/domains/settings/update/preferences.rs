@@ -3,7 +3,8 @@ use crate::common::messages::{DomainMessage, DomainUpdateResult};
 use crate::domains::auth::errors::{AuthError, NetworkError};
 use crate::domains::auth::manager::AutoLoginScope;
 use crate::infra::{
-    constants::layout::calculations::ScaledLayout, design_tokens::SizeProvider,
+    constants::layout::calculations::ScaledLayout,
+    design_tokens::{ScalePreset, SizeProvider},
     shader_widgets::poster,
 };
 use crate::state::State;
@@ -142,6 +143,65 @@ pub fn handle_set_user_scale(
         "UI scale changed: user_scale={:?}, user_scale={}, effective_scale={}",
         user_scale,
         user_scale,
+        effective_scale
+    );
+
+    // 7. Update all tab grids with new scaled dimensions
+    for tab_id in state.tab_manager.tab_ids() {
+        if let Some(tab) = state.tab_manager.get_tab_mut(tab_id)
+            && let Some(grid_state) = tab.grid_state_mut()
+        {
+            grid_state.update_for_scale(&state.domains.ui.state.scaled_layout);
+        }
+    }
+
+    // 8. Update virtual carousels with new dimensions
+    for key in state.domains.ui.state.carousel_registry.keys() {
+        if let Some(vc) = state.domains.ui.state.carousel_registry.get_mut(&key)
+        {
+            vc.update_dimensions(state.window_size.width.max(1.0));
+        }
+    }
+
+    DomainUpdateResult::task(Task::none())
+}
+
+/// Handle scale preset selection
+///
+/// Applies the ScalingContext from the preset (Compact, Default, Large, Huge, TV).
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+pub fn handle_set_scale_preset(
+    state: &mut State,
+    preset: ScalePreset,
+) -> DomainUpdateResult {
+    // 1. Get the ScalingContext from the preset
+    let context = preset.to_context();
+
+    // 2. Apply the context
+    state.domains.ui.state.scaling_context = context;
+
+    // 3. Get the effective scale
+    let effective_scale = context.effective_scale();
+
+    // 4. Recompute the size provider with new context
+    state.domains.ui.state.size_provider = SizeProvider::new(context);
+
+    // 5. Recompute the scaled layout for virtual grids/carousels
+    state.domains.ui.state.scaled_layout = ScaledLayout::new(effective_scale);
+
+    // 6. Update poster text scale for GPU uniform
+    poster::set_text_scale(effective_scale);
+
+    log::info!(
+        "Scale preset applied: {:?}, effective_scale={}",
+        preset,
         effective_scale
     );
 

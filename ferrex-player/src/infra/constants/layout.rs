@@ -27,6 +27,9 @@ pub mod animation {
     /// Scale factor for poster hover/animation effects
     pub const HOVER_SCALE: f32 = 1.05;
 
+    /// Duration of hover scale transition in milliseconds
+    pub const HOVER_TRANSITION_MS: u64 = 150;
+
     /// Additional padding for shadow/glow effects in pixels
     pub const EFFECT_PADDING: f32 = 10.0;
 

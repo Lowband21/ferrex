@@ -7,8 +7,18 @@ use crate::{
     },
     domains::{
         library::messages::LibraryMessage,
-        settings::messages::SettingsMessage,
-        ui::{messages::UiMessage, settings_ui::SettingsUiMessage},
+        settings::{
+            messages::SettingsMessage,
+            sections::{
+                display::DisplayMessage, performance::PerformanceMessage,
+                playback::PlaybackMessage, theme::ThemeMessage,
+            },
+        },
+        ui::{
+            feedback_ui::{FeedbackMessage, ToastNotification},
+            messages::UiMessage,
+            settings_ui::{RuntimeConfigMessage, SettingsUiMessage},
+        },
     },
     state::State,
 };
@@ -21,6 +31,25 @@ pub fn update_settings_ui(
     message: SettingsUiMessage,
 ) -> DomainUpdateResult {
     match message {
+        // Unified settings navigation (new sidebar)
+        SettingsUiMessage::NavigateToSection(section) => {
+            // Check if any in-use setting was modified and show toast
+            let was_dirty = state.runtime_config.take_dirty();
+            let nav_task = Task::done(DomainMessage::Settings(
+                SettingsMessage::NavigateToSection(section),
+            ));
+
+            if was_dirty {
+                let toast_task = Task::done(DomainMessage::Ui(
+                    FeedbackMessage::ShowToast(ToastNotification::success("Settings applied"))
+                        .into(),
+                ));
+                DomainUpdateResult::task(Task::batch([nav_task, toast_task]))
+            } else {
+                DomainUpdateResult::task(nav_task)
+            }
+        }
+
         SettingsUiMessage::ShowAdminDashboard => {
             state.domains.ui.state.view = ViewState::AdminDashboard;
             DomainUpdateResult::task(Task::none())
@@ -283,10 +312,36 @@ pub fn update_settings_ui(
                 DomainUpdateResult::task(Task::none())
             }
         SettingsUiMessage::SetUserScale(user_scale) => {
-                DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                    SettingsMessage::SetUserScale(user_scale),
-                )))
+            // Clear preview when scale is applied
+            state.domains.ui.state.scale_slider_preview = None;
+            // Update text input to match applied value
+            if let ferrex_core::player_prelude::UserScale::Custom(v) = user_scale {
+                state.domains.ui.state.scale_text_input = format!("{:.2}", v);
             }
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::SetUserScale(user_scale),
+            )))
+        }
+        SettingsUiMessage::SetScalePreset(preset) => {
+            // Clear preview and update text input when preset is selected
+            state.domains.ui.state.scale_slider_preview = None;
+            state.domains.ui.state.scale_text_input =
+                format!("{:.2}", preset.scale_factor());
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::SetScalePreset(preset),
+            )))
+        }
+        SettingsUiMessage::ScaleSliderPreview(value) => {
+            // Update preview value during slider drag (UI-only, no domain update)
+            state.domains.ui.state.scale_slider_preview = Some(value);
+            state.domains.ui.state.scale_text_input = format!("{:.2}", value);
+            DomainUpdateResult::task(Task::none())
+        }
+        SettingsUiMessage::ScaleTextInput(text) => {
+            // Update text input field (UI-only, no domain update until submit)
+            state.domains.ui.state.scale_text_input = text;
+            DomainUpdateResult::task(Task::none())
+        }
         SettingsUiMessage::LoadDevices => {
                 DomainUpdateResult::task(Task::done(DomainMessage::Settings(
                     SettingsMessage::LoadDevices,
@@ -409,5 +464,257 @@ pub fn update_settings_ui(
                 LibraryMessage::ResetLibrary(library_id),
             )))
         }
+
+        // Playback settings - route to settings domain
+        SettingsUiMessage::SetSeekForwardCoarse(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Playback(PlaybackMessage::SetSeekForwardCoarse(value)),
+            )))
+        }
+        SettingsUiMessage::SetSeekBackwardCoarse(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Playback(PlaybackMessage::SetSeekBackwardCoarse(value)),
+            )))
+        }
+        SettingsUiMessage::SetSeekForwardFine(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Playback(PlaybackMessage::SetSeekForwardFine(value)),
+            )))
+        }
+        SettingsUiMessage::SetSeekBackwardFine(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Playback(PlaybackMessage::SetSeekBackwardFine(value)),
+            )))
+        }
+
+        // Display settings - route to settings domain
+        SettingsUiMessage::SetPosterWidth(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetPosterBaseWidth(value)),
+            )))
+        }
+        SettingsUiMessage::SetPosterHeight(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetPosterBaseHeight(value)),
+            )))
+        }
+        SettingsUiMessage::SetCornerRadius(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetPosterCornerRadius(value)),
+            )))
+        }
+        SettingsUiMessage::SetGridSpacing(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetGridEffectiveSpacing(value)),
+            )))
+        }
+        SettingsUiMessage::SetRowSpacing(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetGridRowSpacing(value)),
+            )))
+        }
+        SettingsUiMessage::SetHoverScale(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetAnimationHoverScale(value)),
+            )))
+        }
+        SettingsUiMessage::SetAnimationDuration(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(DisplayMessage::SetAnimationDefaultDuration(value)),
+            )))
+        }
+
+        // Performance settings - route to settings domain
+        SettingsUiMessage::SetScrollDebounce(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Performance(PerformanceMessage::SetScrollDebounceMs(value)),
+            )))
+        }
+        SettingsUiMessage::SetScrollMaxVelocity(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Performance(PerformanceMessage::SetScrollMaxVelocity(value)),
+            )))
+        }
+        SettingsUiMessage::SetScrollDecay(value) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Performance(PerformanceMessage::SetScrollDecayTauMs(value)),
+            )))
+        }
+
+        // RuntimeConfig sub-router - updates runtime config directly and shows toast
+        SettingsUiMessage::RuntimeConfig(msg) => {
+            update_runtime_config(state, msg)
+        }
+
+        // Display settings sub-router - routes to settings domain
+        SettingsUiMessage::Display(msg) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Display(msg),
+            )))
+        }
+
+        // Theme settings sub-router - routes to settings domain
+        SettingsUiMessage::Theme(msg) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Settings(
+                SettingsMessage::Theme(msg),
+            )))
+        }
     }
+}
+
+/// Handle RuntimeConfig updates - modifies state directly (values take effect immediately)
+/// Marks dirty only for settings that are actively consumed by the application.
+fn update_runtime_config(
+    state: &mut State,
+    msg: RuntimeConfigMessage,
+) -> DomainUpdateResult {
+    let config = &mut state.runtime_config;
+
+    // Track whether this is an in-use setting (wired to actual consumers)
+    let is_in_use = matches!(
+        msg,
+        // Grid Scrolling - used in motion_controller/update.rs
+        RuntimeConfigMessage::ScrollDebounce(_)
+            | RuntimeConfigMessage::ScrollBaseVelocity(_)
+            | RuntimeConfigMessage::ScrollMaxVelocity(_)
+            | RuntimeConfigMessage::ScrollDecayTau(_)
+            | RuntimeConfigMessage::ScrollRamp(_)
+            | RuntimeConfigMessage::ScrollBoost(_)
+            // Carousel motion - used in ensure_scroller_for_key
+            | RuntimeConfigMessage::CarouselBaseVelocity(_)
+            | RuntimeConfigMessage::CarouselMaxVelocity(_)
+            | RuntimeConfigMessage::CarouselDecayTau(_)
+            | RuntimeConfigMessage::CarouselRamp(_)
+            | RuntimeConfigMessage::CarouselBoost(_)
+            // Snap animations - used in virtual_carousel_updates.rs and home_focus.rs
+            | RuntimeConfigMessage::SnapItemDuration(_)
+            | RuntimeConfigMessage::SnapPageDuration(_)
+            | RuntimeConfigMessage::SnapHoldThreshold(_)
+            | RuntimeConfigMessage::SnapEpsilon(_)
+            // Carousel prefetch - used in planner
+            | RuntimeConfigMessage::CarouselPrefetch(_)
+            | RuntimeConfigMessage::CarouselBackground(_)
+            // Grid prefetch - used in scroll_updates.rs, window_update.rs, library_ui/update.rs, shell_ui/update.rs
+            | RuntimeConfigMessage::PrefetchRowsAbove(_)
+            | RuntimeConfigMessage::PrefetchRowsBelow(_)
+            // Keep-alive - used in utils.rs bump_keep_alive
+            | RuntimeConfigMessage::KeepAlive(_)
+            // Animation effects - used in AnimationConfig via runtime_config.animation_config()
+            | RuntimeConfigMessage::HoverScale(_)
+            | RuntimeConfigMessage::HoverTransition(_)
+            | RuntimeConfigMessage::AnimationDuration(_)
+            | RuntimeConfigMessage::TextureFadeInitial(_)
+            | RuntimeConfigMessage::TextureFade(_)
+    );
+
+    match msg {
+        // Grid Scrolling (IN USE)
+        RuntimeConfigMessage::ScrollDebounce(v) => {
+            config.scroll_debounce_ms = Some(v)
+        }
+        RuntimeConfigMessage::ScrollBaseVelocity(v) => {
+            config.scroll_base_velocity = Some(v)
+        }
+        RuntimeConfigMessage::ScrollMaxVelocity(v) => {
+            config.scroll_max_velocity = Some(v)
+        }
+        RuntimeConfigMessage::ScrollDecayTau(v) => {
+            config.scroll_decay_tau_ms = Some(v)
+        }
+        RuntimeConfigMessage::ScrollRamp(v) => config.scroll_ramp_ms = Some(v),
+        RuntimeConfigMessage::ScrollBoost(v) => {
+            config.scroll_boost_multiplier = Some(v)
+        }
+
+        // Carousel Motion (IN USE)
+        RuntimeConfigMessage::CarouselBaseVelocity(v) => {
+            config.carousel_base_velocity = Some(v)
+        }
+        RuntimeConfigMessage::CarouselMaxVelocity(v) => {
+            config.carousel_max_velocity = Some(v)
+        }
+        RuntimeConfigMessage::CarouselDecayTau(v) => {
+            config.carousel_decay_tau_ms = Some(v)
+        }
+        RuntimeConfigMessage::CarouselRamp(v) => {
+            config.carousel_ramp_ms = Some(v)
+        }
+        RuntimeConfigMessage::CarouselBoost(v) => {
+            config.carousel_boost_multiplier = Some(v)
+        }
+
+        // Snap Animations (IN USE)
+        RuntimeConfigMessage::SnapItemDuration(v) => {
+            config.snap_item_duration_ms = Some(v)
+        }
+        RuntimeConfigMessage::SnapPageDuration(v) => {
+            config.snap_page_duration_ms = Some(v)
+        }
+        RuntimeConfigMessage::SnapHoldThreshold(v) => {
+            config.snap_hold_threshold_ms = Some(v)
+        }
+        RuntimeConfigMessage::SnapEpsilon(v) => {
+            config.snap_epsilon_fraction = Some(v)
+        }
+
+        // Animation Effects (used in AnimationConfig via runtime_config.animation_config())
+        RuntimeConfigMessage::HoverScale(v) => {
+            config.animation_hover_scale = Some(v);
+            // Update global for immediate effect on all posters
+            crate::infra::shader_widgets::poster::set_hover_scale(v);
+        }
+        RuntimeConfigMessage::HoverTransition(v) => {
+            config.animation_hover_transition_ms = Some(v);
+            // Update global for immediate effect on all posters
+            crate::infra::shader_widgets::poster::set_hover_transition_ms(v);
+        }
+        RuntimeConfigMessage::AnimationDuration(v) => {
+            config.animation_default_duration_ms = Some(v)
+        }
+        RuntimeConfigMessage::TextureFadeInitial(v) => {
+            config.animation_texture_fade_initial_ms = Some(v)
+        }
+        RuntimeConfigMessage::TextureFade(v) => {
+            config.animation_texture_fade_ms = Some(v)
+        }
+
+        // GPU/Memory (CarouselPrefetch/Background IN USE)
+        RuntimeConfigMessage::TextureUploads(v) => {
+            config.texture_max_uploads = Some(v)
+        }
+        RuntimeConfigMessage::PrefetchRowsAbove(v) => {
+            config.prefetch_rows_above = Some(v)
+        }
+        RuntimeConfigMessage::PrefetchRowsBelow(v) => {
+            config.prefetch_rows_below = Some(v)
+        }
+        RuntimeConfigMessage::CarouselPrefetch(v) => {
+            config.carousel_prefetch_items = Some(v)
+        }
+        RuntimeConfigMessage::CarouselBackground(v) => {
+            config.carousel_background_items = Some(v)
+        }
+        RuntimeConfigMessage::KeepAlive(v) => config.keep_alive_ms = Some(v),
+
+        // Player Seeking (not yet wired to consumers)
+        RuntimeConfigMessage::SeekForwardCoarse(v) => {
+            config.seek_forward_coarse = Some(v)
+        }
+        RuntimeConfigMessage::SeekBackwardCoarse(v) => {
+            config.seek_backward_coarse = Some(v)
+        }
+        RuntimeConfigMessage::SeekForwardFine(v) => {
+            config.seek_forward_fine = Some(v)
+        }
+        RuntimeConfigMessage::SeekBackwardFine(v) => {
+            config.seek_backward_fine = Some(v)
+        }
+    }
+
+    // Only mark dirty if this setting is actually being consumed
+    if is_in_use {
+        config.mark_dirty();
+    }
+
+    DomainUpdateResult::task(Task::none())
 }

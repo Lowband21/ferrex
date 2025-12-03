@@ -34,6 +34,7 @@ use crate::domains::ui::update_handlers::demo_controls;
 /// Helper to build a demand snapshot for a library tab
 fn build_library_demand_snapshot(
     lib_state: &tabs::state::LibraryTabState,
+    prefetch_rows: usize,
 ) -> DemandSnapshot {
     let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
     let vr = lib_state.grid_state.visible_range.clone();
@@ -41,9 +42,7 @@ fn build_library_demand_snapshot(
         visible_ids.extend(slice.iter().copied());
     }
 
-    let pr = lib_state
-        .grid_state
-        .get_preload_range(layout::virtual_grid::PREFETCH_ROWS_ABOVE);
+    let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
         prefetch_ids.extend(slice.iter().copied());
@@ -51,7 +50,7 @@ fn build_library_demand_snapshot(
     prefetch_ids.retain(|id| !visible_ids.contains(id));
 
     let br = lib_state.grid_state.get_background_range(
-        layout::virtual_grid::PREFETCH_ROWS_ABOVE,
+        prefetch_rows,
         layout::virtual_grid::BACKGROUND_ROWS_BELOW,
     );
     let mut background_ids: Vec<uuid::Uuid> = Vec::new();
@@ -207,7 +206,12 @@ pub fn update_shell_ui(
                         && let Some(TabState::Library(lib_state)) =
                             state.tab_manager.get_tab(TabId::Library(lib_id))
                     {
-                        let snapshot = build_library_demand_snapshot(lib_state);
+                        let prefetch_rows =
+                            state.runtime_config.prefetch_rows_above();
+                        let snapshot = build_library_demand_snapshot(
+                            lib_state,
+                            prefetch_rows,
+                        );
                         handle.send(snapshot);
                     }
 

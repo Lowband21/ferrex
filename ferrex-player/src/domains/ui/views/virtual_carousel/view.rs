@@ -12,6 +12,7 @@ use iced::{
 };
 
 use crate::domains::ui::{messages::UiMessage, theme};
+use crate::infra::theme::accent;
 use lucide_icons::Icon;
 
 use super::{state::VirtualCarouselState, types::CarouselKey};
@@ -84,7 +85,7 @@ where
     };
 
     let title_color = if is_active {
-        theme::MediaServerTheme::ACCENT_BLUE
+        accent()
     } else {
         theme::MediaServerTheme::TEXT_PRIMARY
     };
@@ -206,9 +207,7 @@ fn icon_char(icon: Icon) -> String {
 fn rail_style(_: &iced::Theme) -> iced::widget::container::Style {
     iced::widget::container::Style {
         text_color: None,
-        background: Some(Background::Color(
-            theme::MediaServerTheme::ACCENT_BLUE,
-        )),
+        background: Some(Background::Color(accent())),
         border: iced::Border {
             color: Color::TRANSPARENT,
             width: 0.0,

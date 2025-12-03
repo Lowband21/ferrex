@@ -12,11 +12,12 @@ use crate::{
             },
             home::view_home_content,
         },
-        widgets::{collect_cached_handles_for_media, texture_preloader},
+        widgets::collect_cached_handles_for_media,
     },
     state::State,
 };
-use ferrex_core::player_prelude::{ImageSize, ImageType};
+use ferrex_core::player_prelude::ImageSize;
+use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
@@ -164,8 +165,8 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                 ids.dedup();
                                 let handles = collect_cached_handles_for_media(
                                     ids.into_iter(),
-                                    ImageType::Movie,
-                                    ImageSize::Poster,
+                                    MediaType::Movie,
+                                    ImageSize::poster(),
                                 );
                                 let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
                                 //let preloader = texture_preloader(handles, budget);
@@ -205,10 +206,9 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                 ids.dedup();
                                 let handles = collect_cached_handles_for_media(
                                     ids.into_iter(),
-                                    ImageType::Series,
-                                    ImageSize::Poster,
+                                    MediaType::Series,
+                                    ImageSize::poster(),
                                 );
-                                let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
                                 // let preloader = texture_preloader(handles, budget);
 
                                 let grid = virtual_series_references_grid(

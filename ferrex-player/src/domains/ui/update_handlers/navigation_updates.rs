@@ -1,3 +1,6 @@
+use ferrex_model::{
+    ImageRequest, ImageSize, MediaType, PosterKind, Priority, ProfileSize,
+};
 use iced::Task;
 use rkyv::option::ArchivedOption;
 
@@ -21,11 +24,7 @@ use ferrex_core::{
     },
     types::{
         ids::{EpisodeID, MovieID, SeasonID, SeriesID},
-        image_request::{
-            ImageRequest, PosterKind, PosterSize, Priority, ProfileSize,
-        },
         media_id::MediaID,
-        util_types::{ImageSize, ImageType},
     },
 };
 
@@ -153,8 +152,8 @@ pub fn handle_view_movie_details(
             if movie_details.backdrop_path.is_some() {
                 let request = ImageRequest::new(
                     movie.id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Movie,
+                    ImageSize::backdrop(),
+                    MediaType::Movie,
                 );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
@@ -164,10 +163,12 @@ pub fn handle_view_movie_details(
             }
 
             // Ensure the hero poster is ready when the detail view renders
+            let detail_quality =
+                state.domains.settings.display.detail_poster_quality;
             let poster_request = ImageRequest::poster(
                 movie.id.to_uuid(),
                 PosterKind::Movie,
-                PosterSize::Original,
+                detail_quality,
             )
             .with_priority(Priority::Visible);
             if state.image_service.get(&poster_request).is_none() {
@@ -179,11 +180,12 @@ pub fn handle_view_movie_details(
             // Stagger direction: left-to-right by enqueueing rightmost first
             // Determine count dynamically from viewport and card size (+ small buffer),
             // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
-            let (card_w, _) = ImageSize::Profile.dimensions();
+            let (card_w, _) =
+                ImageSize::profile().dimensions().unwrap_or((180, 270));
             let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
             let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
             let visible = (((state.window_size.width - lr_padding)
-                / (card_w + spacing))
+                / (card_w as f32 + spacing))
                 .floor()
                 .max(1.0)) as usize;
             let prefetch_cap = 24usize; // safety cap
@@ -209,7 +211,7 @@ pub fn handle_view_movie_details(
                 };
                 let cast_request = ImageRequest::person_profile(
                     person_uuid,
-                    ProfileSize::Standard,
+                    ProfileSize::W180,
                 )
                 .with_priority(Priority::Preload)
                 .with_index(image_index);
@@ -319,8 +321,8 @@ pub fn handle_view_series(
             if details.backdrop_path.is_some() {
                 let request = ImageRequest::new(
                     series.id.to_uuid(),
-                    ImageSize::Backdrop,
-                    ImageType::Series,
+                    ImageSize::backdrop(),
+                    MediaType::Series,
                 );
                 if state.image_service.get(&request).is_none() {
                     state.image_service.request_image(request);
@@ -330,10 +332,12 @@ pub fn handle_view_series(
             }
 
             // Preload the primary series poster
+            let detail_quality =
+                state.domains.settings.display.detail_poster_quality;
             let poster_request = ImageRequest::poster(
                 series.id.to_uuid(),
                 PosterKind::Series,
-                PosterSize::Original,
+                detail_quality,
             )
             .with_priority(Priority::Visible);
             if state.image_service.get(&poster_request).is_none() {
@@ -345,11 +349,12 @@ pub fn handle_view_series(
             // Stagger direction: left-to-right by enqueueing rightmost first
             // Determine count dynamically from viewport and card size (+ small buffer),
             // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
-            let (card_w, _) = ImageSize::Profile.dimensions();
+            let (card_w, _) =
+                ImageSize::profile().dimensions().unwrap_or((180, 270));
             let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
             let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
             let visible = (((state.window_size.width - lr_padding)
-                / (card_w + spacing))
+                / (card_w as f32 + spacing))
                 .floor()
                 .max(1.0)) as usize;
             let prefetch_cap = 24usize; // safety cap
@@ -375,7 +380,7 @@ pub fn handle_view_series(
                 };
                 let cast_request = ImageRequest::person_profile(
                     person_uuid,
-                    ProfileSize::Standard,
+                    ProfileSize::W180,
                 )
                 .with_priority(Priority::Preload)
                 .with_index(image_index);
@@ -567,8 +572,8 @@ pub fn handle_view_season(
         {
             let request = ImageRequest::new(
                 season.id().to_uuid(),
-                ImageSize::Backdrop,
-                ImageType::Season,
+                ImageSize::backdrop(),
+                MediaType::Season,
             );
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);

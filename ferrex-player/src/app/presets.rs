@@ -11,7 +11,7 @@ use crate::common::messages::DomainMessage;
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
-    AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
+    AuthenticationFlow, SetupClaimStatus, SetupStep, TransitionDirection,
 };
 use crate::domains::settings::state::{PreferencesState, SettingsView};
 use crate::domains::ui::shell_ui::Scope;
@@ -38,28 +38,24 @@ fn first_run_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
 
         state.domains.auth.state.auth_flow =
             AuthenticationFlow::FirstRunSetup {
+                current_step: SetupStep::Welcome,
                 username: String::new(),
                 password: SecureCredential::from(""),
                 confirm_password: SecureCredential::from(""),
                 display_name: String::new(),
                 setup_token: String::new(),
-                claim_token: String::new(),
                 show_password: false,
+                claim_code: None,
+                claim_token: None,
+                claim_status: SetupClaimStatus::Idle,
+                claim_loading: false,
+                pin: SecureCredential::from(""),
+                confirm_pin: SecureCredential::from(""),
                 error: None,
                 loading: false,
-                claim: SetupClaimUi {
-                    device_name: "Ferrex Test Device".into(),
-                    claim_id: Some(Uuid::nil()),
-                    claim_code: Some("000000".into()),
-                    expires_at: Some(Utc::now() + chrono::Duration::minutes(5)),
-                    claim_token: None,
-                    lan_only: true,
-                    last_error: None,
-                    status: SetupClaimStatus::Idle,
-                    is_requesting: false,
-                    is_confirming: false,
-                },
                 setup_token_required: true,
+                transition_direction: TransitionDirection::None,
+                transition_progress: 0.0,
             };
 
         (state, Task::none())

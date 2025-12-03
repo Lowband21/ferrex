@@ -12,6 +12,7 @@ use crate::{
         },
     },
     infra::repository::accessor::{Accessor, ReadOnly},
+    infra::theme::accent,
     state::State,
 };
 use ferrex_core::player_prelude::{
@@ -484,9 +485,7 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 ScanLifecycleStatus::Pending => {
                     ("Pending", theme::MediaServerTheme::TEXT_SECONDARY)
                 }
-                ScanLifecycleStatus::Running => {
-                    ("Running", theme::MediaServerTheme::ACCENT_BLUE)
-                }
+                ScanLifecycleStatus::Running => ("Running", accent()),
                 ScanLifecycleStatus::Paused => {
                     ("Paused", theme::MediaServerTheme::WARNING)
                 }

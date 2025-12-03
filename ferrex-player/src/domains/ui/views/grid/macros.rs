@@ -382,7 +382,6 @@ macro_rules! media_card {
         }
     ) => {{
         use $crate::domains::ui::views::grid::types::*;
-        use $crate::domains::ui::widgets::poster::animation::PosterAnimationType;
         use $crate::domains::ui::widgets::poster::animation::AnimationBehavior;
         use $crate::domains::ui::theme;
         use iced::{
@@ -408,9 +407,9 @@ macro_rules! media_card {
         let image_element: Element<'_, $crate::domains::ui::messages::UiMessage> = {
             use $crate::domains::ui::widgets::image_for;
 
-            // Determine requested image category from macro parameter (Poster/Backdrop/Thumbnail/Profile/Full)
+            // Determine requested image category from macro parameter (poster/backdrop/thumbnail/profile/poster_large)
             // Width/height continue to follow card_size; this only controls the server fetch category.
-            let image_size = ferrex_core::player_prelude::ImageSize::$image_type;
+            let image_size = ferrex_model::ImageSize::$image_type();
 
             //// Map priority if provided
             let priority = ferrex_core::player_prelude::Priority::Preload;
@@ -423,7 +422,7 @@ macro_rules! media_card {
             // Create the image widget
             let mut img = image_for($id)
                 .size(image_size)
-                .image_type(ferrex_core::player_prelude::ImageType::$card_type)
+                .image_type(ferrex_model::MediaType::$card_type)
                 .radius(radius)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(height))
