@@ -84,6 +84,116 @@ pub enum AuthenticationMode {
     AutoLogin, // Automatic login with saved credentials
 }
 
+/// Setup wizard step in first-run flow
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetupStep {
+    #[default]
+    Welcome, // Brief intro
+    Account,     // Username, display name, password, confirm (combined)
+    SetupToken,  // If required by server (conditional)
+    DeviceClaim, // Secure claim verification (show code, wait for server confirmation)
+    Pin,         // Optional 4-digit PIN
+    Complete,    // Success message
+}
+
+impl SetupStep {
+    /// Get the next step in the wizard flow
+    pub fn next(&self, setup_token_required: bool) -> Option<Self> {
+        match self {
+            Self::Welcome => Some(Self::Account),
+            Self::Account => {
+                if setup_token_required {
+                    Some(Self::SetupToken)
+                } else {
+                    Some(Self::DeviceClaim)
+                }
+            }
+            Self::SetupToken => Some(Self::DeviceClaim),
+            Self::DeviceClaim => Some(Self::Pin),
+            Self::Pin => Some(Self::Complete),
+            Self::Complete => None,
+        }
+    }
+
+    /// Get the previous step in the wizard flow
+    pub fn previous(&self, setup_token_required: bool) -> Option<Self> {
+        match self {
+            Self::Welcome => None,
+            Self::Account => Some(Self::Welcome),
+            Self::SetupToken => Some(Self::Account),
+            Self::DeviceClaim => {
+                if setup_token_required {
+                    Some(Self::SetupToken)
+                } else {
+                    Some(Self::Account)
+                }
+            }
+            Self::Pin => Some(Self::DeviceClaim),
+            Self::Complete => None, // Can't go back after completion
+        }
+    }
+
+    /// Get zero-based index for progress indicator
+    pub fn index(&self, setup_token_required: bool) -> usize {
+        match self {
+            Self::Welcome => 0,
+            Self::Account => 1,
+            Self::SetupToken => 2,
+            Self::DeviceClaim => {
+                if setup_token_required {
+                    3
+                } else {
+                    2
+                }
+            }
+            Self::Pin => {
+                if setup_token_required {
+                    4
+                } else {
+                    3
+                }
+            }
+            Self::Complete => {
+                if setup_token_required {
+                    5
+                } else {
+                    4
+                }
+            }
+        }
+    }
+
+    /// Total number of steps (varies based on setup token requirement)
+    pub fn total_steps(setup_token_required: bool) -> usize {
+        if setup_token_required {
+            6 // Welcome, Account, SetupToken, DeviceClaim, Pin, Complete
+        } else {
+            5 // Welcome, Account, DeviceClaim, Pin, Complete
+        }
+    }
+
+    /// Display label for progress indicator
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Welcome => "Welcome",
+            Self::Account => "Account",
+            Self::SetupToken => "Token",
+            Self::DeviceClaim => "Verify",
+            Self::Pin => "PIN",
+            Self::Complete => "Complete",
+        }
+    }
+}
+
+/// Direction of carousel transition animation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransitionDirection {
+    #[default]
+    None,
+    Forward,  // Sliding left (next step)
+    Backward, // Sliding right (previous step)
+}
+
 /// Authentication flow state
 #[derive(Debug, Clone, Default)]
 pub enum AuthenticationFlow {
@@ -91,19 +201,37 @@ pub enum AuthenticationFlow {
     #[default]
     CheckingSetup,
 
-    /// First-run admin setup
+    /// First-run admin setup wizard
     FirstRunSetup {
+        // Wizard step tracking
+        current_step: SetupStep,
+
+        // Account fields
         username: String,
         password: SecureCredential,
         confirm_password: SecureCredential,
         display_name: String,
         setup_token: String,
-        claim_token: String,
         show_password: bool,
+
+        // Device claim fields
+        claim_code: Option<String>,
+        claim_token: Option<String>,
+        claim_status: SetupClaimStatus,
+        claim_loading: bool,
+
+        // PIN fields (embedded in wizard)
+        pin: SecureCredential,
+        confirm_pin: SecureCredential,
+
+        // State
         error: Option<String>,
         loading: bool,
-        claim: SetupClaimUi,
         setup_token_required: bool,
+
+        // Animation
+        transition_direction: TransitionDirection,
+        transition_progress: f32,
     },
 
     /// Checking for cached auth and auto-login

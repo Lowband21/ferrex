@@ -252,36 +252,38 @@ pub fn update_auth(
             wrap_task!(handle_setup_error(state, error))
         }
 
-        auth::AuthMessage::UpdateClaimDeviceName(name) => {
-            wrap_task!(handle_update_claim_device_name(state, name))
+        // Setup wizard navigation
+        auth::AuthMessage::SetupNextStep => {
+            wrap_task!(handle_setup_next_step(state))
         }
 
+        auth::AuthMessage::SetupPreviousStep => {
+            wrap_task!(handle_setup_previous_step(state))
+        }
+
+        auth::AuthMessage::SkipPinSetup => {
+            wrap_task!(handle_skip_pin_setup(state))
+        }
+
+        auth::AuthMessage::SetupAnimationTick(delta) => {
+            wrap_task!(handle_setup_animation_tick(state, delta))
+        }
+
+        // Device claim flow
         auth::AuthMessage::StartSetupClaim => {
             wrap_task!(handle_start_setup_claim(state))
         }
 
-        auth::AuthMessage::SetupClaimStarted(response) => {
-            wrap_task!(handle_setup_claim_started(state, response))
-        }
-
-        auth::AuthMessage::SetupClaimFailed(error) => {
-            wrap_task!(handle_setup_claim_failed(state, error))
+        auth::AuthMessage::ClaimStarted(result) => {
+            wrap_task!(handle_claim_started(state, result))
         }
 
         auth::AuthMessage::ConfirmSetupClaim => {
             wrap_task!(handle_confirm_setup_claim(state))
         }
 
-        auth::AuthMessage::SetupClaimConfirmed(response) => {
-            wrap_task!(handle_setup_claim_confirmed(state, response))
-        }
-
-        auth::AuthMessage::SetupClaimConfirmFailed(error) => {
-            wrap_task!(handle_setup_claim_confirm_failed(state, error))
-        }
-
-        auth::AuthMessage::ResetSetupClaim => {
-            wrap_task!(handle_reset_setup_claim(state))
+        auth::AuthMessage::ClaimConfirmed(result) => {
+            wrap_task!(handle_claim_confirmed(state, result))
         }
 
         // Command execution

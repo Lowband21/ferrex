@@ -132,7 +132,7 @@ pub fn view_pin_setup<'a>(
     ),
     profiling::function
 )]
-fn pin_display<'a>(
+pub fn pin_display<'a>(
     value: &str,
     _is_confirm: bool,
     font_size: f32,
@@ -186,7 +186,7 @@ fn pin_display<'a>(
     ),
     profiling::function
 )]
-fn numeric_keypad<'a>(
+pub fn numeric_keypad<'a>(
     current_value: &str,
     is_confirm: bool,
     digit_font_size: f32,

@@ -75,14 +75,18 @@ pub enum AuthMessage {
     SubmitSetup,
     SetupComplete(String, String), // access_token, refresh_token
     SetupError(String),
-    UpdateClaimDeviceName(String),
+
+    // Setup wizard navigation
+    SetupNextStep,
+    SetupPreviousStep,
+    SkipPinSetup,
+    SetupAnimationTick(f32), // delta for transition animation
+
+    // Device claim flow (secure setup verification)
     StartSetupClaim,
-    SetupClaimStarted(StartClaimResponse),
-    SetupClaimFailed(String),
+    ClaimStarted(Result<StartClaimResponse, String>),
     ConfirmSetupClaim,
-    SetupClaimConfirmed(ConfirmClaimResponse),
-    SetupClaimConfirmFailed(String),
-    ResetSetupClaim,
+    ClaimConfirmed(Result<ConfirmClaimResponse, String>),
 
     // Admin PIN unlock management
     EnableAdminPinUnlock,
@@ -191,22 +195,24 @@ impl std::fmt::Debug for AuthMessage {
             Self::SubmitSetup => write!(f, "SubmitSetup"),
             Self::SetupComplete(_, _) => write!(f, "SetupComplete(***, ***)"),
             Self::SetupError(error) => write!(f, "SetupError({})", error),
-            Self::UpdateClaimDeviceName(name) => {
-                write!(f, "UpdateClaimDeviceName({})", name)
+
+            // Setup wizard navigation
+            Self::SetupNextStep => write!(f, "SetupNextStep"),
+            Self::SetupPreviousStep => write!(f, "SetupPreviousStep"),
+            Self::SkipPinSetup => write!(f, "SkipPinSetup"),
+            Self::SetupAnimationTick(delta) => {
+                write!(f, "SetupAnimationTick({:.2})", delta)
             }
+
+            // Device claim flow
             Self::StartSetupClaim => write!(f, "StartSetupClaim"),
-            Self::SetupClaimStarted(_) => write!(f, "SetupClaimStarted(...)"),
-            Self::SetupClaimFailed(error) => {
-                write!(f, "SetupClaimFailed({})", error)
+            Self::ClaimStarted(result) => {
+                write!(f, "ClaimStarted({:?})", result.is_ok())
             }
             Self::ConfirmSetupClaim => write!(f, "ConfirmSetupClaim"),
-            Self::SetupClaimConfirmed(_) => {
-                write!(f, "SetupClaimConfirmed(...)")
+            Self::ClaimConfirmed(result) => {
+                write!(f, "ClaimConfirmed({:?})", result.is_ok())
             }
-            Self::SetupClaimConfirmFailed(error) => {
-                write!(f, "SetupClaimConfirmFailed({})", error)
-            }
-            Self::ResetSetupClaim => write!(f, "ResetSetupClaim"),
 
             // Admin PIN unlock management
             Self::EnableAdminPinUnlock => write!(f, "EnableAdminPinUnlock"),
@@ -304,14 +310,18 @@ impl AuthMessage {
             Self::SubmitSetup => "Auth::SubmitSetup",
             Self::SetupComplete(_, _) => "Auth::SetupComplete",
             Self::SetupError(_) => "Auth::SetupError",
-            Self::UpdateClaimDeviceName(_) => "Auth::UpdateClaimDeviceName",
+
+            // Setup wizard navigation
+            Self::SetupNextStep => "Auth::SetupNextStep",
+            Self::SetupPreviousStep => "Auth::SetupPreviousStep",
+            Self::SkipPinSetup => "Auth::SkipPinSetup",
+            Self::SetupAnimationTick(_) => "Auth::SetupAnimationTick",
+
+            // Device claim flow
             Self::StartSetupClaim => "Auth::StartSetupClaim",
-            Self::SetupClaimStarted(_) => "Auth::SetupClaimStarted",
-            Self::SetupClaimFailed(_) => "Auth::SetupClaimFailed",
+            Self::ClaimStarted(_) => "Auth::ClaimStarted",
             Self::ConfirmSetupClaim => "Auth::ConfirmSetupClaim",
-            Self::SetupClaimConfirmed(_) => "Auth::SetupClaimConfirmed",
-            Self::SetupClaimConfirmFailed(_) => "Auth::SetupClaimConfirmFailed",
-            Self::ResetSetupClaim => "Auth::ResetSetupClaim",
+            Self::ClaimConfirmed(_) => "Auth::ClaimConfirmed",
 
             // Admin PIN unlock
             Self::EnableAdminPinUnlock => "Auth::EnableAdminPinUnlock",

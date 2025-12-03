@@ -1,15 +1,14 @@
-//! First-run admin setup handlers, including the secure claim workflow.
+//! First-run admin setup handlers for the setup wizard.
 
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
-    AuthenticationFlow, SetupClaimStatus, SetupClaimUi,
+    AuthenticationFlow, SetupClaimStatus, SetupStep, TransitionDirection,
 };
 use crate::infra::api_client::SetupStatus;
-use crate::infra::api_types::ConfirmClaimResponse;
 use crate::state::State;
-use ferrex_core::player_prelude::StartClaimResponse;
 use ferrex_core::{
+    api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
     domain::users::auth::domain::value_objects::SessionScope,
     player_prelude as core,
 };
@@ -69,23 +68,30 @@ pub fn handle_setup_status_checked(
     );
 
     if status.needs_setup {
-        info!("First-run setup needed, showing admin setup");
+        info!("First-run setup needed, showing setup wizard");
         state.is_authenticated = false;
         state.domains.auth.state.is_authenticated = false;
         state.domains.auth.state.user_permissions = None;
         state.domains.auth.state.auth_flow =
             AuthenticationFlow::FirstRunSetup {
+                current_step: SetupStep::Welcome,
                 username: String::new(),
                 password: SecureCredential::new(String::new()),
                 confirm_password: SecureCredential::new(String::new()),
                 display_name: String::new(),
                 setup_token: String::new(),
-                claim_token: String::new(),
                 show_password: false,
+                claim_code: None,
+                claim_token: None,
+                claim_status: SetupClaimStatus::Idle,
+                claim_loading: false,
+                pin: SecureCredential::new(String::new()),
+                confirm_pin: SecureCredential::new(String::new()),
                 error: None,
                 loading: false,
-                claim: SetupClaimUi::default(),
                 setup_token_required: status.requires_setup_token,
+                transition_direction: TransitionDirection::None,
+                transition_progress: 0.0,
             };
         Task::none()
     } else {
@@ -123,10 +129,13 @@ pub fn handle_update_setup_field(
         confirm_password,
         display_name,
         setup_token,
-        claim_token,
+        error,
         ..
     } = &mut state.domains.auth.state.auth_flow
     {
+        // Clear error when user starts typing
+        *error = None;
+
         match field {
             auth::SetupField::Username(value) => *username = value,
             auth::SetupField::Password(value) => {
@@ -137,7 +146,9 @@ pub fn handle_update_setup_field(
             }
             auth::SetupField::DisplayName(value) => *display_name = value,
             auth::SetupField::SetupToken(value) => *setup_token = value,
-            auth::SetupField::ClaimToken(value) => *claim_token = value,
+            auth::SetupField::ClaimToken(_) => {
+                // ClaimToken is no longer used (device binding is automatic)
+            }
         }
     }
 
@@ -157,6 +168,155 @@ pub fn handle_toggle_setup_password_visibility(
     Task::none()
 }
 
+/// Navigate to the next step in the setup wizard
+pub fn handle_setup_next_step(state: &mut State) -> Task<auth::AuthMessage> {
+    if let AuthenticationFlow::FirstRunSetup {
+        current_step,
+        username,
+        display_name,
+        password,
+        confirm_password,
+        setup_token,
+        setup_token_required,
+        claim_token,
+        error,
+        transition_direction,
+        transition_progress,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        // Validate current step before proceeding
+        let validation_error = match current_step {
+            SetupStep::Welcome => None,
+            SetupStep::Account => {
+                if username.trim().is_empty() {
+                    Some("Username is required")
+                } else if display_name.trim().is_empty() {
+                    Some("Display name is required")
+                } else if password.as_str().is_empty() {
+                    Some("Password is required")
+                } else if password.as_str() != confirm_password.as_str() {
+                    Some("Passwords do not match")
+                } else {
+                    None
+                }
+            }
+            SetupStep::SetupToken => {
+                if setup_token.trim().is_empty() {
+                    Some("Setup token is required")
+                } else {
+                    None
+                }
+            }
+            SetupStep::DeviceClaim => {
+                // Must have a confirmed claim token to proceed
+                if claim_token.is_none() {
+                    Some("Please verify your device first")
+                } else {
+                    None
+                }
+            }
+            SetupStep::Pin => None, // PIN is optional
+            SetupStep::Complete => None,
+        };
+
+        if let Some(err) = validation_error {
+            *error = Some(err.to_string());
+            return Task::none();
+        }
+
+        *error = None;
+
+        // Move to next step
+        if let Some(next) = current_step.next(*setup_token_required) {
+            let entering_claim = matches!(next, SetupStep::DeviceClaim);
+            *current_step = next;
+            *transition_direction = TransitionDirection::Forward;
+            *transition_progress = 0.0;
+
+            // Auto-start claim when entering DeviceClaim step
+            if entering_claim {
+                return Task::done(auth::AuthMessage::StartSetupClaim);
+            }
+        }
+    }
+
+    Task::none()
+}
+
+/// Navigate to the previous step in the setup wizard
+pub fn handle_setup_previous_step(
+    state: &mut State,
+) -> Task<auth::AuthMessage> {
+    if let AuthenticationFlow::FirstRunSetup {
+        current_step,
+        setup_token_required,
+        error,
+        transition_direction,
+        transition_progress,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        *error = None;
+
+        if let Some(prev) = current_step.previous(*setup_token_required) {
+            *current_step = prev;
+            *transition_direction = TransitionDirection::Backward;
+            *transition_progress = 0.0;
+        }
+    }
+
+    Task::none()
+}
+
+/// Skip PIN setup and proceed to completion
+pub fn handle_skip_pin_setup(state: &mut State) -> Task<auth::AuthMessage> {
+    if let AuthenticationFlow::FirstRunSetup {
+        current_step,
+        pin,
+        confirm_pin,
+        transition_direction,
+        transition_progress,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        if matches!(current_step, SetupStep::Pin) {
+            // Clear any partial PIN entry
+            *pin = SecureCredential::new(String::new());
+            *confirm_pin = SecureCredential::new(String::new());
+            // Move to complete
+            *current_step = SetupStep::Complete;
+            *transition_direction = TransitionDirection::Forward;
+            *transition_progress = 0.0;
+        }
+    }
+
+    Task::none()
+}
+
+/// Handle animation tick for carousel transitions
+pub fn handle_setup_animation_tick(
+    state: &mut State,
+    delta: f32,
+) -> Task<auth::AuthMessage> {
+    if let AuthenticationFlow::FirstRunSetup {
+        transition_progress,
+        transition_direction,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
+    {
+        if !matches!(transition_direction, TransitionDirection::None) {
+            *transition_progress = (*transition_progress + delta).min(1.0);
+            if *transition_progress >= 1.0 {
+                *transition_direction = TransitionDirection::None;
+                *transition_progress = 0.0;
+            }
+        }
+    }
+
+    Task::none()
+}
+
 /// Submit the first-run admin setup form
 pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
@@ -168,7 +328,6 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
         claim_token,
         error,
         loading,
-        claim,
         ..
     } = &mut state.domains.auth.state.auth_flow
     {
@@ -194,19 +353,8 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
             return Task::none();
         }
 
-        if claim.is_expired() {
-            claim.mark_expired();
-            *error = Some(
-                "The binding code has expired. Request a new code before continuing.".to_string(),
-            );
-            return Task::none();
-        }
-
-        if claim_token.trim().is_empty() {
-            *error = Some(
-                "Secure claim token required. Confirm the binding before creating the admin."
-                    .to_string(),
-            );
+        if claim_token.is_none() {
+            *error = Some("Device verification is required".to_string());
             return Task::none();
         }
 
@@ -225,11 +373,7 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
         } else {
             Some(setup_token.clone())
         };
-        let claim_token = if claim_token.trim().is_empty() {
-            None
-        } else {
-            Some(claim_token.clone())
-        };
+        let claim_token = claim_token.clone();
 
         return Task::perform(
             async move {
@@ -360,228 +504,151 @@ pub fn handle_setup_error(
     if let AuthenticationFlow::FirstRunSetup {
         error: view_error,
         loading,
+        claim_loading,
         ..
     } = &mut state.domains.auth.state.auth_flow
     {
         *view_error = Some(error);
         *loading = false;
+        *claim_loading = false;
     }
 
     Task::none()
 }
 
-/// Update the device name used when starting the claim flow
-pub fn handle_update_claim_device_name(
-    state: &mut State,
-    name: String,
-) -> Task<auth::AuthMessage> {
-    if let AuthenticationFlow::FirstRunSetup { claim, .. } =
-        &mut state.domains.auth.state.auth_flow
-    {
-        claim.device_name = name;
-    }
-
-    Task::none()
-}
-
-/// Start the secure claim flow
+/// Start the secure setup claim workflow
 pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
-        claim, claim_token, ..
+        claim_loading,
+        claim_status,
+        claim_code,
+        error,
+        ..
     } = &mut state.domains.auth.state.auth_flow
     {
-        if claim.is_requesting {
-            info!("[Auth] Ignoring duplicate claim start request");
-            return Task::none();
-        }
-
-        info!("[Auth] Starting secure claim flow");
-
-        claim.is_requesting = true;
-        claim.last_error = None;
-        claim.claim_id = None;
-        claim.claim_code = None;
-        claim.expires_at = None;
-        claim.claim_token = None;
-        claim.status = SetupClaimStatus::Idle;
-        claim_token.clear();
+        info!("[Auth] Starting setup claim workflow");
+        *claim_loading = true;
+        *claim_status = SetupClaimStatus::Pending;
+        *claim_code = None;
+        *error = None;
 
         let api_service = state.domains.auth.state.api_service.clone();
-        let device_name = if claim.device_name.trim().is_empty() {
-            None
-        } else {
-            Some(claim.device_name.trim().to_string())
-        };
 
         return Task::perform(
             async move {
                 api_service
-                    .start_setup_claim(device_name)
+                    .start_setup_claim(None) // Let server determine device name
                     .await
                     .map_err(|e| e.to_string())
             },
-            |result| match result {
-                Ok(response) => auth::AuthMessage::SetupClaimStarted(response),
-                Err(err) => auth::AuthMessage::SetupClaimFailed(err),
-            },
+            |result| auth::AuthMessage::ClaimStarted(result),
         );
     }
 
     Task::none()
 }
 
-/// Handle successful claim start
-pub fn handle_setup_claim_started(
+/// Handle the result of starting a claim
+pub fn handle_claim_started(
     state: &mut State,
-    response: StartClaimResponse,
+    result: Result<StartClaimResponse, String>,
 ) -> Task<auth::AuthMessage> {
-    if let AuthenticationFlow::FirstRunSetup { claim, .. } =
-        &mut state.domains.auth.state.auth_flow
+    if let AuthenticationFlow::FirstRunSetup {
+        claim_loading,
+        claim_status,
+        claim_code,
+        error,
+        ..
+    } = &mut state.domains.auth.state.auth_flow
     {
-        info!(
-            "[Auth] Secure claim code issued; expires at {}",
-            response.expires_at
-        );
-        claim.is_requesting = false;
-        claim.last_error = None;
-        claim.claim_id = Some(response.claim_id);
-        claim.claim_code = Some(response.claim_code);
-        claim.expires_at = Some(response.expires_at);
-        claim.lan_only = response.lan_only;
-        claim.status = SetupClaimStatus::Pending;
+        *claim_loading = false;
+
+        match result {
+            Ok(response) => {
+                info!(
+                    "[Auth] Claim started successfully, code: {}",
+                    response.claim_code
+                );
+                *claim_code = Some(response.claim_code);
+                *claim_status = SetupClaimStatus::Pending;
+                *error = None;
+            }
+            Err(e) => {
+                error!("[Auth] Failed to start claim: {}", e);
+                *claim_status = SetupClaimStatus::Idle;
+                *error = Some(format!("Failed to start verification: {}", e));
+            }
+        }
     }
 
     Task::none()
 }
 
-/// Handle claim start failure
-pub fn handle_setup_claim_failed(
-    state: &mut State,
-    error: String,
-) -> Task<auth::AuthMessage> {
-    if let AuthenticationFlow::FirstRunSetup { claim, .. } =
-        &mut state.domains.auth.state.auth_flow
-    {
-        error!("[Auth] Failed to start secure claim: {}", error);
-        claim.is_requesting = false;
-        claim.last_error = Some(error);
-    }
-
-    Task::none()
-}
-
-/// Confirm the secure claim
+/// Confirm the setup claim after user verifies on server
 pub fn handle_confirm_setup_claim(
     state: &mut State,
 ) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
-        claim, claim_token, ..
+        claim_code,
+        claim_loading,
+        error,
+        ..
     } = &mut state.domains.auth.state.auth_flow
     {
-        if claim.is_confirming {
-            info!("[Auth] Ignoring duplicate claim confirm request");
-            return Task::none();
-        }
+        if let Some(code) = claim_code.clone() {
+            info!("[Auth] Confirming setup claim with code: {}", code);
+            *claim_loading = true;
+            *error = None;
 
-        if !matches!(claim.status, SetupClaimStatus::Pending) {
-            claim.last_error = Some(
-                "Request a binding code before attempting confirmation."
-                    .to_string(),
+            let api_service = state.domains.auth.state.api_service.clone();
+
+            return Task::perform(
+                async move {
+                    api_service
+                        .confirm_setup_claim(code)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                |result| auth::AuthMessage::ClaimConfirmed(result),
             );
-            return Task::none();
+        } else {
+            *error = Some("No claim code available".to_string());
         }
-
-        if claim.is_expired() {
-            claim.mark_expired();
-            claim.last_error = Some(
-                "The binding code has expired. Request a new code.".to_string(),
-            );
-            return Task::none();
-        }
-
-        let Some(code) = claim.claim_code.clone() else {
-            claim.last_error = Some(
-                "Binding code missing. Start the claim again.".to_string(),
-            );
-            return Task::none();
-        };
-
-        info!("[Auth] Confirming secure claim");
-
-        claim.is_confirming = true;
-        claim.last_error = None;
-        claim.claim_token = None;
-        claim_token.clear();
-
-        let api_service = state.domains.auth.state.api_service.clone();
-
-        return Task::perform(
-            async move {
-                api_service
-                    .confirm_setup_claim(code)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            |result| match result {
-                Ok(response) => {
-                    auth::AuthMessage::SetupClaimConfirmed(response)
-                }
-                Err(err) => auth::AuthMessage::SetupClaimConfirmFailed(err),
-            },
-        );
     }
 
     Task::none()
 }
 
-/// Handle successful claim confirmation
-pub fn handle_setup_claim_confirmed(
+/// Handle the result of confirming a claim
+pub fn handle_claim_confirmed(
     state: &mut State,
-    response: ConfirmClaimResponse,
+    result: Result<ConfirmClaimResponse, String>,
 ) -> Task<auth::AuthMessage> {
     if let AuthenticationFlow::FirstRunSetup {
-        claim, claim_token, ..
+        claim_loading,
+        claim_status,
+        claim_token,
+        error,
+        ..
     } = &mut state.domains.auth.state.auth_flow
     {
-        info!("[Auth] Secure claim confirmed; token issued");
-        claim.is_confirming = false;
-        claim.last_error = None;
-        claim.claim_id = Some(response.claim_id);
-        claim.claim_token = Some(response.claim_token.clone());
-        claim.expires_at = Some(response.expires_at);
-        claim.status = SetupClaimStatus::Confirmed;
-        claim_token.clear();
-        claim_token.push_str(&response.claim_token);
-    }
+        *claim_loading = false;
 
-    Task::none()
-}
-
-/// Handle claim confirmation failure
-pub fn handle_setup_claim_confirm_failed(
-    state: &mut State,
-    error: String,
-) -> Task<auth::AuthMessage> {
-    if let AuthenticationFlow::FirstRunSetup { claim, .. } =
-        &mut state.domains.auth.state.auth_flow
-    {
-        error!("[Auth] Failed to confirm secure claim: {}", error);
-        claim.is_confirming = false;
-        claim.last_error = Some(error);
-    }
-
-    Task::none()
-}
-
-/// Reset the secure claim state
-pub fn handle_reset_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
-    if let AuthenticationFlow::FirstRunSetup {
-        claim, claim_token, ..
-    } = &mut state.domains.auth.state.auth_flow
-    {
-        info!("[Auth] Resetting secure claim state");
-        claim.reset();
-        claim_token.clear();
+        match result {
+            Ok(response) => {
+                info!("[Auth] Claim confirmed successfully");
+                *claim_token = Some(response.claim_token);
+                *claim_status = SetupClaimStatus::Confirmed;
+                *error = None;
+            }
+            Err(e) => {
+                error!("[Auth] Failed to confirm claim: {}", e);
+                // Keep status as pending so user can retry
+                *error = Some(format!(
+                    "Verification not confirmed yet. Please run the confirm command on your server."
+                ));
+            }
+        }
     }
 
     Task::none()
