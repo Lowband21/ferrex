@@ -1,44 +1,66 @@
+use ferrex_model::{MediaID, SubjectKey};
+
+use ferrex_core::{
+    api::types::{
+        ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
+        SeriesBundleResponse,
+    },
+    application::unit_of_work::AppUnitOfWork,
+    domain::scan::{
+        actors::{
+            FileSystemEvent, FileSystemEventKind, LibraryRootsId,
+            index::{IndexingChange, IndexingOutcome},
+        },
+        orchestration::{
+            JobEvent, LibraryActorCommand, StartMode,
+            events::{JobEventPayload, ScanEvent},
+            job::{JobId, JobKind},
+            scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
+        },
+    },
+    error::MediaError,
+    player_prelude::MediaIDLike,
+    types::{
+        LibraryId, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
+        ScanStageLatencySummary, events::ScanSseEventType,
+    },
+};
+
+use crate::infra::{
+    orchestration::ScanOrchestrator,
+    scan::media_event_bus::{MediaEventBus, MediaEventFrame},
+    scan::movie_batch_notifier::MovieBatchFinalizationNotifiers,
+    scan::series_bundle_tracker::{
+        SeriesBundleFinalization, SeriesBundleTracker,
+    },
+};
+
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use ferrex_core::api::types::{
-    ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
-};
-use ferrex_core::application::unit_of_work::AppUnitOfWork;
-use ferrex_core::error::MediaError;
-use ferrex_core::scan::orchestration::actors::pipeline::{
-    IndexingChange, IndexingOutcome,
-};
-use ferrex_core::scan::orchestration::{
-    JobEvent, LibraryActorCommand, StartMode,
-    events::{JobEventPayload, ScanEvent},
-    job::{JobId, JobKind},
-    scan_cursor::{ScanCursor, ScanCursorRepository},
-};
-use ferrex_core::types::events::ScanSseEventType;
-use ferrex_core::types::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
-use ferrex_core::types::{
-    LibraryId, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
-    ScanStageLatencySummary,
-};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
+
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt,
     sync::{Arc, Weak},
     time::{Duration, Instant},
 };
+
 use tokio::{
     spawn,
     sync::{Mutex, RwLock, broadcast},
     time::interval,
 };
-use tracing::{info, instrument, warn};
+
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::infra::orchestration::ScanOrchestrator;
 const EVENT_VERSION: &str = "1";
 const HISTORY_CAPACITY: usize = 256;
 const EVENT_HISTORY_CAPACITY: usize = 512;
+const MEDIA_EVENT_HISTORY_CAPACITY: usize = 512;
+const MEDIA_EVENT_BROADCAST_CAPACITY: usize = 512;
 const DEFAULT_LATENCIES: ScanStageLatencySummary = ScanStageLatencySummary {
     scan: 12,
     analyze: 210,
@@ -46,6 +68,19 @@ const DEFAULT_LATENCIES: ScanStageLatencySummary = ScanStageLatencySummary {
 };
 const DEFAULT_QUIESCENCE: Duration = Duration::from_secs(3);
 const STALLED_SCAN_TIMEOUT_MULTIPLIER: u32 = 5;
+const SERIES_BUNDLE_TRACKER_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
+const SERIES_BUNDLE_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+fn subject_key_path(key: &SubjectKey) -> Option<&str> {
+    match key {
+        SubjectKey::Path(path) => Some(path.as_str()),
+        SubjectKey::Opaque(_) => None,
+    }
+}
+
+fn subject_key_path_owned(key: &SubjectKey) -> Option<String> {
+    subject_key_path(key).map(str::to_string)
+}
 
 /// Command dispatcher + read model for scan orchestration state.
 #[derive(Clone)]
@@ -58,7 +93,7 @@ impl fmt::Debug for ScanControlPlane {
         let active = self.inner.active.try_read().ok().map(|guard| guard.len());
         let history =
             self.inner.history.try_read().ok().map(|guard| guard.len());
-        let receiver_count = self.inner.media_tx.receiver_count();
+        let receiver_count = self.inner.media_bus.receiver_count();
         let uow_ptr = Arc::as_ptr(&self.inner.unit_of_work);
         let orchestrator_ptr = Arc::as_ptr(&self.inner.orchestrator);
 
@@ -77,8 +112,9 @@ struct ScanControlPlaneInner {
     orchestrator: Arc<ScanOrchestrator>,
     active: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
-    media_tx: broadcast::Sender<MediaEvent>,
+    media_bus: Arc<MediaEventBus>,
     aggregator: ScanRunAggregator,
+    movie_batch_notifiers: MovieBatchFinalizationNotifiers,
 }
 
 impl ScanControlPlane {
@@ -98,11 +134,14 @@ impl ScanControlPlane {
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
     ) -> Self {
-        let (media_tx, _rx) = broadcast::channel(512);
+        let media_bus = Arc::new(MediaEventBus::new(
+            MEDIA_EVENT_HISTORY_CAPACITY,
+            MEDIA_EVENT_BROADCAST_CAPACITY,
+        ));
         let aggregator = ScanRunAggregator::new(
             Arc::clone(&orchestrator),
             quiescence,
-            media_tx.clone(),
+            Arc::clone(&media_bus),
             unit_of_work.clone(),
         );
 
@@ -112,8 +151,9 @@ impl ScanControlPlane {
                 orchestrator,
                 active: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
-                media_tx,
+                media_bus,
                 aggregator,
+                movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
             }),
         }
     }
@@ -122,12 +162,28 @@ impl ScanControlPlane {
         Arc::clone(&self.inner.orchestrator)
     }
 
-    pub fn subscribe_media_events(&self) -> broadcast::Receiver<MediaEvent> {
-        self.inner.media_tx.subscribe()
+    pub fn subscribe_media_events(
+        &self,
+    ) -> broadcast::Receiver<MediaEventFrame> {
+        self.inner.media_bus.subscribe()
     }
 
     pub fn publish_media_event(&self, event: MediaEvent) {
-        let _ = self.inner.media_tx.send(event);
+        self.inner.media_bus.publish(event);
+    }
+
+    pub fn media_event_history_since_sequence(
+        &self,
+        sequence: u64,
+    ) -> Vec<MediaEventFrame> {
+        self.inner.media_bus.history_since_sequence(sequence)
+    }
+
+    pub fn media_event_history_since_instant(
+        &self,
+        since: Instant,
+    ) -> Vec<MediaEventFrame> {
+        self.inner.media_bus.history_since_instant(since)
     }
 
     pub async fn subscribe_scan(
@@ -194,6 +250,98 @@ impl ScanControlPlane {
             scan_id,
             correlation_id,
         })
+    }
+
+    pub async fn inject_created_folders(
+        &self,
+        library_id: LibraryId,
+        folders: Vec<std::path::PathBuf>,
+    ) -> Result<(), ScanControlError> {
+        if folders.is_empty() {
+            return Ok(());
+        }
+
+        let library = self
+            .inner
+            .unit_of_work
+            .libraries
+            .get_library(library_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::LibraryNotFound)?;
+
+        if !library.enabled {
+            return Err(ScanControlError::LibraryDisabled);
+        }
+
+        let roots: Vec<(LibraryRootsId, std::path::PathBuf)> = library
+            .paths
+            .iter()
+            .enumerate()
+            .map(|(idx, path)| (LibraryRootsId(idx as u16), path.clone()))
+            .collect();
+
+        if roots.is_empty() {
+            return Err(ScanControlError::internal(format!(
+                "library {} has no root paths configured",
+                library_id
+            )));
+        }
+
+        let correlation_id = Uuid::now_v7();
+        let occurred_at = chrono::Utc::now();
+
+        let mut by_root: HashMap<LibraryRootsId, Vec<FileSystemEvent>> =
+            HashMap::new();
+
+        for folder in folders {
+            let (root_id, _root_path) = roots
+                .iter()
+                .find(|(_id, root_path)| folder.starts_with(root_path))
+                .cloned()
+                .ok_or_else(|| {
+                    ScanControlError::internal(format!(
+                        "path {} not within any configured root for library {}",
+                        folder.display(),
+                        library_id
+                    ))
+                })?;
+
+            let path_key = normalize_path(&folder)
+                .map_err(|e| ScanControlError::Internal(e.to_string()))?;
+            let idempotency_key =
+                format!("demo:{}:{}", library_id, Uuid::now_v7());
+
+            by_root.entry(root_id).or_default().push(FileSystemEvent {
+                version: ferrex_core::domain::scan::fs_watch::EVENT_VERSION,
+                correlation_id: Some(correlation_id),
+                idempotency_key,
+                library_id,
+                path_key,
+                fingerprint: None,
+                path: folder,
+                old_path: None,
+                kind: FileSystemEventKind::Created,
+                occurred_at,
+            });
+        }
+
+        for (root_id, events) in by_root {
+            self.inner
+                .orchestrator
+                .command_library(
+                    library_id,
+                    LibraryActorCommand::FsEvents {
+                        root: root_id,
+                        events,
+                        correlation_id: Some(correlation_id),
+                    },
+                )
+                .await
+                .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        }
+
+        Ok(())
     }
 
     pub async fn pause_scan(
@@ -280,6 +428,15 @@ impl ScanControlPlaneInner {
             let mut guard = self.active.write().await;
             guard.insert(run.scan_id(), Arc::clone(&run));
         }
+
+        self.movie_batch_notifiers
+            .on_run_started(
+                run.library_id(),
+                Arc::clone(&self.unit_of_work),
+                Arc::clone(&self.media_bus),
+            )
+            .await;
+
         self.aggregator.register(run).await;
     }
 
@@ -293,6 +450,9 @@ impl ScanControlPlaneInner {
             let mut guard = self.active.write().await;
             guard.remove(&scan_id);
         }
+        self.movie_batch_notifiers
+            .on_run_finished(snapshot.library_id)
+            .await;
         self.aggregator.drop(&correlation_id).await;
 
         let mut history = self.history.write().await;
@@ -417,7 +577,7 @@ struct ScanRunState {
     dead_lettered_items: u64,
     retrying_items: u64,
     current_path: Option<String>,
-    path_key: Option<String>,
+    path_key: Option<SubjectKey>,
     correlation_id: Uuid,
     idempotency_prefix: String,
     event_sequence: u64,
@@ -480,7 +640,7 @@ struct QueuedFrame {
 struct ScanItemState {
     status: ScanItemStatus,
     last_activity: DateTime<Utc>,
-    path_key: Option<String>,
+    path_key: Option<SubjectKey>,
     last_error: Option<String>,
     last_job_id: Option<JobId>,
 }
@@ -634,8 +794,10 @@ impl ScanRun {
         // Gather scanned folder paths
         let mut scanned: Vec<String> = Vec::new();
         for item in state.item_states.values() {
-            if let Some(path) = &item.path_key {
-                scanned.push(path.clone());
+            if let Some(path) = &item.path_key
+                && let Some(path) = subject_key_path(path)
+            {
+                scanned.push(path.to_string());
             }
         }
 
@@ -730,7 +892,8 @@ impl ScanRun {
 
         // Treat this as activity so quiescence waits for indexing to settle
         state.current_path = Some(chosen.clone());
-        state.path_key = Some(chosen.clone());
+        state.path_key = SubjectKey::path(&chosen).ok();
+
         state.last_activity_at = Some(chrono::Utc::now());
 
         tracing::debug!(
@@ -848,7 +1011,7 @@ impl ScanRun {
         &self,
         idempotency_key: &str,
         job_id: JobId,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
         let path = path_key.clone();
@@ -900,7 +1063,10 @@ impl ScanRun {
                     );
 
                     state.last_activity_at = Some(event_time);
-                    state.current_path = path.clone();
+                    state.current_path = path
+                        .as_ref()
+                        .and_then(subject_key_path)
+                        .map(str::to_string);
                     state.path_key = path.clone();
 
                     let mut frames = Vec::new();
@@ -935,7 +1101,7 @@ impl ScanRun {
         &self,
         idempotency_key: &str,
         job_id: JobId,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
         let path = path_key.clone();
@@ -963,7 +1129,10 @@ impl ScanRun {
                     None,
                 );
                 if changed {
-                    state.current_path = path.clone();
+                    state.current_path = path
+                        .as_ref()
+                        .and_then(subject_key_path)
+                        .map(str::to_string);
                     state.path_key = path.clone();
                     state.last_activity_at = Some(event_time);
                     let progress = state.build_payload();
@@ -995,7 +1164,7 @@ impl ScanRun {
         &self,
         idempotency_key: &str,
         job_id: JobId,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
         let path = path_key.clone();
@@ -1027,8 +1196,9 @@ impl ScanRun {
             }
             item.last_activity = event_time;
             if let Some(path_value) = path {
+                let current_path = subject_key_path_owned(&path_value);
                 item.path_key = Some(path_value.clone());
-                state.current_path = Some(path_value.clone());
+                state.current_path = current_path;
                 state.path_key = Some(path_value);
             }
             state.last_activity_at = Some(event_time);
@@ -1040,7 +1210,7 @@ impl ScanRun {
         idempotency_key: &str,
         job_id: JobId,
         error: Option<String>,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
         retryable: bool,
     ) {
         let event_time = Utc::now();
@@ -1077,7 +1247,10 @@ impl ScanRun {
                 );
 
                 if changed {
-                    state.current_path = path.clone();
+                    state.current_path = path
+                        .as_ref()
+                        .and_then(subject_key_path)
+                        .map(str::to_string);
                     state.path_key = path.clone();
                     state.last_activity_at = Some(event_time);
                     let progress = state.build_payload();
@@ -1108,7 +1281,7 @@ impl ScanRun {
         idempotency_key: &str,
         job_id: JobId,
         error: Option<String>,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
     ) {
         let event_time = Utc::now();
         let path = path_key.clone();
@@ -1136,7 +1309,10 @@ impl ScanRun {
                     "record_folder_dead_lettered"
                 );
                 if changed {
-                    state.current_path = path.clone();
+                    state.current_path = path
+                        .as_ref()
+                        .and_then(subject_key_path)
+                        .map(str::to_string);
                     state.path_key = path.clone();
                     state.last_activity_at = Some(event_time);
                     let progress = state.build_payload();
@@ -1357,8 +1533,10 @@ impl ScanRun {
             // Build set of scanned paths
             let mut scanned_paths: HashSet<String> = HashSet::new();
             for item in state.item_states.values() {
-                if let Some(p) = &item.path_key {
-                    scanned_paths.insert(p.clone());
+                if let Some(p) = &item.path_key
+                    && let Some(path) = subject_key_path(p)
+                {
+                    scanned_paths.insert(path.to_string());
                 }
             }
             let is_root = |path: &str| {
@@ -1378,7 +1556,8 @@ impl ScanRun {
             let mut roots_completed = 0u64;
             for item in state.item_states.values() {
                 if let Some(p) = &item.path_key
-                    && is_root(p)
+                    && let Some(path) = subject_key_path(p)
+                    && is_root(path)
                 {
                     roots_total += 1;
                     if matches!(item.status, ScanItemStatus::Completed) {
@@ -1490,7 +1669,7 @@ impl ScanRun {
                     },
                 },
             };
-            let _ = inner.media_tx.send(message);
+            inner.media_bus.publish(message);
         }
     }
 }
@@ -1555,7 +1734,8 @@ impl ScanRunState {
                 ScanItemState {
                     status: ScanItemStatus::Completed,
                     last_activity,
-                    path_key: Some(cursor.folder_path_norm.clone()),
+                    path_key: SubjectKey::path(cursor.folder_path_norm.clone())
+                        .ok(),
                     last_error: None,
                     last_job_id: None,
                 },
@@ -1720,8 +1900,10 @@ impl ScanRunState {
         // Build a set of all tracked folder paths to detect root-level items
         let mut scanned_paths: HashSet<String> = HashSet::new();
         for item in self.item_states.values() {
-            if let Some(p) = &item.path_key {
-                scanned_paths.insert(p.clone());
+            if let Some(p) = &item.path_key
+                && let Some(path) = subject_key_path(p)
+            {
+                scanned_paths.insert(path.to_string());
             }
         }
 
@@ -1746,6 +1928,9 @@ impl ScanRunState {
             let Some(path) = item.path_key.as_ref() else {
                 continue;
             };
+            let Some(path) = subject_key_path(path) else {
+                continue;
+            };
             // Only demote root-level scanned folders based on matching status
             if !is_root_item(path) {
                 continue;
@@ -1756,19 +1941,21 @@ impl ScanRunState {
                 .cloned()
                 .unwrap_or(0);
             if success_count == 0 {
-                to_demote.push((idempotency.clone(), Some(path.clone())));
+                to_demote.push((idempotency.clone(), Some(path.to_string())));
             }
         }
 
         let mut changed = 0usize;
         let mut last_path: Option<String> = None;
         for (idempotency, path) in to_demote {
+            let path_key =
+                path.clone().and_then(|path| SubjectKey::path(path).ok());
             let updated = self.update_item_status(
                 &idempotency,
                 None,
                 ScanItemStatus::DeadLettered,
                 now,
-                path.clone(),
+                path_key,
                 Some("no_root_match".to_string()),
             );
             if updated {
@@ -1789,7 +1976,8 @@ impl ScanRunState {
 
         if changed > 0 {
             self.current_path = last_path.clone();
-            self.path_key = last_path;
+            self.path_key =
+                last_path.and_then(|path| SubjectKey::path(path).ok());
             self.last_activity_at = Some(now);
         }
 
@@ -1851,7 +2039,7 @@ impl ScanRunState {
         job_id: Option<JobId>,
         status: ScanItemStatus,
         event_time: DateTime<Utc>,
-        path_key: Option<String>,
+        path_key: Option<SubjectKey>,
         error: Option<String>,
     ) -> bool {
         match self.item_states.entry(idempotency_key.to_string()) {
@@ -2014,16 +2202,38 @@ struct ScanRunAggregatorInner {
     runs: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     quiescence_chrono: ChronoDuration,
     stall_timeout: ChronoDuration,
-    media_tx: broadcast::Sender<MediaEvent>,
+    media_bus: Arc<MediaEventBus>,
     unit_of_work: Arc<AppUnitOfWork>,
     seen_media: Mutex<HashSet<Uuid>>,
+    series_bundles: Mutex<HashMap<LibraryId, SeriesBundleTrackerEntry>>,
+}
+
+#[derive(Debug)]
+struct SeriesBundleTrackerEntry {
+    tracker: SeriesBundleTracker,
+    last_touched_at: Instant,
+    last_polled_at: Instant,
+}
+
+impl SeriesBundleTrackerEntry {
+    fn new(now: Instant) -> Self {
+        Self {
+            tracker: SeriesBundleTracker::default(),
+            last_touched_at: now,
+            last_polled_at: now,
+        }
+    }
+
+    fn touch(&mut self, now: Instant) {
+        self.last_touched_at = now;
+    }
 }
 
 impl ScanRunAggregator {
     fn new(
         orchestrator: Arc<ScanOrchestrator>,
         quiescence: Duration,
-        media_tx: broadcast::Sender<MediaEvent>,
+        media_bus: Arc<MediaEventBus>,
         unit_of_work: Arc<AppUnitOfWork>,
     ) -> Self {
         let chrono_window = ChronoDuration::from_std(quiescence)
@@ -2038,9 +2248,10 @@ impl ScanRunAggregator {
             runs: RwLock::new(HashMap::new()),
             quiescence_chrono: chrono_window,
             stall_timeout: stall_window,
-            media_tx,
+            media_bus,
             unit_of_work,
             seen_media: Mutex::new(HashSet::new()),
+            series_bundles: Mutex::new(HashMap::new()),
         });
 
         let aggregator = Self {
@@ -2118,6 +2329,55 @@ impl ScanRunAggregatorInner {
                 self.on_run_completed(run.clone()).await;
             }
         }
+
+        self.poll_series_bundle_finalizations().await;
+        self.cleanup_series_bundle_trackers().await;
+    }
+
+    async fn poll_series_bundle_finalizations(&self) {
+        let now = Instant::now();
+
+        let poll_libraries: Vec<LibraryId> = {
+            let mut guard = self.series_bundles.lock().await;
+            let mut out = Vec::new();
+
+            for (library_id, entry) in guard.iter_mut() {
+                if now.duration_since(entry.last_polled_at)
+                    < SERIES_BUNDLE_POLL_INTERVAL
+                {
+                    continue;
+                }
+
+                if entry.tracker.finalization_candidates().is_empty() {
+                    continue;
+                }
+
+                entry.last_polled_at = now;
+                out.push(*library_id);
+            }
+
+            out
+        };
+
+        for library_id in poll_libraries {
+            self.try_emit_series_bundle_finalized(library_id).await;
+        }
+    }
+
+    async fn cleanup_series_bundle_trackers(&self) {
+        let now = Instant::now();
+
+        let active_libraries: HashSet<LibraryId> = {
+            let guard = self.runs.read().await;
+            guard.values().map(|run| run.library_id()).collect()
+        };
+
+        let mut guard = self.series_bundles.lock().await;
+        guard.retain(|library_id, entry| {
+            active_libraries.contains(library_id)
+                || now.duration_since(entry.last_touched_at)
+                    < SERIES_BUNDLE_TRACKER_IDLE_TTL
+        });
     }
 
     async fn handle_job_event(&self, event: JobEvent) {
@@ -2125,6 +2385,8 @@ impl ScanRunAggregatorInner {
             let guard = self.runs.read().await;
             guard.get(&event.meta.correlation_id).cloned()
         };
+
+        self.observe_series_bundle_job_event(&event).await;
 
         if let Some(run) = run {
             let completed = match event.payload {
@@ -2223,31 +2485,296 @@ impl ScanRunAggregatorInner {
         }
     }
 
+    async fn observe_series_bundle_job_event(&self, event: &JobEvent) {
+        let library_id = event.meta.library_id;
+        let now = Instant::now();
+
+        let mut guard = self.series_bundles.lock().await;
+        let entry = guard
+            .entry(library_id)
+            .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+        entry.touch(now);
+        entry.tracker.observe_job_event(event);
+
+        drop(guard);
+
+        match &event.payload {
+            JobEventPayload::Completed { .. }
+            | JobEventPayload::DeadLettered { .. }
+            | JobEventPayload::Failed {
+                retryable: false, ..
+            } => {
+                self.try_emit_series_bundle_finalized(library_id).await;
+            }
+            _ => {}
+        }
+    }
+
     async fn handle_scan_event(&self, event: ScanEvent) {
-        if let ScanEvent::Indexed(outcome) = event {
-            let outcome = *outcome;
-            let ok = self.handle_indexed_outcome(outcome.clone()).await.is_ok();
+        match event {
+            ScanEvent::FolderDiscovered { context, .. } => {
+                self.observe_series_bundle_folder_discovered(&context).await;
+            }
+            ScanEvent::MediaFileDiscovered(event) => {
+                self.observe_series_bundle_media_discovered(&event).await;
+            }
+            ScanEvent::FolderScanCompleted(summary) => {
+                self.observe_series_bundle_folder_completed(&summary).await;
+            }
+            ScanEvent::Indexed(outcome) => {
+                let outcome = *outcome;
+                let result = self.handle_indexed_outcome(outcome.clone()).await;
+                let ok = result.is_ok();
 
-            // Attribute index outcome to any active runs for this library
-            let runs: Vec<Arc<ScanRun>> = {
-                let guard = self.runs.read().await;
-                guard
-                    .values()
-                    .filter(|r| r.library_id() == outcome.library_id)
-                    .cloned()
-                    .collect()
-            };
+                // Attribute index outcome to any active runs for this library
+                let runs: Vec<Arc<ScanRun>> = {
+                    let guard = self.runs.read().await;
+                    guard
+                        .values()
+                        .filter(|r| r.library_id() == outcome.library_id)
+                        .cloned()
+                        .collect()
+                };
 
-            for run in runs {
-                run.record_index_outcome(&outcome.path_norm, ok).await;
+                for run in runs {
+                    run.record_index_outcome(&outcome.path_norm, ok).await;
+                }
+
+                if let Err(err) = result {
+                    warn!(
+                        library = %outcome.library_id,
+                        path = %outcome.path_norm,
+                        error = %err,
+                        "failed to process indexed outcome"
+                    );
+                }
+
+                self.observe_series_bundle_indexed(&outcome).await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn observe_series_bundle_folder_discovered(
+        &self,
+        context: &ferrex_core::domain::scan::orchestration::context::FolderScanContext,
+    ) {
+        let library_id = context.library_id();
+        let now = Instant::now();
+
+        let mut guard = self.series_bundles.lock().await;
+        let entry = guard
+            .entry(library_id)
+            .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+        entry.touch(now);
+        entry.tracker.observe_folder_discovered(context);
+    }
+
+    async fn observe_series_bundle_media_discovered(
+        &self,
+        event: &ferrex_core::domain::scan::MediaFileDiscovered,
+    ) {
+        let library_id = event.library_id;
+        let now = Instant::now();
+
+        let mut guard = self.series_bundles.lock().await;
+        let entry = guard
+            .entry(library_id)
+            .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+        entry.touch(now);
+        entry.tracker.observe_media_discovered(event);
+    }
+
+    async fn observe_series_bundle_folder_completed(
+        &self,
+        summary: &ferrex_core::domain::scan::FolderScanSummary,
+    ) {
+        let library_id = summary.context.library_id();
+        let now = Instant::now();
+
+        let mut guard = self.series_bundles.lock().await;
+        let entry = guard
+            .entry(library_id)
+            .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+        entry.touch(now);
+        entry.tracker.observe_folder_scan_completed(summary);
+
+        drop(guard);
+
+        self.try_emit_series_bundle_finalized(library_id).await;
+    }
+
+    async fn observe_series_bundle_indexed(&self, outcome: &IndexingOutcome) {
+        let library_id = outcome.library_id;
+        let now = Instant::now();
+
+        let mut guard = self.series_bundles.lock().await;
+        let entry = guard
+            .entry(library_id)
+            .or_insert_with(|| SeriesBundleTrackerEntry::new(now));
+        entry.touch(now);
+        entry.tracker.observe_indexed(outcome);
+
+        drop(guard);
+
+        self.try_emit_series_bundle_finalized(library_id).await;
+    }
+
+    async fn try_emit_series_bundle_finalized(&self, library_id: LibraryId) {
+        let candidates: Vec<SeriesBundleFinalization> = {
+            let guard = self.series_bundles.lock().await;
+            guard
+                .get(&library_id)
+                .map(|entry| entry.tracker.finalization_candidates())
+                .unwrap_or_default()
+        };
+
+        for finalization in candidates {
+            if !self
+                .confirm_series_bundle_ready(
+                    finalization.library_id,
+                    finalization.series_id,
+                )
+                .await
+            {
+                continue;
             }
 
-            if !ok {
+            let event = MediaEvent::SeriesBundleFinalized {
+                library_id: finalization.library_id,
+                series_id: finalization.series_id,
+            };
+
+            let receivers = self.media_bus.receiver_count();
+            let frame = self.media_bus.publish(event);
+
+            let mut guard = self.series_bundles.lock().await;
+            if let Some(entry) = guard.get_mut(&library_id) {
+                entry.tracker.mark_finalized(&finalization.series_root_path);
+            }
+
+            info!(
+                library = %finalization.library_id,
+                series_id = %finalization.series_id,
+                series_root = %finalization.series_root_path.as_str(),
+                receivers = receivers,
+                sequence = frame.sequence,
+                "published series bundle finalization"
+            );
+        }
+    }
+
+    async fn confirm_series_bundle_ready(
+        &self,
+        library_id: LibraryId,
+        series_id: ferrex_core::types::SeriesID,
+    ) -> bool {
+        let uow = &self.unit_of_work;
+
+        let (series, seasons, episodes) = tokio::join!(
+            uow.media_refs.get_series_reference(&series_id),
+            uow.media_refs.get_series_seasons(&series_id),
+            uow.media_refs.get_series_episodes(&series_id),
+        );
+
+        let mut series = match series {
+            Ok(series) if series.library_id == library_id => series,
+            Ok(_) => {
                 warn!(
-                    library = %outcome.library_id,
-                    path = %outcome.path_norm,
-                    "failed to process indexed outcome: missing media reference"
+                    library = %library_id,
+                    series_id = %series_id,
+                    "series bundle finalization library mismatch"
                 );
+                return false;
+            }
+            Err(err) => {
+                warn!(
+                    library = %library_id,
+                    series_id = %series_id,
+                    error = %err,
+                    "series bundle finalization failed to hydrate series"
+                );
+                return false;
+            }
+        };
+
+        let seasons = match seasons {
+            Ok(seasons) => seasons,
+            Err(err) => {
+                warn!(
+                    library = %library_id,
+                    series_id = %series_id,
+                    error = %err,
+                    "series bundle finalization failed to hydrate seasons"
+                );
+                return false;
+            }
+        };
+
+        let episodes = match episodes {
+            Ok(episodes) => episodes,
+            Err(err) => {
+                warn!(
+                    library = %library_id,
+                    series_id = %series_id,
+                    error = %err,
+                    "series bundle finalization failed to hydrate episodes"
+                );
+                return false;
+            }
+        };
+
+        // Ensure the server-side versioning record is up to date at the point
+        // we consider a series bundle "finalized".
+        //
+        // This keeps the version monotonic only when the serialized bundle
+        // payload changes, which is what the player-side cache invalidation
+        // relies on.
+        series.details.available_seasons = Some(seasons.len() as u16);
+        series.details.available_episodes = Some(episodes.len() as u16);
+
+        let response = SeriesBundleResponse {
+            library_id,
+            series_id,
+            series,
+            seasons,
+            episodes,
+        };
+
+        let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                warn!(
+                    library = %library_id,
+                    series_id = %series_id,
+                    error = ?err,
+                    "series bundle finalization failed to serialize bundle response"
+                );
+                return false;
+            }
+        };
+
+        let digest = sha2::Sha256::digest(bytes.as_slice());
+        let hash = u64::from_be_bytes(
+            digest[..8]
+                .try_into()
+                .expect("sha256 digest must be at least 8 bytes"),
+        );
+
+        match uow
+            .media_refs
+            .upsert_series_bundle_hash(&library_id, &series_id, hash)
+            .await
+        {
+            Ok(()) => true,
+            Err(err) => {
+                error!(
+                    library = %library_id,
+                    series_id = %series_id,
+                    error = %err,
+                    "failed to upsert series bundle hash during finalization"
+                );
+                false
             }
         }
     }
@@ -2257,14 +2784,9 @@ impl ScanRunAggregatorInner {
         outcome: IndexingOutcome,
     ) -> Result<(), String> {
         let mut media = outcome.media.clone();
-        let media_id = outcome
-            .media_id
-            .or_else(|| media.as_ref().map(Self::media_uuid));
 
-        if media.is_none()
-            && let Some(candidate) = media_id
-        {
-            media = self.load_media(candidate).await;
+        if media.is_none() {
+            media = self.load_media(outcome.media_id).await;
         }
 
         let media = match media {
@@ -2277,10 +2799,8 @@ impl ScanRunAggregatorInner {
             }
         };
 
-        let media_id = media_id.unwrap_or_else(|| Self::media_uuid(&media));
-
         let mut seen = self.seen_media.lock().await;
-        let first_seen = seen.insert(media_id);
+        let first_seen = seen.insert(outcome.media_id.to_uuid());
         drop(seen);
 
         let change = match outcome.change {
@@ -2290,86 +2810,75 @@ impl ScanRunAggregatorInner {
 
         let event = match (media, change) {
             (Media::Movie(movie), IndexingChange::Created) => {
-                MediaEvent::MovieAdded { movie }
+                MediaEvent::MovieAdded { movie: *movie }
             }
             (Media::Movie(movie), IndexingChange::Updated) => {
-                MediaEvent::MovieUpdated { movie }
+                MediaEvent::MovieUpdated { movie: *movie }
             }
             (Media::Series(series), IndexingChange::Created) => {
-                MediaEvent::SeriesAdded { series }
+                MediaEvent::SeriesAdded { series: *series }
             }
             (Media::Series(series), IndexingChange::Updated) => {
-                MediaEvent::SeriesUpdated { series }
+                MediaEvent::SeriesUpdated { series: *series }
             }
-            (Media::Season(season), IndexingChange::Created) => {
-                MediaEvent::SeasonAdded { season }
-            }
-            (Media::Season(season), IndexingChange::Updated) => {
-                MediaEvent::SeasonUpdated { season }
-            }
-            (Media::Episode(episode), IndexingChange::Created) => {
-                MediaEvent::EpisodeAdded { episode }
-            }
-            (Media::Episode(episode), IndexingChange::Updated) => {
-                MediaEvent::EpisodeUpdated { episode }
-            }
+            (_, _) => return Ok(()),
         };
 
-        if let Err(err) = self.media_tx.send(event) {
-            return Err(format!("broadcast error: {err}"));
-        }
+        let _ = self.media_bus.publish(event);
 
         Ok(())
     }
 
-    async fn load_media(&self, uuid: Uuid) -> Option<Media> {
+    async fn load_media(&self, mid: MediaID) -> Option<Media> {
         let media_refs = &self.unit_of_work.media_refs;
 
-        match media_refs.get_movie_reference(&MovieID(uuid)).await {
-            Ok(movie) => return Some(Media::Movie(movie)),
-            Err(MediaError::NotFound(_)) => {}
-            Err(err) => {
-                warn!("failed to hydrate movie reference {uuid}: {err}");
-                return None;
+        match mid {
+            MediaID::Movie(movie_id) => {
+                match media_refs.get_movie_reference(&movie_id).await {
+                    Ok(movie) => Some(Media::Movie(Box::new(movie))),
+                    Err(MediaError::NotFound(_)) => None,
+                    Err(err) => {
+                        warn!("failed to hydrate movie reference {mid}: {err}");
+                        None
+                    }
+                }
             }
-        }
-
-        match media_refs.get_series_reference(&SeriesID(uuid)).await {
-            Ok(series) => return Some(Media::Series(series)),
-            Err(MediaError::NotFound(_)) => {}
-            Err(err) => {
-                warn!("failed to hydrate series reference {uuid}: {err}");
-                return None;
+            MediaID::Series(series_id) => {
+                match media_refs.get_series_reference(&series_id).await {
+                    Ok(series) => Some(Media::Series(Box::new(series))),
+                    Err(MediaError::NotFound(_)) => None,
+                    Err(err) => {
+                        warn!(
+                            "failed to hydrate series reference {mid}: {err}"
+                        );
+                        None
+                    }
+                }
             }
-        }
-
-        match media_refs.get_season_reference(&SeasonID(uuid)).await {
-            Ok(season) => return Some(Media::Season(season)),
-            Err(MediaError::NotFound(_)) => {}
-            Err(err) => {
-                warn!("failed to hydrate season reference {uuid}: {err}");
-                return None;
+            MediaID::Season(season_id) => {
+                match media_refs.get_season_reference(&season_id).await {
+                    Ok(season) => Some(Media::Season(Box::new(season))),
+                    Err(MediaError::NotFound(_)) => None,
+                    Err(err) => {
+                        warn!(
+                            "failed to hydrate season reference {mid}: {err}"
+                        );
+                        None
+                    }
+                }
             }
-        }
-
-        match media_refs.get_episode_reference(&EpisodeID(uuid)).await {
-            Ok(episode) => return Some(Media::Episode(episode)),
-            Err(MediaError::NotFound(_)) => {}
-            Err(err) => {
-                warn!("failed to hydrate episode reference {uuid}: {err}");
-                return None;
+            MediaID::Episode(episode_id) => {
+                match media_refs.get_episode_reference(&episode_id).await {
+                    Ok(episode) => Some(Media::Episode(Box::new(episode))),
+                    Err(MediaError::NotFound(_)) => None,
+                    Err(err) => {
+                        warn!(
+                            "failed to hydrate episode reference {mid}: {err}"
+                        );
+                        None
+                    }
+                }
             }
-        }
-
-        None
-    }
-
-    fn media_uuid(media: &Media) -> Uuid {
-        match media {
-            Media::Movie(movie) => movie.id.0,
-            Media::Series(series) => series.id.0,
-            Media::Season(season) => season.id.0,
-            Media::Episode(episode) => episode.id.0,
         }
     }
 
@@ -2400,11 +2909,12 @@ impl ScanRunAggregatorInner {
     }
 
     async fn handle_orphan_event(&self, event: &JobEvent) {
-        use ferrex_core::scan::orchestration::job::JobKind::FolderScan;
+        use ferrex_core::domain::scan::orchestration::job::JobKind::FolderScan;
 
-        let path_norm = match event.meta.path_key.as_deref() {
-            Some(value) if !value.is_empty() => value,
-            _ => return,
+        let Some(path_norm) =
+            event.meta.path_key.as_ref().and_then(subject_key_path)
+        else {
+            return;
         };
 
         let should_persist = match event.payload {
@@ -2458,7 +2968,7 @@ impl ScanRunAggregatorInner {
                 run.record_folder_completed(
                     &event.meta.idempotency_key,
                     job_id,
-                    Some(path_owned.clone()),
+                    SubjectKey::path(path_owned.clone()).ok(),
                 )
                 .await;
             }

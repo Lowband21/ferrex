@@ -6,27 +6,22 @@
 
 use std::{collections::HashMap, fmt, sync::Arc};
 
+use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
-use ferrex_core::error::{MediaError, Result};
-use ferrex_core::infrastructure::{
-    media::{image_service::ImageService, providers::TmdbApiProvider},
-    scan::{
-        FsWatchConfig, FsWatchService, NoopFsWatchObserver,
-        PostgresCursorRepository, PostgresQueueService,
-    },
+use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
+use ferrex_core::domain::scan::actors::{
+    DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
+    LibraryActorConfig, LibraryRootsId, NoopActorObserver,
+    analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
+    folder::FolderScanActor,
 };
-use ferrex_core::scan::orchestration::{
-    actors::{
-        DefaultFolderScanActor, DefaultIndexerActor, DefaultLibraryActor,
-        DefaultMediaAnalyzeActor, LibraryActorCommand, LibraryActorConfig,
-        LibraryRootsId, NoopActorObserver,
-        folder::FolderScanActor,
-        pipeline::{
-            DefaultImageFetchActor, ImageFetchActor, IndexerActor,
-            MediaAnalyzeActor, MetadataActor, TmdbMetadataActor,
-        },
-    },
+use ferrex_core::domain::scan::image_fetch::{
+    DefaultImageFetchActor, ImageFetchActor,
+};
+use ferrex_core::domain::scan::index::{DefaultIndexerActor, IndexerActor};
+use ferrex_core::domain::scan::metadata::MetadataActor;
+use ferrex_core::domain::scan::orchestration::{
     budget::InMemoryBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
@@ -35,7 +30,7 @@ use ferrex_core::scan::orchestration::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind, JobPriority, JobValidator},
+    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
@@ -43,6 +38,18 @@ use ferrex_core::scan::orchestration::{
         OrchestratorRuntimeBuilder,
     },
     scheduler::ReadyCountEntry,
+    series::{
+        DefaultSeriesResolver, SeriesMetadataProvider, SeriesResolverPort,
+    },
+    series_state::PostgresSeriesScanStateRepository,
+};
+use ferrex_core::domain::scan::{
+    FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+    PostgresCursorRepository, PostgresQueueService, SeriesScanStateRepository,
+};
+use ferrex_core::error::{MediaError, Result};
+use ferrex_core::infra::media::{
+    image_service::ImageService, providers::TmdbApiProvider,
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
@@ -57,7 +64,6 @@ pub struct ScanOrchestrator {
         >,
     >,
     actors: Arc<ActorSystem>,
-    validator: Arc<dyn JobValidator>,
     cursors: Arc<PostgresCursorRepository>,
     events: Arc<InProcJobEventBus>,
     watchers: Arc<FsWatchService>,
@@ -98,11 +104,23 @@ impl ScanOrchestrator {
             actors.image_actor(),
         );
 
+        let series_states: Arc<Box<dyn SeriesScanStateRepository>> =
+            Arc::new(Box::new(PostgresSeriesScanStateRepository::new(
+                queue.pool().clone(),
+            )));
+        let series_resolver: Arc<dyn SeriesResolverPort> =
+            Arc::new(DefaultSeriesResolver::new(
+                actors.series_provider(),
+                Arc::clone(&series_states),
+            ));
+
         let dispatcher: Arc<dyn JobDispatcher> =
             Arc::new(DefaultJobDispatcher::new(
                 Arc::clone(&queue),
                 Arc::clone(&events),
                 Arc::clone(&cursors),
+                Arc::clone(&series_states),
+                Arc::clone(&series_resolver),
                 dispatcher_actors,
                 correlations.clone(),
             ));
@@ -117,7 +135,6 @@ impl ScanOrchestrator {
             .with_correlations(correlations.clone())
             .build()?;
 
-        let validator: Arc<dyn JobValidator> = Arc::new(NoopJobValidator);
         let watchers: Arc<FsWatchService> = Arc::new(FsWatchService::new(
             FsWatchConfig::from(watch_cfg),
             Arc::new(NoopFsWatchObserver),
@@ -126,7 +143,6 @@ impl ScanOrchestrator {
         Ok(Self {
             runtime: Arc::new(runtime),
             actors,
-            validator,
             cursors,
             events,
             watchers,
@@ -223,8 +239,6 @@ impl ScanOrchestrator {
     }
 
     pub async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
-        self.validator.validate(&request)?;
-
         let queue = self.runtime.queue();
         let events = self.runtime.events();
 
@@ -385,9 +399,7 @@ impl ScanOrchestrator {
     }
 
     /// Return ready-queue depths for each job kind to aid diagnostics.
-    pub async fn queue_depths(
-        &self,
-    ) -> Result<ferrex_core::api::scan::ScanQueueDepths> {
+    pub async fn queue_depths(&self) -> Result<ScanQueueDepths> {
         let queue = self.runtime.queue();
         Ok(ferrex_core::api::scan::ScanQueueDepths {
             folder_scan: queue.queue_depth(JobKind::FolderScan).await?,
@@ -432,6 +444,7 @@ pub struct ActorSystem {
     folder_actor: Arc<dyn FolderScanActor>,
     analyze_actor: Arc<dyn MediaAnalyzeActor>,
     metadata_actor: Arc<dyn MetadataActor>,
+    series_provider: Arc<dyn SeriesMetadataProvider>,
     indexer_actor: Arc<dyn IndexerActor>,
     image_actor: Arc<dyn ImageFetchActor>,
     events: Arc<InProcJobEventBus>,
@@ -454,19 +467,22 @@ impl ActorSystem {
     ) -> Self {
         let image_actor: Arc<dyn ImageFetchActor> =
             Arc::new(DefaultImageFetchActor::new(Arc::clone(&image_service)));
-        let metadata_actor: Arc<dyn MetadataActor> =
-            Arc::new(TmdbMetadataActor::new(
-                unit_of_work.media_refs.clone(),
-                unit_of_work.media_files_write.clone(),
-                tmdb,
-                Arc::clone(&image_service),
-            ));
+        let tmdb_actor = Arc::new(TmdbMetadataActor::new(
+            unit_of_work.media_refs.clone(),
+            unit_of_work.media_files_write.clone(),
+            tmdb,
+            Arc::clone(&image_service),
+        ));
+        let metadata_actor: Arc<dyn MetadataActor> = tmdb_actor.clone();
+        let series_provider: Arc<dyn SeriesMetadataProvider> =
+            tmdb_actor.clone();
 
         Self {
             observer: Arc::new(NoopActorObserver),
             folder_actor: Arc::new(DefaultFolderScanActor::new()),
             analyze_actor: Arc::new(DefaultMediaAnalyzeActor::new()),
             metadata_actor,
+            series_provider,
             indexer_actor: Arc::new(DefaultIndexerActor::new(
                 unit_of_work.media_refs.clone(),
             )),
@@ -502,6 +518,10 @@ impl ActorSystem {
         Arc::clone(&self.metadata_actor)
     }
 
+    pub fn series_provider(&self) -> Arc<dyn SeriesMetadataProvider> {
+        Arc::clone(&self.series_provider)
+    }
+
     pub fn indexer_actor(&self) -> Arc<dyn IndexerActor> {
         Arc::clone(&self.indexer_actor)
     }
@@ -510,8 +530,3 @@ impl ActorSystem {
         Arc::clone(&self.image_actor)
     }
 }
-
-#[derive(Clone)]
-struct NoopJobValidator;
-
-impl JobValidator for NoopJobValidator {}

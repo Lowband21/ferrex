@@ -1,4 +1,4 @@
-use crate::users::map_auth_facade_error;
+use crate::handlers::users::map_auth_facade_error;
 use axum::{Extension, Json, extract::State, http::StatusCode};
 use chrono::Utc;
 use ferrex_core::{

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use ferrex_core::database::ports::media_files::MediaFilesReadPort;
+use ferrex_core::database::repository_ports::media_files::MediaFilesReadPort;
 use ffmpeg_next as ffmpeg;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -96,9 +96,9 @@ impl ThumbnailService {
                 )),
             }
         })
-        .await
-        .context("Failed to spawn blocking task")?
-        .context("Failed to extract thumbnail")?;
+            .await
+            .context("Failed to spawn blocking task")?
+            .context("Failed to extract thumbnail")?;
 
         Ok(thumbnail_path)
     }
@@ -580,7 +580,7 @@ fn save_frame_as_jpeg(
 
     // fsync parent directory best-effort after rename
     // Rename; if another writer already produced the file, discard our temp file
-    match fs::rename(&tmp_path, &output_path) {
+    match fs::rename(&tmp_path, output_path) {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = fs::remove_file(&tmp_path);
@@ -591,10 +591,10 @@ fn save_frame_as_jpeg(
             });
         }
     }
-    if let Some(parent) = output_path.parent() {
-        if let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
+    if let Some(parent) = output_path.parent()
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
     }
 
     tracing::debug!("Thumbnail saved to {:?}", output_path);

@@ -45,22 +45,11 @@ pub async fn list_roles_handler(
     let roles = state.unit_of_work().rbac.get_all_roles().await?;
 
     // For each role, get its permissions
-    let mut roles_with_perms = Vec::new();
+    let mut roles_with_perms = Vec::with_capacity(roles.len());
     for role in roles {
-        // This is a simplified version
-        let permissions = state
-            .unit_of_work()
-            .rbac
-            .get_all_permissions()
-            .await?
-            .into_iter()
-            .filter(|_| {
-                // TODO: Add a method to get permissions for a specific role
-                // For now, we'll just return the role without detailed permissions
-                false
-            })
-            .map(|p| p.name)
-            .collect();
+        // TODO: Add a repository method to query permissions for a specific role.
+        // Until then, return the role with an empty permissions list (previous behavior).
+        let permissions = Vec::new();
 
         roles_with_perms.push(RoleWithPermissions { role, permissions });
     }

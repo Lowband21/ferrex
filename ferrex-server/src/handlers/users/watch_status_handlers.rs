@@ -10,8 +10,8 @@ use ferrex_core::{
     api::types::ApiResponse,
     domain::users::user::User,
     domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
-    types::MediaType,
 };
+use ferrex_model::VideoMediaType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -241,7 +241,7 @@ pub async fn mark_completed_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(media_id): Path<Uuid>,
-    Path(media_type): Path<MediaType>,
+    Path(media_type): Path<VideoMediaType>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     // Create a progress update request with 100% completion
     let request = UpdateProgressRequest {

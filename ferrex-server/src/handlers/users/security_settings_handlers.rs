@@ -1,20 +1,23 @@
-use axum::{Extension, Json, extract::State};
 use ferrex_core::{
     api::types::ApiResponse,
-    database::ports::security_settings::SecuritySettingsUpdate,
+    database::repository_ports::security_settings::SecuritySettingsUpdate,
     domain::users::{
         auth::policy::{PasswordPolicy, PasswordPolicyRule},
         user::User,
     },
 };
+
+use crate::{
+    handlers::users::setup::PasswordPolicyResponse,
+    infra::{
+        app_state::AppState,
+        errors::{AppError, AppResult},
+    },
+};
+
+use axum::{Extension, Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-
-use crate::infra::{
-    app_state::AppState,
-    errors::{AppError, AppResult},
-};
-use crate::users::setup::setup::PasswordPolicyResponse;
 
 #[derive(Debug, Serialize)]
 pub struct SecuritySettingsResponse {

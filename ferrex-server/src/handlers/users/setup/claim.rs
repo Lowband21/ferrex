@@ -1,26 +1,23 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use crate::handlers::users::UserService;
+use crate::infra::{
+    app_state::AppState,
+    errors::{AppError, AppResult},
+};
 use axum::{
     Json,
     extract::{ConnectInfo, State},
 };
-use ferrex_core::{
-    api::types::{
-        ApiResponse,
-        setup::{
-            ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
-            StartClaimResponse,
-        },
+use ferrex_core::api::types::{
+    ApiResponse,
+    setup::{
+        ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,
+        StartClaimResponse,
     },
-    setup::{ConfirmedClaim, SetupClaimError, StartedClaim},
 };
-
-use crate::{
-    infra::{
-        app_state::AppState,
-        errors::{AppError, AppResult},
-    },
-    users::UserService,
+use ferrex_core::domain::setup::{
+    ConfirmedClaim, SetupClaimError, StartedClaim,
 };
 
 pub async fn start_secure_claim(

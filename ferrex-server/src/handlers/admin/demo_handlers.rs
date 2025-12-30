@@ -37,3 +37,35 @@ pub async fn reset(
     let status = coordinator.describe().await;
     Ok(Json(ApiResponse::success(status)))
 }
+
+pub async fn resize(
+    State(state): State<AppState>,
+    Json(body): Json<DemoResetRequest>,
+) -> AppResult<Json<ApiResponse<DemoStatus>>> {
+    let Some(coordinator) = state.demo().clone() else {
+        return Err(AppError::not_found("demo mode is not enabled"));
+    };
+
+    if body.is_empty() {
+        return Err(AppError::bad_request(
+            "Specify a size for movies, series, or both",
+        ));
+    }
+
+    let overrides = DemoSizeOverrides::from(body);
+    let scan_control = state.scan_control();
+
+    coordinator
+        .resize(
+            state.unit_of_work().clone(),
+            scan_control.as_ref(),
+            overrides,
+        )
+        .await
+        .map_err(|err| {
+            AppError::internal(format!("failed to resize demo data: {}", err))
+        })?;
+
+    let status = coordinator.describe().await;
+    Ok(Json(ApiResponse::success(status)))
+}

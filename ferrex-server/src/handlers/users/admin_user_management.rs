@@ -20,10 +20,10 @@ use serde_json::json;
 use sqlx::types::ipnetwork::IpNetwork;
 use uuid::Uuid;
 
+use crate::handlers::users::user_management::map_auth_facade_error;
+use crate::handlers::users::{CreateUserParams, UpdateUserParams, UserService};
 use crate::infra::app_state::AppState;
 use crate::infra::errors::{AppError, AppResult};
-use crate::users::user_management::map_auth_facade_error;
-use crate::users::{CreateUserParams, UpdateUserParams, UserService};
 use ferrex_core::api::types::users_admin::{
     AdminUserInfo, CreateUserRequest, UpdateUserRequest,
 };
@@ -282,9 +282,9 @@ async fn record_admin_action(
         metadata,
         ip
     )
-    .execute(state.postgres().pool())
-    .await
-    .map_err(AppError::from)?;
+        .execute(state.postgres().pool())
+        .await
+        .map_err(AppError::from)?;
     Ok(())
 }
 
@@ -317,8 +317,8 @@ async fn record_security_event(
         success,
         error_message
     )
-    .execute(state.postgres().pool())
-    .await
-    .map_err(AppError::from)?;
+        .execute(state.postgres().pool())
+        .await
+        .map_err(AppError::from)?;
     Ok(())
 }

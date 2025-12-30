@@ -8,18 +8,21 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 
 use ferrex_core::api::routes::v1;
-use ferrex_server::users::setup::claim::reset_claim_rate_limiter_for_tests;
+use ferrex_server::handlers::users::setup::claim::reset_claim_rate_limiter_for_tests;
+use ferrex_server::infra::startup::NoopStartupHooks;
 
-#[path = "support/mod.rs"]
-mod support;
-use support::build_test_app;
+mod common;
+use common::build_test_app_with_hooks;
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn claim_flow_allows_admin_creation(pool: PgPool) -> Result<()> {
     reset_claim_rate_limiter_for_tests().await;
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir; // keep temp directory alive for test lifetime
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
         router.into_make_service_with_connect_info::<SocketAddr>();
@@ -78,9 +81,12 @@ async fn claim_flow_allows_admin_creation(pool: PgPool) -> Result<()> {
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn claim_reset_revokes_pending_codes(pool: PgPool) -> Result<()> {
     reset_claim_rate_limiter_for_tests().await;
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir; // keep temp directory alive for test lifetime
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
         router.into_make_service_with_connect_info::<SocketAddr>();

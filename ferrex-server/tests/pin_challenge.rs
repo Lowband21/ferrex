@@ -10,20 +10,23 @@ use ferrex_core::{
     },
     player_prelude::User,
 };
+use ferrex_server::infra::startup::NoopStartupHooks;
 use serde_json::json;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[path = "support/mod.rs"]
-mod support;
-use support::build_test_app;
+mod common;
+use common::build_test_app_with_hooks;
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn pin_challenge_returns_server_managed_salt(pool: PgPool) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir;
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
         router.into_make_service_with_connect_info::<SocketAddr>();

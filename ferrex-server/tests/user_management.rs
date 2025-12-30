@@ -6,14 +6,13 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use ferrex_core::api::routes::{self, utils as route_utils};
 use ferrex_server::infra::app_state::AppState;
+use ferrex_server::infra::startup::NoopStartupHooks;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[path = "support/mod.rs"]
-mod support;
-
-use support::build_test_app;
+mod common;
+use common::build_test_app_with_hooks;
 
 fn bearer(token: &str) -> String {
     format!("Bearer {}", token)
@@ -69,9 +68,12 @@ async fn promote_to_admin(state: &AppState, user_id: Uuid) -> Result<()> {
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir;
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
 
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
@@ -129,9 +131,12 @@ async fn user_management_requires_permissions(pool: PgPool) -> Result<()> {
 async fn admin_user_crud_flow_enforces_audit_expectations(
     pool: PgPool,
 ) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir;
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
 
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
@@ -337,8 +342,12 @@ async fn admin_user_crud_flow_enforces_audit_expectations(
 async fn admin_endpoints_record_audit_logs(pool: PgPool) -> Result<()> {
     use ferrex_core::api::routes::v1;
 
-    let app = build_test_app(pool).await?;
-    let (router, state, _tempdir) = app.into_parts();
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
+    let (router, state, tempdir) = app.into_parts();
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
 
     let router: Router<()> = router.with_state(state.clone());
     let make_service =

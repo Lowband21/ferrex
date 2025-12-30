@@ -7,10 +7,8 @@ use axum::{
 use chrono::Utc;
 use ferrex_core::api::types::ApiResponse;
 use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
-use ferrex_core::{
-    domain::{users::user::User, watch::UpdateProgressRequest},
-    types::MediaType,
-};
+use ferrex_core::domain::{users::user::User, watch::UpdateProgressRequest};
+use ferrex_model::VideoMediaType;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio_util::io::ReaderStream;
@@ -238,7 +236,7 @@ pub async fn playback_ticket_handler(
 pub async fn report_progress_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path((media_type, media_id)): Path<(MediaType, Uuid)>,
+    Path((media_type, media_id)): Path<(VideoMediaType, Uuid)>,
     Json(progress): Json<ProgressReport>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     // Create update request

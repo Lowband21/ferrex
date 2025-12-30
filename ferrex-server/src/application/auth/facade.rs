@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Error as AnyhowError;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
-    database::ports::users::UsersRepository,
+    database::repository_ports::users::UsersRepository,
     domain::users::{
         auth::domain::{
             aggregates::DeviceSession,

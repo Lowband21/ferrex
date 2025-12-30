@@ -3,4 +3,4 @@ pub mod handle_websocket;
 pub mod media;
 pub mod scan;
 pub mod stream;
-//pub mod user;
+pub mod users;

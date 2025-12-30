@@ -127,7 +127,7 @@ struct CachedDecision {
 /// Configuration update message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum ConfigUpdate {
-    EndpointLimits(EndpointLimits),
+    EndpointLimits(Box<EndpointLimits>),
     TrustedSources(TrustedSources),
     DynamicRule {
         endpoint: String,
@@ -259,7 +259,7 @@ impl RedisRateLimiter {
                     let mut guard = config_updates.write().await;
                     match update {
                         ConfigUpdate::EndpointLimits(limits) => {
-                            guard.endpoint_limits = limits;
+                            guard.endpoint_limits = *limits;
                         }
                         ConfigUpdate::TrustedSources(sources) => {
                             guard.trusted_sources = sources;

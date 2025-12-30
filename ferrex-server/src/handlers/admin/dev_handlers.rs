@@ -4,18 +4,27 @@
 //! including database reset functionality. Reset functionality requires
 //! admin permissions to prevent accidental data loss.
 
-use crate::infra::app_state::AppState;
-use crate::infra::errors::{AppError, AppResult};
+use ferrex_model::MovieReferenceBatchSize;
+
+use ferrex_core::{
+    api::types::ApiResponse,
+    domain::users::user::User,
+    types::{LibraryId, LibraryType, library::Library},
+};
+
+use crate::{
+    handlers::users::{UserService, user_service::CreateUserParams},
+    infra::{
+        app_state::AppState,
+        demo_mode,
+        errors::{AppError, AppResult},
+    },
+};
+
 use axum::{Extension, Json, extract::State};
-use ferrex_core::types::library::Library;
-use ferrex_core::types::{LibraryId, LibraryType};
-use ferrex_core::{api::types::ApiResponse, domain::users::user::User};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{info, warn};
-
-use crate::users::UserService;
-use crate::users::user_service::CreateUserParams;
 
 /// Response for reset check endpoint
 #[derive(Debug, Serialize)]
@@ -102,6 +111,7 @@ pub async fn check_reset_status(
         .map_err(|e| {
             AppError::internal(format!("Failed to get libraries: {}", e))
         })?;
+    let libraries = demo_mode::filter_libraries(&state, libraries);
 
     // Get media count (this is a simplified count - you might want to add a dedicated method)
     let media_count = 0; // TODO: Implement actual media count
@@ -210,6 +220,7 @@ pub async fn reset_database(
             .map_err(|e| {
             AppError::internal(format!("Failed to get libraries: {}", e))
         })?;
+        let libraries = demo_mode::filter_libraries(&state, libraries);
         result.libraries_deleted = libraries.len();
 
         // Delete all libraries
@@ -371,6 +382,7 @@ pub async fn seed_database(
             watch_for_changes: false,
             analyze_on_scan: true,
             max_retry_attempts: 3,
+            movie_ref_batch_size: MovieReferenceBatchSize::default(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             media: None,

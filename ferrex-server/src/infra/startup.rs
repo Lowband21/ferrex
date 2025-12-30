@@ -6,13 +6,11 @@ use async_trait::async_trait;
 use tracing::info;
 use tracing::warn;
 
-use crate::{
-    infra::{app_context::AppContext, app_state::AppState},
-    users::UserService,
-};
+use crate::infra::{app_context::AppContext, app_state::AppState};
 
 #[cfg(feature = "demo")]
 use crate::demo::DemoCoordinator;
+use crate::handlers::users::UserService;
 
 #[async_trait]
 pub trait StartupHooks: Send + Sync {

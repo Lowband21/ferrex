@@ -1,23 +1,24 @@
 use std::{fmt, sync::Arc};
 
+#[cfg(feature = "demo")]
+use crate::demo::DemoCoordinator;
+use crate::infra::thumbnail_service::ThumbnailService;
 use crate::{
     application::auth::AuthApplicationFacade,
     infra::{
         config::Config, scan::scan_manager::ScanControlPlane,
         websocket::ConnectionManager,
     },
-    media::prep::thumbnail_service::ThumbnailService,
 };
+use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
-    database::{PostgresDatabase, ports::setup_claims::SetupClaimsRepository},
+    database::{
+        PostgresDatabase, repository_ports::setup_claims::SetupClaimsRepository,
+    },
     domain::users::auth::AuthCrypto,
-    infrastructure::media::image_service::ImageService,
-    setup::SetupClaimService,
+    infra::media::image_service::ImageService,
 };
-
-#[cfg(feature = "demo")]
-use crate::demo::DemoCoordinator;
 
 #[derive(Clone)]
 pub struct AppContext {

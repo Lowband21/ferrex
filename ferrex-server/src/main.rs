@@ -24,7 +24,7 @@
 use ferrex_core::{
     database::{
         PostgresDatabase, context::DatabaseContext,
-        ports::media_files::MediaFileFilter,
+        repository_ports::media_files::MediaFileFilter,
     },
     domain::users::auth::{
         AuthCrypto,
@@ -44,11 +44,7 @@ use ferrex_core::{
             PostgresRefreshTokenRepository, PostgresUserAuthRepository,
         },
     },
-    infrastructure::media::{
-        image_service::ImageService, providers::TmdbApiProvider,
-    },
-    scan::orchestration::LibraryActorConfig,
-    setup::SetupClaimService,
+    infra::media::{image_service::ImageService, providers::TmdbApiProvider},
     types::LibraryReference,
 };
 
@@ -58,6 +54,7 @@ use ferrex_server::{
     infra::{
         app_context::AppContext,
         app_state::AppState,
+        cache::{MovieBatchesCache, SeriesBundlesCache},
         config::{
             Config, ConfigLoad, ConfigLoader, HstsSettings, RateLimitSource,
             loader::db_url::{
@@ -69,13 +66,11 @@ use ferrex_server::{
         startup::{ProdStartupHooks, StartupHooks},
         websocket,
     },
-    media::prep::thumbnail_service::ThumbnailService,
     routes,
-    users::auth::tls::{TlsCertConfig, create_tls_acceptor},
 };
 
 #[cfg(feature = "demo")]
-use ferrex_server::{db::prepare_demo_database, demo::DemoCoordinator};
+use ferrex_server::{db::derive_demo_database_url, demo::DemoCoordinator};
 
 use anyhow::Context;
 use axum::{
@@ -88,6 +83,12 @@ use axum::{
 };
 use chrono::Utc;
 use clap::{Args as ClapArgs, Parser, Subcommand};
+use ferrex_core::domain::scan::orchestration::LibraryActorConfig;
+use ferrex_core::domain::setup::SetupClaimService;
+use ferrex_server::handlers::users::auth::tls::{
+    TlsCertConfig, create_tls_acceptor,
+};
+use ferrex_server::infra::thumbnail_service::ThumbnailService;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc,
@@ -339,7 +340,7 @@ async fn load_runtime_config(
     }
 
     #[allow(unused_mut)]
-    let (mut database_url, mut url_source): (String, &str) =
+    let (mut database_url, _url_source): (String, &str) =
         match resolve_effective_database_url_with_source(&config) {
             Some((url, DatabaseUrlSource::Config)) => (url, "config"),
             Some((url, DatabaseUrlSource::Env)) => (url, "PG env"),
@@ -357,8 +358,7 @@ async fn load_runtime_config(
 
     #[cfg(feature = "demo")]
     if demo_coordinator.is_some() {
-        database_url = prepare_demo_database(&database_url).await?;
-        url_source = "demo";
+        database_url = derive_demo_database_url(&database_url)?;
         config.database.primary_url = Some(database_url.clone());
     }
 
@@ -371,7 +371,7 @@ async fn load_runtime_config(
         ));
     }
 
-    info!("Connecting to PostgreSQL via {}", url_source);
+    info!("Connecting to PostgreSQL at url: {}", database_url);
 
     config.database.primary_url = Some(database_url.clone());
 
@@ -466,7 +466,7 @@ async fn wire_app_resources(
     let image_service = Arc::new(ImageService::new_with_concurrency(
         unit_of_work.media_files_read.clone(),
         unit_of_work.images.clone(),
-        config.cache_root().to_path_buf(),
+        config.image_cache_dir().to_path_buf(),
         download_concurrency,
     ));
 
@@ -486,6 +486,18 @@ async fn wire_app_resources(
         .list_libraries()
         .await
         .map_err(|err| anyhow::anyhow!("failed to list libraries: {err}"))?;
+
+    #[cfg(feature = "demo")]
+    let libraries: Vec<_> = if demo_coordinator.is_some() {
+        libraries
+            .into_iter()
+            .filter(|library| {
+                ferrex_core::domain::demo::is_demo_library(&library.id)
+            })
+            .collect()
+    } else {
+        libraries
+    };
 
     let mut watch_enabled = 0usize;
     for library in &libraries {
@@ -614,7 +626,12 @@ async fn wire_app_resources(
         demo_coordinator,
     ));
 
-    let state = AppState::new(Arc::clone(&app_context), admin_sessions);
+    let state = AppState::new(
+        Arc::clone(&app_context),
+        admin_sessions,
+        Arc::new(SeriesBundlesCache::new()),
+        Arc::new(MovieBatchesCache::new()),
+    );
 
     Ok(ResourceBootstrap {
         context: app_context,
@@ -800,7 +817,7 @@ where
                 config.server.host, config.server.port
             );
             warn!(
-                "TLS is not configured. For production use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables."
+                "TLS is not configured. For WAN use, set TLS_CERT_PATH and TLS_KEY_PATH environment variables."
             );
 
             let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -853,14 +870,7 @@ pub fn create_app(state: AppState, https_terminates_here: bool) -> Router {
                                     .map(|m: &MatchedPath| m.as_str().to_string());
                                 let limits = configured_limits.clone();
                                 let rule_opt = matched.as_deref().and_then(|p| {
-                                    if p == v1::auth::LOGIN || p == v1::auth::device::LOGIN { Some(limits.login) }
-                                    else if p == v1::auth::REGISTER { Some(limits.register) }
-                                    else if p == v1::auth::REFRESH { Some(limits.token_refresh) }
-                                    else if p == v1::auth::device::PIN_LOGIN || p == v1::auth::device::PIN_CHALLENGE { Some(limits.pin_auth) }
-                                    else if p == v1::setup::CLAIM_START { Some(limits.setup_start) }
-                                    else if p == v1::setup::CLAIM_CONFIRM { Some(limits.setup_confirm) }
-                                    else if p == v1::setup::CREATE_ADMIN { Some(limits.setup_create_admin) }
-                                    else { None }
+                                    if p == v1::auth::LOGIN || p == v1::auth::device::LOGIN { Some(limits.login) } else if p == v1::auth::REGISTER { Some(limits.register) } else if p == v1::auth::REFRESH { Some(limits.token_refresh) } else if p == v1::auth::device::PIN_LOGIN || p == v1::auth::device::PIN_CHALLENGE { Some(limits.pin_auth) } else if p == v1::setup::CLAIM_START { Some(limits.setup_start) } else if p == v1::setup::CLAIM_CONFIRM { Some(limits.setup_confirm) } else if p == v1::setup::CREATE_ADMIN { Some(limits.setup_create_admin) } else { None }
                                 });
 
                                 let Some(rule) = rule_opt else { return Ok::<_, StatusCode>(next.run(req).await); };
@@ -1138,6 +1148,7 @@ async fn health_handler(
     // Check disk space for cache directories
     health_status["checks"]["cache_directories"] = json!({
         "status": "healthy",
+        "image_cache": state.config().image_cache_dir().exists(),
         "thumbnail_cache": state.config().thumbnail_cache_dir().exists(),
         "transcode_cache": state.config().transcode_cache_dir().exists()
     });

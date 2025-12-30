@@ -1,10 +1,13 @@
 pub mod app_context;
 pub mod app_state;
+pub mod cache;
 pub mod config;
 pub mod constants;
+pub mod demo_mode;
 pub mod errors;
 pub mod middleware;
 pub mod orchestration;
 pub mod scan;
 pub mod startup;
+pub mod thumbnail_service;
 pub mod websocket;

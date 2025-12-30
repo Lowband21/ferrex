@@ -16,13 +16,13 @@ use serde::Deserialize;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::handlers::users::{UserService, user_service::UpdateUserParams};
 use crate::{
     application::auth::AuthFacadeError,
     infra::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
-    users::{UserService, user_service::UpdateUserParams},
 };
 
 /// List all users with full information (authenticated endpoint)

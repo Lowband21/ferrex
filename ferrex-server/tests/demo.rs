@@ -8,17 +8,18 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use ferrex_core::demo::{DemoLibraryPlan, DemoSeedOptions, DemoSeedPlan};
+use ferrex_core::domain::demo::{
+    DemoLibraryPlan, DemoSeedOptions, DemoSeedPlan,
+};
 use ferrex_core::types::library::LibraryType;
-use ferrex_server::db::{DEMO_DATABASE_NAME, prepare_demo_database};
+use ferrex_server::db::{DEMO_DATABASE_NAME, derive_demo_database_url};
 use ferrex_server::demo::{DemoCoordinator, DemoPlanProvider};
-use reqwest::Url;
+use ferrex_server::infra::startup::NoopStartupHooks;
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
 
-#[path = "support/mod.rs"]
-mod support;
-use support::build_test_app;
+use crate::common::build_test_app_with_hooks;
+
+mod common;
 
 #[derive(Clone)]
 struct LibraryTemplate {
@@ -121,9 +122,12 @@ fn demo_plan_sequences() -> Vec<PlanTemplate> {
 async fn demo_reset_preserves_libraries_and_cleans_files(
     pool: PgPool,
 ) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (_router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir; // keep alive
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
 
     let plan_provider: Arc<dyn DemoPlanProvider> =
         Arc::new(QueuePlanProvider::new(demo_plan_sequences()));
@@ -188,7 +192,8 @@ async fn demo_reset_preserves_libraries_and_cleans_files(
         "demo files remain zero-length to support fake filesystem"
     );
 
-    let policy = ferrex_core::demo::policy().expect("demo policy initialised");
+    let policy =
+        ferrex_core::domain::demo::policy().expect("demo policy initialised");
     assert!(
         policy.allow_zero_length_files,
         "demo policy should allow zero-length media"
@@ -197,53 +202,13 @@ async fn demo_reset_preserves_libraries_and_cleans_files(
     Ok(())
 }
 
-#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
-async fn prepare_demo_database_recreates_database(_pool: PgPool) -> Result<()> {
-    let raw_base_url = std::env::var("DATABASE_URL")
-        .context("DATABASE_URL should be set for sqlx::test")?;
-    let mut base_url =
-        Url::parse(&raw_base_url).context("DATABASE_URL must be valid URL")?;
-    let current_db = base_url.path().trim_start_matches('/');
-
-    if current_db.is_empty()
-        || current_db.eq_ignore_ascii_case(DEMO_DATABASE_NAME)
-    {
-        base_url.set_path("/ferrex_demo_test_primary");
-    }
-
-    let base_url: String = base_url.into();
-
-    let demo_url = prepare_demo_database(&base_url).await?;
-
-    let demo_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&demo_url)
-        .await
-        .context("connect to freshly created demo database")?;
-    sqlx::query("CREATE TABLE demo_marker(id INT)")
-        .execute(&demo_pool)
-        .await
-        .context("seed marker table in demo database")?;
-    demo_pool.close().await;
-
-    prepare_demo_database(&base_url).await?;
-
-    let demo_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&demo_url)
-        .await
-        .context("reconnect to recreated demo database")?;
-    let marker_exists =
-        sqlx::query("SELECT 1 FROM pg_tables WHERE tablename = 'demo_marker'")
-            .fetch_optional(&demo_pool)
-            .await
-            .context("probe demo database for marker table")?;
-    demo_pool.close().await;
-
+#[test]
+fn derive_demo_database_url_rewrites_database_name() -> Result<()> {
+    let base_url = "postgresql://user:pass@localhost:5432/ferrex";
+    let demo_url = derive_demo_database_url(base_url)?;
     assert!(
-        marker_exists.is_none(),
-        "demo database should be recreated from scratch"
+        demo_url.ends_with(&format!("/{DEMO_DATABASE_NAME}")),
+        "demo url should end with reserved demo database name"
     );
-
     Ok(())
 }

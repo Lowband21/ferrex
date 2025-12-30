@@ -273,7 +273,7 @@ async fn handle_sync_message(
 
 /// Handle user disconnect
 async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
-    // Get room code before removing connection
+    // Get room code before removing the connection
     let room_code = match state.websocket_manager().get_connection(&conn_id) {
         Some(conn) => conn.get_room_code().await,
         _ => None,
@@ -293,7 +293,7 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
             )
             .await;
 
-        // Check if host left and migrate if needed
+        // Check if the host left and migrate if needed
         if let Some(mut session) = state
             .unit_of_work()
             .sync_sessions
@@ -306,7 +306,7 @@ async fn handle_disconnect(state: &AppState, conn_id: Uuid, user: &User) {
                 // Remove leaving user from participants
                 session.remove_participant(user.id);
 
-                // Migrate host to next participant if any
+                // Migrate host to the next participant if any
                 if let Some(new_host) = session.participants.first() {
                     session.host_id = new_host.user_id;
 

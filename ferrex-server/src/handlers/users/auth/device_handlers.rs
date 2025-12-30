@@ -31,13 +31,13 @@ use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::handlers::users::map_auth_facade_error;
 use crate::{
     application::auth::AuthFacadeError,
     infra::{
         app_state::AppState,
         errors::{AppError, AppResult},
     },
-    users::map_auth_facade_error,
 };
 use ferrex_core::domain::users::auth::domain::services::AuthenticationError as CoreAuthError;
 
@@ -584,10 +584,11 @@ fn build_event_context(headers: &HeaderMap) -> AuthEventContext {
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
-    let mut context = AuthEventContext::default();
-    context.ip_address = ip_address;
-    context.user_agent = user_agent;
-    context
+    AuthEventContext {
+        ip_address,
+        user_agent,
+        ..Default::default()
+    }
 }
 
 fn device_session_to_device_registration(

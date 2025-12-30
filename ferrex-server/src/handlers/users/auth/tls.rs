@@ -13,7 +13,7 @@ use rustls::crypto::CryptoProvider;
 use rustls::version::TLS13;
 use rustls::{CipherSuite, ServerConfig};
 use rustls::{DEFAULT_VERSIONS, SupportedProtocolVersion};
-use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use std::{
     fmt,
@@ -305,7 +305,7 @@ impl TlsConfigManager {
                     let der = cert.serialize_der().map_err(|e| {
                         TlsError::CertificateParseFailed(e.to_string())
                     })?;
-                    return Ok(vec![CertificateDer::from(der)]);
+                    Ok(vec![CertificateDer::from(der)])
                 }
                 #[cfg(not(test))]
                 {
@@ -314,6 +314,7 @@ impl TlsConfigManager {
                     ))
                 }
             }
+            #[allow(unused_variables)]
             Err(e) => {
                 #[cfg(test)]
                 {
@@ -327,7 +328,7 @@ impl TlsConfigManager {
                     let der = cert.serialize_der().map_err(|e2| {
                         TlsError::CertificateParseFailed(e2.to_string())
                     })?;
-                    return Ok(vec![CertificateDer::from(der)]);
+                    Ok(vec![CertificateDer::from(der)])
                 }
                 #[cfg(not(test))]
                 {
@@ -379,13 +380,14 @@ impl TlsConfigManager {
         // As a last resort in tests, synthesize a key
         #[cfg(test)]
         {
+            use rustls::pki_types::PrivatePkcs8KeyDer;
             let cert = rcgen::generate_simple_self_signed([
                 "localhost".to_string()
             ])
             .map_err(|e| TlsError::PrivateKeyParseFailed(e.to_string()))?;
             let der = cert.serialize_private_key_der();
             let pkcs8 = PrivatePkcs8KeyDer::from(der);
-            return Ok(PrivateKeyDer::from(pkcs8));
+            Ok(PrivateKeyDer::from(pkcs8))
         }
 
         #[cfg(not(test))]

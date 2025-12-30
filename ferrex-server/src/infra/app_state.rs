@@ -8,13 +8,15 @@ use uuid::Uuid;
 
 use crate::application::auth::AuthApplicationFacade;
 use crate::infra::app_context::AppContext;
+use crate::infra::cache::{MovieBatchesCache, SeriesBundlesCache};
 use crate::infra::config::Config;
 use crate::infra::scan::scan_manager::ScanControlPlane;
+use crate::infra::thumbnail_service::ThumbnailService;
 use crate::infra::websocket::ConnectionManager;
-use crate::media::prep::thumbnail_service::ThumbnailService;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
-use ferrex_core::database::ports::setup_claims::SetupClaimsRepository;
+use ferrex_core::database::repository_ports::setup_claims::SetupClaimsRepository;
+use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::domain::users::auth::{
     AuthCrypto,
     domain::{
@@ -24,8 +26,7 @@ use ferrex_core::domain::users::auth::{
         value_objects::SessionScope,
     },
 };
-use ferrex_core::infrastructure::media::image_service::ImageService;
-use ferrex_core::setup::SetupClaimService;
+use ferrex_core::infra::media::image_service::ImageService;
 
 #[cfg(feature = "demo")]
 use crate::demo::DemoCoordinator;
@@ -35,6 +36,8 @@ pub struct AppState {
     context: Arc<AppContext>,
     /// Track admin sessions per device for PIN authentication eligibility
     pub admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
+    pub series_bundles_cache: Arc<SeriesBundlesCache>,
+    pub movie_batches_cache: Arc<MovieBatchesCache>,
 }
 
 impl fmt::Debug for AppState {
@@ -73,10 +76,14 @@ impl AppState {
     pub fn new(
         context: Arc<AppContext>,
         admin_sessions: Arc<Mutex<HashMap<Uuid, AdminSessionInfo>>>,
+        series_bundles_cache: Arc<SeriesBundlesCache>,
+        movie_batches_cache: Arc<MovieBatchesCache>,
     ) -> Self {
         Self {
             context,
             admin_sessions,
+            series_bundles_cache,
+            movie_batches_cache,
         }
     }
 

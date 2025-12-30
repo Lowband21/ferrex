@@ -1,26 +1,35 @@
-pub use crate::db::{derive_demo_database_url, prepare_demo_database};
-use crate::{
-    infra::{app_state::AppState, config::Config},
-    users::{UserService, user_service::CreateUserParams},
-};
+pub use crate::db::derive_demo_database_url;
+use crate::infra::scan::scan_manager::ScanControlPlane;
+use crate::infra::{app_state::AppState, config::Config};
 
+use ferrex_core::domain::scan::normalize_path;
 use ferrex_core::{
     api::types::{DemoLibraryStatus, DemoResetRequest, DemoStatus},
     application::unit_of_work::AppUnitOfWork,
-    demo::{self, DemoSeedOptions},
+    domain::scan::scanner::StructurePlan,
     domain::users::rbac::roles,
-    infrastructure::providers::TmdbApiProvider,
+    infra::providers::TmdbApiProvider,
     types::{LibraryId, library::LibraryType},
 };
 
+use crate::handlers::users::{UserService, user_service::CreateUserParams};
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use ferrex_core::domain::demo::{self, DemoSeedOptions};
 use std::{
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::Mutex;
 use tracing::warn;
+
+mod resize;
+use resize::{
+    create_zero_length_files, current_folder_names_on_disk, ensure_within_root,
+    merge_structure_into_plan, primary_item_paths_on_disk, remove_fs_item,
+    remove_item_subtree, structure_nodes_to_paths,
+};
 
 #[async_trait]
 pub trait DemoPlanProvider: Send + Sync {
@@ -29,6 +38,46 @@ pub trait DemoPlanProvider: Send + Sync {
         root: &Path,
         options: &DemoSeedOptions,
     ) -> Result<demo::DemoSeedPlan>;
+
+    async fn generate_movie_structure(
+        &self,
+        library_root: &Path,
+        count: usize,
+        language: Option<&str>,
+        region: Option<&str>,
+        forbidden_folder_names: &std::collections::HashSet<String>,
+    ) -> Result<StructurePlan> {
+        let _ = (
+            library_root,
+            count,
+            language,
+            region,
+            forbidden_folder_names,
+        );
+        Err(anyhow!("demo plan provider does not support movie deltas"))
+    }
+
+    async fn generate_series_structure(
+        &self,
+        library_root: &Path,
+        count: usize,
+        language: Option<&str>,
+        region: Option<&str>,
+        seasons_per_series: std::ops::RangeInclusive<u8>,
+        episodes_per_season: std::ops::RangeInclusive<u16>,
+        forbidden_folder_names: &std::collections::HashSet<String>,
+    ) -> Result<StructurePlan> {
+        let _ = (
+            library_root,
+            count,
+            language,
+            region,
+            seasons_per_series,
+            episodes_per_season,
+            forbidden_folder_names,
+        );
+        Err(anyhow!("demo plan provider does not support series deltas"))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -67,6 +116,58 @@ impl DemoPlanProvider for TmdbPlanProvider {
         demo::generate_plan(root, options, self.tmdb.clone())
             .await
             .context("failed to plan demo structure via TMDB")
+    }
+
+    async fn generate_movie_structure(
+        &self,
+        library_root: &Path,
+        count: usize,
+        language: Option<&str>,
+        region: Option<&str>,
+        forbidden_folder_names: &std::collections::HashSet<String>,
+    ) -> Result<StructurePlan> {
+        let generator =
+            ferrex_core::domain::scan::scanner::TmdbFolderGenerator::new(
+                self.tmdb.clone(),
+            );
+        generator
+            .generate_movies_excluding(
+                library_root,
+                count,
+                language,
+                region,
+                forbidden_folder_names,
+            )
+            .await
+            .context("failed to generate movie delta structure")
+    }
+
+    async fn generate_series_structure(
+        &self,
+        library_root: &Path,
+        count: usize,
+        language: Option<&str>,
+        region: Option<&str>,
+        seasons_per_series: std::ops::RangeInclusive<u8>,
+        episodes_per_season: std::ops::RangeInclusive<u16>,
+        forbidden_folder_names: &std::collections::HashSet<String>,
+    ) -> Result<StructurePlan> {
+        let generator =
+            ferrex_core::domain::scan::scanner::TmdbFolderGenerator::new(
+                self.tmdb.clone(),
+            );
+        generator
+            .generate_series_excluding(
+                library_root,
+                count,
+                language,
+                region,
+                seasons_per_series,
+                episodes_per_season,
+                forbidden_folder_names,
+            )
+            .await
+            .context("failed to generate series delta structure")
     }
 }
 
@@ -113,7 +214,8 @@ impl DemoCoordinator {
         options: DemoSeedOptions,
         plan_provider: Arc<dyn DemoPlanProvider>,
     ) -> Result<Self> {
-        let root = resolve_root(&options, config);
+        let root = absolutize_demo_root(resolve_root(&options, config))
+            .context("failed to resolve demo root path")?;
 
         // In demo mode, scope caches under the demo root so demo runs are
         // fully self-contained and writable even in constrained environments.
@@ -142,6 +244,10 @@ impl DemoCoordinator {
             .generate_plan(&root, &initial_options)
             .await
             .context("failed to plan demo structure")?;
+
+        ensure_demo_root_clean(&root, &plan)
+            .context("failed to clean existing demo filesystem")?;
+
         demo::prepare_plan_roots(None, &plan)
             .context("failed to prepare demo filesystem for bootstrap")?;
         demo::apply_plan(&plan)
@@ -153,10 +259,10 @@ impl DemoCoordinator {
         // Initialise shared context for downstream components
         demo::init_demo_context(root.clone(), initial_options.policy())?;
 
-        let username = std::env::var("FERREX_DEMO_USERNAME")
-            .unwrap_or_else(|_| "demo".into());
-        let password = std::env::var("FERREX_DEMO_PASSWORD")
-            .unwrap_or_else(|_| "demo".into());
+        let username = env_nonempty_trimmed("FERREX_DEMO_USERNAME")
+            .unwrap_or_else(|| "demo".into());
+        let password = env_nonempty_trimmed("FERREX_DEMO_PASSWORD")
+            .unwrap_or_else(|| "demodemo".into());
 
         Ok(Self {
             options: options_shared,
@@ -279,6 +385,185 @@ impl DemoCoordinator {
         self.sync_database(unit_of_work).await.map(|_| ())
     }
 
+    pub async fn resize(
+        &self,
+        unit_of_work: Arc<AppUnitOfWork>,
+        scan_control: &ScanControlPlane,
+        overrides: DemoSizeOverrides,
+    ) -> Result<()> {
+        self.apply_overrides(&overrides).await;
+
+        let options_snapshot = {
+            let guard = self.options.lock().await;
+            guard.clone()
+        };
+
+        let library_ids = self.library_ids.lock().await.clone();
+
+        let mut plan_guard = self.plan.lock().await;
+        if plan_guard.libraries.len() != options_snapshot.libraries.len() {
+            return Err(anyhow!(
+                "demo plan/options mismatch (plan_libraries={}, option_libraries={})",
+                plan_guard.libraries.len(),
+                options_snapshot.libraries.len()
+            ));
+        }
+
+        // We inject synthetic FS events for any newly added item roots so the
+        // scanner can pick up additions without a full library rescan.
+        let mut scan_bursts: Vec<(LibraryId, Vec<PathBuf>)> = Vec::new();
+
+        for (idx, (plan_lib, opts_lib)) in plan_guard
+            .libraries
+            .iter_mut()
+            .zip(options_snapshot.libraries.iter())
+            .enumerate()
+        {
+            let Some(library_id) = library_ids.get(idx).copied() else {
+                return Err(anyhow!("demo library ids not initialised"));
+            };
+
+            // Resolve effective language/region (per-library override falls back to global setting)
+            let effective_language = opts_lib
+                .language
+                .as_deref()
+                .or(options_snapshot.language.as_deref());
+            let effective_region = opts_lib
+                .region
+                .as_deref()
+                .or(options_snapshot.region.as_deref());
+
+            let target_primary = match plan_lib.library_type {
+                LibraryType::Movies => {
+                    opts_lib.movie_count.unwrap_or(12).max(1)
+                }
+                LibraryType::Series => {
+                    opts_lib.series_count.unwrap_or(3).max(1)
+                }
+            };
+
+            let current_items = primary_item_paths_on_disk(
+                plan_lib.library_type,
+                &plan_lib.root_path,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to enumerate demo roots for {}",
+                    plan_lib.root_path.display()
+                )
+            })?;
+            let current_primary = current_items.len();
+
+            if current_primary > target_primary {
+                let remove_count = current_primary - target_primary;
+                let to_remove = current_items
+                    .into_iter()
+                    .rev()
+                    .take(remove_count)
+                    .collect::<Vec<_>>();
+
+                let mut media_prefixes: Vec<String> = Vec::new();
+                let mut inventory_prefixes: Vec<String> = Vec::new();
+
+                for item_root in &to_remove {
+                    ensure_within_root(&self.root, item_root)?;
+                    remove_fs_item(item_root)?;
+                    remove_item_subtree(plan_lib, item_root);
+
+                    media_prefixes.push(prefix_for_like(item_root));
+                    inventory_prefixes.push(normalize_path(item_root)?);
+                }
+
+                if !media_prefixes.is_empty() {
+                    let _deleted = unit_of_work
+                        .media_files_write
+                        .delete_by_path_prefixes(library_id, media_prefixes)
+                        .await
+                        .context("failed to delete demo media file rows")?;
+
+                    let _deleted_folders = unit_of_work
+                        .folder_inventory
+                        .delete_by_path_prefixes(library_id, inventory_prefixes)
+                        .await
+                        .context(
+                            "failed to delete demo folder inventory rows",
+                        )?;
+
+                    if matches!(plan_lib.library_type, LibraryType::Series) {
+                        let _ = unit_of_work
+                            .media_refs
+                            .cleanup_orphan_tv_references(library_id)
+                            .await
+                            .context(
+                                "failed to cleanup orphan TV references",
+                            )?;
+                    }
+                }
+            } else if current_primary < target_primary {
+                let add_count = target_primary - current_primary;
+                let forbidden =
+                    current_folder_names_on_disk(&plan_lib.root_path)?;
+
+                let structure = match plan_lib.library_type {
+                    LibraryType::Movies => {
+                        self.plan_provider
+                            .generate_movie_structure(
+                                &plan_lib.root_path,
+                                add_count,
+                                effective_language,
+                                effective_region,
+                                &forbidden,
+                            )
+                            .await?
+                    }
+                    LibraryType::Series => {
+                        let seasons =
+                            opts_lib.seasons_per_series.unwrap_or((1, 2));
+                        let episodes =
+                            opts_lib.episodes_per_season.unwrap_or((4, 6));
+                        self.plan_provider
+                            .generate_series_structure(
+                                &plan_lib.root_path,
+                                add_count,
+                                effective_language,
+                                effective_region,
+                                seasons.0..=seasons.1,
+                                episodes.0..=episodes.1,
+                                &forbidden,
+                            )
+                            .await?
+                    }
+                };
+
+                let (dirs, files) = structure_nodes_to_paths(&structure);
+                for dir in &dirs {
+                    ensure_within_root(&self.root, dir)?;
+                }
+                for file in &files {
+                    ensure_within_root(&self.root, file)?;
+                }
+
+                create_zero_length_files(&dirs, &files)?;
+                let added_items =
+                    merge_structure_into_plan(plan_lib, &structure)?;
+                if !added_items.is_empty() {
+                    scan_bursts.push((library_id, added_items));
+                }
+            }
+        }
+
+        // Ensure the scan runtime is in maintenance mode and enqueue minimal
+        // folder scans for any newly-added demo items.
+        for (library_id, folders) in scan_bursts {
+            scan_control
+                .inject_created_folders(library_id, folders)
+                .await
+                .context("failed to enqueue demo delta scans")?;
+        }
+
+        Ok(())
+    }
+
     pub fn credentials(&self) -> (&str, &str) {
         (&self.username, &self.password)
     }
@@ -305,7 +590,7 @@ impl DemoCoordinator {
                 .libraries
                 .iter()
                 .map(|lib| {
-                    let primary_item_count = lib
+                    let planned_primary_item_count = lib
                         .directories
                         .iter()
                         .filter(|dir| {
@@ -313,6 +598,10 @@ impl DemoCoordinator {
                                 && dir != &&lib.root_path
                         })
                         .count();
+                    let primary_item_count =
+                        primary_item_paths_on_disk(lib.library_type, &lib.root_path)
+                            .map(|items| items.len())
+                            .unwrap_or(planned_primary_item_count);
 
                     let library_id = id_by_root
                         .get(&lib.root_path)
@@ -393,9 +682,82 @@ impl DemoCoordinator {
     }
 }
 
+fn prefix_for_like(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
 fn resolve_root(options: &DemoSeedOptions, config: &Config) -> PathBuf {
     if let Some(explicit) = &options.root {
         return explicit.clone();
     }
     config.cache_root().join("demo-media")
+}
+
+fn env_nonempty_trimmed(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| normalize_env_override(&value))
+}
+
+fn normalize_env_override(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn ensure_demo_root_clean(
+    root: &Path,
+    plan: &demo::DemoSeedPlan,
+) -> Result<()> {
+    for library in &plan.libraries {
+        if !library.root_path.starts_with(root) {
+            return Err(anyhow!(
+                "refusing to clean demo library root outside demo root: {}",
+                library.root_path.display()
+            ));
+        }
+
+        if let Err(err) = fs::remove_dir_all(&library.root_path)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(anyhow!(err).context(format!(
+                "failed to remove demo library directory {}",
+                library.root_path.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn absolutize_demo_root(root: PathBuf) -> Result<PathBuf> {
+    if root.is_absolute() {
+        return Ok(root);
+    }
+
+    let cwd = std::env::current_dir()
+        .context("failed to resolve current working directory")?;
+    Ok(cwd.join(root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_env_override;
+
+    #[test]
+    fn normalize_env_override_treats_blank_as_unset() {
+        assert_eq!(normalize_env_override(""), None);
+        assert_eq!(normalize_env_override("   "), None);
+    }
+
+    #[test]
+    fn normalize_env_override_returns_trimmed_value() {
+        assert_eq!(
+            normalize_env_override("  demodemo  "),
+            Some("demodemo".to_string())
+        );
+    }
 }

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::users::{CreateUserParams, UpdateUserParams, UserService};
+use crate::handlers::users::{CreateUserParams, UpdateUserParams, UserService};
 use crate::{
     application::auth::AuthFacadeError,
     infra::{

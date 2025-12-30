@@ -20,6 +20,8 @@
 //!
 //! These endpoints handle the initial setup flow when no admin user exists.
 
+pub mod claim;
+
 use axum::{Json, extract::State};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
@@ -32,7 +34,6 @@ use ferrex_core::{
         rbac::roles,
         user::AuthToken,
     },
-    setup::SetupClaimError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -40,16 +41,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use axum::extract::ConnectInfo;
-use std::net::SocketAddr;
-
-use crate::{
-    infra::{
-        app_state::AppState,
-        errors::{AppError, AppResult},
-    },
-    users::{UserService, user_service::CreateUserParams},
+use crate::handlers::users::{UserService, user_service::CreateUserParams};
+use crate::infra::{
+    app_state::AppState,
+    demo_mode,
+    errors::{AppError, AppResult},
 };
+use axum::extract::ConnectInfo;
+use ferrex_core::domain::setup::SetupClaimError;
+use std::net::SocketAddr;
 
 /// Simple in-memory rate limiter for setup endpoints
 /// Tracks setup attempts by IP address to prevent brute force attacks
@@ -244,6 +244,7 @@ pub async fn check_setup_status(
         .map_err(|e| {
             AppError::internal(format!("Failed to get libraries: {}", e))
         })?;
+    let libraries = demo_mode::filter_libraries(&state, libraries);
 
     let security_repo = state.unit_of_work().security_settings.clone();
     let security_settings =
@@ -490,6 +491,7 @@ async fn check_setup_status_internal(
         .map_err(|e| {
             AppError::internal(format!("Failed to get libraries: {}", e))
         })?;
+    let libraries = demo_mode::filter_libraries(state, libraries);
 
     let security_repo = state.unit_of_work().security_settings.clone();
     let security_settings =

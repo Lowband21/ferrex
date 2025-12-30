@@ -13,13 +13,14 @@ use ferrex_core::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::handlers::users::role_handlers;
 use crate::{
     application::auth::AuthFacadeError,
     infra::{
         app_state::AppState,
+        demo_mode,
         errors::{AppError, AppResult},
     },
-    users::role_handlers,
 };
 
 /// Request to assign roles to a user
@@ -338,7 +339,10 @@ pub async fn get_admin_stats(
     }
 
     // Get library stats
-    let libraries = state.unit_of_work().libraries.list_libraries().await?;
+    let libraries = demo_mode::filter_libraries(
+        &state,
+        state.unit_of_work().libraries.list_libraries().await?,
+    );
     let total_libraries = libraries.len() as i64;
 
     // Get media stats (simplified - in production you'd want dedicated queries)

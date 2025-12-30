@@ -2,6 +2,7 @@ use axum::{
     body::Bytes,
     extract::{Extension, Path, Query, State},
     http::StatusCode,
+    http::header,
     response::{IntoResponse, Json},
 };
 use ferrex_core::domain::users::user::User;
@@ -11,7 +12,7 @@ use ferrex_core::query::{
     types::{SortBy, SortOrder},
 };
 use ferrex_core::types::{
-    Library, LibraryId, LibraryReference, Media, MediaDetailsOption, MediaID,
+    Library, LibraryId, LibraryReference, Media, MediaID,
 };
 use ferrex_core::{
     api::types::{
@@ -19,19 +20,22 @@ use ferrex_core::{
         FilterIndicesRequest, IndicesResponse, LibraryMediaResponse,
         UpdateLibraryRequest,
     },
-    scan::orchestration::LibraryActorConfig,
     types::LibraryType,
 };
 use rkyv::rancor::Error as RkyvError;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
+use crate::infra::demo_mode;
 
+use ferrex_core::domain::scan::orchestration::LibraryActorConfig;
+use futures::{StreamExt, TryStreamExt, stream};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
@@ -77,6 +81,12 @@ pub async fn get_library_media_handler(
     State(state): State<AppState>,
     Path(library_id): Path<Uuid>,
 ) -> impl IntoResponse {
+    if demo_mode::is_demo_mode(&state)
+        && !demo_mode::is_demo_library(&LibraryId(library_id))
+    {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     info!("Getting media references for library: {}", library_id);
 
     // Get library reference
@@ -114,48 +124,125 @@ pub async fn get_library_media_handler(
 pub async fn get_libraries_with_media_handler(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    match state
-        .unit_of_work()
-        .libraries
-        .list_library_references()
-        .await
-    {
-        Ok(libraries) => {
-            let mut library_results = Vec::new();
-            for library_ref in libraries {
-                let library = state
-                    .unit_of_work()
-                    .libraries
-                    .get_library(library_ref.id)
-                    .await
-                    .map_err(|e| {
-                        error!("Failed to get library: {}", e);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?;
-                let library_media_response =
-                    get_library_media_util(&state, library_ref).await?;
-                if let Some(mut library) = library {
-                    library.media = Some(library_media_response.media);
-                    library_results.push(library);
-                }
-            }
-            let library_responses: Vec<_> =
-                library_results.into_iter().collect::<Vec<_>>();
+    let request_started = Instant::now();
+    let uow = state.unit_of_work();
 
-            // Serialize to rkyv format
-            match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses) {
-                Ok(bytes) => Ok::<_, StatusCode>(Bytes::from(bytes.into_vec())),
-                Err(e) => {
-                    error!("Failed to serialize response with rkyv: {:?}", e);
-                    Err(StatusCode::INTERNAL_SERVER_ERROR)
-                }
-            }
-        }
+    let refs_started = Instant::now();
+    let libraries = match uow.libraries.list_library_references().await {
+        Ok(libraries) => libraries,
         Err(e) => {
             error!("Failed to get libraries: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
-    }
+    };
+    let libraries = demo_mode::filter_library_references(&state, libraries);
+    let refs_elapsed = refs_started.elapsed();
+
+    // Library snapshots can be expensive: each library has a potentially large
+    // media reference list. Previously this handler performed sequential I/O
+    // which can easily exceed the player's 30s reqwest timeout.
+    //
+    // Fetch in limited parallelism to reduce tail latency without stampeding
+    // the database.
+    let fetch_started = Instant::now();
+    let parallelism: usize = 4;
+    let results: Result<Vec<Option<Library>>, StatusCode> =
+        stream::iter(libraries.into_iter())
+            .map(|library_ref| {
+                let uow = Arc::clone(&uow);
+                async move {
+                    let library = uow
+                        .libraries
+                        .get_library(library_ref.id)
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Failed to get library {}: {}",
+                                library_ref.id, e
+                            );
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
+
+                    // Movie and series libraries are bootstrapped via dedicated
+                    // snapshot endpoints (`movie-batches` and `series-bundles`).
+                    // Keep `/libraries` focused on library metadata so the
+                    // snapshot stays small and fast to fetch.
+                    if matches!(
+                        library_ref.library_type,
+                        LibraryType::Movies | LibraryType::Series
+                    ) {
+                        return Ok::<_, StatusCode>(library.map(|mut l| {
+                            l.media = None;
+                            l
+                        }));
+                    }
+
+                    let media = uow
+                        .media_refs
+                        .get_library_media_references(
+                            library_ref.id,
+                            library_ref.library_type,
+                        )
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Failed to get library media {}: {}",
+                                library_ref.id, e
+                            );
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
+
+                    Ok::<_, StatusCode>(library.map(|mut l| {
+                        l.media = Some(media);
+                        l
+                    }))
+                }
+            })
+            .buffer_unordered(parallelism)
+            .try_collect()
+            .await;
+
+    let fetch_elapsed = fetch_started.elapsed();
+    let mut library_responses =
+        results?.into_iter().flatten().collect::<Vec<_>>();
+
+    // Stable ordering helps caching/consumers and improves debuggability.
+    library_responses.sort_by_key(|l| l.id);
+
+    let library_count = library_responses.len();
+    let media_count: usize = library_responses
+        .iter()
+        .map(|l| l.media.as_ref().map(|m| m.len()).unwrap_or(0))
+        .sum();
+
+    let serialize_started = Instant::now();
+    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses)
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            error!("Failed to serialize response with rkyv: {:?}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let serialize_elapsed = serialize_started.elapsed();
+    let payload_len = bytes.len();
+
+    let total_elapsed = request_started.elapsed();
+    info!(
+        "Libraries snapshot built: libraries={} media_items={} bytes={} refs_elapsed={:?} fetch_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
+        library_count,
+        media_count,
+        payload_len,
+        refs_elapsed,
+        fetch_elapsed,
+        serialize_elapsed,
+        total_elapsed
+    );
+
+    Ok::<_, StatusCode>((
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        Bytes::from(bytes.into_vec()),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -405,20 +492,9 @@ pub async fn fetch_media_handler(
                 .get_movie_reference(&id)
                 .await
             {
-                Ok(movie) => {
-                    if matches!(movie.details, MediaDetailsOption::Endpoint(_))
-                    {
-                        warn!(
-                            "Movie {} is missing required TMDB metadata; manual intervention required",
-                            movie.id
-                        );
-                        return Ok(Json(ApiResponse::error(
-                        "Movie metadata unavailable; manual matching required".into(),
-                    )));
-                    }
-
-                    Ok(Json(ApiResponse::success(Media::Movie(movie))))
-                }
+                Ok(movie) => Ok(Json(ApiResponse::success(Media::Movie(
+                    Box::new(movie),
+                )))),
                 Err(e) => {
                     error!("Failed to get movie reference: {}", e);
                     Ok(Json(ApiResponse::error(e.to_string())))
@@ -432,18 +508,7 @@ pub async fn fetch_media_handler(
             .await
         {
             Ok(series) => {
-                if matches!(series.details, MediaDetailsOption::Endpoint(_)) {
-                    warn!(
-                        "Series {} is missing required TMDB metadata; manual intervention required",
-                        series.id
-                    );
-                    return Ok(Json(ApiResponse::error(
-                        "Series metadata unavailable; manual matching required"
-                            .into(),
-                    )));
-                }
-
-                Ok(Json(ApiResponse::success(Media::Series(series))))
+                Ok(Json(ApiResponse::success(Media::Series(Box::new(series)))))
             }
             Err(e) => {
                 error!("Failed to get series reference: {}", e);
@@ -459,7 +524,9 @@ pub async fn fetch_media_handler(
             {
                 Ok(season) => {
                     // TODO: Implement on-demand season metadata fetching if needed
-                    Ok(Json(ApiResponse::success(Media::Season(season))))
+                    Ok(Json(ApiResponse::success(Media::Season(Box::new(
+                        season,
+                    )))))
                 }
                 Err(e) => {
                     error!("Failed to get season reference: {}", e);
@@ -476,7 +543,9 @@ pub async fn fetch_media_handler(
             {
                 Ok(episode) => {
                     // TODO: Implement on-demand episode metadata fetching if needed
-                    Ok(Json(ApiResponse::success(Media::Episode(episode))))
+                    Ok(Json(ApiResponse::success(Media::Episode(Box::new(
+                        episode,
+                    )))))
                 }
                 Err(e) => {
                     error!("Failed to get episode reference: {}", e);
@@ -564,6 +633,8 @@ pub async fn list_libraries_handler(
         .await
     {
         Ok(libraries) => {
+            let libraries =
+                demo_mode::filter_library_references(&state, libraries);
             info!("Found {} libraries", libraries.len());
             Ok(Json(ApiResponse::success(libraries)))
         }
@@ -580,6 +651,12 @@ pub async fn get_library_handler(
     Path(id): Path<Uuid>,
 ) -> Result<Json<ApiResponse<LibraryReference>>, StatusCode> {
     info!("Getting library: {}", id);
+
+    if demo_mode::is_demo_mode(&state)
+        && !demo_mode::is_demo_library(&LibraryId(id))
+    {
+        return Ok(Json(ApiResponse::error("Library not found".to_string())));
+    }
 
     match state
         .unit_of_work()
@@ -600,10 +677,29 @@ pub async fn create_library_handler(
     State(state): State<AppState>,
     Json(request): Json<CreateLibraryRequest>,
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
+    if demo_mode::is_demo_mode(&state) {
+        return Ok(Json(ApiResponse::error(
+            "Library creation is disabled in demo mode".to_string(),
+        )));
+    }
+
     info!("Creating new library: {}", request.name);
 
     let library_id = LibraryId::new();
     info!("Generated library ID: {}", library_id);
+
+    let movie_ref_batch_size =
+        match ferrex_core::types::ids::MovieReferenceBatchSize::new(
+            request.movie_ref_batch_size,
+        ) {
+            Ok(value) => value,
+            Err(e) => {
+                return Ok(Json(ApiResponse::error(format!(
+                    "Invalid movie_ref_batch_size: {}",
+                    e
+                ))));
+            }
+        };
 
     let library = Library {
         id: library_id,
@@ -620,6 +716,7 @@ pub async fn create_library_handler(
         watch_for_changes: true,
         analyze_on_scan: false,
         max_retry_attempts: 3,
+        movie_ref_batch_size,
     };
 
     info!(
@@ -713,6 +810,12 @@ pub async fn update_library_handler(
 
     // Get the existing library
     let uuid = Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    if demo_mode::is_demo_mode(&state)
+        && !demo_mode::is_demo_library(&LibraryId(uuid))
+    {
+        return Ok(Json(ApiResponse::error("Library not found".to_string())));
+    }
     let libraries_repo = state.unit_of_work().libraries.clone();
 
     let mut library = match libraries_repo.get_library(LibraryId(uuid)).await {
@@ -741,6 +844,19 @@ pub async fn update_library_handler(
     if let Some(enabled) = request.enabled {
         library.enabled = enabled;
     }
+    if let Some(size) = request.movie_ref_batch_size {
+        match ferrex_core::types::ids::MovieReferenceBatchSize::new(size) {
+            Ok(value) => {
+                library.movie_ref_batch_size = value;
+            }
+            Err(e) => {
+                return Ok(Json(ApiResponse::error(format!(
+                    "Invalid movie_ref_batch_size: {}",
+                    e
+                ))));
+            }
+        }
+    }
     library.updated_at = chrono::Utc::now();
 
     match libraries_repo
@@ -767,6 +883,12 @@ pub async fn delete_library_handler(
 
     let library_uuid =
         Uuid::parse_str(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    if demo_mode::is_demo_mode(&state)
+        && !demo_mode::is_demo_library(&LibraryId(library_uuid))
+    {
+        return Ok(Json(ApiResponse::error("Library not found".to_string())));
+    }
 
     match state
         .unit_of_work()

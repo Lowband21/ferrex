@@ -110,7 +110,7 @@ pub async fn admin_middleware(request: Request, next: Next) -> Response {
     if let Err(response) =
         ensure_admin_scope(request.extensions().get::<SessionScope>())
     {
-        return response;
+        return *response;
     }
 
     if !permissions.has_role("admin")
@@ -163,7 +163,9 @@ fn map_authentication_error_to_status(err: AuthenticationError) -> StatusCode {
     }
 }
 
-fn ensure_admin_scope(scope: Option<&SessionScope>) -> Result<(), Response> {
+fn ensure_admin_scope(
+    scope: Option<&SessionScope>,
+) -> Result<(), Box<Response>> {
     let scope = scope.ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
@@ -175,13 +177,16 @@ fn ensure_admin_scope(scope: Option<&SessionScope>) -> Result<(), Response> {
     })?;
 
     if *scope != SessionScope::Full {
-        return Err((
-            StatusCode::FORBIDDEN,
-            axum::Json(ApiResponse::<()>::error(
-                "Full authentication required for admin actions".to_string(),
-            )),
-        )
-            .into_response());
+        return Err(Box::new(
+            (
+                StatusCode::FORBIDDEN,
+                axum::Json(ApiResponse::<()>::error(
+                    "Full authentication required for admin actions"
+                        .to_string(),
+                )),
+            )
+                .into_response(),
+        ));
     }
 
     Ok(())

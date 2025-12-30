@@ -4,7 +4,4 @@ pub mod db;
 pub mod demo;
 pub mod handlers;
 pub mod infra;
-pub mod media;
 pub mod routes;
-pub mod stream;
-pub mod users;

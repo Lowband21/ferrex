@@ -4,14 +4,14 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use ferrex_core::api::routes::utils as route_utils;
 use ferrex_core::api::routes::v1;
+use ferrex_server::infra::startup::NoopStartupHooks;
 use serde_json::json;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[path = "support/mod.rs"]
-mod support;
-use support::build_test_app;
+mod common;
+use common::build_test_app_with_hooks;
 
 fn bearer(token: &str) -> String {
     format!("Bearer {}", token)
@@ -25,9 +25,12 @@ fn extract_token_field<'a>(body: &'a serde_json::Value, key: &str) -> &'a str {
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn user_password_change_revokes_tokens(pool: PgPool) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir;
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
         router.into_make_service_with_connect_info::<SocketAddr>();
@@ -102,9 +105,12 @@ async fn user_password_change_revokes_tokens(pool: PgPool) -> Result<()> {
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
 async fn admin_password_reset_revokes_user_tokens(pool: PgPool) -> Result<()> {
-    let app = build_test_app(pool).await?;
+    let app = build_test_app_with_hooks(pool, &NoopStartupHooks).await?;
     let (router, state, tempdir) = app.into_parts();
-    let _tempdir = tempdir;
+    assert!(
+        tempdir.path().join("cache").exists(),
+        "test app should create cache directory structure"
+    );
     let router: Router<()> = router.with_state(state.clone());
     let make_service =
         router.into_make_service_with_connect_info::<SocketAddr>();

@@ -2,6 +2,33 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use axum::Router;
+use ferrex_core::domain::scan::orchestration::{
+    budget::InMemoryBudget,
+    config::OrchestratorConfig,
+    persistence::{PostgresCursorRepository, PostgresQueueService},
+};
+use ferrex_server::{
+    application::auth::AuthApplicationFacade,
+    handlers::users::UserService,
+    infra::{
+        app_context::AppContext,
+        app_state::AppState,
+        cache::{MovieBatchesCache, SeriesBundlesCache},
+        config::{
+            AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
+            DatabaseConfig, FfmpegConfig, HstsSettings, MediaConfig,
+            ScannerConfig, SecurityConfig, ServerConfig,
+        },
+        orchestration::ScanOrchestrator,
+        scan::scan_manager::ScanControlPlane,
+        startup::StartupHooks,
+        thumbnail_service::ThumbnailService,
+        websocket::ConnectionManager,
+    },
+    routes::create_api_router,
+};
+
+use ferrex_core::domain::setup::SetupClaimService;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
     database::PostgresDatabase,
@@ -21,37 +48,14 @@ use ferrex_core::{
             PostgresRefreshTokenRepository, PostgresUserAuthRepository,
         },
     },
-    infrastructure::{image_service::ImageService, providers::TmdbApiProvider},
-    scan::orchestration::{
-        budget::InMemoryBudget,
-        config::OrchestratorConfig,
-        persistence::{PostgresCursorRepository, PostgresQueueService},
-    },
-    setup::SetupClaimService,
-};
-use ferrex_server::{
-    application::auth::AuthApplicationFacade,
-    infra::{
-        app_context::AppContext,
-        app_state::AppState,
-        config::{
-            AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
-            DatabaseConfig, FfmpegConfig, HstsSettings, MediaConfig,
-            ScannerConfig, SecurityConfig, ServerConfig,
-        },
-        orchestration::ScanOrchestrator,
-        scan::scan_manager::ScanControlPlane,
-        startup::{NoopStartupHooks, StartupHooks},
-        websocket::ConnectionManager,
-    },
-    media::prep::thumbnail_service::ThumbnailService,
-    routes::create_api_router,
-    users::UserService,
+    infra::{image_service::ImageService, providers::TmdbApiProvider},
 };
 use sqlx::PgPool;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 
+// Code is used by test modules, but not in this scope
+#[allow(unused)]
 #[derive(Debug)]
 pub struct TestApp {
     pub router: Router<AppState>,
@@ -59,16 +63,14 @@ pub struct TestApp {
     _tempdir: TempDir,
 }
 
+#[allow(unused)]
 impl TestApp {
     pub fn into_parts(self) -> (Router<AppState>, AppState, TempDir) {
         (self.router, self.state, self._tempdir)
     }
 }
 
-pub async fn build_test_app(pool: PgPool) -> Result<TestApp> {
-    build_test_app_with_hooks(pool, &NoopStartupHooks).await
-}
-
+#[allow(unused)]
 pub async fn build_test_app_with_hooks<H: StartupHooks>(
     pool: PgPool,
     hooks: &H,
@@ -104,6 +106,7 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
         media: MediaConfig { root: None },
         cache: CacheConfig {
             root: cache_root.clone(),
+            images: image_cache_dir.clone(),
             transcode: transcode_cache_dir.clone(),
             thumbnails: thumbnail_cache_dir.clone(),
         },
@@ -275,7 +278,12 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
         None,
     ));
 
-    let state = AppState::new(app_context, admin_sessions);
+    let state = AppState::new(
+        app_context,
+        admin_sessions,
+        Arc::new(SeriesBundlesCache::new()),
+        Arc::new(MovieBatchesCache::new()),
+    );
 
     hooks
         .run(

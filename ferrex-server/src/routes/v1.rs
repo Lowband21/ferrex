@@ -8,6 +8,16 @@ use ferrex_core::api::routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
+use crate::handlers::stream::stream_handlers;
+use crate::handlers::users::admin_user_management;
+use crate::handlers::users::{
+    admin_handlers, auth, role_handlers, security_settings_handlers,
+    setup::{
+        claim::{confirm_secure_claim, start_secure_claim},
+        {check_setup_status, create_initial_admin},
+    },
+    user_handlers, user_management, watch_status_handlers,
+};
 use crate::{
     handlers::{
         admin::{dev_handlers, media_root},
@@ -20,8 +30,18 @@ use crate::{
                 get_library_media_handler, get_library_sorted_indices_handler,
                 post_library_filtered_indices_handler, update_library_handler,
             },
-            handle_refresh_images::refresh_images_handler,
+            handle_movie_batches::{
+                get_movie_reference_batch_bundle_handler,
+                get_movie_reference_batch_handler,
+                post_movie_reference_batch_fetch_handler,
+                post_movie_reference_batch_sync_handler,
+            },
             handle_search::query_media_handler,
+            handle_series_bundles::{
+                get_series_bundle_bundle_handler, get_series_bundle_handler,
+                post_series_bundle_fetch_handler,
+                post_series_bundle_sync_handler,
+            },
         },
         scan::handle_scan::{
             active_scans_handler, cancel_scan_handler, latest_progress_handler,
@@ -34,16 +54,6 @@ use crate::{
     infra::{
         app_state::AppState,
         scan::folder_inventory::{get_folder_inventory, get_scan_progress},
-    },
-    stream::stream_handlers,
-    users::admin_user_management,
-    users::{
-        admin_handlers, auth, role_handlers, security_settings_handlers,
-        setup::{
-            claim::{confirm_secure_claim, start_secure_claim},
-            setup::{check_setup_status, create_initial_admin},
-        },
-        user_handlers, user_management, watch_status_handlers,
     },
 };
 
@@ -289,6 +299,38 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
         )
         .route(v1::libraries::MEDIA, get(get_library_media_handler))
         .route(
+            v1::libraries::movie_batches::COLLECTION,
+            get(get_movie_reference_batch_bundle_handler),
+        )
+        .route(
+            v1::libraries::movie_batches::ITEM,
+            get(get_movie_reference_batch_handler),
+        )
+        .route(
+            v1::libraries::movie_batches::SYNC,
+            post(post_movie_reference_batch_sync_handler),
+        )
+        .route(
+            v1::libraries::movie_batches::FETCH,
+            post(post_movie_reference_batch_fetch_handler),
+        )
+        .route(
+            v1::libraries::series_bundles::COLLECTION,
+            get(get_series_bundle_bundle_handler),
+        )
+        .route(
+            v1::libraries::series_bundles::ITEM,
+            get(get_series_bundle_handler),
+        )
+        .route(
+            v1::libraries::series_bundles::SYNC,
+            post(post_series_bundle_sync_handler),
+        )
+        .route(
+            v1::libraries::series_bundles::FETCH,
+            post(post_series_bundle_fetch_handler),
+        )
+        .route(
             v1::libraries::SORTED_INDICES,
             get(get_library_sorted_indices_handler),
         )
@@ -325,7 +367,6 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
 fn create_metadata_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route(v1::images::SERVE, get(serve_image_handler))
-        .route(v1::images::REFRESH, post(refresh_images_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -390,7 +431,8 @@ fn create_admin_routes(state: AppState) -> Router<AppState> {
     #[cfg(feature = "demo")]
     let router = router
         .route(v1::admin::demo::STATUS, get(demo_handlers::status))
-        .route(v1::admin::demo::RESET, post(demo_handlers::reset));
+        .route(v1::admin::demo::RESET, post(demo_handlers::reset))
+        .route(v1::admin::demo::RESIZE, post(demo_handlers::resize));
 
     router
         // route_layer applies inside-out; add admin guard first so auth runs before it
