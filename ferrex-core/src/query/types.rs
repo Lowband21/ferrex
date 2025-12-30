@@ -1,8 +1,8 @@
 use crate::{
     api::types::{RatingValue, ScalarRange},
-    domain::watch::{InProgressItem, WatchStatusFilter},
-    types::media::Media,
+    domain::watch::{ItemWatchStatus, WatchStatusFilter},
 };
+use ferrex_model::MediaID;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -141,12 +141,24 @@ pub struct QueryEndpoint {
     pub params: HashMap<String, String>,
 }
 
-/// Combined media reference with user watch status
+/// Combined media ID with user watch status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaWithStatus {
-    pub media: Media,
-    pub watch_status: Option<InProgressItem>,
-    pub is_completed: bool,
+    pub id: MediaID,
+    pub watch_status: Option<ItemWatchStatus>,
+}
+
+impl MediaWithStatus {
+    /// Note: returns false if inner watch status is none
+    pub fn is_completed(&self) -> bool {
+        match &self.watch_status {
+            Some(iws) => match iws {
+                ItemWatchStatus::InProgress(_) => false,
+                ItemWatchStatus::Completed(_) => true,
+            },
+            None => false,
+        }
+    }
 }
 
 /// Query execution error

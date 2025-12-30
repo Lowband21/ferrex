@@ -1,63 +1,6 @@
 use ferrex_model::details::{
-    CastMember, CrewMember, EnhancedMovieDetails, EnhancedSeriesDetails,
-    EpisodeDetails, ExternalIds, SeasonDetails, TmdbDetails,
+    CastMember, CrewMember, EnhancedSeriesDetails, ExternalIds, SeasonDetails,
 };
-
-/// Convenience trait for retrieving details of a particular given media type
-pub trait MediaDetails {
-    #[allow(missing_docs)]
-    type MovieDetails;
-    #[allow(missing_docs)]
-    type SeriesDetails;
-    #[allow(missing_docs)]
-    type SeasonDetails;
-    #[allow(missing_docs)]
-    type EpisodeDetails;
-
-    /// Convenience function to retrieve movie details option
-    fn to_movie_details(&self) -> Option<&Self::MovieDetails>;
-    /// Convenience function to retrieve series details option
-    fn to_series_details(&self) -> Option<&Self::SeriesDetails>;
-    /// Convenience function to retrieve season details option
-    fn to_season_details(&self) -> Option<&Self::SeasonDetails>;
-    /// Convenience function to retrieve episode details option
-    fn to_episode_details(&self) -> Option<&Self::EpisodeDetails>;
-}
-
-impl MediaDetails for TmdbDetails {
-    type MovieDetails = EnhancedMovieDetails;
-    type SeriesDetails = EnhancedSeriesDetails;
-    type SeasonDetails = SeasonDetails;
-    type EpisodeDetails = EpisodeDetails;
-
-    fn to_movie_details(&self) -> Option<&EnhancedMovieDetails> {
-        match self {
-            TmdbDetails::Movie(details) => Some(details),
-            _ => None,
-        }
-    }
-
-    fn to_series_details(&self) -> Option<&EnhancedSeriesDetails> {
-        match self {
-            TmdbDetails::Series(details) => Some(details),
-            _ => None,
-        }
-    }
-
-    fn to_season_details(&self) -> Option<&SeasonDetails> {
-        match self {
-            TmdbDetails::Season(details) => Some(details),
-            _ => None,
-        }
-    }
-
-    fn to_episode_details(&self) -> Option<&EpisodeDetails> {
-        match self {
-            TmdbDetails::Episode(details) => Some(details),
-            _ => None,
-        }
-    }
-}
 
 pub trait SeriesDetailsLike {
     type Cast;
@@ -69,8 +12,8 @@ pub trait SeriesDetailsLike {
     fn overview(&self) -> Option<&str>;
     fn first_air_date(&self) -> Option<&str>;
     fn last_air_date(&self) -> Option<&str>;
-    fn num_seasons(&self) -> Option<u32>;
-    fn num_episodes(&self) -> Option<u32>;
+    fn num_seasons(&self) -> Option<u16>;
+    fn num_episodes(&self) -> Option<u16>;
     fn vote_average(&self) -> Option<f32>;
     fn vote_count(&self) -> Option<u32>;
     fn popularity(&self) -> Option<f32>;
@@ -102,10 +45,10 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
     fn last_air_date(&self) -> Option<&str> {
         self.last_air_date.as_deref()
     }
-    fn num_seasons(&self) -> Option<u32> {
+    fn num_seasons(&self) -> Option<u16> {
         self.number_of_seasons
     }
-    fn num_episodes(&self) -> Option<u32> {
+    fn num_episodes(&self) -> Option<u16> {
         self.number_of_episodes
     }
     fn vote_average(&self) -> Option<f32> {
@@ -147,11 +90,11 @@ impl SeriesDetailsLike for EnhancedSeriesDetails {
 }
 
 pub trait SeasonDetailsLike {
-    fn num_episodes(&self) -> u32;
+    fn num_episodes(&self) -> u16;
 }
 
 impl SeasonDetailsLike for SeasonDetails {
-    fn num_episodes(&self) -> u32 {
+    fn num_episodes(&self) -> u16 {
         self.episode_count
     }
 }
@@ -185,14 +128,14 @@ mod archived {
         fn last_air_date(&self) -> Option<&str> {
             self.last_air_date.as_deref()
         }
-        fn num_seasons(&self) -> Option<u32> {
+        fn num_seasons(&self) -> Option<u16> {
             if let ArchivedOption::Some(seasons) = self.number_of_seasons {
                 Some(seasons.to_native())
             } else {
                 None
             }
         }
-        fn num_episodes(&self) -> Option<u32> {
+        fn num_episodes(&self) -> Option<u16> {
             if let ArchivedOption::Some(episodes) = self.number_of_episodes {
                 Some(episodes.to_native())
             } else {
@@ -250,7 +193,7 @@ mod archived {
     }
 
     impl SeasonDetailsLike for ArchivedSeasonDetails {
-        fn num_episodes(&self) -> u32 {
+        fn num_episodes(&self) -> u16 {
             self.episode_count.to_native()
         }
     }

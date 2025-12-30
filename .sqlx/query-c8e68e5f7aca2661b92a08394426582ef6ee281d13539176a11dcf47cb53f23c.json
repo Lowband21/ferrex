@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO series_bundle_versioning\n                (library_id, series_id, finalized)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (library_id, series_id) DO UPDATE SET\n                finalized = true,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c8e68e5f7aca2661b92a08394426582ef6ee281d13539176a11dcf47cb53f23c"
+}

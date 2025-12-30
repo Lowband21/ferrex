@@ -1,0 +1,186 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            movie_id,\n            tmdb_id,\n            title,\n            original_title,\n            overview,\n            release_date,\n            runtime,\n            vote_average,\n            vote_count,\n            popularity,\n            primary_certification,\n            homepage,\n            status,\n            tagline,\n            budget,\n            revenue,\n            poster_path,\n            backdrop_path,\n            primary_poster_image_id,\n            primary_backdrop_image_id,\n            logo_path,\n            imdb_id,\n            facebook_id,\n            instagram_id,\n            twitter_id,\n            wikidata_id,\n            tiktok_id,\n            youtube_id\n        FROM movie_metadata\n        WHERE library_id = $1\n          AND batch_id = $2\n          AND movie_id = ANY($3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "original_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "release_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "vote_average",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 8,
+        "name": "vote_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "popularity",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "primary_certification",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "homepage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "tagline",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "budget",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "revenue",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "poster_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "backdrop_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "primary_poster_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
+        "name": "primary_backdrop_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 20,
+        "name": "logo_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 26,
+        "name": "tiktok_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "youtube_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ee7f134052a9c946cadb48bbbfa6c01598a41a54398726a5268ef31e58525e5d"
+}

@@ -1,4 +1,6 @@
-use ferrex_core::infrastructure::media::metadata::FilenameParser;
+//! Integration-style tests for TV episode filename parsing across library contexts.
+
+use ferrex_core::infra::media::metadata::FilenameParser;
 use ferrex_core::types::{LibraryType, ParsedMediaInfo};
 use std::path::PathBuf;
 
@@ -24,7 +26,7 @@ fn test_metadata_extraction_with_tv_library_context() {
 
 #[test]
 fn test_metadata_extraction_multi_episode() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let multi_file = PathBuf::from(
         "TV Shows/The Office/S01E01-E02 - Pilot & Diversity Day.mkv",
     );
@@ -57,7 +59,7 @@ fn test_metadata_extraction_date_based() {
 
 #[test]
 fn test_metadata_extraction_specials() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let special_file = PathBuf::from(
         "TV Shows/Doctor Who/Specials/S00E01 - Christmas Special.mkv",
     );
@@ -74,7 +76,7 @@ fn test_metadata_extraction_specials() {
 
 #[test]
 fn test_metadata_extraction_folder_based() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let folder_file =
         PathBuf::from("TV Shows/The Wire/Season 1/03 - The Buys.mkv");
     let parsed_info = parser
@@ -126,7 +128,7 @@ fn test_metadata_extraction_tv_in_movie_library() {
 
 #[test]
 fn test_metadata_extraction_anime() {
-    let mut parser = FilenameParser::with_library_type(LibraryType::Series);
+    let parser = FilenameParser::with_library_type(LibraryType::Series);
     let anime_file = PathBuf::from(
         "TV Shows/Anime/[HorribleSubs] Attack on Titan - 01 [720p].mkv",
     );

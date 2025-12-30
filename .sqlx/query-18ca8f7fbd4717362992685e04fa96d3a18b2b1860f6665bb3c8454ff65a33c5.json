@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM person_aliases WHERE person_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "18ca8f7fbd4717362992685e04fa96d3a18b2b1860f6665bb3c8454ff65a33c5"
+}

@@ -97,6 +97,34 @@ pub mod v1 {
         pub const FILTERED_INDICES: &str =
             v1_path!("/libraries/{id}/indices/filter");
 
+        pub mod movie_batches {
+            pub const COLLECTION: &str =
+                v1_path!("/libraries/{id}/movie-batches");
+            pub const ITEM: &str =
+                v1_path!("/libraries/{id}/movie-batches/{batch_id}");
+            /// Compare player cached movie batch versions against server records.
+            pub const SYNC: &str =
+                v1_path!("/libraries/{id}/movie-batches:sync");
+            /// Fetch a subset of movie batches for the given library.
+            pub const FETCH: &str =
+                v1_path!("/libraries/{id}/movie-batches:fetch");
+        }
+
+        pub mod series_bundles {
+            /// Fetch all series bundles for a library in one request.
+            pub const COLLECTION: &str =
+                v1_path!("/libraries/{id}/series-bundles");
+            /// Fetch a single series bundle by (library_id, series_id).
+            pub const ITEM: &str =
+                v1_path!("/libraries/{id}/series-bundles/{series_id}");
+            /// Compare player cached series bundle versions against server records.
+            pub const SYNC: &str =
+                v1_path!("/libraries/{id}/series-bundles:sync");
+            /// Fetch a subset of series bundles for the given library.
+            pub const FETCH: &str =
+                v1_path!("/libraries/{id}/series-bundles:fetch");
+        }
+
         pub mod scans {
             pub const START: &str = v1_path!("/libraries/{id}/scans:start");
             pub const PAUSE: &str = v1_path!("/libraries/{id}/scans:pause");
@@ -120,8 +148,7 @@ pub mod v1 {
     }
 
     pub mod images {
-        pub const SERVE: &str =
-            v1_path!("/images/{type}/{id}/{category}/{index}");
+        pub const SERVE: &str = v1_path!("/images");
         /// Refresh (invalidate) all cached images for a media item
         pub const REFRESH: &str = v1_path!("/media/{type}/{id}/refresh-images");
     }
@@ -159,6 +186,7 @@ pub mod v1 {
         pub mod demo {
             pub const STATUS: &str = v1_path!("/admin/demo/status");
             pub const RESET: &str = v1_path!("/admin/demo/reset");
+            pub const RESIZE: &str = v1_path!("/admin/demo/resize");
         }
 
         pub mod sessions {

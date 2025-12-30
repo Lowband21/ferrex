@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT group_name, library_id, last_event_id, last_detected_at\n        FROM file_watch_consumer_offsets\n        WHERE group_name = $1 AND library_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "group_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_detected_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "34a2de978fe0dca9d7bdb764244feed1f299f579cb857eea539e90b39984feb0"
+}

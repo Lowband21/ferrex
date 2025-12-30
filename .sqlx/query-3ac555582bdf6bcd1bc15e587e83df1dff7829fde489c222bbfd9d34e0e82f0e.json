@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT f.id, f.media_id, f.media_type AS \"media_type!: ImageMediaType\", f.library_id, f.file_path, f.filename, f.file_size,\n                   f.technical_metadata, f.parsed_info, f.discovered_at, f.created_at, f.updated_at\n            FROM media_files f\n            JOIN media_processing_status p ON f.id = p.media_file_id\n            WHERE f.library_id = $1\n              AND p.retry_count > 0\n              AND p.retry_count <= $2\n              AND (p.next_retry_at IS NULL OR p.next_retry_at <= NOW())\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type!: ImageMediaType",
+        "type_info": {
+          "Custom": {
+            "name": "media_type",
+            "kind": {
+              "Enum": [
+                "movie",
+                "series",
+                "season",
+                "episode",
+                "person"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "filename",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "technical_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "parsed_info",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3ac555582bdf6bcd1bc15e587e83df1dff7829fde489c222bbfd9d34e0e82f0e"
+}

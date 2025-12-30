@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, media_id, media_type AS \"media_type!: VideoMediaType\", library_id, file_path, filename, file_size,\n                   discovered_at, created_at, technical_metadata, parsed_info\n            FROM media_files\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type!: VideoMediaType",
+        "type_info": {
+          "Custom": {
+            "name": "media_type",
+            "kind": {
+              "Enum": [
+                "movie",
+                "series",
+                "season",
+                "episode",
+                "person"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "filename",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "technical_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "parsed_info",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "38d4e7cc70b8f28f306fdde1044b33b4379959604e8862240004c365707bd8ca"
+}

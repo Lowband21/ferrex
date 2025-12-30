@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT mr.batch_id\n            FROM movie_references mr\n            WHERE mr.library_id = $1\n            ORDER BY mr.batch_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "32740fd6254326b66309f1d613badc2bdc2a66ba9bcd60b824b7c4587fe929e4"
+}

@@ -1,9 +1,9 @@
 use super::{id::MediaIDLike, media_ops::MediaOps};
 use ferrex_model::media::{
-    EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
+    EpisodeReference, Media, MovieReference, SeasonReference, Series,
 };
 use ferrex_model::media_id::MediaID;
-use ferrex_model::media_type::MediaType;
+use ferrex_model::media_type::VideoMediaType;
 
 // A trait that allows us to treat archived and non-archived media references as the same type
 pub trait MediaLike {
@@ -42,19 +42,19 @@ pub trait MediaLike {
     fn media_id(&self) -> Self::MediaID;*/
 
     /// Helper to get media type
-    fn media_type(&self) -> MediaType;
+    fn media_type(&self) -> VideoMediaType;
 }
 
 impl MediaLike for Media {
-    type MovieRef = MovieReference;
-    type SeriesRef = SeriesReference;
-    type SeasonRef = SeasonReference;
-    type EpisodeRef = EpisodeReference;
+    type MovieRef = Box<MovieReference>;
+    type SeriesRef = Box<Series>;
+    type SeasonRef = Box<SeasonReference>;
+    type EpisodeRef = Box<EpisodeReference>;
 
     type MediaID = MediaID;
 
     /// Try to extract owned movie reference
-    fn to_movie(self) -> Option<MovieReference> {
+    fn to_movie(self) -> Option<Box<MovieReference>> {
         match self {
             Self::Movie(m) => Some(m),
             _ => None,
@@ -62,7 +62,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract owned series reference
-    fn to_series(self) -> Option<SeriesReference> {
+    fn to_series(self) -> Option<Box<Series>> {
         match self {
             Self::Series(s) => Some(s),
             _ => None,
@@ -70,7 +70,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract owned season reference
-    fn to_season(self) -> Option<SeasonReference> {
+    fn to_season(self) -> Option<Box<SeasonReference>> {
         match self {
             Self::Season(s) => Some(s),
             _ => None,
@@ -78,7 +78,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract owned episode reference
-    fn to_episode(self) -> Option<EpisodeReference> {
+    fn to_episode(self) -> Option<Box<EpisodeReference>> {
         match self {
             Self::Episode(e) => Some(e),
             _ => None,
@@ -86,7 +86,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract movie reference
-    fn as_movie(&self) -> Option<&MovieReference> {
+    fn as_movie(&self) -> Option<&Box<MovieReference>> {
         match self {
             Self::Movie(m) => Some(m),
             _ => None,
@@ -94,7 +94,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract series reference
-    fn as_series(&self) -> Option<&SeriesReference> {
+    fn as_series(&self) -> Option<&Box<Series>> {
         match self {
             Self::Series(s) => Some(s),
             _ => None,
@@ -102,7 +102,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract season reference
-    fn as_season(&self) -> Option<&SeasonReference> {
+    fn as_season(&self) -> Option<&Box<SeasonReference>> {
         match self {
             Self::Season(s) => Some(s),
             _ => None,
@@ -110,7 +110,7 @@ impl MediaLike for Media {
     }
 
     /// Try to extract episode reference
-    fn as_episode(&self) -> Option<&EpisodeReference> {
+    fn as_episode(&self) -> Option<&Box<EpisodeReference>> {
         match self {
             Self::Episode(e) => Some(e),
             _ => None,
@@ -129,12 +129,12 @@ impl MediaLike for Media {
     }*/
 
     /// Helper to get media type
-    fn media_type(&self) -> MediaType {
+    fn media_type(&self) -> VideoMediaType {
         match self {
-            Self::Movie(_) => MediaType::Movie,
-            Self::Series(_) => MediaType::Series,
-            Self::Season(_) => MediaType::Season,
-            Self::Episode(_) => MediaType::Episode,
+            Self::Movie(_) => VideoMediaType::Movie,
+            Self::Series(_) => VideoMediaType::Series,
+            Self::Season(_) => VideoMediaType::Season,
+            Self::Episode(_) => VideoMediaType::Episode,
         }
     }
 }
@@ -144,79 +144,80 @@ mod archived {
     use super::*;
     use ferrex_model::media::{
         ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,
-        ArchivedSeasonReference, ArchivedSeriesReference,
+        ArchivedSeasonReference, ArchivedSeries,
     };
     use ferrex_model::media_id::ArchivedMediaID;
+    use rkyv::boxed::ArchivedBox;
 
     impl MediaLike for ArchivedMedia {
-        type MovieRef = ArchivedMovieReference;
-        type SeriesRef = ArchivedSeriesReference;
-        type SeasonRef = ArchivedSeasonReference;
-        type EpisodeRef = ArchivedEpisodeReference;
+        type MovieRef = ArchivedBox<ArchivedMovieReference>;
+        type SeriesRef = ArchivedBox<ArchivedSeries>;
+        type SeasonRef = ArchivedBox<ArchivedSeasonReference>;
+        type EpisodeRef = ArchivedBox<ArchivedEpisodeReference>;
         type MediaID = ArchivedMediaID;
 
-        fn to_movie(self) -> Option<ArchivedMovieReference> {
+        fn to_movie(self) -> Option<ArchivedBox<ArchivedMovieReference>> {
             match self {
                 ArchivedMedia::Movie(m) => Some(m),
                 _ => None,
             }
         }
 
-        fn to_series(self) -> Option<ArchivedSeriesReference> {
+        fn to_series(self) -> Option<ArchivedBox<ArchivedSeries>> {
             match self {
                 ArchivedMedia::Series(s) => Some(s),
                 _ => None,
             }
         }
 
-        fn to_season(self) -> Option<ArchivedSeasonReference> {
+        fn to_season(self) -> Option<ArchivedBox<ArchivedSeasonReference>> {
             match self {
                 ArchivedMedia::Season(s) => Some(s),
                 _ => None,
             }
         }
 
-        fn to_episode(self) -> Option<ArchivedEpisodeReference> {
+        fn to_episode(self) -> Option<ArchivedBox<ArchivedEpisodeReference>> {
             match self {
                 ArchivedMedia::Episode(e) => Some(e),
                 _ => None,
             }
         }
 
-        fn as_movie(&self) -> Option<&ArchivedMovieReference> {
+        fn as_movie(&self) -> Option<&ArchivedBox<ArchivedMovieReference>> {
             match self {
                 ArchivedMedia::Movie(m) => Some(m),
                 _ => None,
             }
         }
 
-        fn as_series(&self) -> Option<&ArchivedSeriesReference> {
+        fn as_series(&self) -> Option<&ArchivedBox<ArchivedSeries>> {
             match self {
                 ArchivedMedia::Series(s) => Some(s),
                 _ => None,
             }
         }
 
-        fn as_season(&self) -> Option<&ArchivedSeasonReference> {
+        fn as_season(&self) -> Option<&ArchivedBox<ArchivedSeasonReference>> {
             match self {
                 ArchivedMedia::Season(s) => Some(s),
                 _ => None,
             }
         }
 
-        fn as_episode(&self) -> Option<&ArchivedEpisodeReference> {
+        fn as_episode(&self) -> Option<&ArchivedBox<ArchivedEpisodeReference>> {
             match self {
                 ArchivedMedia::Episode(e) => Some(e),
                 _ => None,
             }
         }
 
-        fn media_type(&self) -> MediaType {
+        fn media_type(&self) -> VideoMediaType {
             match self {
-                ArchivedMedia::Movie(_) => MediaType::Movie,
-                ArchivedMedia::Series(_) => MediaType::Series,
-                ArchivedMedia::Season(_) => MediaType::Season,
-                ArchivedMedia::Episode(_) => MediaType::Episode,
+                ArchivedMedia::Movie(_) => VideoMediaType::Movie,
+                ArchivedMedia::Series(_) => VideoMediaType::Series,
+                ArchivedMedia::Season(_) => VideoMediaType::Season,
+                ArchivedMedia::Episode(_) => VideoMediaType::Episode,
             }
         }
     }

@@ -1,5 +1,5 @@
 use crate::{
-    database::{PostgresDatabase, ports::rbac::RbacRepository},
+    database::{PostgresDatabase, repository_ports::rbac::RbacRepository},
     domain::users::rbac::{Permission, Role, UserPermissions},
     error::Result,
 };

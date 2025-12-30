@@ -1,0 +1,130 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                episode_id,\n                tmdb_id,\n                season_number,\n                episode_number,\n                name,\n                overview,\n                air_date,\n                runtime,\n                still_path,\n                primary_thumbnail_image_id,\n                vote_average,\n                vote_count,\n                production_code,\n                imdb_id,\n                tvdb_id,\n                facebook_id,\n                instagram_id,\n                twitter_id,\n                wikidata_id\n            FROM episode_metadata\n            WHERE episode_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "episode_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "episode_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 7,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "still_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "primary_thumbnail_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "vote_average",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 11,
+        "name": "vote_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "production_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "tvdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "024320884f9571ef40a7efc3afb1359bb96e02fff52617dcc6032a4500e1e502"
+}

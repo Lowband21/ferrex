@@ -343,8 +343,8 @@ impl ExtrasParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::image_types::modname::MediaType;
     use crate::types::library::LibraryType;
+    use ferrex_model::ImageMediaType;
     use std::path::PathBuf;
 
     #[test]
@@ -443,7 +443,7 @@ mod tests {
         let _movie_lib = LibraryType::Movies;
 
         let test_cases =
-            vec![("/movies/The Matrix (1999).mkv", MediaType::Movie)];
+            vec![("/movies/The Matrix (1999).mkv", ImageMediaType::Movie)];
 
         for (path, _expected) in test_cases {
             let _path = PathBuf::from(path);

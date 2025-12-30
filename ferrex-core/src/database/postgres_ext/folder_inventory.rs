@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::database::PostgresDatabase;
-use crate::database::ports::folder_inventory::FolderInventoryRepository;
+use crate::database::repository_ports::folder_inventory::FolderInventoryRepository;
 use crate::database::traits::{
     FolderInventory, FolderProcessingStatus, FolderScanFilters,
 };

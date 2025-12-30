@@ -1,3 +1,5 @@
+//! Migration smoke tests for the `folder_inventory` table and its constraints.
+
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;

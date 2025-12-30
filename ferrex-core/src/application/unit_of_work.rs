@@ -2,40 +2,39 @@ use std::any::type_name_of_val;
 use std::fmt;
 use std::sync::Arc;
 
-#[cfg(feature = "database")]
-use crate::database::ports::{
-    folder_inventory::FolderInventoryRepository,
-    images::ImageRepository,
-    indices::IndicesRepository,
-    library::LibraryRepository,
-    media_files::{MediaFilesReadPort, MediaFilesWritePort},
-    media_references::MediaReferencesRepository,
-    processing_status::ProcessingStatusRepository,
-    query::QueryRepository,
-    rbac::RbacRepository,
-    security_settings::SecuritySettingsRepository,
-    setup_claims::SetupClaimsRepository,
-    sync_sessions::SyncSessionsRepository,
-    users::UsersRepository,
-    watch_metrics::WatchMetricsReadPort,
-    watch_status::WatchStatusRepository,
-};
+use crate::database::repositories::watch_status::PostgresWatchStatusRepository;
 #[cfg(feature = "database")]
 use crate::database::{
-    infrastructure::postgres::{
-        PostgresFolderInventoryRepository, PostgresImageRepository,
-        PostgresIndicesRepository, PostgresLibraryRepository,
-        PostgresMediaReferencesRepository, PostgresMediaRepository,
-        PostgresProcessingStatusRepository, PostgresQueryRepository,
-        PostgresRbacRepository, PostgresSecuritySettingsRepository,
-        PostgresSetupClaimsRepository, PostgresSyncSessionsRepository,
-        PostgresUsersRepository, PostgresWatchMetricsRepository,
-        PostgresWatchStatusRepository,
-    },
     postgres::PostgresDatabase,
+    repositories::{
+        folder_inventory::PostgresFolderInventoryRepository,
+        images::PostgresImageRepository, indices::PostgresIndicesRepository,
+        library::PostgresLibraryRepository, media::PostgresMediaRepository,
+        media_references::PostgresMediaReferencesRepository,
+        processing_status::PostgresProcessingStatusRepository,
+        query::PostgresQueryRepository, rbac::PostgresRbacRepository,
+        security_settings::PostgresSecuritySettingsRepository,
+        setup_claims::PostgresSetupClaimsRepository,
+        sync_sessions::PostgresSyncSessionsRepository,
+        users::PostgresUsersRepository,
+        watch_metrics::PostgresWatchMetricsRepository,
+    },
+    repository_ports::{
+        folder_inventory::FolderInventoryRepository, images::ImageRepository,
+        indices::IndicesRepository, library::LibraryRepository,
+        media_files::MediaFilesReadPort, media_files::MediaFilesWritePort,
+        media_references::MediaReferencesRepository,
+        processing_status::ProcessingStatusRepositoryTrait,
+        query::QueryRepository, rbac::RbacRepository,
+        security_settings::SecuritySettingsRepository,
+        setup_claims::SetupClaimsRepository,
+        sync_sessions::SyncSessionsRepository, users::UsersRepository,
+        watch_metrics::WatchMetricsReadPort,
+        watch_status::WatchStatusRepository,
+    },
 };
 
-/// Aggregates all repository ports used by application services.
+/// Aggregates all repository repository_ports used by application services.
 ///
 /// This composition-based façade replaces the monolithic database interface in
 /// application code while keeping construction/testing straightforward.
@@ -59,7 +58,7 @@ pub struct AppUnitOfWork {
     pub sync_sessions: Arc<dyn SyncSessionsRepository>,
 
     pub folder_inventory: Arc<dyn FolderInventoryRepository>,
-    pub processing_status: Arc<dyn ProcessingStatusRepository>,
+    pub processing_status: Arc<dyn ProcessingStatusRepositoryTrait>,
     pub indices: Arc<dyn IndicesRepository>,
 }
 
@@ -133,7 +132,7 @@ pub struct AppUnitOfWorkBuilder {
     sync_sessions: Option<Arc<dyn SyncSessionsRepository>>,
 
     folder_inventory: Option<Arc<dyn FolderInventoryRepository>>,
-    processing_status: Option<Arc<dyn ProcessingStatusRepository>>,
+    processing_status: Option<Arc<dyn ProcessingStatusRepositoryTrait>>,
     indices: Option<Arc<dyn IndicesRepository>>,
 }
 
@@ -243,7 +242,7 @@ impl AppUnitOfWorkBuilder {
     }
     pub fn with_processing_status(
         mut self,
-        repo: Arc<dyn ProcessingStatusRepository>,
+        repo: Arc<dyn ProcessingStatusRepositoryTrait>,
     ) -> Self {
         self.processing_status = Some(repo);
         self
@@ -311,7 +310,7 @@ impl AppUnitOfWorkBuilder {
 
 #[cfg(feature = "database")]
 impl AppUnitOfWork {
-    /// Convenience helper to compose all Postgres-backed repositories into a unit of work.
+    /// Convenience helper to compose all Postgres-backed repository_ports into a unit of work.
     pub fn from_postgres(db: Arc<PostgresDatabase>) -> Result<Self, String> {
         AppUnitOfWorkBuilder::new().with_postgres(db).build()
     }
@@ -379,7 +378,7 @@ impl AppUnitOfWorkBuilder {
             Arc::new(PostgresIndicesRepository::new(pool.clone()));
         self.indices = Some(indices);
 
-        let processing_status: Arc<dyn ProcessingStatusRepository> =
+        let processing_status: Arc<dyn ProcessingStatusRepositoryTrait> =
             Arc::new(PostgresProcessingStatusRepository::new(pool));
         self.processing_status = Some(processing_status);
 

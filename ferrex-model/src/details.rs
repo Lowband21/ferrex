@@ -268,6 +268,11 @@ pub struct EnhancedMovieDetails {
     pub poster_path: Option<String>,
     pub backdrop_path: Option<String>,
     pub logo_path: Option<String>,
+    /// Primary poster image variant id (`tmdb_image_variants.id`).
+    pub primary_poster_iid: Option<uuid::Uuid>,
+    /// Primary backdrop image variant id (`tmdb_image_variants.id`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primary_backdrop_iid: Option<uuid::Uuid>,
     pub images: MediaImages,
 
     // Credits
@@ -306,8 +311,10 @@ pub struct EnhancedSeriesDetails {
     pub overview: Option<String>,
     pub first_air_date: Option<String>,
     pub last_air_date: Option<String>,
-    pub number_of_seasons: Option<u32>,
-    pub number_of_episodes: Option<u32>,
+    pub number_of_seasons: Option<u16>,
+    pub number_of_episodes: Option<u16>,
+    pub available_seasons: Option<u16>,
+    pub available_episodes: Option<u16>,
     pub vote_average: Option<f32>,
     pub vote_count: Option<u32>,
     pub popularity: Option<f32>,
@@ -337,6 +344,12 @@ pub struct EnhancedSeriesDetails {
     pub poster_path: Option<String>,
     pub backdrop_path: Option<String>,
     pub logo_path: Option<String>,
+    /// Primary poster image variant id (`tmdb_image_variants.id`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primary_poster_iid: Option<uuid::Uuid>,
+    /// Primary backdrop image variant id (`tmdb_image_variants.id`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primary_backdrop_iid: Option<uuid::Uuid>,
     pub images: MediaImages,
 
     // Credits
@@ -370,12 +383,15 @@ pub struct EnhancedSeriesDetails {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct SeasonDetails {
     pub id: u64,
-    pub season_number: u8,
+    pub season_number: u16,
     pub name: String,
     pub overview: Option<String>,
     pub air_date: Option<String>,
-    pub episode_count: u32,
+    pub episode_count: u16,
     pub poster_path: Option<String>,
+    /// Primary season poster image variant id (`tmdb_image_variants.id`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primary_poster_iid: Option<uuid::Uuid>,
     pub runtime: Option<u32>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub external_ids: ExternalIds,
@@ -398,13 +414,16 @@ pub struct SeasonDetails {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct EpisodeDetails {
     pub id: u64,
-    pub episode_number: u8,
-    pub season_number: u8,
+    pub episode_number: u16,
+    pub season_number: u16,
     pub name: String,
     pub overview: Option<String>,
     pub air_date: Option<String>,
     pub runtime: Option<u32>,
     pub still_path: Option<String>,
+    /// Primary episode still image variant id (`tmdb_image_variants.id`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primary_still_iid: Option<uuid::Uuid>,
     pub vote_average: Option<f32>,
     pub vote_count: Option<u32>,
     #[cfg_attr(feature = "serde", serde(default))]
@@ -540,6 +559,7 @@ impl fmt::Debug for EpisodeDetails {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct CastMember {
     pub id: u64,
+    pub person_id: Option<Uuid>,
     pub credit_id: Option<String>,
     pub cast_id: Option<u64>,
     pub name: String,
@@ -557,10 +577,11 @@ pub struct CastMember {
     pub external_ids: PersonExternalIds,
     #[cfg_attr(feature = "serde", serde(default))]
     pub image_slot: u32,
+    /// Primary person profile image variant id (`tmdb_image_variants.id`).
+    ///
+    /// Optional because cast may not have an associated portrait.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub profile_media_id: Option<Uuid>,
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub profile_image_index: Option<u32>,
+    pub image_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -572,6 +593,7 @@ pub struct CastMember {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct CrewMember {
     pub id: u64,
+    pub person_id: Option<Uuid>,
     pub credit_id: Option<String>,
     pub name: String,
     pub job: String,
@@ -586,6 +608,11 @@ pub struct CrewMember {
     pub also_known_as: Vec<String>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub external_ids: PersonExternalIds,
+    /// Primary person profile image variant id (`tmdb_image_variants.id`).
+    ///
+    /// Optional because crew may not have an associated portrait.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub profile_iid: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -641,147 +668,4 @@ pub struct LibraryReference {
     pub library_type: LibraryType,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::VecPathBuf))]
     pub paths: Vec<PathBuf>,
-}
-
-pub trait MediaDetailsOptionLike {
-    fn get_release_year(&self) -> Option<u16>;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
-)]
-#[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
-pub enum MediaDetailsOption {
-    Endpoint(String),
-    Details(Box<TmdbDetails>),
-}
-
-impl MediaDetailsOption {
-    /// Returns the underlying TMDB details if they are cached locally.
-    pub fn as_tmdb(&self) -> Option<&TmdbDetails> {
-        match self {
-            MediaDetailsOption::Details(details) => Some(details.as_ref()),
-            MediaDetailsOption::Endpoint(_) => None,
-        }
-    }
-
-    /// Returns the enhanced movie details when present.
-    pub fn as_movie(&self) -> Option<&EnhancedMovieDetails> {
-        match self.as_tmdb() {
-            Some(TmdbDetails::Movie(movie)) => Some(movie),
-            _ => None,
-        }
-    }
-
-    /// Returns the enhanced series details when present.
-    pub fn as_series(&self) -> Option<&EnhancedSeriesDetails> {
-        match self.as_tmdb() {
-            Some(TmdbDetails::Series(series)) => Some(series),
-            _ => None,
-        }
-    }
-
-    /// Returns the season details when present.
-    pub fn as_season(&self) -> Option<&SeasonDetails> {
-        match self.as_tmdb() {
-            Some(TmdbDetails::Season(season)) => Some(season),
-            _ => None,
-        }
-    }
-
-    /// Returns the episode details when present.
-    pub fn as_episode(&self) -> Option<&EpisodeDetails> {
-        match self.as_tmdb() {
-            Some(TmdbDetails::Episode(episode)) => Some(episode),
-            _ => None,
-        }
-    }
-}
-
-impl MediaDetailsOptionLike for MediaDetailsOption {
-    fn get_release_year(&self) -> Option<u16> {
-        match self {
-            MediaDetailsOption::Endpoint(_) => None,
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split("-").next())
-                    .and_then(|year| year.parse().ok()),
-                _ => None,
-            },
-        }
-    }
-}
-
-#[cfg(feature = "rkyv")]
-impl MediaDetailsOptionLike for ArchivedMediaDetailsOption {
-    fn get_release_year(&self) -> Option<u16> {
-        match self {
-            ArchivedMediaDetailsOption::Endpoint(_) => None,
-            ArchivedMediaDetailsOption::Details(details) => {
-                match details.as_ref() {
-                    ArchivedTmdbDetails::Movie(movie) => movie
-                        .release_date
-                        .as_ref()
-                        .and_then(|date| date.split("-").next())
-                        .and_then(|year| year.parse().ok()),
-                    ArchivedTmdbDetails::Series(series) => series
-                        .first_air_date
-                        .as_ref()
-                        .and_then(|date| date.split("-").next())
-                        .and_then(|year| year.parse().ok()),
-                    _ => None,
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "rkyv")]
-impl ArchivedMediaDetailsOption {
-    /// Returns the archived TMDB details if available.
-    pub fn as_tmdb(&self) -> Option<&ArchivedTmdbDetails> {
-        match self {
-            ArchivedMediaDetailsOption::Details(details) => {
-                Some(details.as_ref())
-            }
-            ArchivedMediaDetailsOption::Endpoint(_) => None,
-        }
-    }
-
-    /// Returns archived movie details when present.
-    pub fn as_movie(&self) -> Option<&ArchivedEnhancedMovieDetails> {
-        match self.as_tmdb() {
-            Some(ArchivedTmdbDetails::Movie(movie)) => Some(movie),
-            _ => None,
-        }
-    }
-
-    /// Returns archived series details when present.
-    pub fn as_series(&self) -> Option<&ArchivedEnhancedSeriesDetails> {
-        match self.as_tmdb() {
-            Some(ArchivedTmdbDetails::Series(series)) => Some(series),
-            _ => None,
-        }
-    }
-
-    /// Returns archived season details when present.
-    pub fn as_season(&self) -> Option<&ArchivedSeasonDetails> {
-        match self.as_tmdb() {
-            Some(ArchivedTmdbDetails::Season(season)) => Some(season),
-            _ => None,
-        }
-    }
-
-    /// Returns archived episode details when present.
-    pub fn as_episode(&self) -> Option<&ArchivedEpisodeDetails> {
-        match self.as_tmdb() {
-            Some(ArchivedTmdbDetails::Episode(episode)) => Some(episode),
-            _ => None,
-        }
-    }
 }

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT 1\n            FROM pg_indexes\n            WHERE indexname = $1\n              AND schemaname IN ('ferrex','public')\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "?column?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3bb7fcbade3712a25ea5fa89376dde9085981f917cd4daf7ed80d2f5e7acd259"
+}

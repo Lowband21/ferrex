@@ -1,0 +1,155 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH input AS (\n                SELECT\n                    ord::bigint AS ord,\n                    image_variant,\n                    tmdb_path,\n                    media_id,\n                    media_type,\n                    width,\n                    height,\n                    iso_lang,\n                    vote_avg,\n                    vote_cnt,\n                    is_primary\n                FROM UNNEST(\n                    $1::image_variant[],\n                    $2::varchar[],\n                    $3::uuid[],\n                    $4::media_type[],\n                    $5::smallint[],\n                    $6::smallint[],\n                    $7::varchar[],\n                    $8::float8[],\n                    $9::int4[],\n                    $10::bool[]\n                ) WITH ORDINALITY AS v(\n                    image_variant,\n                    tmdb_path,\n                    media_id,\n                    media_type,\n                    width,\n                    height,\n                    iso_lang,\n                    vote_avg,\n                    vote_cnt,\n                    is_primary,\n                    ord\n                )\n            ),\n            upserted AS (\n                INSERT INTO tmdb_image_variants (\n                    image_variant,\n                    tmdb_path,\n                    media_id,\n                    media_type,\n                    width,\n                    height,\n                    iso_lang,\n                    vote_avg,\n                    vote_cnt,\n                    is_primary\n                )\n                SELECT\n                    image_variant,\n                    tmdb_path,\n                    media_id,\n                    media_type,\n                    width,\n                    height,\n                    iso_lang,\n                    vote_avg,\n                    vote_cnt,\n                    is_primary\n                FROM input\n                ON CONFLICT (tmdb_path) DO UPDATE SET\n                    image_variant = EXCLUDED.image_variant,\n                    media_id = EXCLUDED.media_id,\n                    media_type = EXCLUDED.media_type,\n                    width = EXCLUDED.width,\n                    height = EXCLUDED.height,\n                    iso_lang = EXCLUDED.iso_lang,\n                    vote_avg = EXCLUDED.vote_avg,\n                    vote_cnt = EXCLUDED.vote_cnt,\n                    is_primary = EXCLUDED.is_primary\n                RETURNING id, image_variant, tmdb_path, media_id, media_type, width, iso_lang, vote_avg, vote_cnt, COALESCE(is_primary, false) AS is_primary\n            )\n            SELECT\n                input.ord AS \"_ord!\",\n                upserted.id,\n                upserted.image_variant AS \"image_variant!: ImageVariant\",\n                upserted.tmdb_path,\n                upserted.media_id,\n                upserted.media_type AS \"media_type: ImageMediaType\",\n                upserted.width,\n                upserted.iso_lang,\n                upserted.vote_avg::real AS \"vote_avg!: f32\",\n                upserted.vote_cnt,\n                upserted.is_primary AS \"is_primary!: bool\"\n            FROM upserted\n            JOIN input USING (tmdb_path)\n            ORDER BY input.ord\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_ord!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_variant!: ImageVariant",
+        "type_info": {
+          "Custom": {
+            "name": "image_variant",
+            "kind": {
+              "Enum": [
+                "poster",
+                "backdrop",
+                "thumbnail",
+                "profile"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "tmdb_path",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "media_type: ImageMediaType",
+        "type_info": {
+          "Custom": {
+            "name": "media_type",
+            "kind": {
+              "Enum": [
+                "movie",
+                "series",
+                "season",
+                "episode",
+                "person"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "width",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "iso_lang",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "vote_avg!: f32",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 9,
+        "name": "vote_cnt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "is_primary!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "image_variant[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "image_variant",
+                  "kind": {
+                    "Enum": [
+                      "poster",
+                      "backdrop",
+                      "thumbnail",
+                      "profile"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "VarcharArray",
+        "UuidArray",
+        {
+          "Custom": {
+            "name": "media_type[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "media_type",
+                  "kind": {
+                    "Enum": [
+                      "movie",
+                      "series",
+                      "season",
+                      "episode",
+                      "person"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Int2Array",
+        "Int2Array",
+        "VarcharArray",
+        "Float8Array",
+        "Int4Array",
+        "BoolArray"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      false,
+      null
+    ]
+  },
+  "hash": "c1044e966774880b9a7a61457d692cd94e18a35e70857c60493f216ff1cfbbd8"
+}

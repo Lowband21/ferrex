@@ -5,14 +5,17 @@ use tokio::task::JoinHandle;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use ferrex_core::scan::orchestration::persistence::PostgresQueueService;
-use ferrex_core::scan::orchestration::job::{
-    EnqueueRequest, FolderScanJob, IndexUpsertJob, JobKind, JobPayload,
-    JobPriority, MatchMediaIntent, MediaAnalyzeJob, MediaFingerprint,
-    MetadataEnrichJob, MetadataIntent,
+use ferrex_core::domain::scan::orchestration::persistence::PostgresQueueService;
+use ferrex_core::domain::scan::orchestration::context::{
+    ScanHierarchy, ScanNodeKind,
 };
-use ferrex_core::scan::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
-use ferrex_core::QueueService;
+use ferrex_core::domain::scan::orchestration::job::{
+    EnqueueRequest, FolderScanJob, IndexUpsertJob, JobKind, JobPayload,
+    JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
+    ScanReason,
+};
+use ferrex_core::domain::scan::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
+use ferrex_core::domain::scan::orchestration::queue::QueueService;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -30,8 +33,8 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
         let fs = FolderScanJob {
             library_id: lib_id,
             folder_path_norm: format!("/bulk/path/{}", i),
-            parent_context: None,
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+            hierarchy: ScanHierarchy::default(),
+            scan_reason: ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -49,7 +52,7 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
         handles.push(tokio::spawn(async move {
             loop {
                 let dq = DequeueRequest {
-                    kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan,
+                    kind: JobKind::FolderScan,
                     worker_id: format!("e2e-w{}", w),
                     lease_ttl: chrono::Duration::seconds(10),
                     selector: None,
@@ -101,8 +104,8 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
         let fs = FolderScanJob {
             library_id: lib_id,
             folder_path_norm: format!("/crash/path/{}", i),
-            parent_context: None,
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+            hierarchy: ScanHierarchy::default(),
+            scan_reason: ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -114,7 +117,7 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
     // Lease all
     let mut leased_ids = Vec::new();
     for i in 0..m {
-        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: format!("cr-{}", i), lease_ttl: chrono::Duration::seconds(30), selector: None };
+        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: format!("cr-{}", i), lease_ttl: chrono::Duration::seconds(30), selector: None };
         let lease = svc.dequeue(dq).await.expect("dequeue ok").expect("lease");
         leased_ids.push(lease.job.id.0);
     }
@@ -134,7 +137,7 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
 
     // Now process to completion
     loop {
-        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: "cr-worker".into(), lease_ttl: chrono::Duration::seconds(10), selector: None };
+        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: "cr-worker".into(), lease_ttl: chrono::Duration::seconds(10), selector: None };
         match svc.dequeue(dq).await.expect("dequeue") {
             Some(lease) => { svc.complete(lease.lease_id).await.expect("complete"); }
             None => break,
@@ -161,8 +164,8 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
             JobPayload::FolderScan(FolderScanJob {
                 library_id: lib_x,
                 folder_path_norm: "/selector/a".into(),
-                parent_context: None,
-                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+                hierarchy: ScanHierarchy::default(),
+                scan_reason: ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -176,8 +179,8 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
             JobPayload::FolderScan(FolderScanJob {
                 library_id: lib_y,
                 folder_path_norm: "/selector/b".into(),
-                parent_context: None,
-                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+                hierarchy: ScanHierarchy::default(),
+                scan_reason: ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -191,8 +194,8 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
             JobPayload::FolderScan(FolderScanJob {
                 library_id: lib_x,
                 folder_path_norm: "/selector/c".into(),
-                parent_context: None,
-                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+                hierarchy: ScanHierarchy::default(),
+                scan_reason: ScanReason::UserRequested,
                 enqueue_time: Utc::now(),
                 device_id: None,
             }),
@@ -292,8 +295,8 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         let fs = FolderScanJob {
             library_id: lib_id,
             folder_path_norm: format!("/e2e/mixed/folder_{}", i),
-            parent_context: None,
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+            hierarchy: ScanHierarchy::default(),
+            scan_reason: ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         };
@@ -305,8 +308,8 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         JobPayload::FolderScan(FolderScanJob {
             library_id: lib_id,
             folder_path_norm: "/e2e/mixed/folder_1".into(),
-            parent_context: None,
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested,
+            hierarchy: ScanHierarchy::default(),
+            scan_reason: ScanReason::UserRequested,
             enqueue_time: Utc::now(),
             device_id: None,
         }),
@@ -325,8 +328,11 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             path_norm: format!("/e2e/mixed/analyze_{i}.mkv"),
             fingerprint: fp,
             discovered_at: Utc::now(),
-            context: serde_json::Value::Null,
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
+            media_id: MediaID::new(VideoMediaType::Movie),
+            variant: VideoMediaType::Movie,
+            hierarchy: ScanHierarchy::default(),
+            node: ScanNodeKind::Unknown,
+            scan_reason: ScanReason::BulkSeed,
         };
         enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma)));
     }
@@ -342,22 +348,24 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             weak_hash: Some("h-2".into()),
         },
         discovered_at: Utc::now(),
-        context: serde_json::Value::Null,
-        scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
+        media_id: MediaID::new(VideoMediaType::Movie),
+        variant: VideoMediaType::Movie,
+        hierarchy: ScanHierarchy::default(),
+        node: ScanNodeKind::Unknown,
+        scan_reason: ScanReason::BulkSeed,
     };
     enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma_dupe)));
 
     for i in 0..5 {
         let md = MetadataEnrichJob {
             library_id: lib_id,
-            logical_candidate_id: format!("cand-{i}"),
-            intent: MetadataIntent::MatchMedia(MatchMediaIntent {
-                path: format!("/meta/cand-{i}"),
-                fingerprint: MediaFingerprint::default(),
-                context: serde_json::json!({"t": i}),
-                scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
-            }),
-            external_ids: None,
+            media_id: MediaID::new(VideoMediaType::Movie),
+            variant: VideoMediaType::Movie,
+            hierarchy: ScanHierarchy::default(),
+            node: ScanNodeKind::Unknown,
+            path_norm: format!("/meta/cand-{i}"),
+            fingerprint: MediaFingerprint::default(),
+            scan_reason: ScanReason::BulkSeed,
         };
         enqueues.push(EnqueueRequest::new(
             JobPriority::P1,
@@ -367,14 +375,13 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
     // Duplicate candidate
     let md_dupe = MetadataEnrichJob {
         library_id: lib_id,
-        logical_candidate_id: "cand-4".into(),
-        intent: MetadataIntent::MatchMedia(MatchMediaIntent {
-            path: "/meta/cand-4".into(),
-            fingerprint: MediaFingerprint::default(),
-            context: serde_json::json!({"t": "4b"}),
-            scan_reason: ferrex_core::scan::orchestration::job::ScanReason::BulkSeed,
-        }),
-        external_ids: None,
+        media_id: MediaID::new(VideoMediaType::Movie),
+        variant: VideoMediaType::Movie,
+        hierarchy: ScanHierarchy::default(),
+        node: ScanNodeKind::Unknown,
+        path_norm: "/meta/cand-4".into(),
+        fingerprint: MediaFingerprint::default(),
+        scan_reason: ScanReason::BulkSeed,
     };
     enqueues.push(EnqueueRequest::new(
         JobPriority::P0,
@@ -384,11 +391,12 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
     for i in 0..5 {
         let ix = IndexUpsertJob {
             library_id: lib_id,
-            logical_entity: serde_json::json!({"id": i}),
-            media_attrs: serde_json::json!({}),
-            relations: serde_json::json!({}),
+            media_id: MediaID::new(VideoMediaType::Movie),
+            variant: VideoMediaType::Movie,
+            hierarchy: ScanHierarchy::default(),
+            node: ScanNodeKind::Unknown,
             path_norm: format!("/e2e/mixed/index_{i}.json"),
-            idempotency_key: format!("idem-{i}"),
+            idempotency_key: format!("index:{}:/e2e/mixed/index_{i}.json", lib_id),
         };
         enqueues.push(EnqueueRequest::new(JobPriority::P3, JobPayload::IndexUpsert(ix)));
     }
@@ -472,13 +480,13 @@ async fn bench_stub_latency_logging(pool: PgPool) {
     // Enqueue a small batch and measure dequeue->complete latency
     let n = 10;
     for i in 0..n {
-        let fs = FolderScanJob { library_id: lib_id, folder_path_norm: format!("/bench/{}", i), parent_context: None, scan_reason: ferrex_core::scan::orchestration::job::ScanReason::UserRequested, enqueue_time: Utc::now(), device_id: None };
+        let fs = FolderScanJob { library_id: lib_id, folder_path_norm: format!("/bench/{}", i), hierarchy: ScanHierarchy::default(), scan_reason: ScanReason::UserRequested, enqueue_time: Utc::now(), device_id: None };
         svc.enqueue(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs))).await.expect("enqueue");
     }
 
     let mut latencies = Vec::new();
     loop {
-        let dq = DequeueRequest { kind: ferrex_core::scan::orchestration::job::JobKind::FolderScan, worker_id: "bench".into(), lease_ttl: chrono::Duration::seconds(5), selector: None };
+        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: "bench".into(), lease_ttl: chrono::Duration::seconds(5), selector: None };
         match svc.dequeue(dq).await.expect("dequeue") {
             Some(lease) => {
                 let start = Utc::now();

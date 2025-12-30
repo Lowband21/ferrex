@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT batch_id\n            FROM movie_reference_batches\n            WHERE library_id = $1\n              AND finalized_at IS NOT NULL\n            ORDER BY batch_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f6fb7c07598198cf0fd5ad45762755300374fba301bce5c0dee4848100ac4678"
+}

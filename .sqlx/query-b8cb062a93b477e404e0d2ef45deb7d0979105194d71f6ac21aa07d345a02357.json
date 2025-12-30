@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, attempts, library_id, payload\n            FROM orchestrator_jobs\n            WHERE lease_id = $1::uuid AND state = 'leased'\n            FOR UPDATE\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b8cb062a93b477e404e0d2ef45deb7d0979105194d71f6ac21aa07d345a02357"
+}

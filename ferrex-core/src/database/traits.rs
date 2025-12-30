@@ -1,6 +1,6 @@
-use crate::domain::media::image::MediaImageKind;
 use crate::types::ids::LibraryId;
 use chrono::{DateTime, Utc};
+use ferrex_model::{ImageMediaType, ImageSize, MediaID};
 #[cfg(feature = "rkyv")]
 use rkyv::{
     Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
@@ -143,60 +143,47 @@ pub struct EpisodeInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
 pub struct ImageRecord {
-    pub id: Uuid,
-    pub tmdb_path: String,
-    pub file_hash: Option<String>,
-    pub file_size: Option<i32>,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-    pub format: Option<String>,
+    pub iid: Uuid,
+    pub imz: ImageSize,
+    pub theme_color: String,
+    pub dimensions: (u32, u32),
+    pub cache_key: String,
+    pub integrity: String,
+    pub byte_len: i32,
     #[cfg_attr(
         feature = "rkyv",
         rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)
     )]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(
+        feature = "rkyv",
+        rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)
+    )]
+    pub modified_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
-pub struct ImageVariant {
-    pub id: Uuid,
-    pub image_id: Uuid,
-    pub variant: String,
-    pub file_path: String,
-    pub file_size: i32,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-    #[cfg_attr(
-        feature = "rkyv",
-        rkyv(with = crate::rkyv_wrappers::DateTimeWrapper)
-    )]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[cfg_attr(
-        feature = "rkyv",
-        rkyv(with = crate::rkyv_wrappers::OptionDateTime)
-    )]
-    pub downloaded_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MediaImage {
-    pub media_type: String,
+pub struct OriginalImage {
+    pub iid: Uuid,
     pub media_id: Uuid,
-    pub image_id: Uuid,
-    pub image_type: MediaImageKind,
-    pub order_index: i32,
+    pub media_type: ImageMediaType,
+    pub tmdb_path: String,
+    pub imz: ImageSize,
+    pub iso_lang: String,
+    pub vote_avg: f32,
+    pub vote_cnt: u32,
     pub is_primary: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+#[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct ImageLookupParams {
-    pub media_type: String,
-    pub media_id: String,
-    pub image_type: MediaImageKind,
-    pub index: u32,
-    pub variant: Option<String>,
+    pub id: MediaID,
+    pub iid: Uuid,
+    pub imz: ImageSize,
+    pub is_primary: bool,
 }
 
 // Folder inventory types

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT library_id, detected_at FROM file_watch_events WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "detected_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "715b28cd593b2152f1023630d8dee6e8bbb1569761f6427a53a188a684124559"
+}

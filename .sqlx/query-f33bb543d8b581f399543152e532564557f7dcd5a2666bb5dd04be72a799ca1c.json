@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT series_id, iso_639_1, name FROM series_spoken_languages WHERE series_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_639_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f33bb543d8b581f399543152e532564557f7dcd5a2666bb5dd04be72a799ca1c"
+}

@@ -5,11 +5,11 @@ use crate::application::unit_of_work::AppUnitOfWork;
 use crate::database::PostgresDatabase;
 use crate::error::{MediaError, Result};
 
-/// Bundles the Postgres infrastructure with the application-facing unit of work.
+/// Bundles the Postgres infra with the application-facing unit of work.
 ///
 /// This replaces the legacy `MediaDatabase` façade so callers can grab the
-/// repositories they actually need (via `AppUnitOfWork`) while still exposing
-/// the raw Postgres adapter for infrastructure wiring.
+/// repository_ports they actually need (via `AppUnitOfWork`) while still exposing
+/// the raw Postgres adapter for infra wiring.
 #[derive(Clone)]
 pub struct DatabaseContext {
     postgres: Arc<PostgresDatabase>,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE setup_claims\n            SET revoked_at = COALESCE(revoked_at, $1),\n                revoked_reason = COALESCE($2, revoked_reason)\n            WHERE revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be37678282e6f351640339b8cb717f808becb8d783398f4e26966d358f72739b"
+}

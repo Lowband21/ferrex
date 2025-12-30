@@ -1,14 +1,8 @@
-/// Trait that allows us to treat archived MediaIDs the same as MediaIDs.
-//pub trait MediaIDVariant {
-//    fn as_str(&self) -> String;
-//    fn as_uuid(&self) -> Uuid;
-//    fn sub_eq(&self, other: &impl MediaIDVariant) -> bool;
-//}
 use uuid::Uuid;
 
 use ferrex_model::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
 use ferrex_model::media_id::MediaID;
-use ferrex_model::media_type::MediaType;
+use ferrex_model::media_type::VideoMediaType;
 
 const UUID_STR_LEN: usize = 36;
 
@@ -18,6 +12,7 @@ fn uuid_to_str(uuid: Uuid, buffer: &mut [u8; 45]) -> &str {
     encoded
 }
 
+/// Trait that allows us to treat archived MediaIDs the same as MediaIDs.
 pub trait MediaIDLike {
     type MediaId: MediaIDLike;
 
@@ -34,7 +29,11 @@ pub trait MediaIDLike {
 
     fn sub_eq(&self, other: &impl MediaIDLike) -> bool;
 
-    fn media_type(&self) -> MediaType;
+    /// The playable media category for this id.
+    ///
+    /// Note: this intentionally returns `VideoMediaType` (Movie/Series/Season/Episode),
+    /// not `ImageMediaType` (which includes `Person` for image ownership).
+    fn media_type(&self) -> VideoMediaType;
 }
 
 impl MediaIDLike for MediaID {
@@ -85,12 +84,12 @@ impl MediaIDLike for MediaID {
         self.as_uuid() == other.as_uuid()
     }
 
-    fn media_type(&self) -> MediaType {
+    fn media_type(&self) -> VideoMediaType {
         match &self {
-            MediaID::Movie(_) => MediaType::Movie,
-            MediaID::Series(_) => MediaType::Series,
-            MediaID::Season(_) => MediaType::Season,
-            MediaID::Episode(_) => MediaType::Episode,
+            MediaID::Movie(_) => VideoMediaType::Movie,
+            MediaID::Series(_) => VideoMediaType::Series,
+            MediaID::Season(_) => VideoMediaType::Season,
+            MediaID::Episode(_) => VideoMediaType::Episode,
         }
     }
 }
@@ -153,12 +152,12 @@ mod archived {
             self.as_uuid() == other.as_uuid()
         }
 
-        fn media_type(&self) -> MediaType {
+        fn media_type(&self) -> VideoMediaType {
             match &self {
-                ArchivedMediaID::Movie(_) => MediaType::Movie,
-                ArchivedMediaID::Series(_) => MediaType::Series,
-                ArchivedMediaID::Season(_) => MediaType::Season,
-                ArchivedMediaID::Episode(_) => MediaType::Episode,
+                ArchivedMediaID::Movie(_) => VideoMediaType::Movie,
+                ArchivedMediaID::Series(_) => VideoMediaType::Series,
+                ArchivedMediaID::Season(_) => VideoMediaType::Season,
+                ArchivedMediaID::Episode(_) => VideoMediaType::Episode,
             }
         }
     }
@@ -190,8 +189,8 @@ mod archived {
             self.as_uuid() == other.as_uuid()
         }
 
-        fn media_type(&self) -> MediaType {
-            MediaType::Movie
+        fn media_type(&self) -> VideoMediaType {
+            VideoMediaType::Movie
         }
     }
 
@@ -222,8 +221,8 @@ mod archived {
             self.as_uuid() == other.as_uuid()
         }
 
-        fn media_type(&self) -> MediaType {
-            MediaType::Series
+        fn media_type(&self) -> VideoMediaType {
+            VideoMediaType::Series
         }
     }
 
@@ -254,8 +253,8 @@ mod archived {
             self.as_uuid() == other.as_uuid()
         }
 
-        fn media_type(&self) -> MediaType {
-            MediaType::Season
+        fn media_type(&self) -> VideoMediaType {
+            VideoMediaType::Season
         }
     }
 
@@ -286,8 +285,8 @@ mod archived {
             self.as_uuid() == other.as_uuid()
         }
 
-        fn media_type(&self) -> MediaType {
-            MediaType::Episode
+        fn media_type(&self) -> VideoMediaType {
+            VideoMediaType::Episode
         }
     }
 }
@@ -319,8 +318,8 @@ impl MediaIDLike for MovieID {
         self.as_uuid() == other.as_uuid()
     }
 
-    fn media_type(&self) -> MediaType {
-        MediaType::Movie
+    fn media_type(&self) -> VideoMediaType {
+        VideoMediaType::Movie
     }
 }
 
@@ -351,8 +350,8 @@ impl MediaIDLike for SeriesID {
         self.as_uuid() == other.as_uuid()
     }
 
-    fn media_type(&self) -> MediaType {
-        MediaType::Series
+    fn media_type(&self) -> VideoMediaType {
+        VideoMediaType::Series
     }
 }
 
@@ -383,8 +382,8 @@ impl MediaIDLike for SeasonID {
         self.as_uuid() == other.as_uuid()
     }
 
-    fn media_type(&self) -> MediaType {
-        MediaType::Season
+    fn media_type(&self) -> VideoMediaType {
+        VideoMediaType::Season
     }
 }
 
@@ -415,7 +414,7 @@ impl MediaIDLike for EpisodeID {
         self.as_uuid() == other.as_uuid()
     }
 
-    fn media_type(&self) -> MediaType {
-        MediaType::Episode
+    fn media_type(&self) -> VideoMediaType {
+        VideoMediaType::Episode
     }
 }

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO permissions (name, category, description)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (name) DO UPDATE\n            SET category = EXCLUDED.category,\n                description = EXCLUDED.description\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b0d50fabcf5e8b02dd8ef2835aee8c82681cfdb8f2ede4bb592fde4c6d416a8b"
+}

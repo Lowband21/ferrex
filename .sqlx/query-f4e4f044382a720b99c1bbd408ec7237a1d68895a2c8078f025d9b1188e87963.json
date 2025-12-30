@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, tmdb_path, media_id, image_variant AS \"image_variant!: ImageVariant\", media_type AS \"media_type: ImageMediaType\", width, iso_lang, vote_avg::real AS \"vote_avg!: f32\", vote_cnt, COALESCE(is_primary, false) AS \"is_primary!: bool\"\n            FROM tmdb_image_variants\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_path",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "media_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "image_variant!: ImageVariant",
+        "type_info": {
+          "Custom": {
+            "name": "image_variant",
+            "kind": {
+              "Enum": [
+                "poster",
+                "backdrop",
+                "thumbnail",
+                "profile"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "media_type: ImageMediaType",
+        "type_info": {
+          "Custom": {
+            "name": "media_type",
+            "kind": {
+              "Enum": [
+                "movie",
+                "series",
+                "season",
+                "episode",
+                "person"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "width",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "iso_lang",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "vote_avg!: f32",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 8,
+        "name": "vote_cnt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_primary!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      false,
+      null
+    ]
+  },
+  "hash": "f4e4f044382a720b99c1bbd408ec7237a1d68895a2c8078f025d9b1188e87963"
+}

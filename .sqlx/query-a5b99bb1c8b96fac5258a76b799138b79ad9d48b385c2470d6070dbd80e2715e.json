@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO series_bundle_versioning\n                (library_id, series_id, finalized, bundle_hash)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (library_id, series_id) DO UPDATE SET\n                version = CASE\n                    WHEN series_bundle_versioning.bundle_hash IS DISTINCT FROM EXCLUDED.bundle_hash\n                    THEN series_bundle_versioning.version + 1\n                    ELSE series_bundle_versioning.version\n                END,\n                finalized = EXCLUDED.finalized,\n                bundle_hash = EXCLUDED.bundle_hash,\n                updated_at = CASE\n                    WHEN series_bundle_versioning.bundle_hash IS DISTINCT FROM EXCLUDED.bundle_hash\n                    THEN NOW()\n                    ELSE series_bundle_versioning.updated_at\n                END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a5b99bb1c8b96fac5258a76b799138b79ad9d48b385c2470d6070dbd80e2715e"
+}

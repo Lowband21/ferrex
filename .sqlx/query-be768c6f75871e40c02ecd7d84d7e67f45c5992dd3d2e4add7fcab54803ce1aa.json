@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                sr.id,\n                sr.library_id,\n                sr.tmdb_id,\n                sr.title,\n                sr.theme_color,\n                sr.discovered_at AS \"discovered_at!\",\n                sr.created_at AS \"created_at!\"\n            FROM series sr\n            WHERE sr.id = ANY($1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "be768c6f75871e40c02ecd7d84d7e67f45c5992dd3d2e4add7fcab54803ce1aa"
+}

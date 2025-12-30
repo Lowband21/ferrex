@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                er.id,\n                er.episode_number,\n                er.season_number,\n                er.season_id,\n                er.series_id,\n                er.tmdb_series_id,\n                er.discovered_at AS episode_discovered_at,\n                er.created_at AS episode_created_at,\n                mf.id AS file_id,\n                mf.library_id,\n                mf.file_path,\n                mf.filename,\n                mf.file_size,\n                mf.discovered_at AS file_discovered_at,\n                mf.created_at AS file_created_at,\n                mf.technical_metadata\n            FROM episode_references er\n            JOIN media_files mf ON er.file_id = mf.id\n            WHERE er.season_id = $1\n            ORDER BY er.episode_number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "episode_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "season_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "tmdb_series_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "episode_discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "episode_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "filename",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "file_discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "file_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "technical_metadata",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "5c7652a7f6d136dcc363f07f6a8c5bb5320f8b9c26efb9ea8fba82b5ee7cdad9"
+}

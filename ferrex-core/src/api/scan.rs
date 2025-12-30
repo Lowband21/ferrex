@@ -37,6 +37,7 @@ pub struct OrchestratorConfigView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueConfigView {
     pub max_parallel_scans: usize,
+    pub max_parallel_series_resolve: usize,
     pub max_parallel_analyses: usize,
     pub max_parallel_metadata: usize,
     pub max_parallel_index: usize,

@@ -6,6 +6,15 @@ pub enum MediaError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("HTTP client error: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("HTTP request failed with status {status} ({url})")]
+    HttpStatus {
+        status: reqwest::StatusCode,
+        url: String,
+    },
+
     #[cfg(feature = "ffmpeg")]
     #[error("FFmpeg error: {0}")]
     Ffmpeg(#[from] ffmpeg_next::Error),

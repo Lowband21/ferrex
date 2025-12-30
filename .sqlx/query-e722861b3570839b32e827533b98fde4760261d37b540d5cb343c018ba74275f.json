@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_keywords (movie_id, library_id, batch_id, keyword_id, name)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (movie_id, keyword_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e722861b3570839b32e827533b98fde4760261d37b540d5cb343c018ba74275f"
+}

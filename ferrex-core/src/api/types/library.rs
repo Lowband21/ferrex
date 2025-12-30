@@ -9,9 +9,10 @@ use uuid::Uuid;
 
 use crate::types::details::LibraryReference;
 use crate::types::ids::LibraryId;
+use crate::types::ids::{MovieBatchId, SeriesID};
 use crate::types::library::LibraryType;
 use crate::types::media::{
-    EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
+    EpisodeReference, Media, MovieReference, SeasonReference, Series,
 };
 use crate::types::media_id::MediaID;
 
@@ -23,6 +24,71 @@ pub struct LibraryMediaResponse {
     pub media: Vec<Media>, // Lightweight - MediaDetailsOption will be Endpoint variant
 }
 
+/// Archived movie reference batch payload fetched by (library_id, batch_id).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+#[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq)))]
+pub struct MovieReferenceBatchResponse {
+    pub library_id: LibraryId,
+    pub batch_id: MovieBatchId,
+    pub movies: Vec<MovieReference>,
+}
+
+/// Bundled movie batches payload for bootstrapping movie libraries.
+///
+/// This is used by the player at startup to fetch all finalized movie batches
+/// for a library in a single request, avoiding N HTTP round-trips.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+pub struct MovieReferenceBatchBlob {
+    pub batch_id: MovieBatchId,
+    pub bytes: Vec<u8>,
+}
+
+/// Response containing all finalized movie reference batches for a library.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+pub struct MovieReferenceBatchBundleResponse {
+    pub library_id: LibraryId,
+    pub batches: Vec<MovieReferenceBatchBlob>,
+}
+
+/// Archived per-series payload containing the series and all dependent
+/// season/episode references.
+///
+/// This is intended to be stored and accessed as rkyv bytes by the player so it
+/// can look up series, seasons, and episodes without fully deserializing them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+pub struct SeriesBundleResponse {
+    pub library_id: LibraryId,
+    pub series_id: SeriesID,
+    pub series: Series,
+    pub seasons: Vec<SeasonReference>,
+    pub episodes: Vec<EpisodeReference>,
+}
+
+/// Bundled per-series archives payload for bootstrapping series libraries.
+///
+/// Each `bytes` blob is an rkyv-serialized `SeriesBundleResponse`, allowing the
+/// player to keep per-series payloads isolated (and replaceable) without
+/// re-downloading the entire library snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+#[cfg_attr(feature = "rkyv", rkyv(derive(Debug, Hash, PartialEq, Eq)))]
+pub struct SeriesBundleBlob {
+    pub series_id: SeriesID,
+    pub bytes: Vec<u8>,
+}
+
+/// Response containing all series bundles for a library.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "rkyv", derive(Archive, RkyvSerialize, RkyvDeserialize))]
+pub struct SeriesBundleBundleResponse {
+    pub library_id: LibraryId,
+    pub bundles: Vec<(SeriesBundleBlob, u64)>,
+}
+
 /// In-memory cache shared between services for library media lookups
 #[derive(Debug, Clone)]
 pub enum LibraryMediaCache {
@@ -30,8 +96,8 @@ pub enum LibraryMediaCache {
         references: Vec<MovieReference>,
     },
     TvShows {
-        series_references: HashMap<Uuid, SeriesReference>,
-        series_references_sorted: Vec<SeriesReference>,
+        series_references: HashMap<Uuid, Series>,
+        series_references_sorted: Vec<Series>,
         series_indices_sorted: Vec<String>,
         season_references: HashMap<Uuid, Vec<SeasonReference>>,
         episode_references: HashMap<Uuid, Vec<EpisodeReference>>,
@@ -103,6 +169,8 @@ pub struct CreateLibraryRequest {
     pub scan_interval_minutes: u32,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_movie_ref_batch_size")]
+    pub movie_ref_batch_size: u32,
     #[serde(default = "default_start_scan")]
     pub start_scan: bool,
 }
@@ -114,6 +182,7 @@ pub struct UpdateLibraryRequest {
     pub paths: Option<Vec<String>>,
     pub scan_interval_minutes: Option<u32>,
     pub enabled: Option<bool>,
+    pub movie_ref_batch_size: Option<u32>,
 }
 
 fn default_scan_interval() -> u32 {
@@ -126,4 +195,8 @@ fn default_enabled() -> bool {
 
 fn default_start_scan() -> bool {
     true
+}
+
+fn default_movie_ref_batch_size() -> u32 {
+    250
 }

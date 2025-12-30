@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE orchestrator_jobs\n            SET state='completed',\n                lease_owner=NULL,\n                lease_id=NULL,\n                lease_expires_at=NULL\n            WHERE lease_id = $1 AND state='leased'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d1e3d7744f37a27d6ab9c9f0cf99f7c3794a4ad4c6285150540f94d1f473a04f"
+}

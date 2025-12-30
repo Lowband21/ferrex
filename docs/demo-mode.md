@@ -105,7 +105,9 @@ Set via `FERREX_DEMO_OPTIONS`.
 
 ## Runtime Behavior
 - **Filesystem seeding**: On startup, the server fetches TMDB popular lists, builds the directory tree, and creates zero-byte files according to the plan. Resetting will wipe and re-seed the tree with a fresh TMDB snapshot.
-- **Database isolation**: If demo mode is active, the server rewrites `postgres://.../dbname` to `postgres://.../dbname_demo`. You may need to create the database upfront (`createdb dbname_demo`).
+- **Database isolation**: When demo mode is active, the server connects to the reserved demo database `ferrex_demo` (derived from your normal `DATABASE_URL`).
+  - The server **does not** drop/recreate the demo database on startup.
+  - To recreate the demo database on-demand (drop + create + run migrations), use `just reset-demo`.
 - **Library registration**: Generated libraries are inserted into the DB (or re-used if names match). Filesystem watchers are disabled for demo libs to avoid unnecessary noise.
 - **Policy enforcement**: Scanner checks `demo::policy()` to bypass size checks and FFmpeg probes. Only files under registered demo libraries are affected.
 - **User provisioning**: `demo` user is created automatically with admin role; credentials configurable via env. Perfect for staging or quick sales demos.
@@ -127,6 +129,9 @@ Set via `FERREX_DEMO_OPTIONS`.
 ```bash
 # Start server in demo mode
 cargo run -p ferrex-server --features demo -- --demo
+
+# Recreate the demo database (drop + create + migrate)
+just reset-demo
 
 # Start player in demo mode (separate terminal)
 FERREX_SERVER_URL=https://localhost:3000 \

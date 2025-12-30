@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT series_id, network_id, name, origin_country FROM series_networks WHERE series_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "network_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "origin_country",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0d44783d77ba2bd9749e1e6d53f973748b68b4e55b8177bf7e32897a7e17626e"
+}

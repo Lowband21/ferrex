@@ -1,3 +1,5 @@
+//! Validates the PIN device trust window enforcement in authentication.
+
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use ferrex_core::domain::users::auth::domain::{

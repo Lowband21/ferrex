@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE setup_claims\n            SET attempts = attempts + 1,\n                last_attempt_at = $2\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0edc6aae67907ee777b81c1cfe838f52d1a78ca2f26034f63e00c1e17a03f787"
+}

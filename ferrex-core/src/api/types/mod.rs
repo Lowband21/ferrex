@@ -7,6 +7,7 @@ pub mod demo;
 pub mod filters;
 pub mod library;
 pub mod media;
+pub mod media_repo_sync;
 pub mod responses;
 pub mod scan;
 pub mod setup;
@@ -25,9 +26,18 @@ pub use filters::{
 pub use library::{
     BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
     FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
-    ManualMatchRequest, UpdateLibraryRequest,
+    ManualMatchRequest, MovieReferenceBatchBlob,
+    MovieReferenceBatchBundleResponse, MovieReferenceBatchResponse,
+    SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
+    UpdateLibraryRequest,
 };
 pub use media::ImageData;
+pub use media_repo_sync::{
+    MovieBatchFetchRequest, MovieBatchSyncRequest, MovieBatchSyncResponse,
+    MovieBatchVersionManifestEntry, SeriesBundleFetchRequest,
+    SeriesBundleSyncRequest, SeriesBundleSyncResponse,
+    SeriesBundleVersionManifestEntry,
+};
 pub use responses::{ApiResponse, MediaStats, MetadataRequest};
 pub use scan::{
     ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
@@ -45,9 +55,18 @@ pub mod player {
     pub use super::library::{
         BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
         FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,
-        ManualMatchRequest, UpdateLibraryRequest,
+        ManualMatchRequest, MovieReferenceBatchBlob,
+        MovieReferenceBatchBundleResponse, MovieReferenceBatchResponse,
+        SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
+        UpdateLibraryRequest,
     };
     pub use super::media::ImageData;
+    pub use super::media_repo_sync::{
+        MovieBatchFetchRequest, MovieBatchSyncRequest, MovieBatchSyncResponse,
+        MovieBatchVersionManifestEntry, SeriesBundleFetchRequest,
+        SeriesBundleSyncRequest, SeriesBundleSyncResponse,
+        SeriesBundleVersionManifestEntry,
+    };
     pub use super::responses::ApiResponse;
     pub use super::scan::{
         ActiveScansResponse, LatestProgressResponse,

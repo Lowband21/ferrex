@@ -1,15 +1,13 @@
-use crate::{
-    database::infrastructure::postgres::repositories::{
-        folder_inventory::PostgresFolderInventoryRepository,
-        processing_status::PostgresProcessingStatusRepository,
-        rbac::PostgresRbacRepository,
-        sync_sessions::PostgresSyncSessionsRepository,
-        users::PostgresUsersRepository,
-        watch_status::PostgresWatchStatusRepository,
-    },
-    error::{MediaError, Result},
-    scan::fs_watch::event_bus::PostgresFileChangeEventBus,
+use crate::database::repositories::{
+    folder_inventory::PostgresFolderInventoryRepository,
+    processing_status::PostgresProcessingStatusRepository,
+    rbac::PostgresRbacRepository,
+    sync_sessions::PostgresSyncSessionsRepository,
+    users::PostgresUsersRepository,
+    watch_status::PostgresWatchStatusRepository,
 };
+use crate::domain::scan::fs_watch::event_bus::PostgresFileChangeEventBus;
+use crate::error::{MediaError, Result};
 use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
@@ -59,7 +57,7 @@ impl PostgresDatabase {
         let max_connections = std::env::var("DB_MAX_CONNECTIONS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(num_cpus::get() as u32);
+            .unwrap_or(100);
 
         let min_connections = std::env::var("DB_MIN_CONNECTIONS")
             .ok()
@@ -80,7 +78,7 @@ impl PostgresDatabase {
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
                     // Safe to set even if schema doesn't yet exist; Postgres allows arbitrary names in search_path.
-                    let _ = sqlx::query("SET search_path = ferrex, public")
+                    let _ = sqlx::query!("SET search_path = ferrex, public")
                         .execute(conn)
                         .await;
                     Ok(())
@@ -107,11 +105,8 @@ impl PostgresDatabase {
         let sync_sessions = PostgresSyncSessionsRepository::new(pool.clone());
         let folder_inventory =
             PostgresFolderInventoryRepository::new(pool.clone());
-        //let libraries = PostgresLibraryRepository::new(pool.clone());
-        //let media = PostgresMediaRepository::new(pool.clone());
         let processing_status =
             PostgresProcessingStatusRepository::new(pool.clone());
-        //let file_watch = PostgresFileWatchRepository::new(pool.clone());
 
         Ok(PostgresDatabase {
             pool,
@@ -123,7 +118,6 @@ impl PostgresDatabase {
             sync_sessions,
             folder_inventory,
             processing_status,
-            //file_watch,
         })
     }
 
@@ -142,10 +136,10 @@ impl PostgresDatabase {
         let ferrex_exists = sqlx::query!(
             "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'ferrex') AS \"exists!: bool\"",
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Schema existence check failed: {}", e)))?
-        .exists;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Schema existence check failed: {}", e)))?
+            .exists;
 
         let target_schema = if ferrex_exists { "ferrex" } else { "public" };
 
@@ -158,34 +152,34 @@ impl PostgresDatabase {
             "#,
             target_schema
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Privilege preflight failed: {}", e)))?;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Privilege preflight failed: {}", e)))?;
 
         // Detect presence of required extensions; migrations create them IF NOT EXISTS.
         let ext_citext = sqlx::query!(
             "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'citext') AS \"exists!: bool\""
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Extension check (citext) failed: {}", e)))?
-        .exists;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Extension check (citext) failed: {}", e)))?
+            .exists;
 
         let ext_trgm = sqlx::query!(
             "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS \"exists!: bool\""
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Extension check (pg_trgm) failed: {}", e)))?
-        .exists;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Extension check (pg_trgm) failed: {}", e)))?
+            .exists;
 
         let ext_pgcrypto = sqlx::query!(
             "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') AS \"exists!: bool\""
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Extension check (pgcrypto) failed: {}", e)))?
-        .exists;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Extension check (pgcrypto) failed: {}", e)))?
+            .exists;
 
         // Determine whether current_user can CREATE EXTENSION (db owner or superuser).
         let db_info = sqlx::query!(
@@ -219,10 +213,10 @@ impl PostgresDatabase {
         let is_superuser = sqlx::query!(
             r#"SELECT rolsuper AS "is_superuser!: bool" FROM pg_roles WHERE rolname = current_user"#
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| MediaError::Internal(format!("Role check failed: {}", e)))?
-        .is_superuser;
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MediaError::Internal(format!("Role check failed: {}", e)))?
+            .is_superuser;
         let can_create_extension = is_db_owner || is_superuser;
 
         // Build actionable errors if prerequisites are missing.
@@ -362,7 +356,15 @@ impl PostgresDatabase {
             })?
         };
 
-        if let Ok(db_name) = std::env::var("DATABASE_NAME")
+        // Only apply `DATABASE_NAME` as a fallback when the connection string
+        // does not already specify a database.
+        //
+        // Rationale: demo mode (and other callers) may intentionally rewrite
+        // the database in `DATABASE_URL`. Unconditionally overriding it here
+        // forces all connections back to the primary database, which can lead
+        // to demo data being written into production/dev databases.
+        if options.get_database().is_none()
+            && let Ok(db_name) = std::env::var("DATABASE_NAME")
             && !db_name.is_empty()
         {
             options = options.database(&db_name);
@@ -452,11 +454,6 @@ impl PostgresDatabase {
         &self.folder_inventory
     }
 
-    // // Reintegrate?
-    // pub(crate) fn file_watch_repository(&self) -> &PostgresFileWatchRepository {
-    //&self.file_watch
-    // }
-
     pub(crate) fn processing_status_repository(
         &self,
     ) -> &PostgresProcessingStatusRepository {
@@ -479,8 +476,21 @@ impl PostgresDatabase {
     pub async fn initialize_schema(&self) -> Result<()> {
         self.preflight_check().await?;
 
+        let mut conn = self.pool.acquire().await.map_err(|e| {
+            MediaError::Internal(format!("Database connection failed: {}", e))
+        })?;
+        sqlx::query!("SET search_path = ferrex, public")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to set migration search_path: {}",
+                    e
+                ))
+            })?;
+
         sqlx::migrate!("./migrations")
-            .run(&self.pool)
+            .run(&mut *conn)
             .await
             .map_err(|e| {
                 MediaError::Internal(format!("Migration failed: {}", e))

@@ -20,12 +20,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Shared crates
 
 [dependencies]
-ferrex-model = { workspace = true, features = ["serde", "chrono"] }
+ferrex-model = { workspace = true, features = ["serde", "chrono", "sqlx"] }
 ferrex-contracts = { workspace = true, features = ["serde", "chrono"] }
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
 rkyv.workspace = true
+fuzzy-matcher = { version = "0.3.7", optional = true }
 
 # Error handling
 anyhow.workspace = true
@@ -61,6 +62,10 @@ async-trait.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
+tokio-util.workspace = true
+
+# On-disk cache (content-addressed, integrity-checked)
+cacache.workspace = true
 
 # URL
 url.workspace = true
@@ -93,15 +98,19 @@ hmac = "0.12"
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 num_cpus = "1.17.0"
 constant_time_eq = { version = "0.4.2", default-features = false }
-tokio-util.workspace = true
 ed25519-dalek = { version = "2", default-features = false, features = [
   "rand_core",
 ] }
+normpath = "1.5.0"
+num-bigint = "0.4.6"
+
+# Not sure this is worth the added dep
+# tap = "1.0.1"
 
 [features]
 default = ["ffmpeg", "database", "compat", "scan-runtime", "rkyv"]
-ffmpeg = ["dep:ffmpeg-next"]
-database = ["dep:sqlx", "dep:redis", "dep:ipnetwork", "dep:image", "dep:notify"]
+ffmpeg = ["dep:ffmpeg-next", "dep:image"]
+database = ["dep:sqlx", "dep:redis", "dep:ipnetwork", "dep:image", "dep:notify", "dep:fuzzy-matcher", "ferrex-model/sqlx"]
 compat = []
 demo = []
 rkyv = ["ferrex-model/rkyv", "ferrex-contracts/rkyv"]

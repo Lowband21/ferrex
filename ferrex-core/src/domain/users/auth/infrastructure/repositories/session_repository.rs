@@ -64,6 +64,8 @@ impl PostgresAuthSessionRepository {
     }
 }
 
+const AUTH_SESSION_TOUCH_MIN_INTERVAL_SECS: i64 = 30;
+
 #[async_trait]
 impl AuthSessionRepository for PostgresAuthSessionRepository {
     async fn find_by_id(
@@ -220,8 +222,14 @@ impl AuthSessionRepository for PostgresAuthSessionRepository {
 
     async fn touch(&self, session_id: Uuid) -> Result<()> {
         sqlx::query!(
-            "UPDATE auth_sessions SET last_activity = NOW() WHERE id = $1",
-            session_id
+            r#"
+            UPDATE auth_sessions
+            SET last_activity = NOW()
+            WHERE id = $1
+              AND last_activity < (NOW() - make_interval(secs => $2))
+            "#,
+            session_id,
+            AUTH_SESSION_TOUCH_MIN_INTERVAL_SECS as f64
         )
         .execute(&self.pool)
         .await?;

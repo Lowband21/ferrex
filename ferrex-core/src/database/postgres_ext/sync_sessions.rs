@@ -1,5 +1,5 @@
 use crate::database::PostgresDatabase;
-use crate::database::ports::sync_sessions::SyncSessionsRepository;
+use crate::database::repository_ports::sync_sessions::SyncSessionsRepository;
 use crate::error::Result;
 use crate::sync_session::{Participant, PlaybackState, SyncSession};
 use uuid::Uuid;

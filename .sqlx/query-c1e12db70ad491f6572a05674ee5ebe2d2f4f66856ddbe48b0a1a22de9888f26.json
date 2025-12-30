@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT series_id, iso_3166_1, name FROM series_production_countries WHERE series_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c1e12db70ad491f6572a05674ee5ebe2d2f4f66856ddbe48b0a1a22de9888f26"
+}

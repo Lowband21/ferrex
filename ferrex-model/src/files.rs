@@ -1,4 +1,7 @@
-use crate::error::{ModelError as MediaError, Result};
+use crate::{
+    MediaID,
+    error::{ModelError as MediaError, Result},
+};
 use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -15,6 +18,7 @@ use crate::chrono::{DateTime, Utc};
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct MediaFile {
     pub id: Uuid,
+    pub media_id: MediaID,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::PathBufWrapper))]
     pub path: PathBuf,
     pub filename: String,
@@ -25,21 +29,6 @@ pub struct MediaFile {
     pub created_at: DateTime<Utc>,
     pub media_file_metadata: Option<MediaFileMetadata>,
     pub library_id: LibraryId,
-}
-
-impl Default for MediaFile {
-    fn default() -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            path: PathBuf::new(),
-            filename: String::new(),
-            size: 0,
-            discovered_at: Utc::now(),
-            created_at: Utc::now(),
-            media_file_metadata: None,
-            library_id: LibraryId(Uuid::nil()), // Use nil UUID for default
-        }
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -151,8 +140,8 @@ pub struct ParsedMovieInfo {
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub struct ParsedEpisodeInfo {
     pub show_name: String,
-    pub season: u32,
-    pub episode: u32,
+    pub season: u16,
+    pub episode: u16,
     pub episode_title: Option<String>,
     pub year: Option<u16>,
     pub resolution: Option<String>,
@@ -195,11 +184,16 @@ impl std::fmt::Display for ExtraType {
 }
 
 impl MediaFile {
-    pub fn new(path: PathBuf, library_id: LibraryId) -> Result<Self> {
-        Self::new_with_policy(path, library_id, false)
+    pub fn new(
+        media_id: MediaID,
+        path: PathBuf,
+        library_id: LibraryId,
+    ) -> Result<Self> {
+        Self::new_with_policy(media_id, path, library_id, false)
     }
 
     pub fn new_with_policy(
+        media_id: MediaID,
         path: PathBuf,
         library_id: LibraryId,
         allow_zero_length: bool,
@@ -253,6 +247,7 @@ impl MediaFile {
 
         Ok(Self {
             id: Uuid::now_v7(),
+            media_id,
             path,
             filename,
             size,

@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO setup_claims (code_hash, expires_at, client_name, client_ip)\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                id,\n                code_hash,\n                claim_token_hash,\n                created_at,\n                expires_at,\n                confirmed_at,\n                client_name,\n                client_ip,\n                attempts,\n                last_attempt_at,\n                revoked_at,\n                revoked_reason\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "code_hash",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "claim_token_hash",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "client_ip",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 8,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_attempt_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "revoked_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Timestamptz",
+        "Text",
+        "Inet"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a39e33a8be87e62a699729cb7b14e46bab36607797a2aaecbce72d550d112fd0"
+}

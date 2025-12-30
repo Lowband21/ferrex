@@ -1,21 +1,19 @@
-use super::id::MediaIDLike;
-use ferrex_model::details::{
-    MediaDetailsOption, MediaDetailsOptionLike, TmdbDetails,
-};
-use ferrex_model::files::MediaFile;
-use ferrex_model::ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID};
-use ferrex_model::media::{
-    EpisodeReference, Media, MovieReference, SeasonReference, SeriesReference,
-};
-use ferrex_model::media_id::MediaID;
-use ferrex_model::urls::UrlLike;
-use std::time::Duration;
+//! Media trait system helpers.
+//!
+//! Provides a clean interface for working with media references without repetitive
+//! pattern matching, while keeping backward-compatible representations.
 
-// ===== Media Trait System =====
-//
-// This trait system provides a clean interface for working with media references
-// without the need for repetitive pattern matching. It maintains backward compatibility
-// while offering better ergonomics for common operations.
+use super::id::MediaIDLike;
+
+use ferrex_model::{
+    files::MediaFile,
+    ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
+    media::{EpisodeReference, Media, MovieReference, SeasonReference, Series},
+    media_id::MediaID,
+    urls::UrlLike,
+};
+
+use std::time::Duration;
 
 /// Common interface for all media reference types
 pub trait MediaOps: Send + Sync {
@@ -55,9 +53,6 @@ pub trait Playable: MediaOps {
 }
 
 pub trait Details: MediaOps {
-    /// Get the media details
-    fn details(&self) -> &impl MediaDetailsOptionLike;
-
     /// Get release/air year if available
     fn year(&self) -> Option<u16>;
 
@@ -71,7 +66,7 @@ pub trait Details: MediaOps {
 /// Specialized trait for media that contains other media
 pub trait Browsable: MediaOps {
     /// Get the number of child items if known
-    fn child_count(&self) -> Option<usize>;
+    fn child_count(&self) -> Option<u16>;
 
     /// Get the library ID this media belongs to
     fn library_id(&self) -> LibraryId;
@@ -119,6 +114,85 @@ impl MediaOps for Media {
     }
 }
 
+impl MediaOps for Box<MovieReference> {
+    type Id = MovieID;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+
+    fn media_id(&self) -> MediaID {
+        MediaID::Movie(self.id)
+    }
+
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.as_str().to_string()
+    }
+}
+
+impl MediaOps for Box<Series> {
+    type Id = SeriesID;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+
+    fn media_id(&self) -> MediaID {
+        MediaID::Series(self.id)
+    }
+
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.as_str().to_string()
+    }
+}
+
+impl MediaOps for Box<SeasonReference> {
+    type Id = SeasonID;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+
+    fn media_id(&self) -> MediaID {
+        MediaID::Season(self.id)
+    }
+
+    fn theme_color(&self) -> Option<&str> {
+        self.theme_color.as_deref()
+    }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.as_str().to_string()
+    }
+}
+
+impl MediaOps for Box<EpisodeReference> {
+    type Id = EpisodeID;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+
+    fn media_id(&self) -> MediaID {
+        MediaID::Episode(self.id)
+    }
+
+    fn theme_color(&self) -> Option<&str> {
+        None // Episodes don't have theme colors in the current schema
+    }
+
+    fn endpoint(&self) -> String {
+        self.endpoint.as_str().to_string()
+    }
+}
 impl MediaOps for MovieReference {
     type Id = MovieID;
 
@@ -139,7 +213,7 @@ impl MediaOps for MovieReference {
     }
 }
 
-impl MediaOps for SeriesReference {
+impl MediaOps for Series {
     type Id = SeriesID;
 
     fn id(&self) -> Self::Id {
@@ -201,13 +275,13 @@ impl MediaOps for EpisodeReference {
 
 // ===== Playable Implementations =====
 
-impl Playable for MovieReference {
+impl Playable for Box<MovieReference> {
     fn file(&self) -> &MediaFile {
         &self.file
     }
 }
 
-impl Playable for EpisodeReference {
+impl Playable for Box<EpisodeReference> {
     fn file(&self) -> &MediaFile {
         &self.file
     }
@@ -215,17 +289,9 @@ impl Playable for EpisodeReference {
 
 // ===== Browsable Implementations =====
 
-impl Browsable for SeriesReference {
-    fn child_count(&self) -> Option<usize> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Series(details) => {
-                    details.number_of_episodes.map(|n| n as usize)
-                }
-                _ => None,
-            },
-            _ => None,
-        }
+impl Browsable for Box<Series> {
+    fn child_count(&self) -> Option<u16> {
+        self.details.number_of_episodes
     }
 
     fn library_id(&self) -> LibraryId {
@@ -233,17 +299,9 @@ impl Browsable for SeriesReference {
     }
 }
 
-impl Browsable for SeasonReference {
-    fn child_count(&self) -> Option<usize> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Season(details) => {
-                    Some(details.episode_count as usize)
-                }
-                _ => None,
-            },
-            _ => None,
-        }
+impl Browsable for Box<SeasonReference> {
+    fn child_count(&self) -> Option<u16> {
+        Some(self.details.episode_count)
     }
 
     fn library_id(&self) -> LibraryId {
@@ -257,9 +315,10 @@ mod archived {
     use super::*;
     use ferrex_model::media::{
         ArchivedEpisodeReference, ArchivedMedia, ArchivedMovieReference,
-        ArchivedSeasonReference, ArchivedSeriesReference,
+        ArchivedSeasonReference, ArchivedSeries,
     };
     use ferrex_model::media_id::ArchivedMediaID;
+    use rkyv::boxed::ArchivedBox;
 
     impl MediaOps for ArchivedMedia {
         type Id = ArchivedMediaID;
@@ -315,6 +374,86 @@ mod archived {
         }
     }
 
+    impl MediaOps for ArchivedBox<ArchivedMovieReference> {
+        type Id = MovieID;
+
+        fn id(&self) -> Self::Id {
+            MovieID(self.id.0)
+        }
+
+        fn media_id(&self) -> MediaID {
+            MediaID::from(self.id)
+        }
+
+        fn theme_color(&self) -> Option<&str> {
+            self.theme_color.as_ref().map(|color| color.as_str())
+        }
+
+        fn endpoint(&self) -> String {
+            self.endpoint.to_string()
+        }
+    }
+
+    impl MediaOps for ArchivedBox<ArchivedSeries> {
+        type Id = SeriesID;
+
+        fn id(&self) -> Self::Id {
+            SeriesID(self.id.0)
+        }
+
+        fn media_id(&self) -> MediaID {
+            MediaID::from(self.id)
+        }
+
+        fn theme_color(&self) -> Option<&str> {
+            self.theme_color.as_ref().map(|color| color.as_str())
+        }
+
+        fn endpoint(&self) -> String {
+            self.endpoint.to_string()
+        }
+    }
+
+    impl MediaOps for ArchivedBox<ArchivedSeasonReference> {
+        type Id = SeasonID;
+
+        fn id(&self) -> Self::Id {
+            SeasonID(self.id.0)
+        }
+
+        fn media_id(&self) -> MediaID {
+            MediaID::from(self.id)
+        }
+
+        fn theme_color(&self) -> Option<&str> {
+            self.theme_color.as_ref().map(|color| color.as_str())
+        }
+
+        fn endpoint(&self) -> String {
+            self.endpoint.to_string()
+        }
+    }
+
+    impl MediaOps for ArchivedBox<ArchivedEpisodeReference> {
+        type Id = EpisodeID;
+
+        fn id(&self) -> Self::Id {
+            EpisodeID(self.id.0)
+        }
+
+        fn media_id(&self) -> MediaID {
+            MediaID::from(self.id)
+        }
+
+        fn theme_color(&self) -> Option<&str> {
+            log::warn!("Theme color not implemented for episode reference");
+            Option::None
+        }
+
+        fn endpoint(&self) -> String {
+            self.endpoint.to_string()
+        }
+    }
     impl MediaOps for ArchivedMovieReference {
         type Id = MovieID;
 
@@ -335,7 +474,7 @@ mod archived {
         }
     }
 
-    impl MediaOps for ArchivedSeriesReference {
+    impl MediaOps for ArchivedSeries {
         type Id = SeriesID;
 
         fn id(&self) -> Self::Id {

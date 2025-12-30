@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT movie_id, iso_3166_1, title, title_type FROM movie_alternative_titles WHERE movie_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title_type",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "502828cca09d12e4e49242659e7cf85cfcfdb1af828238c54c03563954929e5b"
+}

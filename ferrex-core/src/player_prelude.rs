@@ -12,7 +12,7 @@ pub use crate::domain::watch::{
     WatchStatusFilter,
 };
 #[cfg(feature = "rkyv")]
-pub use crate::infrastructure::archive::ArchivedModel;
+pub use crate::infra::archive::ArchivedModel;
 pub use crate::query::prelude::*;
 pub use crate::traits::prelude::*;
 pub use crate::types::prelude::*;

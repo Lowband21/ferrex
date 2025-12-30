@@ -6,14 +6,14 @@
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, Clone, PartialEq, Eq, Hash)))]
-pub struct SeasonNumber(u8);
+pub struct SeasonNumber(u16);
 
 impl SeasonNumber {
-    pub fn new(num: u8) -> Self {
+    pub fn new(num: u16) -> Self {
         SeasonNumber(num)
     }
 
-    pub fn value(&self) -> u8 {
+    pub fn value(&self) -> u16 {
         self.0
     }
 }
@@ -24,8 +24,8 @@ impl std::fmt::Display for SeasonNumber {
     }
 }
 
-impl From<u8> for SeasonNumber {
-    fn from(num: u8) -> Self {
+impl From<u16> for SeasonNumber {
+    fn from(num: u16) -> Self {
         SeasonNumber(num)
     }
 }
@@ -44,14 +44,14 @@ impl Default for SeasonNumber {
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, Clone, PartialEq, Eq, Hash)))]
-pub struct EpisodeNumber(u8);
+pub struct EpisodeNumber(u16);
 
 impl EpisodeNumber {
-    pub fn new(num: u8) -> Self {
+    pub fn new(num: u16) -> Self {
         EpisodeNumber(num)
     }
 
-    pub fn value(&self) -> u8 {
+    pub fn value(&self) -> u16 {
         self.0
     }
 }
@@ -62,8 +62,8 @@ impl std::fmt::Display for EpisodeNumber {
     }
 }
 
-impl From<u8> for EpisodeNumber {
-    fn from(num: u8) -> Self {
+impl From<u16> for EpisodeNumber {
+    fn from(num: u16) -> Self {
         EpisodeNumber(num)
     }
 }

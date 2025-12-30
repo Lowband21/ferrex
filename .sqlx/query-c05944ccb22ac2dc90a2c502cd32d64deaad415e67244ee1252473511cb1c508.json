@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT movie_id, keyword_id, name\n        FROM movie_keywords\n        WHERE library_id = $1\n          AND batch_id = $2\n          AND movie_id = ANY($3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "keyword_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c05944ccb22ac2dc90a2c502cd32d64deaad415e67244ee1252473511cb1c508"
+}

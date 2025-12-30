@@ -1,11 +1,13 @@
+//! Database behavioral tests for Postgres-backed repositories.
+
 use std::collections::HashSet;
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use ferrex_core::database::infrastructure::postgres::PostgresFolderInventoryRepository;
-use ferrex_core::database::ports::folder_inventory::FolderInventoryRepository;
 use ferrex_core::database::postgres::PostgresDatabase;
-use ferrex_core::database::postgres_ext::processing_status::ProcessingStatusRepository;
+use ferrex_core::database::repositories::folder_inventory::PostgresFolderInventoryRepository;
+use ferrex_core::database::repository_ports::folder_inventory::FolderInventoryRepository;
+use ferrex_core::database::repository_ports::processing_status::ProcessingStatusRepository;
 use ferrex_core::database::traits::{
     FolderProcessingStatus, FolderScanFilters, MediaProcessingStatus,
 };

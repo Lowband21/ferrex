@@ -1,3 +1,5 @@
+//! Guards refresh-token reuse semantics (family revocation on reuse detection).
+
 use std::sync::Arc;
 
 use anyhow::Result;

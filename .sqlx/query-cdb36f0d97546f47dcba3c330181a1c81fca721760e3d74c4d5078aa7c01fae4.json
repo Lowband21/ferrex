@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t            SELECT\n\t                ci.image_id,\n\t                ci.image_variant AS \"image_variant!: ImageVariant\",\n\t                ci.width,\n\t                ci.height,\n\t                ci.size_variant AS \"size_variant!: SqlxImageSizeVariant\",\n\t                ci.theme_color,\n\t                ci.cache_key,\n\t                ci.integrity,\n\t                ci.byte_len,\n\t                ci.created_at as \"created_at!: DateTime<Utc>\",\n\t                ci.modified_at as \"modified_at!: DateTime<Utc>\"\n\t            FROM cached_images ci\n            WHERE ci.image_id = $1\n              AND ci.width = $2\n            ORDER BY ci.modified_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "image_variant!: ImageVariant",
+        "type_info": {
+          "Custom": {
+            "name": "image_variant",
+            "kind": {
+              "Enum": [
+                "poster",
+                "backdrop",
+                "thumbnail",
+                "profile"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "width",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "height",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "size_variant!: SqlxImageSizeVariant",
+        "type_info": {
+          "Custom": {
+            "name": "size_variant",
+            "kind": {
+              "Enum": [
+                "original",
+                "resized",
+                "tmdb"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "cache_key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "integrity",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "byte_len",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "modified_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cdb36f0d97546f47dcba3c330181a1c81fca721760e3d74c4d5078aa7c01fae4"
+}

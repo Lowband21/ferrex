@@ -1,4 +1,7 @@
-use crate::ids::{EpisodeID, MovieID, SeasonID, SeriesID};
+use crate::{
+    ids::{EpisodeID, MovieID, SeasonID, SeriesID},
+    media_type::VideoMediaType,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -15,7 +18,35 @@ pub enum MediaID {
     Episode(EpisodeID),
 }
 
+impl Default for MediaID {
+    fn default() -> Self {
+        MediaID::Movie(MovieID(Uuid::now_v7()))
+    }
+}
+
+impl From<(Uuid, VideoMediaType)> for MediaID {
+    fn from(v: (Uuid, VideoMediaType)) -> Self {
+        match v.1 {
+            VideoMediaType::Movie => MediaID::Movie(v.0.into()),
+            VideoMediaType::Series => MediaID::Series(v.0.into()),
+            VideoMediaType::Season => MediaID::Season(v.0.into()),
+            VideoMediaType::Episode => MediaID::Episode(v.0.into()),
+        }
+    }
+}
+
 impl MediaID {
+    pub fn new(media_type: VideoMediaType) -> MediaID {
+        match media_type {
+            VideoMediaType::Movie => MediaID::Movie(MovieID(Uuid::now_v7())),
+            VideoMediaType::Series => MediaID::Series(SeriesID(Uuid::now_v7())),
+            VideoMediaType::Season => MediaID::Season(SeasonID(Uuid::now_v7())),
+            VideoMediaType::Episode => {
+                MediaID::Episode(EpisodeID(Uuid::now_v7()))
+            }
+        }
+    }
+
     pub fn as_uuid(&self) -> &Uuid {
         match &self {
             MediaID::Movie(movie_id) => movie_id.as_uuid(),
@@ -89,8 +120,8 @@ mod archived {
         },
         media::{ArchivedMedia, ArchivedMovieReference},
     };
-    use rkyv::deserialize;
     use rkyv::rancor::Error;
+    use rkyv::{boxed::ArchivedBox, deserialize};
 
     impl ArchivedMediaID {
         pub fn eq_movie(&self, other: &ArchivedMovieID) -> bool {
@@ -124,7 +155,7 @@ mod archived {
         }
     }
 
-    impl From<ArchivedMedia> for ArchivedMovieReference {
+    impl From<ArchivedMedia> for ArchivedBox<ArchivedMovieReference> {
         fn from(med_ref: ArchivedMedia) -> Self {
             match med_ref {
                 ArchivedMedia::Movie(data) => data,

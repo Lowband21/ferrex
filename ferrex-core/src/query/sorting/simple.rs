@@ -1,41 +1,9 @@
 use crate::{
     query::types::{SortBy, SortOrder},
-    types::{
-        details::{MediaDetailsOption, TmdbDetails},
-        media::Media,
-    },
+    types::media::Media,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use std::cmp::Ordering;
-
-fn has_poster(media: &Media) -> bool {
-    match media {
-        Media::Movie(m) => m
-            .details
-            .as_movie()
-            .and_then(|d| d.poster_path.as_deref())
-            .map(|p| !p.is_empty())
-            .unwrap_or(false),
-        Media::Series(s) => s
-            .details
-            .as_series()
-            .and_then(|d| d.poster_path.as_deref())
-            .map(|p| !p.is_empty())
-            .unwrap_or(false),
-        Media::Season(season) => season
-            .details
-            .as_season()
-            .and_then(|d| d.poster_path.as_deref())
-            .map(|p| !p.is_empty())
-            .unwrap_or(false),
-        Media::Episode(e) => e
-            .details
-            .as_episode()
-            .and_then(|d| d.still_path.as_deref())
-            .map(|p| !p.is_empty())
-            .unwrap_or(false),
-    }
-}
 
 /// Compare two media items using the provided sort field and order.
 /// Returns `None` when the comparison cannot be evaluated (e.g. user-context fields).
@@ -45,17 +13,6 @@ pub fn compare_media(
     sort_by: SortBy,
     sort_order: SortOrder,
 ) -> Option<Ordering> {
-    // Always push items without posters to the end, regardless of the active sort.
-    let a_has = has_poster(a);
-    let b_has = has_poster(b);
-    if a_has != b_has {
-        return Some(if a_has {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        });
-    }
-
     let ord = match sort_by {
         SortBy::Title => {
             let a_title = get_title(a).to_lowercase();
@@ -157,73 +114,31 @@ fn get_release_date(media: &Media) -> Option<NaiveDate> {
     }
 
     match media {
-        Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(d) => parse(&d.release_date),
-                _ => None,
-            },
-            _ => None,
-        },
-        Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Series(d) => parse(&d.first_air_date),
-                _ => None,
-            },
-            _ => None,
-        },
+        Media::Movie(m) => parse(&m.details.release_date),
+        Media::Series(s) => parse(&s.details.first_air_date),
         _ => None,
     }
 }
 
 fn get_rating(media: &Media) -> Option<f32> {
     match media {
-        Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(d) => d.vote_average,
-                _ => None,
-            },
-            _ => None,
-        },
-        Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Series(d) => d.vote_average,
-                _ => None,
-            },
-            _ => None,
-        },
+        Media::Movie(m) => m.details.vote_average,
+        Media::Series(s) => s.details.vote_average,
         _ => None,
     }
 }
 
 fn get_runtime(media: &Media) -> Option<u32> {
     match media {
-        Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(d) => d.runtime,
-                _ => None,
-            },
-            _ => None,
-        },
+        Media::Movie(m) => m.details.runtime,
         _ => None,
     }
 }
 
 fn get_popularity(media: &Media) -> Option<f32> {
     match media {
-        Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(d) => d.popularity,
-                _ => None,
-            },
-            _ => None,
-        },
-        Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Series(d) => d.popularity,
-                _ => None,
-            },
-            _ => None,
-        },
+        Media::Movie(m) => m.details.popularity,
+        Media::Series(s) => s.details.popularity,
         _ => None,
     }
 }
@@ -262,30 +177,20 @@ fn get_resolution(media: &Media) -> Option<u32> {
 
 fn get_content_rating(media: &Media) -> Option<String> {
     match media {
-        Media::Movie(m) => match &m.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(d) => d
-                    .content_rating
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
-                _ => None,
-            },
-            _ => None,
-        },
-        Media::Series(s) => match &s.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Series(d) => d
-                    .content_rating
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
-                _ => None,
-            },
-            _ => None,
-        },
+        Media::Movie(m) => m
+            .details
+            .content_rating
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
+        Media::Series(s) => s
+            .details
+            .content_rating
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string()),
         _ => None,
     }
 }

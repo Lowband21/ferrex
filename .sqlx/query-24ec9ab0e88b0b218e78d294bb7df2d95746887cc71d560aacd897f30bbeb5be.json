@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_similar (movie_id, library_id, batch_id, similar_tmdb_id, title)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (movie_id, similar_tmdb_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "24ec9ab0e88b0b218e78d294bb7df2d95746887cc71d560aacd897f30bbeb5be"
+}

@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE orchestrator_jobs\n            SET lease_expires_at = lease_expires_at + ($1::bigint) * INTERVAL '1 millisecond'\n            WHERE lease_id = $2\n              AND state = 'leased'\n              AND lease_expires_at > NOW()\n            RETURNING\n                id, library_id, kind, payload, priority, attempts, available_at,\n                dedupe_key, dependency_key, created_at, updated_at,\n                lease_owner, lease_expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "priority",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "available_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "dedupe_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "dependency_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "lease_owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1adb6e581364e4d210a8b820a71f9777e1e92b8ecb0036b87f22b883e1aeb7e3"
+}

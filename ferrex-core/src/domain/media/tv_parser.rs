@@ -10,13 +10,13 @@ pub struct TvParser;
 /// Represents parsed episode information
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpisodeInfo {
-    pub season: u32,
-    pub episode: u32,
-    pub end_episode: Option<u32>, // For multi-episode files
-    pub year: Option<u32>,        // For date-based episodes
-    pub month: Option<u32>,
-    pub day: Option<u32>,
-    pub absolute_episode: Option<u32>, // For anime
+    pub season: u16,
+    pub episode: u16,
+    pub end_episode: Option<u16>, // For multi-episode files
+    pub year: Option<u16>,        // For date-based episodes
+    pub month: Option<u16>,
+    pub day: Option<u16>,
+    pub absolute_episode: Option<u16>, // For anime
     pub is_special: bool,              // Season 0 episodes
 }
 
@@ -141,20 +141,26 @@ impl TvParser {
             if let Some(captures) = pattern.captures(filename) {
                 let (year, month, day) = match pattern_name {
                     "date_ymd" | "date_compact" => (
-                        captures[1].parse().ok()?,
-                        captures[2].parse().ok()?,
-                        captures[3].parse().ok()?,
+                        captures[1].parse::<u16>().ok()?,
+                        captures[2].parse::<u16>().ok()?,
+                        captures[3].parse::<u16>().ok()?,
                     ),
                     "date_dmy" => (
-                        captures[3].parse().ok()?,
-                        captures[2].parse().ok()?,
-                        captures[1].parse().ok()?,
+                        captures[3].parse::<u16>().ok()?,
+                        captures[2].parse::<u16>().ok()?,
+                        captures[1].parse::<u16>().ok()?,
                     ),
                     _ => continue,
                 };
 
                 // Validate date
-                if NaiveDate::from_ymd_opt(year as i32, month, day).is_some() {
+                if NaiveDate::from_ymd_opt(
+                    year as i32,
+                    month as u32,
+                    day as u32,
+                )
+                .is_some()
+                {
                     debug!(
                         "Parsed date-based episode: {}-{:02}-{:02} from {}",
                         year, month, day, filename
@@ -179,9 +185,9 @@ impl TvParser {
                 match pattern_name {
                     "multi_episode_dash" | "multi_episode_x" => {
                         if captures.len() >= 4 {
-                            let season: u32 = captures[1].parse().ok()?;
-                            let start_ep: u32 = captures[2].parse().ok()?;
-                            let end_ep: u32 = captures[3].parse().ok()?;
+                            let season: u16 = captures[1].parse().ok()?;
+                            let start_ep: u16 = captures[2].parse().ok()?;
+                            let end_ep: u16 = captures[3].parse().ok()?;
                             debug!(
                                 "Parsed multi-episode: S{:02}E{:02}-E{:02} from {}",
                                 season, start_ep, end_ep, filename
@@ -200,9 +206,9 @@ impl TvParser {
                     }
                     "multi_episode_concat" => {
                         if captures.len() >= 4 {
-                            let season: u32 = captures[1].parse().ok()?;
-                            let start_ep: u32 = captures[2].parse().ok()?;
-                            let end_ep: u32 = captures[3].parse().ok()?;
+                            let season: u16 = captures[1].parse().ok()?;
+                            let start_ep: u16 = captures[2].parse().ok()?;
+                            let end_ep: u16 = captures[3].parse().ok()?;
                             debug!(
                                 "Parsed concat episodes: S{:02}E{:02}E{:02} from {}",
                                 season, start_ep, end_ep, filename
@@ -223,7 +229,7 @@ impl TvParser {
                         // Only use absolute numbering if no other pattern matched
                         // and we're in an anime-like structure
                         if Self::is_likely_anime(path)
-                            && let Ok(abs_ep) = captures[1].parse::<u32>()
+                            && let Ok(abs_ep) = captures[1].parse::<u16>()
                             && abs_ep > 0
                             && abs_ep < 10000
                         {
@@ -245,7 +251,7 @@ impl TvParser {
                     }
                     "ep000" | "e00" => {
                         if captures.len() >= 2
-                            && let Ok(episode) = captures[1].parse::<u32>()
+                            && let Ok(episode) = captures[1].parse::<u16>()
                         {
                             // If we're in a season folder, use that season
                             let season =
@@ -269,7 +275,7 @@ impl TvParser {
                     }
                     "part" | "chapter" => {
                         if captures.len() >= 2
-                            && let Ok(episode) = captures[1].parse::<u32>()
+                            && let Ok(episode) = captures[1].parse::<u16>()
                         {
                             // For parts/chapters, assume season 1 unless in season folder
                             let season =
@@ -293,8 +299,8 @@ impl TvParser {
                     }
                     _ => {
                         if captures.len() >= 3 {
-                            let season: u32 = captures[1].parse().ok()?;
-                            let episode: u32 = captures[2].parse().ok()?;
+                            let season: u16 = captures[1].parse().ok()?;
+                            let episode: u16 = captures[2].parse().ok()?;
                             debug!(
                                 "Parsed episode: S{:02}E{:02} from {}",
                                 season, episode, filename
@@ -320,7 +326,7 @@ impl TvParser {
     }
 
     /// Extract season and episode numbers from a file path (simplified version)
-    pub fn parse_episode(path: &Path) -> Option<(u32, u32)> {
+    pub fn parse_episode(path: &Path) -> Option<(u16, u16)> {
         Self::parse_episode_info(path).map(|info| (info.season, info.episode))
     }
 
@@ -335,7 +341,7 @@ impl TvParser {
     fn parse_series_child_season_number(
         series_name: &str,
         child_name: &str,
-    ) -> Option<u32> {
+    ) -> Option<u16> {
         let series_norm = Self::normalize_series_hint(series_name);
         let child_norm = Self::normalize_series_hint(child_name);
 
@@ -351,7 +357,7 @@ impl TvParser {
         Self::parse_season_suffix(remainder)
     }
 
-    fn parse_season_suffix(remainder: &str) -> Option<u32> {
+    fn parse_season_suffix(remainder: &str) -> Option<u16> {
         if remainder.is_empty() {
             return None;
         }
@@ -377,7 +383,7 @@ impl TvParser {
         None
     }
 
-    fn parse_season_from_parent(parent: &Path) -> Option<u32> {
+    fn parse_season_from_parent(parent: &Path) -> Option<u16> {
         let parent_name = parent.file_name()?.to_str()?;
         let series_name = parent
             .parent()
@@ -386,7 +392,7 @@ impl TvParser {
         Self::parse_season_folder_with_series(parent_name, series_name)
     }
 
-    fn parse_season_from_path(path: &Path) -> Option<u32> {
+    fn parse_season_from_path(path: &Path) -> Option<u16> {
         path.parent().and_then(Self::parse_season_from_parent)
     }
 
@@ -410,7 +416,7 @@ impl TvParser {
 
             for pattern in ep_patterns {
                 if let Some(captures) = pattern.captures(filename)
-                    && let Ok(episode) = captures[1].parse::<u32>()
+                    && let Ok(episode) = captures[1].parse::<u16>()
                 {
                     debug!(
                         "Parsed episode: S{:02}E{:02} from folder+filename",
@@ -434,7 +440,7 @@ impl TvParser {
     }
 
     /// Parse season number from folder name
-    pub fn parse_season_folder(folder_name: &str) -> Option<u32> {
+    pub fn parse_season_folder(folder_name: &str) -> Option<u16> {
         // Check for specials folder
         if folder_name.to_lowercase() == "specials"
             || folder_name.to_lowercase() == "special"
@@ -445,7 +451,7 @@ impl TvParser {
         for pattern in Self::season_folder_patterns() {
             if let Some(captures) = pattern.captures(folder_name)
                 && captures.len() >= 2
-                && let Ok(season) = captures[1].parse::<u32>()
+                && let Ok(season) = captures[1].parse::<u16>()
             {
                 return Some(season);
             }
@@ -456,7 +462,7 @@ impl TvParser {
     pub fn parse_season_folder_with_series(
         folder_name: &str,
         series_name: Option<&str>,
-    ) -> Option<u32> {
+    ) -> Option<u16> {
         if let Some(season) = Self::parse_season_folder(folder_name) {
             return Some(season);
         }

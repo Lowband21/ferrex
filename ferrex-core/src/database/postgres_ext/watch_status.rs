@@ -1,6 +1,6 @@
 use crate::{
     database::PostgresDatabase,
-    database::ports::watch_status::WatchStatusRepository,
+    database::repository_ports::watch_status::WatchStatusRepository,
     domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
     error::Result,
     types::watch::{

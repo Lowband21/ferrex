@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_videos (\n                movie_id, library_id, batch_id,\n                video_key, site, name, video_type, official,\n                iso_639_1, iso_3166_1, published_at, size)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n            ON CONFLICT (movie_id, video_key, site) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d5460c2b39b793ac0fefd640f0540bb346db9c79cdf2b9ae34ad286aae8d1bbf"
+}

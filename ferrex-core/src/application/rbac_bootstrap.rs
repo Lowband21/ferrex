@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, sync::Arc};
 use uuid::Uuid;
 
 use crate::{
-    database::ports::rbac::RbacRepository,
+    database::repository_ports::rbac::RbacRepository,
     domain::users::rbac::{self, PermissionCategory},
     error::Result,
 };

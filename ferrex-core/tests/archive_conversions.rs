@@ -1,15 +1,17 @@
+//! Ensures rkyv archived models can roundtrip back to domain models.
+
 use std::path::PathBuf;
 
 use ferrex_contracts::{
     id::MediaIDLike,
     media_ops::{MediaOps, Playable},
 };
-use ferrex_core::infrastructure::archive::ArchivedModel;
+use ferrex_core::infra::archive::ArchivedModel;
 use ferrex_model::{
-    LibraryId, MovieID,
+    LibraryId, MediaID, MovieID, MovieReferenceBatchSize,
     chrono::Timelike,
-    details::MediaDetailsOption,
     files::{MediaFile, MediaFileMetadata},
+    image::MediaImages,
     library::{ArchivedLibrary, ArchivedLibraryExt, Library, LibraryType},
     media::{ArchivedMedia, Media, MovieReference},
     titles::MovieTitle,
@@ -37,6 +39,7 @@ fn sample_movie() -> SampleMovie {
 
     let media_file = MediaFile {
         id: Uuid::now_v7(),
+        media_id: MediaID::Movie(movie_id),
         path: PathBuf::from("/library/movies/inception.mkv"),
         filename: "inception.mkv".to_string(),
         size: 1_073_741_824,
@@ -63,9 +66,64 @@ fn sample_movie() -> SampleMovie {
     let movie_ref = MovieReference {
         id: movie_id,
         library_id,
+        batch_id: None,
         tmdb_id: 27205,
         title: MovieTitle::from("Inception"),
-        details: MediaDetailsOption::Endpoint("/tmdb/movies/27205".into()),
+        details: ferrex_model::EnhancedMovieDetails {
+            id: 0,
+            title: String::new(),
+            original_title: None,
+            overview: None,
+            primary_poster_iid: None,
+            primary_backdrop_iid: None,
+            release_date: None,
+            runtime: None,
+            vote_average: None,
+            vote_count: None,
+            popularity: None,
+            content_rating: None,
+            content_ratings: vec![],
+            release_dates: vec![],
+            genres: vec![],
+            spoken_languages: vec![],
+            production_companies: vec![],
+            production_countries: vec![],
+            homepage: None,
+            status: None,
+            tagline: None,
+            budget: None,
+            revenue: None,
+            poster_path: None,
+            backdrop_path: None,
+            logo_path: None,
+            images: MediaImages {
+                posters: vec![],
+                backdrops: vec![],
+                logos: vec![],
+                stills: vec![],
+            },
+            cast: vec![],
+            crew: vec![],
+            videos: vec![],
+            keywords: vec![],
+            external_ids: ferrex_model::details::ExternalIds {
+                imdb_id: None,
+                tvdb_id: None,
+                facebook_id: None,
+                instagram_id: None,
+                twitter_id: None,
+                wikidata_id: None,
+                tiktok_id: None,
+                youtube_id: None,
+                freebase_id: None,
+                freebase_mid: None,
+            },
+            alternative_titles: vec![],
+            translations: vec![],
+            collection: None,
+            recommendations: vec![],
+            similar: vec![],
+        },
         endpoint: MovieURL::from_string("/movies/inception".into()),
         file: media_file,
         theme_color: Some("#0a0f24".into()),
@@ -73,7 +131,7 @@ fn sample_movie() -> SampleMovie {
 
     SampleMovie {
         library_id,
-        media: Media::Movie(movie_ref),
+        media: Media::Movie(Box::new(movie_ref)),
     }
 }
 
@@ -131,6 +189,7 @@ fn archived_library_round_trip_retains_members() {
         watch_for_changes: true,
         analyze_on_scan: false,
         max_retry_attempts: 3,
+        movie_ref_batch_size: MovieReferenceBatchSize::default(),
         created_at: timestamp,
         updated_at: timestamp,
         media: Some(vec![movie.clone()]),
@@ -176,7 +235,7 @@ fn archived_library_round_trip_retains_members() {
         .expect("movie library should expose archived movie references");
     let owned_movie_ref: MovieReference = archived_movie_ref.to_model();
     if let Media::Movie(expected) = movie {
-        assert_eq!(owned_movie_ref, expected);
+        assert_eq!(owned_movie_ref, *expected);
     } else {
         panic!("expected sample movie media");
     }

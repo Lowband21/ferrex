@@ -1,0 +1,142 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, library_id, folder_path, folder_type, parent_folder_id,\n                discovered_at, last_seen_at, discovery_source,\n                processing_status, last_processed_at, processing_error,\n                processing_attempts, next_retry_at,\n                total_files, processed_files, total_size_bytes,\n                file_types, last_modified,\n                metadata, created_at, updated_at\n            FROM folder_inventory\n            WHERE library_id = $1\n            ORDER BY folder_path\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "folder_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "folder_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "parent_folder_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "discovery_source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "processing_status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_processed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "processing_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "processing_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "next_retry_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "total_files",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "processed_files",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "total_size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "file_types",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "last_modified",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "517eb2d8f089c3c31f0eba85c1a8f18180e906c44ad564a29a05ef4780e68d8f"
+}

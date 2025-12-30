@@ -1,6 +1,6 @@
 use crate::database::PostgresDatabase;
-use crate::database::ports::rbac::RbacRepository;
-use crate::database::ports::users::UsersRepository;
+use crate::database::repository_ports::rbac::RbacRepository;
+use crate::database::repository_ports::users::UsersRepository;
 use crate::domain::users::user::User;
 use crate::error::Result;
 use uuid::Uuid;

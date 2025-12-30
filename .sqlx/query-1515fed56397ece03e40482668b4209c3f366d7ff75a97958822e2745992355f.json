@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM setup_claims\n            WHERE (revoked_at IS NOT NULL AND revoked_at < $1)\n               OR (confirmed_at IS NULL AND expires_at < $1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1515fed56397ece03e40482668b4209c3f366d7ff75a97958822e2745992355f"
+}

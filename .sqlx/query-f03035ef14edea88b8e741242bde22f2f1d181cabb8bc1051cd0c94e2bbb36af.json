@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO movie_reference_batches\n                (library_id, batch_id, batch_size, batch_hash)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (library_id, batch_id) DO UPDATE SET\n                batch_size = EXCLUDED.batch_size,\n                version = CASE\n                    WHEN movie_reference_batches.batch_hash IS DISTINCT FROM EXCLUDED.batch_hash\n                    THEN movie_reference_batches.version + 1\n                    ELSE movie_reference_batches.version\n                END,\n                batch_hash = EXCLUDED.batch_hash,\n                updated_at = CASE\n                    WHEN movie_reference_batches.batch_hash IS DISTINCT FROM EXCLUDED.batch_hash\n                    THEN NOW()\n                    ELSE movie_reference_batches.updated_at\n                END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int4",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f03035ef14edea88b8e741242bde22f2f1d181cabb8bc1051cd0c94e2bbb36af"
+}

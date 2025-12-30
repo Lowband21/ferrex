@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                admin_password_policy,\n                user_password_policy,\n                updated_at,\n                updated_by\n            FROM auth_security_settings\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "admin_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "d3a900e05a30857ff2fd9a7fad6fa2229766c3aa2d6f0e2ff7dafb66e39a5f51"
+}

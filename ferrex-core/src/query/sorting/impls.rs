@@ -9,8 +9,7 @@ use super::{
     StringKey,
 };
 
-use crate::types::details::{MediaDetailsOption, TmdbDetails};
-use crate::types::media::{MovieReference, SeriesReference};
+use crate::types::media::{MovieReference, Series};
 
 /// Implementation of SortableEntity for MovieReference
 impl SortableEntity for MovieReference {
@@ -46,87 +45,51 @@ impl SortableEntity for MovieReference {
             .unwrap()
         } else if F::ID == "release_date" {
             // Release date requires TMDB details
-            let date = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    if let TmdbDetails::Movie(movie_details) = details.as_ref()
-                    {
-                        movie_details.release_date.as_ref().and_then(
-                            |date_str| {
-                                // Parse the date string (expected format: YYYY-MM-DD)
-                                use chrono::{NaiveDate, NaiveTime, Utc};
-                                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                                    .ok()
-                                    .and_then(|date| {
-                                        let naive_datetime = date.and_time(
-                                            NaiveTime::from_hms_opt(0, 0, 0)?,
-                                        );
-                                        naive_datetime
-                                            .and_local_timezone(Utc)
-                                            .single()
-                                    })
-                            },
-                        )
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
+            let date =
+                self.details.release_date.as_ref().and_then(|date_str| {
+                    // Parse the date string (expected format: YYYY-MM-DD)
+                    use chrono::{NaiveDate, NaiveTime, Utc};
+                    NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                        .ok()
+                        .and_then(|date| {
+                            let naive_datetime = date
+                                .and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+                            naive_datetime.and_local_timezone(Utc).single()
+                        })
+                });
+
             let key = OptionalDateKey::new(date);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
             .unwrap()
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
-            let rating = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    match details.as_ref() {
-                        TmdbDetails::Movie(movie_details) => {
-                            movie_details.vote_average
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let rating = self.details.vote_average;
+
             let key = OptionalFloatKey::new(rating);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
             .unwrap()
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
-            let popularity = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    match details.as_ref() {
-                        TmdbDetails::Movie(movie_details) => {
-                            movie_details.popularity
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let popularity = self.details.popularity;
+
             let key = OptionalFloatKey::new(popularity);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
             .unwrap()
         } else if F::ID == "runtime" {
             // Runtime requires TMDB details
-            let runtime = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    match details.as_ref() {
-                        TmdbDetails::Movie(movie_details) => {
-                            movie_details.runtime
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let runtime = self.details.runtime;
+
             let key = OptionalU32Key::new(runtime);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
@@ -189,7 +152,7 @@ impl SortableEntity for MovieReference {
 }
 
 /// Implementation of SortableEntity for SeriesReference
-impl SortableEntity for SeriesReference {
+impl SortableEntity for Series {
     type AvailableFields = SeriesFieldSet;
 
     fn extract_key<F: SortFieldMarker>(&self, _field: F) -> F::Key
@@ -214,70 +177,40 @@ impl SortableEntity for SeriesReference {
             .unwrap()
         } else if F::ID == "release_date" {
             // First air date requires TMDB details
-            let date = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    if let TmdbDetails::Series(series_details) =
-                        details.as_ref()
-                    {
-                        series_details.first_air_date.as_ref().and_then(
-                            |date_str| {
-                                // Parse the date string (expected format: YYYY-MM-DD)
-                                use chrono::{NaiveDate, NaiveTime, Utc};
-                                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                                    .ok()
-                                    .and_then(|date| {
-                                        let naive_datetime = date.and_time(
-                                            NaiveTime::from_hms_opt(0, 0, 0)?,
-                                        );
-                                        naive_datetime
-                                            .and_local_timezone(Utc)
-                                            .single()
-                                    })
-                            },
-                        )
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
+            let date =
+                self.details.first_air_date.as_ref().and_then(|date_str| {
+                    // Parse the date string (expected format: YYYY-MM-DD)
+                    use chrono::{NaiveDate, NaiveTime, Utc};
+                    NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                        .ok()
+                        .and_then(|date| {
+                            let naive_datetime = date
+                                .and_time(NaiveTime::from_hms_opt(0, 0, 0)?);
+                            naive_datetime.and_local_timezone(Utc).single()
+                        })
+                });
+
             let key = OptionalDateKey::new(date);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
             .unwrap()
         } else if F::ID == "rating" {
             // Rating (vote_average) requires TMDB details
-            let rating = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    match details.as_ref() {
-                        TmdbDetails::Series(series_details) => {
-                            series_details.vote_average
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let rating = self.details.vote_average;
+
             let key = OptionalFloatKey::new(rating);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
             .unwrap()
         } else if F::ID == "popularity" {
             // Popularity requires TMDB details
-            let popularity = match &self.details {
-                MediaDetailsOption::Details(details) => {
-                    match details.as_ref() {
-                        TmdbDetails::Series(series_details) => {
-                            series_details.popularity
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let popularity = self.details.popularity;
             let key = OptionalFloatKey::new(popularity);
+
             *Box::<dyn std::any::Any>::downcast(
                 Box::new(key) as Box<dyn std::any::Any>
             )
@@ -311,27 +244,31 @@ impl SortableEntity for SeriesReference {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::sorting::fields::{
-        DateAddedField, PopularityField, RatingField, ReleaseDateField,
-        RuntimeField, TitleField,
+    use crate::{
+        query::sorting::fields::{
+            DateAddedField, PopularityField, RatingField, ReleaseDateField,
+            RuntimeField, TitleField,
+        },
+        types::{
+            details::{EnhancedMovieDetails, ExternalIds, SpokenLanguage},
+            files::MediaFile,
+            ids::{LibraryId, MovieID},
+            image::MediaImages,
+            titles::MovieTitle,
+            urls::{MovieURL, UrlLike},
+        },
     };
-    use crate::query::sorting::strategy::{FieldSort, SortStrategy};
-    use crate::types::details::{
-        EnhancedMovieDetails, ExternalIds, SpokenLanguage,
-    };
-    use crate::types::files::MediaFile;
-    use crate::types::ids::{LibraryId, MovieID};
-    use crate::types::image::MediaImages;
-    use crate::types::titles::MovieTitle;
-    use crate::types::urls::{MovieURL, UrlLike};
+    use ferrex_model::MediaID;
     use uuid::Uuid;
 
-    fn create_test_movie_with_details() -> MovieReference {
+    fn create_test_movie() -> MovieReference {
         let mut details = EnhancedMovieDetails {
             id: 12345,
             title: "Test Movie".to_string(),
             original_title: None,
             overview: Some("A test movie".to_string()),
+            primary_poster_iid: None,
+            primary_backdrop_iid: None,
             release_date: Some("2023-01-15".to_string()),
             runtime: Some(120),
             vote_average: Some(7.5f32),
@@ -369,17 +306,19 @@ mod tests {
             name: "English".to_string(),
         });
 
+        let movie_id = MovieID::new();
+
         MovieReference {
-            id: MovieID::new(),
+            id: movie_id,
             library_id: LibraryId::new(),
+            batch_id: None,
             tmdb_id: 12345,
             title: MovieTitle::new("Test Movie".to_string()).unwrap(),
-            details: MediaDetailsOption::Details(Box::new(TmdbDetails::Movie(
-                details,
-            ))),
+            details,
             endpoint: MovieURL::from_string("/movies/test-movie-1".to_string()),
             file: MediaFile {
                 id: Uuid::now_v7(),
+                media_id: MediaID::Movie(movie_id),
                 path: std::path::PathBuf::from("/movies/test.mp4"),
                 filename: "test.mp4".to_string(),
                 size: 1000000,
@@ -392,86 +331,45 @@ mod tests {
         }
     }
 
-    fn create_test_movie_without_details() -> MovieReference {
-        let mut movie = create_test_movie_with_details();
-        movie.details =
-            MediaDetailsOption::Endpoint("/movies/test-movie-1".to_string());
-        movie
-    }
-
     #[test]
     fn test_extract_title_key() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: StringKey = movie.extract_key(TitleField);
         assert!(!key.is_missing());
     }
 
     #[test]
     fn test_extract_date_added_key() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: OptionalDateKey = movie.extract_key(DateAddedField);
         assert!(!key.is_missing());
     }
 
     #[test]
     fn test_extract_release_date_with_details() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: OptionalDateKey = movie.extract_key(ReleaseDateField);
         assert!(!key.is_missing());
-    }
-
-    #[test]
-    fn test_extract_release_date_without_details() {
-        let movie = create_test_movie_without_details();
-        let key: OptionalDateKey = movie.extract_key(ReleaseDateField);
-        assert!(key.is_missing());
     }
 
     #[test]
     fn test_extract_rating_with_details() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: OptionalFloatKey = movie.extract_key(RatingField);
         assert!(!key.is_missing());
     }
 
     #[test]
-    fn test_extract_rating_without_details() {
-        let movie = create_test_movie_without_details();
-        let key: OptionalFloatKey = movie.extract_key(RatingField);
-        assert!(key.is_missing());
-    }
-
-    #[test]
     fn test_extract_runtime_with_details() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: OptionalU32Key = movie.extract_key(RuntimeField);
         assert!(!key.is_missing());
     }
 
     #[test]
     fn test_extract_popularity_with_details() {
-        let movie = create_test_movie_with_details();
+        let movie = create_test_movie();
         let key: OptionalFloatKey = movie.extract_key(PopularityField);
         assert!(!key.is_missing());
-    }
-
-    #[test]
-    fn test_missing_optional_values_stay_last_on_desc() {
-        let mut with_details = create_test_movie_with_details();
-        with_details.title =
-            MovieTitle::new("Rated Movie".to_string()).unwrap();
-
-        let mut without_details = create_test_movie_without_details();
-        without_details.title =
-            MovieTitle::new("Unrated Movie".to_string()).unwrap();
-
-        let mut movies = vec![without_details.clone(), with_details.clone()];
-
-        let sorter =
-            FieldSort::<MovieReference, RatingField>::new(RatingField, true);
-        sorter.sort(&mut movies);
-
-        assert_eq!(movies[0].title, with_details.title);
-        assert_eq!(movies[1].title, without_details.title);
     }
 }

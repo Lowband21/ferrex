@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT episode_id, keyword_id, name FROM episode_keywords WHERE episode_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "episode_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "keyword_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7ca2389d4073c302c7b24f8602861f127181fc89fff851068342450a03cb8e8a"
+}

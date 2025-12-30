@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT sbv.series_id, sbv.version\n            FROM series_bundle_versioning sbv\n            INNER JOIN series s ON s.id = sbv.series_id\n            WHERE sbv.library_id = $1\n              AND s.library_id = $1\n              AND sbv.finalized = true\n            ORDER BY sbv.series_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "version",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "410bf2204208c88ad46311be868f02e9c567a62081a384cea36a98c2edc67485"
+}

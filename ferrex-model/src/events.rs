@@ -72,7 +72,9 @@ impl FromStr for ScanSseEventType {
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum MediaSseEventType {
     MovieAdded,
+    MovieBatchFinalized,
     SeriesAdded,
+    SeriesBundleFinalized,
     SeasonAdded,
     EpisodeAdded,
     MovieUpdated,
@@ -87,7 +89,9 @@ impl MediaSseEventType {
     pub const fn event_name(self) -> &'static str {
         match self {
             Self::MovieAdded => "media.movie_added",
+            Self::MovieBatchFinalized => "media.movie_batch_finalized",
             Self::SeriesAdded => "media.series_added",
+            Self::SeriesBundleFinalized => "media.series_bundle_finalized",
             Self::SeasonAdded => "media.season_added",
             Self::EpisodeAdded => "media.episode_added",
             Self::MovieUpdated => "media.movie_updated",
@@ -133,7 +137,9 @@ impl FromStr for MediaSseEventType {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "media.movie_added" => Ok(Self::MovieAdded),
+            "media.movie_batch_finalized" => Ok(Self::MovieBatchFinalized),
             "media.series_added" => Ok(Self::SeriesAdded),
+            "media.series_bundle_finalized" => Ok(Self::SeriesBundleFinalized),
             "media.season_added" => Ok(Self::SeasonAdded),
             "media.episode_added" => Ok(Self::EpisodeAdded),
             "media.movie_updated" => Ok(Self::MovieUpdated),
@@ -153,18 +159,16 @@ impl MediaEvent {
     pub fn sse_event_type(&self) -> MediaSseEventType {
         match self {
             MediaEvent::MovieAdded { .. } => MediaSseEventType::MovieAdded,
+            MediaEvent::MovieBatchFinalized { .. } => {
+                MediaSseEventType::MovieBatchFinalized
+            }
+            MediaEvent::SeriesBundleFinalized { .. } => {
+                MediaSseEventType::SeriesBundleFinalized
+            }
             MediaEvent::SeriesAdded { .. } => MediaSseEventType::SeriesAdded,
-            MediaEvent::SeasonAdded { .. } => MediaSseEventType::SeasonAdded,
-            MediaEvent::EpisodeAdded { .. } => MediaSseEventType::EpisodeAdded,
             MediaEvent::MovieUpdated { .. } => MediaSseEventType::MovieUpdated,
             MediaEvent::SeriesUpdated { .. } => {
                 MediaSseEventType::SeriesUpdated
-            }
-            MediaEvent::SeasonUpdated { .. } => {
-                MediaSseEventType::SeasonUpdated
-            }
-            MediaEvent::EpisodeUpdated { .. } => {
-                MediaSseEventType::EpisodeUpdated
             }
             MediaEvent::MediaDeleted { .. } => MediaSseEventType::MediaDeleted,
             MediaEvent::ScanStarted { .. } => {
@@ -206,7 +210,15 @@ mod tests {
     fn media_event_name_roundtrip() {
         for (name, value) in [
             ("media.movie_added", MediaSseEventType::MovieAdded),
+            (
+                "media.movie_batch_finalized",
+                MediaSseEventType::MovieBatchFinalized,
+            ),
             ("media.series_added", MediaSseEventType::SeriesAdded),
+            (
+                "media.series_bundle_finalized",
+                MediaSseEventType::SeriesBundleFinalized,
+            ),
             ("media.season_added", MediaSseEventType::SeasonAdded),
             ("media.episode_added", MediaSseEventType::EpisodeAdded),
             ("media.movie_updated", MediaSseEventType::MovieUpdated),

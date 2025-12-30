@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT library_id, series_root_path, status as \"status!: SeriesScanStatus\",\n                   series_id, series_title, series_slug, series_year, series_region,\n                   seeded_at, last_attempt_at, attempts,\n                   resolved_at, failed_at, failure_reason, created_at, updated_at\n            FROM series_scan_state\n            WHERE library_id = $1 AND series_root_path = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "series_root_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: SeriesScanStatus",
+        "type_info": {
+          "Custom": {
+            "name": "series_scan_status",
+            "kind": {
+              "Enum": [
+                "discovered",
+                "seeded",
+                "resolved",
+                "failed"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "series_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "series_slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "series_year",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "series_region",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "seeded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_attempt_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "resolved_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "failed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "failure_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "46c4e46178e710cba8ee78dec4318e4821691319fb23e998b3a9dfae2e823995"
+}

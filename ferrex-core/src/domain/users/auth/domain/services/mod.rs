@@ -17,7 +17,7 @@ pub use device_trust_service::{DeviceTrustError, DeviceTrustService};
 pub use event_context::AuthEventContext;
 pub use pin_management_service::{PinManagementError, PinManagementService};
 
-/// Factory function to create an AuthenticationService with PostgreSQL repositories
+/// Factory function to create an AuthenticationService with PostgreSQL repository_ports
 #[cfg(feature = "database")]
 pub fn create_authentication_service(
     pool: sqlx::PgPool,

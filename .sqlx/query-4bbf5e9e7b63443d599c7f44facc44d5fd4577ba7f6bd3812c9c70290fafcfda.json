@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT movie_id, iso_3166_1, iso_639_1, name, english_name, title, overview, homepage, tagline\n        FROM movie_translations\n        WHERE library_id = $1\n          AND batch_id = $2\n          AND movie_id = ANY($3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "iso_639_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "english_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "homepage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "tagline",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "4bbf5e9e7b63443d599c7f44facc44d5fd4577ba7f6bd3812c9c70290fafcfda"
+}

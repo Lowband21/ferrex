@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE file_watch_events\n        SET processed = true,\n            processed_at = NOW()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca30c25fb20da7653644ca97401ef3bfba97a1bdc90cc627dc4c3146a046b75b"
+}

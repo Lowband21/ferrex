@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO file_watch_consumer_offsets (\n            group_name,\n            library_id,\n            last_event_id,\n            last_detected_at,\n            updated_at\n        ) VALUES ($1, $2, $3, $4, NOW())\n        ON CONFLICT (group_name, library_id)\n        DO UPDATE SET\n            last_event_id = EXCLUDED.last_event_id,\n            last_detected_at = EXCLUDED.last_detected_at,\n            updated_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c871f1cc2f5ceefd40196f612070eb318265c17360df07b0a60c5fc52d599113"
+}

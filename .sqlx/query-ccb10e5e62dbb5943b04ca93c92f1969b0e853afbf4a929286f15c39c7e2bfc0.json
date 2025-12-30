@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT b.batch_id, b.version, b.batch_hash\n            FROM movie_reference_batches b\n            WHERE b.library_id = $1\n              AND EXISTS (\n                SELECT 1\n                FROM movie_references mr\n                WHERE mr.library_id = $1\n                  AND mr.batch_id = b.batch_id\n              )\n            ORDER BY b.batch_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_hash",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ccb10e5e62dbb5943b04ca93c92f1969b0e853afbf4a929286f15c39c7e2bfc0"
+}

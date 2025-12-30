@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM cached_images\n            WHERE image_id NOT IN (SELECT id FROM tmdb_image_variants)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "76c78bf5d3bd4dfc877013993778e157c65722de6646a8e693c8ccb35087468f"
+}

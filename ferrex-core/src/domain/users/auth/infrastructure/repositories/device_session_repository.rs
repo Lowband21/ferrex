@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use std::{fmt, sync::Arc};
 use uuid::Uuid;
 
@@ -355,45 +355,46 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
         &self,
         fingerprint: &DeviceFingerprint,
     ) -> Result<bool> {
-        let exists = sqlx::query_scalar::<_, bool>(
+        let exists = sqlx::query!(
             r#"
             SELECT EXISTS(
                 SELECT 1
                 FROM auth_device_sessions
                 WHERE device_fingerprint = $1
-            )
+            ) AS "exists!"
             "#,
+            fingerprint.as_str()
         )
-        .bind(fingerprint.as_str())
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(exists)
+        Ok(exists.exists)
     }
 
     async fn pin_status_by_fingerprint(
         &self,
         fingerprint: &DeviceFingerprint,
     ) -> Result<Vec<DevicePinStatus>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             SELECT
                 ds.user_id,
-                (uc.pin_hash IS NOT NULL) AS has_pin
+                COALESCE((uc.pin_hash IS NOT NULL), false) AS "has_pin!"
             FROM auth_device_sessions ds
             INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             WHERE ds.device_fingerprint = $1
             "#,
+            fingerprint.as_str()
         )
-        .bind(fingerprint.as_str())
         .fetch_all(&self.pool)
         .await?;
 
         let mut statuses = Vec::with_capacity(rows.len());
         for row in rows {
-            let user_id: Uuid = row.try_get("user_id")?;
-            let has_pin: bool = row.try_get("has_pin")?;
-            statuses.push(DevicePinStatus { user_id, has_pin });
+            statuses.push(DevicePinStatus {
+                user_id: row.user_id,
+                has_pin: row.has_pin,
+            });
         }
 
         Ok(statuses)

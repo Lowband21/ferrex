@@ -3,7 +3,7 @@ use std::fmt;
 /// Enumerates the canonical reasons for revoking authentication material.
 ///
 /// Having a strongly typed list keeps logging, metrics, and policy decisions
-/// consistent across repositories and services.
+/// consistent across repository_ports and services.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevocationReason {
     /// Session was rotated as part of the normal refresh flow.

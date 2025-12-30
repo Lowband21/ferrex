@@ -6,7 +6,7 @@
       {
         "ordinal": 0,
         "name": "kind",
-        "type_info": "Varchar"
+        "type_info": "Int2"
       },
       {
         "ordinal": 1,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM file_watch_events\n        WHERE detected_at < NOW() - ($1 || ' days')::interval\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "80d4cf4d4eb8bc7b6a446e9ccc6f31584886a9abddcac3207f466ea8e8ce234e"
+}

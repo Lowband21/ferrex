@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM scan_cursors\n            WHERE library_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "238f6c458566b6b36f161cc520fb4937e185c0d5f6f006c0bce4f79d5b61c87c"
+}

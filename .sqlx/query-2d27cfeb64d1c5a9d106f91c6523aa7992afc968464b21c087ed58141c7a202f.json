@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO libraries (\n                id,\n                name,\n                library_type,\n                paths,\n                scan_interval_minutes,\n                enabled,\n                auto_scan,\n                watch_for_changes,\n                analyze_on_scan,\n                max_retry_attempts\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            ON CONFLICT (id) DO UPDATE SET\n                name = EXCLUDED.name,\n                paths = EXCLUDED.paths,\n                scan_interval_minutes = EXCLUDED.scan_interval_minutes,\n                enabled = EXCLUDED.enabled,\n                auto_scan = EXCLUDED.auto_scan,\n                watch_for_changes = EXCLUDED.watch_for_changes,\n                analyze_on_scan = EXCLUDED.analyze_on_scan,\n                max_retry_attempts = EXCLUDED.max_retry_attempts,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "TextArray",
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d27cfeb64d1c5a9d106f91c6523aa7992afc968464b21c087ed58141c7a202f"
+}

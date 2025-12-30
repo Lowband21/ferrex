@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT episode_id, iso_3166_1, iso_639_1, name, english_name, title, overview, homepage, tagline\n            FROM episode_translations WHERE episode_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "episode_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "iso_639_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "english_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "homepage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "tagline",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b6f53702a3bf03a4401cc56c079ebb5d2e842330d9e8d7eda47cf674b2061540"
+}

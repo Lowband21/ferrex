@@ -21,10 +21,13 @@ default = []
 serde = ["dep:serde", "chrono"]
 rkyv = ["dep:rkyv", "chrono"]
 chrono = ["dep:chrono"]
+sqlx = ["dep:sqlx"]
 
 [dependencies]
 serde = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
+tmdb-api.workspace = true
 uuid.workspace = true
 chrono = { workspace = true, optional = true }
 url.workspace = true
+sqlx = { workspace = true, optional = true }

@@ -7,7 +7,7 @@ use chrono::Utc;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::database::ports::{
+use crate::database::repository_ports::{
     rbac::RbacRepository, security_settings::SecuritySettingsRepository,
     users::UsersRepository,
 };

@@ -9,7 +9,7 @@ pub use crate::types::watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
     SeasonWatchStatus, SeriesWatchStatus,
 };
-use ferrex_model::MediaType;
+use ferrex_model::{MediaID, VideoMediaType};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
@@ -98,6 +98,25 @@ impl UserWatchState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub enum ItemWatchStatus {
+    InProgress(InProgressItem),
+    Completed(CompletedItem),
+}
+
+impl ItemWatchStatus {
+    pub fn to_watch_progress(self) -> WatchProgress {
+        match self {
+            ItemWatchStatus::InProgress(in_progress_item) => {
+                in_progress_item.to_watch_progress()
+            }
+            ItemWatchStatus::Completed(completed_item) => {
+                completed_item.to_watch_progress()
+            }
+        }
+    }
+}
+
 /// Item currently being watched
 ///
 /// Represents a single media item with viewing progress.
@@ -145,6 +164,45 @@ impl InProgressItem {
     }
 }
 
+/// Watched item
+///
+/// Represents a single completed media item.
+/// # Example
+///
+/// ```json
+/// {
+///   "media_id": "movie:550e8400-e29b-41d4-a716-446655440000",
+///   "last_watched": 1704067200
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletedItem {
+    /// The media being watched
+    pub media_id: MediaID,
+    /// Unix timestamp of last update
+    pub last_watched: i64,
+}
+
+impl Eq for CompletedItem {}
+
+impl PartialEq for CompletedItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.media_id == other.media_id
+    }
+}
+
+impl Hash for CompletedItem {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.media_id.hash(state);
+    }
+}
+
+impl CompletedItem {
+    pub fn to_watch_progress(&self) -> WatchProgress {
+        WatchProgress::from(self)
+    }
+}
+
 /// Filter for watch status queries
 ///
 /// Used to filter media by watch status in query operations.
@@ -178,7 +236,7 @@ pub struct UpdateProgressRequest {
     /// Media to update progress for (required for movies; for episodes this is the EpisodeReference id)
     pub media_id: Uuid,
     /// Type of media (movie, series, season, episode)
-    pub media_type: MediaType,
+    pub media_type: VideoMediaType,
     /// Current playback position in seconds
     pub position: f32,
     /// Total media duration in seconds
@@ -220,6 +278,12 @@ impl WatchProgress {
 impl From<&InProgressItem> for WatchProgress {
     fn from(item: &InProgressItem) -> Self {
         WatchProgress::new(item.position / item.duration)
+    }
+}
+
+impl From<&CompletedItem> for WatchProgress {
+    fn from(_: &CompletedItem) -> Self {
+        WatchProgress::new(1.0)
     }
 }
 

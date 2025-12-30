@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                ds.user_id,\n                COALESCE((uc.pin_hash IS NOT NULL), false) AS \"has_pin!\"\n            FROM auth_device_sessions ds\n            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id\n            WHERE ds.device_fingerprint = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "has_pin!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "c6df0c6654a36bd1a52675f6dc936f7746d0aae0370b680329e880bfad301ebe"
+}

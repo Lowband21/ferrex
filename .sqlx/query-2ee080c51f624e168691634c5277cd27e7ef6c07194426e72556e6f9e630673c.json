@@ -10,156 +10,176 @@
       },
       {
         "ordinal": 1,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
         "name": "tmdb_id",
         "type_info": "Int8"
       },
       {
-        "ordinal": 2,
+        "ordinal": 4,
         "name": "title",
         "type_info": "Text"
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "original_title",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "overview",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "release_date",
         "type_info": "Date"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "runtime",
         "type_info": "Int4"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "vote_average",
         "type_info": "Float4"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "vote_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "popularity",
         "type_info": "Float4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "primary_certification",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "homepage",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "status",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "tagline",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "budget",
         "type_info": "Int8"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "revenue",
         "type_info": "Int8"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "poster_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "backdrop_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
+        "name": "primary_poster_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 21,
+        "name": "primary_backdrop_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 22,
         "name": "logo_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 19,
+        "ordinal": 23,
         "name": "collection_id",
         "type_info": "Int8"
       },
       {
-        "ordinal": 20,
+        "ordinal": 24,
         "name": "collection_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 21,
+        "ordinal": 25,
         "name": "collection_poster_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 22,
+        "ordinal": 26,
         "name": "collection_backdrop_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 27,
         "name": "imdb_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 24,
+        "ordinal": 28,
         "name": "facebook_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 25,
+        "ordinal": 29,
         "name": "instagram_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 26,
+        "ordinal": 30,
         "name": "twitter_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 27,
+        "ordinal": 31,
         "name": "wikidata_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 28,
+        "ordinal": 32,
         "name": "tiktok_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 29,
+        "ordinal": 33,
         "name": "youtube_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 30,
+        "ordinal": 34,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 31,
+        "ordinal": 35,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -173,6 +193,8 @@
       false,
       false,
       false,
+      false,
+      false,
       true,
       true,
       true,
@@ -187,6 +209,8 @@
       true,
       true,
       true,
+      true,
+      false,
       true,
       true,
       true,

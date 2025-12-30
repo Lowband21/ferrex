@@ -1,16 +1,20 @@
 use super::{
-    details::{MediaDetailsOption, TmdbDetails},
     files::MediaFile,
-    ids::{EpisodeID, LibraryId, MovieID, SeasonID, SeriesID},
+    ids::{EpisodeID, LibraryId, MovieBatchId, MovieID, SeasonID, SeriesID},
     numbers::{EpisodeNumber, SeasonNumber},
     titles::{MovieTitle, SeriesTitle},
     urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL},
 };
 use std::fmt;
 
-use crate::chrono::{DateTime, Utc};
 #[cfg(feature = "rkyv")]
 use crate::media_id::ArchivedMediaID;
+#[cfg(feature = "rkyv")]
+use crate::rkyv_wrappers::DateTimeWrapper;
+use crate::{
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, SeasonDetails,
+    chrono::{DateTime, Utc},
+};
 /// Lightweight movie reference for lists/collections
 #[derive(Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -21,13 +25,13 @@ use crate::media_id::ArchivedMediaID;
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
 pub enum Media {
     /// Movie media reference
-    Movie(MovieReference),
+    Movie(Box<MovieReference>),
     /// Series media reference
-    Series(SeriesReference),
+    Series(Box<Series>),
     /// Season media reference
-    Season(SeasonReference),
+    Season(Box<SeasonReference>),
     /// Episode media reference
-    Episode(EpisodeReference),
+    Episode(Box<EpisodeReference>),
 }
 
 /// Lightweight movie reference for lists/collections
@@ -41,9 +45,14 @@ pub enum Media {
 pub struct MovieReference {
     pub id: MovieID,
     pub library_id: LibraryId,
+    #[cfg_attr(
+        feature = "serde",
+        serde(skip_serializing_if = "Option::is_none", default)
+    )]
+    pub batch_id: Option<MovieBatchId>,
     pub tmdb_id: u64,
     pub title: MovieTitle,
-    pub details: MediaDetailsOption,
+    pub details: EnhancedMovieDetails,
     pub endpoint: MovieURL,
     pub file: MediaFile,
     #[cfg_attr(
@@ -61,20 +70,20 @@ pub struct MovieReference {
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
-pub struct SeriesReference {
+pub struct Series {
     pub id: SeriesID,
     pub library_id: LibraryId,
     pub tmdb_id: u64,
     pub title: SeriesTitle,
-    pub details: MediaDetailsOption,
+    pub details: EnhancedSeriesDetails,
     pub endpoint: SeriesURL,
     /// When the series was discovered (row creation time)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub discovered_at: DateTime<Utc>,
     /// When the series folder was created (for date added sorting)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub created_at: DateTime<Utc>,
     #[cfg_attr(
         feature = "serde",
@@ -97,15 +106,15 @@ pub struct SeasonReference {
     pub season_number: SeasonNumber,
     pub series_id: SeriesID, // Link to parent series
     pub tmdb_series_id: u64,
-    pub details: MediaDetailsOption,
+    pub details: SeasonDetails,
     pub endpoint: SeasonURL,
     /// When the season was discovered (row creation time)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub discovered_at: DateTime<Utc>,
     /// When the season folder was created (for date added sorting)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub created_at: DateTime<Utc>,
     #[cfg_attr(
         feature = "serde",
@@ -130,16 +139,16 @@ pub struct EpisodeReference {
     pub season_id: SeasonID, // Link to parent season
     pub series_id: SeriesID, // Link to parent series
     pub tmdb_series_id: u64,
-    pub details: MediaDetailsOption,
+    pub details: EpisodeDetails,
     pub endpoint: EpisodeURL,
     pub file: MediaFile,
     /// When the episode was discovered (row creation time)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub discovered_at: DateTime<Utc>,
     /// When the episode was created (for alternate date-based sorting)
     #[cfg_attr(feature = "serde", serde(default = "Utc::now"))]
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub created_at: DateTime<Utc>,
 }
 
@@ -167,6 +176,7 @@ impl fmt::Debug for MovieReference {
         f.debug_struct("MovieReference")
             .field("id", &self.id)
             .field("library_id", &self.library_id)
+            .field("batch_id", &self.batch_id)
             .field("tmdb_id", &self.tmdb_id)
             .field("title", &self.title)
             .field("endpoint", &self.endpoint)
@@ -177,7 +187,7 @@ impl fmt::Debug for MovieReference {
     }
 }
 
-impl fmt::Debug for SeriesReference {
+impl fmt::Debug for Series {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SeriesReference")
             .field("id", &self.id)
@@ -229,245 +239,88 @@ impl fmt::Debug for EpisodeReference {
 }
 
 impl MovieReference {
-    /// Returns the rating when TMDB details are cached locally.
+    /// Returns the rating when available.
     pub fn rating(&self) -> Option<f32> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie.vote_average,
-                TmdbDetails::Series(series) => series.vote_average,
-                TmdbDetails::Episode(episode) => episode.vote_average,
-                TmdbDetails::Season(_) => None,
-            },
-            _ => None,
-        }
+        self.details.vote_average
     }
 
-    /// Returns the list of genre names when TMDB details are cached locally.
-    pub fn genres(&self) -> Option<Vec<&str>> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => Some(
-                    movie
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                TmdbDetails::Series(series) => Some(
-                    series
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                _ => None,
-            },
-            _ => None,
-        }
+    /// Returns the list of genre names when available.
+    pub fn genres(&self) -> Vec<&str> {
+        self.details
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect()
     }
 }
 
-impl SeriesReference {
+impl Series {
     /// Returns the first available year across the known TMDB detail variants.
     pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
+        self.details
+            .first_air_date
+            .as_ref()
+            .and_then(|date| date.split('-').next())
+            .and_then(|year| year.parse().ok())
     }
 
     /// Returns the rating when TMDB details are cached locally.
     pub fn rating(&self) -> Option<f32> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie.vote_average,
-                TmdbDetails::Series(series) => series.vote_average,
-                TmdbDetails::Episode(episode) => episode.vote_average,
-                TmdbDetails::Season(_) => None,
-            },
-            _ => None,
-        }
+        self.details.vote_average
     }
 
     /// Returns the list of genre names when TMDB details are cached locally.
-    pub fn genres(&self) -> Option<Vec<&str>> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => Some(
-                    movie
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                TmdbDetails::Series(series) => Some(
-                    series
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                _ => None,
-            },
-            _ => None,
-        }
+    pub fn genres(&self) -> Vec<&str> {
+        self.details
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect()
     }
 }
 
 impl SeasonReference {
     /// Returns the first available year across the known TMDB detail variants.
     pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
+        self.details
+            .air_date
+            .as_ref()
+            .and_then(|date| date.split('-').next())
+            .and_then(|year| year.parse().ok())
     }
 
     /// Returns the rating when TMDB details are cached locally.
     pub fn rating(&self) -> Option<f32> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie.vote_average,
-                TmdbDetails::Series(series) => series.vote_average,
-                TmdbDetails::Episode(episode) => episode.vote_average,
-                TmdbDetails::Season(_) => None,
-            },
-            _ => None,
-        }
+        // TODO: Seasons currently have no rating
+        None
     }
 
     /// Returns the list of genre names when TMDB details are cached locally.
     pub fn genres(&self) -> Option<Vec<&str>> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => Some(
-                    movie
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                TmdbDetails::Series(series) => Some(
-                    series
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                _ => None,
-            },
-            _ => None,
-        }
+        None
     }
 }
 
 impl EpisodeReference {
     /// Returns the first available year across the known TMDB detail variants.
     pub fn year(&self) -> Option<u16> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie
-                    .release_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Series(series) => series
-                    .first_air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Season(season) => season
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-                TmdbDetails::Episode(episode) => episode
-                    .air_date
-                    .as_ref()
-                    .and_then(|date| date.split('-').next())
-                    .and_then(|year| year.parse().ok()),
-            },
-            _ => None,
-        }
+        self.details
+            .air_date
+            .as_ref()
+            .and_then(|date| date.split('-').next())
+            .and_then(|year| year.parse().ok())
     }
 
     /// Returns the rating when TMDB details are cached locally.
     pub fn rating(&self) -> Option<f32> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => movie.vote_average,
-                TmdbDetails::Series(series) => series.vote_average,
-                TmdbDetails::Episode(episode) => episode.vote_average,
-                TmdbDetails::Season(_) => None,
-            },
-            _ => None,
-        }
+        self.details.vote_average
     }
 
     /// Returns the list of genre names when TMDB details are cached locally.
     pub fn genres(&self) -> Option<Vec<&str>> {
-        match &self.details {
-            MediaDetailsOption::Details(details) => match details.as_ref() {
-                TmdbDetails::Movie(movie) => Some(
-                    movie
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                TmdbDetails::Series(series) => Some(
-                    series
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect(),
-                ),
-                _ => None,
-            },
-            _ => None,
-        }
+        // Episodes do not currently have genre information; we'd need to source it from
+        // the parent series or extend the details model to include genres.
+        None
     }
 }
 

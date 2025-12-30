@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO persons (\n            tmdb_id, name, original_name, gender, known_for_department, profile_path,\n            adult, popularity, biography, birthday, deathday, place_of_birth, homepage,\n            imdb_id, facebook_id, instagram_id, twitter_id, wikidata_id, tiktok_id, youtube_id\n        )\n        VALUES (\n            $1, $2, $3, $4, $5, $6,\n            $7, $8, $9, $10, $11, $12, $13,\n            $14, $15, $16, $17, $18, $19, $20\n        )\n        ON CONFLICT (tmdb_id) DO UPDATE SET\n            name = EXCLUDED.name,\n            original_name = EXCLUDED.original_name,\n            gender = EXCLUDED.gender,\n            known_for_department = EXCLUDED.known_for_department,\n            profile_path = EXCLUDED.profile_path,\n            adult = EXCLUDED.adult,\n            popularity = EXCLUDED.popularity,\n            imdb_id = EXCLUDED.imdb_id,\n            facebook_id = EXCLUDED.facebook_id,\n            instagram_id = EXCLUDED.instagram_id,\n            twitter_id = EXCLUDED.twitter_id,\n            wikidata_id = EXCLUDED.wikidata_id,\n            tiktok_id = EXCLUDED.tiktok_id,\n            youtube_id = EXCLUDED.youtube_id,\n            updated_at = NOW()\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Int2",
+        "Text",
+        "Text",
+        "Bool",
+        "Float4",
+        "Text",
+        "Date",
+        "Date",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f95f040a47ea07aef364f28522c7e29dea11df8515685c82fd081605f0e2c234"
+}

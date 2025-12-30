@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                series_id,\n                season_number,\n                library_id,\n                tmdb_series_id,\n                discovered_at AS \"discovered_at!\",\n                created_at AS \"created_at!\",\n                theme_color\n            FROM season_references\n            WHERE series_id = $1\n            ORDER BY season_number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "season_number",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "tmdb_series_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "discovered_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "theme_color",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "39262e1037f08649235d1f148eada673c9ef91a296e84808bfb5248a3c78fb56"
+}

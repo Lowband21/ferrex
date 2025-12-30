@@ -1,0 +1,196 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                series_id,\n                tmdb_id,\n                name,\n                original_name,\n                overview,\n                first_air_date,\n                last_air_date,\n                number_of_seasons,\n                number_of_episodes,\n                vote_average,\n                vote_count,\n                popularity,\n                primary_content_rating,\n                homepage,\n                status,\n                tagline,\n                in_production,\n                poster_path,\n                backdrop_path,\n                primary_poster_image_id,\n                primary_backdrop_image_id,\n                logo_path,\n                imdb_id,\n                tvdb_id,\n                facebook_id,\n                instagram_id,\n                twitter_id,\n                wikidata_id,\n                tiktok_id,\n                youtube_id\n            FROM series_metadata\n            WHERE series_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "original_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "first_air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 7,
+        "name": "number_of_seasons",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "number_of_episodes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "vote_average",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 10,
+        "name": "vote_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "popularity",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 12,
+        "name": "primary_content_rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "homepage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "tagline",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "in_production",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "poster_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "backdrop_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "primary_poster_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 20,
+        "name": "primary_backdrop_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 21,
+        "name": "logo_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "tvdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 24,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 26,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 28,
+        "name": "tiktok_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "youtube_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e85b6bfb0df1203a1afeaa737ada94ca24d67c2f9c3a566e28135c7355578e98"
+}

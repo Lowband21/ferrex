@@ -1,5 +1,5 @@
 use crate::types::media_id::MediaID;
-use ferrex_model::MediaType;
+use ferrex_model::VideoMediaType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,7 +10,8 @@ pub struct SyncSession {
     pub room_code: String, // 6-char code like "ABC123"
     pub host_id: Uuid,
     pub media_id: Uuid,
-    pub media_type: MediaType,
+    /// Playable media type for the session (movie/series/season/episode).
+    pub media_type: VideoMediaType,
     pub state: PlaybackState,
     pub participants: Vec<Participant>,
     pub created_at: i64,

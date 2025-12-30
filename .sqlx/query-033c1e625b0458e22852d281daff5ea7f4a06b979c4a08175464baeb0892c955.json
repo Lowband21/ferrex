@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO season_references (\n            id,\n            season_number,\n            series_id,\n            library_id,\n            tmdb_series_id,\n            created_at,\n            theme_color\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        ON CONFLICT (series_id, season_number) DO UPDATE SET\n            tmdb_series_id = EXCLUDED.tmdb_series_id,\n            theme_color = COALESCE(NULLIF(season_references.theme_color, ''), EXCLUDED.theme_color)\n        WHERE\n            season_references.tmdb_series_id IS DISTINCT FROM EXCLUDED.tmdb_series_id\n            OR (\n                COALESCE(NULLIF(season_references.theme_color, ''), NULL) IS NULL\n                AND EXCLUDED.theme_color IS NOT NULL\n                AND EXCLUDED.theme_color <> ''\n            )\n        RETURNING season_references.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Timestamptz",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "033c1e625b0458e22852d281daff5ea7f4a06b979c4a08175464baeb0892c955"
+}

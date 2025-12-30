@@ -1,8 +1,7 @@
 //! Cost estimation for different query execution strategies
 
 use crate::query::decision_engine::{
-    DataCompleteness, NetworkQuality, QueryComplexity, QueryContext,
-    QueryMetrics,
+    NetworkQuality, QueryComplexity, QueryContext, QueryMetrics,
 };
 
 /// Estimates the cost (in milliseconds) of different execution strategies
@@ -59,7 +58,6 @@ impl CostEstimator {
     pub fn estimate_client_cost<T>(
         &self,
         context: &QueryContext<T>,
-        data_completeness: DataCompleteness,
         query_complexity: QueryComplexity,
     ) -> u64 {
         let dataset_size = context.available_data.len();
@@ -80,13 +78,6 @@ impl CostEstimator {
             dataset_size as u64 * self.base_costs.client_filter_per_item_us
         } else {
             0
-        };
-
-        // Penalty for missing data
-        let completeness_penalty = match data_completeness {
-            DataCompleteness::High => 1.0,
-            DataCompleteness::Medium => 1.5,
-            DataCompleteness::Low => 3.0, // Significant penalty for incomplete data
         };
 
         // Complexity multiplier
@@ -110,7 +101,6 @@ impl CostEstimator {
 
         // Calculate total cost in microseconds
         let total_us = (sort_cost_us + filter_cost_us) as f32
-            * completeness_penalty
             * complexity_multiplier
             * cache_benefit;
 
@@ -206,42 +196,6 @@ impl Default for CostEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::types::MediaQuery;
-
-    #[test]
-    fn test_client_cost_estimation() {
-        let estimator = CostEstimator::new();
-
-        // Create a context with 1000 items
-        let context = QueryContext {
-            query: MediaQuery::default(),
-            available_data: vec![(); 1000], // Dummy data
-            has_cache: false,
-            cache_age_seconds: None,
-            expected_total_size: Some(1000),
-            hints: Default::default(),
-        };
-
-        // Test with high completeness and simple query
-        let cost = estimator.estimate_client_cost(
-            &context,
-            DataCompleteness::High,
-            QueryComplexity::Simple,
-        );
-
-        // Should be relatively low (around 10-20ms for 1000 items)
-        assert!(cost < 50);
-
-        // Test with low completeness and complex query
-        let cost_complex = estimator.estimate_client_cost(
-            &context,
-            DataCompleteness::Low,
-            QueryComplexity::Complex,
-        );
-
-        // Should be significantly higher
-        assert!(cost_complex > cost * 3);
-    }
 
     #[test]
     fn test_server_cost_estimation() {

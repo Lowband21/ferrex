@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE libraries\n            SET\n                name = $1,\n                library_type = $2,\n                paths = $3,\n                scan_interval_minutes = $4,\n                enabled = $5,\n                auto_scan = $6,\n                watch_for_changes = $7,\n                analyze_on_scan = $8,\n                max_retry_attempts = $9,\n                movie_ref_batch_size = $10,\n                updated_at = NOW()\n            WHERE id = $11\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "TextArray",
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8752940a67cb65a03609840a455dc2ff32ec19cda0308725e7df0dcc4b7f96e1"
+}

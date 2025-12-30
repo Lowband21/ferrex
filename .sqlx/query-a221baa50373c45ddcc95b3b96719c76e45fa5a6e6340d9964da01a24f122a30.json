@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT path_hash, folder_path_norm, listing_hash, entry_count, last_scan_at, last_modified_at, device_id\n            FROM scan_cursors\n            WHERE library_id = $1 AND last_scan_at < $2\n            ORDER BY last_scan_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "path_hash",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "folder_path_norm",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "listing_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "entry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_scan_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_modified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "device_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a221baa50373c45ddcc95b3b96719c76e45fa5a6e6340d9964da01a24f122a30"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_spoken_languages (movie_id, library_id, batch_id, iso_639_1, name)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (movie_id, name) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e4ab9a46440603e5e20bfc98299c99385359e19bd16fd6da259b00145d29b23"
+}

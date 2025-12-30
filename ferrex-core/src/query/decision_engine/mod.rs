@@ -12,9 +12,7 @@ pub mod estimator;
 pub mod monitor;
 pub mod types;
 
-pub use analyzers::{
-    DataCompleteness, DataCompletenessAnalyzer, QueryComplexityAnalyzer,
-};
+pub use analyzers::QueryComplexityAnalyzer;
 pub use estimator::CostEstimator;
 pub use monitor::{NetworkMonitor, NetworkQuality};
 pub use types::{ExecutionMode, QueryContext, QueryStrategy, StrategyConfig};
@@ -107,9 +105,6 @@ impl DecisionEngine {
     where
         T: SortableEntity,
     {
-        // Analyze data completeness
-        let data_completeness = DataCompletenessAnalyzer::analyze(&context);
-
         // Analyze query complexity
         let query_complexity = QueryComplexityAnalyzer::analyze(&context.query);
 
@@ -117,11 +112,9 @@ impl DecisionEngine {
         let network_quality = self.network_monitor.current_quality();
 
         // Estimate costs for different strategies
-        let client_cost = self.cost_estimator.estimate_client_cost(
-            &context,
-            data_completeness,
-            query_complexity,
-        );
+        let client_cost = self
+            .cost_estimator
+            .estimate_client_cost(&context, query_complexity);
 
         let server_cost = self.cost_estimator.estimate_server_cost(
             query_complexity,
@@ -133,7 +126,6 @@ impl DecisionEngine {
         self.select_strategy(
             client_cost,
             server_cost,
-            data_completeness,
             network_quality,
             query_complexity,
         )
@@ -144,60 +136,47 @@ impl DecisionEngine {
         &self,
         client_cost: u64,
         server_cost: u64,
-        data_completeness: DataCompleteness,
         network_quality: NetworkQuality,
         query_complexity: QueryComplexity,
     ) -> QueryStrategy {
-        let execution_mode =
-            match (data_completeness, network_quality, query_complexity) {
-                // Obvious client-side cases
-                (DataCompleteness::High, _, QueryComplexity::Simple) => {
+        let execution_mode = match (network_quality, query_complexity) {
+            // Obvious client-side cases
+            (_, QueryComplexity::Simple) => ExecutionMode::ClientOnly,
+            (NetworkQuality::Offline, _) => ExecutionMode::ClientOnly,
+
+            (NetworkQuality::Excellent, QueryComplexity::Complex) => {
+                ExecutionMode::ServerOnly
+            }
+
+            // Hybrid strategies
+            (NetworkQuality::Good, QueryComplexity::Moderate) => {
+                if client_cost < server_cost {
+                    ExecutionMode::HybridClientFilter
+                } else {
+                    ExecutionMode::HybridServerFilter
+                }
+            }
+
+            // Race condition for uncertain cases
+            _ if client_cost.abs_diff(server_cost)
+                < self.config.parallel_race_threshold_ms =>
+            {
+                ExecutionMode::ParallelRace
+            }
+
+            // Default to lowest cost
+            _ => {
+                if client_cost < server_cost {
                     ExecutionMode::ClientOnly
-                }
-                (_, NetworkQuality::Offline, _) => ExecutionMode::ClientOnly,
-
-                // Obvious server-side cases
-                (DataCompleteness::Low, NetworkQuality::Excellent, _) => {
+                } else {
                     ExecutionMode::ServerOnly
                 }
-                (_, NetworkQuality::Excellent, QueryComplexity::Complex) => {
-                    ExecutionMode::ServerOnly
-                }
-
-                // Hybrid strategies
-                (
-                    DataCompleteness::Medium,
-                    NetworkQuality::Good,
-                    QueryComplexity::Moderate,
-                ) => {
-                    if client_cost < server_cost {
-                        ExecutionMode::HybridClientFilter
-                    } else {
-                        ExecutionMode::HybridServerFilter
-                    }
-                }
-
-                // Race condition for uncertain cases
-                _ if client_cost.abs_diff(server_cost)
-                    < self.config.parallel_race_threshold_ms =>
-                {
-                    ExecutionMode::ParallelRace
-                }
-
-                // Default to lowest cost
-                _ => {
-                    if client_cost < server_cost {
-                        ExecutionMode::ClientOnly
-                    } else {
-                        ExecutionMode::ServerOnly
-                    }
-                }
-            };
+            }
+        };
 
         let confidence = self.calculate_confidence(
             client_cost,
             server_cost,
-            data_completeness,
             network_quality,
         );
 
@@ -207,7 +186,6 @@ impl DecisionEngine {
             estimated_latency_ms: client_cost.min(server_cost),
             reasoning: self.generate_reasoning(
                 execution_mode,
-                data_completeness,
                 network_quality,
                 query_complexity,
             ),
@@ -219,7 +197,6 @@ impl DecisionEngine {
         &self,
         client_cost: u64,
         server_cost: u64,
-        data_completeness: DataCompleteness,
         network_quality: NetworkQuality,
     ) -> f32 {
         let cost_difference = (client_cost as f32 - server_cost as f32).abs();
@@ -230,12 +207,6 @@ impl DecisionEngine {
             0.5
         };
 
-        let data_confidence = match data_completeness {
-            DataCompleteness::High => 0.9,
-            DataCompleteness::Medium => 0.6,
-            DataCompleteness::Low => 0.3,
-        };
-
         let network_confidence = match network_quality {
             NetworkQuality::Excellent => 0.9,
             NetworkQuality::Good => 0.7,
@@ -244,31 +215,27 @@ impl DecisionEngine {
         };
 
         // Weighted average
-        (cost_confidence * 0.4
-            + data_confidence * 0.3
-            + network_confidence * 0.3)
-            .clamp(0.0, 1.0)
+        (cost_confidence * 0.4 + network_confidence * 0.3).clamp(0.0, 1.0)
     }
 
     /// Generate human-readable reasoning for the strategy selection
     fn generate_reasoning(
         &self,
         mode: ExecutionMode,
-        data_completeness: DataCompleteness,
         network_quality: NetworkQuality,
         query_complexity: QueryComplexity,
     ) -> String {
         match mode {
             ExecutionMode::ClientOnly => {
                 format!(
-                    "Using client-side execution: {:?} data completeness, {:?} network, {:?} query",
-                    data_completeness, network_quality, query_complexity
+                    "Using client-side execution: {:?} network, {:?} query",
+                    network_quality, query_complexity
                 )
             }
             ExecutionMode::ServerOnly => {
                 format!(
-                    "Using server-side execution: {:?} data completeness, {:?} network, {:?} query",
-                    data_completeness, network_quality, query_complexity
+                    "Using server-side execution: {:?} network, {:?} query",
+                    network_quality, query_complexity
                 )
             }
             ExecutionMode::HybridClientFilter => {

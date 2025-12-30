@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO scan_cursors (\n                library_id, path_hash, folder_path_norm, listing_hash,\n                entry_count, last_scan_at, last_modified_at, device_id\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n            ON CONFLICT (library_id, path_hash)\n            DO UPDATE SET\n                listing_hash = EXCLUDED.listing_hash,\n                entry_count = EXCLUDED.entry_count,\n                last_scan_at = EXCLUDED.last_scan_at,\n                last_modified_at = EXCLUDED.last_modified_at,\n                device_id = EXCLUDED.device_id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e8f6757496a7e16869b21ea0b45eb85e3fad7dcf81b6ed0dd1437e4e59916448"
+}

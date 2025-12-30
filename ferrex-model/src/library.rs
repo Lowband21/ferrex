@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::chrono::{DateTime, Utc};
 use crate::media::Media;
 
-use super::ids::LibraryId;
+use super::ids::{LibraryId, MovieReferenceBatchSize};
 
 /// Read-only operations for library-like types
 pub trait LibraryLike {
@@ -19,6 +19,7 @@ pub trait LibraryLike {
     fn is_watch_for_changes(&self) -> bool;
     fn is_analyze_on_scan(&self) -> bool;
     fn get_max_retry_attempts(&self) -> u32;
+    fn get_movie_ref_batch_size(&self) -> MovieReferenceBatchSize;
     fn get_created_at(&self) -> DateTime<Utc>;
     fn get_updated_at(&self) -> DateTime<Utc>;
     fn get_media_references_clone(&self) -> Option<Vec<Media>>;
@@ -63,6 +64,7 @@ pub struct Library {
     pub watch_for_changes: bool,
     pub analyze_on_scan: bool,
     pub max_retry_attempts: u32,
+    pub movie_ref_batch_size: MovieReferenceBatchSize,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
     pub created_at: DateTime<Utc>,
     #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
@@ -152,6 +154,10 @@ impl LibraryLike for Library {
         self.max_retry_attempts
     }
 
+    fn get_movie_ref_batch_size(&self) -> MovieReferenceBatchSize {
+        self.movie_ref_batch_size
+    }
+
     fn get_created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
@@ -184,6 +190,7 @@ impl LibraryLikeMut for Library {
             watch_for_changes: true,
             analyze_on_scan: false,
             max_retry_attempts: 3,
+            movie_ref_batch_size: MovieReferenceBatchSize::default(),
             created_at: now,
             updated_at: now,
             media: None,
@@ -283,7 +290,7 @@ mod archived {
             &self,
         ) -> impl Iterator<Item = &ArchivedMovieReference> {
             self.media_as_slice().iter().filter_map(|m| match m {
-                ArchivedMedia::Movie(movie) => Some(movie),
+                ArchivedMedia::Movie(movie) => Some(movie.get()),
                 _ => None,
             })
         }

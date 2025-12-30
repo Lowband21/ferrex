@@ -11,9 +11,6 @@ pub mod domain;
 pub mod infrastructure;
 pub mod policy;
 pub mod rate_limit;
-//pub mod session;
-//pub mod state;
-//pub mod state_machine;
 
 pub use crypto::{AuthCrypto, AuthCryptoError};
 pub use device::*;
@@ -21,15 +18,6 @@ pub use policy::{
     AuthSecuritySettings, PasswordPolicy, PasswordPolicyCheck,
     PasswordPolicyRule,
 };
-// Re-export session types with explicit naming to avoid conflicts
-// pub use session::{
-//     CreateSessionRequest, CreateSessionResponse, ListSessionsRequest,
-//     RevokeSessionRequest, SessionActivity, SessionConfig, SessionSummary,
-//     SessionValidationResult, generate_session_token,
-// };
-// Export session DeviceSession with alias to avoid conflict with domain DeviceSession
-//pub use session::DeviceSession as SessionDeviceSession;
-//pub use state::*;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

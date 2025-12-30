@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                sm.season_id,\n                sm.tmdb_id,\n                sm.name,\n                sm.overview,\n                sm.air_date,\n                sm.episode_count,\n                sm.poster_path,\n                sm.primary_poster_image_id,\n                sm.runtime,\n                sm.imdb_id,\n                sm.facebook_id,\n                sm.instagram_id,\n                sm.twitter_id,\n                sm.wikidata_id,\n                sr.season_number\n            FROM season_metadata sm\n            JOIN season_references sr ON sr.id = sm.season_id\n            WHERE sm.season_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "overview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "air_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "episode_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "poster_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "primary_poster_image_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "runtime",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "season_number",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4c3a17f7ab19812b4a861a727dad236e308feb9fa04a679330bce6f119043022"
+}

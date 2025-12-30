@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO movie_collection_membership (\n                movie_id, library_id, batch_id, collection_id, name, poster_path, backdrop_path\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7)\n            ON CONFLICT (movie_id) DO UPDATE SET\n                collection_id = EXCLUDED.collection_id,\n                library_id = EXCLUDED.library_id,\n                batch_id = EXCLUDED.batch_id,\n                name = EXCLUDED.name,\n                poster_path = EXCLUDED.poster_path,\n                backdrop_path = EXCLUDED.backdrop_path\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5fb5409957b58bfdd002b79be9c1805009b6d59c9f5de04242ec809af470d6d"
+}

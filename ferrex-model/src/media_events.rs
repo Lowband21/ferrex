@@ -1,11 +1,15 @@
-use crate::chrono::{DateTime, Utc};
+use super::{LibraryId, Media, MediaID, MovieBatchId, MovieReference, Series};
+
+use crate::{
+    SeriesID, SubjectKey,
+    chrono::{DateTime, Utc},
+};
+
 use std::fmt;
 use uuid::Uuid;
 
-use super::{
-    EpisodeReference, LibraryId, Media, MediaID, MovieReference,
-    SeasonReference, SeriesReference,
-};
+#[cfg(feature = "rkyv")]
+use crate::rkyv_wrappers::DateTimeWrapper;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -44,11 +48,11 @@ pub struct ScanProgressEvent {
         feature = "serde",
         serde(skip_serializing_if = "Option::is_none")
     )]
-    pub path_key: Option<String>,
+    pub path_key: Option<SubjectKey>,
     pub p95_stage_latencies_ms: ScanStageLatencySummary,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
-    #[cfg_attr(feature = "rkyv", rkyv(with = crate::rkyv_wrappers::DateTimeWrapper))]
+    #[cfg_attr(feature = "rkyv", rkyv(with = DateTimeWrapper))]
     pub emitted_at: DateTime<Utc>,
     #[cfg_attr(
         feature = "serde",
@@ -108,27 +112,22 @@ pub enum MediaEvent {
     MovieAdded {
         movie: MovieReference,
     },
+    MovieBatchFinalized {
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+    },
     SeriesAdded {
-        series: SeriesReference,
+        series: Series,
     },
-    SeasonAdded {
-        season: SeasonReference,
+    SeriesBundleFinalized {
+        library_id: LibraryId,
+        series_id: SeriesID,
     },
-    EpisodeAdded {
-        episode: EpisodeReference,
-    },
-
     MovieUpdated {
         movie: MovieReference,
     },
     SeriesUpdated {
-        series: SeriesReference,
-    },
-    SeasonUpdated {
-        season: SeasonReference,
-    },
-    EpisodeUpdated {
-        episode: EpisodeReference,
+        series: Series,
     },
 
     MediaDeleted {
@@ -158,18 +157,14 @@ impl MediaEvent {
     pub fn into_media(self) -> Option<Media> {
         match self {
             MediaEvent::MovieAdded { movie }
-            | MediaEvent::MovieUpdated { movie } => Some(Media::Movie(movie)),
+            | MediaEvent::MovieUpdated { movie } => {
+                Some(Media::Movie(Box::new(movie)))
+            }
+            MediaEvent::MovieBatchFinalized { .. } => None,
+            MediaEvent::SeriesBundleFinalized { .. } => None,
             MediaEvent::SeriesAdded { series }
             | MediaEvent::SeriesUpdated { series } => {
-                Some(Media::Series(series))
-            }
-            MediaEvent::SeasonAdded { season }
-            | MediaEvent::SeasonUpdated { season } => {
-                Some(Media::Season(season))
-            }
-            MediaEvent::EpisodeAdded { episode }
-            | MediaEvent::EpisodeUpdated { episode } => {
-                Some(Media::Episode(episode))
+                Some(Media::Series(Box::new(series)))
             }
             MediaEvent::MediaDeleted { .. }
             | MediaEvent::ScanStarted { .. }

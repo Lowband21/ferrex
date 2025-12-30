@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT movie_id, iso_3166_1, iso_639_1, certification, release_date, release_type, note, descriptors\n           FROM movie_release_dates WHERE movie_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "iso_3166_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "iso_639_1",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "certification",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "release_date",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "release_type",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "descriptors",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "838d79744c018302f361ec4484b48c5aef16cbd140d1e6cc3dc819ba6f495eca"
+}

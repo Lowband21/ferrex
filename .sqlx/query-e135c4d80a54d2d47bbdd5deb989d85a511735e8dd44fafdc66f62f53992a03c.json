@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT season_id, keyword_id, name FROM season_keywords WHERE season_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "keyword_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e135c4d80a54d2d47bbdd5deb989d85a511735e8dd44fafdc66f62f53992a03c"
+}

@@ -1,0 +1,142 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                sc.series_id,\n                sc.person_tmdb_id,\n                sc.credit_id,\n                sc.department,\n                sc.job,\n                p.id,\n                p.name,\n                p.original_name,\n                p.profile_path,\n                p.gender,\n                p.known_for_department,\n                p.adult,\n                p.popularity,\n                p.imdb_id,\n                p.facebook_id,\n                p.instagram_id,\n                p.twitter_id,\n                p.wikidata_id,\n                p.tiktok_id,\n                p.youtube_id,\n                COALESCE(alias_data.aliases, ARRAY[]::TEXT[]) AS \"aliases!: Vec<String>\"\n            FROM series_crew sc\n            JOIN persons p ON p.id = sc.person_id\n            LEFT JOIN (\n                SELECT person_id, ARRAY_AGG(alias ORDER BY alias) AS aliases\n                FROM person_aliases\n                GROUP BY person_id\n            ) alias_data ON alias_data.person_id = p.id\n            WHERE sc.series_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "series_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "person_tmdb_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "credit_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "department",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "job",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "original_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "profile_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "gender",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 10,
+        "name": "known_for_department",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "adult",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "popularity",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 13,
+        "name": "imdb_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "facebook_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "instagram_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "twitter_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "wikidata_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "tiktok_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "youtube_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "aliases!: Vec<String>",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "fb04dab44798f1b6334872fc7dd3e95a94dd2fab2a78df13679335590c53d02f"
+}
