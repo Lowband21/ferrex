@@ -13,11 +13,11 @@ use rustls::crypto::CryptoProvider;
 use rustls::version::TLS13;
 use rustls::{CipherSuite, ServerConfig};
 use rustls::{DEFAULT_VERSIONS, SupportedProtocolVersion};
+use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
 use std::{
     fmt,
-    io::BufReader,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -288,11 +288,38 @@ impl TlsConfigManager {
         let mut pem_data = Vec::new();
         file.read_to_end(&mut pem_data).await?;
 
-        let mut reader = BufReader::new(&pem_data[..]);
-        match rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()
+        let certs = match CertificateDer::pem_slice_iter(&pem_data)
+            .collect::<Result<Vec<_>, _>>()
         {
-            Ok(certs) if !certs.is_empty() => Ok(certs.into_iter().collect()),
-            Ok(_) => {
+            Ok(certs) => certs,
+            #[allow(unused_variables)]
+            Err(e) => {
+                #[cfg(test)]
+                {
+                    // Fallback for odd CI/env issues: generate a local self-signed cert
+                    let cert = rcgen::generate_simple_self_signed([
+                        "localhost".to_string(),
+                    ])
+                    .map_err(|e2| {
+                        TlsError::CertificateParseFailed(e2.to_string())
+                    })?;
+                    let der = cert.serialize_der().map_err(|e2| {
+                        TlsError::CertificateParseFailed(e2.to_string())
+                    })?;
+                    return Ok(vec![CertificateDer::from(der)]);
+                }
+                #[cfg(not(test))]
+                {
+                    return Err(TlsError::CertificateParseFailed(
+                        e.to_string(),
+                    ));
+                }
+            }
+        };
+
+        match certs.is_empty() {
+            false => Ok(certs),
+            true => {
                 #[cfg(test)]
                 {
                     // Fallback for odd CI/env issues: generate a local self-signed cert
@@ -314,27 +341,6 @@ impl TlsConfigManager {
                     ))
                 }
             }
-            #[allow(unused_variables)]
-            Err(e) => {
-                #[cfg(test)]
-                {
-                    // As above, generate a cert in test builds if parsing failed
-                    let cert = rcgen::generate_simple_self_signed([
-                        "localhost".to_string(),
-                    ])
-                    .map_err(|e2| {
-                        TlsError::CertificateParseFailed(e2.to_string())
-                    })?;
-                    let der = cert.serialize_der().map_err(|e2| {
-                        TlsError::CertificateParseFailed(e2.to_string())
-                    })?;
-                    Ok(vec![CertificateDer::from(der)])
-                }
-                #[cfg(not(test))]
-                {
-                    Err(TlsError::CertificateParseFailed(e.to_string()))
-                }
-            }
         }
     }
 
@@ -350,10 +356,7 @@ impl TlsConfigManager {
         let mut pem_data = Vec::new();
         file.read_to_end(&mut pem_data).await?;
 
-        let mut reader = BufReader::new(&pem_data[..]);
-
-        // Try to read PKCS#8 private key first
-        let keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
+        let keys = PrivateKeyDer::pem_slice_iter(&pem_data)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| TlsError::PrivateKeyParseFailed(e.to_string()))?;
 
@@ -361,20 +364,7 @@ impl TlsConfigManager {
             if keys.len() > 1 {
                 return Err(TlsError::MultiplePrivateKeysFound);
             }
-            return Ok(PrivateKeyDer::from(keys.into_iter().next().unwrap()));
-        }
-
-        // Try RSA private key format
-        let mut reader = BufReader::new(&pem_data[..]);
-        let keys = rustls_pemfile::rsa_private_keys(&mut reader)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| TlsError::PrivateKeyParseFailed(e.to_string()))?;
-
-        if !keys.is_empty() {
-            if keys.len() > 1 {
-                return Err(TlsError::MultiplePrivateKeysFound);
-            }
-            return Ok(PrivateKeyDer::from(keys.into_iter().next().unwrap()));
+            return Ok(keys.into_iter().next().unwrap());
         }
 
         // As a last resort in tests, synthesize a key

@@ -64,7 +64,7 @@ feature-depth = 1
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
 # The path where the advisory databases are cloned/fetched into
-#db-path = "$CARGO_HOME/advisory-dbs"
+db-path = "cache/advisory-dbs"
 # The url(s) of the advisory databases to use
 #db-urls = ["https://github.com/rustsec/advisory-db"]
 # A list of advisory IDs to ignore. Note that ignored advisories will still
@@ -74,6 +74,7 @@ ignore = [
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
+    { id = "RUSTSEC-2022-0081", reason = "`json` is a transitive build-dependency of `hsluv` used by `ferrex-player`; it is not linked into runtime artifacts and there is no upstream upgrade path yet" },
     { id = "RUSTSEC-2024-0384", reason = "`instant` is required by `notify` v7; upstream replacement not yet available" },
     { id = "RUSTSEC-2024-0436", reason = "`paste` comes from `wgpu` transitive deps; awaiting ecosystem migration" },
 ]
