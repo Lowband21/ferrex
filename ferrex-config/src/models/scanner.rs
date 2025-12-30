@@ -1,5 +1,5 @@
 use anyhow::{Context, anyhow};
-use ferrex_core::scan::{
+use ferrex_core::domain::scan::{
     orchestration::config::OrchestratorConfig, scanner::settings,
 };
 use serde::{Deserialize, Serialize};

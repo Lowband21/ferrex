@@ -14,6 +14,7 @@ use crate::{
 
 use std::{
     collections::HashMap,
+    fmt::Display,
     path::{Path, PathBuf},
 };
 
@@ -23,7 +24,7 @@ use tokio::{
     process::Command,
     time::{Duration, Instant, sleep},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Abstract command representation so we can test without spawning processes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,34 @@ pub struct CommandSpec {
     pub env: Vec<(String, String)>,
     pub cwd: Option<PathBuf>,
     pub inherit_stdio: bool,
+}
+
+/// Display raw command string
+impl Display for CommandSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CMD:`{}{} {}`\nENV:\n{}",
+            self.cwd
+                .clone()
+                .map(|dir| {
+                    let mut dir_str = dir.to_string_lossy().to_string();
+                    if !dir_str.ends_with("/") {
+                        dir_str.push('/')
+                    }
+                    dir_str
+                })
+                .unwrap_or_default(),
+            self.program,
+            self.args.join(" "),
+            self.env
+                .clone()
+                .into_iter()
+                .map(|v| format!("{}: {}", v.0, v.1))
+                .collect::<Vec<String>>()
+                .join("\n"),
+        )
+    }
 }
 
 impl CommandSpec {
@@ -113,8 +142,7 @@ pub fn reset_db_volume_spec(project_name: &str) -> CommandSpec {
     spec
 }
 
-pub fn compose_files(mode: StackMode) -> Vec<PathBuf> {
-    let root = compose_root();
+pub fn compose_files(mode: StackMode, root: &Path) -> Vec<PathBuf> {
     let mut files = vec![root.join("docker-compose.yml")];
     if matches!(mode, StackMode::Tailscale) {
         files.push(root.join("docker-compose.tailscale.yml"));
@@ -129,25 +157,19 @@ pub fn compose_base_spec(
     rust_log: &Option<String>,
     wild: Option<bool>,
     project_name: &str,
-    include_env_file: bool,
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = CommandSpec::new("docker");
     spec.args = vec!["compose".into()];
-    spec.cwd = Some(compose_root());
-    for file in compose_files(mode) {
+    spec.cwd = Some(compose_root.to_path_buf());
+    for file in compose_files(mode, compose_root) {
         spec.args.push("-f".into());
         spec.args.push(file.display().to_string());
     }
-    if include_env_file || env_file.exists() {
+    if env_file.exists() {
         spec.args.push("--env-file".into());
         spec.args.push(env_file.display().to_string());
-    }
 
-    // Load entire .env file into command environment to override any stale
-    // shell-inherited variables. This fixes the bug where `just` loads old
-    // .env values into shell before init regenerates credentials, and
-    // docker-compose gives shell vars precedence over --env-file.
-    if env_file.exists() {
         match read_env_map(env_file) {
             Ok(env_map) => {
                 debug!(
@@ -167,12 +189,17 @@ pub fn compose_base_spec(
                 );
             }
         }
+
+        spec.env
+            .push(("FERREX_ENV_FILE".into(), env_file.display().to_string()));
+    } else {
+        warn!(
+            "Environment file could not be found, likely to cause issues due to being unable to update environment values, especially if they were regenerated since config start."
+        )
     }
 
     spec.env
         .push(("COMPOSE_PROJECT_NAME".into(), project_name.into()));
-    spec.env
-        .push(("FERREX_ENV_FILE".into(), env_file.display().to_string()));
     spec.env
         .push(("FERREX_BUILD_PROFILE".into(), profile.to_string()));
     if let Some(val) = wild {
@@ -194,7 +221,7 @@ pub fn compose_down_spec(
     rust_log: &Option<String>,
     wild: Option<bool>,
     project_name: &str,
-    include_env_file: bool,
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         mode,
@@ -203,7 +230,7 @@ pub fn compose_down_spec(
         rust_log,
         wild,
         project_name,
-        include_env_file,
+        compose_root,
     );
     spec.args.extend(["down".into(), "--remove-orphans".into()]);
     spec
@@ -213,6 +240,7 @@ pub fn compose_up_docker_spec(
     opts: &options::StackOptions,
     project_name: &str,
     force_recreate: bool,
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         opts.mode,
@@ -221,7 +249,7 @@ pub fn compose_up_docker_spec(
         &opts.rust_log,
         opts.wild,
         project_name,
-        true,
+        compose_root,
     );
     spec.args.extend(["up".into(), "-d".into()]);
     if opts.clean {
@@ -236,6 +264,7 @@ pub fn compose_up_docker_spec(
 pub fn tailscale_serve_spec(
     opts: &options::StackOptions,
     project_name: &str,
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         opts.mode,
@@ -244,7 +273,7 @@ pub fn tailscale_serve_spec(
         &opts.rust_log,
         opts.wild,
         project_name,
-        true,
+        compose_root,
     );
     spec.args.extend([
         "exec".into(),
@@ -259,10 +288,11 @@ pub fn tailscale_serve_spec(
     spec
 }
 
-pub fn compose_up_services_spec(
+pub fn compose_down_services_spec(
     opts: &options::StackOptions,
     project_name: &str,
     services: &[&str],
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         opts.mode,
@@ -271,7 +301,29 @@ pub fn compose_up_services_spec(
         &opts.rust_log,
         opts.wild,
         project_name,
-        true,
+        compose_root,
+    );
+    spec.args.push("down".into());
+    for svc in services {
+        spec.args.push((*svc).into());
+    }
+    spec
+}
+
+pub fn compose_up_services_spec(
+    opts: &options::StackOptions,
+    project_name: &str,
+    services: &[&str],
+    compose_root: &Path,
+) -> CommandSpec {
+    let mut spec = compose_base_spec(
+        opts.mode,
+        &opts.env_file,
+        &opts.profile,
+        &opts.rust_log,
+        opts.wild,
+        project_name,
+        compose_root,
     );
     spec.args.push("up".into());
     spec.args.push("-d".into());
@@ -288,6 +340,7 @@ pub fn compose_running_services_spec(
     rust_log: &Option<String>,
     wild: Option<bool>,
     project_name: &str,
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         mode,
@@ -296,7 +349,7 @@ pub fn compose_running_services_spec(
         rust_log,
         wild,
         project_name,
-        true,
+        compose_root,
     );
     spec.args.extend([
         "ps".into(),
@@ -312,6 +365,7 @@ pub async fn wait_for_services(
     project_name: &str,
     services: &[&str],
     timeout: Duration,
+    compose_root: &Path,
 ) -> Result<()> {
     let spec = compose_running_services_spec(
         opts.mode,
@@ -320,18 +374,14 @@ pub async fn wait_for_services(
         &opts.rust_log,
         opts.wild,
         project_name,
+        compose_root,
     );
     let deadline = Instant::now() + timeout;
     loop {
         let (status, out) = run_spec_with_output(&spec).await?;
         if status.success() {
-            let running: Vec<&str> = out
-                .lines()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .collect();
-            let all_running =
-                services.iter().all(|svc| running.iter().any(|r| r == svc));
+            trace!("Services status from spec:\n`{}`\nOutput:\n{}", spec, out);
+            let all_running = services.iter().all(|svc| out.contains(svc));
             if all_running {
                 return Ok(());
             }
@@ -385,16 +435,21 @@ pub fn host_db_spec(
 ) -> Result<CommandSpec> {
     let mut spec = CommandSpec::new("cargo");
     spec.cwd = Some(workspace_root());
+
     spec.args = vec!["run".into(), "-p".into(), "ferrex-server".into()];
+
     if opts.profile == "release" {
         spec.args.push("--release".into());
     } else {
         spec.args.push("--profile".into());
         spec.args.push(opts.profile.clone());
     }
+
     spec.args.push("--".into());
     spec.args.push("db".into());
+
     spec.args.push(subcommand.into());
+
     for a in extra_args {
         spec.args.push(a.clone());
     }
@@ -402,11 +457,14 @@ pub fn host_db_spec(
     for (k, v) in env_map {
         spec.env.push((k.clone(), v.clone()));
     }
+
     spec.env.push((
         "FERREX_ENV_FILE".into(),
         opts.env_file.display().to_string(),
     ));
-    spec.env.push(("SQLX_OFFLINE".into(), "1".into())); // ensure offline mode even on host
+
+    spec.env.push(("SQLX_OFFLINE".into(), "true".into()));
+
     if let Some(log) = &opts.rust_log {
         spec.env.push(("RUST_LOG".into(), log.clone()));
     }
@@ -502,6 +560,8 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
         })?;
     }
 
+    let compose_root = &compose_root();
+
     if matches!(opts.mode, StackMode::Tailscale)
         && matches!(opts.server_mode, ServerMode::Host)
     {
@@ -530,7 +590,7 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
             &opts.rust_log,
             opts.wild,
             &project_name,
-            true,
+            compose_root,
         );
         let status = run_spec_inherit(&down).await?;
         if !status.success() {
@@ -563,7 +623,12 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
 
     let (host_server_pid, pid_file) = match opts.server_mode {
         ServerMode::Docker => {
-            let up = compose_up_docker_spec(opts, &project_name, opts.reset_db);
+            let up = compose_up_docker_spec(
+                opts,
+                &project_name,
+                opts.reset_db,
+                compose_root,
+            );
             // Capture output for better error reporting
             let status = run_spec_inherit(&up).await?;
             if !status.success() {
@@ -576,12 +641,25 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
         }
         ServerMode::Host => {
             // Bring up only db/cache.
-            let up =
-                compose_up_services_spec(opts, &project_name, &["db", "cache"]);
+            if opts.clean {
+                let down = compose_down_services_spec(
+                    opts,
+                    &project_name,
+                    &["db", "cache"],
+                    compose_root,
+                );
+                let _ = run_spec_inherit(&down).await?;
+            }
+            let up = compose_up_services_spec(
+                opts,
+                &project_name,
+                &["db", "cache"],
+                compose_root,
+            );
             // Capture output for better error reporting
             let status = run_spec_inherit(&up).await?;
             if !status.success() {
-                eprintln!("Docker compose up failed with status: {}", status);
+                error!("Docker compose up failed with status: {}", status);
                 bail!(
                     "docker compose up failed - see output above for details"
                 );
@@ -590,33 +668,54 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
             if let Err(err) = wait_for_services(
                 opts,
                 &project_name,
-                &["db", "cache"],
-                Duration::from_secs(90),
+                &["postgres", "redis"],
+                Duration::from_secs(5),
+                compose_root,
             )
             .await
             {
-                eprintln!(
+                warn!(
                     "Warning: db/cache may not be ready yet ({err}). \
-Check status with: docker compose --project-name {project_name} ps"
+             Check status with: docker compose --project-name {project_name} ps"
                 );
             }
+
             let env_map = read_env_map(&opts.env_file)?;
             let spec = host_server_spec(opts, &env_map)?;
-            let pid = spawn_spec(&spec)
-                .await
-                .context("failed to spawn host server task")?
-                .ok_or_else(|| anyhow!("failed to obtain host server pid"))?;
-            let pid_path = host_pid_file_path(&opts.env_file, &project_name);
-            if let Some(parent) = pid_path.parent() {
-                let _ = fs::create_dir_all(parent);
+            if opts.host_attach {
+                // Foreground mode: behave like `docker compose up` so the user sees
+                // compile/runtime output immediately and can Ctrl-C to stop.
+                let status = run_spec_inherit(&spec)
+                    .await
+                    .context("failed to run host server in foreground")?;
+                if !status.success() {
+                    bail!(
+                        "host ferrex-server exited with non-zero status {}",
+                        status
+                    );
+                }
+                (None, None)
+            } else {
+                // Detached mode: spawn and write PID file for later `stack down`.
+                let pid = spawn_spec(&spec)
+                    .await
+                    .context("failed to spawn host server task")?
+                    .ok_or_else(|| {
+                        anyhow!("failed to obtain host server pid")
+                    })?;
+                let pid_path =
+                    host_pid_file_path(&opts.env_file, &project_name);
+                if let Some(parent) = pid_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                fs::write(&pid_path, pid.to_string()).with_context(|| {
+                    format!(
+                        "failed to write host server pid to {}",
+                        pid_path.display()
+                    )
+                })?;
+                (Some(pid), Some(pid_path))
             }
-            fs::write(&pid_path, pid.to_string()).with_context(|| {
-                format!(
-                    "failed to write host server pid to {}",
-                    pid_path.display()
-                )
-            })?;
-            (Some(pid), Some(pid_path))
         }
     };
 
@@ -631,9 +730,10 @@ Check status with: docker compose --project-name {project_name} ps"
             &project_name,
             &["tailscale"],
             Duration::from_secs(90),
+            compose_root,
         )
         .await;
-        let spec = tailscale_serve_spec(opts, &project_name);
+        let spec = tailscale_serve_spec(opts, &project_name, compose_root);
         match run_spec_inherit(&spec).await {
             Ok(status) if status.success() => {
                 tailscale_serve_ran = true;
@@ -654,7 +754,7 @@ Check status with: docker compose --project-name {project_name} ps"
 
     Ok(StackOutcome {
         project_name,
-        compose_files: compose_files(opts.mode),
+        compose_files: compose_files(opts.mode, compose_root),
         server_mode: opts.server_mode,
         tailscale: matches!(opts.mode, StackMode::Tailscale),
         reset_db: opts.reset_db,
@@ -667,12 +767,11 @@ Check status with: docker compose --project-name {project_name} ps"
 
 pub async fn stack_down(opts: &options::StackOptions) -> Result<StackOutcome> {
     let project_name = resolve_project_name(opts);
+    let compose_root = &compose_root();
 
     let pid_file = host_pid_file_path(&opts.env_file, &project_name);
     let stopped_pid = stop_host_server(&pid_file).await?;
 
-    // Only pass env file to compose if it exists to avoid down failures.
-    let include_env_file = opts.env_file.exists();
     let down = compose_down_spec(
         opts.mode,
         &opts.env_file,
@@ -680,7 +779,7 @@ pub async fn stack_down(opts: &options::StackOptions) -> Result<StackOutcome> {
         &opts.rust_log,
         opts.wild,
         &project_name,
-        include_env_file,
+        compose_root,
     );
     let status = run_spec(&down).await?;
     if !status.success() {
@@ -694,7 +793,7 @@ pub async fn stack_down(opts: &options::StackOptions) -> Result<StackOutcome> {
     }
     Ok(StackOutcome {
         project_name,
-        compose_files: compose_files(opts.mode),
+        compose_files: compose_files(opts.mode, compose_root),
         server_mode: opts.server_mode,
         tailscale: matches!(opts.mode, StackMode::Tailscale),
         reset_db: false,
@@ -709,6 +808,7 @@ pub fn compose_run_server_spec(
     opts: &options::StackOptions,
     project_name: &str,
     args: &[String],
+    compose_root: &Path,
 ) -> CommandSpec {
     let mut spec = compose_base_spec(
         opts.mode,
@@ -717,11 +817,13 @@ pub fn compose_run_server_spec(
         &opts.rust_log,
         opts.wild,
         project_name,
-        true,
+        compose_root,
     );
     spec.args.push("run".into());
-    spec.args.push("--rm".into());
-    spec.args.push("--build".into());
+    if opts.clean {
+        spec.args.push("--rm".into());
+        spec.args.push("--build".into());
+    }
     spec.args.push("ferrex".into());
     spec.args.extend(args.iter().cloned());
     spec.inherit_stdio = true;
@@ -730,7 +832,8 @@ pub fn compose_run_server_spec(
 
 pub async fn stack_status(opts: &options::StackOptions) -> Result<()> {
     let project_name = resolve_project_name(opts);
-    let include_env_file = opts.env_file.exists();
+    let compose_root = &compose_root();
+
     let mut spec = compose_base_spec(
         opts.mode,
         &opts.env_file,
@@ -738,7 +841,7 @@ pub async fn stack_status(opts: &options::StackOptions) -> Result<()> {
         &opts.rust_log,
         opts.wild,
         &project_name,
-        include_env_file,
+        compose_root,
     );
     spec.args.push("ps".into());
     run_spec_inherit(&spec).await?;
@@ -751,7 +854,8 @@ pub async fn stack_logs(
     follow: bool,
 ) -> Result<()> {
     let project_name = resolve_project_name(opts);
-    let include_env_file = opts.env_file.exists();
+    let compose_root = &compose_root();
+
     let mut spec = compose_base_spec(
         opts.mode,
         &opts.env_file,
@@ -759,8 +863,9 @@ pub async fn stack_logs(
         &opts.rust_log,
         opts.wild,
         &project_name,
-        include_env_file,
+        compose_root,
     );
+
     spec.args.push("logs".into());
     if follow {
         spec.args.push("-f".into());
@@ -768,6 +873,7 @@ pub async fn stack_logs(
     if let Some(svc) = service {
         spec.args.push(svc.into());
     }
+
     run_spec_inherit(&spec).await?;
     Ok(())
 }

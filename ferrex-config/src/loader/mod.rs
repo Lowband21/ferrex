@@ -49,22 +49,28 @@ impl ConfigLoader {
         // 2) Path from $FERREX_ENV_FILE
         // 3) Default dotenv discovery from the current working directory
         let env_file_loaded = if let Some(path) = &self.options.env_file {
-            dotenvy::from_path(path)
+            // When an env file path is explicitly provided, treat it as the
+            // authoritative source for configuration and override any inherited
+            // shell variables (e.g. when a parent process started with stale
+            // `.env` values already loaded).
+            dotenvy::from_path_override(path)
                 .map(|_| true)
                 .or_else(|err| match err {
                     dotenvy::Error::Io(_) => Ok(false),
                     _ => Err(err),
                 })?
         } else if let Ok(path) = std::env::var("FERREX_ENV_FILE") {
-            dotenvy::from_path(Path::new(&path)).map(|_| true).or_else(
-                |err| match err {
+            // Same rationale as above: if a specific env file is provided via
+            // FERREX_ENV_FILE, it should win over any already-set environment.
+            dotenvy::from_path_override(Path::new(&path))
+                .map(|_| true)
+                .or_else(|err| match err {
                     dotenvy::Error::Io(e) => {
                         error!("{}", e);
                         Ok(false)
                     }
                     _ => Err(err),
-                },
-            )?
+                })?
         } else {
             dotenvy::dotenv().map(|_| true).or_else(|err| match err {
                 dotenvy::Error::Io(_) => Ok(false),
@@ -160,6 +166,11 @@ impl ConfigLoader {
             .clone()
             .or(file_cache.root.clone())
             .unwrap_or_else(|| PathBuf::from("./cache"));
+        let images = env
+            .cache_images
+            .clone()
+            .or(file_cache.images.clone())
+            .unwrap_or_else(|| cache_root.join("images"));
         let transcode = env
             .cache_transcode
             .clone()
@@ -172,6 +183,7 @@ impl ConfigLoader {
             .unwrap_or_else(|| cache_root.join("thumbnails"));
         let cache = CacheConfig {
             root: cache_root,
+            images,
             transcode,
             thumbnails,
         };
@@ -312,6 +324,62 @@ impl ConfigLoader {
         file_database: &FileDatabaseConfig,
     ) -> Result<Option<String>, error::ConfigLoadError> {
         resolve_database_url(env, file_database)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            // NOTE: `std::env::set_var` is `unsafe` on newer Rust toolchains
+            // because mutating the process environment is not thread-safe.
+            // Tests here run in-process and must restore state.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_env_file_overrides_inherited_env() {
+        let _db_guard = EnvGuard::set("DATABASE_URL", "postgresql://old");
+
+        let dir = tempdir().expect("tempdir");
+        let env_file = dir.path().join(".env");
+        std::fs::write(
+            &env_file,
+            "DEV_MODE=true\nDATABASE_URL=postgresql://new\n",
+        )
+        .expect("write .env");
+
+        let loader = ConfigLoader::new().with_path(&env_file);
+        let loaded = loader.load().expect("config load");
+
+        assert_eq!(
+            loaded.config.database.primary_url.as_deref().map(str::trim),
+            Some("postgresql://new")
+        );
     }
 }
 

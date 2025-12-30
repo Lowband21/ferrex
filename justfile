@@ -45,7 +45,19 @@ up *args: ensure-installed
     ferrex-init stack up {{ args }}
 
 [no-cd]
+up-nochk *args:
+    ferrex-init stack up {{ args }}
+
+[no-cd]
+up-noinstall *args:
+    cargo run -p ferrex-config --bin ferrex-init -- stack up {{ args }}
+
+[no-cd]
 down *args='--clean': ensure-installed
+    ferrex-init stack down {{ args }}
+
+[no-cd]
+down-nochk *args='--clean':
     ferrex-init stack down {{ args }}
 
 [no-cd]
@@ -61,12 +73,12 @@ logs service="ferrex":
     ferrex-init logs --service {{ service }} --follow
 
 [no-cd]
-db-preflight profile="release" wild="1" *args="":
-    ferrex-init db preflight --profile {{ profile }} --wild {{ wild }} {{ args }}
+db-preflight profile="release" wild="auto" *args="":
+    DATABASE_URL=$DATABASE_URL_ADMIN ferrex-init db preflight --profile {{ profile }} --wild {{ wild }} {{ args }}
 
 [no-cd]
-db-migrate profile="release" wild="1" *args="":
-    ferrex-init db migrate --profile {{ profile }} --wild {{ wild }} {{ args }}
+db-migrate profile="release" wild="auto" *args="":
+    DATABASE_URL=$DATABASE_URL_ADMIN ferrex-init db migrate --profile {{ profile }} --wild {{ wild }} {{ args }}
 
 alias shst := show-setup-token
 
@@ -77,7 +89,7 @@ alias shst := show-setup-token
 alias cpst := copy-setup-token
 
 [no-cd]
-@copy-setup-token *args: ensure-installed ensure-env
+@copy-setup-token *args: ensure-env
     ferrex-init show-token {{ args }} | wl-copy >/dev/null 2>&1
 
 [no-cd]
@@ -123,6 +135,8 @@ alias ca := check-all
 alias caq := check-all-quiet
 alias cpq := check-player-nowarn
 alias rp := run-player
+alias rpd := run-player-dev
+alias rpq := run-player-nowarn
 alias rpr := run-player-release
 alias rs := run-server
 alias rsr := run-server-release
@@ -235,23 +249,23 @@ log-player-warn: prep-logs
 # Test
 [no-cd]
 test args="" pt_args="":
-    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast --quiet {{ args }} -- {{ pt_args }}
+    DATABASE_URL=$DATABASE_URL_ADMIN RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast --quiet {{ args }} -- {{ pt_args }}
 
 [no-cd]
 log-tests args="" pt_args=test_output: prep-logs
-    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast {{ args }} -- {{ pt_args }}
+    DATABASE_URL=$DATABASE_URL_ADMIN RUSTFLAGS=-Awarnings cargo test --workspace --all-features --all-targets --no-fail-fast {{ args }} -- {{ pt_args }}
 
 [no-cd]
 test-player:
-    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-player --no-fail-fast
+    DATABASE_URL=$DATABASE_URL_ADMIN RUSTFLAGS=-Awarnings cargo test -p ferrex-player --no-fail-fast
 
 [no-cd]
 test-server:
-    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-server --no-fail-fast
+    DATABASE_URL=$DATABASE_URL_ADMIN RUSTFLAGS=-Awarnings cargo test -p ferrex-server --no-fail-fast
 
 [no-cd]
 test-core:
-    DATABASE_USER=$DATABASE_ADMIN_USER RUSTFLAGS=-Awarnings cargo test -p ferrex-core --no-fail-fast
+    DATABASE_URL=$DATABASE_URL_ADMIN RUSTFLAGS=-Awarnings cargo test -p ferrex-core --no-fail-fast
 
 # Format
 [no-cd]
@@ -330,8 +344,16 @@ fixp-dirty package="ferrex-core": fmt
 
 # Run
 [no-cd]
+run-player-dev PROFILE="dev":
+    cargo run -p ferrex-player --profile {{ PROFILE }}
+
+[no-cd]
 run-player PROFILE="priority":
     cargo run -p ferrex-player --profile {{ PROFILE }}
+
+[no-cd]
+run-player-nowarn PROFILE="priority":
+    RUSTFLAGS=-Awarnings cargo run -p ferrex-player --profile {{ PROFILE }}
 
 [no-cd]
 run-player-release:
@@ -356,16 +378,20 @@ run-server-demo:
 # sqlx
 [no-cd]
 prepare $SQLX_OFFLINE="false":
-    DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx prepare --workspace -- --all-features --all-targets
+    DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx prepare --workspace -- --all-features --all-targets
 
 [confirm]
 [no-cd]
 migrate:
-    cd ferrex-core && DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx migrate run
+    cd ferrex-core &&  DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx migrate run
 
 [no-cd]
 reset:
-    cd ferrex-core && DATABASE_USER=$DATABASE_ADMIN_USER cargo sqlx database reset
+    cd ferrex-core && DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx database reset
+
+[no-cd]
+reset-demo:
+    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DEMO_DATABASE_NAME}" cargo sqlx database reset
 
 # Git
 [no-cd]

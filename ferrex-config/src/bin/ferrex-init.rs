@@ -197,9 +197,8 @@ enum WildChoice {
     Off,
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<Option<bool>> for WildChoice {
-    fn into(self) -> Option<bool> {
+impl WildChoice {
+    const fn as_option_bool(self) -> Option<bool> {
         match self {
             WildChoice::Auto => None,
             WildChoice::On => Some(true),
@@ -232,6 +231,11 @@ enum StackAction {
         wild: WildChoice,
         #[arg(long, value_enum, default_value = "docker")]
         server: ServerModeArg,
+        #[arg(
+            long,
+            help = "When --server host, run the host server in the foreground and stream output (no PID file)"
+        )]
+        host_attach: bool,
         #[arg(long)]
         reset_db: bool,
         #[arg(long)]
@@ -534,6 +538,7 @@ async fn main() -> Result<()> {
                 rust_log,
                 wild,
                 server,
+                host_attach,
                 reset_db,
                 clean,
                 non_interactive,
@@ -557,8 +562,9 @@ async fn main() -> Result<()> {
                     mode: mode.into(),
                     profile,
                     rust_log,
-                    wild: wild.into(),
+                    wild: wild.as_option_bool(),
                     server_mode: server.into(),
+                    host_attach,
                     project_name_override: project,
                     reset_db,
                     clean,
@@ -584,7 +590,7 @@ async fn main() -> Result<()> {
             } => {
                 let options = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    clean, false, false, false, project, false,
+                    false, clean, false, false, false, project, false,
                 );
                 let outcome = stack_down(&options).await?;
                 print_stack_outcome("down", &outcome);
@@ -605,6 +611,7 @@ async fn main() -> Result<()> {
                 rust_log,
                 wild,
                 ServerModeArg::Docker,
+                false,
                 false,
                 false,
                 false,
@@ -637,6 +644,7 @@ async fn main() -> Result<()> {
                 false,
                 false,
                 false,
+                false,
                 project,
                 false,
             );
@@ -660,7 +668,7 @@ async fn main() -> Result<()> {
             } => {
                 let opts = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    false, true, false, false, project, false,
+                    false, false, true, false, false, project, false,
                 );
                 stack_db_preflight(&opts, &args).await?;
             }
@@ -673,11 +681,7 @@ async fn main() -> Result<()> {
                 args,
                 server,
             } => {
-                let wild_opt = match wild {
-                    WildChoice::On => Some(true),
-                    WildChoice::Off => Some(false),
-                    WildChoice::Auto => None,
-                };
+                let wild_opt = wild.as_option_bool();
 
                 let opts = StackOptions {
                     env_file,
@@ -729,6 +733,7 @@ impl From<ServerModeArg> for ServerMode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stack_opts_from_args(
     env_file: PathBuf,
     mode: StackModeArg,
@@ -736,6 +741,7 @@ fn stack_opts_from_args(
     rust_log: Option<String>,
     wild: WildChoice,
     server: ServerModeArg,
+    host_attach: bool,
     reset_db: bool,
     clean: bool,
     non_interactive: bool,
@@ -744,11 +750,7 @@ fn stack_opts_from_args(
     project: Option<String>,
     tailscale_serve: bool,
 ) -> StackOptions {
-    let wild_opt = match wild {
-        WildChoice::On => Some(true),
-        WildChoice::Off => Some(false),
-        WildChoice::Auto => None,
-    };
+    let wild_opt = wild.as_option_bool();
     let stack_mode: StackMode = mode.into();
 
     StackOptions {
@@ -758,6 +760,7 @@ fn stack_opts_from_args(
         rust_log,
         wild: wild_opt,
         server_mode: server.into(),
+        host_attach,
         reset_db,
         clean,
         init_non_interactive: non_interactive,

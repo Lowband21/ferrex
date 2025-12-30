@@ -7,7 +7,7 @@ use crate::{
             wait_for_services,
         },
         stack::{ServerMode, StackMode},
-        utils::resolve_project_name,
+        utils::{compose_root, resolve_project_name},
     },
     env_writer::read_env_map,
 };
@@ -28,6 +28,8 @@ pub async fn stack_db_preflight(
         );
     }
 
+    let compose_root = &compose_root();
+
     if matches!(opts.server_mode, ServerMode::Docker) {
         if matches!(opts.mode, StackMode::Tailscale) {
             bail!(
@@ -36,7 +38,12 @@ pub async fn stack_db_preflight(
         }
 
         let project_name = resolve_project_name(opts);
-        let up = compose_up_services_spec(opts, &project_name, &["db"]);
+        let up = compose_up_services_spec(
+            opts,
+            &project_name,
+            &["db"],
+            compose_root,
+        );
         let status = run_spec(&up).await?;
         if !status.success() {
             bail!("docker compose up db exited with {}", status);
@@ -45,8 +52,9 @@ pub async fn stack_db_preflight(
         let _ = wait_for_services(
             opts,
             &project_name,
-            &["db"],
+            &["postgres"],
             Duration::from_secs(90),
+            compose_root,
         )
         .await;
 
@@ -54,7 +62,8 @@ pub async fn stack_db_preflight(
         if !extra_args.trim().is_empty() {
             args.extend(extra_args.split_whitespace().map(|s| s.to_string()));
         }
-        let run = compose_run_server_spec(opts, &project_name, &args);
+        let run =
+            compose_run_server_spec(opts, &project_name, &args, compose_root);
         let status = run_spec_inherit(&run).await?;
         if !status.success() {
             bail!("db preflight exited with {}", status);
@@ -86,10 +95,16 @@ pub async fn stack_db_migrate(
             opts.env_file.display()
         );
     }
+    let compose_root = &compose_root();
 
     if matches!(opts.server_mode, ServerMode::Docker) {
         let project_name = resolve_project_name(opts);
-        let up = compose_up_services_spec(opts, &project_name, &["db"]);
+        let up = compose_up_services_spec(
+            opts,
+            &project_name,
+            &["db"],
+            compose_root,
+        );
         let status = run_spec(&up).await?;
         if !status.success() {
             bail!("docker compose up db exited with {}", status);
@@ -98,8 +113,9 @@ pub async fn stack_db_migrate(
         let _ = wait_for_services(
             opts,
             &project_name,
-            &["db"],
+            &["postgres"],
             Duration::from_secs(90),
+            compose_root,
         )
         .await;
 
@@ -107,7 +123,8 @@ pub async fn stack_db_migrate(
         if !extra_args.trim().is_empty() {
             args.extend(extra_args.split_whitespace().map(|s| s.to_string()));
         }
-        let run = compose_run_server_spec(opts, &project_name, &args);
+        let run =
+            compose_run_server_spec(opts, &project_name, &args, compose_root);
         let status = run_spec_inherit(&run).await?;
         if !status.success() {
             bail!("db migrate exited with {}", status);

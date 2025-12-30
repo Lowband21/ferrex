@@ -115,7 +115,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
         existing_env.get("REDIS_URL_CONTAINER").cloned();
 
     let sqlx_offline = existing_env
-        .get("DATABASE_HOST")
+        .get("SQLX_OFFLINE")
         .cloned()
         .unwrap_or_else(|| "true".to_string());
     let db_host_default = existing_env
@@ -515,7 +515,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let demo_language = existing_env
         .get("FERREX_DEMO_LANGUAGE")
         .cloned()
-        .unwrap_or_else(|| "us-EN".to_string());
+        .unwrap_or_else(|| "en".to_string());
     let demo_region = existing_env
         .get("FERREX_DEMO_REGION")
         .cloned()

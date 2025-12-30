@@ -6,7 +6,7 @@ version: '3.9'
 services:
   ferrex:
     network_mode: "service:tailscale"
-    ports: []
+    ports: [ ]
     # In Tailscale mode all services share the tailscale network namespace.
     # This removes inter-service DNS names like 'db' and 'cache'.
     # Force the server to talk to Postgres/Redis via localhost within the
@@ -27,7 +27,7 @@ services:
   #
   # ferrex:
   #   network_mode: "service:tailscale"   # share network namespace with tailscale
-  #   ports: []                            # ensure no host ports are exposed
+  #   repository_ports: []                            # ensure no host repository_ports are exposed
   #   depends_on:
   #     tailscale:
   #       condition: service_healthy       # wait for tailscale to be ready
@@ -49,22 +49,22 @@ services:
     cap_add:
       - NET_ADMIN
     healthcheck:
-      test: ["CMD", "tailscale", "status"]
+      test: [ "CMD", "tailscale", "status" ]
       interval: 30s
       timeout: 5s
       retries: 5
 
   # When running with tailscale, you typically don't want to expose
-  # database/cache host ports. The following overrides clear them.
+  # database/cache host repository_ports. The following overrides clear them.
   db:
     network_mode: "service:tailscale"
-    ports: []
+    ports: [ ]
     depends_on:
       tailscale:
         condition: service_healthy
   cache:
     network_mode: "service:tailscale"
-    ports: []
+    ports: [ ]
     depends_on:
       tailscale:
         condition: service_healthy

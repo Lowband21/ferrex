@@ -47,7 +47,7 @@ mod tests {
             compose_up_services_spec, host_server_spec,
             init_spec::env_contents_have_placeholders, reset_db_volume_spec,
         },
-        utils::derive_compose_project_name,
+        utils::{compose_root, derive_compose_project_name},
     };
 
     use super::*;
@@ -99,6 +99,7 @@ mod tests {
             rust_log: Some("info".into()),
             wild: Some(true),
             server_mode: ServerMode::Docker,
+            host_attach: false,
             reset_db: false,
             clean: false,
             init_non_interactive: true,
@@ -114,14 +115,16 @@ mod tests {
     #[test]
     fn compose_up_docker_spec_includes_files_and_envs() {
         let opts = sample_opts();
-        let spec = compose_up_docker_spec(&opts, "ferrex-test", false);
+        let compose_root = &compose_root();
+
+        let spec =
+            compose_up_docker_spec(&opts, "ferrex-test", false, compose_root);
         assert_eq!(spec.program, "docker");
         assert!(spec.args.starts_with(&["compose".into(), "-f".into(),]));
         assert!(
             spec.args.iter().any(|a| a.ends_with("docker-compose.yml")),
             "compose file args missing"
         );
-        assert!(spec.args.contains(&"--env-file".into()));
         assert!(spec.args.contains(&"up".into()));
         assert!(
             !spec.args.contains(&"--build".into()),
@@ -146,7 +149,12 @@ mod tests {
     fn compose_up_docker_spec_includes_build_when_clean() {
         let mut opts = sample_opts();
         opts.clean = true;
-        let spec = compose_up_docker_spec(&opts, "ferrex-test", false);
+        let spec = compose_up_docker_spec(
+            &opts,
+            "ferrex-test",
+            false,
+            &compose_root(),
+        );
         assert!(
             spec.args.contains(&"--build".into()),
             "--build should be included when clean is true"
@@ -156,7 +164,8 @@ mod tests {
     #[test]
     fn compose_up_docker_spec_force_recreate_when_reset_db() {
         let opts = sample_opts();
-        let spec = compose_up_docker_spec(&opts, "ferrex-test", true);
+        let spec =
+            compose_up_docker_spec(&opts, "ferrex-test", true, &compose_root());
         assert!(
             spec.args.contains(&"--force-recreate".into()),
             "force-recreate should be included when reset_db is true"
@@ -166,8 +175,12 @@ mod tests {
     #[test]
     fn compose_up_services_spec_targets_db_cache() {
         let opts = sample_opts();
-        let spec =
-            compose_up_services_spec(&opts, "ferrex-test", &["db", "cache"]);
+        let spec = compose_up_services_spec(
+            &opts,
+            "ferrex-test",
+            &["db", "cache"],
+            &compose_root(),
+        );
         assert!(spec.args.ends_with(&["db".into(), "cache".into()]));
         assert!(spec.args.contains(&"up".into()));
     }
@@ -182,6 +195,7 @@ mod tests {
             &opts.rust_log,
             opts.wild,
             "ferrex-test",
+            &compose_root(),
         );
         assert!(spec.args.contains(&"--services".into()));
         assert!(spec.args.contains(&"status=running".into()));

@@ -125,14 +125,15 @@ impl EventSource for ScriptEventSource {
     fn next(&mut self, _timeout: Duration) -> Result<Option<Event>> {
         if self.cursor >= self.events.len() {
             // Allow a short grace period before failing to avoid tight loop.
-            if self.exhausted_at.is_none() {
-                self.exhausted_at = Some(Instant::now());
-            } else if self.exhausted_at.unwrap().elapsed()
-                > Duration::from_secs(1)
-            {
-                return Err(anyhow!(
-                    "scripted TUI input exhausted before menu finished"
-                ));
+            match self.exhausted_at {
+                Some(ea) => {
+                    if ea.elapsed() > Duration::from_secs(1) {
+                        return Err(anyhow!(
+                            "scripted TUI input exhausted before menu finished"
+                        ));
+                    }
+                }
+                None => self.exhausted_at = Some(Instant::now()),
             }
             std::thread::sleep(Duration::from_millis(25));
             return Ok(None);
@@ -340,9 +341,9 @@ fn handle_key(
                 if app.dirty && !app.pending_quit {
                     app.pending_quit = true;
                     app.set_message(
-                            MessageKind::Error,
-                            "Unsaved changes — press q again to exit without writing .env",
-                        );
+                        MessageKind::Error,
+                        "Unsaved changes — press q again to exit without writing .env",
+                    );
                     return Ok(false);
                 }
                 return Ok(true);
@@ -1055,7 +1056,9 @@ fn apply_input(
 fn help_text(item: MenuItem) -> &'static str {
     match item {
         MenuItem::Finish => "Write .env and exit",
-        MenuItem::DevMode => "Use development-friendly defaults and ports.",
+        MenuItem::DevMode => {
+            "Use development-friendly defaults and repository_ports."
+        }
         MenuItem::ServerHost => {
             "Bind address for ferrex-server (0.0.0.0 in containers)."
         }

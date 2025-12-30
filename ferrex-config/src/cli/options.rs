@@ -14,6 +14,12 @@ pub struct StackOptions {
     pub rust_log: Option<String>,
     pub wild: Option<bool>,
     pub server_mode: ServerMode,
+    /// When running with `server_mode=Host`, keep the server process in the foreground
+    /// and stream compile/runtime output immediately (like `docker compose up`).
+    ///
+    /// When `false` (default), the host server is spawned in the background and a PID
+    /// file is written so it can be stopped on `stack down`.
+    pub host_attach: bool,
     pub reset_db: bool,
     pub clean: bool,
     pub init_non_interactive: bool,
@@ -35,6 +41,7 @@ impl Default for StackOptions {
             rust_log: None,
             wild: Some(true),
             server_mode: ServerMode::Docker,
+            host_attach: false,
             reset_db: false,
             clean: false,
             init_non_interactive: false,

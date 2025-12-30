@@ -72,6 +72,7 @@ pub fn choose_runner(choice: RunnerChoice) -> Runner {
 }
 
 /// Run init inside a docker/podman container and parse `KEY=VAL` lines.
+#[allow(clippy::too_many_arguments)]
 pub fn run_docker_init(
     image: &str,
     env_file: &Path,

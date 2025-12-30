@@ -46,6 +46,10 @@ impl Config {
     pub fn thumbnail_cache_dir(&self) -> &Path {
         &self.cache.thumbnails
     }
+
+    pub fn image_cache_dir(&self) -> &Path {
+        &self.cache.images
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +76,7 @@ pub struct MediaConfig {
 #[derive(Debug, Clone)]
 pub struct CacheConfig {
     pub root: PathBuf,
+    pub images: PathBuf,
     pub transcode: PathBuf,
     pub thumbnails: PathBuf,
 }
@@ -79,6 +84,7 @@ pub struct CacheConfig {
 impl CacheConfig {
     fn ensure_directories(&self) -> anyhow::Result<()> {
         std::fs::create_dir_all(&self.root)?;
+        std::fs::create_dir_all(&self.images)?;
         std::fs::create_dir_all(&self.transcode)?;
         std::fs::create_dir_all(&self.thumbnails)?;
         Ok(())
@@ -86,6 +92,7 @@ impl CacheConfig {
 
     fn normalize_paths(&mut self) -> anyhow::Result<()> {
         self.root = std::fs::canonicalize(&self.root)?;
+        self.images = std::fs::canonicalize(&self.images)?;
         self.transcode = std::fs::canonicalize(&self.transcode)?;
         self.thumbnails = std::fs::canonicalize(&self.thumbnails)?;
         Ok(())

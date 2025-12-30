@@ -63,6 +63,8 @@ pub struct FileCacheConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transcode: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnails: Option<PathBuf>,
@@ -144,6 +146,7 @@ pub struct EnvConfig {
     pub redis_url: Option<String>,
     pub media_root: Option<PathBuf>,
     pub cache_root: Option<PathBuf>,
+    pub cache_images: Option<PathBuf>,
     pub cache_transcode: Option<PathBuf>,
     pub cache_thumbnails: Option<PathBuf>,
     pub ffmpeg_path: Option<String>,
@@ -194,6 +197,9 @@ impl EnvConfig {
             redis_url: std::env::var("REDIS_URL").ok(),
             media_root: std::env::var("MEDIA_ROOT").ok().map(PathBuf::from),
             cache_root: std::env::var("CACHE_DIR").ok().map(PathBuf::from),
+            cache_images: std::env::var("IMAGE_CACHE_DIR")
+                .ok()
+                .map(PathBuf::from),
             cache_transcode: std::env::var("TRANSCODE_CACHE_DIR")
                 .ok()
                 .map(PathBuf::from),

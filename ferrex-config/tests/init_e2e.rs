@@ -51,11 +51,13 @@ impl Harness {
 
         let env_file = root.path().join(".env");
         let cache_dir = root.path().join("cache");
+        let image_cache_dir = cache_dir.join("images");
         let media_dir = root.path().join("media");
         fs::create_dir_all(&cache_dir)?;
+        fs::create_dir_all(&image_cache_dir)?;
         fs::create_dir_all(&media_dir)?;
 
-        // Seed an env with the chosen host ports so init picks them up.
+        // Seed an env with the chosen host repository_ports so init picks them up.
         fs::write(
             &env_file,
             format!(
@@ -64,12 +66,14 @@ SERVER_PORT={app}
 FERREX_SERVER_URL=http://localhost:{app}
 DATABASE_PORT={db}
 DATABASE_HOST=localhost
-REDIS_URL=redis://127.0.0.1:{redis}
-MEDIA_ROOT={}
-CACHE_DIR={}
-",
+                REDIS_URL=redis://127.0.0.1:{redis}
+                MEDIA_ROOT={}
+                CACHE_DIR={}
+                IMAGE_CACHE_DIR={}
+                ",
                 media_dir.display(),
                 cache_dir.display(),
+                image_cache_dir.display(),
                 app = ports.app,
                 db = ports.db,
                 redis = ports.redis
@@ -355,7 +359,7 @@ fn sanitize_compose(contents: &str, ports: Ports) -> String {
         .replace_all(&out, format!("${{1}}${{2}}{}/docker/initdb:", workspace))
         .to_string();
 
-    // Rebind host ports to the randomly assigned ones.
+    // Rebind host repository_ports to the randomly assigned ones.
     out = replace_port(out, 5432, ports.db);
     out = replace_port(out, 6379, ports.redis);
     out = replace_port(out, 3000, ports.app);
@@ -489,7 +493,9 @@ fn tui_init_writes_env_without_placeholders() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    eprintln!("→ Setting up test harness with temp directories and ports...");
+    eprintln!(
+        "→ Setting up test harness with temp directories and repository_ports..."
+    );
     let harness = Harness::new()?;
     harness.run_init_tui(&["s"])?;
 
@@ -517,7 +523,9 @@ fn stack_docker_roundtrip_and_check() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    eprintln!("→ Setting up test harness with temp directories and ports...");
+    eprintln!(
+        "→ Setting up test harness with temp directories and repository_ports..."
+    );
     let harness = Harness::new()?;
     harness.run_init_noninteractive()?;
     harness.stack_up("docker", true)?;
@@ -538,7 +546,9 @@ fn stack_host_mode_roundtrip() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    eprintln!("→ Setting up test harness with temp directories and ports...");
+    eprintln!(
+        "→ Setting up test harness with temp directories and repository_ports..."
+    );
     let harness = Harness::new()?;
     harness.run_init_noninteractive()?;
     harness.stack_up("host", true)?;
@@ -575,7 +585,9 @@ fn stack_reset_db_then_clean_succeeds() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    eprintln!("→ Setting up test harness with temp directories and ports...");
+    eprintln!(
+        "→ Setting up test harness with temp directories and repository_ports..."
+    );
     let harness = Harness::new()?;
 
     // Step 1: Initial bring-up with --reset-db (generates new credentials)

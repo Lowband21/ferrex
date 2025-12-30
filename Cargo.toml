@@ -1,3 +1,4 @@
+cargo-features = ["codegen-backend"]
 [workspace]
 members = [
   "ferrex-server",
@@ -61,7 +62,7 @@ path = "ferrex-config"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "^1.47", default-features = false, features = [
+tokio = { version = "1.48", default-features = false, features = [
   "rt",
   "rt-multi-thread",
   "macros",
@@ -69,22 +70,25 @@ tokio = { version = "^1.47", default-features = false, features = [
   "time",
   "process",
 ] }
-tokio-util = { version = "^0.7", default-features = false, features = ["io"] }
-tokio-stream = { version = "^0.1", default-features = false, features = [
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
+tokio-stream = { version = "0.1", default-features = false, features = [
   "sync",
 ] }
 
+# On-disk cache (content-addressed, integrity-checked)
+cacache = { version = "13.1.0", default-features = false, features = ["tokio-runtime", "mmap"] }
+
 # Futures
-futures = "^0.3"
-futures-util = "^0.3"
+futures = "0.3"
+futures-util = "0.3"
 
 # Serialization
-serde = { version = "^1.0", default-features = false, features = [
+serde = { version = "1.0", default-features = false, features = [
   "std",
   "derive",
 ] }
-serde_json = "^1.0"
-rkyv = { version = "^0.8.12", default-features = false, features = [
+serde_json = "1.0"
+rkyv = { version = "0.8.12", default-features = false, features = [
   "std",
   "alloc",
   "bytecheck",
@@ -95,16 +99,16 @@ rkyv = { version = "^0.8.12", default-features = false, features = [
 ] }
 
 # Error handling
-anyhow = "^1.0"
-thiserror = "^2.0"
+anyhow = "1.0"
+thiserror = "2.0"
 
 # Logging
-tracing = "^0.1"
-tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
-log = "^0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
 
 # Time handling
-chrono = { version = "^0.4", default-features = false, features = [
+chrono = { version = "0.4", default-features = false, features = [
   "alloc",
   "std",
   "clock",
@@ -113,7 +117,7 @@ chrono = { version = "^0.4", default-features = false, features = [
 ] }
 
 # HTTP/Web
-axum = { version = "^0.8.6", default-features = false, features = [
+axum = { version = "0.8.7", default-features = false, features = [
   "http1",
   "http2",
   "ws",
@@ -123,27 +127,26 @@ axum = { version = "^0.8.6", default-features = false, features = [
   "query",
   "matched-path",
 ] }
-axum-server = { version = "^0.7", default-features = false, features = [
+axum-server = { version = "0.8", default-features = false, features = [
   "tls-rustls-no-provider",
 ] }
-tower = { version = "^0.5", default-features = false, features = ["util"] }
-tower-http = { version = "^0.6", default-features = false, features = [
+tower = { version = "0.5", default-features = false, features = ["util"] }
+tower-http = { version = "0.6", default-features = false, features = [
   "fs",
   "cors",
   "trace",
 ] }
-reqwest = { version = "^0.12", default-features = false, features = [
+reqwest = { version = "0.12", default-features = false, features = [
   "http2",
   "rustls-tls",
   "json",
   "stream",
   "charset",
-  "system-proxy",
 ] }
 
 # Async traits
-async-stream = "^0.3.6"
-async-trait = "^0.1"
+async-stream = "0.3"
+async-trait = "0.1"
 
 # Database
 sqlx = { version = "0.8.6", features = [
@@ -159,92 +162,118 @@ sqlx = { version = "0.8.6", features = [
   "ipnetwork",
   "json",
 ] }
-redis = { version = "^0.32", default-features = false, features = [
+redis = { version = "1.0", default-features = false, features = [
   "tokio-comp",
   "connection-manager",
   "aio",
   "script",
 ] }
-ipnetwork = "^0.20"
+ipnetwork = "0.20"
 
 # Media processing
-ffmpeg-next = "^8.0"
+ffmpeg-next = "8.0"
 
 # Image processing
-image = "^0.25"
+image = "0.25"
 
 # Cryptography
-sha2 = "^0.10"
-aes-gcm = "^0.10"
-base64 = "^0.22"
-rustls = { version = "^0.23", default-features = false }
-rustls-pemfile = { version = "^2.2", default-features = false }
-rustls-pki-types = "^1.12"
-rand = "^0.9"
+sha2 = "0.10"
+aes-gcm = "0.10"
+base64 = "0.22"
+rustls = { version = "0.23", default-features = false }
+rustls-pemfile = { version = "2.2", default-features = false, features = ["std"]}
+rustls-pki-types = "1.13"
+rand = "0.9"
 
 # Memory zeroization for secure credentials
-zeroize = { version = "^1.8.1", features = ["zeroize_derive"] }
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
 
 # Temp file handling
-tempfile = "^3.21"
+tempfile = "3.23"
 
 # Regex
-regex = "^1.11"
+regex = "1.12"
 
 # UUID generation
-uuid = { version = "^1.18", features = ["v4", "v5", "v7", "serde", "std"] }
+uuid = { version = "1.19", features = ["v4", "v5", "v7", "serde", "std"] }
 
 # Configuration
-config = "^0.15"
+config = "0.15"
 
 # URL
-url = "^2.5.7"
+url = "2.5"
 
 # tmdb
-tmdb-api = "^0.9.1"
+tmdb-api = { git = "https://github.com/jdrouet/tmdb-api.git", tag = "v1.0.0-alpha.5" } # , features = ["reqwest-middleware"] }
 
 # Testing
-mockall = "^0.13"
+mockall = "0.14"
 
 # Concurrency
-rayon = "^1.11"
-dashmap = "^6.1"
+rayon = "1.11"
+dashmap = "6.1"
 
 # Authentication
-jsonwebtoken = "^9.3"
-argon2 = "^0.5.3"
-
-[profile.release]
-#lto = "thin"
-#codegen-units = 16
-lto = "fat"
-codegen-units = 1
-opt-level = 3
-debug = 0
-panic = "abort"
-
-[profile.dev]
+jsonwebtoken = "10.2"
+argon2 = "0.5"
 
 [workspace.metadata.dist]
 ci = "github"
 targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 installers = ["shell", "powershell"]
 
+[profile.dev]
+codegen-backend = "llvm"
+
 [profile.dev.package.ferrex-player]
 opt-level = 1
 
+[profile.dev-cranelift]
+inherits = "dev"
+codegen-backend = "cranelift"
+
 [profile.priority]
 inherits = "dev"
-opt-level = 1
+opt-level = 3
+debug = 0
+strip = "none"
+lto = false
+codegen-units = 256
+incremental = true
+codegen-backend = "llvm"
 
 [profile.priority.package.ferrex-core]
-opt-level = 3
+opt-level = 1
 
 [profile.priority.package.ferrex-server]
-opt-level = 3
+opt-level = 1
 
 [profile.priority.package.ferrex-player]
+opt-level = 1
+
+[profile.release]
+codegen-backend = "llvm"
+lto = true
+codegen-units = 1
 opt-level = 3
+debug = false
+panic = "abort"
+incremental = false
+
+[profile.release-lite]
+inherits = "release"
+codegen-units = 256
+strip = "none"
+incremental = true
+
+[profile.release-lite.package.ferrex-core]
+opt-level = 2
+
+[profile.release-lite.package.ferrex-server]
+opt-level = 2
+
+[profile.release-lite.package.ferrex-player]
+opt-level = 2
 
 [patch.crates-io]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
@@ -265,31 +294,34 @@ iced_widget = { git = "https://github.com/Lowband21/iced-ferrex.git", package = 
 iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_wgpu" }
 
 # [patch.crates-io]
-# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
-# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
-# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
+# iced = { path = "../../fxeco/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxeco/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxeco/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxeco/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxeco/iced_ferrex/winit", package = "iced_winit" }
 
 # [patch."https://github.com/iced-rs/iced.git"]
-# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
-# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
-# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
+# iced = { path = "../../fxeco/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxeco/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxeco/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxeco/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxeco/iced_ferrex/winit", package = "iced_winit" }
 
 # [patch."https://github.com/Lowband21/iced-ferrex.git"]
-# iced = { path = "../../fxecodev/iced_ferrex", package = "iced" }
-# iced_core = { path = "../../fxecodev/iced_ferrex/core", package = "iced_core" }
-# iced_widget = { path = "../../fxecodev/iced_ferrex/widget", package = "iced_widget" }
-# iced_wgpu = { path = "../../fxecodev/iced_ferrex/wgpu", package = "iced_wgpu" }
-# iced_winit = { path = "../../fxecodev/iced_ferrex/winit", package = "iced_winit" }
-# iced_test = { path = "../../fxecodev/iced_ferrex/test", package = "iced_test" }
+# iced = { path = "../../fxeco/iced_ferrex", package = "iced" }
+# iced_core = { path = "../../fxeco/iced_ferrex/core", package = "iced_core" }
+# iced_widget = { path = "../../fxeco/iced_ferrex/widget", package = "iced_widget" }
+# iced_wgpu = { path = "../../fxeco/iced_ferrex/wgpu", package = "iced_wgpu" }
+# iced_winit = { path = "../../fxeco/iced_ferrex/winit", package = "iced_winit" }
+# iced_test = { path = "../../fxeco/iced_ferrex/test", package = "iced_test" }
 
 # [patch."https://github.com/Lowband21/iced_aw_ferrex.git"]
-# iced_aw = { path = "../../fxecodev/iced_aw" }
+# iced_aw = { path = "../../fxeco/iced_aw" }
+
+# [patch."https://github.com/Lowband21/lucide-icons-iced-0.14.git"]
+# lucide-icons = { path = "../../fxeco/lucide-icons-iced-0.14" }
 
 # [patch."https://github.com/Lowband21/subwave.git"]
-# subwave_unified = { path = "../fxeco/subwave/subwave_unified" }
-# subwave_core = { path = "../fxeco/subwave/subwave_core" }
-# subwave_wayland = { path = "../fxeco/subwave/subwave_wayland" }
+# subwave_unified = { path = "../../fxeco/subwave/subwave_unified" }
+# subwave_core = { path = "../../fxeco/subwave/subwave_core" }
+# subwave_wayland = { path = "../../fxeco/subwave/subwave_wayland" }

@@ -31,45 +31,40 @@ pub fn validate_credential_consistency(
     // Check DATABASE_URL vs DATABASE_APP_PASSWORD
     if let (Some(url), Some(pw)) =
         (map.get("DATABASE_URL"), map.get("DATABASE_APP_PASSWORD"))
-    {
-        if let Err(e) = validate_url_password_match(
+        && let Err(e) = validate_url_password_match(
             "DATABASE_URL",
             url,
             "DATABASE_APP_PASSWORD",
             pw,
-        ) {
-            errors.push(e);
-        }
+        )
+    {
+        errors.push(e);
     }
 
     // Check DATABASE_URL_ADMIN vs DATABASE_ADMIN_PASSWORD
     if let (Some(url), Some(pw)) = (
         map.get("DATABASE_URL_ADMIN"),
         map.get("DATABASE_ADMIN_PASSWORD"),
+    ) && let Err(e) = validate_url_password_match(
+        "DATABASE_URL_ADMIN",
+        url,
+        "DATABASE_ADMIN_PASSWORD",
+        pw,
     ) {
-        if let Err(e) = validate_url_password_match(
-            "DATABASE_URL_ADMIN",
-            url,
-            "DATABASE_ADMIN_PASSWORD",
-            pw,
-        ) {
-            errors.push(e);
-        }
+        errors.push(e);
     }
 
     // Check DATABASE_URL_CONTAINER vs DATABASE_APP_PASSWORD
     if let (Some(url), Some(pw)) = (
         map.get("DATABASE_URL_CONTAINER"),
         map.get("DATABASE_APP_PASSWORD"),
+    ) && let Err(e) = validate_url_password_match(
+        "DATABASE_URL_CONTAINER",
+        url,
+        "DATABASE_APP_PASSWORD",
+        pw,
     ) {
-        if let Err(e) = validate_url_password_match(
-            "DATABASE_URL_CONTAINER",
-            url,
-            "DATABASE_APP_PASSWORD",
-            pw,
-        ) {
-            errors.push(e);
-        }
+        errors.push(e);
     }
 
     errors
@@ -103,9 +98,7 @@ fn validate_url_password_match(
             message: format!(
                 "{url_key} contains password that does not match {password_key}"
             ),
-            hint: format!(
-                "Run `ferrex-init init --rotate db` to regenerate consistent credentials"
-            ),
+            hint: "Run `ferrex-init init --rotate db` to regenerate consistent credentials".to_string(),
         });
     }
 
@@ -155,7 +148,7 @@ pub fn validate_tmdb_api_key(key: &str) -> Result<(), String> {
     // TMDB API keys are typically 32 characters, alphanumeric
     // Accept between 20-64 chars to allow for format changes
     let len = trimmed.len();
-    if len < 20 || len > 64 {
+    if !(20..=64).contains(&len) {
         return Err(format!(
             "TMDB_API_KEY should be between 20-64 characters (got {})",
             len
