@@ -5,27 +5,13 @@
 <p><em>Native media server + desktop player focused on zero‑copy HDR on Wayland and low‑latency animated browsing.</em></p>
 </div>
 
-https://github.com/user-attachments/assets/e7b42e2f-59fa-4347-a5f8-cc49192d5d41
+![player grid](https://media.lowband.me/images/grid_fallback.png)
 
 <p align="center">
   <img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.90%2B-orange?logo=rust&logoColor=white&style=flat" />
   <img alt="Rust edition" src="https://img.shields.io/badge/edition-2024-orange?logo=rust&logoColor=white&style=flat" />
   <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-informational?style=flat" /></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%2F%20Wayland-informational?logo=linux&style=flat" />
-  <img alt="Native" src="https://img.shields.io/badge/Native-Server%20%2B%20Player-2c3e50?style=flat" />
-  <img alt="UI" src="https://img.shields.io/badge/UI-Iced%20(fork)-5865f2?style=flat" />
-  <img alt="HDR" src="https://img.shields.io/badge/HDR-zero--copy%20(wayland)-blueviolet?style=flat" />
-  <img alt="GStreamer" src="https://img.shields.io/badge/GStreamer-1.27.x-0a7?style=flat" />
-  <img alt="Postgres" src="https://img.shields.io/badge/Postgres-enabled-336791?logo=postgresql&logoColor=white&style=flat" />
-  <img alt="Redis" src="https://img.shields.io/badge/Redis-enabled-DC382D?logo=redis&logoColor=white&style=flat" />
-  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-informational?logo=docker&style=flat" />
-  <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat" />
-  <img alt="Status" src="https://img.shields.io/badge/status-active--development-yellow?style=flat" />
   <a href="https://lowband21.github.io/ferrex/"><img alt="Docs" src="https://img.shields.io/badge/docs-github%20pages-0078D4?style=flat" /></a>
-</p>
-
-
-<p align="center">
   <a href="https://github.com/Lowband21/ferrex/actions/workflows/ci.yml">
     <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Lowband21/ferrex/ci.yml?branch=main&label=CI&logo=githubactions&style=flat" />
   </a>
@@ -41,7 +27,7 @@ A Rust‑native media server and player focused on delivering a smooth and low l
 - Zero‑copy HDR on Wayland: a Wayland‑subsurface path makes use of bleeding edge GStreamer HDR developments to preserve metadata and avoid expensive copies.
 - Pragmatic elsewhere: on other platforms, Ferrex can hand off to mpv.
 
-Status: active development. Expect rapid changes while core surfaces continue to stabilize.
+Status: pre-alpha (0.1.0-alpha). Expect rapid changes while core surfaces continue to stabilize.
 
 ## Why it exists
 
@@ -49,7 +35,7 @@ Existing home media tools are flexible but often not fast in the ways that feel 
 
 ## Who it’s for
 
-Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback shines (currently requires a development build of GStreamer 1.27.x for correct HDR metadata passthrough). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
+Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.27.x development series for correct HDR metadata passthrough (tested with **GStreamer 1.27.50** as of **2025-12-30**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
 
 ## Highlights
 
@@ -61,13 +47,8 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 
 ## Screenshots / Demo
 
+- Visit the showcase at [ferrex.lowband.me](https://ferrex.lowband.me/).
 - Fastest way to try it: see [Demo Mode](docs/demo-mode.md) to seed a disposable library.
-- Screenshots and short clips will be added soon.
-
-## Documentation
-
-- Preview rustdocs (WIP): https://lowband21.github.io/ferrex/
-  - Early content; APIs and docs are evolving and incomplete ahead of 0.1.0‑alpha.
 
 ## Quickstart
 
@@ -76,6 +57,7 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 - Docker + Docker Compose
 - Rust toolchain (stable 1.90+, edition 2024)
 - just (https://github.com/casey/just)
+- Linux: GStreamer + FFmpeg development headers (see the CI workflow for the current package list)
 - mpv (optional; currently required on windows for playback)
 
 ### Start the stack

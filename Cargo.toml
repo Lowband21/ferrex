@@ -1,4 +1,3 @@
-cargo-features = ["codegen-backend"]
 [workspace]
 members = [
   "ferrex-server",
@@ -223,14 +222,8 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
 installers = ["shell", "powershell"]
 
 [profile.dev]
-codegen-backend = "llvm"
-
 [profile.dev.package.ferrex-player]
 opt-level = 1
-
-[profile.dev-cranelift]
-inherits = "dev"
-codegen-backend = "cranelift"
 
 [profile.priority]
 inherits = "dev"
@@ -240,7 +233,6 @@ strip = "none"
 lto = false
 codegen-units = 256
 incremental = true
-codegen-backend = "llvm"
 
 [profile.priority.package.ferrex-core]
 opt-level = 1
@@ -252,7 +244,6 @@ opt-level = 1
 opt-level = 1
 
 [profile.release]
-codegen-backend = "llvm"
 lto = true
 codegen-units = 1
 opt-level = 3

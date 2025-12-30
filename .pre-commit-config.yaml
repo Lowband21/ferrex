@@ -1,7 +1,7 @@
 # Shared, tracked pre-commit configuration for all worktrees.
 # Install: pipx install pre-commit  (or pip install --user pre-commit)
 # One-time setup (from repo root dir):
-#   git --git-dir=.bare config core.hooksPath .githooks
+#   git config core.hooksPath .githooks
 # First run (optional): pre-commit run --all-files
 
 minimum_pre_commit_version: "3.0.0"

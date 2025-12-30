@@ -13,7 +13,7 @@ Ferrex is a Rust workspace with these primary crates:
 - `ferrex-contracts` – API contracts and schema glue.
 
 Related docs:
-- Scan/orchestration runtime details: `ferrex-core/src/scan/orchestration/runtime/README.md`
+- Scan/orchestration runtime details: `ferrex-core/src/domain/scan/orchestration/runtime/README.md`
 - Player specifics and platform notes: `ferrex-player/README.md`
 - Demo mode: `docs/demo-mode.md`
 - UI testing workflow: `docs/ui-testing-workflow.md`
@@ -46,7 +46,7 @@ Related docs:
   - Worker pools per JobKind; jobs leased with TTL and renewed pre‑expiry.
   - Expired leases are resurrected by housekeeping.
   - Queue invariants: `state = 'ready'` and `available_at <= NOW()` gate eligibility; partial unique index on `dedupe_key` enforces de‑dup across relevant states.
-  - See `ferrex-core/src/scan/orchestration/runtime/README.md` for specifics.
+  - See `ferrex-core/src/domain/scan/orchestration/runtime/README.md` for specifics.
 
 ### Player (`ferrex-player`)
 - UI: Iced (custom fork pinned in workspace).

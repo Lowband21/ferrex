@@ -7,7 +7,7 @@ Ferrex is a Rust workspace with several crates (server, player, core, models, co
 ## Quick Expectations
 
 - Be considerate and constructive. We follow the spirit of the Contributor Covenant (see “Code of Conduct”).
-- Sign every commit with the DCO trailer (`Signed-off-by:`). See “DCO (Required)”.
+- Prefer signed commits (GPG or SSH). If you enable the local hooks in `.githooks`, unsigned commits may be rejected by the pre-push checks.
 - Contributions are under MIT OR Apache‑2.0. See “License of Contributions”.
 - Report security issues privately. See `SECURITY.md`.
 
@@ -71,7 +71,7 @@ You can also use plain cargo:
 
 ```bash
 cargo fmt --all
-cargo clippy --workspace --all-targets --all-features -D warnings
+cargo clippy --workspace --all-targets --all-features -- -W warnings
 cargo test --workspace --all-features --all-targets --no-fail-fast
 ```
 
@@ -106,7 +106,7 @@ We keep fast checks in `pre-commit` and heavier checks in `pre-push`. After enab
   - rustfmt (check)
 
 - Pre-push (heavier):
-  - cargo clippy (workspace, all targets/features, `-D warnings`)
+  - cargo clippy (workspace, all targets/features)
   - SQLx offline check (`SQLX_OFFLINE=true cargo sqlx prepare --workspace --check`)
   - cargo-deny (per `deny.toml`)
   - hadolint (Dockerfiles)
@@ -125,8 +125,6 @@ pre-commit autoupdate
 pre-commit migrate-config   # when prompted by pre-commit
 ```
 
-Note: Direct commits to `main` are disabled.
-
 ## Development Guidelines
 
 - Keep PRs scoped and reviewable. Prefer a series of small changes over one large one.
@@ -144,7 +142,7 @@ Please include:
 - Test coverage or a manual test plan.
 - Notes on migration or operational impact (if any).
 
-CI builds the workspace on Linux/macOS/Windows and runs format, advisories, deny, and clippy. Some DB-dependent tests may not run in CI; please run them locally.
+CI builds on Linux/macOS/Windows. Linux/macOS run `fmt`, `audit`, `deny`, `clippy`, and builds/doctests; Windows focuses on building the player (fmt/clippy/build).
 
 ## Dependency Updates
 
@@ -156,7 +154,6 @@ Dependabot maintains third‑party dependencies with small, predictable batches.
   - Cargo: one PR for all patch updates, one for all minor updates (majors are separate).
   - Actions/Docker: one PR grouping patch + minor updates.
 - Labels: `dependencies`. Reviewer: `@Lowband21`.
-- Commit conventions: Conventional Commits (e.g., `chore(deps): …`, `chore(actions): …`).
 
 Review/merge guidelines:
 
@@ -165,24 +162,6 @@ Review/merge guidelines:
 - Prefer squash merge with the generated title. Keep one PR per group for a clean history.
 
 If a dependency needs to be pinned or ignored, propose a change to `.github/dependabot.yml` with rationale.
-
-## DCO (Required)
-
-Ferrex uses the Developer Certificate of Origin (DCO) 1.1. Sign off every commit to certify you wrote the code or otherwise have the right to submit it.
-
-Add the sign-off automatically with `-s`:
-
-```bash
-git commit -s -m "Your commit message"
-```
-
-This adds a trailer like:
-
-```
-Signed-off-by: Your Name <you@example.com>
-```
-
-Learn more: https://developercertificate.org/
 
 ## License of Contributions
 
