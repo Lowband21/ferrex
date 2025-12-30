@@ -7,13 +7,17 @@ use ferrex_core::{
     },
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use ferrex_model::image::ImageQuery;
 use log::{info, warn};
 use reqwest::{Client, RequestBuilder, StatusCode};
 use rkyv::util::AlignedVec;
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
+
+use crate::infra::services::api::ImageFetchResult;
 
 /// Callback for token refresh
 pub type RefreshTokenCallback = Arc<
@@ -65,7 +69,7 @@ impl ApiClient {
         // Normalize the provided base URL so we don't trip over missing schemes
         // Rationale: many users will provide "localhost:3000" which reqwest rejects.
         // We add http:// if missing and trim a trailing slash to prevent double slashes.
-        fn normalize(mut raw: String) -> String {
+        fn normalize(raw: String) -> String {
             let original = raw.clone();
             let trimmed = raw.trim().trim_end_matches('/').to_string();
             let with_scheme = if trimmed.starts_with("http://")
@@ -110,6 +114,45 @@ impl ApiClient {
             token_store: Arc::new(RwLock::new(None)),
             refresh_callback: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn rkyv_timeout_for_url(url: &str) -> Duration {
+        // The rkyv "snapshot" endpoints can be very large (libraries + media),
+        // and can legitimately take longer than the default reqwest client
+        // timeout under real-world libraries and slower disks/DBs.
+        //
+        // The regression observed in 2025-12-15 logs is consistent with the
+        // global 30s client timeout being too low for `/api/v1/libraries`.
+        //
+        // Keep typical rkyv endpoints snappy, but allow library snapshots to
+        // complete without spurious timeouts.
+        let default = Duration::from_secs(30);
+        let long_snapshot = Duration::from_secs(180);
+
+        let Ok(parsed) = reqwest::Url::parse(url) else {
+            return default;
+        };
+        let path = parsed.path();
+
+        // Libraries collection snapshot: `/api/v1/libraries`
+        if path.ends_with("/api/v1/libraries") {
+            return long_snapshot;
+        }
+
+        // Per-library media snapshot: `/api/v1/libraries/{id}/media`
+        if path.contains("/api/v1/libraries/") && path.ends_with("/media") {
+            return long_snapshot;
+        }
+
+        // Movie batch snapshots can also be large, especially the bundle endpoint:
+        // `/api/v1/libraries/{id}/movie-batches`.
+        if path.contains("/api/v1/libraries/")
+            && path.contains("/movie-batches")
+        {
+            return long_snapshot;
+        }
+
+        default
     }
 
     /// Build a versioned API URL
@@ -475,9 +518,21 @@ impl ApiClient {
         let request = self.build_request(request).await;
 
         //// Add Accept header for rkyv format
-        let request = request.header("Accept", "application/octet-stream");
+        let timeout = Self::rkyv_timeout_for_url(&url);
+        if timeout > Duration::from_secs(30) {
+            log::debug!(
+                "[ApiClient] Using extended timeout {:?} for {}",
+                timeout,
+                url
+            );
+        }
+        let request = request
+            .header("Accept", "application/octet-stream")
+            .timeout(timeout);
 
-        let response = request.send().await?;
+        let response = request.send().await.with_context(|| {
+            format!("GET rkyv {} (timeout {:?})", url, timeout)
+        })?;
 
         match response.status() {
             StatusCode::OK => {
@@ -501,7 +556,8 @@ impl ApiClient {
                     Ok(aligned)
                 } else {
                     Err(anyhow::anyhow!(
-                        "Expected octet-stream response but got {}",
+                        "Expected application/octet-stream from {} but got '{}'",
+                        url,
                         content_type
                     ))
                 }
@@ -538,14 +594,14 @@ impl ApiClient {
         if let Some((k, v)) = query {
             request = request.query(&[(k, v)]);
         }
-        // Prefer typical image content types; accept anything as fallback
         let request = self
             .build_request(request)
             .await
-            // Prefer faster-to-decode formats on client; avoid AVIF for now
-            .header("Accept", "image/webp,image/*;q=0.9,*/*;q=0.8")
-            // Avoid compressed transfer encodings for ranged/partial hazards.
-            .header("Accept-Encoding", "identity");
+            .header("Accept", "image/jpeg,image/*");
+
+        //;q=0.9,*/*;q=0.8
+        // // Avoid compressed transfer encodings for ranged/partial hazards.
+        // .header("Accept-Encoding", "identity");
 
         let response = request.send().await?;
         match response.status() {
@@ -563,19 +619,91 @@ impl ApiClient {
                     .map(|s| s.to_string());
 
                 let bytes = response.bytes().await?;
-                if let Some(expected) = cl {
-                    if expected != bytes.len() {
-                        // Treat mismatches as hard errors to avoid decoding partial/corrupt images.
-                        return Err(anyhow::anyhow!(
-                            "Content-Length mismatch for {}: header={} actual={} encoding={:?}",
-                            url,
-                            expected,
-                            bytes.len(),
-                            encoding
-                        ));
-                    }
+                if let Some(expected) = cl
+                    && expected != bytes.len()
+                {
+                    // Treat mismatches as hard errors to avoid decoding partial/corrupt images.
+                    return Err(anyhow::anyhow!(
+                        "Content-Length mismatch for {}: header={} actual={} encoding={:?}",
+                        url,
+                        expected,
+                        bytes.len(),
+                        encoding
+                    ));
                 }
                 Ok(bytes.to_vec())
+            }
+            StatusCode::UNAUTHORIZED => {
+                self.set_token(None).await;
+                Err(anyhow::anyhow!("Unauthorized - please login again"))
+            }
+            status => {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                Err(anyhow::anyhow!(
+                    "Request failed with status {}: {}",
+                    status,
+                    error_text
+                ))
+            }
+        }
+    }
+
+    /// GET request for images (size is carried via query params; no custom header)
+    pub async fn get_image(
+        &self,
+        path: &str,
+        image_query: ImageQuery,
+    ) -> Result<ImageFetchResult> {
+        let url = self.build_url(path);
+        log::debug!("GET (image) request to: {}", url);
+
+        let request = self.client.get(&url);
+        let request = self
+            .build_request(request)
+            .await
+            .header("Accept", "image/jpeg")
+            .json(&image_query);
+
+        let response = request.send().await?;
+
+        match response.status() {
+            StatusCode::OK => {
+                let cl = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<usize>().ok());
+                let encoding = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_ENCODING)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let bytes = response.bytes().await?;
+                if let Some(expected) = cl
+                    && expected != bytes.len()
+                {
+                    return Err(anyhow::anyhow!(
+                        "Content-Length mismatch for {}: header={} actual={} encoding={:?}",
+                        url,
+                        expected,
+                        bytes.len(),
+                        encoding
+                    ));
+                }
+                Ok(ImageFetchResult::Ready(bytes.to_vec()))
+            }
+            StatusCode::ACCEPTED => {
+                let retry_after = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|raw| raw.parse::<u64>().ok())
+                    .map(Duration::from_secs);
+                Ok(ImageFetchResult::Pending { retry_after })
             }
             StatusCode::UNAUTHORIZED => {
                 self.set_token(None).await;
@@ -743,7 +871,6 @@ impl ApiClient {
         &self,
         query: MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
-        // Server endpoint is at /media/query, not /api/v1/media/query
         self.post(v1::media::QUERY, &query).await
     }
 }

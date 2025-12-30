@@ -8,6 +8,7 @@ use crate::domains::media;
 use crate::domains::metadata;
 use crate::domains::player;
 use crate::domains::settings;
+#[cfg(feature = "unimplemented")]
 use crate::domains::streaming;
 use crate::domains::ui;
 
@@ -81,6 +82,7 @@ impl DomainUpdate {
 }
 
 /// Result of a domain update that includes both a task and events to emit
+#[derive(Debug)]
 pub struct DomainUpdateResult {
     /// The task to execute (may produce more messages)
     pub task: Task<DomainMessage>,
@@ -142,6 +144,7 @@ pub enum DomainMessage {
     Metadata(metadata::messages::MetadataMessage),
 
     /// Streaming/Transcoding domain
+    #[cfg(feature = "unimplemented")]
     Streaming(streaming::messages::StreamingMessage),
 
     /// Settings domain
@@ -200,6 +203,7 @@ impl From<metadata::messages::MetadataMessage> for DomainMessage {
     }
 }
 
+#[cfg(feature = "unimplemented")]
 impl From<streaming::messages::StreamingMessage> for DomainMessage {
     fn from(msg: streaming::messages::StreamingMessage) -> Self {
         DomainMessage::Streaming(msg)
@@ -239,6 +243,7 @@ impl DomainMessage {
             Self::Player(_) => "Player", // PlayerMessage doesn't have name() method yet
             Self::Ui(msg) => msg.name(),
             Self::Metadata(msg) => msg.name(),
+            #[cfg(feature = "unimplemented")]
             Self::Streaming(msg) => msg.name(),
             Self::Settings(msg) => msg.name(),
             Self::UserManagement(msg) => msg.name(),
@@ -265,6 +270,7 @@ impl std::fmt::Debug for DomainMessage {
             Self::Metadata(msg) => {
                 write!(f, "DomainMessage::Metadata({:?})", msg)
             }
+            #[cfg(feature = "unimplemented")]
             Self::Streaming(msg) => {
                 write!(f, "DomainMessage::Streaming({:?})", msg)
             }
@@ -317,12 +323,6 @@ pub enum CrossDomainEvent {
 
     // Player coordination events
     MediaStarted(MediaID), // Player notifies media domain of started playback
-    #[deprecated(note = "Transcoding is now handled within streaming domain")]
-    RequestTranscoding(MediaFile),
-    #[deprecated(note = "Transcoding is now handled within streaming domain")]
-    TranscodingReady(url::Url), // Legacy: Streaming notifies player that stream is ready
-
-    // UI events
 
     // Window management events
     HideWindow, // Hide the application window (e.g., for external MPV)
@@ -346,8 +346,6 @@ pub enum CrossDomainEvent {
     // Children updates for series/season detail views
     SeriesChildrenChanged(ferrex_core::player_prelude::SeriesID),
     SeasonChildrenChanged(ferrex_core::player_prelude::SeasonID),
-
-    // NOTE: Device management events moved to direct Settings messages in Task 2.9
 
     // Cleanup events for logout
     ClearMediaStore,      // Clear media store data

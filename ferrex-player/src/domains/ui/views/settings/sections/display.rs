@@ -15,7 +15,7 @@ use crate::domains::ui::settings_ui::SettingsUiMessage;
 use crate::domains::ui::theme::{self, MediaServerTheme};
 use crate::domains::ui::widgets::setting_controls::{
     scale_preset_buttons, scale_slider, setting_dropdown, setting_row,
-    setting_section,
+    setting_section, setting_slider,
 };
 use crate::state::State;
 use ferrex_core::player_prelude::UserScale;
@@ -69,6 +69,56 @@ pub fn view_display_section<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
     content = content.push(Space::new().height(24));
 
+    let display_state = &state.domains.settings.display;
+
+    // Library Grid section
+    content = content.push(setting_section(
+        "Library Grid",
+        Some("Poster spacing and layout for grid views"),
+        fonts,
+    ));
+    content = content.push(setting_slider(
+        "Poster gap",
+        display_state.grid_poster_gap,
+        0.0..=80.0,
+        "scaled units",
+        1,
+        |value| {
+            SettingsUiMessage::Display(DisplayMessage::SetGridPosterGap(
+                format!("{value:.1}"),
+            ))
+            .into()
+        },
+        fonts,
+    ));
+
+    content = content.push(Space::new().height(24));
+
+    // Scrollbar section
+    content = content.push(setting_section(
+        "Scrollbars",
+        Some("Adjust minimum scrollbar thumb size for easier grabbing"),
+        fonts,
+    ));
+    content = content.push(setting_slider(
+        "Minimum thumb length",
+        display_state.scrollbar_scroller_min_length_px,
+        2.0..=120.0,
+        "px",
+        0,
+        |value| {
+            SettingsUiMessage::Display(
+                DisplayMessage::SetScrollbarScrollerMinLength(format!(
+                    "{value:.0}"
+                )),
+            )
+            .into()
+        },
+        fonts,
+    ));
+
+    content = content.push(Space::new().height(24));
+
     // Poster Quality section
     content = content.push(setting_section(
         "Poster Quality",
@@ -76,7 +126,6 @@ pub fn view_display_section<'a>(state: &'a State) -> Element<'a, UiMessage> {
         fonts,
     ));
 
-    let display_state = &state.domains.settings.display;
     content = content.push(setting_row(vec![
         setting_dropdown(
             "Library Grid",

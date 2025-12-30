@@ -11,9 +11,11 @@ pub mod metadata;
 pub mod player;
 pub mod search;
 pub mod settings;
-pub mod streaming;
 pub mod ui;
 pub mod user_management;
+
+#[cfg(feature = "unimplemented")]
+pub mod streaming;
 
 use crate::common::messages::{
     CrossDomainEvent, DomainMessage, DomainUpdateResult,
@@ -45,10 +47,11 @@ pub struct DomainRegistry {
     pub metadata: metadata::MetadataDomain,
     pub player: player::PlayerDomain,
     pub settings: settings::SettingsDomain,
-    pub streaming: streaming::StreamingDomain,
     pub ui: ui::UIDomain,
     pub user_management: user_management::UserManagementDomain,
     pub search: search::SearchDomain,
+    #[cfg(feature = "unimplemented")]
+    pub streaming: streaming::StreamingDomain,
 }
 
 impl DomainRegistry {
@@ -65,6 +68,7 @@ impl DomainRegistry {
             self.metadata.handle_event(&event),
             self.player.handle_event(&event),
             self.settings.handle_event(&event),
+            #[cfg(feature = "unimplemented")]
             self.streaming.handle_event(&event),
             self.ui.handle_event(&event),
             self.user_management.handle_event(&event),

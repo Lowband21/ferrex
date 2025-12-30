@@ -518,13 +518,13 @@ mod tests {
 
         #[derive(Debug)]
         struct TestState {
-            value: i32,
+            _value: i32,
         }
 
-        let state = TestState { value: 42 };
+        let state = TestState { _value: 42 };
         recorder.snapshot_state(&state, "initial".to_string());
 
-        let state = TestState { value: 100 };
+        let state = TestState { _value: 100 };
         recorder.snapshot_state(&state, "after_update".to_string());
 
         let snapshots = recorder.snapshots();

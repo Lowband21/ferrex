@@ -53,51 +53,86 @@ fn get_text_scale() -> f32 {
 }
 
 /// Default duration of hover scale transition in milliseconds (fallback)
-const DEFAULT_HOVER_TRANSITION_MS: u64 = 150;
+const DEFAULT_HOVER_TRANSITION_MS: u64 =
+    crate::infra::constants::layout::animation::HOVER_TRANSITION_MS;
+
+/// Default delay before scaling down after hover ends in milliseconds (fallback)
+const DEFAULT_HOVER_SCALE_DOWN_DELAY_MS: u64 =
+    crate::infra::constants::layout::animation::HOVER_SCALE_DOWN_DELAY_MS;
 
 /// Tracks hover scale transition state for smooth animations
 #[derive(Debug, Clone, Copy)]
 struct HoverTransition {
     /// When the transition started
     start_time: Instant,
-    /// Whether transitioning to hovered (true) or unhovered (false)
-    to_hovered: bool,
-    /// The hover_scale value to use (from AnimatedPosterBounds)
-    hover_scale: f32,
+    /// Progress at transition start (0.0 = unhovered, 1.0 = hovered)
+    start_progress: f32,
+    /// Target progress at transition end (0.0 = unhovered, 1.0 = hovered)
+    end_progress: f32,
     /// Transition duration in milliseconds (from AnimatedPosterBounds)
     transition_ms: u64,
+    /// Delay before scaling down after hover ends (milliseconds)
+    scale_down_delay_ms: u64,
 }
 
 impl HoverTransition {
     /// Calculate current hover progress (0.0 = not hovered, 1.0 = fully hovered)
     fn progress(&self) -> f32 {
-        let elapsed_ms = self.start_time.elapsed().as_millis() as f32;
-        let duration_ms = self.transition_ms as f32;
-        let raw_progress = (elapsed_ms / duration_ms).clamp(0.0, 1.0);
+        let elapsed_ms_u128 = self.start_time.elapsed().as_millis();
 
-        // Apply easing: ease-out for hover-in, ease-in for hover-out
-        let eased = if self.to_hovered {
-            // ease-out-cubic: 1 - (1-t)^3
-            let t = 1.0 - raw_progress;
-            1.0 - t * t * t
+        if (self.start_progress - self.end_progress).abs() <= f32::EPSILON {
+            return self.end_progress;
+        }
+
+        let scaling_down = self.end_progress < self.start_progress;
+
+        // Hover-out: optionally hold before starting the scale-down.
+        if scaling_down && elapsed_ms_u128 < self.scale_down_delay_ms as u128 {
+            return self.start_progress;
+        }
+
+        if self.transition_ms == 0 {
+            return self.end_progress;
+        }
+
+        let elapsed_for_transition_ms = if scaling_down {
+            elapsed_ms_u128.saturating_sub(self.scale_down_delay_ms as u128)
+                as f32
         } else {
-            // ease-in-cubic: t^3
-            raw_progress * raw_progress * raw_progress
+            elapsed_ms_u128 as f32
         };
 
-        if self.to_hovered { eased } else { 1.0 - eased }
+        let duration_ms = self.transition_ms as f32;
+        let raw_t = (elapsed_for_transition_ms / duration_ms).clamp(0.0, 1.0);
+
+        // Apply easing: ease-out for hover-in, ease-in for hover-out.
+        let eased_t = if scaling_down {
+            // ease-in-cubic: t^3
+            raw_t * raw_t * raw_t
+        } else {
+            // ease-out-cubic: 1 - (1-t)^3
+            let t = 1.0 - raw_t;
+            1.0 - t * t * t
+        };
+
+        self.start_progress
+            + (self.end_progress - self.start_progress) * eased_t
     }
 
     /// Check if transition is complete
     fn is_complete(&self) -> bool {
-        self.start_time.elapsed().as_millis() >= self.transition_ms as u128
+        let scaling_down = self.end_progress < self.start_progress;
+        let total_ms = if scaling_down {
+            self.transition_ms.saturating_add(self.scale_down_delay_ms)
+        } else {
+            self.transition_ms
+        };
+
+        self.start_time.elapsed().as_millis() >= total_ms as u128
     }
 
-    /// Calculate effective scale based on current progress
-    fn effective_scale(&self) -> f32 {
-        let progress = self.progress();
-        1.0 + (self.hover_scale - 1.0) * progress
-    }
+    // Note: we intentionally only track `progress` here. The actual scale
+    // calculation (including hover_scale) happens when building GPU instances.
 }
 
 /// GPU instance payload for a poster primitive.
@@ -155,7 +190,7 @@ struct Globals {
     atlas_is_srgb: f32,
     // Whether the render target is sRGB (GPU will encode on write)
     target_is_srgb: f32,
-    // UI text scale for poster title/meta (from unified scaling infrastructure)
+    // UI text scale for poster title/meta (from unified scaling infra)
     text_scale: f32,
     _padding: [f32; 4],
 }
@@ -192,7 +227,7 @@ pub struct PosterBatchState {
     font_atlas_texture: Option<wgpu::Texture>,
     font_atlas_view: Option<wgpu::TextureView>,
     font_atlas_uploaded: bool,
-    // Text rendering pipeline
+    // Text rendering provider
     shader_text: Arc<wgpu::ShaderModule>,
     render_pipeline_text: Option<Arc<wgpu::RenderPipeline>>,
 }
@@ -277,7 +312,7 @@ impl PosterBatchState {
         }
     }
 
-    /// Lazily creates the front render pipeline once the atlas layout is known.
+    /// Lazily creates the front render provider once the atlas layout is known.
     fn ensure_pipeline_front(
         &mut self,
         device: &wgpu::Device,
@@ -292,7 +327,7 @@ impl PosterBatchState {
 
             if !Arc::ptr_eq(existing, &atlas_layout) {
                 log::warn!(
-                    "PosterBatchState received a different atlas layout; rebuilding pipeline",
+                    "PosterBatchState received a different atlas layout; rebuilding provider",
                 );
             }
         }
@@ -350,7 +385,7 @@ impl PosterBatchState {
         self.atlas_bind_group_layout = Some(atlas_layout);
     }
 
-    /// Lazily creates the back render pipeline once the atlas layout is known.
+    /// Lazily creates the back render provider once the atlas layout is known.
     fn ensure_pipeline_back(
         &mut self,
         device: &wgpu::Device,
@@ -416,7 +451,7 @@ impl PosterBatchState {
         self.atlas_bind_group_layout = Some(atlas_layout);
     }
 
-    /// Lazily creates the text render pipeline for title/meta rendering.
+    /// Lazily creates the text render provider for title/meta rendering.
     /// Text uses only the globals bind group (which includes the font atlas).
     fn ensure_pipeline_text(&mut self, device: &wgpu::Device) {
         if self.render_pipeline_text.is_some() {
@@ -539,40 +574,55 @@ impl PosterBatchState {
         &mut self,
         id: u64,
         is_hovered: bool,
-        hover_scale: f32,
         hover_transition_ms: u64,
+        hover_scale_down_delay_ms: u64,
     ) -> f32 {
-        let prev_hovered = self.previous_hover_states.get(&id).copied();
+        let prev_hovered = match self.previous_hover_states.get(&id).copied() {
+            Some(prev) => prev,
+            None => {
+                self.previous_hover_states.insert(id, is_hovered);
+                self.hover_transitions.remove(&id);
+                return if is_hovered { 1.0 } else { 0.0 };
+            }
+        };
 
         // Detect hover state change
-        let state_changed =
-            prev_hovered.map(|prev| prev != is_hovered).unwrap_or(true);
+        if prev_hovered != is_hovered {
+            let current_progress = self
+                .hover_transitions
+                .get(&id)
+                .map(HoverTransition::progress)
+                .unwrap_or_else(|| if prev_hovered { 1.0 } else { 0.0 });
 
-        if state_changed {
-            // Start new transition
-            let transition = HoverTransition {
-                start_time: Instant::now(),
-                to_hovered: is_hovered,
-                hover_scale,
-                transition_ms: hover_transition_ms,
-            };
-            self.hover_transitions.insert(id, transition);
+            let end_progress = if is_hovered { 1.0 } else { 0.0 };
+
+            if (current_progress - end_progress).abs() <= f32::EPSILON {
+                self.hover_transitions.remove(&id);
+            } else {
+                let transition = HoverTransition {
+                    start_time: Instant::now(),
+                    start_progress: current_progress,
+                    end_progress,
+                    transition_ms: hover_transition_ms,
+                    scale_down_delay_ms: hover_scale_down_delay_ms,
+                };
+                self.hover_transitions.insert(id, transition);
+            }
+
             self.previous_hover_states.insert(id, is_hovered);
         }
 
         // Get current progress from transition (or default based on hover state)
-        if let Some(transition) = self.hover_transitions.get(&id) {
+        if let Some(transition) = self.hover_transitions.get(&id).copied() {
             let progress = transition.progress();
-
-            // Clean up completed transitions that ended in unhovered state
-            if transition.is_complete() && !transition.to_hovered {
-                // Will be cleaned up next frame to avoid borrow issues
+            if transition.is_complete() {
+                self.hover_transitions.remove(&id);
             }
-
             progress
+        } else if is_hovered {
+            1.0
         } else {
-            // No transition, use instant state
-            if is_hovered { 1.0 } else { 0.0 }
+            0.0
         }
     }
 }
@@ -826,7 +876,7 @@ impl PrimitiveBatchState for PosterBatchState {
                                 row_bytes.div_ceil(align) * align
                             };
                             if !row_bytes.is_multiple_of(align) {
-                                log::debug!(
+                                log::trace!(
                                     "Poster atlas upload: {}x{} RGBA, row_bytes={} padded_bytes_per_row={} (align {}), extent=({}, {}, 1)",
                                     width,
                                     height,
@@ -959,43 +1009,46 @@ impl PrimitiveBatchState for PosterBatchState {
                 }
 
                 // Log atlas layer once per id or on change to avoid flooding
-                let layer_i32 = region.layer as i32;
-                let should_log = match self.logged_layers.get(&pending.id) {
-                    None => true,
-                    Some(prev) => *prev != layer_i32,
-                };
-                if should_log {
-                    log::debug!(
-                        "PosterBatch: id={} atlas_layer={} (cached={}, uploads_this_frame={}), uv_min=({:.6},{:.6}) uv_max=({:.6},{:.6})",
-                        pending.id,
-                        layer_i32,
-                        was_cached,
-                        self.upload_budget.uploads_this_frame(),
-                        region.uv_min[0],
-                        region.uv_min[1],
-                        region.uv_max[0],
-                        region.uv_max[1]
-                    );
-                    self.logged_layers.insert(pending.id, layer_i32);
+                #[cfg(debug_assertions)]
+                {
+                    let layer_i32 = region.layer as i32;
+                    let should_log = match self.logged_layers.get(&pending.id) {
+                        None => true,
+                        Some(prev) => *prev != layer_i32,
+                    };
+                    if should_log {
+                        log::trace!(
+                            "PosterBatch: id={} atlas_layer={} (cached={}, uploads_this_frame={}), uv_min=({:.6},{:.6}) uv_max=({:.6},{:.6})",
+                            pending.id,
+                            layer_i32,
+                            was_cached,
+                            self.upload_budget.uploads_this_frame(),
+                            region.uv_min[0],
+                            region.uv_min[1],
+                            region.uv_max[0],
+                            region.uv_max[1]
+                        );
+                        self.logged_layers.insert(pending.id, layer_i32);
+                    }
                 }
 
                 // Compute smooth hover progress for scale animation
-                let hover_scale = pending
-                    .animated_bounds
-                    .as_ref()
-                    .map(|b| b.hover_scale)
-                    .unwrap_or(1.05);
                 let hover_transition_ms = pending
                     .animated_bounds
                     .as_ref()
                     .map(|b| b.hover_transition_ms)
                     .unwrap_or(DEFAULT_HOVER_TRANSITION_MS);
+                let hover_scale_down_delay_ms = pending
+                    .animated_bounds
+                    .as_ref()
+                    .map(|b| b.hover_scale_down_delay_ms)
+                    .unwrap_or(DEFAULT_HOVER_SCALE_DOWN_DELAY_MS);
 
                 let hover_progress = self.compute_hover_progress(
                     pending.id,
                     pending.is_hovered,
-                    hover_scale,
                     hover_transition_ms,
+                    hover_scale_down_delay_ms,
                 );
 
                 let instance = create_batch_instance(
@@ -1450,7 +1503,7 @@ impl PosterBatchState {
             (manager.buffer(), globals, pipeline)
         else {
             log::error!(
-                "PosterBatchState::render missing buffer/pipeline for {} instances",
+                "PosterBatchState::render missing buffer/provider for {} instances",
                 end - start
             );
             return;

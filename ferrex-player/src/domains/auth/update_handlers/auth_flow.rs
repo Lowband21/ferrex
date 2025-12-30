@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use crate::domains::auth::AuthenticationFlow;
+use crate::domains::auth::messages::AuthMessage;
 use crate::domains::ui::update_handlers::curated;
 use crate::{
     domains::auth::{
-        manager::DeviceAuthStatus, messages as auth,
+        manager::DeviceAuthStatus,
         security::secure_credential::SecureCredential,
     },
     infra::services::auth::AuthService,
@@ -14,9 +16,7 @@ use ferrex_core::player_prelude::{User, UserPermissions};
 use iced::Task;
 
 /// Handle loading users for user selection screen
-pub fn handle_load_users(state: &mut State) -> Task<auth::AuthMessage> {
-    use crate::domains::auth::types::AuthenticationFlow;
-
+pub fn handle_load_users(state: &mut State) -> Task<AuthMessage> {
     log::info!("[Auth] handle_load_users called - loading users for selection");
 
     // Set auth flow to LoadingUsers to show the loading screen
@@ -35,30 +35,26 @@ pub fn handle_load_users(state: &mut State) -> Task<auth::AuthMessage> {
                 if users.is_empty() {
                     // No users found, check if setup is needed
                     log::info!("[Auth] No users found, checking setup status");
-                    auth::AuthMessage::CheckSetupStatus
+                    AuthMessage::CheckSetupStatus
                 } else {
                     log::info!(
                         "[Auth] Successfully loaded {} users",
                         users.len()
                     );
-                    auth::AuthMessage::UsersLoaded(Ok(users))
+                    AuthMessage::UsersLoaded(Ok(users))
                 }
             }
             Err(e) => {
                 log::error!("[Auth] Failed to load users: {}", e);
                 // On error, check setup status as fallback
-                auth::AuthMessage::CheckSetupStatus
+                AuthMessage::CheckSetupStatus
             }
         },
     )
 }
 
 /// Transition into the auto-login check flow when setup is not required.
-pub fn transition_to_auto_login_check(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
-    use crate::domains::auth::types::AuthenticationFlow;
-
+pub fn transition_to_auto_login_check(state: &mut State) -> Task<AuthMessage> {
     log::info!("[Auth] No setup needed, checking for auto-login");
     state.domains.auth.state.auth_flow = AuthenticationFlow::CheckingAutoLogin;
 
@@ -91,7 +87,7 @@ pub fn transition_to_auto_login_check(
                         match svc.apply_stored_auth(stored_auth.clone()).await {
                             Ok(_) => {
                                 log::info!("[Auth] Auto-login successful");
-                                return auth::AuthMessage::AutoLoginSuccessful(
+                                return AuthMessage::AutoLoginSuccessful(
                                     stored_auth.user,
                                 );
                             }
@@ -113,7 +109,7 @@ pub fn transition_to_auto_login_check(
                 }
             }
 
-            auth::AuthMessage::AutoLoginCheckComplete
+            AuthMessage::AutoLoginCheckComplete
         },
         |msg| msg,
     )
@@ -123,7 +119,7 @@ pub fn transition_to_auto_login_check(
 pub fn handle_users_loaded(
     state: &mut State,
     result: Result<Vec<crate::domains::auth::dto::UserListItemDto>, String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     log::info!(
@@ -181,7 +177,7 @@ pub fn handle_users_loaded(
 pub fn handle_select_user(
     state: &mut State,
     user_id: uuid::Uuid,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     log::info!("[Auth] handle_select_user called for user_id: {}", user_id);
@@ -233,9 +229,7 @@ pub fn handle_select_user(
                     .await
                     .map_err(|e| e.to_string())
             },
-            move |result| {
-                auth::AuthMessage::DeviceStatusChecked(user_clone, result)
-            },
+            move |result| AuthMessage::DeviceStatusChecked(user_clone, result),
         );
     } else {
         log::error!("[Auth] User {} not found in current auth flow", user_id);
@@ -249,7 +243,7 @@ pub fn handle_device_status_checked(
     state: &mut State,
     user: core::User,
     result: Result<DeviceAuthStatus, String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
 
     log::info!(
@@ -314,38 +308,30 @@ pub fn handle_device_status_checked(
                 .await
                 .unwrap_or(false)
         },
-        auth::AuthMessage::RememberDeviceSynced,
+        AuthMessage::RememberDeviceSynced,
     )
 }
 
 /// Handle enable admin PIN unlock
-pub fn handle_enable_admin_pin_unlock(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
+pub fn handle_enable_admin_pin_unlock(state: &mut State) -> Task<AuthMessage> {
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::future(async move {
         match svc.enable_admin_pin_unlock().await {
-            Ok(_) => auth::AuthMessage::AdminPinUnlockToggled(Ok(true)),
-            Err(e) => {
-                auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string()))
-            }
+            Ok(_) => AuthMessage::AdminPinUnlockToggled(Ok(true)),
+            Err(e) => AuthMessage::AdminPinUnlockToggled(Err(e.to_string())),
         }
     })
 }
 
 /// Handle disable admin PIN unlock
-pub fn handle_disable_admin_pin_unlock(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
+pub fn handle_disable_admin_pin_unlock(state: &mut State) -> Task<AuthMessage> {
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
     Task::future(async move {
         match svc.disable_admin_pin_unlock().await {
-            Ok(_) => auth::AuthMessage::AdminPinUnlockToggled(Ok(false)),
-            Err(e) => {
-                auth::AuthMessage::AdminPinUnlockToggled(Err(e.to_string()))
-            }
+            Ok(_) => AuthMessage::AdminPinUnlockToggled(Ok(false)),
+            Err(e) => AuthMessage::AdminPinUnlockToggled(Err(e.to_string())),
         }
     })
 }
@@ -354,7 +340,7 @@ pub fn handle_disable_admin_pin_unlock(
 pub fn handle_admin_pin_unlock_toggled(
     state: &mut State,
     result: Result<bool, String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     match result {
         Ok(enabled) => {
             // Update any UI state if needed
@@ -381,7 +367,7 @@ pub fn handle_login_success(
     state: &mut State,
     user: core::User,
     permissions: core::UserPermissions,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{AuthenticationFlow, AuthenticationMode};
 
     log::info!("Login successful for user: {}", user.username);
@@ -426,11 +412,11 @@ pub fn handle_login_success(
             match result {
                 Ok(watch_state) => {
                     // Store watch state and signal authentication complete
-                    auth::AuthMessage::WatchStatusLoaded(Ok(watch_state))
+                    AuthMessage::WatchStatusLoaded(Ok(watch_state))
                 }
                 Err(e) => {
                     // Even on error, we're still authenticated
-                    auth::AuthMessage::WatchStatusLoaded(Err(e.to_string()))
+                    AuthMessage::WatchStatusLoaded(Err(e.to_string()))
                 }
             }
         },
@@ -438,9 +424,7 @@ pub fn handle_login_success(
 }
 
 /// Handle back to user selection
-pub fn handle_back_to_user_selection(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
+pub fn handle_back_to_user_selection(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     state.domains.auth.state.auth_flow = AuthenticationFlow::LoadingUsers;
@@ -450,7 +434,7 @@ pub fn handle_back_to_user_selection(
 }
 
 /// Handle logout
-pub fn handle_logout(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_logout(state: &mut State) -> Task<AuthMessage> {
     // Use trait-based auth service
     let auth_service = &state.domains.auth.state.auth_service;
     let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
@@ -458,12 +442,12 @@ pub fn handle_logout(state: &mut State) -> Task<auth::AuthMessage> {
         async move {
             let _ = svc.logout().await;
         },
-        |_| auth::AuthMessage::LogoutComplete,
+        |_| AuthMessage::LogoutComplete,
     )
 }
 
 /// Handle logout complete
-pub fn handle_logout_complete(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_logout_complete(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     // Reset authentication state (both top-level and domain state)
@@ -481,7 +465,7 @@ pub fn handle_logout_complete(state: &mut State) -> Task<auth::AuthMessage> {
 // Legacy password login handlers removed - replaced by AuthFlow handlers
 
 /// Handle auth status check (when stored auth is loaded from keychain)
-pub fn handle_check_auth_status(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_check_auth_status(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     log::info!(
@@ -497,11 +481,11 @@ pub fn handle_check_auth_status(state: &mut State) -> Task<auth::AuthMessage> {
         async move { svc.validate_session().await.map_err(|e| e.to_string()) },
         |result| match result {
             Ok((user, permissions)) => {
-                auth::AuthMessage::LoginSuccess(user, permissions)
+                AuthMessage::LoginSuccess(user, permissions)
             }
             Err(err) => {
                 log::warn!("[Auth] Auto-login validation failed: {}", err);
-                auth::AuthMessage::AutoLoginCheckComplete
+                AuthMessage::AutoLoginCheckComplete
             }
         },
     )
@@ -510,7 +494,7 @@ pub fn handle_check_auth_status(state: &mut State) -> Task<auth::AuthMessage> {
 /// Handle auth status confirmed with PIN (user has valid stored auth and PIN)
 pub fn handle_auth_status_confirmed_with_pin(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     log::info!(
         "[Auth] User has valid stored auth and PIN, proceeding to load libraries"
     );
@@ -538,15 +522,16 @@ pub fn handle_auth_status_confirmed_with_pin(
     });
 
     // Fallbacks in case the service doesn't return identity immediately
-    let user = maybe_user.or_else(|| match &state.domains.auth.state.auth_flow {
-        crate::domains::auth::types::AuthenticationFlow::EnteringCredentials { user, .. } => {
-            Some(user.clone())
-        }
-        crate::domains::auth::types::AuthenticationFlow::Authenticated { user, .. } => {
-            Some(user.clone())
-        }
-        _ => None,
-    });
+    let user =
+        maybe_user.or_else(|| match &state.domains.auth.state.auth_flow {
+            AuthenticationFlow::EnteringCredentials { user, .. } => {
+                Some(user.clone())
+            }
+            AuthenticationFlow::Authenticated { user, .. } => {
+                Some(user.clone())
+            }
+            _ => None,
+        });
 
     // Update cached permissions if available
     if let Some(perms) = maybe_perms.clone() {
@@ -555,7 +540,7 @@ pub fn handle_auth_status_confirmed_with_pin(
 
     match (user, maybe_perms) {
         (Some(user), Some(perms)) => {
-            Task::done(auth::AuthMessage::LoginSuccess(user, perms))
+            Task::done(AuthMessage::LoginSuccess(user, perms))
         }
         // If permissions are unavailable, synthesize an empty set so we can still
         // drive the unified LoginSuccess path and emit AuthenticationComplete.
@@ -566,7 +551,7 @@ pub fn handle_auth_status_confirmed_with_pin(
                 permissions: std::collections::HashMap::new(),
                 permission_details: None,
             };
-            Task::done(auth::AuthMessage::LoginSuccess(user, perms))
+            Task::done(AuthMessage::LoginSuccess(user, perms))
         }
         // If the user can't be determined (shouldn't happen in this path),
         // fall back to previous behavior: proceed with watch-state only.
@@ -577,10 +562,10 @@ pub fn handle_auth_status_confirmed_with_pin(
                 async move { api_service.get_watch_state().await },
                 |result| match result {
                     Ok(watch_state) => {
-                        auth::AuthMessage::WatchStatusLoaded(Ok(watch_state))
+                        AuthMessage::WatchStatusLoaded(Ok(watch_state))
                     }
                     Err(e) => {
-                        auth::AuthMessage::WatchStatusLoaded(Err(e.to_string()))
+                        AuthMessage::WatchStatusLoaded(Err(e.to_string()))
                     }
                 },
             )
@@ -591,7 +576,7 @@ pub fn handle_auth_status_confirmed_with_pin(
 /// Handle auto-login check complete - proceed to load users
 pub fn handle_auto_login_check_complete(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     log::info!("[Auth] Auto-login check complete, loading users");
 
     // Reset auth state and reuse the existing user-loading flow logic
@@ -606,7 +591,7 @@ pub fn handle_auto_login_check_complete(
 pub fn handle_auto_login_successful(
     state: &mut State,
     user: User,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     log::info!("[Auth] Auto-login successful for user: {}", user.username);
 
     state.domains.auth.state.auto_login_enabled =
@@ -627,10 +612,10 @@ pub fn handle_auto_login_successful(
         },
         |(user, permissions)| {
             if let Some(perms) = permissions {
-                auth::AuthMessage::LoginSuccess(user, perms)
+                AuthMessage::LoginSuccess(user, perms)
             } else {
                 let user_id = user.id;
-                auth::AuthMessage::LoginSuccess(
+                AuthMessage::LoginSuccess(
                     user,
                     UserPermissions {
                         user_id,
@@ -648,7 +633,7 @@ pub fn handle_auto_login_successful(
 pub fn handle_watch_status_loaded(
     state: &mut State,
     result: Result<core::UserWatchState, String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     match result {
         Ok(watch_state) => {
             log::info!(
@@ -674,7 +659,7 @@ pub fn handle_watch_status_loaded(
 pub fn handle_auth_flow_update_credential(
     state: &mut State,
     input: String,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
 
     match &mut state.domains.auth.state.auth_flow {
@@ -691,7 +676,7 @@ pub fn handle_auth_flow_update_credential(
             if matches!(input_type, CredentialType::Pin { .. })
                 && current_input.len() == 4
             {
-                return Task::done(auth::AuthMessage::SubmitCredential);
+                return Task::done(AuthMessage::SubmitCredential);
             }
         }
 
@@ -711,7 +696,7 @@ pub fn handle_auth_flow_update_credential(
 /// Handle credential submission
 pub fn handle_auth_flow_submit_credential(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
 
     if let AuthenticationFlow::EnteringCredentials {
@@ -743,7 +728,7 @@ pub fn handle_auth_flow_submit_credential(
                         .await
                         .map_err(|e| e.to_string())
                     },
-                    auth::AuthMessage::AuthResult,
+                    AuthMessage::AuthResult,
                 );
             }
             CredentialType::Pin { .. } => {
@@ -756,7 +741,7 @@ pub fn handle_auth_flow_submit_credential(
                         .await
                         .map_err(|e| e.to_string())
                     },
-                    auth::AuthMessage::AuthResult,
+                    AuthMessage::AuthResult,
                 );
             }
         }
@@ -768,7 +753,7 @@ pub fn handle_auth_flow_submit_credential(
 pub fn handle_pre_auth_update_username(
     state: &mut State,
     username: String,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
     if let AuthenticationFlow::PreAuthLogin {
         username: u, error, ..
@@ -783,7 +768,7 @@ pub fn handle_pre_auth_update_username(
 /// Handle pre-auth password visibility toggle
 pub fn handle_pre_auth_toggle_password_visibility(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
     if let AuthenticationFlow::PreAuthLogin { show_password, .. } =
         &mut state.domains.auth.state.auth_flow
@@ -796,7 +781,7 @@ pub fn handle_pre_auth_toggle_password_visibility(
 /// Handle pre-auth remember device toggle
 pub fn handle_pre_auth_toggle_remember_device(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
     if let AuthenticationFlow::PreAuthLogin {
         remember_device, ..
@@ -809,7 +794,7 @@ pub fn handle_pre_auth_toggle_remember_device(
 }
 
 /// Handle pre-auth submit
-pub fn handle_pre_auth_submit(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_pre_auth_submit(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::PreAuthLogin {
@@ -844,7 +829,7 @@ pub fn handle_pre_auth_submit(state: &mut State) -> Task<auth::AuthMessage> {
                     .await
                     .map_err(|e| e.to_string())
             },
-            auth::AuthMessage::AuthResult,
+            AuthMessage::AuthResult,
         );
     }
     Task::none()
@@ -854,7 +839,7 @@ pub fn handle_pre_auth_submit(state: &mut State) -> Task<auth::AuthMessage> {
 pub fn handle_auth_flow_auth_result(
     state: &mut State,
     result: Result<crate::domains::auth::manager::PlayerAuthResult, String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{
         AuthenticationFlow, AuthenticationMode, CredentialType,
     };
@@ -914,7 +899,7 @@ pub fn handle_auth_flow_auth_result(
 
             // Unify with auto-login path: dispatch LoginSuccess immediately so
             // AuthenticationComplete is emitted regardless of watch-state outcome.
-            Task::done(auth::AuthMessage::LoginSuccess(
+            Task::done(AuthMessage::LoginSuccess(
                 auth_result.user,
                 auth_result.permissions,
             ))
@@ -932,10 +917,8 @@ pub fn handle_auth_flow_auth_result(
                         error.contains("locked") || error.contains("attempts");
                     *view_error = Some(error);
                     *loading = false;
-                    if is_lockout {
-                        if let Some(remaining) = attempts_remaining {
-                            *remaining = remaining.saturating_sub(1);
-                        }
+                    if is_lockout && let Some(remaining) = attempts_remaining {
+                        *remaining = remaining.saturating_sub(1);
                     }
                 }
                 AuthenticationFlow::PreAuthLogin {
@@ -956,9 +939,7 @@ pub fn handle_auth_flow_auth_result(
 }
 
 /// Handle PIN setup submission
-pub fn handle_auth_flow_submit_pin(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_submit_pin(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::SettingUpPin {
@@ -988,7 +969,7 @@ pub fn handle_auth_flow_submit_pin(
                     .await
                     .map_err(|e| e.to_string())
             },
-            auth::AuthMessage::PinSet,
+            AuthMessage::PinSet,
         );
     }
     Task::none()
@@ -998,7 +979,7 @@ pub fn handle_auth_flow_submit_pin(
 pub fn handle_auth_flow_pin_set(
     state: &mut State,
     result: Result<(), String>,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::{AuthenticationFlow, AuthenticationMode};
 
     match result {
@@ -1031,7 +1012,7 @@ pub fn handle_auth_flow_pin_set(
                             permission_details: None,
                         }
                     });
-                return Task::done(auth::AuthMessage::LoginSuccess(
+                return Task::done(AuthMessage::LoginSuccess(
                     user.clone(),
                     permissions,
                 ));
@@ -1052,7 +1033,7 @@ pub fn handle_auth_flow_pin_set(
 /// Handle password visibility toggle
 pub fn handle_auth_flow_toggle_password_visibility(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::EnteringCredentials { show_password, .. } =
@@ -1066,7 +1047,7 @@ pub fn handle_auth_flow_toggle_password_visibility(
 /// Handle remember device toggle
 pub fn handle_auth_flow_toggle_remember_device(
     state: &mut State,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::EnteringCredentials {
@@ -1082,7 +1063,7 @@ pub fn handle_auth_flow_toggle_remember_device(
 pub fn handle_remember_device_synced(
     state: &mut State,
     enabled: bool,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     state.domains.auth.state.auto_login_enabled = enabled;
@@ -1098,9 +1079,7 @@ pub fn handle_remember_device_synced(
 }
 
 /// Transition into PIN setup when we have an authenticated user context.
-pub fn handle_auth_flow_setup_pin(
-    state: &mut State,
-) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_setup_pin(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     let user = match &state.domains.auth.state.auth_flow {
@@ -1128,7 +1107,7 @@ pub fn handle_auth_flow_setup_pin(
 pub fn handle_auth_flow_update_pin(
     state: &mut State,
     raw_value: String,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::SettingUpPin { pin, error, .. } =
@@ -1151,7 +1130,7 @@ pub fn handle_auth_flow_update_pin(
 pub fn handle_auth_flow_update_confirm_pin(
     state: &mut State,
     raw_value: String,
-) -> Task<auth::AuthMessage> {
+) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     if let AuthenticationFlow::SettingUpPin {
@@ -1172,7 +1151,7 @@ pub fn handle_auth_flow_update_confirm_pin(
 }
 
 /// Retry the current authentication step.
-pub fn handle_auth_flow_retry(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_retry(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     match &state.domains.auth.state.auth_flow {
@@ -1191,7 +1170,7 @@ pub fn handle_auth_flow_retry(state: &mut State) -> Task<auth::AuthMessage> {
                         .map_err(|e| e.to_string())
                 },
                 move |result| {
-                    auth::AuthMessage::DeviceStatusChecked(user_clone, result)
+                    AuthMessage::DeviceStatusChecked(user_clone, result)
                 },
             )
         }
@@ -1203,7 +1182,7 @@ pub fn handle_auth_flow_retry(state: &mut State) -> Task<auth::AuthMessage> {
 }
 
 /// Handle local back navigation for the auth flow.
-pub fn handle_auth_flow_back(state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_auth_flow_back(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
     match state.domains.auth.state.auth_flow.clone() {
@@ -1218,7 +1197,7 @@ pub fn handle_auth_flow_back(state: &mut State) -> Task<auth::AuthMessage> {
     }
 }
 
-pub fn handle_show_create_user(_state: &mut State) -> Task<auth::AuthMessage> {
+pub fn handle_show_create_user(_state: &mut State) -> Task<AuthMessage> {
     // Legacy handler - replaced by AuthFlow
     Task::none()
 }

@@ -51,8 +51,6 @@ impl SettingsService for MockSettingsServiceOk {
 fn new_state_with_service(service: Option<Arc<dyn SettingsService>>) -> State {
     let mut state = State::default();
     // Ensure settings view is device management for clarity
-    state.domains.settings.current_view =
-        ferrex_player::domains::settings::state::SettingsView::DeviceManagement;
     if let Some(svc) = service {
         state.domains.settings.settings_service = svc;
     }

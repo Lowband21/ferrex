@@ -279,16 +279,15 @@ pub fn handle_skip_pin_setup(state: &mut State) -> Task<auth::AuthMessage> {
         transition_progress,
         ..
     } = &mut state.domains.auth.state.auth_flow
+        && matches!(current_step, SetupStep::Pin)
     {
-        if matches!(current_step, SetupStep::Pin) {
-            // Clear any partial PIN entry
-            *pin = SecureCredential::new(String::new());
-            *confirm_pin = SecureCredential::new(String::new());
-            // Move to complete
-            *current_step = SetupStep::Complete;
-            *transition_direction = TransitionDirection::Forward;
-            *transition_progress = 0.0;
-        }
+        // Clear any partial PIN entry
+        *pin = SecureCredential::new(String::new());
+        *confirm_pin = SecureCredential::new(String::new());
+        // Move to complete
+        *current_step = SetupStep::Complete;
+        *transition_direction = TransitionDirection::Forward;
+        *transition_progress = 0.0;
     }
 
     Task::none()
@@ -304,13 +303,12 @@ pub fn handle_setup_animation_tick(
         transition_direction,
         ..
     } = &mut state.domains.auth.state.auth_flow
+        && !matches!(transition_direction, TransitionDirection::None)
     {
-        if !matches!(transition_direction, TransitionDirection::None) {
-            *transition_progress = (*transition_progress + delta).min(1.0);
-            if *transition_progress >= 1.0 {
-                *transition_direction = TransitionDirection::None;
-                *transition_progress = 0.0;
-            }
+        *transition_progress = (*transition_progress + delta).min(1.0);
+        if *transition_progress >= 1.0 {
+            *transition_direction = TransitionDirection::None;
+            *transition_progress = 0.0;
         }
     }
 
@@ -541,7 +539,7 @@ pub fn handle_start_setup_claim(state: &mut State) -> Task<auth::AuthMessage> {
                     .await
                     .map_err(|e| e.to_string())
             },
-            |result| auth::AuthMessage::ClaimStarted(result),
+            auth::AuthMessage::ClaimStarted,
         );
     }
 
@@ -609,7 +607,7 @@ pub fn handle_confirm_setup_claim(
                         .await
                         .map_err(|e| e.to_string())
                 },
-                |result| auth::AuthMessage::ClaimConfirmed(result),
+                auth::AuthMessage::ClaimConfirmed,
             );
         } else {
             *error = Some("No claim code available".to_string());
@@ -644,9 +642,7 @@ pub fn handle_claim_confirmed(
             Err(e) => {
                 error!("[Auth] Failed to confirm claim: {}", e);
                 // Keep status as pending so user can retry
-                *error = Some(format!(
-                    "Verification not confirmed yet. Please run the confirm command on your server."
-                ));
+                *error = Some("Verification not confirmed yet. Please run the confirm command on your server.".to_string());
             }
         }
     }

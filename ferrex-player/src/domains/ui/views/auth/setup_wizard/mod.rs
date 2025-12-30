@@ -103,15 +103,15 @@ pub fn view_setup_wizard<'a>(
     ]
     .spacing(0)
     .align_x(Alignment::Center)
-    .width(Length::Fixed(480.0))
-    .height(Length::Fill);
+    .width(Length::Fill)
+    .height(Length::FillPortion(2));
 
     // Wrap in auth container (centered on screen)
     let card = auth_card(
         container(content)
             .padding(24)
             .width(Length::Fill)
-            .height(Length::Fill),
+            .height(Length::FillPortion(2)),
     );
 
     auth_container(card).into()

@@ -15,6 +15,7 @@ use ferrex_core::player_prelude::{AuthToken, User, UserPermissions};
 use log::{info, warn};
 
 /// Adapter that implements AuthService using the existing AuthManager
+#[derive(Debug)]
 pub struct AuthManagerAdapter {
     manager: Arc<AuthManager>,
 }
@@ -217,15 +218,14 @@ impl AuthService for AuthManagerAdapter {
                 // If credentials are invalid against the current server, also clear stale user cache
                 // so the UI doesn't present users from a previous server instance.
                 let msg = e.to_string();
-                if msg.contains("Invalid credentials") {
-                    if let Err(clear_err) =
+                if msg.contains("Invalid credentials")
+                    && let Err(clear_err) =
                         self.manager.clear_current_server_user_cache().await
-                    {
-                        warn!(
-                            "[Auth] Failed to clear stale user cache: {}",
-                            clear_err
-                        );
-                    }
+                {
+                    warn!(
+                        "[Auth] Failed to clear stale user cache: {}",
+                        clear_err
+                    );
                 }
                 Err(RepositoryError::QueryFailed(format!(
                     "Apply stored auth failed: {}",

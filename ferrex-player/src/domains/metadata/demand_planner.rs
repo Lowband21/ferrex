@@ -5,13 +5,16 @@
 //! image service with appropriate priorities.
 
 use ferrex_core::player_prelude::{
-    EpisodeStillSize, ImageRequest, PosterKind, PosterSize, Priority,
+    EpisodeSize, ImageRequest, ImageSize, PosterSize, Priority,
 };
 use uuid::Uuid;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+use crate::domains::metadata::image_service::UnifiedImageService;
 
 /// Optional context for non-grid imagery (e.g., hero/backdrop/cast).
 #[derive(Debug, Clone, Default)]
@@ -34,8 +37,8 @@ impl DemandContext {
 /// Specific image request instructions used to override the default poster mapping.
 #[derive(Debug, Clone)]
 pub enum DemandRequestKind {
-    Poster { kind: PosterKind, size: PosterSize },
-    EpisodeStill { size: EpisodeStillSize },
+    Poster { size: PosterSize },
+    EpisodeStill { size: EpisodeSize },
 }
 
 /// Snapshot of current demand produced by UI layer.
@@ -46,7 +49,7 @@ pub struct DemandSnapshot {
     pub background_ids: Vec<Uuid>,
     pub timestamp: std::time::Instant,
     pub context: Option<DemandContext>,
-    pub poster_kind: Option<PosterKind>,
+    pub poster_size: PosterSize,
 }
 
 /// Handle to send snapshots to the planner.
@@ -63,7 +66,7 @@ impl PlannerHandle {
 
 /// Start the planner task.
 pub fn start_planner(
-    image_service: crate::domains::metadata::image_service::UnifiedImageService,
+    image_service: Arc<UnifiedImageService>,
 ) -> (PlannerHandle, tokio::task::JoinHandle<()>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<DemandSnapshot>();
     let handle = PlannerHandle { tx };
@@ -88,7 +91,7 @@ pub fn start_planner(
             let mut total_background = 0usize;
 
             // Helper to insert/upgrade priority while preserving order
-            let mut push_or_update =
+            let push_or_update =
                 |req: ImageRequest,
                  prio: Priority,
                  out: &mut Vec<(ImageRequest, Priority)>,
@@ -112,7 +115,7 @@ pub fn start_planner(
                     snap.visible_ids.iter().copied(),
                     snap.prefetch_ids.iter().copied(),
                     snap.background_ids.iter().copied(),
-                    snap.poster_kind,
+                    snap.poster_size,
                     snap.context.as_ref(),
                 );
 
@@ -138,7 +141,7 @@ pub fn start_planner(
                 image_service.request_image(req.clone().with_priority(*prio));
             }
 
-            const CANCELLATION_GRACE_MS: u64 = 75;
+            const CANCELLATION_GRACE_MS: u64 = 150;
             const MAX_CANCEL_PER_TICK: usize = 6;
 
             if state.in_flight >= image_service.max_concurrent() {
@@ -150,16 +153,19 @@ pub fn start_planner(
                     if let Some(started) = image_service.loading_started_at(req)
                         && started.elapsed()
                             >= Duration::from_millis(CANCELLATION_GRACE_MS)
+                        && image_service.cancel_inflight(req)
                     {
-                        if image_service.cancel_inflight(req) {
-                            cancelled += 1;
-                            log::trace!(
-                                "Planner cancelled in-flight request {:?}",
-                                req.media_id
+                        cancelled += 1;
+                        log::warn!(
+                            "Planner cancelled in-flight request {:?}",
+                            req.iid
+                        );
+                        if cancelled >= MAX_CANCEL_PER_TICK {
+                            log::warn!(
+                                "Hit max cancel per tick bound {}",
+                                MAX_CANCEL_PER_TICK
                             );
-                            if cancelled >= MAX_CANCEL_PER_TICK {
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
@@ -197,14 +203,14 @@ pub fn build_desired_set(
     visible_ids: impl IntoIterator<Item = Uuid>,
     prefetch_ids: impl IntoIterator<Item = Uuid>,
     background_ids: impl IntoIterator<Item = Uuid>,
-    poster_kind: Option<PosterKind>,
+    poster_size: PosterSize,
     context: Option<&DemandContext>,
 ) -> Vec<(ImageRequest, Priority)> {
     let mut out: Vec<(ImageRequest, Priority)> = Vec::new();
     let mut positions: HashMap<ImageRequest, usize> = HashMap::new();
 
     // Helper closure to insert or upgrade priority while preserving order.
-    let mut push_or_update =
+    let push_or_update =
         |req: ImageRequest,
          prio: Priority,
          out: &mut Vec<(ImageRequest, Priority)>,
@@ -227,20 +233,20 @@ pub fn build_desired_set(
             visible_list.into_iter().enumerate().collect();
         indexed.sort_by_key(|(idx, _)| idx.abs_diff(center));
         for (_idx, id) in indexed {
-            let req = resolve_image_request(id, poster_kind, context);
+            let req = resolve_image_request(id, poster_size, context);
             push_or_update(req, Priority::Visible, &mut out, &mut positions);
         }
     }
 
     // Prefetch → Preload priority (do not override Visible if already set)
     for id in prefetch_ids {
-        let req = resolve_image_request(id, poster_kind, context);
+        let req = resolve_image_request(id, poster_size, context);
         push_or_update(req, Priority::Preload, &mut out, &mut positions);
     }
 
     // Background → Background priority (lowest tier)
     for id in background_ids {
-        let req = resolve_image_request(id, poster_kind, context);
+        let req = resolve_image_request(id, poster_size, context);
         push_or_update(req, Priority::Background, &mut out, &mut positions);
     }
 
@@ -249,30 +255,28 @@ pub fn build_desired_set(
 
 fn resolve_image_request(
     id: Uuid,
-    fallback_kind: Option<PosterKind>,
+    poster_size: PosterSize,
     context: Option<&DemandContext>,
 ) -> ImageRequest {
-    if let Some(ctx) = context {
-        if let Some(kind) = ctx.request_kind(&id) {
-            return match kind {
-                DemandRequestKind::Poster { kind, size } => {
-                    ImageRequest::poster(id, *kind, *size)
-                }
-                DemandRequestKind::EpisodeStill { size } => {
-                    ImageRequest::episode_still(id, *size)
-                }
-            };
-        }
+    if let Some(ctx) = context
+        && let Some(kind) = ctx.request_kind(&id)
+    {
+        return match kind {
+            DemandRequestKind::Poster { size } => {
+                ImageRequest::new(id, ImageSize::Poster(*size))
+            }
+            DemandRequestKind::EpisodeStill { size } => {
+                ImageRequest::new(id, ImageSize::Thumbnail(*size))
+            }
+        };
     }
 
-    let kind = fallback_kind.unwrap_or(PosterKind::Movie);
-    ImageRequest::poster(id, kind, PosterSize::W300)
+    ImageRequest::new(id, ImageSize::Poster(poster_size))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrex_core::player_prelude::PosterKind;
 
     fn uuid(idx: u128) -> Uuid {
         Uuid::from_u128(idx)
@@ -285,11 +289,10 @@ mod tests {
             visible.clone(),
             Vec::<Uuid>::new(),
             Vec::<Uuid>::new(),
-            Some(PosterKind::Movie),
+            PosterSize::W185,
             None,
         );
-        let order: Vec<Uuid> =
-            desired.iter().map(|(req, _)| req.media_id).collect();
+        let order: Vec<Uuid> = desired.iter().map(|(req, _)| req.iid).collect();
         assert_eq!(order, vec![uuid(3), uuid(2), uuid(4), uuid(1)]);
         assert!(
             desired
@@ -305,7 +308,7 @@ mod tests {
             vec![id],
             vec![id],
             Vec::<Uuid>::new(),
-            Some(PosterKind::Series),
+            PosterSize::W185,
             None,
         );
         assert_eq!(desired.len(), 1);
@@ -319,7 +322,7 @@ mod tests {
         context.override_request(
             episode_id,
             DemandRequestKind::EpisodeStill {
-                size: EpisodeStillSize::Standard,
+                size: EpisodeSize::W512,
             },
         );
 
@@ -327,17 +330,14 @@ mod tests {
             Vec::<Uuid>::new(),
             vec![episode_id],
             Vec::<Uuid>::new(),
-            None,
+            PosterSize::W185,
             Some(&context),
         );
 
         assert_eq!(desired.len(), 1);
         let request = &desired[0].0;
-        assert_eq!(request.media_id, episode_id);
-        assert_eq!(
-            request.image_type,
-            ferrex_core::player_prelude::ImageType::Episode
-        );
+        assert_eq!(request.iid, episode_id);
+        assert!(matches!(request.size, ImageSize::Thumbnail(_)));
         assert_eq!(desired[0].1, Priority::Preload);
     }
 
@@ -351,13 +351,13 @@ mod tests {
             visible,
             prefetch,
             background.clone(),
-            Some(PosterKind::Movie),
+            PosterSize::W185,
             None,
         );
 
         let background_entries: Vec<(ImageRequest, Priority)> = desired
             .into_iter()
-            .filter(|(req, _)| background.contains(&req.media_id))
+            .filter(|(req, _)| background.contains(&req.iid))
             .collect();
 
         assert_eq!(background_entries.len(), 2);

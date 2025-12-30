@@ -1,5 +1,6 @@
 use iced::Task;
 
+use crate::infra::cache::PlayerDiskImageCacheLimits;
 use crate::{
     common::{
         ViewState,
@@ -11,12 +12,11 @@ use crate::{
             messages::SettingsMessage,
             sections::{
                 display::DisplayMessage, performance::PerformanceMessage,
-                playback::PlaybackMessage, theme::ThemeMessage,
+                playback::PlaybackMessage,
             },
         },
         ui::{
             feedback_ui::{FeedbackMessage, ToastNotification},
-            messages::UiMessage,
             settings_ui::{RuntimeConfigMessage, SettingsUiMessage},
         },
     },
@@ -76,16 +76,20 @@ pub fn update_settings_ui(
                 LibraryMessage::FetchActiveScans,
             ));
 
-            let mut tasks = vec![fetch_scans_task];
+            let tasks = {
+                let tasks = vec![fetch_scans_task];
 
-            #[cfg(feature = "demo")]
-            {
-                use crate::domains::ui::update_handlers::demo_controls;
+                #[cfg(feature = "demo")]
+                let tasks = {
+                    use crate::domains::ui::update_handlers::demo_controls;
 
-                tasks = demo_controls::augment_show_library_management_tasks(
-                    state, tasks,
-                );
-            }
+                    demo_controls::augment_show_library_management_tasks(
+                        state, tasks,
+                    )
+                };
+
+                tasks
+            };
 
             let combined_task = Task::batch(tasks);
 
@@ -104,7 +108,7 @@ pub fn update_settings_ui(
             state.domains.ui.state.view = ViewState::AdminDashboard;
             DomainUpdateResult::task(Task::none())
         }
-        SettingsUiMessage::ShowProfile => {
+        SettingsUiMessage::ShowSettings => {
                 // Save current view to navigation history
                 state
                     .domains
@@ -189,40 +193,6 @@ pub fn update_settings_ui(
         SettingsUiMessage::DatabaseCleared(result) => {
                 let task = crate::common::clear_database::handle_database_cleared(state, result);
                 DomainUpdateResult::task(task)
-            }
-        SettingsUiMessage::ShowUserProfile => {
-                state.domains.settings.current_view =
-                    crate::domains::settings::state::SettingsView::Profile;
-                DomainUpdateResult::task(Task::none())
-            }
-        SettingsUiMessage::ShowUserPreferences => {
-                state.domains.settings.current_view =
-                    crate::domains::settings::state::SettingsView::Preferences;
-                DomainUpdateResult::task(Task::none())
-            }
-        SettingsUiMessage::ShowUserSecurity => {
-                state.domains.settings.current_view =
-                    crate::domains::settings::state::SettingsView::Security;
-
-                DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                    SettingsMessage::CheckUserHasPin,
-                )))
-            }
-        SettingsUiMessage::ShowDeviceManagement => {
-                state.domains.settings.current_view =
-                    crate::domains::settings::state::SettingsView::DeviceManagement;
-                // Load devices when the view is shown - send direct message to Settings domain
-                DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                    crate::domains::settings::messages::SettingsMessage::LoadDevices,
-                )))
-            }
-        SettingsUiMessage::BackToSettings => {
-                state.domains.ui.state.view = ViewState::UserSettings;
-                state.domains.settings.current_view =
-                    crate::domains::settings::state::SettingsView::Main;
-                // Clear any security settings state
-                state.domains.settings.security = Default::default();
-                DomainUpdateResult::task(Task::none())
             }
         SettingsUiMessage::ShowChangePassword => {
                 DomainUpdateResult::task(Task::done(DomainMessage::Settings(
@@ -505,7 +475,7 @@ pub fn update_settings_ui(
         }
         SettingsUiMessage::SetGridSpacing(value) => {
             DomainUpdateResult::task(Task::done(DomainMessage::Settings(
-                SettingsMessage::Display(DisplayMessage::SetGridEffectiveSpacing(value)),
+                SettingsMessage::Display(DisplayMessage::SetGridPosterGap(value)),
             )))
         }
         SettingsUiMessage::SetRowSpacing(value) => {
@@ -599,9 +569,14 @@ fn update_runtime_config(
             | RuntimeConfigMessage::PrefetchRowsBelow(_)
             // Keep-alive - used in utils.rs bump_keep_alive
             | RuntimeConfigMessage::KeepAlive(_)
+            // Image cache - used in metadata loader + UnifiedImageService
+            | RuntimeConfigMessage::ImageCacheRamMax(_)
+            | RuntimeConfigMessage::ImageCacheDiskMax(_)
+            | RuntimeConfigMessage::ImageCacheDiskTtlDays(_)
             // Animation effects - used in AnimationConfig via runtime_config.animation_config()
             | RuntimeConfigMessage::HoverScale(_)
             | RuntimeConfigMessage::HoverTransition(_)
+            | RuntimeConfigMessage::HoverScaleDownDelay(_)
             | RuntimeConfigMessage::AnimationDuration(_)
             | RuntimeConfigMessage::TextureFadeInitial(_)
             | RuntimeConfigMessage::TextureFade(_)
@@ -668,6 +643,13 @@ fn update_runtime_config(
             // Update global for immediate effect on all posters
             crate::infra::shader_widgets::poster::set_hover_transition_ms(v);
         }
+        RuntimeConfigMessage::HoverScaleDownDelay(v) => {
+            config.animation_hover_scale_down_delay_ms = Some(v);
+            // Update global for immediate effect on all posters
+            crate::infra::shader_widgets::poster::set_hover_scale_down_delay_ms(
+                v,
+            );
+        }
         RuntimeConfigMessage::AnimationDuration(v) => {
             config.animation_default_duration_ms = Some(v)
         }
@@ -695,6 +677,40 @@ fn update_runtime_config(
             config.carousel_background_items = Some(v)
         }
         RuntimeConfigMessage::KeepAlive(v) => config.keep_alive_ms = Some(v),
+
+        // Image Cache (IN USE)
+        RuntimeConfigMessage::ImageCacheRamMax(byte_size) => {
+            config.image_cache_ram_max_bytes = Some(byte_size);
+            state.image_service.set_ram_max_bytes(byte_size);
+        }
+        RuntimeConfigMessage::ImageCacheDiskMax(byte_size) => {
+            config.image_cache_disk_max_bytes = Some(byte_size);
+            if let Some(cache) = state.disk_image_cache.as_ref() {
+                cache.set_limits_and_enforce(PlayerDiskImageCacheLimits {
+                    max_bytes: config.image_cache_disk_max_bytes(),
+                    ttl: config.image_cache_disk_ttl(),
+                    touch_interval: PlayerDiskImageCacheLimits::defaults()
+                        .touch_interval,
+                    access_index_flush_interval:
+                        PlayerDiskImageCacheLimits::defaults()
+                            .access_index_flush_interval,
+                });
+            }
+        }
+        RuntimeConfigMessage::ImageCacheDiskTtlDays(days) => {
+            config.image_cache_disk_ttl_days = Some(days.max(1));
+            if let Some(cache) = state.disk_image_cache.as_ref() {
+                cache.set_limits_and_enforce(PlayerDiskImageCacheLimits {
+                    max_bytes: config.image_cache_disk_max_bytes(),
+                    ttl: config.image_cache_disk_ttl(),
+                    touch_interval: PlayerDiskImageCacheLimits::defaults()
+                        .touch_interval,
+                    access_index_flush_interval:
+                        PlayerDiskImageCacheLimits::defaults()
+                            .access_index_flush_interval,
+                });
+            }
+        }
 
         // Player Seeking (not yet wired to consumers)
         RuntimeConfigMessage::SeekForwardCoarse(v) => {

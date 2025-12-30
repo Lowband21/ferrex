@@ -1,7 +1,7 @@
 use super::messages::MediaMessage;
 use crate::{
     common::messages::{DomainMessage, DomainUpdateResult},
-    state::State,
+    domains::media::MediaDomainState,
 };
 use ferrex_core::player_prelude::{
     EpisodeKey, MediaID, MediaIDLike, UpdateProgressRequest, UserWatchState,
@@ -18,7 +18,7 @@ use iced::Task;
     profiling::function
 )]
 pub fn update_media(
-    state: &mut State,
+    state: &mut MediaDomainState,
     message: MediaMessage,
 ) -> DomainUpdateResult {
     match message {
@@ -33,55 +33,11 @@ pub fn update_media(
             DomainUpdateResult::task(Task::none())
         }
 
-        /* TODO: Reimplement this in player domain
-        Message::PlayNextEpisode => {
-            // Check if current media is an episode and play the next one
-            if let Some(current_media_id) = &state.domains.media.state.current_media_id {
-                if let MediaID::Episode(episode_id) = current_media_id {
-                    // Use series progress service to find next episode
-                    //use crate::domains::media::services::SeriesProgressService;
-
-                    let media_store = state.domains.media.state.media_store.clone();
-                    let service = SeriesProgressService::new(media_store);
-
-                    if let Some(next_episode) = service.get_next_episode(episode_id) {
-                        log::info!(
-                            "Auto-playing next episode: S{:02}E{:02}",
-                            next_episode.season_number.value(),
-                            next_episode.episode_number.value()
-                        );
-
-                        // Convert to MediaFile and play
-                        let media_file = crate::domains::media::library::MediaFile::from(
-                            next_episode.file.clone(),
-                        );
-                        let media_id = MediaID::Episode(next_episode.id.clone());
-
-                        // Clear any pending resume position for fresh start of next episode
-                        state.domains.media.state.pending_resume_position = None;
-
-                        // Reuse the PlayMediaWithId handler
-                        update_media(state, Message::PlayMediaWithId(media_file, media_id))
-                    } else {
-                        log::info!("No next episode found, playback complete");
-                        // Could navigate back to series view or show completion message
-                        DomainUpdateResult::task(Task::none())
-                    }
-                } else {
-                    // Not an episode, nothing to auto-play
-                    DomainUpdateResult::task(Task::none())
-                }
-            } else {
-                DomainUpdateResult::task(Task::none())
-            }
-            DomainUpdateResult::task(Task::none())
-        }*/
         // Handle watch progress tracking
         MediaMessage::ProgressUpdateSent(media_id, position, duration) => {
             // Update the last sent position
-            state.domains.player.state.last_progress_sent = position;
-            state.domains.player.state.last_progress_update =
-                Some(std::time::Instant::now());
+            state.last_progress_sent = position;
+            state.last_progress_update = Some(std::time::Instant::now());
 
             // Update local watch state to reflect in UI immediately
             let should_refresh_ui = {
@@ -94,14 +50,11 @@ pub fn update_media(
                     false
                 } else {
                     // Ensure we have a local watch state cache to update
-                    if state.domains.media.state.user_watch_state.is_none() {
-                        state.domains.media.state.user_watch_state =
-                            Some(UserWatchState::new());
+                    if state.user_watch_state.is_none() {
+                        state.user_watch_state = Some(UserWatchState::new());
                     }
 
-                    if let Some(watch_state) =
-                        &mut state.domains.media.state.user_watch_state
-                    {
+                    if let Some(watch_state) = &mut state.user_watch_state {
                         let media_uuid = media_id.to_uuid();
                         let progress_ratio =
                             (position / duration).clamp(0.0, 1.0);
@@ -163,11 +116,7 @@ pub fn update_media(
 
                         // Otherwise fall back to debounce window (max one refresh every 2 seconds)
                         let allow_debounce_refresh = if let Some(last_refresh) =
-                            state
-                                .domains
-                                .media
-                                .state
-                                .last_ui_refresh_for_progress
+                            state.last_ui_refresh_for_progress
                         {
                             last_refresh.elapsed()
                                 > std::time::Duration::from_secs(2)
@@ -176,11 +125,7 @@ pub fn update_media(
                         };
 
                         if bypass_debounce || allow_debounce_refresh {
-                            state
-                                .domains
-                                .media
-                                .state
-                                .last_ui_refresh_for_progress =
+                            state.last_ui_refresh_for_progress =
                                 Some(std::time::Instant::now());
                             true
                         } else {
@@ -221,7 +166,7 @@ pub fn update_media(
             );
 
             // Send an immediate progress update using the captured data
-            if let Some(api_service) = &state.domains.media.state.api_service {
+            if let Some(api_service) = &state.api_service {
                 log::debug!(
                     "SendProgressUpdateWithData: Media {:?}, Position: {:.1}s, Duration: {:.1}s",
                     media_id,
@@ -237,9 +182,6 @@ pub fn update_media(
                         MediaID::Episode(ep_id) => {
                             // Try to fetch the episode reference to extract identity
                             match state
-                                .domains
-                                .media
-                                .state
                                 .repo_accessor
                                 .get(&MediaID::Episode(ep_id))
                             {
@@ -247,10 +189,8 @@ pub fn update_media(
                                     crate::infra::api_types::Media::Episode(ep),
                                 ) => Some(EpisodeKey {
                                     tmdb_series_id: ep.tmdb_series_id,
-                                    season_number: ep.season_number.value()
-                                        as u16,
-                                    episode_number: ep.episode_number.value()
-                                        as u16,
+                                    season_number: ep.season_number.value(),
+                                    episode_number: ep.episode_number.value(),
                                 }),
                                 _ => None,
                             }

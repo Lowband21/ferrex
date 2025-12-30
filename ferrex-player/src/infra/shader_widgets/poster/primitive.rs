@@ -8,7 +8,10 @@ use iced::{
     Color, Point, Rectangle, Size,
     advanced::graphics::Viewport,
     wgpu,
-    widget::{image::Handle, shader::Primitive},
+    widget::{
+        image::Handle,
+        shader::{Pipeline, Primitive},
+    },
 };
 use iced_wgpu::primitive::{
     BatchEncodeContext, BatchPrimitive, PrimitiveBatchState,
@@ -20,7 +23,6 @@ use std::time::Instant;
 pub struct PosterPrimitive {
     pub id: u64,
     pub handle: Handle,
-    pub bounds: Rectangle,
     pub radius: f32,
     pub animation: PosterAnimationType,
     pub load_time: Option<Instant>,
@@ -39,32 +41,33 @@ pub struct PosterPrimitive {
     pub meta: Option<String>,
 }
 
-impl PosterPrimitive {
-    pub(crate) fn set_load_time(&mut self, load_time: Instant) {
-        self.load_time = Some(load_time);
+/// No-op provider for batched primitives.
+/// This is never actually used because batching always succeeds,
+/// but the trait requires a Pipeline type to compile.
+pub struct NoopPipeline;
+
+impl Pipeline for NoopPipeline {
+    fn new(
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+    ) -> Self {
+        NoopPipeline
     }
 }
 
 impl Primitive for PosterPrimitive {
-    type Renderer = ();
-
-    fn initialize(
-        &self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _format: wgpu::TextureFormat,
-    ) -> Self::Renderer {
-    }
+    type Pipeline = NoopPipeline;
 
     fn prepare(
         &self,
-        _renderer: &mut Self::Renderer,
+        _pipeline: &mut Self::Pipeline,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _bounds: &Rectangle,
         _viewport: &Viewport,
     ) {
-        // Batched pipeline performs all rendering work.
+        // Batched provider performs all rendering work.
     }
 }
 

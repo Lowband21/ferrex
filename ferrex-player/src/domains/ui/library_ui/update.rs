@@ -7,7 +7,7 @@ use crate::{
         ui::{
             library_ui::LibraryUiMessage,
             tabs::{TabId, TabState},
-            utils::bump_keep_alive,
+            utils::{bump_keep_alive, primary_poster_iid_for_library_media},
         },
     },
     infra::{api_types::LibraryType, constants::layout},
@@ -15,9 +15,7 @@ use crate::{
 };
 
 use ferrex_core::{
-    player_prelude::{
-        MediaTypeFilter, PosterKind, SortOrder, UiResolution, UiWatchStatus,
-    },
+    player_prelude::{MediaTypeFilter, SortOrder, UiResolution, UiWatchStatus},
     query::filtering::{
         FilterRequestParams, build_filter_indices_request, hash_filter_spec,
     },
@@ -52,13 +50,29 @@ pub fn update_library_ui(
                 let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                 let vr = lib_state.grid_state.visible_range.clone();
                 if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-                    visible_ids.extend(slice.iter().copied());
+                    visible_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 let prefetch_rows = state.runtime_config.prefetch_rows_above();
                 let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
                 let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-                    prefetch_ids.extend(slice.iter().copied());
+                    prefetch_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 prefetch_ids.retain(|id| !visible_ids.contains(id));
                 let br = lib_state.grid_state.get_background_range(
@@ -67,22 +81,28 @@ pub fn update_library_ui(
                 );
                 let mut background_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(br) {
-                    background_ids.extend(slice.iter().copied());
+                    background_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 background_ids.retain(|id| {
                     !visible_ids.contains(id) && !prefetch_ids.contains(id)
                 });
-                let poster_kind = match lib_state.library_type {
-                    LibraryType::Movies => Some(PosterKind::Movie),
-                    LibraryType::Series => Some(PosterKind::Series),
-                };
+                let poster_size =
+                    state.domains.settings.display.library_poster_quality;
                 handle.send(DemandSnapshot {
                     visible_ids,
                     prefetch_ids,
                     background_ids,
                     timestamp: now,
                     context: None,
-                    poster_kind,
+                    poster_size,
                 });
             }
             DomainUpdateResult::task(fetch_task)
@@ -115,13 +135,29 @@ pub fn update_library_ui(
                 let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                 let vr = lib_state.grid_state.visible_range.clone();
                 if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-                    visible_ids.extend(slice.iter().copied());
+                    visible_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 let prefetch_rows = state.runtime_config.prefetch_rows_above();
                 let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
                 let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-                    prefetch_ids.extend(slice.iter().copied());
+                    prefetch_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 prefetch_ids.retain(|id| !visible_ids.contains(id));
                 let br = lib_state.grid_state.get_background_range(
@@ -130,22 +166,28 @@ pub fn update_library_ui(
                 );
                 let mut background_ids: Vec<uuid::Uuid> = Vec::new();
                 if let Some(slice) = lib_state.cached_index_ids.get(br) {
-                    background_ids.extend(slice.iter().copied());
+                    background_ids.extend(slice.iter().copied().filter_map(
+                        |id| {
+                            primary_poster_iid_for_library_media(
+                                state,
+                                lib_state.library_type,
+                                id,
+                            )
+                        },
+                    ));
                 }
                 background_ids.retain(|id| {
                     !visible_ids.contains(id) && !prefetch_ids.contains(id)
                 });
-                let poster_kind = match lib_state.library_type {
-                    LibraryType::Movies => Some(PosterKind::Movie),
-                    LibraryType::Series => Some(PosterKind::Series),
-                };
+                let poster_size =
+                    state.domains.settings.display.library_poster_quality;
                 handle.send(DemandSnapshot {
                     visible_ids,
                     prefetch_ids,
                     background_ids,
                     timestamp: now,
                     context: None,
-                    poster_kind,
+                    poster_size,
                 });
             }
             DomainUpdateResult::task(fetch_task)
@@ -177,7 +219,15 @@ pub fn update_library_ui(
                     let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
                     let vr = lib_state.grid_state.visible_range.clone();
                     if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-                        visible_ids.extend(slice.iter().copied());
+                        visible_ids.extend(slice.iter().copied().filter_map(
+                            |id| {
+                                primary_poster_iid_for_library_media(
+                                    state,
+                                    lib_state.library_type,
+                                    id,
+                                )
+                            },
+                        ));
                     }
                     let prefetch_rows =
                         state.runtime_config.prefetch_rows_above();
@@ -185,7 +235,15 @@ pub fn update_library_ui(
                         lib_state.grid_state.get_preload_range(prefetch_rows);
                     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-                        prefetch_ids.extend(slice.iter().copied());
+                        prefetch_ids.extend(slice.iter().copied().filter_map(
+                            |id| {
+                                primary_poster_iid_for_library_media(
+                                    state,
+                                    lib_state.library_type,
+                                    id,
+                                )
+                            },
+                        ));
                     }
                     prefetch_ids.retain(|id| !visible_ids.contains(id));
                     let br = lib_state.grid_state.get_background_range(
@@ -194,22 +252,28 @@ pub fn update_library_ui(
                     );
                     let mut background_ids: Vec<uuid::Uuid> = Vec::new();
                     if let Some(slice) = lib_state.cached_index_ids.get(br) {
-                        background_ids.extend(slice.iter().copied());
+                        background_ids.extend(
+                            slice.iter().copied().filter_map(|id| {
+                                primary_poster_iid_for_library_media(
+                                    state,
+                                    lib_state.library_type,
+                                    id,
+                                )
+                            }),
+                        );
                     }
                     background_ids.retain(|id| {
                         !visible_ids.contains(id) && !prefetch_ids.contains(id)
                     });
-                    let poster_kind = match lib_state.library_type {
-                        LibraryType::Movies => Some(PosterKind::Movie),
-                        LibraryType::Series => Some(PosterKind::Series),
-                    };
+                    let poster_size =
+                        state.domains.settings.display.library_poster_quality;
                     handle.send(DemandSnapshot {
                         visible_ids,
                         prefetch_ids,
                         background_ids,
                         timestamp: now,
                         context: None,
-                        poster_kind,
+                        poster_size,
                     });
                 }
 

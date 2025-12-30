@@ -11,12 +11,16 @@ use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
     CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
     Library, LibraryId, LibraryType, Media, MediaQuery,
-    MediaRootBrowseResponse, MediaWithStatus, Platform, Role,
-    ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
-    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
-    UpdateProgressRequest, User, UserPermissions, UserPreferences,
-    UserWatchState,
+    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
+    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, Platform,
+    Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+    ScanMetrics, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    SeriesBundleSyncResponse, SeriesID, StartClaimResponse, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserPreferences, UserWatchState,
 };
+use ferrex_model::MovieReferenceBatchSize;
+use ferrex_model::image::ImageQuery;
 use rkyv::util::AlignedVec;
 use uuid::Uuid;
 
@@ -24,6 +28,7 @@ use uuid::Uuid;
 use crate::infra::api_types::{DemoResetRequest, DemoStatus};
 use crate::infra::repository::{RepositoryError, RepositoryResult};
 use crate::infra::services::api::ApiService;
+use crate::infra::services::api::ImageFetchResult;
 
 #[derive(Debug, Clone)]
 pub struct TestApiService {
@@ -130,6 +135,16 @@ impl ApiService for TestApiService {
         ))
     }
 
+    async fn get_image(
+        &self,
+        _path: &str,
+        _size: ImageQuery,
+    ) -> RepositoryResult<ImageFetchResult> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::get_image not implemented".into(),
+        ))
+    }
+
     async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
         Ok(self.inner.read().expect("lock poisoned").libraries.clone())
     }
@@ -146,6 +161,88 @@ impl ApiService for TestApiService {
             .unwrap_or_default())
     }
 
+    async fn fetch_movie_reference_batch(
+        &self,
+        _library_id: LibraryId,
+        _batch_id: MovieBatchId,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_movie_reference_batch not implemented"
+                .into(),
+        ))
+    }
+
+    async fn fetch_movie_reference_batch_bundle(
+        &self,
+        _library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_movie_reference_batch_bundle not implemented"
+                .into(),
+        ))
+    }
+
+    async fn sync_movie_reference_batches(
+        &self,
+        _library_id: LibraryId,
+        _request: MovieBatchSyncRequest,
+    ) -> RepositoryResult<MovieBatchSyncResponse> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::sync_movie_reference_batches not implemented"
+                .into(),
+        ))
+    }
+
+    async fn fetch_movie_reference_batches(
+        &self,
+        _library_id: LibraryId,
+        _request: MovieBatchFetchRequest,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_movie_reference_batches not implemented"
+                .into(),
+        ))
+    }
+
+    async fn fetch_series_bundle(
+        &self,
+        _library_id: LibraryId,
+        _series_id: SeriesID,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_series_bundle not implemented".into(),
+        ))
+    }
+
+    async fn fetch_series_bundle_bundle(
+        &self,
+        _library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_series_bundle_bundle not implemented".into(),
+        ))
+    }
+
+    async fn sync_series_bundles(
+        &self,
+        _library_id: LibraryId,
+        _request: SeriesBundleSyncRequest,
+    ) -> RepositoryResult<SeriesBundleSyncResponse> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::sync_series_bundles not implemented".into(),
+        ))
+    }
+
+    async fn fetch_series_bundles(
+        &self,
+        _library_id: LibraryId,
+        _request: SeriesBundleFetchRequest,
+    ) -> RepositoryResult<AlignedVec> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::fetch_series_bundles not implemented".into(),
+        ))
+    }
+
     async fn create_library(
         &self,
         request: CreateLibraryRequest,
@@ -156,6 +253,7 @@ impl ApiService for TestApiService {
             paths,
             scan_interval_minutes,
             enabled,
+            movie_ref_batch_size,
             start_scan,
         } = request;
 
@@ -172,6 +270,10 @@ impl ApiService for TestApiService {
             watch_for_changes: false,
             analyze_on_scan: false,
             max_retry_attempts: 3,
+            movie_ref_batch_size: ferrex_model::MovieReferenceBatchSize::new(
+                movie_ref_batch_size,
+            )
+            .expect("movie_ref_batch_size must be valid"),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             media: None,
@@ -192,6 +294,11 @@ impl ApiService for TestApiService {
         {
             if let Some(name) = request.name {
                 library.name = name;
+            }
+            if let Some(size) = request.movie_ref_batch_size {
+                library.movie_ref_batch_size =
+                    ferrex_model::MovieReferenceBatchSize::new(size)
+                        .expect("movie_ref_batch_size must be valid");
             }
             library.updated_at = Utc::now();
             Ok(())
@@ -310,6 +417,16 @@ impl ApiService for TestApiService {
     ) -> RepositoryResult<DemoStatus> {
         Err(RepositoryError::UpdateFailed(
             "Demo reset not available in test stub".into(),
+        ))
+    }
+
+    #[cfg(feature = "demo")]
+    async fn resize_demo(
+        &self,
+        _request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus> {
+        Err(RepositoryError::UpdateFailed(
+            "Demo resize not available in test stub".into(),
         ))
     }
 
@@ -561,6 +678,7 @@ fn sample_library(name: &str) -> Library {
         watch_for_changes: false,
         analyze_on_scan: false,
         max_retry_attempts: 3,
+        movie_ref_batch_size: MovieReferenceBatchSize::default(),
         created_at: Utc::now() - Duration::days(1),
         updated_at: Utc::now(),
         media: None,

@@ -25,6 +25,7 @@ pub trait MockService: Send + Sync {
 }
 
 /// Simple mock implementation
+#[derive(Debug)]
 pub struct SimpleMock {
     call_count: usize,
     expected_calls: Option<usize>,
@@ -98,6 +99,15 @@ impl Default for SimpleMock {
 /// Type-safe mock registry using TypeId
 pub struct MockRegistry {
     mocks: Arc<Mutex<HashMap<TypeId, Box<dyn MockService>>>>,
+}
+
+impl std::fmt::Debug for MockRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let count = self.mocks.lock().map(|m| m.len()).ok();
+        f.debug_struct("MockRegistry")
+            .field("count", &count)
+            .finish()
+    }
 }
 
 impl MockRegistry {
@@ -235,6 +245,16 @@ pub struct MockHandle<M> {
     _phantom: std::marker::PhantomData<M>,
 }
 
+impl<M> std::fmt::Debug for MockHandle<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockHandle")
+            .field("mock_type", &std::any::type_name::<M>())
+            .field("type_id", &self.type_id)
+            .field("registry", &self.registry)
+            .finish()
+    }
+}
+
 impl<M> MockHandle<M>
 where
     M: MockService + 'static,
@@ -288,6 +308,14 @@ pub struct MockBuilder<M> {
     mock: M,
 }
 
+impl<M> std::fmt::Debug for MockBuilder<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockBuilder")
+            .field("mock_type", &std::any::type_name::<M>())
+            .finish()
+    }
+}
+
 impl<M> MockBuilder<M>
 where
     M: MockService,
@@ -302,6 +330,7 @@ where
 }
 
 /// Example custom mock for specific domain testing
+#[derive(Debug)]
 pub struct DomainMock {
     base: SimpleMock,
     responses: HashMap<String, String>,

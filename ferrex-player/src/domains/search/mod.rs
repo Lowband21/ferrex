@@ -1,6 +1,7 @@
 //! Search domain - coordinates global, server-backed search
 
 pub mod calibrator;
+pub mod error;
 pub mod messages;
 pub mod metrics;
 pub mod service;
@@ -8,12 +9,15 @@ pub mod types;
 pub mod update;
 
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
+use crate::infra::repository::{Accessor, ReadOnly};
 use iced::Task;
 use std::sync::Arc;
 
 pub use self::messages::{SearchEvent, SearchMessage};
 pub use self::service::SearchService;
-pub use self::types::{SearchMode, SearchResult, SearchState, SearchStrategy};
+pub use self::types::{
+    SearchMode, SearchPresentation, SearchResponse, SearchState, SearchStrategy,
+};
 
 /// Search domain state container
 #[derive(Debug)]
@@ -35,10 +39,11 @@ impl SearchDomain {
     )]
     pub fn new(
         api_service: Option<Arc<dyn crate::infra::services::api::ApiService>>,
+        search_accessor: Option<Arc<Accessor<ReadOnly>>>,
     ) -> Self {
         Self {
             state: SearchState::default(),
-            service: Arc::new(SearchService::new(api_service)),
+            service: Arc::new(SearchService::new(api_service, search_accessor)),
         }
     }
 
@@ -52,6 +57,7 @@ impl SearchDomain {
     )]
     pub fn new_with_metrics(
         api_service: Option<Arc<dyn crate::infra::services::api::ApiService>>,
+        search_accessor: Option<Arc<Accessor<ReadOnly>>>,
     ) -> Self {
         let state = SearchState {
             decision_engine: types::SearchDecisionEngine::new_with_metrics(),
@@ -60,7 +66,7 @@ impl SearchDomain {
 
         Self {
             state,
-            service: Arc::new(SearchService::new(api_service)),
+            service: Arc::new(SearchService::new(api_service, search_accessor)),
         }
     }
 

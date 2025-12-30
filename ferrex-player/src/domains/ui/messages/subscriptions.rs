@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use super::UiMessage;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::{
-    background_ui::BackgroundMessage, feedback_ui::FeedbackMessage,
-    interaction_ui::InteractionMessage,
+    feedback_ui::FeedbackMessage, interaction_ui::InteractionMessage,
 };
 
 use crate::{
@@ -23,7 +22,6 @@ use crate::{
             },
         },
     },
-    infra::constants::{performance_config, virtual_carousel},
     state::State,
 };
 
@@ -31,7 +29,11 @@ use iced::{
     Subscription,
     event::{self, Event as RuntimeEvent, Status as EventStatus},
     keyboard::{self, Key},
+    window,
 };
+
+#[cfg(feature = "debug-cache-overlay")]
+use iced::time;
 
 #[cfg_attr(
     any(
@@ -43,6 +45,8 @@ use iced::{
 )]
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
+    let mut needs_frame_tick = false;
+    let search_open = state.domains.search.state.presentation.is_open();
 
     // Delegate window lifecycle subscriptions (resize, move, focus) to the
     // window management module so secondary windows stay isolated
@@ -50,9 +54,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         crate::domains::ui::windows::subscriptions::subscription(state),
     );
 
-    // Dedicated search window keyboard interactions
-    if state.search_window_id.is_some() {
-        subscriptions.push(event::listen_with(search_window_key_handler));
+    // Search surface keyboard interactions (overlay or detached window)
+    if search_open {
+        subscriptions.push(event::listen_with(search_surface_key_handler));
     }
 
     // Watch for close requests and close only our search window
@@ -60,7 +64,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(iced::window::close_requests().with(search_id).map(
             |(search_id, id)| {
                 if id == search_id {
-                    DomainMessage::Ui(UiShellMessage::CloseSearchWindow.into())
+                    DomainMessage::Ui(UiShellMessage::CloseSearch.into())
                 } else {
                     DomainMessage::NoOp
                 }
@@ -68,7 +72,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         ));
     }
 
-    let in_grid_context = state.search_window_id.is_none()
+    let in_grid_context = !search_open
         && matches!(state.domains.ui.state.view, ViewState::Library)
         && matches!(state.domains.ui.state.scope, Scope::Library(_))
         && matches!(state.tab_manager.active_tab_id(), TabId::Library(_));
@@ -77,7 +81,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(event::listen_with(main_window_grid_key_handler));
     }
 
-    if state.search_window_id.is_none() {
+    if !search_open {
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -151,7 +155,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     }
 
     // All tab focus navigation (Up/Down to move between carousels)
-    let in_all_curated = state.search_window_id.is_none()
+    let in_all_curated = !search_open
         && matches!(state.domains.ui.state.scope, Scope::Home)
         && matches!(state.tab_manager.active_tab_id(), TabId::Home);
     if in_all_curated {
@@ -179,20 +183,22 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         }));
     }
 
-    if state.domains.ui.state.motion_controller.is_active() {
+    #[cfg(feature = "debug-cache-overlay")]
+    {
         subscriptions.push(
-            iced::time::every(std::time::Duration::from_nanos(
-                performance_config::scrolling::TICK_NS,
-            ))
-            .map(|_| {
-                DomainMessage::Ui(
-                    InteractionMessage::KineticScroll(KM::Tick).into(),
-                )
-            }),
+            time::every(Duration::from_secs(5))
+                .map(|_| DomainMessage::Ui(UiMessage::CacheOverlayTick)),
         );
     }
 
+    // Frame-synchronized ticking for any per-frame motion/animation. We only
+    // subscribe once, then dispatch work via `UiMessage::FrameTick`.
+    if state.domains.ui.state.motion_controller.is_active() {
+        needs_frame_tick = true;
+    }
+
     // Motion ticking for virtual carousels (All view active carousel, seasons/episodes)
+    let mut carousel_motion_active = false;
     {
         use ViewState::*;
         let mut keys: Vec<CarouselKey> =
@@ -226,40 +232,32 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                     .get_animator(&key)
                     .map(|a| a.is_active())
                     .unwrap_or(false);
+
                 if scroller_active || animator_active {
                     any_active = true;
                     break;
                 }
             }
             if any_active {
-                subscriptions.push(
-                    iced::time::every(std::time::Duration::from_nanos(
-                        virtual_carousel::motion::TICK_NS,
-                    ))
-                    .map(|_| {
-                        DomainMessage::Ui(UiMessage::VirtualCarousel(
-                            VCM::MotionTickActive,
-                        ))
-                    }),
-                );
+                carousel_motion_active = true;
             }
         }
     }
+    if carousel_motion_active {
+        needs_frame_tick = true;
+    }
 
     // Vertical snapping for All view focus changes and poster keep alive
+    let mut home_focus_anim_active = false;
     if in_all_curated
         && let Some(TabState::Home(all_state)) =
             state.tab_manager.get_tab(TabId::Home)
         && all_state.focus.vertical_animator.is_active()
     {
-        subscriptions.push(
-            iced::time::every(Duration::from_nanos(
-                virtual_carousel::motion::TICK_NS,
-            ))
-            .map(|_| {
-                DomainMessage::Ui(InteractionMessage::HomeFocusTick.into())
-            }),
-        );
+        home_focus_anim_active = true;
+    }
+    if home_focus_anim_active {
+        needs_frame_tick = true;
     }
 
     let poster_anim_active = state
@@ -268,22 +266,13 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         .state
         .poster_anim_active_until
         .map(|until| until >= Instant::now())
-        .unwrap_or(true);
+        .unwrap_or(false);
 
     if poster_anim_active {
-        subscriptions.push(
-            iced::time::every(Duration::from_nanos(
-                virtual_carousel::motion::TICK_NS,
-            ))
-            .map(|_| {
-                DomainMessage::Ui(UiMessage::VirtualCarousel(
-                    VCM::MotionTickActive,
-                ))
-            }),
-        );
+        needs_frame_tick = true;
     }
 
-    if state
+    let transitions_active = state
         .domains
         .ui
         .state
@@ -304,15 +293,16 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             .background_shader_state
             .gradient_transitions
             .is_transitioning()
-        || poster_anim_active
-    {
+        || poster_anim_active;
+    if transitions_active {
+        needs_frame_tick = true;
+    }
+
+    if needs_frame_tick {
         subscriptions.push(
-            iced::time::every(std::time::Duration::from_nanos(8_333_333)) // ~120 FPS
-                .map(|_| {
-                    DomainMessage::Ui(
-                        BackgroundMessage::UpdateTransitions.into(),
-                    )
-                }),
+            window::frames().map(|instant| {
+                DomainMessage::Ui(UiMessage::FrameTick(instant))
+            }),
         );
     }
 
@@ -327,7 +317,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     Subscription::batch(subscriptions)
 }
 
-fn search_window_key_handler(
+fn search_surface_key_handler(
     event: RuntimeEvent,
     _status: EventStatus,
     _window: iced::window::Id,
@@ -386,9 +376,14 @@ fn main_window_grid_key_handler(
         RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
             key,
             modifiers,
+            repeat,
             ..
         }) => {
             if modifiers.control() || modifiers.alt() || modifiers.logo() {
+                return None;
+            }
+            // Ignore OS auto-repeat; motion controller handles continuous motion
+            if repeat {
                 return None;
             }
             match key {

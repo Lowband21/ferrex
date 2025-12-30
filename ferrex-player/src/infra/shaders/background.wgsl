@@ -12,42 +12,46 @@ struct Globals {
     secondary_color: vec4<f32>,     // offset 112, size 16
 
     // Texture and scroll
-    texture_params: vec4<f32>,      // texture_aspect, scroll_offset, 0, 0 (offset 128, size 16)
+    texture_params: vec4<f32>,      // texture_aspect, scroll_offset_px, header_offset_px, backdrop_coverage_uv (offset 128, size 16)
+
+    // Content-space offset (logical pixels) used to deterministically anchor high-frequency noise
+    // to scrollable content movement (horizontal carousels + vertical lists/grids).
+    content_offset_px: vec4<f32>,   // x, y, 0, 0 (offset 144, size 16)
 
     // Transition colors
-    prev_primary_color: vec4<f32>,  // offset 144, size 16
-    prev_secondary_color: vec4<f32>,// offset 160, size 16
+    prev_primary_color: vec4<f32>,  // offset 160, size 16
+    prev_secondary_color: vec4<f32>,// offset 176, size 16
 
     // Transition parameters
-    transition_params: vec4<f32>,   // transition_progress, backdrop_opacity, backdrop_slide_offset, backdrop_scale (offset 176, size 16)
+    transition_params: vec4<f32>,   // transition_progress, backdrop_opacity, backdrop_slide_offset, backdrop_scale (offset 192, size 16)
 
     // Gradient and depth
-    gradient_center: vec4<f32>,     // gradient_center.x, gradient_center.y, 0, 0 (offset 192, size 16)
-    depth_params: vec4<f32>,        // region_count, base_depth, shadow_intensity, shadow_distance (offset 208, size 16)
-    ambient_light: vec4<f32>,       // light_dir.x, light_dir.y, 0, 0 (offset 224, size 16)
+    gradient_center: vec4<f32>,     // gradient_center.x, gradient_center.y, 0, 0 (offset 208, size 16)
+    depth_params: vec4<f32>,        // region_count, base_depth, shadow_intensity, shadow_distance (offset 224, size 16)
+    ambient_light: vec4<f32>,       // light_dir.x, light_dir.y, 0, 0 (offset 240, size 16)
 
     // Depth regions (up to 4)
-    region1_bounds: vec4<f32>,      // x, y, width, height (offset 240, size 16)
-    region1_depth_params: vec4<f32>,// depth, edge_transition_type, edge_width, shadow_enabled (offset 256, size 16)
-    region1_shadow_params: vec4<f32>,// shadow_intensity, z_order, border_width, border_opacity (offset 272, size 16)
-    region1_border_color: vec4<f32>,// r, g, b, a (offset 288, size 16)
+    region1_bounds: vec4<f32>,      // x, y, width, height (offset 256, size 16)
+    region1_depth_params: vec4<f32>,// depth, edge_transition_type, edge_width, shadow_enabled (offset 272, size 16)
+    region1_shadow_params: vec4<f32>,// shadow_intensity, z_order, border_width, border_opacity (offset 288, size 16)
+    region1_border_color: vec4<f32>,// r, g, b, a (offset 304, size 16)
 
-    region2_bounds: vec4<f32>,      // (offset 304, size 16)
-    region2_depth_params: vec4<f32>,// (offset 320, size 16)
-    region2_shadow_params: vec4<f32>,// (offset 336, size 16)
-    region2_border_color: vec4<f32>,// (offset 352, size 16)
+    region2_bounds: vec4<f32>,      // (offset 320, size 16)
+    region2_depth_params: vec4<f32>,// (offset 336, size 16)
+    region2_shadow_params: vec4<f32>,// (offset 352, size 16)
+    region2_border_color: vec4<f32>,// (offset 368, size 16)
 
-    region3_bounds: vec4<f32>,      // (offset 368, size 16)
-    region3_depth_params: vec4<f32>,// (offset 384, size 16)
-    region3_shadow_params: vec4<f32>,// (offset 400, size 16)
-    region3_border_color: vec4<f32>,// (offset 416, size 16)
+    region3_bounds: vec4<f32>,      // (offset 384, size 16)
+    region3_depth_params: vec4<f32>,// (offset 400, size 16)
+    region3_shadow_params: vec4<f32>,// (offset 416, size 16)
+    region3_border_color: vec4<f32>,// (offset 432, size 16)
 
-    region4_bounds: vec4<f32>,      // (offset 432, size 16)
-    region4_depth_params: vec4<f32>,// (offset 448, size 16)
-    region4_shadow_params: vec4<f32>,// (offset 464, size 16)
-    region4_border_color: vec4<f32>,// (offset 480, size 16)
+    region4_bounds: vec4<f32>,      // (offset 448, size 16)
+    region4_depth_params: vec4<f32>,// (offset 464, size 16)
+    region4_shadow_params: vec4<f32>,// (offset 480, size 16)
+    region4_border_color: vec4<f32>,// (offset 496, size 16)
 
-    // Total: 496 bytes (31 * 16)
+    // Total: 512 bytes (32 * 16)
 }
 
 struct VertexOutput {
@@ -108,6 +112,20 @@ fn smooth_noise(p: vec2<f32>) -> f32 {
 
     let u = f * f * (3.0 - 2.0 * f);
 
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+// Smooth noise interpolation using hash2d (avoids trig in noise2d).
+fn smooth_hash_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+
+    let a = hash2d(i);
+    let b = hash2d(i + vec2<f32>(1.0, 0.0));
+    let c = hash2d(i + vec2<f32>(0.0, 1.0));
+    let d = hash2d(i + vec2<f32>(1.0, 1.0));
+
+    let u = f * f * (3.0 - 2.0 * f);
     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
 
@@ -211,19 +229,34 @@ fn calculate_ao(p: vec2<f32>, region_bounds: vec4<f32>, corner_radius: f32, ao_r
     return 1.0 - (edge_factor * 0.6 + corner_factor * 0.8);
 }
 
-// Film grain effect - static, position-based only
-fn film_grain(uv: vec2<f32>, intensity: f32) -> f32 {
-    // Create static grain based on position only
-    // Lower scale for coarser grain, like brushed metal texture
-    let grain_scale = 200.0; // Coarser grain
+// Film grain effect - anchored to content movement
+//
+// Use content-space position so the grain scrolls with virtual grids.
+// We base the sampling on physical pixels (via scale factor)
+// so resizing does not re-parameterize the noise.
+fn film_grain(content_pos_px: vec2<f32>, intensity: f32) -> f32 {
+    // Convert logical pixels (DIPs) to physical pixels for stability across DPI.
+    let physical_pos_px = content_pos_px * globals.scale_and_effect.x;
 
-    // Layer multiple octaves for more organic, less patterned result
+    // Lower cell size = finer grain.
+    // For “old TV static” the grain should approach per-physical-pixel frequency.
+    let grain_cell_px = 1.5;
+    let grain_coord = physical_pos_px / grain_cell_px;
+
+    // Layer multiple octaves for more organic, less patterned result.
+    //
+    // IMPORTANT: Use smooth (interpolated) value noise instead of hashing the raw
+    // coordinate. A discontinuous hash sampled at high frequency will “sparkle”
+    // under fractional scroll offsets because the sampling point moves subpixel
+    // across sharp discontinuities (temporal aliasing). Interpolated noise
+    // makes the field continuous, so scrolling becomes a pure deterministic
+    // translation rather than an apparent re-randomization.
     var grain = 0.0;
-    grain += hash2d(uv * grain_scale) * 0.5;
-    grain += hash2d(uv * grain_scale * 1.5 + vec2<f32>(17.32, 29.71)) * 0.3;
-    grain += hash2d(uv * grain_scale * 2.7 + vec2<f32>(43.19, 61.23)) * 0.2;
+    grain += smooth_hash_noise(grain_coord) * 0.5;
+    grain += smooth_hash_noise(grain_coord * 1.5 + vec2<f32>(17.32, 29.71)) * 0.3;
+    grain += smooth_hash_noise(grain_coord * 2.7 + vec2<f32>(43.19, 61.23)) * 0.2;
 
-    // Make grain centered around 0 and apply intensity
+    // Make grain centered around 0 and apply intensity.
     return (grain - 0.5) * intensity;
 }
 
@@ -482,6 +515,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let time = globals.time_and_resolution.x;
     let resolution = globals.time_and_resolution.zw;
     let aspect = resolution.x / resolution.y;
+    let scroll_offset_px = globals.texture_params.y;
+    let scroll_offset_uv = scroll_offset_px / resolution.y;
+    let content_offset_px = globals.content_offset_px.xy;
+    let content_px_pos = vec2<f32>(uv.x * resolution.x, uv.y * resolution.y) + content_offset_px;
 
     // Transform colors to be background-friendly
     let effect = i32(globals.scale_and_effect.y);
@@ -513,13 +550,51 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let edge_fade = 1.0 - smoothstep(0.8, 1.2, length(centered_uv));
         color *= 0.95 + 0.05 * edge_fade;
 
+        // Add a very subtle, scroll-anchored texture layer.
+        //
+        // We intentionally do not scroll the *entire* gradient, because doing so
+        // would push UVs out of the 0..1 range on long scrolls and collapse the
+        // gradient into a mostly-flat color. Instead, we keep the base gradient
+        // stable and scroll only the high-frequency variation so the background
+        // feels attached to the grid under fast scrolling.
+        // Sample in pixel space so the texture is anchored to content movement
+        // regardless of window aspect ratio.
+        let detail_uv = content_px_pos / 96.0;
+        let detail = smooth_hash_noise(detail_uv);
+        color *= 0.94 + 0.06 * detail;
+
+        // Subtle scroll-anchored grid lines for library-style grid views.
+        //
+        // We key off the depth region count because Library currently emits a
+        // single region layout, while detail views emit multiple regions.
+        // This keeps the effect localized without adding new uniforms.
+        let region_count = i32(globals.depth_params.x);
+        if (region_count == 1) {
+            let cell = 160.0;      // DIP cell size (visual only)
+            let line_w = 1.0;      // DIP line width
+
+            let fx = fract(content_px_pos.x / cell);
+            let fy = fract(content_px_pos.y / cell);
+
+            let dx = min(fx, 1.0 - fx) * cell;
+            let dy = min(fy, 1.0 - fy) * cell;
+
+            let line_x = 1.0 - smoothstep(0.0, line_w, dx);
+            let line_y = 1.0 - smoothstep(0.0, line_w, dy);
+
+            let line = max(line_x, line_y);
+            color *= 1.0 - (line * 0.025);
+        }
+
     } else if (effect == 2) {
         // Subtle noise
         let scale = globals.scale_and_effect.z;
         let speed = globals.scale_and_effect.w;
 
         // Animated noise
-        let noise_uv = centered_uv * scale + vec2<f32>(time * speed * 0.1, 0.0);
+        let noise_uv = centered_uv * scale
+            + (content_offset_px / 96.0) * scale
+            + vec2<f32>(time * speed * 0.1, 0.0);
         let n = fbm(noise_uv, 4);
 
         // Blend noise with gradient
@@ -692,9 +767,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Apply film grain effect
+    // Apply film grain effect (content-anchored so it scrolls with the grid)
     let grain_intensity = 0.015; // Very subtle grain for softer appearance
-    let grain = film_grain(uv, grain_intensity);
+    let grain = film_grain(content_px_pos, grain_intensity);
     color = color + vec3<f32>(grain);
 
     // Ensure color stays in valid range

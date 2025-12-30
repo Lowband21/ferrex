@@ -37,6 +37,14 @@ pub struct UserAdminApiAdapter {
     client: Arc<ApiClient>,
 }
 
+impl std::fmt::Debug for UserAdminApiAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserAdminApiAdapter")
+            .field("client", &"<ApiClient>")
+            .finish()
+    }
+}
+
 impl UserAdminApiAdapter {
     pub fn new(client: Arc<ApiClient>) -> Self {
         Self { client }

@@ -14,7 +14,8 @@ mod primitive;
 mod program;
 
 pub use animation::{
-    AnimationConfig, set_hover_scale, set_hover_transition_ms,
+    AnimationConfig, set_hover_scale, set_hover_scale_down_delay_ms,
+    set_hover_transition_ms,
 };
 pub use batch_state::set_text_scale;
 pub use state::{PosterFace, PosterInstanceKey};
@@ -64,6 +65,41 @@ pub struct Poster {
     title: Option<String>,
     /// Meta text (e.g., year) to render below the title (max 16 chars)
     meta: Option<String>,
+}
+
+impl std::fmt::Debug for Poster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Poster")
+            .field("id", &self.id)
+            .field("menu_target", &self.menu_target)
+            .field("handle", &"<image handle>")
+            .field("radius", &self.radius)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("animation", &self.animation)
+            .field("load_time", &self.load_time)
+            .field("opacity", &self.opacity)
+            .field("theme_color", &"<Color>")
+            .field(
+                "bounds",
+                &self.bounds.as_ref().map(|_| "<AnimatedPosterBounds>"),
+            )
+            .field("is_hovered", &self.is_hovered)
+            .field("on_play", &self.on_play.as_ref().map(|_| "<UiMessage>"))
+            .field("on_edit", &self.on_edit.as_ref().map(|_| "<UiMessage>"))
+            .field(
+                "on_options",
+                &self.on_options.as_ref().map(|_| "<UiMessage>"),
+            )
+            .field("on_click", &self.on_click.as_ref().map(|_| "<UiMessage>"))
+            .field("progress", &self.progress)
+            .field("progress_color", &"<Color>")
+            .field("rotation_y", &self.rotation_y)
+            .field("face", &self.face)
+            .field("title", &self.title)
+            .field("meta", &self.meta)
+            .finish()
+    }
 }
 
 impl Poster {
@@ -211,7 +247,7 @@ impl Poster {
         self
     }
 
-    /// Sets which face/pipeline to render
+    /// Sets which face/provider to render
     pub fn face(mut self, face: PosterFace) -> Self {
         self.face = face;
         self

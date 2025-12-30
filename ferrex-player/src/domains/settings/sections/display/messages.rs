@@ -34,8 +34,8 @@ pub enum DisplayMessage {
     SetPosterTextAreaHeight(f32),
 
     // Spacing subsection (String for validation in domain handler)
-    /// Set grid effective spacing
-    SetGridEffectiveSpacing(String),
+    /// Set grid poster gap
+    SetGridPosterGap(String),
     /// Set grid row spacing
     SetGridRowSpacing(String),
     /// Set grid viewport padding
@@ -60,6 +60,10 @@ pub enum DisplayMessage {
     SetLibraryPosterQuality(PosterSize),
     /// Set poster quality for detail views
     SetDetailPosterQuality(PosterSize),
+
+    // Scrollbar subsection (String for validation in domain handler)
+    /// Set minimum scroller length in pixels
+    SetScrollbarScrollerMinLength(String),
 }
 
 impl DisplayMessage {
@@ -83,9 +87,7 @@ impl DisplayMessage {
             Self::SetPosterTextAreaHeight(_) => {
                 "Display::SetPosterTextAreaHeight"
             }
-            Self::SetGridEffectiveSpacing(_) => {
-                "Display::SetGridEffectiveSpacing"
-            }
+            Self::SetGridPosterGap(_) => "Display::SetGridPosterGap",
             Self::SetGridRowSpacing(_) => "Display::SetGridRowSpacing",
             Self::SetGridViewportPadding(_) => {
                 "Display::SetGridViewportPadding"
@@ -109,6 +111,9 @@ impl DisplayMessage {
             }
             Self::SetDetailPosterQuality(_) => {
                 "Display::SetDetailPosterQuality"
+            }
+            Self::SetScrollbarScrollerMinLength(_) => {
+                "Display::SetScrollbarScrollerMinLength"
             }
         }
     }

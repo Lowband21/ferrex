@@ -15,9 +15,9 @@ pub enum AuthState {
 
     /// User is authenticated with valid credentials
     Authenticated {
-        user: User,
+        user: Box<User>,
         token: AuthToken,
-        permissions: UserPermissions,
+        permissions: Box<UserPermissions>,
         /// Server URL this auth is valid for
         server_url: String,
     },
@@ -122,9 +122,9 @@ impl AuthStateStore {
         server_url: String,
     ) {
         self.set(AuthState::Authenticated {
-            user,
+            user: Box::new(user),
             token,
-            permissions,
+            permissions: Box::new(permissions),
             server_url,
         });
     }

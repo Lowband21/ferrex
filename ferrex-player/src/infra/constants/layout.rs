@@ -30,6 +30,12 @@ pub mod animation {
     /// Duration of hover scale transition in milliseconds
     pub const HOVER_TRANSITION_MS: u64 = 150;
 
+    /// Delay before scaling down after hover ends (milliseconds).
+    ///
+    /// This helps prevent "scale flicker" when the cursor briefly exits a card.
+    /// Set to `0` for immediate scale down.
+    pub const HOVER_SCALE_DOWN_DELAY_MS: u64 = 150;
+
     /// Additional padding for shadow/glow effects in pixels
     pub const EFFECT_PADDING: f32 = 10.0;
 
@@ -62,11 +68,28 @@ pub mod animation {
 
 /// Grid layout constants
 pub mod grid {
-    /// Effective spacing when using animated containers (reduced to accommodate larger containers)
+    /// Gap between poster columns (unscaled).
+    ///
+    /// This value represents the *inter-column* spacing between poster cards.
+    /// It is scaled by the application's effective scale at runtime.
     pub const EFFECTIVE_SPACING: f32 = 15.0;
 
+    /// Scrollbar rail width for vertical grid scrollables (pixels).
+    pub const VERTICAL_SCROLLBAR_WIDTH: u32 = 10;
+
+    /// Scrollbar thumb width for vertical grid scrollables (pixels).
+    pub const VERTICAL_SCROLLBAR_SCROLLER_WIDTH: u32 = 8;
+
+    /// Reserved width for the vertical scrollbar.
+    pub const VERTICAL_SCROLLBAR_RESERVED_WIDTH: f32 =
+        if VERTICAL_SCROLLBAR_WIDTH > VERTICAL_SCROLLBAR_SCROLLER_WIDTH {
+            VERTICAL_SCROLLBAR_WIDTH as f32
+        } else {
+            VERTICAL_SCROLLBAR_SCROLLER_WIDTH as f32
+        };
+
     /// Minimum padding on each side of the viewport
-    pub const MIN_VIEWPORT_PADDING: f32 = 10.0; // 40.0;
+    pub const MIN_VIEWPORT_PADDING: f32 = 10.0;
 
     /// Total horizontal padding (left + right)
     pub const TOTAL_HORIZONTAL_PADDING: f32 = MIN_VIEWPORT_PADDING * 2.0;
@@ -102,14 +125,14 @@ pub mod virtual_grid {
                 + animation::EFFECT_PADDING);
 
     /// Number of rows above the viewport to include in the visible/preload window
-    pub const PREFETCH_ROWS_ABOVE: usize = 1;
+    pub const PREFETCH_ROWS_ABOVE: usize = 0;
     // Number of rows below the viewport to include in the visible/preload window
-    pub const PREFETCH_ROWS_BELOW: usize = 1;
+    pub const PREFETCH_ROWS_BELOW: usize = 3;
     /// Additional rows beyond the preload window to treat as low-priority background work
     pub const BACKGROUND_ROWS_BELOW: usize = 0;
 
     /// Keep-alive duration after scroll (ms) to allow placeholder->texture swaps to complete
-    pub const KEEP_ALIVE_MS: u64 = 50000;
+    pub const KEEP_ALIVE_MS: u64 = 5000;
 }
 
 /// Player controls layout constants
@@ -157,11 +180,8 @@ pub mod search {
     const WINDOW_VERTICAL_PADDING: f32 = 16.0 * 2.0; // Container padding (top + bottom)
     const SECTION_SPACING: f32 = 16.0; // Spacing between header/input/results
 
-    const HEADER_ICON_SIZE: f32 = 36.0;
-    const HEADER_VERTICAL_PADDING: f32 = 12.0 * 2.0;
-
     /// Total rendered height of the header block
-    pub const HEADER_HEIGHT: f32 = HEADER_ICON_SIZE + HEADER_VERTICAL_PADDING;
+    pub const HEADER_HEIGHT: f32 = 48.0;
 
     const INPUT_BUTTON_HEIGHT: f32 = 46.0;
     const INPUT_PANEL_VERTICAL_PADDING: f32 = 12.0 * 2.0;
@@ -283,7 +303,8 @@ pub mod calculations {
     ///
     /// Create once when scale changes and store in UI state:
     /// ```rust,ignore
-    /// state.domains.ui.state.scaled_layout = ScaledLayout::new(scale);
+    /// state.domains.ui.state.scaled_layout =
+    ///     ScaledLayout::new(scale, grid::EFFECTIVE_SPACING);
     /// ```
     ///
     /// Access during rendering:
@@ -314,15 +335,18 @@ pub mod calculations {
         pub v_animation_padding: f32,
         /// Scaled corner radius for poster cards
         pub corner_radius: f32,
+        /// Gap between poster columns (scaled)
+        pub poster_gap: f32,
     }
 
     impl ScaledLayout {
         /// Create a new ScaledLayout for the given scale factor
-        pub fn new(scale: f32) -> Self {
+        pub fn new(scale: f32, poster_gap: f32) -> Self {
             let poster_width = poster::BASE_WIDTH * scale;
             let poster_height = poster::BASE_HEIGHT * scale;
             let text_area_height = poster::TEXT_AREA_HEIGHT * scale;
             let corner_radius = poster::CORNER_RADIUS * scale;
+            let poster_gap = poster_gap * scale;
 
             // Match the TOTAL_CARD_HEIGHT calculation: BASE_HEIGHT + TEXT_AREA_HEIGHT + 5.0
             let poster_total_height =
@@ -353,17 +377,18 @@ pub mod calculations {
                 h_animation_padding: h_padding,
                 v_animation_padding: v_padding,
                 corner_radius,
+                poster_gap,
             }
         }
 
         /// Create layout at default scale (1.0)
         pub fn default_scale() -> Self {
-            Self::new(1.0)
+            Self::new(1.0, grid::EFFECTIVE_SPACING)
         }
 
-        /// Get effective spacing for grid (currently not scaled)
-        pub fn grid_spacing(&self) -> f32 {
-            grid::EFFECTIVE_SPACING
+        /// Get poster gap (scaled)
+        pub fn poster_gap(&self) -> f32 {
+            self.poster_gap
         }
 
         /// Get minimum viewport padding (currently not scaled)
@@ -373,16 +398,35 @@ pub mod calculations {
 
         /// Calculate columns for a given viewport width using this layout's scale
         pub fn calculate_columns(&self, viewport_width: f32) -> usize {
-            calculate_columns(viewport_width, self.scale)
+            calculate_columns(viewport_width, self.scale, self.poster_gap)
         }
 
-        /// Calculate grid padding for centering
-        pub fn calculate_grid_padding(
+        /// Calculate horizontal layout for a grid row.
+        ///
+        /// - `poster_gap` (inter-column spacing) is fixed (scaled) and does not
+        ///   vary with window width.
+        /// - Side margins are the remainder after laying out columns + gaps.
+        pub fn calculate_grid_horizontal_layout(
+            &self,
+            viewport_width: f32,
+            columns: usize,
+        ) -> GridHorizontalLayout {
+            calculate_grid_horizontal_layout(
+                viewport_width,
+                columns,
+                self.scale,
+                self.poster_gap,
+            )
+        }
+
+        /// Calculate side padding (left/right) for the grid in a viewport.
+        pub fn calculate_grid_side_margin(
             &self,
             viewport_width: f32,
             columns: usize,
         ) -> f32 {
-            calculate_grid_padding(viewport_width, columns, self.scale)
+            self.calculate_grid_horizontal_layout(viewport_width, columns)
+                .side_margin
         }
     }
 
@@ -393,34 +437,59 @@ pub mod calculations {
     }
 
     /// Calculate the number of columns that fit in a given viewport width
-    pub fn calculate_columns(viewport_width: f32, scale: f32) -> usize {
+    pub fn calculate_columns(
+        viewport_width: f32,
+        scale: f32,
+        poster_gap: f32,
+    ) -> usize {
         // Get the actual container dimensions (includes padding for animations)
         let (container_width, _) = get_container_dimensions(scale);
-        let available_width = viewport_width - grid::TOTAL_HORIZONTAL_PADDING;
+        let poster_gap = poster_gap.max(0.0);
+        let stride = (container_width + poster_gap).max(1.0);
 
-        // Use reduced spacing since containers are larger
-        let effective_spacing = grid::EFFECTIVE_SPACING;
-
-        let max_columns = ((available_width + effective_spacing)
-            / (container_width + effective_spacing))
-            .floor() as usize;
+        // Reserve at least half a gap on each side. This is accomplished by
+        // requiring `columns * (container_width + poster_gap) <= viewport_width`.
+        let max_columns = (viewport_width.max(0.0) / stride).floor() as usize;
 
         max_columns.clamp(grid::MIN_COLUMNS, grid::MAX_COLUMNS)
     }
 
-    /// Calculate padding for centered grid layout
-    pub fn calculate_grid_padding(
+    /// Computed horizontal layout for a grid row.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GridHorizontalLayout {
+        /// Fixed inter-column gap between poster containers.
+        pub poster_gap: f32,
+        /// Left/right margin for centering the row within the viewport.
+        pub side_margin: f32,
+    }
+
+    /// Calculate the horizontal layout for a grid row.
+    ///
+    /// The gap between poster columns is fixed (`poster_gap`). Side margins are
+    /// computed from the remaining width after laying out columns + gaps.
+    ///
+    /// If `viewport_width` is an exact multiple of `(container_width + poster_gap)`,
+    /// the remainder equals `poster_gap`, yielding a side margin of `poster_gap / 2`.
+    pub fn calculate_grid_horizontal_layout(
         viewport_width: f32,
         columns: usize,
         scale: f32,
-    ) -> f32 {
+        poster_gap: f32,
+    ) -> GridHorizontalLayout {
         let (container_width, _) = get_container_dimensions(scale);
-        let effective_spacing = grid::EFFECTIVE_SPACING;
+        let poster_gap = poster_gap.max(0.0);
+        let columns_f = columns.max(1) as f32;
 
-        let content_width = columns as f32 * container_width
-            + (columns.saturating_sub(1)) as f32 * effective_spacing;
+        let content_width =
+            columns_f * container_width + (columns_f - 1.0) * poster_gap;
 
-        ((viewport_width - content_width) / 2.0).max(grid::MIN_VIEWPORT_PADDING)
+        let remainder = (viewport_width - content_width).max(0.0);
+        let side_margin = remainder / 2.0;
+
+        GridHorizontalLayout {
+            poster_gap,
+            side_margin,
+        }
     }
 
     /// Get container dimensions including animation padding

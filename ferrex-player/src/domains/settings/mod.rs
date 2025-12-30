@@ -35,9 +35,12 @@ pub use sections::{
 // Re-export the new SettingsSection enum
 pub use state::SettingsSection;
 
-use self::messages::SettingsMessage;
+use std::sync::Arc;
+
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
+use crate::infra::services::auth::AuthService;
+use crate::infra::services::settings::SettingsService;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::Task;
 
@@ -49,11 +52,8 @@ use sections::theme::ThemeState;
 
 /// Settings domain state - moved from monolithic State
 pub struct SettingsDomainState {
-    // Settings fields moved directly here to avoid state.state nesting
-    /// Current section in the unified settings sidebar (new)
+    /// Current section in the unified settings sidebar
     pub current_section: state::SettingsSection,
-    /// Current settings view (legacy - being replaced by SettingsSection)
-    pub current_view: state::SettingsView,
     pub security: state::SecurityState,
     pub profile: state::ProfileState,
     pub preferences: state::PreferencesState,
@@ -68,10 +68,10 @@ pub struct SettingsDomainState {
 
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
-    pub auth_service: std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
-    pub api_service: std::sync::Arc<dyn ApiService>,
+    pub auth_service: Arc<dyn AuthService>,
+    pub api_service: Arc<dyn ApiService>,
     pub settings_service:
-        std::sync::Arc<dyn crate::infra::services::settings::SettingsService>,
+        Arc<dyn SettingsService>,
 }
 
 #[cfg_attr(
@@ -85,17 +85,12 @@ pub struct SettingsDomainState {
 impl SettingsDomainState {
     /// Create a new SettingsDomainState with required services
     pub fn new(
-        auth_service: std::sync::Arc<
-            dyn crate::infra::services::auth::AuthService,
-        >,
-        api_service: std::sync::Arc<dyn ApiService>,
-        settings_service: std::sync::Arc<
-            dyn crate::infra::services::settings::SettingsService,
-        >,
+        auth_service: Arc<dyn AuthService>,
+        api_service: Arc<dyn ApiService>,
+        settings_service: Arc<dyn SettingsService>,
     ) -> Self {
         Self {
             current_section: state::SettingsSection::default(),
-            current_view: state::SettingsView::default(),
             security: state::SecurityState::default(),
             profile: state::ProfileState::default(),
             preferences: state::PreferencesState::default(),
@@ -116,8 +111,6 @@ pub struct SettingsDomain {
     // Settings fields moved directly here to avoid settings.state nesting
     /// Current section in the unified settings sidebar (new)
     pub current_section: state::SettingsSection,
-    /// Current settings view (legacy - being replaced by SettingsSection)
-    pub current_view: state::SettingsView,
     pub security: state::SecurityState,
     pub profile: state::ProfileState,
     pub preferences: state::PreferencesState,
@@ -132,10 +125,10 @@ pub struct SettingsDomain {
 
     // References needed by settings domain
     pub user_permissions: Option<UserPermissions>,
-    pub auth_service: std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
-    pub api_service: std::sync::Arc<dyn ApiService>,
+    pub auth_service: Arc<dyn AuthService>,
+    pub api_service: Arc<dyn ApiService>,
     pub settings_service:
-        std::sync::Arc<dyn crate::infra::services::settings::SettingsService>,
+        Arc<dyn SettingsService>,
 }
 
 #[cfg_attr(
@@ -150,7 +143,6 @@ impl SettingsDomain {
     pub fn new(state: SettingsDomainState) -> Self {
         Self {
             current_section: state.current_section,
-            current_view: state.current_view,
             security: state.security,
             profile: state.profile,
             preferences: state.preferences,
@@ -164,13 +156,6 @@ impl SettingsDomain {
             api_service: state.api_service,
             settings_service: state.settings_service,
         }
-    }
-
-    /// Update function - delegates to existing settings update logic
-    pub fn update(&mut self, message: SettingsMessage) -> Task<DomainMessage> {
-        // This will call the existing settings update function
-        // For now, we return Task::none() to make it compile
-        Task::none()
     }
 
     pub fn handle_event(
@@ -191,7 +176,6 @@ impl std::fmt::Debug for SettingsDomainState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SettingsDomainState")
             .field("current_section", &self.current_section)
-            .field("current_view", &self.current_view)
             .field("security", &"<omitted>")
             .field("profile", &self.profile)
             .field("preferences", &self.preferences)
@@ -212,7 +196,6 @@ impl std::fmt::Debug for SettingsDomain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SettingsDomain")
             .field("current_section", &self.current_section)
-            .field("current_view", &self.current_view)
             .field("security", &"<omitted>")
             .field("profile", &self.profile)
             .field("preferences", &self.preferences)

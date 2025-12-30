@@ -2,14 +2,19 @@
 
 use std::sync::Arc;
 
+use crate::domains::search::error::SearchError;
+use crate::infra::repository::{Accessor, ReadOnly};
 use crate::infra::services::api::ApiService;
 
 use super::metrics::SearchPerformanceMetrics;
-use super::types::{SearchResult, SearchStrategy};
+use super::types::{SearchResponse, SearchStrategy};
 use chrono::Datelike;
-use ferrex_core::player_prelude::{MediaWithStatus, SearchField};
+use ferrex_core::player_prelude::{
+    ArchivedModel, MediaWithStatus, SearchField,
+};
 use ferrex_core::query::MediaQueryBuilder;
-use ferrex_model::{LibraryId, Media, MovieReference, SeriesReference};
+use ferrex_model::{LibraryId, Media, MediaID};
+use log::warn;
 use std::time::Instant;
 
 const SERVER_SEARCH_LIMIT: usize = 50;
@@ -19,6 +24,7 @@ const SERVER_SEARCH_LIMIT: usize = 50;
 pub struct SearchService {
     /// API service for server-backed searching (optional)
     api_service: Option<Arc<dyn ApiService>>,
+    repo_accessor: Option<Arc<Accessor<ReadOnly>>>,
 }
 
 impl SearchService {
@@ -31,8 +37,14 @@ impl SearchService {
         ),
         profiling::function
     )]
-    pub fn new(api_service: Option<Arc<dyn ApiService>>) -> Self {
-        Self { api_service }
+    pub fn new(
+        api_service: Option<Arc<dyn ApiService>>,
+        repo_accessor: Option<Arc<Accessor<ReadOnly>>>,
+    ) -> Self {
+        Self {
+            api_service,
+            repo_accessor,
+        }
     }
 
     /// Check if network is available (api_service is present)
@@ -55,7 +67,7 @@ impl SearchService {
         strategy: SearchStrategy,
         library_id: Option<LibraryId>,
         fuzzy: bool,
-    ) -> Result<Vec<SearchResult>, String> {
+    ) -> anyhow::Result<Vec<SearchResponse>, SearchError> {
         match strategy {
             SearchStrategy::Client => {
                 self.search_hybrid(query, fields, library_id, fuzzy).await
@@ -76,7 +88,10 @@ impl SearchService {
         strategy: SearchStrategy,
         library_id: Option<LibraryId>,
         fuzzy: bool,
-    ) -> (Result<Vec<SearchResult>, String>, SearchPerformanceMetrics) {
+    ) -> (
+        anyhow::Result<Vec<SearchResponse>, SearchError>,
+        SearchPerformanceMetrics,
+    ) {
         let start = Instant::now();
         let query_length = query.len();
         let field_count = fields.len();
@@ -363,11 +378,13 @@ impl SearchService {
         &self,
         query: &str,
         fields: &[SearchField],
-        library_id: Option<LibraryId>,
+        _library_id: Option<LibraryId>,
         _fuzzy: bool,
-    ) -> Result<Vec<SearchResult>, String> {
+    ) -> anyhow::Result<Vec<SearchResponse>, SearchError> {
         let api_service = self.api_service.as_ref().ok_or_else(|| {
-            "No API service available for server search".to_string()
+            SearchError::Server(
+                "No API service available for server search".to_string(),
+            )
         })?;
 
         // Build MediaQuery for server
@@ -376,12 +393,16 @@ impl SearchService {
         // Global search only: ignore any library filter for now
 
         // Always use fuzzy search (which includes exact matches)
-        // This avoids API issues with exact search mode
-        if fields.is_empty() || fields.contains(&SearchField::All) {
-            query_builder = query_builder.search(query);
-        } else {
-            query_builder = query_builder.search_in(query, fields.to_vec());
-        }
+        // NOTE: the server-side fuzzy path is currently title-only; treat
+        // `All` as "Title" until multi-field fuzzy search is implemented.
+        let effective_fields =
+            if fields.is_empty() || fields.contains(&SearchField::All) {
+                vec![SearchField::Title]
+            } else {
+                fields.to_vec()
+            };
+
+        query_builder = query_builder.search_in(query, effective_fields);
 
         let media_query = query_builder.limit(SERVER_SEARCH_LIMIT).build();
 
@@ -415,10 +436,9 @@ impl SearchService {
             }
         };
 
-        // Convert server results to SearchResult
-        let results = self.convert_api_results_from_status(response, query);
-
-        Ok(results)
+        // Convert server results to SearchResponse
+        self.convert_api_results_from_status(response, query)
+            .map(|opt_vec| opt_vec.into_iter().flatten().collect())
     }
 
     async fn search_hybrid(
@@ -427,7 +447,7 @@ impl SearchService {
         fields: &[SearchField],
         library_id: Option<LibraryId>,
         fuzzy: bool,
-    ) -> Result<Vec<SearchResult>, String> {
+    ) -> anyhow::Result<Vec<SearchResponse>, SearchError> {
         // Start with client search
         //let mut results = self.search_client(query, fields, library_id, fuzzy)?;
 
@@ -462,205 +482,199 @@ impl SearchService {
         Ok(results)
     }
 
-    /// Match a movie against search query
-    #[cfg_attr(
-        any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ),
-        profiling::function
-    )]
-    fn match_movie(
-        &self,
-        movie: &MovieReference,
-        query: &str,
-        fields: &[SearchField],
-        fuzzy: bool,
-    ) -> Option<f32> {
-        let check_all = fields.is_empty() || fields.contains(&SearchField::All);
-        let mut best_score = 0.0f32;
+    // Match a movie against search query
+    // #[cfg_attr(
+    //     any(
+    //         feature = "profile-with-puffin",
+    //         feature = "profile-with-tracy",
+    //         feature = "profile-with-tracing"
+    //     ),
+    //     profiling::function
+    // )]
+    // fn match_movie(
+    //     &self,
+    //     movie: &MovieReference,
+    //     query: &str,
+    //     fields: &[SearchField],
+    //     fuzzy: bool,
+    // ) -> Option<f32> {
+    //     let check_all = fields.is_empty() || fields.contains(&SearchField::All);
+    //     let mut best_score = 0.0f32;
 
-        // Check title
-        if (check_all || fields.contains(&SearchField::Title))
-            && let Some(score) =
-                self.calculate_match_score(movie.title.as_str(), query, fuzzy)
-        {
-            best_score = best_score.max(score);
-        }
+    //     // Check title
+    //     if (check_all || fields.contains(&SearchField::Title))
+    //         && let Some(score) =
+    //             self.calculate_match_score(movie.title.as_str(), query, fuzzy)
+    //     {
+    //         best_score = best_score.max(score);
+    //     }
 
-        let details = movie.details.as_movie();
+    //     let details = &movie.details;
 
-        // Check overview
-        if (check_all || fields.contains(&SearchField::Overview))
-            && let Some(details) = details
-            && let Some(overview) = details.overview.as_ref()
-            && let Some(score) =
-                self.calculate_match_score(overview, query, fuzzy)
-        {
-            best_score = best_score.max(score * 0.8); // Lower weight for overview matches
-        }
+    //     // Check overview
+    //     if (check_all || fields.contains(&SearchField::Overview))
+    //         && let Some(overview) = details.overview.as_ref()
+    //         && let Some(score) =
+    //             self.calculate_match_score(overview, query, fuzzy)
+    //     {
+    //         best_score = best_score.max(score * 0.8); // Lower weight for overview matches
+    //     }
 
-        // Check genres
-        if (check_all || fields.contains(&SearchField::Genre))
-            && let Some(details) = details
-        {
-            for genre in &details.genres {
-                if let Some(score) =
-                    self.calculate_match_score(&genre.name, query, fuzzy)
-                {
-                    best_score = best_score.max(score * 0.9);
-                }
-            }
-        }
+    //     // Check genres
+    //     if check_all || fields.contains(&SearchField::Genre) {
+    //         for genre in &details.genres {
+    //             if let Some(score) =
+    //                 self.calculate_match_score(&genre.name, query, fuzzy)
+    //             {
+    //                 best_score = best_score.max(score * 0.9);
+    //             }
+    //         }
+    //     }
 
-        if best_score > 0.0 {
-            Some(best_score)
-        } else {
-            None
-        }
-    }
+    //     if best_score > 0.0 {
+    //         Some(best_score)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    /// Match a series against search query
-    #[cfg_attr(
-        any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ),
-        profiling::function
-    )]
-    fn match_series(
-        &self,
-        series: &SeriesReference,
-        query: &str,
-        fields: &[SearchField],
-        fuzzy: bool,
-    ) -> Option<f32> {
-        let check_all = fields.is_empty() || fields.contains(&SearchField::All);
-        let mut best_score = 0.0f32;
+    // Match a series against search query
+    // #[cfg_attr(
+    //     any(
+    //         feature = "profile-with-puffin",
+    //         feature = "profile-with-tracy",
+    //         feature = "profile-with-tracing"
+    //     ),
+    //     profiling::function
+    // )]
+    // fn match_series(
+    //     &self,
+    //     series: &Series,
+    //     query: &str,
+    //     fields: &[SearchField],
+    //     fuzzy: bool,
+    // ) -> Option<f32> {
+    //     let check_all = fields.is_empty() || fields.contains(&SearchField::All);
+    //     let mut best_score = 0.0f32;
 
-        // Check title
-        if (check_all || fields.contains(&SearchField::Title))
-            && let Some(score) =
-                self.calculate_match_score(series.title.as_str(), query, fuzzy)
-        {
-            best_score = best_score.max(score);
-        }
+    //     // Check title
+    //     if (check_all || fields.contains(&SearchField::Title))
+    //         && let Some(score) =
+    //             self.calculate_match_score(series.title.as_str(), query, fuzzy)
+    //     {
+    //         best_score = best_score.max(score);
+    //     }
 
-        let details = series.details.as_series();
+    //     let details = &series.details;
 
-        // Check overview
-        if (check_all || fields.contains(&SearchField::Overview))
-            && let Some(details) = details
-            && let Some(overview) = details.overview.as_ref()
-            && let Some(score) =
-                self.calculate_match_score(overview, query, fuzzy)
-        {
-            best_score = best_score.max(score * 0.8);
-        }
+    //     // Check overview
+    //     if (check_all || fields.contains(&SearchField::Overview))
+    //         && let Some(overview) = details.overview.as_ref()
+    //         && let Some(score) =
+    //             self.calculate_match_score(overview, query, fuzzy)
+    //     {
+    //         best_score = best_score.max(score * 0.8);
+    //     }
 
-        // Check genres
-        if (check_all || fields.contains(&SearchField::Genre))
-            && let Some(details) = details
-        {
-            for genre in &details.genres {
-                if let Some(score) =
-                    self.calculate_match_score(&genre.name, query, fuzzy)
-                {
-                    best_score = best_score.max(score * 0.9);
-                }
-            }
-        }
+    //     // Check genres
+    //     if check_all || fields.contains(&SearchField::Genre) {
+    //         for genre in &details.genres {
+    //             if let Some(score) =
+    //                 self.calculate_match_score(&genre.name, query, fuzzy)
+    //             {
+    //                 best_score = best_score.max(score * 0.9);
+    //             }
+    //         }
+    //     }
 
-        if best_score > 0.0 {
-            Some(best_score)
-        } else {
-            None
-        }
-    }
+    //     if best_score > 0.0 {
+    //         Some(best_score)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    /// Calculate match score between text and query
-    #[cfg_attr(
-        any(
-            feature = "profile-with-puffin",
-            feature = "profile-with-tracy",
-            feature = "profile-with-tracing"
-        ),
-        profiling::function
-    )]
-    fn calculate_match_score(
-        &self,
-        text: &str,
-        query: &str,
-        _fuzzy: bool,
-    ) -> Option<f32> {
-        let text_lower = text.to_lowercase();
-        let query_lower = query.to_lowercase();
+    // Calculate match score between text and query
+    // #[cfg_attr(
+    //     any(
+    //         feature = "profile-with-puffin",
+    //         feature = "profile-with-tracy",
+    //         feature = "profile-with-tracing"
+    //     ),
+    //     profiling::function
+    // )]
+    // fn calculate_match_score(
+    //     &self,
+    //     text: &str,
+    //     query: &str,
+    //     _fuzzy: bool,
+    // ) -> Option<f32> {
+    //     let text_lower = text.to_lowercase();
+    //     let query_lower = query.to_lowercase();
 
-        // Always use fuzzy matching that prioritizes exact matches
+    //     // Always use fuzzy matching that prioritizes exact matches
 
-        // Perfect match gets highest score
-        if text_lower == query_lower {
-            return Some(1.0);
-        }
+    //     // Perfect match gets highest score
+    //     if text_lower == query_lower {
+    //         return Some(1.0);
+    //     }
 
-        // Exact substring match gets high score
-        if text_lower.contains(&query_lower) {
-            let position = text_lower.find(&query_lower).unwrap() as f32;
-            let text_len = text_lower.len() as f32;
-            let query_len = query_lower.len() as f32;
+    //     // Exact substring match gets high score
+    //     if text_lower.contains(&query_lower) {
+    //         let position = text_lower.find(&query_lower).unwrap() as f32;
+    //         let text_len = text_lower.len() as f32;
+    //         let query_len = query_lower.len() as f32;
 
-            // Score based on position (earlier = better) and coverage (more coverage = better)
-            let position_score = 1.0 - (position / text_len);
-            let coverage_score = query_len / text_len;
+    //         // Score based on position (earlier = better) and coverage (more coverage = better)
+    //         let position_score = 1.0 - (position / text_len);
+    //         let coverage_score = query_len / text_len;
 
-            // If it starts with the query, give extra boost
-            if position == 0.0 {
-                return Some(0.95 + (coverage_score * 0.05));
-            }
+    //         // If it starts with the query, give extra boost
+    //         if position == 0.0 {
+    //             return Some(0.95 + (coverage_score * 0.05));
+    //         }
 
-            return Some(
-                (position_score * 0.6 + coverage_score * 0.4).max(0.7),
-            );
-        }
+    //         return Some(
+    //             (position_score * 0.6 + coverage_score * 0.4).max(0.7),
+    //         );
+    //     }
 
-        // Check for partial word matches (fuzzy matching)
-        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
-        if query_words.is_empty() {
-            return None;
-        }
+    //     // Check for partial word matches (fuzzy matching)
+    //     let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+    //     if query_words.is_empty() {
+    //         return None;
+    //     }
 
-        let text_words: Vec<String> = text_lower
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
+    //     let text_words: Vec<String> = text_lower
+    //         .split_whitespace()
+    //         .map(|s| s.to_string())
+    //         .collect();
 
-        let mut matched_words = 0;
-        let mut exact_word_matches = 0;
+    //     let mut matched_words = 0;
+    //     let mut exact_word_matches = 0;
 
-        for query_word in &query_words {
-            for text_word in &text_words {
-                if text_word == query_word {
-                    exact_word_matches += 1;
-                    matched_words += 1;
-                    break;
-                } else if text_word.contains(query_word) {
-                    matched_words += 1;
-                    break;
-                }
-            }
-        }
+    //     for query_word in &query_words {
+    //         for text_word in &text_words {
+    //             if text_word == query_word {
+    //                 exact_word_matches += 1;
+    //                 matched_words += 1;
+    //                 break;
+    //             } else if text_word.contains(query_word) {
+    //                 matched_words += 1;
+    //                 break;
+    //             }
+    //         }
+    //     }
 
-        if matched_words > 0 {
-            let base_score = matched_words as f32 / query_words.len() as f32;
-            let exact_bonus =
-                exact_word_matches as f32 / query_words.len() as f32 * 0.2;
-            Some((base_score * 0.6 + exact_bonus).min(0.69)) // Cap fuzzy matches below exact substring matches
-        } else {
-            None
-        }
-    }
+    //     if matched_words > 0 {
+    //         let base_score = matched_words as f32 / query_words.len() as f32;
+    //         let exact_bonus =
+    //             exact_word_matches as f32 / query_words.len() as f32 * 0.2;
+    //         Some((base_score * 0.6 + exact_bonus).min(0.69)) // Cap fuzzy matches below exact substring matches
+    //     } else {
+    //         None
+    //     }
+    // }
 
     /// Convert API response with status to SearchResult format
     #[cfg_attr(
@@ -675,21 +689,10 @@ impl SearchService {
         &self,
         response: Vec<MediaWithStatus>,
         query: &str,
-    ) -> Vec<SearchResult> {
+    ) -> anyhow::Result<Vec<Option<SearchResponse>>, SearchError> {
         response
             .into_iter()
-            .map(|item| self.convert_media_ref_to_result(item.media, query))
-            .collect()
-    }
-
-    fn convert_api_results(
-        &self,
-        response: Vec<Media>,
-        query: &str,
-    ) -> Vec<SearchResult> {
-        response
-            .into_iter()
-            .map(|media_ref| self.convert_media_ref_to_result(media_ref, query))
+            .map(|item| self.convert_media_ref_to_result(item.id, query))
             .collect()
     }
 
@@ -703,88 +706,81 @@ impl SearchService {
     )]
     fn convert_media_ref_to_result(
         &self,
-        media_ref: Media,
+        id: MediaID,
         _query: &str,
-    ) -> SearchResult {
-        match &media_ref {
-            Media::Movie(movie) => SearchResult {
-                title: movie.title.as_str().to_string(),
-                subtitle: movie
-                    .details
-                    .as_movie()
-                    .and_then(|details| {
-                        details.release_date.as_ref().and_then(|d| {
-                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                                .ok()
-                                .map(|date| format!("{} • Movie", date.year()))
-                        })
-                    })
-                    .or(Some("Movie".to_string())),
-                year: movie.details.as_movie().and_then(|details| {
-                    details.release_date.as_ref().and_then(|d| {
-                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| date.year())
-                    })
+    ) -> anyhow::Result<Option<SearchResponse>, SearchError> {
+        let Some(ra) = &self.repo_accessor else {
+            return Err(SearchError::Internal(format!(
+                "Search for {:#?} failed: Repo accessor unavaiable",
+                id
+            )));
+        };
+
+        let yoke_opt = ra.get_media_yoke(&id).ok();
+
+        let media: Media = match yoke_opt {
+            Some(yoke) => {
+                yoke.get().try_to_model().map_err(SearchError::Rkyv)?
+            }
+            // TODO: Handle fallback for media that cannot be found in player repo
+            None => {
+                warn!("Failed to find media in repo for media_id: {}", &id);
+                return Ok(None);
+            }
+        };
+
+        match media.clone() {
+            Media::Movie(ref movie) => Ok(Some(SearchResponse {
+                media_ref: media,
+                title: movie.title.to_string(),
+                subtitle: movie.details.release_date.as_ref().and_then(|d| {
+                    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                        .ok()
+                        .map(|date| format!("{} • Movie", date.year()))
                 }),
-                poster_url: movie
-                    .details
-                    .as_movie()
-                    .and_then(|details| details.poster_path.clone()),
+                year: movie.details.release_date.as_ref().and_then(|d| {
+                    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                        .ok()
+                        .map(|date| date.year())
+                }),
+                poster_url: movie.details.poster_path.clone(),
                 match_score: 1.0, // Server results assumed to be relevant
                 match_field: SearchField::All,
                 library_id: Some(movie.file.library_id),
-                media_ref,
-            },
-            Media::Series(series) => SearchResult {
+            })),
+            Media::Series(series) => Ok(Some(SearchResponse {
+                media_ref: media,
                 title: series.title.as_str().to_string(),
-                subtitle: series
-                    .details
-                    .as_series()
-                    .and_then(|details| {
-                        details.first_air_date.as_ref().and_then(|d| {
-                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                                .ok()
-                                .map(|date| format!("{} • Series", date.year()))
-                        })
-                    })
-                    .or(Some("Series".to_string())),
-                year: series.details.as_series().and_then(|details| {
-                    details.first_air_date.as_ref().and_then(|d| {
+                subtitle: series.details.first_air_date.as_ref().and_then(
+                    |d| {
                         chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
                             .ok()
-                            .map(|date| date.year())
-                    })
+                            .map(|date| format!("{} • Series", date.year()))
+                    },
+                ),
+                year: series.details.first_air_date.as_ref().and_then(|d| {
+                    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                        .ok()
+                        .map(|date| date.year())
                 }),
-                poster_url: series
-                    .details
-                    .as_series()
-                    .and_then(|details| details.poster_path.clone()),
+                poster_url: series.details.poster_path.clone(),
                 match_score: 1.0,
                 match_field: SearchField::All,
                 library_id: Some(series.library_id),
-                media_ref,
-            },
-            Media::Season(season) => SearchResult {
+            })),
+            Media::Season(season) => Ok(Some(SearchResponse {
+                media_ref: media,
                 title: format!("Season {}", season.season_number.value()),
                 subtitle: Some("Series • Season".to_string()),
                 year: None,
-                poster_url: (season.details)
-                    .as_season()
-                    .and_then(|details| details.poster_path.clone()),
+                poster_url: (season.details.poster_path.clone()),
                 match_score: 0.8,
                 match_field: SearchField::All,
                 library_id: Some(season.library_id),
-                media_ref,
-            },
-            Media::Episode(episode) => SearchResult {
-                title: episode
-                    .details
-                    .as_episode()
-                    .map(|details| details.name.clone())
-                    .unwrap_or_else(|| {
-                        format!("Episode {}", episode.episode_number.value())
-                    }),
+            })),
+            Media::Episode(episode) => Ok(Some(SearchResponse {
+                media_ref: media,
+                title: episode.details.name.clone(),
                 subtitle: Some(format!(
                     "Episode {} • S{:02}E{:02}",
                     episode.episode_number.value(),
@@ -792,15 +788,11 @@ impl SearchService {
                     episode.episode_number.value()
                 )),
                 year: None,
-                poster_url: episode
-                    .details
-                    .as_episode()
-                    .and_then(|details| details.still_path.clone()),
+                poster_url: episode.details.still_path.clone(),
                 match_score: 0.7,
                 match_field: SearchField::All,
                 library_id: Some(episode.file.library_id),
-                media_ref,
-            },
+            })),
         }
     }
 }

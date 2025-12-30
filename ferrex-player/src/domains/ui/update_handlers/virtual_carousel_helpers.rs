@@ -1,22 +1,27 @@
 //! Helpers for initializing and maintaining virtual carousels across views
 
-use std::time::{Duration, Instant};
+use crate::{
+    domains::{
+        metadata::demand_planner::DemandSnapshot,
+        ui::{
+            messages::UiMessage,
+            tabs::{TabId, TabState},
+            views::virtual_carousel::{
+                planner,
+                types::{CarouselConfig, CarouselKey},
+            },
+        },
+    },
+    infra::api_types::LibraryType,
+    state::State,
+};
 
-use crate::domains::metadata::demand_planner::DemandSnapshot;
-use crate::domains::ui::views::virtual_carousel::{
-    planner,
-    types::{CarouselConfig, CarouselKey},
+use ferrex_core::player_prelude::PosterSize;
+use iced::{
+    Task,
+    widget::{operation::scroll_to, scrollable::AbsoluteOffset},
 };
-use crate::domains::ui::{
-    messages::UiMessage,
-    tabs::{TabId, TabState},
-};
-use crate::infra::api_types::LibraryType;
-use crate::infra::api_types::Media;
-use crate::state::State;
-use ferrex_core::player_prelude::{MediaID, MovieID, PosterKind, SeriesID};
-use iced::Task;
-use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
+use std::time::Instant;
 use uuid::Uuid;
 
 pub fn init_all_tab_virtual_carousels(state: &mut State) {
@@ -61,14 +66,12 @@ pub fn init_all_tab_virtual_carousels(state: &mut State) {
                 .state
                 .scroll_manager
                 .get_carousel_scroll(&key)
-            {
-                if let Some(vc) =
+                && let Some(vc) =
                     state.domains.ui.state.carousel_registry.get_mut(&key)
-                {
-                    // Restore the carousel state
-                    vc.set_index_position(saved_scroll.index_position);
-                    vc.set_reference_index(saved_scroll.reference_index);
-                }
+            {
+                // Restore the carousel state
+                vc.set_index_position(saved_scroll.index_position);
+                vc.set_reference_index(saved_scroll.reference_index);
             }
         }
     }
@@ -86,7 +89,7 @@ pub fn emit_snapshot_for_carousel_simple<F>(
     key: &CarouselKey,
     total: usize,
     ids_fn: F,
-    poster_kind: Option<PosterKind>,
+    poster_size: PosterSize,
 ) where
     F: Fn(usize) -> Option<Uuid> + Copy,
 {
@@ -101,21 +104,21 @@ pub fn emit_snapshot_for_carousel_simple<F>(
     let snap = if vc.visible_range.start == vc.visible_range.end && total > 0 {
         // Head window fallback when no measurements yet
         let head = usize::min(total, 10);
-        let visible_ids: Vec<_> = (0..head).filter_map(|i| ids_fn(i)).collect();
+        let visible_ids: Vec<_> = (0..head).filter_map(&ids_fn).collect();
         DemandSnapshot {
             visible_ids,
             prefetch_ids: Vec::new(),
             background_ids: Vec::new(),
             timestamp: Instant::now(),
             context: None,
-            poster_kind,
+            poster_size,
         }
     } else {
         planner::snapshot_for_visible(
             vc,
             total,
             ids_fn,
-            poster_kind,
+            poster_size,
             None,
             &state.runtime_config,
         )
@@ -124,82 +127,43 @@ pub fn emit_snapshot_for_carousel_simple<F>(
     handle.send(snap);
 }
 
-/// Build a DemandContext that maps the provided ids to their correct poster types
-/// (Movie vs Series). This is useful for mixed lists like Continue Watching.
-pub fn build_mixed_poster_context(
-    state: &State,
-    ids: &[Uuid],
-) -> crate::domains::metadata::demand_planner::DemandContext {
-    use crate::domains::metadata::demand_planner::{
-        DemandContext, DemandRequestKind,
-    };
-
-    let mut ctx = DemandContext::default();
-    let acc = &state.domains.ui.state.repo_accessor;
-    let library_quality = state.domains.settings.display.library_poster_quality;
-
-    for id in ids {
-        // Try to detect series first; fall back to movie
-        let is_series = acc
-            .get(&MediaID::Series(SeriesID(*id)))
-            .ok()
-            .map(|m| matches!(m, Media::Series(_)))
-            .unwrap_or(false);
-
-        if is_series {
-            ctx.override_request(
-                *id,
-                DemandRequestKind::Poster {
-                    kind: PosterKind::Series,
-                    size: library_quality,
-                },
-            );
-        } else {
-            // Be explicit for movies too to avoid any fallback ambiguity
-            ctx.override_request(
-                *id,
-                DemandRequestKind::Poster {
-                    kind: PosterKind::Movie,
-                    size: library_quality,
-                },
-            );
-        }
-    }
-    ctx
-}
-
 /// Emit initial DemandPlanner snapshots for each All-tab carousel so images load
 /// even before any scroll events fire.
 pub fn emit_initial_all_tab_snapshots(state: &mut State) {
     {
+        let state_ref: &State = state;
+        let poster_size = state.domains.settings.display.library_poster_quality;
         for (lib_id, lib_type) in &state.tab_manager.library_info().clone() {
             // Ensure the corresponding library tab exists and has cached IDs
             if let Some(tab) =
                 state.tab_manager.get_tab(TabId::Library(*lib_id))
+                && let TabState::Library(lib_state) = tab
             {
-                if let TabState::Library(lib_state) = tab {
-                    let ids = &lib_state.cached_index_ids;
-                    let total = ids.len();
-                    let key = match lib_type {
-                        LibraryType::Movies => {
-                            CarouselKey::LibraryMovies(lib_id.to_uuid())
-                        }
-                        LibraryType::Series => {
-                            CarouselKey::LibrarySeries(lib_id.to_uuid())
-                        }
-                    };
-                    let poster_kind = match lib_type {
-                        LibraryType::Movies => Some(PosterKind::Movie),
-                        LibraryType::Series => Some(PosterKind::Series),
-                    };
-                    emit_snapshot_for_carousel_simple(
-                        state,
-                        &key,
-                        total,
-                        |i| ids.get(i).copied(),
-                        poster_kind,
-                    );
-                }
+                let ids = &lib_state.cached_index_ids;
+                let total = ids.len();
+                let key = match lib_type {
+                    LibraryType::Movies => {
+                        CarouselKey::LibraryMovies(lib_id.to_uuid())
+                    }
+                    LibraryType::Series => {
+                        CarouselKey::LibrarySeries(lib_id.to_uuid())
+                    }
+                };
+                emit_snapshot_for_carousel_simple(
+                    state_ref,
+                    &key,
+                    total,
+                    |i| {
+                        ids.get(i).copied().and_then(|id| {
+                            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                state_ref,
+                                *lib_type,
+                                id,
+                            )
+                        })
+                    },
+                    poster_size,
+                );
             }
         }
     }

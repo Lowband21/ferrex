@@ -1,4 +1,5 @@
 use iced::Subscription;
+use iced::event;
 use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::Id;
@@ -13,12 +14,19 @@ pub enum FocusArea {
     LibraryForm,
 }
 
-/// Messages emitted by focus infrastructure.
-#[derive(Debug, Clone, Copy)]
+/// Messages emitted by focus infra.
+#[derive(Debug, Clone)]
 pub enum FocusMessage {
     Activate(FocusArea),
     Clear,
-    Traverse { backwards: bool },
+    Traverse {
+        backwards: bool,
+    },
+    TraverseProbeResult {
+        generation: u64,
+        backwards: bool,
+        focused: Vec<(Id, bool)>,
+    },
 }
 
 impl FocusMessage {
@@ -28,6 +36,12 @@ impl FocusMessage {
             Self::Clear => "Focus::Clear",
             Self::Traverse { backwards: true } => "Focus::TraverseBackward",
             Self::Traverse { backwards: false } => "Focus::TraverseForward",
+            Self::TraverseProbeResult {
+                backwards: true, ..
+            } => "Focus::TraverseBackwardResolved",
+            Self::TraverseProbeResult {
+                backwards: false, ..
+            } => "Focus::TraverseForwardResolved",
         }
     }
 }
@@ -38,11 +52,12 @@ type FocusId = &'static Lazy<Id>;
 #[derive(Debug, Default)]
 pub struct FocusManager {
     active: Option<ActiveArea>,
+    generation: u64,
 }
 
 #[derive(Debug)]
 struct ActiveArea {
-    _area: FocusArea,
+    area: FocusArea,
     has_multiple_fields: bool,
 }
 
@@ -55,8 +70,9 @@ impl FocusManager {
             return None;
         }
 
+        self.generation = self.generation.wrapping_add(1);
         self.active = Some(ActiveArea {
-            _area: area,
+            area,
             has_multiple_fields: fields.len() > 1,
         });
 
@@ -66,6 +82,7 @@ impl FocusManager {
     /// Clear any active focus group.
     pub fn clear(&mut self) {
         self.active = None;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Determine if the current context supports tab traversal.
@@ -73,6 +90,85 @@ impl FocusManager {
         // Rationale: Enable Tab traversal whenever a focus area is active,
         // even if it has a single text field (e.g., password-only screens).
         self.active.is_some()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn is_generation(&self, generation: u64) -> bool {
+        self.generation == generation
+    }
+
+    pub fn active_field_ids(&self) -> Option<Vec<Id>> {
+        let fields = self.active.as_ref().map(|active| active.area.fields())?;
+        Some(fields.iter().map(|lazy| (**lazy).clone()).collect())
+    }
+
+    pub fn resolve_traverse(
+        &self,
+        backwards: bool,
+        focused: Option<&Id>,
+    ) -> Option<Id> {
+        let active = self.active.as_ref()?;
+        let present: Vec<Id> = active
+            .area
+            .fields()
+            .iter()
+            .map(|lazy| (**lazy).clone())
+            .collect();
+
+        self.resolve_traverse_present(backwards, focused, &present)
+    }
+
+    pub fn resolve_traverse_present(
+        &self,
+        backwards: bool,
+        focused: Option<&Id>,
+        present: &[Id],
+    ) -> Option<Id> {
+        let active = self.active.as_ref()?;
+
+        let ordered_present: Vec<Id> = active
+            .area
+            .fields()
+            .iter()
+            .map(|lazy| (**lazy).clone())
+            .filter(|id| present.iter().any(|p| p == id))
+            .collect();
+
+        let first = ordered_present.first().cloned()?;
+
+        // Important UX: `iced::widget::operation::focus_next()` will unfocus the
+        // only field if there's exactly one focusable widget. We explicitly keep
+        // focus on the single field for password-only screens.
+        if !active.has_multiple_fields || ordered_present.len() <= 1 {
+            return Some(first);
+        }
+
+        let Some(current_index) =
+            focused.and_then(|id| ordered_present.iter().position(|x| x == id))
+        else {
+            return Some(if backwards {
+                ordered_present.last().cloned().unwrap_or(first)
+            } else {
+                first
+            });
+        };
+
+        let next_index = if backwards {
+            if current_index == 0 {
+                ordered_present.len() - 1
+            } else {
+                current_index - 1
+            }
+        } else if current_index + 1 >= ordered_present.len() {
+            0
+        } else {
+            current_index + 1
+        };
+
+        ordered_present.get(next_index).cloned()
     }
 }
 
@@ -89,10 +185,28 @@ impl FocusArea {
 
 /// Keyboard subscription that promotes Tab / Shift+Tab into focus messages.
 pub fn subscription() -> Subscription<FocusMessage> {
-    keyboard::on_key_press(on_key_press)
+    event::listen_with(|event, status, _id| {
+        if status == event::Status::Captured {
+            return None;
+        }
+
+        let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            ..
+        }) = event
+        else {
+            return None;
+        };
+        on_key_press(key, modifiers)
+    })
 }
 
 fn on_key_press(key: Key, modifiers: Modifiers) -> Option<FocusMessage> {
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
     match key.as_ref() {
         Key::Named(Named::Tab) => Some(FocusMessage::Traverse {
             backwards: modifiers.shift(),

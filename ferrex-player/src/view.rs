@@ -20,8 +20,7 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state::State;
-use ferrex_core::player_prelude::{ImageRequest, ImageSize};
-use ferrex_model::MediaType;
+use ferrex_core::player_prelude::{ImageRequest, ImageSize, Media, MediaID};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
 
@@ -51,7 +50,6 @@ pub fn view(
     // Check for first-run setup
     // Check authentication state
     if !state.is_authenticated {
-        log::debug!("[Auth] Not authenticated, showing auth view");
         let auth_content = view_auth(
             state,
             &state.domains.auth.state.auth_flow,
@@ -131,13 +129,16 @@ pub fn view(
             .style(theme::Container::Header.style());
 
         // Check if we need library controls bar
-        let selected_library =
-            state.domains.ui.state.scope.lib_id().map(|id| id.to_uuid());
-
         let controls_bar = match &state.domains.ui.state.view {
             ViewState::Library => {
-                view_library_controls_bar(state, selected_library)
-                    .map(|bar| bar.map(DomainMessage::from))
+                if let Some(lib_id) = state.domains.ui.state.scope.lib_id()
+                    && let Some(lib_type) = state.tab_manager.active_tab_type()
+                {
+                    view_library_controls_bar(state, lib_id, lib_type)
+                        .map(|bar| bar.map(DomainMessage::from))
+                } else {
+                    None
+                }
             }
             _ => None,
         };
@@ -210,47 +211,53 @@ pub fn view(
             .background_shader_state
             .build_shader(&state.domains.ui.state.view);
 
-        // Get backdrop from image service based on current view (reactive approach)
-        let (fade_start, fade_end) = state
-            .domains
-            .ui
-            .state
-            .background_shader_state
-            .backdrop_fade();
-
-        let backdrop_handle = match &state.domains.ui.state.view {
-            ViewState::MovieDetail { movie_id, .. } => {
-                let request = ImageRequest::new(
-                    movie_id.to_uuid(),
-                    ImageSize::backdrop(),
-                    MediaType::Movie,
-                );
-                state.image_service.get(&request)
-            }
-            ViewState::SeriesDetail { series_id, .. } => {
-                let request = ImageRequest::new(
-                    series_id.to_uuid(),
-                    ImageSize::backdrop(),
-                    MediaType::Series,
-                );
-                state.image_service.get(&request)
-            }
-            ViewState::SeasonDetail { season_id, .. } => {
-                let request = ImageRequest::new(
-                    season_id.to_uuid(),
-                    ImageSize::backdrop(),
-                    MediaType::Season,
-                );
-                state.image_service.get(&request)
-            }
+        let backdrop_iid = match &state.domains.ui.state.view {
+            ViewState::MovieDetail { movie_id, .. } => state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Movie(*movie_id))
+                .ok()
+                .and_then(|m| match m {
+                    Media::Movie(mr) => mr.details.primary_backdrop_iid,
+                    _ => None,
+                }),
+            ViewState::SeriesDetail { series_id, .. } => state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Series(*series_id))
+                .ok()
+                .and_then(|m| match m {
+                    Media::Series(sr) => sr.details.primary_backdrop_iid,
+                    _ => None,
+                }),
+            ViewState::SeasonDetail { series_id, .. } => state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Series(*series_id))
+                .ok()
+                .and_then(|m| match m {
+                    Media::Series(sr) => sr.details.primary_backdrop_iid,
+                    _ => None,
+                }),
             _ => None,
         };
 
+        let backdrop_handle = backdrop_iid.and_then(|iid| {
+            let request = ImageRequest::new(iid, ImageSize::backdrop());
+            state.image_service.get(&request)
+        });
+
         // Add backdrop if available
         if let Some(handle) = backdrop_handle {
-            // Use BackdropGradient effect with configured fade window from persistent state
             bg_shader = bg_shader
-                .backdrop_with_fade(handle, fade_start, fade_end)
+                .effect(BackgroundEffect::BackdropGradient)
+                .backdrop(handle)
                 .backdrop_aspect_mode(
                     state
                         .domains
@@ -281,18 +288,57 @@ pub fn view(
         content_with_header
     };
 
+    let layered = {
+        #[cfg(feature = "debug-cache-overlay")]
+        {
+            let overlay =
+                crate::domains::ui::views::cache_debug_overlay::view_cache_debug_overlay(state);
+            Stack::new()
+                .push(result)
+                .push(overlay.map(DomainMessage::from))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
+
+        #[cfg(not(feature = "debug-cache-overlay"))]
+        {
+            result
+        }
+    };
+
+    let with_search_overlay =
+        if state.domains.search.state.presentation.is_overlay() {
+            if let Some(overlay) =
+                crate::domains::ui::views::components::view_search_overlay(
+                    state,
+                )
+            {
+                Stack::new()
+                    .push(layered)
+                    .push(overlay)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            } else {
+                layered
+            }
+        } else {
+            layered
+        };
+
     // Overlay toast notifications if any are active
     if state.domains.ui.state.toast_manager.has_toasts() {
         let toast_overlay =
             crate::domains::ui::views::toast_overlay::view_toast_overlay(state);
         Stack::new()
-            .push(result)
+            .push(with_search_overlay)
             .push(toast_overlay.map(DomainMessage::from))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
-        result
+        with_search_overlay
     }
 }
 

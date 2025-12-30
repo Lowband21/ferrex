@@ -9,7 +9,7 @@ use crate::domains::auth::messages as auth;
 use crate::state::State;
 use ferrex_core::player_prelude::UserPermissions;
 use iced::{
-    Alignment, Element, Length, Theme,
+    Alignment, Background, Color, Element, Length, Shadow, Theme, Vector,
     widget::{Space, button, column, container, row, scrollable, text},
 };
 
@@ -88,7 +88,7 @@ pub fn view_user_selection_with_admin_state<'a>(
         let mut user_items: Vec<Element<'a, DomainMessage>> = users
             .iter()
             .map(|user| {
-                user_button_with_auth_method(
+                user_button(
                     user,
                     admin_pin_unlock_enabled,
                     fonts.title,
@@ -123,7 +123,9 @@ pub fn view_user_selection_with_admin_state<'a>(
                         background: Some(palette.background.weak.color.into()),
                         border: iced::Border::default(),
                         scroller: scrollable::Scroller {
-                            color: palette.background.strong.color,
+                            background: Background::Color(
+                                palette.background.strong.color,
+                            ),
                             border: iced::Border::default(),
                         },
                     },
@@ -131,11 +133,25 @@ pub fn view_user_selection_with_admin_state<'a>(
                         background: Some(palette.background.weak.color.into()),
                         border: iced::Border::default(),
                         scroller: scrollable::Scroller {
-                            color: palette.background.strong.color,
+                            background: Background::Color(
+                                palette.background.strong.color,
+                            ),
                             border: iced::Border::default(),
                         },
                     },
                     gap: None,
+                    auto_scroll: scrollable::AutoScroll {
+                        background: Background::Color(
+                            palette.background.base.color,
+                        ),
+                        border: iced::Border::default(),
+                        shadow: Shadow {
+                            color: Color::BLACK,
+                            offset: Vector::ZERO,
+                            blur_radius: 2.0,
+                        },
+                        icon: palette.background.base.text,
+                    },
                 }
             });
 
@@ -217,47 +233,7 @@ fn admin_session_indicator<'a>(
     ),
     profiling::function
 )]
-fn user_button_with_auth_method<'a>(
-    user: &'a UserListItemDto,
-    admin_pin_unlock_enabled: bool,
-    display_name_size: f32,
-    username_size: f32,
-    auth_method_size: f32,
-) -> Element<'a, DomainMessage> {
-    user_button_internal(
-        user,
-        admin_pin_unlock_enabled,
-        display_name_size,
-        username_size,
-        auth_method_size,
-    )
-}
-
-/// Creates a user selection button (legacy compatibility)
 fn user_button<'a>(
-    user: &'a UserListItemDto,
-    display_name_size: f32,
-    username_size: f32,
-    auth_method_size: f32,
-) -> Element<'a, DomainMessage> {
-    user_button_internal(
-        user,
-        false,
-        display_name_size,
-        username_size,
-        auth_method_size,
-    )
-}
-
-#[cfg_attr(
-    any(
-        feature = "profile-with-puffin",
-        feature = "profile-with-tracy",
-        feature = "profile-with-tracing"
-    ),
-    profiling::function
-)]
-fn user_button_internal<'a>(
     user: &'a UserListItemDto,
     admin_pin_unlock_enabled: bool,
     display_name_size: f32,

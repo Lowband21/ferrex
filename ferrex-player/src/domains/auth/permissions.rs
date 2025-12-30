@@ -9,6 +9,7 @@ use ferrex_core::{
 };
 
 /// Permission checker for the current user
+#[derive(Debug)]
 pub struct PermissionChecker<'a> {
     permissions: Option<&'a UserPermissions>,
 }

@@ -12,7 +12,7 @@ pub const SEARCH_WINDOW_INPUT_ID: &str = "search-window-input";
 /// current UI state. This keeps downstream call sites agnostic of the concrete widget
 /// identifiers and makes it easier to extend focus rules later on.
 pub fn focus_active_search_input(state: &State) -> Task<DomainMessage> {
-    if state.search_window_id.is_some() {
+    if state.domains.search.state.presentation.is_open() {
         focus::<DomainMessage>(Id::new(SEARCH_WINDOW_INPUT_ID))
     } else {
         Task::none()

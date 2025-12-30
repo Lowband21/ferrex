@@ -29,7 +29,7 @@ pub trait StreamingApiService: Send + Sync {
     async fn get_master_playlist(&self, media_id: &str) -> Result<String>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StreamingApiAdapter {
     client: Arc<ApiClient>,
 }
@@ -47,7 +47,7 @@ impl StreamingApiService for StreamingApiAdapter {
         media_id: &str,
         profile: &str,
     ) -> Result<String> {
-        // Transcoding pipeline is temporarily unavailable; signal cached job
+        // Transcoding provider is temporarily unavailable; signal cached job
         let _ = profile; // profile selection is ignored for direct streaming
         Ok(format!("cached_{}", media_id))
     }
@@ -72,7 +72,7 @@ impl StreamingApiService for StreamingApiAdapter {
         #[derive(serde::Deserialize)]
         struct PlaybackTicketResponse {
             access_token: String,
-            expires_in: i64,
+            _expires_in: i64,
         }
         let ticket_path =
             utils::replace_param(v1::stream::PLAYBACK_TICKET, "{id}", media_id);

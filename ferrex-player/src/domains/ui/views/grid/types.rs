@@ -93,37 +93,6 @@ pub enum CardState {
     Placeholder,
 }
 
-/// Media types supported by the card system
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MediaType {
-    Movie,
-    Series,
-    Season,
-    Episode,
-}
-
-impl MediaType {
-    /// Get the default fallback icon/emoji for this media type
-    pub fn default_icon(&self) -> &'static str {
-        match self {
-            MediaType::Movie => "🎬",
-            MediaType::Series => "📺",
-            MediaType::Season => "📺",
-            MediaType::Episode => "🎞️",
-        }
-    }
-
-    /// Get the hover icon name for this media type
-    pub fn hover_icon(&self) -> lucide_icons::Icon {
-        match self {
-            MediaType::Movie => lucide_icons::Icon::Play,
-            MediaType::Series => lucide_icons::Icon::Tv,
-            MediaType::Season => lucide_icons::Icon::LayoutGrid,
-            MediaType::Episode => lucide_icons::Icon::Play,
-        }
-    }
-}
-
 /// Animation configuration for cards
 #[derive(Debug, Clone)]
 pub struct AnimationConfig {
@@ -207,7 +176,7 @@ impl EasingFunction {
                     1.0 - 2.0 * (1.0 - t) * (1.0 - t)
                 }
             }
-            EasingFunction::CubicBezier(x1, y1, x2, y2) => {
+            EasingFunction::CubicBezier(_x1, y1, _x2, y2) => {
                 // Simplified cubic bezier approximation
                 let t2 = t * t;
                 let t3 = t2 * t;

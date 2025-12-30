@@ -5,8 +5,15 @@ use iced::Rectangle;
 
 // Thread-safe storage for animation settings, bridging RuntimeConfig to shader widgets.
 // These are updated when settings change and read by AnimationConfig::default().
-static HOVER_SCALE_BITS: AtomicU32 = AtomicU32::new(0x3F86_6666); // 1.05f32 in IEEE 754
-static HOVER_TRANSITION_MS: AtomicU64 = AtomicU64::new(150);
+static HOVER_SCALE_BITS: AtomicU32 = AtomicU32::new(
+    crate::infra::constants::layout::animation::HOVER_SCALE.to_bits(),
+);
+static HOVER_TRANSITION_MS: AtomicU64 = AtomicU64::new(
+    crate::infra::constants::layout::animation::HOVER_TRANSITION_MS,
+);
+static HOVER_SCALE_DOWN_DELAY_MS: AtomicU64 = AtomicU64::new(
+    crate::infra::constants::layout::animation::HOVER_SCALE_DOWN_DELAY_MS,
+);
 
 /// Set the hover scale factor from RuntimeConfig.
 /// Called when animation settings are updated.
@@ -30,6 +37,17 @@ pub fn get_hover_transition_ms() -> u64 {
     HOVER_TRANSITION_MS.load(Ordering::Relaxed)
 }
 
+/// Set the hover scale-down delay from RuntimeConfig.
+/// Called when animation settings are updated.
+pub fn set_hover_scale_down_delay_ms(ms: u64) {
+    HOVER_SCALE_DOWN_DELAY_MS.store(ms, Ordering::Relaxed);
+}
+
+/// Get the current hover scale-down delay (milliseconds).
+pub fn get_hover_scale_down_delay_ms() -> u64 {
+    HOVER_SCALE_DOWN_DELAY_MS.load(Ordering::Relaxed)
+}
+
 /// Animation timing configuration for poster widgets.
 /// Created from RuntimeConfig at the view layer, passed explicitly to avoid global state.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +57,7 @@ pub struct AnimationConfig {
     pub texture_fade_ms: u64,
     pub hover_scale: f32,
     pub hover_transition_ms: u64,
+    pub hover_scale_down_delay_ms: u64,
 }
 
 impl Default for AnimationConfig {
@@ -52,6 +71,7 @@ impl Default for AnimationConfig {
             // Read from globals so settings changes take effect immediately
             hover_scale: get_hover_scale(),
             hover_transition_ms: get_hover_transition_ms(),
+            hover_scale_down_delay_ms: get_hover_scale_down_delay_ms(),
         }
     }
 }
@@ -72,6 +92,8 @@ pub struct AnimatedPosterBounds {
     pub hover_scale: f32,
     /// Hover transition duration in milliseconds (stored from AnimationConfig)
     pub hover_transition_ms: u64,
+    /// Delay before scaling down after hover ends (stored from AnimationConfig)
+    pub hover_scale_down_delay_ms: u64,
 }
 
 #[cfg_attr(
@@ -105,6 +127,7 @@ impl AnimatedPosterBounds {
             ui_scale_factor: 1.0,
             hover_scale: config.hover_scale,
             hover_transition_ms: config.hover_transition_ms,
+            hover_scale_down_delay_ms: config.hover_scale_down_delay_ms,
         }
     }
 

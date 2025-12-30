@@ -338,8 +338,8 @@ impl AuthMessage {
 /// Cross-domain events that auth domain can emit
 #[derive(Clone, Debug)]
 pub enum AuthEvent {
-    UserAuthenticated(User, UserPermissions),
+    UserAuthenticated(Box<User>, UserPermissions),
     UserLoggedOut,
-    WatchStatusUpdated(UserWatchState),
+    WatchStatusUpdated(Box<UserWatchState>),
     RequireSetup,
 }

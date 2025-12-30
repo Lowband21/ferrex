@@ -51,15 +51,12 @@ pub mod scrolling {
     pub const BOOST_MULTIPLIER: f32 = 4.0;
 }
 
-/// Texture upload budgeting configuration
-pub mod texture_upload {
-    /// Maximum texture uploads allowed per frame
-    /// Each upload takes ~3ms, with all other operations being relatively insignificant
-    /// So 3 uploads = 9ms (close to our target ~8ms frame budget)
-    /// Adjust based on target hardware:
-    /// - Low-end: 1-2 uploads
-    /// - Mid-range: 2-3 uploads
-    /// - High-end: 4+ uploads
-    // Tuned for smoother, steadier appearance over throughput
-    pub const MAX_UPLOADS_PER_FRAME: u32 = 6;
+pub mod memory_usage {
+    /// One GiB in Bytes
+    const GIB: u64 = 1_073_741_824;
+
+    /// 2GiB default max ram usage
+    pub const MAX_RAM_BYTES: u64 = GIB;
+    /// 5GiB default max ram usage
+    pub const MAX_IMAGE_CACHE_BYTES: u64 = 5 * GIB;
 }

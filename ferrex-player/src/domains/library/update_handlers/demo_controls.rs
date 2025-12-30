@@ -40,7 +40,7 @@ pub fn handle_apply_demo_sizing(
         Task::perform(
             async move {
                 api_service
-                    .reset_demo(request)
+                    .resize_demo(request)
                     .await
                     .map_err(|e| e.to_string())
             },

@@ -4,11 +4,14 @@ use super::components::{
     auth_card, auth_container, error_message, primary_button, secondary_button,
     spacing, title,
 };
+use crate::common::focus::FocusMessage;
 use crate::common::focus::ids;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::CredentialType;
+use crate::domains::ui::theme;
+use crate::domains::ui::views::auth::login_card;
 use ferrex_core::player_prelude::User;
 use iced::{
     Alignment, Element, Length, Theme,
@@ -77,25 +80,39 @@ pub fn view_credential_entry<'a>(
         spacing(),
     ];
 
-    // Error message
-    if let Some(err) = error {
-        content = content.push(error_message(err, fonts.caption));
-        content = content.push(Space::new().height(Length::Fixed(12.0)));
-    }
+    // Keep a stable widget tree before the input field to avoid focus loss when
+    // error/warning content appears/disappears (iced widget state is positional).
+    let has_error = error.is_some();
+    let error_slot: Element<'a, DomainMessage> = error
+        .map(|err| error_message(err, fonts.caption).into())
+        .unwrap_or_else(|| Space::new().height(Length::Fixed(0.0)).into());
+    content = content.push(error_slot);
+    content = content.push(Space::new().height(if has_error {
+        Length::Fixed(12.0)
+    } else {
+        Length::Fixed(0.0)
+    }));
 
-    // Attempts remaining warning
-    if let Some(attempts) = attempts_remaining
+    let show_attempts_warning = attempts_remaining.is_some_and(|a| a < 3);
+    let attempts_warning: Element<'a, DomainMessage> = if let Some(attempts) =
+        attempts_remaining
         && attempts < 3
     {
-        content = content.push(
-            text(format!("{} attempts remaining", attempts))
-                .size(14)
-                .style(|theme: &Theme| text::Style {
-                    color: Some(theme.extended_palette().danger.base.color),
-                }),
-        );
-        content = content.push(Space::new().height(Length::Fixed(8.0)));
-    }
+        text(format!("{} attempts remaining", attempts))
+            .size(14)
+            .style(|theme: &Theme| text::Style {
+                color: Some(theme.extended_palette().danger.base.color),
+            })
+            .into()
+    } else {
+        Space::new().height(Length::Fixed(0.0)).into()
+    };
+    content = content.push(attempts_warning);
+    content = content.push(Space::new().height(if show_attempts_warning {
+        Length::Fixed(8.0)
+    } else {
+        Length::Fixed(0.0)
+    }));
 
     // Input field
     match input_type {
@@ -121,13 +138,16 @@ pub fn view_credential_entry<'a>(
 
             // Password visibility toggle
             content = content.push(
-                checkbox("Show password", show_password)
+                checkbox(show_password)
+                    .label("Show password")
                     .on_toggle(|_| {
                         DomainMessage::Auth(
                             auth::AuthMessage::TogglePasswordVisibility,
                         )
                     })
+                    .style(theme::Checkbox::style())
                     .size(16)
+                    .text_size(fonts.caption)
                     .spacing(8),
             );
 
@@ -135,13 +155,16 @@ pub fn view_credential_entry<'a>(
 
             // Remember device checkbox
             content = content.push(
-                checkbox("Remember this device", remember_device)
+                checkbox(remember_device)
+                    .label("Remember this device")
                     .on_toggle(|_| {
                         DomainMessage::Auth(
                             auth::AuthMessage::ToggleRememberDevice,
                         )
                     })
+                    .style(theme::Checkbox::style())
                     .size(16)
+                    .text_size(fonts.caption)
                     .spacing(8),
             );
         }
@@ -211,10 +234,17 @@ pub fn view_pre_auth_login<'a>(
     let fonts = &state.domains.ui.state.size_provider.font;
     let mut content = column![title("Sign in", fonts.title_lg), spacing(),];
 
-    if let Some(err) = error {
-        content = content.push(error_message(err, fonts.caption));
-        content = content.push(Space::new().height(Length::Fixed(12.0)));
-    }
+    // Keep a stable widget tree before inputs to preserve focus when errors are cleared.
+    let has_error = error.is_some();
+    let error_slot: Element<'a, DomainMessage> = error
+        .map(|err| error_message(err, fonts.caption).into())
+        .unwrap_or_else(|| Space::new().height(Length::Fixed(0.0)).into());
+    content = content.push(error_slot);
+    content = content.push(Space::new().height(if has_error {
+        Length::Fixed(12.0)
+    } else {
+        Length::Fixed(0.0)
+    }));
 
     // Username input
     content = content.push(
@@ -222,6 +252,9 @@ pub fn view_pre_auth_login<'a>(
             .on_input(|s| {
                 DomainMessage::Auth(auth::AuthMessage::PreAuthUpdateUsername(s))
             })
+            .on_submit(DomainMessage::Focus(FocusMessage::Traverse {
+                backwards: false,
+            }))
             .id(ids::auth_pre_auth_username())
             .padding(12)
             .size(16)
@@ -248,22 +281,27 @@ pub fn view_pre_auth_login<'a>(
 
     // Toggles
     content = content.push(
-        row![
-            checkbox("Show password", show_password)
+        column![
+            checkbox(show_password)
+                .label("Show password")
                 .on_toggle(|_| DomainMessage::Auth(
                     auth::AuthMessage::PreAuthTogglePasswordVisibility
                 ))
+                .style(theme::Checkbox::style())
                 .size(16)
+                .text_size(fonts.caption)
                 .spacing(8),
-            Space::new().width(Length::Fixed(16.0)),
-            checkbox("Remember this device", remember_device)
+            checkbox(remember_device)
+                .label("Remember this device")
                 .on_toggle(|_| DomainMessage::Auth(
                     auth::AuthMessage::PreAuthToggleRememberDevice
                 ))
+                .style(theme::Checkbox::style())
                 .size(16)
+                .text_size(fonts.caption)
                 .spacing(8),
         ]
-        .align_y(Alignment::Center),
+        .spacing(8),
     );
 
     content = content.push(spacing());
@@ -279,7 +317,14 @@ pub fn view_pre_auth_login<'a>(
 
     content = content.push(submit_button);
 
-    let card = auth_card(content.align_x(Alignment::Center));
+    // Wrap in auth container (centered on screen)
+    let card = login_card(
+        container(content)
+            .padding(24)
+            .width(Length::Fill)
+            .height(Length::Shrink),
+    );
+
     auth_container(card).into()
 }
 

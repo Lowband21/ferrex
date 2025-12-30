@@ -1,4 +1,4 @@
-//! Domain-agnostic testing infrastructure for Ferrex
+//! Domain-agnostic testing infra for Ferrex
 //!
 //! This module provides a comprehensive testing framework that enables:
 //! - Deterministic async execution
@@ -9,7 +9,7 @@
 //!
 //! # Architecture
 //!
-//! The testing infrastructure is organized into several key components:
+//! The testing infra is organized into several key components:
 //!
 //! - **Executor**: Controls async task execution deterministically
 //! - **Time**: Virtual time provider for testing time-dependent code

@@ -104,13 +104,14 @@ impl Pipeline {
         ),
         profiling::function
     )]
+    #[allow(unused)]
     pub(crate) fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
     ) -> Self {
-        log::debug!("Creating rounded image shader pipeline");
+        log::debug!("Creating rounded image shader provider");
 
-        // Load shader (front pipeline): concatenate shared helpers + poster shader.
+        // Load shader (front provider): concatenate shared helpers + poster shader.
         let shader_src = format!(
             "{}\n{}",
             include_str!("../../shaders/common.wgsl"),
@@ -171,7 +172,7 @@ impl Pipeline {
                 }],
             });
 
-        // Create pipeline layout
+        // Create provider layout
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Rounded Image Pipeline Layout"),
@@ -244,7 +245,7 @@ impl Pipeline {
             ],
         };
 
-        // Create render pipeline
+        // Create render provider
         let render_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Rounded Image Pipeline"),
@@ -359,8 +360,8 @@ pub(crate) fn create_batch_instance(
 
     let (
         actual_opacity,
-        mut rotation_y,
-        mut animation_progress,
+        rotation_y,
+        animation_progress,
         z_depth,
         scale,
         shadow_intensity,
@@ -498,9 +499,9 @@ pub(crate) fn create_batch_instance(
 
     // Pack title and meta text for GPU
     let (title_chars, title_len) =
-        title.map(|t| pack_title(t)).unwrap_or(([0xFFFFFFFF; 6], 0));
+        title.map(pack_title).unwrap_or(([0xFFFFFFFF; 6], 0));
     let (meta_chars, meta_len) =
-        meta.map(|m| pack_meta(m)).unwrap_or(([0xFFFFFFFF; 4], 0));
+        meta.map(pack_meta).unwrap_or(([0xFFFFFFFF; 4], 0));
 
     PosterInstance {
         position_and_size: [
@@ -557,7 +558,7 @@ pub fn create_placeholder_instance(
     bounds: &Rectangle,
     radius: f32,
     theme_color: Color,
-    animated_bounds: Option<&animation::AnimatedPosterBounds>,
+    _animated_bounds: Option<&animation::AnimatedPosterBounds>,
     progress: Option<f32>,
     progress_color: Color,
     _face: PosterFace,

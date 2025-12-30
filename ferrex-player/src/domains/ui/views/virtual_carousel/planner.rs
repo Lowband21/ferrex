@@ -12,16 +12,16 @@ use crate::{
     infra::runtime_config::RuntimeConfig,
 };
 
-use ferrex_core::player_prelude::{EpisodeStillSize, PosterKind};
+use ferrex_core::player_prelude::{EpisodeSize, PosterSize};
 
 use uuid::Uuid;
 
 /// Build a generic snapshot for a poster-based carousel.
 ///
 /// - `ids_fn` must map item indices to Uuids (if present in range)
-/// - `poster_kind` sets the default PosterKind when no DemandContext override
-///   is provided (e.g., Movie/Series/Season)
-/// Collect visible, prefetch, and background id lists using the state's ranges.
+/// - `poster_size` sets the default `ImageSize::Poster` size when no
+///   `DemandContext` override is provided.
+///   Collect visible, prefetch, and background id lists using the state's ranges.
 pub fn collect_ranges_ids<F>(
     state: &VirtualCarouselState,
     _total_items: usize,
@@ -68,7 +68,7 @@ pub fn snapshot_for_visible<F>(
     state: &VirtualCarouselState,
     total_items: usize,
     ids_fn: F,
-    poster_kind: Option<PosterKind>,
+    poster_size: PosterSize,
     context: Option<DemandContext>,
     rc: &RuntimeConfig,
 ) -> DemandSnapshot
@@ -84,7 +84,7 @@ where
         background_ids,
         timestamp: std::time::Instant::now(),
         context,
-        poster_kind,
+        poster_size,
     }
 }
 
@@ -95,7 +95,7 @@ pub fn build_episode_still_context(ids: &[Uuid]) -> DemandContext {
         context.override_request(
             *id,
             DemandRequestKind::EpisodeStill {
-                size: EpisodeStillSize::Standard,
+                size: EpisodeSize::W512,
             },
         );
     }

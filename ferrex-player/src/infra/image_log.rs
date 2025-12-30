@@ -1,17 +1,18 @@
 use dashmap::{DashMap, DashSet};
-use ferrex_model::ImageSize;
+use ferrex_model::{ImageSize, image::ImageQuery};
+use log::debug;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 // Temporary diagnostics: associate media_id -> human-readable name/title.
-static MEDIA_TITLES: Lazy<DashMap<Uuid, String>> = Lazy::new(|| DashMap::new());
+static MEDIA_TITLES: Lazy<DashMap<Uuid, String>> = Lazy::new(DashMap::new);
 
 // Guard to avoid flooding logs: record a small set of keys we've already logged.
 // Keys are formed as "kind:media_id:category:size" where kind is one of
 //   - fetch-ok
 //   - fetch-fail
 //   - decode-fallback
-static LOGGED_KEYS: Lazy<DashSet<String>> = Lazy::new(|| DashSet::new());
+static LOGGED_KEYS: Lazy<DashSet<String>> = Lazy::new(DashSet::new);
 
 /// Register a title for a media id (no overwrite).
 pub fn register_media_title(media_id: Uuid, title: &str) {
@@ -38,50 +39,48 @@ fn size_label(size: &ImageSize) -> &'static str {
 
 /// Log a successful image fetch exactly once per (media, category, size).
 pub fn log_fetch_once(
-    media_id: Uuid,
-    category: &str,
-    size: ImageSize,
-    target_w: u32,
-    url: &str,
+    iq: ImageQuery,
+    _url: &str,
+    actual_width: u32,
+    _actual_height: u32,
     byte_len: usize,
 ) {
-    let key = format!("fetch-ok:{media_id}:{category}:{:?}", size);
+    let key = format!(
+        "fetch-ok:{}:{}:{:?}",
+        iq.iid,
+        iq.imz.image_variant(),
+        actual_width
+    );
     if LOGGED_KEYS.insert(key) {
-        let title = title_for(&media_id);
-        log::info!(
-            "ImageFetch OK media_id={} title=\"{}\" category={} size={} target_w={} url={} bytes={}",
-            media_id,
-            title,
-            category,
-            size_label(&size),
-            target_w,
-            url,
-            byte_len
+        debug!(
+            "fetch-ok: iid:{}, type:{}, requested width:{}, received width: {}, byte length: {}",
+            iq.iid,
+            iq.imz.image_variant(),
+            iq.imz
+                .width()
+                .map(|w| w.to_string())
+                .unwrap_or("Unknown".to_string()),
+            actual_width,
+            byte_len,
         );
     }
 }
 
 /// Log a failed image fetch exactly once per (media, category, size).
-pub fn log_fetch_failure_once(
-    media_id: Uuid,
-    category: &str,
-    size: ImageSize,
-    target_w: u32,
-    url: &str,
-    error: &str,
-) {
-    let key = format!("fetch-fail:{media_id}:{category}:{:?}", size);
+pub fn log_fetch_failure_once(iq: ImageQuery, url: &str) {
+    let key = format!(
+        "fetch-fail:{}:{}:{:?}",
+        iq.iid,
+        iq.imz.image_variant(),
+        iq.imz
+    );
     if LOGGED_KEYS.insert(key) {
-        let title = title_for(&media_id);
         log::info!(
-            "ImageFetch FAIL media_id={} title=\"{}\" category={} size={} target_w={} url={} error={}",
-            media_id,
-            title,
-            category,
-            size_label(&size),
-            target_w,
+            "ImageFetch FAIL iid={} category={}, size={}, url={}",
+            iq.iid,
+            iq.imz.image_variant(),
+            iq.imz,
             url,
-            error
         );
     }
 }

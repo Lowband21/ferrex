@@ -5,12 +5,13 @@
 
 use crate::{
     domains::{
-        metadata::image_service::FirstDisplayHint,
+        metadata::image_service::{FirstDisplayHint, UnifiedImageService},
         ui::{
             messages::UiMessage, views::virtual_carousel::types::CarouselKey,
         },
     },
     infra::{
+        image_log::register_media_title,
         service_registry,
         shader_widgets::poster::{
             Poster, PosterFace, PosterInstanceKey,
@@ -20,22 +21,24 @@ use crate::{
             },
             poster,
         },
-        theme::accent,
+        theme::{accent, fallback_theme_color_for},
     },
 };
 
-use ferrex_core::player_prelude::{ImageRequest, MediaIDLike, Priority};
+use ferrex_core::player_prelude::{ImageRequest, Priority};
 
 use ferrex_model::{
-    EpisodeReference, ImageSize, MediaType, MovieReference, SeasonReference,
-    SeriesReference,
+    EpisodeReference, ImageSize, MovieReference, SeasonReference, Series,
 };
 
 use iced::{Color, Element, Length, widget::image::Handle};
 
 use lucide_icons::Icon;
 use rand::random;
-use std::hash::{Hash, Hasher};
+use std::{
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 use uuid::Uuid;
 
 /// Cached image data to avoid repeated lookups
@@ -50,15 +53,17 @@ struct CachedImageData {
 #[derive(Debug, Clone)]
 pub struct ImageFor {
     media_id: Uuid,
+    /// TMDB image variant id (`tmdb_image_variants.id`) to request.
+    ///
+    /// `None` means "no known image" and will render only a placeholder.
+    iid: Option<Uuid>,
     size: ImageSize,
-    image_type: MediaType,
     radius: f32,
     width: Length,
     height: Length,
     placeholder_icon: Icon,
     placeholder_text: Option<String>,
     priority: Priority,
-    image_index: u32,
     animation: AnimationBehavior,
     theme_color: Option<Color>,
     is_hovered: bool,
@@ -77,8 +82,9 @@ pub struct ImageFor {
     meta: Option<String>,
     // Carousel context for unique poster instance identification
     carousel_key: Option<CarouselKey>,
-    // Hover scale factor from AnimationConfig (for config-aware bounds)
-    hover_scale: Option<f32>,
+    // Animation configuration snapshot used for config-aware bounds + animations.
+    // Keeping this as a value avoids lifetime plumbing and allows per-widget overrides.
+    animation_config: Option<AnimationConfig>,
 }
 
 impl ImageFor {
@@ -95,8 +101,8 @@ impl ImageFor {
         use crate::infra::constants::layout::poster;
         Self {
             media_id,
+            iid: None,
             size: ImageSize::poster(),
-            image_type: MediaType::Movie,
             radius: poster::CORNER_RADIUS,
             width: Length::Fixed(poster::BASE_WIDTH),
             height: Length::Fixed(poster::BASE_HEIGHT),
@@ -104,10 +110,9 @@ impl ImageFor {
             placeholder_icon: Icon::FileArchive,
             placeholder_text: None,
             priority: Priority::Preload,
-            image_index: 0,
             // Default: flip on first display, fade on subsequent displays
             animation: AnimationBehavior::fade_slow_then_quick(),
-            theme_color: None,
+            theme_color: Some(fallback_theme_color_for(media_id)),
             is_hovered: false,
             on_play: None,
             on_click: None,
@@ -120,8 +125,14 @@ impl ImageFor {
             title: None,
             meta: None,
             carousel_key: None,
-            hover_scale: None,
+            animation_config: None,
         }
+    }
+
+    /// Set the TMDB image variant id to load.
+    pub fn iid(mut self, iid: Option<Uuid>) -> Self {
+        self.iid = iid;
+        self
     }
 
     /// Set the image size/type to load
@@ -132,12 +143,6 @@ impl ImageFor {
             self.height = Length::Fixed(h as f32);
         }
         self.size = size;
-        self
-    }
-
-    /// Set the image type to load
-    pub fn image_type(mut self, image_type: MediaType) -> Self {
-        self.image_type = image_type;
         self
     }
 
@@ -177,12 +182,6 @@ impl ImageFor {
         self
     }
 
-    /// Set the image index for multi-image categories (e.g. cast order)
-    pub fn image_index(mut self, index: u32) -> Self {
-        self.image_index = index;
-        self
-    }
-
     /// Set priority based on visibility (convenience method)
     pub fn visible(mut self, is_visible: bool) -> Self {
         self.priority = if is_visible {
@@ -201,10 +200,10 @@ impl ImageFor {
 
     /// Set the default fade animation using explicit config from RuntimeConfig.
     /// This is the preferred method when animation timing is user-configurable.
-    /// Also extracts hover_scale for config-aware bounds calculation.
+    /// Also stores the config for config-aware bounds calculation.
     pub fn with_animation_config(mut self, config: &AnimationConfig) -> Self {
         self.animation = AnimationBehavior::fade_slow_then_quick_with(config);
-        self.hover_scale = Some(config.hover_scale);
+        self.animation_config = Some(*config);
         self
     }
 
@@ -256,7 +255,7 @@ impl ImageFor {
         self
     }
 
-    /// Set which face/pipeline to render
+    /// Set which face/provider to render
     pub fn face(mut self, face: PosterFace) -> Self {
         self.face = Some(face);
         self
@@ -298,7 +297,7 @@ pub fn image_for(media_id: Uuid) -> ImageFor {
 
 // Thread-local cache for the image service to avoid repeated lookups
 thread_local! {
-    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<crate::infra::service_registry::ImageServiceHandle>> = const { std::cell::RefCell::new(None) };
+    static CACHED_IMAGE_SERVICE: std::cell::RefCell<Option<Arc<UnifiedImageService>>> = const { std::cell::RefCell::new(None) };
 }
 
 // Track which requests have already emitted a planner coverage warning to avoid spamming logs
@@ -321,34 +320,25 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
         };
 
         // Create animated bounds for proper sizing
-        // Use config-aware bounds if hover_scale was set via with_animation_config
-        let bounds = if let Some(hover_scale) = image.hover_scale {
-            AnimatedPosterBounds::new_with_config(
-                width,
-                height,
-                &AnimationConfig {
-                    hover_scale,
-                    ..AnimationConfig::default()
-                },
-            )
+        // Use config-aware bounds if an explicit AnimationConfig was set via with_animation_config
+        let bounds = if let Some(config) = image.animation_config {
+            AnimatedPosterBounds::new_with_config(width, height, &config)
         } else {
             AnimatedPosterBounds::new(width, height)
         };
 
-        // Create the image request
-        let request =
-            ImageRequest::new(image.media_id, image.size, image.image_type)
-                .with_priority(image.priority)
-                .with_index(image.image_index);
+        let request = image.iid.map(|iid| {
+            ImageRequest::new(iid, image.size).with_priority(image.priority)
+        });
 
         // Calculate instance hash for cache invalidation and widget identity.
         // Includes carousel_key so the same media in different carousels gets
         // unique primitive IDs for correct batch deduplication.
         let instance_hash = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            request.media_id.hash(&mut hasher);
-            request.size.hash(&mut hasher);
-            request.image_index.hash(&mut hasher);
+            image.media_id.hash(&mut hasher);
+            image.iid.hash(&mut hasher);
+            image.size.hash(&mut hasher);
             // Include carousel context for unique instance identity
             image.carousel_key.hash(&mut hasher);
             hasher.finish()
@@ -388,8 +378,25 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
 
         // Check if we have access to the image service
         if let Some(image_service) = image_service {
+            let Some(request) = request.clone() else {
+                // No iid available; render placeholder only.
+                let instance_key = PosterInstanceKey::new(
+                    image.media_id,
+                    image.carousel_key.clone(),
+                );
+                return create_loading_placeholder(
+                    bounds,
+                    image.radius,
+                    image.theme_color,
+                    instance_hash,
+                    instance_key,
+                    image.face.unwrap_or(PosterFace::Front),
+                    image.rotation_y,
+                );
+            };
+
             // Check the cache first
-            match image_service.get().take_loaded_entry(&request) {
+            match image_service.take_loaded_entry(&request) {
                 Some((handle, loaded_at, hint)) => {
                     #[cfg(any(
                         feature = "profile-with-puffin",
@@ -485,7 +492,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     profiling::scope!("image_for::CacheMiss");
 
                     if !image.skip_request {
-                        image_service.get().request_image(request);
+                        image_service.request_image(request.clone());
                     } else {
                         // Hardening: warn if no planner snapshot appears to cover this request shortly
                         // We check again after a short delay to reduce false positives during transitions
@@ -493,9 +500,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                             service_registry::get_image_service();
                         if let Some(svc) = maybe_handle {
                             // Only schedule if not already loaded/loading/queued
-                            if !svc.get().is_loaded(&request)
-                                && !svc.get().is_loading(&request)
-                                && !svc.get().is_queued(&request)
+                            if !svc.is_loaded(&request)
+                                && !svc.is_loading(&request)
+                                && !svc.is_queued(&request)
                             {
                                 let req = request.clone();
                                 let req_hash = instance_hash;
@@ -506,24 +513,20 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                                     );
                                     if let Some(svc) =
                                         service_registry::get_image_service()
+                                        && !svc.is_loaded(&req)
+                                        && !svc.is_loading(&req)
+                                        && !svc.is_queued(&req)
                                     {
-                                        if !svc.get().is_loaded(&req)
-                                            && !svc.get().is_loading(&req)
-                                            && !svc.get().is_queued(&req)
+                                        // Deduplicate warnings per request
+                                        if let Ok(mut set) =
+                                            PLANNER_WARNED.lock()
+                                            && set.insert(req_hash)
                                         {
-                                            // Deduplicate warnings per request
-                                            if let Ok(mut set) =
-                                                PLANNER_WARNED.lock()
-                                            {
-                                                if set.insert(req_hash) {
-                                                    log::warn!(
-                                                        "ImageFor(skip_request=true): no planner snapshot detected for id={:?} size={:?} type={:?}. Did the view emit DemandSnapshot?",
-                                                        req.media_id,
-                                                        req.size,
-                                                        req.image_type
-                                                    );
-                                                }
-                                            }
+                                            log::warn!(
+                                                "ImageFor(skip_request=true): no planner snapshot detected for iid={:?} size={:?}. Did the view emit DemandSnapshot?",
+                                                req.iid,
+                                                req.size
+                                            );
                                         }
                                     }
                                 });
@@ -662,10 +665,8 @@ fn create_loading_placeholder<'a>(
     let placeholder_handle = Handle::from_rgba(1, 1, vec![0, 0, 0, 0]);
 
     // Use theme color or default
-    let color = theme_color.unwrap_or_else(|| {
-        log::debug!("No theme color provided, using default dark gray");
-        Color::from_rgb(0.15, 0.15, 0.15)
-    });
+    let color =
+        theme_color.unwrap_or_else(|| Color::from_rgb(0.15, 0.15, 0.15));
 
     //log::debug!("Creating placeholder shader with color: {:?}", color);
 
@@ -699,24 +700,23 @@ impl ImageForExt for MovieReference {
         // Temporary diagnostics: register a human-readable title for media_id
         crate::infra::image_log::register_media_title(
             self.id.to_uuid(),
-            &self.title.to_string(),
+            self.title.as_ref(),
         );
         image_for(self.id.to_uuid())
+            .iid(self.details.primary_poster_iid)
+            .skip_request(self.details.primary_poster_iid.is_none())
             .placeholder(Icon::Film)
-            .image_type(MediaType::Movie)
     }
 }
 
-impl ImageForExt for SeriesReference {
+impl ImageForExt for Series {
     fn image_for(&self) -> ImageFor {
         // Temporary diagnostics: register a human-readable title for media_id
-        crate::infra::image_log::register_media_title(
-            self.id.to_uuid(),
-            &self.title.to_string(),
-        );
+        register_media_title(self.id.to_uuid(), self.title.as_ref());
         image_for(self.id.to_uuid())
+            .iid(self.details.primary_poster_iid)
+            .skip_request(self.details.primary_poster_iid.is_none())
             .placeholder(Icon::Tv)
-            .image_type(MediaType::Series)
     }
 }
 
@@ -728,8 +728,9 @@ impl ImageForExt for SeasonReference {
             &format!("Season {}", self.season_number.value()),
         );
         image_for(self.id.to_uuid())
+            .iid(self.details.primary_poster_iid)
+            .skip_request(self.details.primary_poster_iid.is_none())
             .placeholder(Icon::Tv)
-            .image_type(MediaType::Season)
     }
 }
 
@@ -745,7 +746,9 @@ impl ImageForExt for EpisodeReference {
             ),
         );
         image_for(self.id.to_uuid())
+            .iid(self.details.primary_still_iid)
+            .skip_request(self.details.primary_still_iid.is_none())
+            .size(ImageSize::thumbnail())
             .placeholder(Icon::FileImage)
-            .image_type(MediaType::Episode)
     }
 }

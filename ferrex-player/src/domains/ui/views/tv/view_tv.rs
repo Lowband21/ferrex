@@ -25,13 +25,14 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{
-    EpisodeLike, MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
+    MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
 };
 
 use ferrex_model::{
-    EpisodeID, ImageSize, MediaID, MediaType, Priority, SeasonID,
-    SeasonReference, SeriesID,
+    EpisodeID, ImageSize, MediaID, Priority, SeasonID, SeasonReference,
+    SeriesID,
 };
+use rkyv::option::ArchivedOption;
 
 use iced::{
     Element, Length,
@@ -52,6 +53,10 @@ pub fn view_series_detail<'a>(
 ) -> Element<'a, UiMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
     let scaled_layout = &state.domains.ui.state.scaled_layout;
+    let detail_poster_quality =
+        state.domains.settings.display.detail_poster_quality;
+    let library_poster_quality =
+        state.domains.settings.display.library_poster_quality;
 
     // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
     let series_uuid = series_id.to_uuid();
@@ -139,10 +144,18 @@ pub fn view_series_detail<'a>(
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
+    let series_details = series.details();
+
+    let series_poster_iid = match &series_details.primary_poster_iid {
+        ArchivedOption::Some(iid) => Some(*iid),
+        ArchivedOption::None => None,
+    };
+
     // Apply theme color to poster if present
     let mut poster = image_for(media_id.to_uuid())
-        .size(ImageSize::poster_large())
-        .image_type(MediaType::Series)
+        .iid(series_poster_iid)
+        .skip_request(series_poster_iid.is_none())
+        .size(ImageSize::Poster(detail_poster_quality))
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
@@ -172,8 +185,6 @@ pub fn view_series_detail<'a>(
     }
     let poster_element: Element<UiMessage> = poster.into();
 
-    let series_details_opt = series.details();
-
     // Fetch seasons for this series
     let seasons: Vec<SeasonReference> = match state
         .domains
@@ -194,27 +205,12 @@ pub fn view_series_detail<'a>(
     };
 
     // Extract details from the series reference
-    let (series_details, description, rating, total_episodes) =
-        if let Some(series_details) = series_details_opt {
-            /*
-            log::info!(
-                "Series {} has overview: {:?}",
-                series_ref.title.as_str(),
-                series_details
-                    .overview
-                    .as_ref()
-                    .map(|o| crate::domains::ui::views::macros::truncate_text(o, 50))
-            ); */
-            (
-                Some(series_details),
-                series_details.overview.as_ref(),
-                series_details.vote_average.as_ref(),
-                series_details.number_of_episodes.as_ref(),
-            )
-        } else {
-            log::warn!("Series {} has no TMDB details", series.title);
-            (None, None, None, None)
-        };
+    let (series_details, description, rating, _total_episodes) = (
+        Some(series_details),
+        series_details.overview.as_ref(),
+        series_details.vote_average.as_ref(),
+        series_details.number_of_episodes.as_ref(),
+    );
 
     /*
     // Stats - use the seasons we already fetched
@@ -242,10 +238,8 @@ pub fn view_series_detail<'a>(
     // Stats: seasons and total episodes (if season list available)
     if !seasons.is_empty() {
         let season_count = seasons.len();
-        let total_eps: u32 = seasons
-            .iter()
-            .map(|s| s.details().map(|d| d.episode_count).unwrap_or(0))
-            .sum();
+        let total_eps: u16 =
+            seasons.iter().map(|s| s.details.episode_count).sum();
         details = details.push(
             text(format!("{} Seasons • {} Episodes", season_count, total_eps))
                 .size(fonts.body)
@@ -325,14 +319,12 @@ pub fn view_series_detail<'a>(
                         } else {
                             format!("Season {}", s.season_number.value())
                         };
-                        let subtitle_str = s
-                            .details()
-                            .map(|d| format!("{} episodes", d.episode_count))
-                            .unwrap_or_else(|| String::from("\u{00A0}"));
+                        let subtitle_str =
+                            format!("{} episodes", s.details.episode_count);
 
                         media_card! {
                             type: Season,
-                            data: s.clone(),
+                            data: (s.clone()),
                             {
                                 id: s.id.to_uuid(),
                                 title: title_str.as_str(),
@@ -342,6 +334,7 @@ pub fn view_series_detail<'a>(
                                     type: poster,
                                     fallback: "📺",
                                 },
+                                image_size: ImageSize::Poster(library_poster_quality),
                                 size: Medium,
                                 on_click: UiShellMessage::ViewSeason(
                                     s.series_id,
@@ -358,6 +351,7 @@ pub fn view_series_detail<'a>(
                 false,
                 fonts,
                 scaled_layout,
+                0.0,
             );
             content = content.push(section);
         }
@@ -409,6 +403,8 @@ pub fn view_season_detail<'a>(
 ) -> Element<'a, UiMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
     let scaled_layout = &state.domains.ui.state.scaled_layout;
+    let detail_poster_quality =
+        state.domains.settings.display.detail_poster_quality;
 
     // Resolve season yoke via UI cache with lazy fetch
     let season_uuid = season_id.to_uuid();
@@ -479,10 +475,16 @@ pub fn view_season_detail<'a>(
         .calculate_content_offset_height(window_width, window_height);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
+    let season_poster_iid = match &season.details.primary_poster_iid {
+        ArchivedOption::Some(iid) => Some(*iid),
+        ArchivedOption::None => None,
+    };
+
     // Poster element
     let mut poster = image_for(season.id.to_uuid())
-        .size(ImageSize::poster())
-        .image_type(MediaType::Season)
+        .iid(season_poster_iid)
+        .skip_request(season_poster_iid.is_none())
+        .size(ImageSize::Poster(detail_poster_quality))
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
@@ -519,7 +521,7 @@ pub fn view_season_detail<'a>(
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
     // Title and episode count
-    let season_number = season.details().map(|d| d.season_number).unwrap_or(0);
+    let season_number = season.details.season_number;
     let title = if season_number == 0 {
         "Specials".to_string()
     } else {
@@ -558,9 +560,7 @@ pub fn view_season_detail<'a>(
     }
 
     // Overview
-    if let Some(season_details) = season.details()
-        && let Some(desc) = season_details.overview.as_ref()
-    {
+    if let Some(desc) = season.details.overview.as_ref() {
         details = details.push(Space::new().height(10));
         details = details.push(
             container(
@@ -608,14 +608,11 @@ pub fn view_season_detail<'a>(
                             e.season_number.value(),
                             e.episode_number.value()
                         );
-                        let subtitle_str = e
-                            .details()
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("Episode title unavailable");
+                        let subtitle_str = e.details.name.as_str();
 
                         media_card! {
                             type: Episode,
-                            data: e.clone(),
+                            data: (e.clone()),
                             {
                                 id: e.id.to_uuid(),
                                 title: title_str.as_str(),
@@ -643,6 +640,7 @@ pub fn view_season_detail<'a>(
                 false,
                 fonts,
                 scaled_layout,
+                0.0,
             );
             content = content.push(ep_section);
         }
@@ -758,10 +756,16 @@ pub fn view_episode_detail<'a>(
     let mut content = column![].padding(20);
     content = content.push(Space::new().height(Length::Fixed(content_offset)));
 
+    let still_iid = match &episode.details.primary_still_iid {
+        ArchivedOption::Some(iid) => Some(*iid),
+        ArchivedOption::None => None,
+    };
+
     // Episode still image
     let mut still = image_for(episode.id.to_uuid())
+        .iid(still_iid)
+        .skip_request(still_iid.is_none())
         .size(ImageSize::thumbnail())
-        .image_type(MediaType::Episode)
         .width(Length::Fixed(640.0))
         .height(Length::Fixed(360.0))
         .priority(Priority::Visible);
@@ -792,24 +796,19 @@ pub fn view_episode_detail<'a>(
     let mut details = column![].spacing(15).padding(20).width(Length::Fill);
 
     // Title and info
-    let (ep_name, overview, air_date, runtime, vote_average) =
-        if let Some(d) = episode.details() {
-            (
-                Some(d.name.to_string()),
-                d.overview.as_ref(),
-                d.air_date.as_ref(),
-                d.runtime.as_ref(),
-                d.vote_average.as_ref(),
-            )
-        } else {
-            (None, None, None, None, None)
-        };
+    let (ep_name, overview, air_date, runtime, vote_average) = (
+        Some(episode.details.name.to_string()),
+        episode.details.overview.as_ref(),
+        episode.details.air_date.as_ref(),
+        episode.details.runtime.as_ref(),
+        episode.details.vote_average.as_ref(),
+    );
 
-    let (season_number, ep_number) = if let Some(d) = episode.details() {
-        (d.season_number, d.episode_number)
-    } else {
-        (0, 0)
-    };
+    let (season_number, ep_number) = (
+        episode.details.season_number,
+        episode.details.episode_number,
+    );
+
     let title = ep_name.unwrap_or_else(|| format!("Episode {}", ep_number));
     details = details.push(
         text(format!("S{:02}E{:02}: {}", season_number, ep_number, title))

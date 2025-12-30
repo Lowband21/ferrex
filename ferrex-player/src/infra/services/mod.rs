@@ -12,8 +12,8 @@ pub mod user_management;
 
 /// A reference to either a concrete service instance or a trait object.
 /// This allows domains to work with a unified handle while we migrate
-/// from concrete types to trait-based ports.
-#[derive(Clone)]
+/// from concrete types to trait-based repository_ports.
+#[derive(Clone, Debug)]
 pub enum ServiceRef<T, Trait>
 where
     Trait: ?Sized + Send + Sync + 'static,
@@ -50,7 +50,7 @@ impl Default for CompatToggles {
 }
 
 /// Simple builder to construct and wire services for domains during app startup.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ServiceBuilder {
     toggles: CompatToggles,
 }

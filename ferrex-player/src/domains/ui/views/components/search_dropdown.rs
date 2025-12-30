@@ -1,17 +1,18 @@
-//! Search dropdown overlay component
+//! Search overlay and detached window component
 
 use iced::widget::{
-    Id as TextInputId, Space, button, column, container, row, scrollable, text,
-    text_input,
+    Id as TextInputId, Space, Stack, button, column, container, row,
+    scrollable, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
 use crate::common::messages::DomainMessage;
-use crate::domains::search::types::{SearchMode, SearchResult};
+use crate::domains::search::types::{SearchMode, SearchResponse};
 use crate::domains::ui::shell_ui::UiShellMessage;
 use crate::domains::ui::theme::{Button as ButtonStyle, MediaServerTheme};
 use crate::domains::ui::windows::focus::SEARCH_WINDOW_INPUT_ID;
 use crate::infra::api_types::Media;
+use crate::infra::constants::layout;
 use crate::infra::theme::{accent, accent_glow};
 use crate::state::State;
 use ferrex_core::query::types::SearchField;
@@ -19,9 +20,9 @@ use ferrex_core::query::types::SearchField;
 type Message = DomainMessage;
 
 #[derive(Clone, Copy)]
-enum ResultsLayout {
-    Dropdown,
-    Window,
+enum SearchSurface {
+    Overlay,
+    Detached,
 }
 
 #[cfg_attr(
@@ -32,48 +33,51 @@ enum ResultsLayout {
     ),
     profiling::function
 )]
-pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
-    let dropdown_content =
-        build_results_content(state, ResultsLayout::Dropdown)?;
+pub fn view_search_overlay(state: &State) -> Option<Element<'_, Message>> {
+    let panel = view_search_panel(state, SearchSurface::Overlay);
 
-    // Use Stack to layer backdrop and dropdown
-    use iced::widget::Stack;
-
-    // Create transparent backdrop button that clears search when clicked
     let backdrop = button(
         container(Space::new().width(Length::Fill).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill),
     )
-    .on_press(DomainMessage::Search(
-        crate::domains::search::messages::SearchMessage::ClearSearch,
-    ))
-    .style(
-        |_theme: &iced::Theme, _status: button::Status| button::Style {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: iced::Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            shadow: iced::Shadow::default(),
-            text_color: Color::TRANSPARENT,
-            snap: false,
+    .on_press(DomainMessage::Ui(UiShellMessage::CloseSearch.into()))
+    .style(|_theme: &Theme, _status: button::Status| button::Style {
+        background: Some(iced::Background::Color(Color::from_rgba(
+            0.0, 0.0, 0.0, 0.55,
+        ))),
+        border: iced::Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
         },
-    )
+        shadow: iced::Shadow::default(),
+        text_color: Color::TRANSPARENT,
+        snap: false,
+    })
     .width(Length::Fill)
     .height(Length::Fill);
 
-    // Stack with backdrop behind dropdown
+    let panel_container = container(panel)
+        .width(Length::Fixed(layout::search::WINDOW_WIDTH))
+        .height(Length::Fixed(layout::search::WINDOW_HEIGHT));
+
+    let positioned_panel = column![
+        Space::new().height(Length::Fixed(
+            layout::header::HEIGHT + layout::search::WINDOW_VERTICAL_OFFSET
+        )),
+        container(panel_container)
+            .width(Length::Fill)
+            .center_x(Length::Fill),
+        Space::new().height(Length::Fill),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill);
+
     Some(
         Stack::new()
             .push(backdrop)
-            .push(
-                container(dropdown_content)
-                    .padding(Padding::from([65.0, 0.0])) // Position below header
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-            )
+            .push(positioned_panel)
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
@@ -81,6 +85,13 @@ pub fn view_search_dropdown(state: &State) -> Option<Element<'_, Message>> {
 }
 
 pub fn view_search_window(state: &State) -> Element<'_, Message> {
+    view_search_panel(state, SearchSurface::Detached)
+}
+
+fn view_search_panel(
+    state: &State,
+    surface: SearchSurface,
+) -> Element<'_, Message> {
     let search_state = &state.domains.search.state;
 
     let title = if search_state.query.is_empty() {
@@ -88,6 +99,8 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     } else {
         format!("Results for \"{}\"", search_state.query)
     };
+
+    let displayed_results = search_state.results.len();
 
     let subtitle = if search_state.is_searching {
         "Searching...".to_owned()
@@ -97,48 +110,58 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     } else if search_state.total_results > 0 {
         format!(
             "Showing {} of {} results",
-            search_state.displayed_results, search_state.total_results
+            displayed_results, search_state.total_results
         )
     } else {
         "Find movies, shows, and episodes instantly".to_owned()
     };
 
-    let header = container(
-        row![
-            container(text("🔍").size(28))
-                .width(Length::Fixed(36.0))
-                .center_x(Length::Fixed(36.0))
-                .center_y(Length::Fixed(36.0)),
-            column![
-                text(title).size(22),
-                text(subtitle)
-                    .size(14)
-                    .color(Color::from_rgb(0.7, 0.7, 0.75)),
-            ]
-            .spacing(4)
-            .width(Length::Fill),
+    let mut header_row = row![
+        container(text("🔍").size(28))
+            .width(Length::Fixed(36.0))
+            .center_x(Length::Fixed(36.0))
+            .center_y(Length::Fixed(36.0)),
+        column![
+            text(title).size(22),
+            text(subtitle)
+                .size(14)
+                .color(Color::from_rgb(0.7, 0.7, 0.75)),
         ]
-        .spacing(12.0)
-        .align_y(Alignment::Center),
-    )
-    .padding(Padding::from([12.0, 16.0]))
-    .width(Length::Fill)
-    .style(|_theme: &Theme| container::Style {
-        background: Some(iced::Background::Color(
-            MediaServerTheme::SOFT_GREY_DARK,
-        )),
-        border: iced::Border {
-            color: Color::from_rgb(0.2, 0.2, 0.25),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: iced::Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        ..Default::default()
-    });
+        .spacing(4)
+        .width(Length::Fill),
+    ]
+    .spacing(12.0)
+    .align_y(Alignment::Center);
+
+    if matches!(surface, SearchSurface::Overlay) {
+        header_row = header_row.push(
+            button(text("Pop out").size(14))
+                .on_press(DomainMessage::Ui(
+                    UiShellMessage::PopOutSearch.into(),
+                ))
+                .style(ButtonStyle::Secondary.style()),
+        );
+    }
+
+    let header = container(header_row)
+        .padding(Padding::from([12.0, 16.0]))
+        .width(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                MediaServerTheme::SOFT_GREY_DARK,
+            )),
+            border: iced::Border {
+                color: Color::from_rgb(0.2, 0.2, 0.25),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
+            },
+            ..Default::default()
+        });
 
     let input_row = row![
         text_input("Search...", &search_state.query)
@@ -179,37 +202,36 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
             ..Default::default()
         });
 
-    let results = build_results_content(state, ResultsLayout::Window)
-        .unwrap_or_else(|| {
-            container(
-                column![
-                    text("Start typing to search your library").size(18),
-                    text("We'll surface your best matches in real-time.")
-                        .size(14)
-                        .color(Color::from_rgb(0.7, 0.7, 0.75)),
-                ]
-                .spacing(8)
-                .width(Length::Fill)
-                .align_x(Alignment::Center),
-            )
+    let results = build_results_content(state).unwrap_or_else(|| {
+        container(
+            column![
+                text("Start typing to search your library").size(18),
+                text("We'll surface your best matches in real-time.")
+                    .size(14)
+                    .color(Color::from_rgb(0.7, 0.7, 0.75)),
+            ]
+            .spacing(8)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(
-                    0.1, 0.1, 0.13, 0.65,
-                ))),
-                border: iced::Border {
-                    color: Color::from_rgba(0.2, 0.2, 0.3, 0.4),
-                    width: 1.0,
-                    radius: 12.0.into(),
-                },
-                shadow: iced::Shadow::default(),
-                ..Default::default()
-            })
-            .into()
-        });
+            .align_x(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.1, 0.1, 0.13, 0.65,
+            ))),
+            border: iced::Border {
+                color: Color::from_rgba(0.2, 0.2, 0.3, 0.4),
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            shadow: iced::Shadow::default(),
+            ..Default::default()
+        })
+        .into()
+    });
 
     container(
         column![header, input_panel, results]
@@ -239,69 +261,53 @@ pub fn view_search_window(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn build_results_content(
-    state: &State,
-    layout: ResultsLayout,
-) -> Option<Element<'_, Message>> {
+fn build_results_content(state: &State) -> Option<Element<'_, Message>> {
     let search_state = &state.domains.search.state;
 
-    let is_window = matches!(layout, ResultsLayout::Window);
-
-    if !is_window && search_state.mode != SearchMode::Dropdown {
-        return None;
-    }
-
-    if !is_window
-        && search_state.query.is_empty()
+    if search_state.query.is_empty()
         && search_state.results.is_empty()
         && !search_state.is_searching
     {
         return None;
     }
 
-    let mut results_column = column![].spacing(if is_window { 6 } else { 2 });
+    let mut results_column = column![].spacing(6);
 
     if search_state.is_searching {
         results_column = results_column.push(
             container(
                 row![
-                    text("Searching...").size(if is_window { 16 } else { 14 }),
+                    text("Searching...").size(16),
                     Space::new().width(Length::Fill),
-                    text("⏳").size(if is_window { 18 } else { 16 }),
+                    text("⏳").size(18),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(10),
             )
-            .padding(Padding::from([12.0, if is_window { 20.0 } else { 16.0 }]))
+            .padding(Padding::from([12.0, 20.0]))
             .width(Length::Fill),
         );
     } else if let Some(error) = &search_state.error {
         results_column = results_column.push(
             container(
                 text(format!("Search error: {}", error))
-                    .size(if is_window { 16 } else { 14 })
+                    .size(16)
                     .color(MediaServerTheme::ERROR),
             )
-            .padding(Padding::from([12.0, if is_window { 20.0 } else { 16.0 }]))
+            .padding(Padding::from([12.0, 20.0]))
             .width(Length::Fill),
         );
     } else if search_state.results.is_empty() {
         results_column = results_column.push(
             container(
                 text(format!("No results for \"{}\"", search_state.query))
-                    .size(if is_window { 16 } else { 14 }),
+                    .size(16),
             )
-            .padding(Padding::from([12.0, if is_window { 20.0 } else { 16.0 }]))
+            .padding(Padding::from([12.0, 20.0]))
             .width(Length::Fill),
         );
     } else {
-        let displayed_count = if is_window {
-            search_state.results.len()
-        } else {
-            search_state
-                .displayed_results
-                .min(search_state.results.len())
-        };
+        let displayed_count = search_state.results.len();
 
         for (index, result) in search_state
             .results
@@ -310,41 +316,8 @@ fn build_results_content(
             .enumerate()
         {
             let is_selected = search_state.selected_index == Some(index);
-            results_column = results_column.push(view_search_result(
-                result,
-                is_selected,
-                layout,
-            ));
-        }
-
-        if !is_window
-            && (search_state.results.len() > displayed_count
-                || search_state.total_results > search_state.results.len())
-        {
-            results_column = results_column.push(
-                button(
-                    container(text("Load More").size(if is_window {
-                        15
-                    } else {
-                        14
-                    }))
-                    .padding(Padding::from([
-                        12.0,
-                        if is_window { 18.0 } else { 16.0 },
-                    ]))
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-                )
-                .on_press(DomainMessage::Search(
-                    crate::domains::search::messages::SearchMessage::LoadMore,
-                ))
-                .style(if is_window {
-                    ButtonStyle::Primary.style()
-                } else {
-                    ButtonStyle::Text.style()
-                })
-                .width(Length::Fill),
-            );
+            results_column =
+                results_column.push(view_search_result(result, is_selected));
         }
 
         if search_state.total_results > 0 {
@@ -354,12 +327,9 @@ fn build_results_content(
                         "Showing {} of {} results",
                         displayed_count, search_state.total_results
                     ))
-                    .size(if is_window { 13 } else { 12 }),
+                    .size(13),
                 )
-                .padding(Padding::from([
-                    8.0,
-                    if is_window { 18.0 } else { 16.0 },
-                ]))
+                .padding(Padding::from([8.0, 18.0]))
                 .width(Length::Fill)
                 .center_x(Length::Fill),
             );
@@ -370,235 +340,134 @@ fn build_results_content(
         container(
             {
                 let scrollable_view = scrollable(results_column);
-
-                let scrollable_view = if is_window {
-                    scrollable_view.id(
-                        crate::domains::search::types::SEARCH_RESULTS_SCROLL_ID,
-                    )
-                } else {
-                    scrollable_view
-                };
-
-                scrollable_view.direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::default(),
-                ))
+                scrollable_view
+                    .id(crate::domains::search::types::SEARCH_RESULTS_SCROLL_ID)
+                    .direction(scrollable::Direction::Vertical(
+                        scrollable::Scrollbar::default(),
+                    ))
             }
-            .height(if is_window {
-                Length::Fill
-            } else {
-                Length::Shrink
-            })
+            .height(Length::Fill)
             .width(Length::Fill),
         )
-        .width(if is_window {
-            Length::Fill
-        } else {
-            Length::Fixed(600.0)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgba(
+                0.08, 0.08, 0.1, 0.88,
+            ))),
+            border: iced::Border {
+                color: Color::from_rgba(0.2, 0.25, 0.35, 0.6),
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: iced::Vector::new(0.0, 10.0),
+                blur_radius: 20.0,
+            },
+            ..Default::default()
         })
-        .height(if is_window {
-            Length::Fill
-        } else {
-            Length::Shrink
-        })
-        .style(move |_theme: &Theme| {
-            if is_window {
-                container::Style {
-                    background: Some(iced::Background::Color(
-                        Color::from_rgba(0.08, 0.08, 0.1, 0.88),
-                    )),
-                    border: iced::Border {
-                        color: Color::from_rgba(0.2, 0.25, 0.35, 0.6),
-                        width: 1.0,
-                        radius: 12.0.into(),
-                    },
-                    shadow: iced::Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                        offset: iced::Vector::new(0.0, 10.0),
-                        blur_radius: 20.0,
-                    },
-                    ..Default::default()
-                }
-            } else {
-                container::Style {
-                    background: Some(iced::Background::Color(
-                        Color::from_rgba(0.1, 0.1, 0.1, 0.98),
-                    )),
-                    border: iced::Border {
-                        color: Color::from_rgb(0.3, 0.3, 0.3),
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    shadow: iced::Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                        offset: iced::Vector::new(0.0, 4.0),
-                        blur_radius: 12.0,
-                    },
-                    ..Default::default()
-                }
-            }
-        })
-        .max_height(if is_window { f32::MAX } else { 360.0 })
+        .max_height(f32::MAX)
         .into(),
     )
 }
 
 /// Render an individual search result item
 fn view_search_result(
-    result: &SearchResult,
+    result: &SearchResponse,
     is_selected: bool,
-    layout: ResultsLayout,
 ) -> Element<'_, Message> {
-    match layout {
-        ResultsLayout::Dropdown => {
-            let background_color = if is_selected {
-                Color::from_rgba(0.3, 0.3, 0.3, 0.8)
-            } else {
-                Color::from_rgba(0.15, 0.15, 0.15, 0.0)
-            };
+    let background = if is_selected {
+        MediaServerTheme::CARD_HOVER
+    } else {
+        MediaServerTheme::CARD_BG
+    };
 
-            let mut content_row = row![].spacing(12).align_y(Alignment::Center);
+    let border_color = if is_selected {
+        accent()
+    } else {
+        MediaServerTheme::BORDER_COLOR
+    };
 
-            content_row = content_row.push(
-                container(text(get_media_icon(&result.media_ref)).size(20))
-                    .width(Length::Fixed(40.0))
-                    .height(Length::Fixed(40.0))
-                    .center_x(Length::Fixed(40.0))
-                    .center_y(Length::Fixed(40.0)),
-            );
+    let mut text_column = column![text(&result.title).size(17)].spacing(6);
 
-            let mut text_column = column![].spacing(2);
-            text_column = text_column.push(text(&result.title).size(14));
-
-            if let Some(subtitle) = &result.subtitle {
-                text_column = text_column.push(text(subtitle).size(12));
-            }
-
-            content_row = content_row.push(text_column);
-
-            if cfg!(debug_assertions) {
-                content_row =
-                    content_row.push(Space::new().width(Length::Fill)).push(
-                        text(format!("{:.0}%", result.match_score * 100.0))
-                            .size(11),
-                    );
-            }
-
-            button(
-                container(content_row)
-                    .padding(Padding::from([8.0, 16.0]))
-                    .width(Length::Fill)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(
-                            background_color,
-                        )),
-                        ..Default::default()
-                    }),
-            )
-            .on_press(DomainMessage::Search(
-                crate::domains::search::messages::SearchMessage::SelectResult(
-                    result.media_ref.clone(),
-                ),
-            ))
-            .style(ButtonStyle::Text.style())
-            .width(Length::Fill)
-            .into()
-        }
-        ResultsLayout::Window => {
-            let background = if is_selected {
-                MediaServerTheme::CARD_HOVER
-            } else {
-                MediaServerTheme::CARD_BG
-            };
-
-            let border_color = if is_selected {
-                accent()
-            } else {
-                MediaServerTheme::BORDER_COLOR
-            };
-
-            let mut text_column =
-                column![text(&result.title).size(17)].spacing(6);
-
-            if let Some(subtitle) = &result.subtitle {
-                text_column = text_column.push(
-                    text(subtitle)
-                        .size(14)
-                        .color(MediaServerTheme::TEXT_SECONDARY),
-                );
-            }
-
-            let mut metadata_row = row![].spacing(8);
-
-            if let Some(year) = result.year {
-                metadata_row =
-                    metadata_row.push(metadata_badge(year.to_string()));
-            }
-
-            metadata_row = metadata_row.push(metadata_badge(
-                match_field_label(result.match_field).to_owned(),
-            ));
-            metadata_row = metadata_row.push(metadata_badge(format!(
-                "{:.0}% match",
-                result.match_score * 100.0
-            )));
-
-            text_column = text_column.push(metadata_row);
-
-            let content_row = row![
-                container(text(get_media_icon(&result.media_ref)).size(26))
-                    .width(Length::Fixed(48.0))
-                    .height(Length::Fixed(48.0))
-                    .center_x(Length::Fixed(48.0))
-                    .center_y(Length::Fixed(48.0))
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(
-                            Color::from_rgba(0.2, 0.2, 0.24, 0.65,)
-                        )),
-                        border: iced::Border {
-                            color: Color::from_rgba(0.35, 0.35, 0.45, 0.4),
-                            width: 1.0,
-                            radius: 8.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-                text_column,
-            ]
-            .spacing(14)
-            .align_y(Alignment::Center);
-
-            button(
-                container(content_row)
-                    .padding(Padding::from([14.0, 18.0]))
-                    .width(Length::Fill)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(background)),
-                        border: iced::Border {
-                            color: border_color,
-                            width: if is_selected { 1.5 } else { 1.0 },
-                            radius: 12.0.into(),
-                        },
-                        shadow: if is_selected {
-                            iced::Shadow {
-                                color: accent_glow(),
-                                offset: iced::Vector::default(),
-                                blur_radius: 14.0,
-                            }
-                        } else {
-                            iced::Shadow::default()
-                        },
-                        ..Default::default()
-                    }),
-            )
-            .on_press(DomainMessage::Search(
-                crate::domains::search::messages::SearchMessage::SelectResult(
-                    result.media_ref.clone(),
-                ),
-            ))
-            .style(ButtonStyle::Text.style())
-            .width(Length::Fill)
-            .into()
-        }
+    if let Some(subtitle) = &result.subtitle {
+        text_column = text_column.push(
+            text(subtitle)
+                .size(14)
+                .color(MediaServerTheme::TEXT_SECONDARY),
+        );
     }
+
+    let mut metadata_row = row![].spacing(8);
+
+    if let Some(year) = result.year {
+        metadata_row = metadata_row.push(metadata_badge(year.to_string()));
+    }
+
+    metadata_row = metadata_row.push(metadata_badge(
+        match_field_label(result.match_field).to_owned(),
+    ));
+    metadata_row = metadata_row.push(metadata_badge(format!(
+        "{:.0}% match",
+        result.match_score * 100.0
+    )));
+
+    text_column = text_column.push(metadata_row);
+
+    let content_row = row![
+        container(text(get_media_icon(&result.media_ref)).size(26))
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0))
+            .center_x(Length::Fixed(48.0))
+            .center_y(Length::Fixed(48.0))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    0.2, 0.2, 0.24, 0.65,
+                ))),
+                border: iced::Border {
+                    color: Color::from_rgba(0.35, 0.35, 0.45, 0.4),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            }),
+        text_column,
+    ]
+    .spacing(14)
+    .align_y(Alignment::Center);
+
+    button(
+        container(content_row)
+            .padding(Padding::from([14.0, 18.0]))
+            .width(Length::Fill)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(iced::Background::Color(background)),
+                border: iced::Border {
+                    color: border_color,
+                    width: if is_selected { 1.5 } else { 1.0 },
+                    radius: 12.0.into(),
+                },
+                shadow: if is_selected {
+                    iced::Shadow {
+                        color: accent_glow(),
+                        offset: iced::Vector::default(),
+                        blur_radius: 14.0,
+                    }
+                } else {
+                    iced::Shadow::default()
+                },
+                ..Default::default()
+            }),
+    )
+    .on_press(DomainMessage::Search(
+        crate::domains::search::messages::SearchMessage::SelectResult(
+            result.media_ref.clone(),
+        ),
+    ))
+    .style(ButtonStyle::Text.style())
+    .width(Length::Fill)
+    .into()
 }
 
 /// Get an icon for the media type
@@ -759,7 +628,7 @@ pub fn view_search_fullscreen(state: &State) -> Element<'_, Message> {
     profiling::function
 )]
 fn view_search_result_fullscreen(
-    result: &SearchResult,
+    result: &SearchResponse,
 ) -> Element<'_, Message> {
     let mut content_row = row![].spacing(16).align_y(Alignment::Center);
 

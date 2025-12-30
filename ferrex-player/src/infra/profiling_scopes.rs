@@ -92,6 +92,7 @@ macro_rules! profile_ui {
 }
 
 /// Performance target definitions
+#[derive(Debug, Clone, Copy)]
 pub struct PerformanceTargets {
     pub view_operation_ms: f32,    // Target: 8ms
     pub frame_time_ms: f32,        // Target: 8.33ms (120fps)

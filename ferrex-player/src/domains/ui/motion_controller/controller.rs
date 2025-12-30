@@ -137,12 +137,17 @@ impl MotionController {
             self.v *= decay;
         }
 
-        // Clamp velocity against max allowed DIP/s from units/s cap
+        // Clamp velocity against max allowed speed, but only when accelerating.
+        // When boost is released, we want velocity to decay smoothly via the
+        // time-constant filter rather than snapping down instantly.
         let max_speed = self
             .boosted_max_units_per_s()
             .max(self.cfg.base_units_per_s)
             * unit_size;
-        if self.v.abs() > max_speed {
+        let target_mag = (self.dir as f32) * max_speed;
+        let accelerating_past_limit =
+            (self.v - target_mag).signum() == self.dir as f32;
+        if self.v.abs() > max_speed && accelerating_past_limit {
             self.v = self.v.signum() * max_speed;
         }
 
@@ -184,7 +189,95 @@ impl MotionController {
         Some(next)
     }
 
-    // No estimated_max_speed helper needed in rows/sec mode
+    /// Advance using external frame timestamp and return delta to apply.
+    /// Uses frame-synchronized timing from `window::frames()` for smooth scrolling.
+    /// Returns None if inactive or no meaningful movement.
+    pub fn tick_delta_at(
+        &mut self,
+        now: Instant,
+        unit_size: f32,
+    ) -> Option<f32> {
+        if !self.active {
+            return None;
+        }
+
+        let last = self.last_tick.unwrap_or(now);
+        let dt = now.saturating_duration_since(last);
+        self.last_tick = Some(now);
+
+        if dt.is_zero() {
+            return None;
+        }
+
+        // Clamp dt to ~33ms (30fps floor) to prevent velocity spikes on frame drops
+        let dt_s = dt.as_secs_f32().min(0.033);
+
+        if self.holding {
+            // Target rows/s ramps from BASE -> MAX using easing over a ramp duration.
+            let hold_elapsed_ms = self
+                .hold_started
+                .map(|t| now.saturating_duration_since(t).as_millis() as u64)
+                .unwrap_or(0);
+            let ramp = self.cfg.ramp_ms.max(1) as f32;
+            let mut t = (hold_elapsed_ms as f32 / ramp).clamp(0.0, 1.0);
+            t = apply_easing(t, self.cfg.easing_kind);
+            let max_ups = self
+                .boosted_max_units_per_s()
+                .max(self.cfg.base_units_per_s);
+            let target_ups = self.cfg.base_units_per_s
+                + (max_ups - self.cfg.base_units_per_s) * t;
+            let target_mag = target_ups * unit_size;
+            let target = (self.dir as f32) * target_mag;
+
+            // Time-constant filter to smoothly approach target
+            let tau = self.accel_tau_secs();
+            let alpha = 1.0 - (-dt_s / tau).exp();
+            self.v += (target - self.v) * alpha;
+        } else {
+            // Decay exponentially toward zero
+            let tau = (self.cfg.decay_tau_ms.max(1) as f32) / 1000.0;
+            let decay = (-dt_s / tau).exp();
+            self.v *= decay;
+        }
+
+        // Clamp velocity against max allowed speed, but only when accelerating.
+        // When boost is released, we want velocity to decay smoothly via the
+        // time-constant filter rather than snapping down instantly.
+        let max_speed = self
+            .boosted_max_units_per_s()
+            .max(self.cfg.base_units_per_s)
+            * unit_size;
+        let target_mag = (self.dir as f32) * max_speed;
+        let accelerating_past_limit =
+            (self.v - target_mag).signum() == self.dir as f32;
+        if self.v.abs() > max_speed && accelerating_past_limit {
+            self.v = self.v.signum() * max_speed;
+        }
+
+        // If very slow and not holding, stop completely
+        if self.v.abs() <= (self.cfg.min_units_per_s_stop * unit_size)
+            && !self.holding
+        {
+            self.active = false;
+            self.v = 0.0;
+            return None;
+        }
+
+        // Return delta instead of absolute position
+        let delta = self.v * dt_s;
+
+        // Avoid tiny movements
+        if delta.abs() < 0.5 {
+            return None;
+        }
+
+        Some(delta)
+    }
+
+    /// Current scroll direction: +1 for down, -1 for up, 0 for none.
+    pub fn direction(&self) -> i32 {
+        self.dir
+    }
 }
 
 fn apply_easing(t: f32, kind: u8) -> f32 {

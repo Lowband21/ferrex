@@ -18,13 +18,6 @@ pub enum SettingsMessage {
     Theme(ThemeMessage),
     Performance(PerformanceMessage),
 
-    // Navigation (legacy - to be deprecated)
-    ShowProfile,
-    ShowPreferences,
-    ShowSecurity,
-    BackToMain,
-    BackToHome,
-
     // Preferences - UI Scale
     SetUserScale(UserScale),
     SetScalePreset(ScalePreset),
@@ -82,13 +75,6 @@ impl SettingsMessage {
             Self::Display(msg) => msg.name(),
             Self::Theme(msg) => msg.name(),
             Self::Performance(msg) => msg.name(),
-
-            // Navigation (legacy)
-            Self::ShowProfile => "Settings::ShowProfile",
-            Self::ShowPreferences => "Settings::ShowPreferences",
-            Self::ShowSecurity => "Settings::ShowSecurity",
-            Self::BackToMain => "Settings::BackToMain",
-            Self::BackToHome => "Settings::BackToHome",
 
             // Security - Password
             Self::ShowChangePassword => "Settings::ShowChangePassword",

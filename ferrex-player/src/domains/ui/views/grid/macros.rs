@@ -2,8 +2,7 @@
 
 use ferrex_core::player_prelude::{
     ArchivedEpisodeReference, ArchivedMovieReference, ArchivedSeasonReference,
-    ArchivedSeriesReference, EpisodeReference, MovieReference, SeasonReference,
-    SeriesReference,
+    ArchivedSeries, EpisodeReference, MovieReference, SeasonReference, Series,
 };
 /// Macro to generate virtual grid views for different reference types
 /// This eliminates code duplication between movie and series grids
@@ -32,7 +31,7 @@ macro_rules! virtual_reference_grid {
             //let reference_grid = iced::debug::time($profiler_label);
             use iced::{
                 Length,
-                widget::{Space, column, container, row, scrollable, text},
+                widget::{Space, column, container, row, text},
             };
             // Profile grid rendering operations
             #[cfg(any(
@@ -81,6 +80,18 @@ macro_rules! virtual_reference_grid {
 
             // Calculate total rows
             let total_rows = len.div_ceil(grid_state.columns);
+            let total_height = total_rows as f32 * grid_state.row_height
+                + grid::TOP_PADDING
+                + grid::BOTTOM_PADDING;
+
+            let reserved_scrollbar_width =
+                if total_height > grid_state.viewport_height.max(1.0) {
+                    grid::VERTICAL_SCROLLBAR_RESERVED_WIDTH
+                } else {
+                    0.0
+                };
+            let layout_viewport_width =
+                (grid_state.viewport_width - reserved_scrollbar_width).max(1.0);
 
             // Add spacer for rows above viewport
             let start_row = grid_state.visible_range.start / grid_state.columns;
@@ -96,7 +107,18 @@ macro_rules! virtual_reference_grid {
             let end_row =
                 grid_state.visible_range.end.div_ceil(grid_state.columns);
             for row_idx in start_row..end_row.min(total_rows) {
-                let mut row_content = row![].spacing(grid::EFFECTIVE_SPACING);
+                let scaled_layout = &state.domains.ui.state.scaled_layout;
+                let mut row_content = row![].spacing(0);
+                let horizontal_layout = scaled_layout
+                    .calculate_grid_horizontal_layout(
+                        layout_viewport_width,
+                        grid_state.columns,
+                    );
+
+                let side_margin = horizontal_layout.side_margin;
+                let poster_gap = horizontal_layout.poster_gap;
+
+                row_content = row_content.push(Space::new().width(side_margin));
 
                 for col in 0..grid_state.columns {
                     let item_idx = row_idx * grid_state.columns + col;
@@ -129,8 +151,6 @@ macro_rules! virtual_reference_grid {
                         );
 
                         // Use container dimensions from scaled layout
-                        let scaled_layout =
-                            &state.domains.ui.state.scaled_layout;
                         let container_width = scaled_layout.container_width;
 
                         // Use total card height with animation padding from scaled layout
@@ -146,8 +166,6 @@ macro_rules! virtual_reference_grid {
                         );
                     } else if item_idx < len {
                         // Placeholder for items not yet visible but in the row
-                        let scaled_layout =
-                            &state.domains.ui.state.scaled_layout;
                         let container_width = scaled_layout.container_width;
                         let total_card_height = scaled_layout
                             .poster_total_height
@@ -163,24 +181,20 @@ macro_rules! virtual_reference_grid {
                                     .style(),
                             ),
                         );
+                    } else {
+                        // Empty placeholder to preserve spacing in incomplete rows
+                        let container_width = scaled_layout.container_width;
+                        row_content = row_content
+                            .push(Space::new().width(container_width));
+                    }
+
+                    if col + 1 < grid_state.columns {
+                        row_content =
+                            row_content.push(Space::new().width(poster_gap));
                     }
                 }
 
-                // Fill remaining columns with empty space only if this is the last row and it's incomplete
-                if row_idx == total_rows - 1 {
-                    let items_in_last_row =
-                        len - (row_idx * grid_state.columns);
-                    if items_in_last_row < grid_state.columns {
-                        let scaled_layout =
-                            &state.domains.ui.state.scaled_layout;
-                        for _ in items_in_last_row..grid_state.columns {
-                            row_content = row_content.push(
-                                Space::new()
-                                    .width(scaled_layout.container_width),
-                            );
-                        }
-                    }
-                }
+                row_content = row_content.push(Space::new().width(side_margin));
 
                 // Row container with centered alignment
                 let row_container = container(row_content)
@@ -204,28 +218,31 @@ macro_rules! virtual_reference_grid {
             // Add some padding at the bottom
             content = content.push(Space::new().height(grid::BOTTOM_PADDING));
 
-            let total_height = total_rows as f32 * grid_state.row_height
-                + grid::TOP_PADDING
-                + grid::BOTTOM_PADDING;
-
             // Calculate horizontal padding for centering (matching VirtualGridState expectation)
-            let horizontal_padding = grid::MIN_VIEWPORT_PADDING;
+            let min_thumb_px = state
+                .domains
+                .settings
+                .display
+                .scrollbar_scroller_min_length_px;
 
-            let scrollable_content = scrollable(
-                container(content)
-                    .width(Length::Fill)
-                    .height(Length::Fixed(total_height))
-                    .padding([0, horizontal_padding as u16])
-                    .clip(false),
-            )
-            .id(grid_state.scrollable_id.clone())
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::default(),
-            ))
-            .on_scroll(move |viewport| on_scroll(viewport))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style($crate::domains::ui::theme::Scrollable::style());
+            let scrollable_content =
+                $crate::domains::ui::widgets::min_thumb_scrollable(
+                    container(content)
+                        .width(Length::Fill)
+                        .height(Length::Fixed(total_height))
+                        .clip(false),
+                    min_thumb_px,
+                )
+                .id(grid_state.scrollable_id.clone())
+                .scrollbar_config(
+                    grid::VERTICAL_SCROLLBAR_WIDTH as f32,
+                    grid::VERTICAL_SCROLLBAR_SCROLLER_WIDTH as f32,
+                    0.0,
+                )
+                .on_scroll(move |viewport| on_scroll(viewport))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style($crate::domains::ui::theme::Scrollable::style());
 
             scrollable_content.into()
         }
@@ -304,7 +321,7 @@ impl ThemeColorAccess for MovieReference {
     }
 }
 
-impl ThemeColorAccess for SeriesReference {
+impl ThemeColorAccess for Series {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
@@ -329,7 +346,7 @@ impl ThemeColorAccess for ArchivedMovieReference {
     }
 }
 
-impl ThemeColorAccess for ArchivedSeriesReference {
+impl ThemeColorAccess for ArchivedSeries {
     fn theme_color(&self) -> Option<&str> {
         self.theme_color.as_deref()
     }
@@ -365,6 +382,7 @@ macro_rules! media_card {
                 type: $image_type:ident,
                 fallback: $fallback:expr_2021,
             },
+            $(image_size: $image_size:expr_2021,)?
             size: $size:ident,
 
             // Actions
@@ -409,7 +427,30 @@ macro_rules! media_card {
 
             // Determine requested image category from macro parameter (poster/backdrop/thumbnail/profile/poster_large)
             // Width/height continue to follow card_size; this only controls the server fetch category.
-            let image_size = ferrex_model::ImageSize::$image_type();
+            macro_rules! __image_size_override {
+                () => {
+                    None::<ferrex_model::ImageSize>
+                };
+                ($value:expr_2021) => {
+                    Some($value)
+                };
+            }
+
+            let image_size = __image_size_override!($($image_size)?)
+                .unwrap_or_else(|| ferrex_model::ImageSize::$image_type());
+
+            // Map the card's media reference to the correct iid field (iid-first images).
+            // Note: `key` must be a media UUID used for widget identity; the actual fetch key is `iid`.
+            macro_rules! __primary_iid_for_card_type {
+                (Episode) => {
+                    $data.details.primary_still_iid
+                };
+                ($other:ident) => {
+                    $data.details.primary_poster_iid
+                };
+            }
+
+            let iid = __primary_iid_for_card_type!($card_type);
 
             //// Map priority if provided
             let priority = ferrex_core::player_prelude::Priority::Preload;
@@ -421,8 +462,9 @@ macro_rules! media_card {
 
             // Create the image widget
             let mut img = image_for($id)
+                .iid(iid)
+                .skip_request(iid.is_none())
                 .size(image_size)
-                .image_type(ferrex_model::MediaType::$card_type)
                 .radius(radius)
                 .width(Length::Fixed(width))
                 .height(Length::Fixed(height))
@@ -437,7 +479,6 @@ macro_rules! media_card {
                     }
                 }).unwrap_or(lucide_icons::Icon::Image))
                 .priority(priority)
-                .skip_request(true)
                 .is_hovered(is_hovered)
                 .on_play($play_msg)
                 .on_click($click_msg);

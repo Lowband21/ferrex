@@ -1,11 +1,21 @@
 #[cfg(feature = "demo")]
 use crate::infra::api_types::DemoStatus;
 use crate::{
-    common::focus::{FocusArea, FocusMessage},
-    common::messages::{DomainMessage, DomainUpdateResult},
+    common::{
+        focus::{FocusArea, FocusMessage},
+        messages::{DomainMessage, DomainUpdateResult},
+    },
     domains::{
-        library::update_handlers::fetch_libraries,
-        ui::tabs::{TabId, TabState},
+        library::update_handlers::{
+            handle_fetch_movie_reference_batch, handle_fetch_series_bundle,
+            handle_scan_library,
+        },
+        ui::{
+            tabs::{TabId, TabState},
+            update_handlers::{
+                emit_initial_all_tab_snapshots_combined, init_all_tab_view,
+            },
+        },
     },
     infra::api_types::Media,
     state::State,
@@ -14,13 +24,11 @@ use crate::{
 use super::messages::LibraryMessage;
 use crate::domains::auth::types::AuthenticationFlow;
 use crate::domains::library::LibrariesLoadState;
-use ferrex_model::{ImageSize, MediaType};
 use iced::Task;
 use std::collections::{HashMap, HashSet};
 
 use ferrex_core::player_prelude::{
-    ImageRequest, LibraryId, MediaIDLike, Priority, ScanLifecycleStatus,
-    ScanSnapshotDto,
+    LibraryId, ScanLifecycleStatus, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use ferrex_model::library::LibraryType;
@@ -38,11 +46,6 @@ pub fn update_library(
     message: LibraryMessage,
 ) -> DomainUpdateResult {
     match message {
-        // Core library loading
-
-        //Message::TvShowsLoaded(result) => {
-        //    super::tv_loaded::handle_tv_shows_loaded(state, result)
-        //}
         LibraryMessage::RefreshLibrary => {
             let task =
                 super::update_handlers::refresh_library::handle_refresh_library(
@@ -59,6 +62,45 @@ pub fn update_library(
                 );
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
+
+        LibraryMessage::LibrariesListLoaded(result) => match result {
+            Ok(libraries) => {
+                // Update UI navigation state immediately so the header can render
+                // library tabs without waiting for the full media cache bootstrap.
+                state.domains.library.state.libraries = libraries.clone();
+                state.tab_manager.set_libraries(&libraries);
+
+                let api_service = state.api_service.clone();
+                let cache = state.disk_media_repo_cache.clone();
+                let libraries_for_bootstrap = libraries.clone();
+
+                let task = Task::perform(
+                    super::update_handlers::library_loaded::fetch_libraries_bootstrap(
+                        api_service,
+                        cache,
+                        libraries_for_bootstrap,
+                    ),
+                    |result| {
+                        LibraryMessage::LibrariesLoaded(
+                            result.map_err(|e| format!("{:#}", e)),
+                        )
+                    },
+                );
+
+                DomainUpdateResult::task(task.map(DomainMessage::Library))
+            }
+            Err(e) => {
+                log::error!(
+                    "[Library] Failed to fetch libraries list (server_url={}): {}",
+                    state.server_url,
+                    e
+                );
+                state.domains.library.state.load_state =
+                    LibrariesLoadState::Failed { last_error: e };
+                state.loading = false;
+                DomainUpdateResult::task(Task::none())
+            }
+        },
 
         LibraryMessage::LoadLibraries => {
             // Auth gating: avoid starting a fetch if we're not authenticated yet.
@@ -82,10 +124,12 @@ pub fn update_library(
                     state.domains.library.state.load_state =
                         LibrariesLoadState::InProgress;
                     Task::perform(
-                        fetch_libraries(state.api_service.clone()),
+                        super::update_handlers::library_loaded::fetch_libraries_list(
+                            state.api_service.clone(),
+                        ),
                         |result| {
-                            LibraryMessage::LibrariesLoaded(
-                                result.map_err(|e| e.to_string()),
+                            LibraryMessage::LibrariesListLoaded(
+                                result.map_err(|e| format!("{:#}", e)),
                             )
                         },
                     )
@@ -96,10 +140,12 @@ pub fn update_library(
                     state.domains.library.state.load_state =
                         LibrariesLoadState::InProgress;
                     Task::perform(
-                        fetch_libraries(state.api_service.clone()),
+                        super::update_handlers::library_loaded::fetch_libraries_list(
+                            state.api_service.clone(),
+                        ),
                         |result| {
-                            LibraryMessage::LibrariesLoaded(
-                                result.map_err(|e| e.to_string()),
+                            LibraryMessage::LibrariesListLoaded(
+                                result.map_err(|e| format!("{:#}", e)),
                             )
                         },
                     )
@@ -132,10 +178,12 @@ pub fn update_library(
                         state.domains.library.state.load_state =
                             LibrariesLoadState::InProgress;
                         Task::perform(
-                            fetch_libraries(state.api_service.clone()),
+                            super::update_handlers::library_loaded::fetch_libraries_list(
+                                state.api_service.clone(),
+                            ),
                             |result| {
-                                LibraryMessage::LibrariesLoaded(
-                                    result.map_err(|e| e.to_string()),
+                                LibraryMessage::LibrariesListLoaded(
+                                    result.map_err(|e| format!("{:#}", e)),
                                 )
                             },
                         )
@@ -209,11 +257,182 @@ pub fn update_library(
         }
 
         LibraryMessage::ScanLibrary(library_id) => {
-            let task =
-                super::update_handlers::scan_updates::handle_scan_library(
-                    state, library_id,
-                );
+            let task = handle_scan_library(state, library_id);
             DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::FetchMovieBatch {
+            library_id,
+            batch_id,
+        } => {
+            let task = handle_fetch_movie_reference_batch(
+                state.api_service.clone(),
+                library_id,
+                batch_id,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::FetchSeriesBundle {
+            library_id,
+            series_id,
+        } => {
+            let task = handle_fetch_series_bundle(
+                state.api_service.clone(),
+                library_id,
+                series_id,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::MovieBatchLoaded {
+            library_id,
+            batch_id,
+            result,
+        } => {
+            let bytes = match result {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    log::warn!(
+                        "[Library] Movie batch load failed: library {} batch {} err={}",
+                        library_id,
+                        batch_id,
+                        err
+                    );
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+
+            log::info!(
+                "[Library] Movie batch loaded: library {} batch {} bytes={}",
+                library_id,
+                batch_id,
+                bytes.len()
+            );
+
+            let outcome = match state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .install_movie_reference_batch(library_id, batch_id, bytes)
+            {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    log::error!(
+                        "[Library] Failed to install movie batch: library {} batch {} err={}",
+                        library_id,
+                        batch_id,
+                        err
+                    );
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+
+            for movie_id in outcome.movie_ids.iter() {
+                state.domains.ui.state.movie_yoke_cache.remove(movie_id);
+            }
+
+            log::info!(
+                "[Library] Installed movie batch: library {} batch {} movies={} pruned_runtime={}",
+                library_id,
+                batch_id,
+                outcome.movies_indexed,
+                outcome.movies_replaced_from_runtime_overlay
+            );
+
+            refresh_tabs_for_libraries(state, &HashSet::from([library_id]));
+            DomainUpdateResult::task(Task::none())
+        }
+
+        LibraryMessage::SeriesBundleLoaded {
+            library_id,
+            series_id,
+            result,
+        } => {
+            let bytes = match result {
+                Ok(bytes) => {
+                    log::debug!(
+                        "[Library] Series bundle loaded {} bytes",
+                        bytes.len()
+                    );
+                    bytes
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[Library] Series bundle load failed: library {} series {} err={}",
+                        library_id,
+                        series_id,
+                        err
+                    );
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+
+            log::info!(
+                "[Library] Series bundle loaded: library {} series {} bytes={}",
+                library_id,
+                series_id,
+                bytes.len()
+            );
+
+            let outcome = match state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .install_series_bundle(library_id, series_id, bytes)
+            {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    log::error!(
+                        "[Library] Failed to install series bundle: library {} series {} err={}",
+                        library_id,
+                        series_id,
+                        err
+                    );
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+            state
+                .domains
+                .ui
+                .state
+                .series_yoke_cache
+                .remove(&outcome.series_id);
+
+            for season_id in outcome.season_ids.iter() {
+                state.domains.ui.state.series_yoke_cache.remove(season_id);
+            }
+            for episode_id in outcome.episode_ids.iter() {
+                state.domains.ui.state.series_yoke_cache.remove(episode_id);
+            }
+
+            if let Err(err) = state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .mark_episode_len_dirty(&library_id)
+            {
+                log::warn!(
+                    "[Library] Failed to mark episode length cache dirty: library {} err={}",
+                    library_id,
+                    err
+                );
+            }
+
+            log::info!(
+                "[Library] Installed series bundle: library {} series {} seasons={} episodes={} pruned_runtime={}",
+                library_id,
+                series_id,
+                outcome.seasons_indexed,
+                outcome.episodes_indexed,
+                outcome.items_replaced_from_runtime_overlay,
+            );
+
+            refresh_tabs_for_libraries(state, &HashSet::from([library_id]));
+            DomainUpdateResult::task(Task::none())
         }
 
         LibraryMessage::PauseScan {
@@ -280,26 +499,9 @@ pub fn update_library(
                     // Update UI/control state from returned status
                     apply_demo_status(state, status.clone());
 
-                    // After resetting demo data, trigger fresh scans for all
-                    // registered demo libraries so the user can explore the
-                    // new seed without restarting the server.
-                    let mut tasks: Vec<Task<LibraryMessage>> = Vec::new();
-                    for lib in status.libraries {
-                        tasks.push(
-                            super::update_handlers::scan_updates::handle_scan_library(
-                                state,
-                                lib.library_id,
-                            ),
-                        );
-                    }
-
-                    if tasks.is_empty() {
-                        DomainUpdateResult::task(Task::none())
-                    } else {
-                        DomainUpdateResult::task(
-                            Task::batch(tasks).map(DomainMessage::Library),
-                        )
-                    }
+                    // Demo sizing uses incremental server-side scanning; avoid
+                    // triggering a full rescan from the client.
+                    DomainUpdateResult::task(Task::none())
                 }
                 Err(err) => {
                     state.domains.library.state.demo_controls.error = Some(err);
@@ -363,11 +565,12 @@ pub fn update_library(
                 let fetch =
                     super::update_handlers::library_loaded::fetch_libraries(
                         state.api_service.clone(),
+                        state.disk_media_repo_cache.clone(),
                     );
                 return DomainUpdateResult::task(
                     Task::perform(fetch, |res| {
                         LibraryMessage::LibrariesLoaded(
-                            res.map_err(|e| e.to_string()),
+                            res.map_err(|e| format!("{:#}", e)),
                         )
                     })
                     .map(DomainMessage::Library),
@@ -734,42 +937,8 @@ pub fn update_library(
             DomainUpdateResult::task(Task::none())
         }
 
-        // Note: _EmitCrossDomainEvent variant has been removed
-
         // No-op
         LibraryMessage::NoOp => DomainUpdateResult::task(Task::none()),
-
-        // Batch metadata handling
-        LibraryMessage::MediaDetailsBatch(references) => {
-            log::info!(
-                "Received batch of {} media references for metadata fetching",
-                references.len()
-            );
-            // This is handled by the batch metadata fetcher
-            DomainUpdateResult::task(Task::none())
-        }
-
-        LibraryMessage::BatchMetadataComplete => {
-            log::info!(
-                "[BatchMetadataFetcher] Complete message received - hiding loading spinner"
-            );
-            state.loading = false;
-            DomainUpdateResult::task(Task::none())
-        }
-
-        // View model updates
-        LibraryMessage::RefreshViewModels => {
-            // This message is deprecated in Library domain - ViewModels are managed by UI domain
-            // The UI domain handles RefreshViewModels to update its own ViewModels
-            log::debug!(
-                "Library: RefreshViewModels is now handled by UI domain"
-            );
-            DomainUpdateResult::task(Task::none())
-        } // TV Shows loading
-          //Message::TvShowsLoaded(result) => {
-          //    log::info!("TV shows loaded: {:?}", result.as_ref().map(|v| v.len()));
-          //    DomainUpdateResult::task(Task::none())
-          //}
     }
 }
 
@@ -782,46 +951,46 @@ fn media_library_id(media: &Media) -> Option<LibraryId> {
     }
 }
 
-fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
-    match media {
-        Media::Movie(movie) => Some(
-            ImageRequest::new(
-                movie.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Movie,
-            )
-            .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Series(series) => Some(
-            ImageRequest::new(
-                series.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Series,
-            )
-            .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Season(season) => Some(
-            ImageRequest::new(
-                season.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Season,
-            )
-            .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Episode(episode) => Some(
-            ImageRequest::new(
-                *episode.id.as_uuid(),
-                ImageSize::thumbnail(),
-                MediaType::Episode,
-            )
-            .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-    }
-}
+// fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
+//     match media {
+//         Media::Movie(movie) => Some(
+//             ImageRequest::new(
+//                 movie.id.to_uuid(),
+//                 ImageSize::poster(),
+//                 MediaType::Movie,
+//             )
+//             .with_priority(Priority::Visible)
+//             .with_index(0),
+//         ),
+//         Media::Series(series) => Some(
+//             ImageRequest::new(
+//                 series.id.to_uuid(),
+//                 ImageSize::poster(),
+//                 MediaType::Series,
+//             )
+//             .with_priority(Priority::Visible)
+//             .with_index(0),
+//         ),
+//         Media::Season(season) => Some(
+//             ImageRequest::new(
+//                 season.id.to_uuid(),
+//                 ImageSize::poster(),
+//                 MediaType::Season,
+//             )
+//             .with_priority(Priority::Visible)
+//             .with_index(0),
+//         ),
+//         Media::Episode(episode) => Some(
+//             ImageRequest::new(
+//                 *episode.id.as_uuid(),
+//                 ImageSize::thumbnail(),
+//                 MediaType::Episode,
+//             )
+//             .with_priority(Priority::Visible)
+//             .with_index(0),
+//         ),
+//     }
+// }
 
 fn refresh_tabs_for_libraries(
     state: &mut State,
@@ -836,13 +1005,26 @@ fn refresh_tabs_for_libraries(
 
     for library_id in libraries {
         let tab_id = TabId::Library(*library_id);
-        state.tab_manager.mark_tab_needs_refresh(tab_id);
-        if active_tab == tab_id {
-            active_needs_refresh = true;
+
+        // Ensure the tab exists so downstream All-tab carousel helpers can read
+        // its cached IDs.
+        let tab = state.tab_manager.get_or_create_tab(tab_id);
+        if let TabState::Library(tab_state) = tab {
+            tab_state.mark_needs_refresh();
+            tab_state.refresh_from_repo();
         }
     }
 
-    if active_needs_refresh {
+    // Refreshing the "Home" (All) view is not driven by TabManager::refresh_active_tab.
+    // Instead, the All view's carousels are wired through UI-level helpers that
+    // re-sync per-library carousels from each library tab's cached IDs and emit
+    // demand snapshots for poster loading.
+    if active_tab == TabId::Home {
+        init_all_tab_view(state);
+        emit_initial_all_tab_snapshots_combined(state);
+        active_needs_refresh = true;
+    } else if libraries.iter().any(|id| TabId::Library(*id) == active_tab) {
+        active_needs_refresh = true;
         state.tab_manager.refresh_active_tab();
     }
 

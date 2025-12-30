@@ -8,16 +8,16 @@ pub fn handle_unified_image_loaded(
     state: &mut State,
     request: ImageRequest,
     handle: Handle,
+    estimated_bytes: u64,
 ) -> Task<MetadataMessage> {
     //log::info!("Unified image loaded: {:?}", request);
 
     // Update the unified image service cache with the loaded handle
-    state
-        .domains
-        .metadata
-        .state
-        .image_service
-        .mark_loaded(&request, handle.clone());
+    state.domains.metadata.state.image_service.mark_loaded(
+        &request,
+        handle.clone(),
+        estimated_bytes,
+    );
 
     // Keep UI alive briefly to allow poster animations to play smoothly
     if matches!(request.size, ImageSize::Poster(_))

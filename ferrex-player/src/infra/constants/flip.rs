@@ -31,5 +31,7 @@ pub const SNAP_K: f32 = 30.0;
 pub const SETTLE_VELOCITY_THRESHOLD: f32 = 0.01;
 /// ~0.1 radians - proximity to stable point
 pub const SETTLE_ANGLE_THRESHOLD: f32 = 0.0314;
+/// ~0.1 radians - proximity to stable point
+pub const STOPPED_ANGLE_THRESHOLD: f32 = 0.000314;
 /// rad/s - when to nudge toward opposite
 pub const NUDGE_VELOCITY_THRESHOLD: f32 = 2.0;

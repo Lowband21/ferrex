@@ -432,7 +432,7 @@ pub fn update_player(
             info!(
                 "[Player] Video ready to play - loading with internal backend"
             );
-            // Keep VideoReadyToPlay on the internal pipeline; explicit MPV
+            // Keep VideoReadyToPlay on the internal provider; explicit MPV
             // handoff is triggered via UI::PlayMediaWithIdInMpv / Player::PlayExternal
             DomainUpdateResult::task(
                 load_video(app_state).map(DomainMessage::Player),
@@ -462,7 +462,7 @@ pub fn update_player(
                     );
 
                     if let Some(next_ep) = next_opt {
-                        // Persist final progress, then start next episode (internal pipeline)
+                        // Persist final progress, then start next episode (internal provider)
                         let tasks = Task::batch(vec![
                             Task::done(DomainMessage::Media(
                                 media::messages::MediaMessage::SendProgressUpdateWithData(
@@ -980,10 +980,10 @@ pub fn update_player(
                 } else {
                     (state.last_valid_position, state.last_valid_duration)
                 };
-            if let Some(src) = state.source_duration {
-                if src > 0.0 {
-                    duration = src;
-                }
+            if let Some(src) = state.source_duration
+                && src > 0.0
+            {
+                duration = src;
             }
             let ratio = if duration > 0.0 {
                 position / duration
@@ -1407,7 +1407,7 @@ pub fn update_player(
                         // Ensure we stay on the Player view for near-instant transitions
                         app_state.domains.ui.state.view =
                             ui::types::ViewState::Player;
-                        // Explicitly close the existing pipeline so load_video doesn't early-return
+                        // Explicitly close the existing provider so load_video doesn't early-return
                         crate::domains::player::video::close_video(app_state);
                     } else {
                         // First-time play or not currently in player: show loading view briefly
@@ -1534,7 +1534,7 @@ fn start_external_mpv_with_current_url(
             )))
         }
         Err(e) => {
-            // Fallback to internal pipeline
+            // Fallback to internal provider
             error!(
                 "Failed to start external MPV (falling back to internal): {}",
                 e

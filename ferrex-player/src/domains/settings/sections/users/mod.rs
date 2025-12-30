@@ -17,6 +17,7 @@ use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
 /// Users section marker for type-safe section identification
+#[derive(Debug)]
 pub struct UsersSection;
 
 /// Update users settings state

@@ -27,14 +27,18 @@ pub fn update_interaction_ui(
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         InteractionMessage::DetailViewScrolled(viewport) => {
+            bump_keep_alive(state);
             DomainUpdateResult::task(
                 scroll_updates::handle_detail_view_scrolled(state, viewport)
                     .map(DomainMessage::Ui),
             )
         }
         InteractionMessage::HomeScrolled(viewport) => DomainUpdateResult::task(
-            home_focus::handle_home_scrolled(state, viewport)
-                .map(DomainMessage::Ui),
+            {
+                bump_keep_alive(state);
+                home_focus::handle_home_scrolled(state, viewport)
+            }
+            .map(DomainMessage::Ui),
         ),
         InteractionMessage::HomeFocusNext => DomainUpdateResult::task(
             home_focus::handle_home_focus_next(state).map(DomainMessage::Ui),
@@ -42,16 +46,13 @@ pub fn update_interaction_ui(
         InteractionMessage::HomeFocusPrev => DomainUpdateResult::task(
             home_focus::handle_home_focus_prev(state).map(DomainMessage::Ui),
         ),
-        InteractionMessage::HomeFocusTick => DomainUpdateResult::task(
-            home_focus::handle_home_focus_tick(state).map(DomainMessage::Ui),
+        InteractionMessage::HomeFocusTick(now) => DomainUpdateResult::task(
+            home_focus::handle_home_focus_tick(state, now)
+                .map(DomainMessage::Ui),
         ),
         InteractionMessage::MouseMoved => {
-            state
-                .domains
-                .ui
-                .state
-                .carousel_focus
-                .record_mouse_move(std::time::Instant::now());
+            let now = std::time::Instant::now();
+            state.domains.ui.state.carousel_focus.record_mouse_move(now);
             DomainUpdateResult::task(Task::none())
         }
         InteractionMessage::MediaHovered(instance_key) => {

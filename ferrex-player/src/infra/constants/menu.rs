@@ -55,12 +55,12 @@ pub fn button_y_end(index: usize) -> f32 {
 /// Check if an x coordinate is within button x bounds.
 #[inline]
 pub fn in_x_bounds(x: f32) -> bool {
-    x >= BUTTON_X_PADDING && x <= (1.0 - BUTTON_X_PADDING)
+    (BUTTON_X_PADDING..=(1.0 - BUTTON_X_PADDING)).contains(&x)
 }
 
 /// Get button index from normalized y position, or None if not on a button.
 pub fn button_from_y(y: f32) -> Option<usize> {
-    if y < 0.0 || y > 1.0 {
+    if !(0.0..=1.0).contains(&y) {
         return None;
     }
     for i in 0..NUM_BUTTONS {

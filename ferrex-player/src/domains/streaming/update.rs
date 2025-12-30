@@ -145,17 +145,8 @@ fn handle_bandwidth_measured(
     state.domains.streaming.state.last_bandwidth_measurement = Some(bandwidth);
 
     // Check if we should switch quality based on bandwidth
-    // TODO: Fix type inference issue and implement automatic quality switching
-    /*
-    if let Some(ref mut hls_client) = state.domains.streaming.state.hls_client {
-        if let Some(ref master_playlist) = state.domains.streaming.state.master_playlist {
-            if let Some(new_variant) = hls_client.should_switch_variant(master_playlist) {
-                log::info!("Switching to quality variant: {}", new_variant.profile);
-                // TODO: Implement automatic quality switching
-            }
-        }
-    }
-    */
+    // TODO: Implement automatic quality switching once the HLS client exposes a stable,
+    // type-safe variant selection API.
 
     DomainUpdateResult::task(Task::none())
 }

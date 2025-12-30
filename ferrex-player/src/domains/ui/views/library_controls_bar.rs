@@ -8,8 +8,8 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::{LibraryId, UiResolution, UiWatchStatus};
+use ferrex_model::LibraryType;
 use iced::{Element, Length, widget::container};
-use uuid::Uuid;
 
 /// Creates the library controls bar that appears below the header
 /// This bar contains sort and filter controls and is only visible when viewing specific libraries
@@ -23,36 +23,60 @@ use uuid::Uuid;
 )]
 pub fn view_library_controls_bar<'a>(
     state: &'a State,
-    selected_library: Option<Uuid>,
+    lib_id: LibraryId,
+    lib_type: &LibraryType,
 ) -> Option<Element<'a, UiMessage>> {
     // Only show controls for specific libraries, not the Home view
-    selected_library?;
 
     // Get current sort settings from state
     let ui_state = &state.domains.ui.state;
     let current_sort = ui_state.sort_by;
     let current_order = ui_state.sort_order;
 
-    let item_count = selected_library
-        .and_then(|library_uuid| {
-            let library_id = LibraryId(library_uuid);
-            state
+    let item_count = match lib_type {
+        LibraryType::Movies => {
+            let movie_num = state
                 .tab_manager
-                .get_tab(TabId::Library(library_id))
+                .get_tab(TabId::Library(lib_id))
                 .and_then(|tab| match tab {
                     TabState::Library(lib_state) => {
                         Some(lib_state.grid_state.total_items)
                     }
                     _ => None,
                 })
-        })
-        .or_else(|| match state.tab_manager.active_tab() {
-            TabState::Library(lib_state) => {
-                Some(lib_state.grid_state.total_items)
-            }
-            _ => None,
-        })
-        .unwrap_or(0);
+                .unwrap_or(0)
+                .to_string();
+            let mut ret = String::with_capacity(12);
+            ret.push_str(&movie_num.to_string());
+            ret.push_str(" Movies");
+            ret
+        }
+        LibraryType::Series => {
+            let series_num = state
+                .tab_manager
+                .get_tab(TabId::Library(lib_id))
+                .and_then(|tab| match tab {
+                    TabState::Library(lib_state) => {
+                        Some(lib_state.grid_state.total_items)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0);
+            let episode_num = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .episode_len(&lib_id)
+                .ok()?;
+            let mut ret = String::with_capacity(24);
+            ret.push_str(&series_num.to_string());
+            ret.push_str(" Series ");
+            ret.push_str(&episode_num.to_string());
+            ret.push_str(" Episodes");
+            ret
+        }
+    };
 
     let active_filter_count = ui_state.selected_genres.len()
         + ui_state.selected_decade.iter().count()

@@ -178,7 +178,7 @@ impl VirtualCarouselState {
     pub fn page_right_index_target(&self) -> f32 {
         let i0 = self.reference_index.floor() as usize;
         let page_stride = self.items_per_page.saturating_sub(1).max(1);
-        let mut target_i = i0.saturating_add(page_stride);
+        let target_i = i0.saturating_add(page_stride);
         let max_i = self.max_start_index();
         if target_i > max_i {
             // Special case: right-align at the end

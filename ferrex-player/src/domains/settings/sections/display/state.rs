@@ -6,6 +6,16 @@
 use ferrex_model::PosterSize;
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_SCROLLBAR_SCROLLER_MIN_LENGTH_PX: f32 = 24.0;
+
+fn default_grid_poster_gap() -> f32 {
+    15.0
+}
+
+fn default_scrollbar_scroller_min_length_px() -> f32 {
+    DEFAULT_SCROLLBAR_SCROLLER_MIN_LENGTH_PX
+}
+
 /// Display settings state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayState {
@@ -36,8 +46,16 @@ pub struct DisplayState {
     pub poster_text_area_height: f32,
 
     // Spacing subsection (from constants::layout::grid)
-    /// Grid effective spacing in pixels (default: 15.0)
-    pub grid_effective_spacing: f32,
+    /// Gap between poster columns in pixels (unscaled).
+    ///
+    /// This value is scaled by the application's effective scale at runtime.
+    ///
+    /// Backwards-compat: formerly stored as `grid_effective_spacing`.
+    #[serde(
+        default = "default_grid_poster_gap",
+        alias = "grid_effective_spacing"
+    )]
+    pub grid_poster_gap: f32,
     /// Grid row spacing in pixels (default: 50.0)
     pub grid_row_spacing: f32,
     /// Minimum viewport padding in pixels (default: 40.0)
@@ -62,6 +80,13 @@ pub struct DisplayState {
     pub library_poster_quality: PosterSize,
     /// Poster quality for detail views - hero poster (default: W780)
     pub detail_poster_quality: PosterSize,
+
+    // Scrollbar subsection
+    /// Minimum length (height/width) of scrollable scrollers in pixels.
+    ///
+    /// This applies globally to all scrollables at runtime.
+    #[serde(default = "default_scrollbar_scroller_min_length_px")]
+    pub scrollbar_scroller_min_length_px: f32,
 }
 
 impl Default for DisplayState {
@@ -84,7 +109,7 @@ impl Default for DisplayState {
             poster_text_area_height: 60.0,
 
             // Spacing (matches constants::layout::grid defaults)
-            grid_effective_spacing: 15.0,
+            grid_poster_gap: default_grid_poster_gap(),
             grid_row_spacing: 50.0,
             grid_viewport_padding: 40.0,
             grid_top_padding: 20.0,
@@ -97,8 +122,12 @@ impl Default for DisplayState {
             animation_texture_fade_ms: 400,
 
             // Poster Quality
-            library_poster_quality: PosterSize::W300,
-            detail_poster_quality: PosterSize::W950,
+            library_poster_quality: PosterSize::W185,
+            detail_poster_quality: PosterSize::W780,
+
+            // Scrollbar
+            scrollbar_scroller_min_length_px:
+                default_scrollbar_scroller_min_length_px(),
         }
     }
 }

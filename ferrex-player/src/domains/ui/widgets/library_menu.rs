@@ -19,7 +19,7 @@ pub fn library_sort_filter_menu<'a>(
     current_order: SortOrder,
     active_filter_count: usize,
     is_filter_panel_open: bool,
-    item_count: usize,
+    item_count: String,
 ) -> Element<'a, UiMessage> {
     let sort_item = build_sort_menu(current_sort, current_order);
     let filter_item =

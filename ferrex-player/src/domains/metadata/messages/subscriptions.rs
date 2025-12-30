@@ -10,9 +10,13 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             Arc::clone(&state.api_service),
             state.server_url.clone(),
             Arc::clone(&state.image_receiver),
+            state.disk_image_cache.clone(),
         )
         .map(DomainMessage::Metadata),
-        super::image_cache_cleanup_subscription::image_cache_cleanup()
-            .map(DomainMessage::Metadata),
+        super::image_cache_cleanup_subscription::image_cache_cleanup(
+            Arc::clone(&state.image_service),
+            state.disk_image_cache.clone(),
+        )
+        .map(DomainMessage::Metadata),
     ])
 }

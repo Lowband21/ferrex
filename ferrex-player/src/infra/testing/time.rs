@@ -36,7 +36,7 @@ pub trait TimeProvider: Send + Sync + 'static {
 }
 
 /// Production time provider that uses real system time
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SystemTimeProvider;
 
 impl TimeProvider for SystemTimeProvider {
@@ -72,7 +72,7 @@ impl TimeProvider for SystemTimeProvider {
 }
 
 /// Virtual time provider for testing
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VirtualTimeProvider {
     /// Current virtual instant
     instant: Arc<Mutex<Instant>>,
@@ -87,6 +87,7 @@ pub struct VirtualTimeProvider {
 }
 
 /// A virtual timer that can be resolved when time advances
+#[derive(Debug)]
 struct VirtualTimer {
     deadline: Instant,
     waker: Option<std::task::Waker>,
@@ -296,6 +297,14 @@ impl std::future::Future for VirtualSleep {
 /// Helper to inject time provider into async contexts
 pub struct TimeContext {
     provider: Box<dyn TimeProvider>,
+}
+
+impl std::fmt::Debug for TimeContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimeContext")
+            .field("provider", &"<dyn TimeProvider>")
+            .finish()
+    }
 }
 
 impl TimeContext {

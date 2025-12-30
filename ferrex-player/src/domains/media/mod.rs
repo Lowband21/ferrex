@@ -6,19 +6,27 @@ pub mod messages;
 pub mod selectors;
 pub mod update;
 
-use crate::common::messages::{CrossDomainEvent, DomainMessage};
-use crate::domains::media::messages::MediaMessage;
-use crate::infra::repository::{Accessor, ReadWrite};
-use crate::infra::services::api::ApiService;
+use crate::{
+    common::messages::{CrossDomainEvent, DomainMessage},
+    infra::{
+        repository::{Accessor, ReadWrite},
+        services::api::ApiService,
+    },
+};
+
 use ferrex_core::player_prelude::{
     InProgressItem, MediaID, MediaIDLike, SeasonDetails, UserWatchState,
 };
+
 use iced::Task;
-use std::sync::Arc;
+
+use std::{sync::Arc, time::Instant};
 
 /// Media domain state - focused on media management, not playback
 #[derive(Debug)]
 pub struct MediaDomainState {
+    pub last_progress_sent: f64,
+    pub last_progress_update: Option<Instant>,
     // Media management state
     pub user_watch_state: Option<UserWatchState>,
     pub current_season_details: Option<SeasonDetails>,
@@ -46,6 +54,8 @@ impl MediaDomainState {
         //let query_service = Arc::new(MediaQueryService::new(Arc::clone(&media_store)));
 
         Self {
+            last_progress_sent: 0.0,
+            last_progress_update: None,
             user_watch_state: None,
             current_season_details: None,
             current_media_id: None,
@@ -155,13 +165,6 @@ pub struct MediaDomain {
 impl MediaDomain {
     pub fn new(state: MediaDomainState) -> Self {
         Self { state }
-    }
-
-    /// Update function - delegates to existing update_media logic
-    pub fn update(&mut self, message: MediaMessage) -> Task<DomainMessage> {
-        // This will call the existing update_media function
-        // For now, we return Task::none() to make it compile
-        Task::none()
     }
 
     pub fn handle_event(

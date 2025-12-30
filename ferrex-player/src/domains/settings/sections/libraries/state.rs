@@ -2,6 +2,7 @@
 //!
 //! This will integrate with the existing library management state.
 
+use ferrex_model::LibraryType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,28 +31,6 @@ pub struct LibrarySummary {
     pub item_count: usize,
     pub last_scan: Option<String>,
     pub scan_in_progress: bool,
-}
-
-/// Library type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LibraryType {
-    Movies,
-    TvShows,
-    Music,
-    Photos,
-    Mixed,
-}
-
-impl std::fmt::Display for LibraryType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Movies => write!(f, "Movies"),
-            Self::TvShows => write!(f, "TV Shows"),
-            Self::Music => write!(f, "Music"),
-            Self::Photos => write!(f, "Photos"),
-            Self::Mixed => write!(f, "Mixed"),
-        }
-    }
 }
 
 /// State for library add/edit form

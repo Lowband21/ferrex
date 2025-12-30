@@ -43,11 +43,13 @@ use crate::domains::metadata::update::update_metadata;
 use crate::domains::player::update::update_player;
 use crate::domains::search::update as search_update;
 use crate::domains::settings::update::update_settings;
-use crate::domains::streaming::update::update_streaming;
 use crate::domains::ui::update::update_ui;
 use crate::domains::user_management::update::update_user_management;
 use crate::state::State;
 use iced::Task;
+
+#[cfg(feature = "unimplemented")]
+use crate::domains::streaming::update::update_streaming;
 
 /// Domain-aware update function that routes messages to appropriate handlers
 /// and collects events from DomainUpdateResult for cross-domain communication
@@ -106,7 +108,9 @@ pub fn update(
         }
 
         // Route media messages to the media domain handler
-        DomainMessage::Media(media_msg) => update_media(state, media_msg),
+        DomainMessage::Media(media_msg) => {
+            update_media(&mut state.domains.media.state, media_msg)
+        }
 
         // Route player messages to the player domain handler
         DomainMessage::Player(player_msg) => update_player(state, player_msg),
@@ -120,6 +124,7 @@ pub fn update(
         DomainMessage::Ui(ui_msg) => update_ui(state, ui_msg),
 
         // Route streaming messages to the streaming domain handler
+        #[cfg(feature = "unimplemented")]
         DomainMessage::Streaming(streaming_msg) => {
             update_streaming(state, streaming_msg)
         }
@@ -154,14 +159,68 @@ pub fn update(
                     Task::none()
                 }
                 FocusMessage::Traverse { backwards } => {
-                    if state.focus.allow_traversal() {
-                        if backwards {
-                            iced::widget::operation::focus_previous()
-                        } else {
-                            iced::widget::operation::focus_next()
-                        }
-                    } else {
+                    if !state.focus.allow_traversal() {
                         Task::none()
+                    } else {
+                        let generation = state.focus.generation();
+                        match state.focus.active_field_ids() {
+                            None => Task::none(),
+                            Some(ids) if ids.len() <= 1 => ids
+                                .into_iter()
+                                .next()
+                                .map(iced::widget::operation::focus)
+                                .unwrap_or_else(Task::none),
+                            Some(ids) => {
+                                let probe_tasks = ids.into_iter().map(|id| {
+                                    let id_for_query = id.clone();
+                                    iced::widget::operation::is_focused(
+                                        id_for_query,
+                                    )
+                                    .map(move |focused| (id.clone(), focused))
+                                });
+
+                                Task::batch(probe_tasks).collect().map(
+                                    move |focused| {
+                                        DomainMessage::Focus(
+                                            FocusMessage::TraverseProbeResult {
+                                                generation,
+                                                backwards,
+                                                focused,
+                                            },
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                FocusMessage::TraverseProbeResult {
+                    generation,
+                    backwards,
+                    focused,
+                } => {
+                    if !state.focus.is_generation(generation) {
+                        Task::none()
+                    } else {
+                        let present: Vec<iced::widget::Id> =
+                            focused.iter().map(|(id, _)| id.clone()).collect();
+
+                        let focused_id =
+                            focused.iter().find_map(|(id, is_focused)| {
+                                (*is_focused).then_some(id.clone())
+                            });
+
+                        if let Some(next) =
+                            state.focus.resolve_traverse_present(
+                                backwards,
+                                focused_id.as_ref(),
+                                &present,
+                            )
+                        {
+                            iced::widget::operation::focus(next)
+                        } else {
+                            Task::none()
+                        }
                     }
                 }
             };

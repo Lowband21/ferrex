@@ -1,6 +1,6 @@
-//! Minimal Central State
+//! Central State
 //!
-//! This new State structure delegates domain-specific state to the DomainRegistry,
+//! This State delegates domain-specific state to the DomainRegistry,
 //! keeping only the view models and cross-cutting concerns at the top level.
 
 use crate::{
@@ -14,7 +14,6 @@ use crate::{
         player::PlayerDomain,
         search::SearchDomain,
         settings::SettingsDomainState,
-        streaming::StreamingDomainState,
         ui::{
             MotionController, UIDomainState,
             scroll_manager::ScrollPositionManager,
@@ -32,21 +31,30 @@ use crate::{
         ServiceBuilder,
         adapters::{ApiClientAdapter, AuthManagerAdapter},
         api_client::ApiClient,
+        cache::{
+            PlayerDiskImageCache, PlayerDiskImageCacheLimits,
+            PlayerDiskMediaRepoCache,
+        },
         constants::layout::calculations::ScaledLayout,
         design_tokens::{ScalingContext, SizeProvider},
         repository::{
             accessor::{Accessor, ReadOnly, ReadWrite},
-            repository::MediaRepo,
+            media_repo::MediaRepo,
             yoke_cache::YokeCache,
         },
         runtime_config::RuntimeConfig,
         services::{
             api::ApiService, settings::SettingsApiAdapter,
-            streaming::StreamingApiAdapter,
             user_management::UserAdminApiAdapter,
         },
         shader_widgets::background::state::BackgroundShaderState,
     },
+};
+
+#[cfg(feature = "unimplemented")]
+use crate::{
+    domains::streaming::StreamingDomainState,
+    infra::services::streaming::StreamingApiAdapter,
 };
 
 use ferrex_core::player_prelude::{
@@ -68,20 +76,19 @@ pub struct State {
     /// Central focus manager for coordinating keyboard traversal
     pub focus: FocusManager,
 
-    /// Tab manager for independent tab states (NEW ARCHITECTURE)
+    /// Tab manager for independent tab states
     pub tab_manager: TabManager,
 
     /// Server URL - needed by multiple domains
     pub server_url: String,
 
-    /// Shared services and infrastructure
+    /// Shared services and infra
     pub api_service: Arc<dyn ApiService>,
-    pub image_service: UnifiedImageService,
+    pub image_service: Arc<UnifiedImageService>,
+    pub disk_image_cache: Option<Arc<PlayerDiskImageCache>>,
+    pub disk_media_repo_cache: Option<Arc<PlayerDiskMediaRepoCache>>,
     pub image_receiver:
         Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
-
-    //pub batch_metadata_fetcher:
-    //    Option<Arc<crate::domains::metadata::batch_fetcher::BatchMetadataFetcher>>,
     /// Top-level application state
     pub loading: bool,
     pub is_authenticated: bool,
@@ -109,6 +116,8 @@ impl State {
         // Initialize MediaRepo (will be populated when libraries are loaded)
         let media_repo = Arc::new(StdRwLock::new(None));
         let ui_accessor: Accessor<ReadOnly> = Accessor::new(media_repo.clone());
+        let search_accessor: Accessor<ReadOnly> =
+            Accessor::new(media_repo.clone());
         let lib_accessor: Accessor<ReadWrite> =
             Accessor::new(media_repo.clone());
         // Media and library domains should be combined
@@ -117,7 +126,32 @@ impl State {
 
         let api_client = ApiClient::new(server_url.clone());
 
-        let (image_service, _receiver) = UnifiedImageService::new(8);
+        let (image_service, receiver) = UnifiedImageService::new(128);
+        let image_service_arc = Arc::new(image_service);
+
+        let disk_image_cache = match PlayerDiskImageCache::try_new_for_server(
+            &server_url,
+            PlayerDiskImageCacheLimits::defaults(),
+        ) {
+            Ok(cache) => Some(Arc::new(cache)),
+            Err(e) => {
+                log::warn!(
+                    "Failed to initialize disk image cache; continuing without it: {e}"
+                );
+                None
+            }
+        };
+
+        let disk_media_repo_cache =
+            match PlayerDiskMediaRepoCache::try_new_for_server(&server_url) {
+                Ok(cache) => Some(Arc::new(cache)),
+                Err(e) => {
+                    log::warn!(
+                        "Failed to initialize media repo disk cache; continuing without it: {e}"
+                    );
+                    None
+                }
+            };
 
         // Create service builder/toggles first (used by multiple domains)
         let service_builder = ServiceBuilder::new();
@@ -147,7 +181,7 @@ impl State {
         let metadata_state = MetadataDomainState::new(
             server_url.clone(),
             Some(api_service.clone()),
-            image_service.clone(),
+            image_service_arc.clone(),
         );
 
         let ui_state = UIDomainState {
@@ -203,6 +237,8 @@ impl State {
             poster_menu_open: None,
             poster_menu_states: HashMap::new(),
             toast_manager: crate::domains::ui::feedback_ui::ToastManager::new(),
+            #[cfg(feature = "debug-cache-overlay")]
+            cache_overlay_sample: None,
         };
 
         // Create settings service adapter
@@ -216,16 +252,18 @@ impl State {
             settings_service,
         );
 
-        // Create streaming service adapter
-        let api_arc_stream = Arc::new(api_client.clone());
-        let streaming_adapter = StreamingApiAdapter::new(api_arc_stream);
-        let streaming_service = Arc::new(streaming_adapter);
-
-        let streaming_state = StreamingDomainState::new(
-            api_service.clone(),
-            streaming_service,
-            ui_accessor.clone(),
-        );
+        #[cfg(feature = "unimplemented")]
+        let streaming_state = {
+            // Create streaming service adapter
+            let api_arc_stream = Arc::new(api_client.clone());
+            let streaming_adapter = StreamingApiAdapter::new(api_arc_stream);
+            let streaming_service = Arc::new(streaming_adapter);
+            StreamingDomainState::new(
+                api_service.clone(),
+                streaming_service,
+                ui_accessor.clone(),
+            )
+        };
 
         let mut user_mgmt_state = UserManagementDomainState {
             api_service: Some(api_service.clone()),
@@ -242,8 +280,10 @@ impl State {
 
         let player_domain = PlayerDomain::new(Some(api_service.clone()));
 
-        let search_domain =
-            SearchDomain::new_with_metrics(Some(api_service.clone()));
+        let search_domain = SearchDomain::new_with_metrics(
+            Some(api_service.clone()),
+            Some(Arc::new(search_accessor)),
+        );
 
         // Create domain registry
         let domains = DomainRegistry {
@@ -258,6 +298,8 @@ impl State {
             settings: crate::domains::settings::SettingsDomain::new(
                 settings_state,
             ),
+
+            #[cfg(feature = "unimplemented")]
             streaming: crate::domains::streaming::StreamingDomain::new(
                 streaming_state,
             ),
@@ -289,8 +331,10 @@ impl State {
             tab_manager,
             server_url: server_url.clone(),
             api_service,
-            image_service: image_service.clone(), // TODO: Fix this clone
-            image_receiver: Arc::new(std::sync::Mutex::new(Some(_receiver))),
+            image_service: image_service_arc.clone(), // TODO: Fix this clone
+            disk_image_cache,
+            disk_media_repo_cache,
+            image_receiver: Arc::new(std::sync::Mutex::new(Some(receiver))),
             loading: true,
             is_authenticated: false,
             window_size: iced::Size::new(1280.0, 720.0),
@@ -320,8 +364,8 @@ impl State {
 
     /// Update TabManager with library information
     pub fn update_tab_manager_libraries(&mut self) {
-        // Update TabManager with current libraries via the repo accessor
-        self.tab_manager.update_libraries();
+        self.tab_manager
+            .set_libraries(&self.domains.library.state.libraries);
     }
 
     /// Get the active tab ID

@@ -152,7 +152,8 @@ mod tests {
 
     #[test]
     fn test_harmony_offsets() {
-        assert_eq!(HarmonyMode::None.offsets(), &[]);
+        let empty: &[f32] = &[];
+        assert_eq!(HarmonyMode::None.offsets(), empty);
         assert_eq!(HarmonyMode::Complementary.offsets(), &[180.0]);
         assert_eq!(HarmonyMode::Triadic.offsets(), &[120.0, 240.0]);
         assert_eq!(HarmonyMode::SplitComplementary.offsets(), &[150.0, 210.0]);

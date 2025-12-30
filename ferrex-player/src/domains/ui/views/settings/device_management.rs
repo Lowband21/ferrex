@@ -92,18 +92,6 @@ pub fn view_device_management<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let content = column![
         // Header
         row![
-            button(
-                row![
-                    icon_text(Icon::ChevronLeft).size(fonts.subtitle),
-                    Space::new().width(5),
-                    text("Back").size(fonts.body)
-                ]
-                .align_y(iced::Alignment::Center)
-            )
-            .on_press(SettingsUiMessage::BackToSettings.into())
-            .style(theme::Button::Secondary.style())
-            .padding([8, 16]),
-            Space::new().width(20),
             text("Device Management")
                 .size(fonts.title_lg)
                 .color(theme::MediaServerTheme::TEXT_PRIMARY),
@@ -299,7 +287,7 @@ fn create_device_card<'a>(
                                     .size(fonts.small)
                                     .color(theme::MediaServerTheme::SUCCESS),
                             )
-                            .style(|theme: &Theme| container::Style {
+                            .style(|_theme: &Theme| container::Style {
                                 background: Some(
                                     theme::MediaServerTheme::SUCCESS
                                         .scale_alpha(0.2)

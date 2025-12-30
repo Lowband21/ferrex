@@ -57,16 +57,15 @@ pub enum UiShellMessage {
     MainWindowUnfocused,
     RawWindowClosed(window::Id),
 
-    // Search window and query management
+    // Search surface and query management
     UpdateSearchQuery(String),
-    BeginSearchFromKeyboard(String),
     ExecuteSearch,
-    OpenSearchWindow,
-    OpenSearchWindowWithSeed(String),
-    SearchWindowOpened(window::Id),
-    FocusSearchWindow,
+    OpenSearchOverlay,
+    OpenSearchOverlayWithSeed(String),
+    PopOutSearch,
+    CloseSearch,
+    SearchDetachedOpened(window::Id),
     FocusSearchInput,
-    CloseSearchWindow,
 
     // Cross-domain controls
     ToggleFullscreen,
@@ -101,16 +100,17 @@ impl UiShellMessage {
             Self::MainWindowUnfocused => "UI::MainWindowUnfocused",
             Self::RawWindowClosed(_) => "UI::RawWindowClosed",
 
-            // Search window and query management
+            // Search surface and query management
             Self::UpdateSearchQuery(_) => "UI::UpdateSearchQuery",
-            Self::BeginSearchFromKeyboard(_) => "UI::BeginSearchFromKeyboard",
             Self::ExecuteSearch => "UI::ExecuteSearch",
-            Self::OpenSearchWindow => "UI::OpenSearchWindow",
-            Self::OpenSearchWindowWithSeed(_) => "UI::OpenSearchWindowWithSeed",
-            Self::SearchWindowOpened(_) => "UI::SearchWindowOpened",
-            Self::FocusSearchWindow => "UI::FocusSearchWindow",
+            Self::OpenSearchOverlay => "UI::OpenSearchOverlay",
+            Self::OpenSearchOverlayWithSeed(_) => {
+                "UI::OpenSearchOverlayWithSeed"
+            }
+            Self::PopOutSearch => "UI::PopOutSearch",
+            Self::CloseSearch => "UI::CloseSearch",
+            Self::SearchDetachedOpened(_) => "UI::SearchDetachedOpened",
             Self::FocusSearchInput => "UI::FocusSearchInput",
-            Self::CloseSearchWindow => "UI::CloseSearchWindow",
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
         }
     }
@@ -154,27 +154,20 @@ impl std::fmt::Debug for UiShellMessage {
             UiShellMessage::UpdateSearchQuery(_) => {
                 write!(f, "UI::UpdateSearchQuery")
             }
-            UiShellMessage::BeginSearchFromKeyboard(_) => {
-                write!(f, "UI::BeginSearchFromKeyboard")
-            }
             UiShellMessage::ExecuteSearch => write!(f, "UI::ExecuteSearch"),
-            UiShellMessage::OpenSearchWindow => {
-                write!(f, "UI::OpenSearchWindow")
+            UiShellMessage::OpenSearchOverlay => {
+                write!(f, "UI::OpenSearchOverlay")
             }
-            UiShellMessage::OpenSearchWindowWithSeed(_) => {
-                write!(f, "UI::OpenSearchWindowWithSeed")
+            UiShellMessage::OpenSearchOverlayWithSeed(_) => {
+                write!(f, "UI::OpenSearchOverlayWithSeed")
             }
-            UiShellMessage::SearchWindowOpened(id) => {
-                write!(f, "UI::SearchWindowOpened({:?})", id)
-            }
-            UiShellMessage::FocusSearchWindow => {
-                write!(f, "UI::FocusSearchWindow")
+            UiShellMessage::PopOutSearch => write!(f, "UI::PopOutSearch"),
+            UiShellMessage::CloseSearch => write!(f, "UI::CloseSearch"),
+            UiShellMessage::SearchDetachedOpened(id) => {
+                write!(f, "UI::SearchDetachedOpened({:?})", id)
             }
             UiShellMessage::FocusSearchInput => {
                 write!(f, "UI::FocusSearchInput")
-            }
-            UiShellMessage::CloseSearchWindow => {
-                write!(f, "UI::CloseSearchWindow")
             }
             UiShellMessage::ToggleFullscreen => {
                 write!(f, "UI::ToggleFullscreen")

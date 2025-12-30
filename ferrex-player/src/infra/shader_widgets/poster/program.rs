@@ -63,7 +63,7 @@ impl Program<UiMessage> for PosterProgram {
         &self,
         state: &Self::State,
         _cursor: mouse::Cursor,
-        bounds: Rectangle,
+        _bounds: Rectangle,
     ) -> Self::Primitive {
         ensure_batch_registration();
 
@@ -71,7 +71,7 @@ impl Program<UiMessage> for PosterProgram {
         let mouse_position = state.mouse_position;
 
         /*
-        log::info!(
+        log::trace!(
             "RoundedImageProgram::draw called - state hover: {}, mouse_pos: {:?}",
             state.is_hovered,
             mouse_position
@@ -80,7 +80,6 @@ impl Program<UiMessage> for PosterProgram {
         PosterPrimitive {
             id: self.id,
             handle: self.handle.clone(),
-            bounds,
             radius: self.radius,
             animation: self.animation,
             load_time: self.load_time,
@@ -342,7 +341,6 @@ impl Program<UiMessage> for PosterProgram {
                         );
                         state.mouse_position = Some(relative_pos);
                         state.is_hovered = true;
-                        //log::debug!("Cursor entered widget at: {:?}", relative_pos);
                     }
                 }
                 mouse::Event::CursorLeft => {
@@ -360,7 +358,6 @@ impl Program<UiMessage> for PosterProgram {
                             ));
                         }
                     }
-                    log::debug!("Cursor left widget");
                 }
                 _ => {}
             }

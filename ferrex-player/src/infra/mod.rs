@@ -5,6 +5,7 @@
 pub mod adapters;
 pub mod api_client;
 pub mod api_types;
+pub mod cache;
 pub mod color;
 pub mod config;
 pub mod constants;
@@ -14,6 +15,7 @@ pub mod render;
 pub mod runtime_config;
 pub mod shader_widgets;
 pub mod theme;
+pub mod units;
 
 // New profiling modules (feature-gated)
 #[cfg(any(
@@ -60,14 +62,15 @@ pub mod profiling {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
+    #[derive(Debug)]
     pub struct Profiler {
-        enabled: AtomicBool,
+        _enabled: AtomicBool,
     }
 
     impl Profiler {
         pub fn new() -> Arc<Self> {
             Arc::new(Self {
-                enabled: AtomicBool::new(false),
+                _enabled: AtomicBool::new(false),
             })
         }
 

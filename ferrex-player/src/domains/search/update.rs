@@ -1,20 +1,25 @@
 //! Search domain update logic (global, server-backed)
 
-use iced::Task;
-use iced::widget::operation::snap_to;
-use std::time::Instant;
+use super::{
+    messages::SearchMessage,
+    types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy},
+};
 
-use super::messages::SearchMessage;
-use super::types::{SEARCH_RESULTS_SCROLL_ID, SearchMode, SearchStrategy};
-use crate::common::messages::{
-    CrossDomainEvent, DomainMessage, DomainUpdateResult,
+use crate::{
+    common::messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
+    domains::ui::{
+        shell_ui::UiShellMessage, windows::focus::focus_active_search_input,
+    },
+    infra::constants::layout::search as search_layout,
+    state::State,
 };
-use crate::domains::ui::{
-    messages as ui_messages, shell_ui::UiShellMessage, windows::focus,
+
+use iced::{
+    Task,
+    widget::{operation::snap_to, scrollable::RelativeOffset},
 };
-use crate::infra::constants::layout::search as search_layout;
-use crate::state::State;
-use iced::widget::scrollable::RelativeOffset;
+
+use std::time::Instant;
 
 pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
     #[cfg(any(
@@ -36,7 +41,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
             } else {
                 // Keep focus on search input and debounce the search
                 DomainUpdateResult::task(Task::batch(vec![
-                    focus::focus_active_search_input(state)
+                    focus_active_search_input(state)
                         .map(|_| DomainMessage::NoOp),
                     Task::perform(
                         async move {
@@ -90,7 +95,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
             DomainUpdateResult::task(Task::batch([
                 navigation_task,
                 Task::done(DomainMessage::Ui(
-                    UiShellMessage::CloseSearchWindow.into(),
+                    UiShellMessage::CloseSearch.into(),
                 )),
             ]))
         }
@@ -162,7 +167,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
                 result.task = Task::batch([
                     result.task,
                     Task::done(DomainMessage::Ui(
-                        UiShellMessage::CloseSearchWindow.into(),
+                        UiShellMessage::CloseSearch.into(),
                     )),
                 ]);
                 result
@@ -175,7 +180,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
             if state.domains.search.state.escape_pending {
                 state.domains.search.state.escape_pending = false;
                 DomainUpdateResult::task(Task::done(DomainMessage::Ui(
-                    UiShellMessage::CloseSearchWindow.into(),
+                    UiShellMessage::CloseSearch.into(),
                 )))
             } else {
                 {
@@ -206,7 +211,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
                 state.domains.search.state.error = None;
                 state.domains.search.state.escape_pending = false;
                 state.domains.search.state.window_scroll_offset = 0.0;
-                if state.search_window_id.is_some() {
+                if state.domains.search.state.presentation.is_open() {
                     state.domains.search.state.selected_index = None;
                 }
 
@@ -224,7 +229,7 @@ pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
 
                 // Keep focus on search input when results arrive
                 DomainUpdateResult::task(Task::batch(vec![
-                    focus::focus_active_search_input(state)
+                    focus_active_search_input(state)
                         .map(|_| DomainMessage::NoOp),
                 ]))
             } else {
@@ -403,9 +408,9 @@ fn handle_execute_search(
                     total_count,
                 })
             }
-            Err(error) => {
-                DomainMessage::Search(SearchMessage::SearchError(error))
-            }
+            Err(error) => DomainMessage::Search(SearchMessage::SearchError(
+                error.to_string(),
+            )),
         },
     ))
 }
@@ -433,7 +438,7 @@ fn handle_select_result(
 }
 
 fn scroll_selected_into_view(state: &mut State) -> Task<DomainMessage> {
-    if state.search_window_id.is_none() {
+    if !state.domains.search.state.presentation.is_open() {
         return Task::none();
     }
 

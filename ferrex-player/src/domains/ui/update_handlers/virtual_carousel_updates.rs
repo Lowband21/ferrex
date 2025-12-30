@@ -1,35 +1,34 @@
 use crate::{
     domains::{
-        metadata::demand_planner::{
-            DemandContext, DemandRequestKind, DemandSnapshot,
-        },
+        metadata::demand_planner::DemandSnapshot,
         ui::{
             messages as ui,
             motion_controller::{MotionController, MotionControllerConfig},
             scroll_manager::CarouselScrollState,
             shell_ui::Scope,
             tabs::{TabId, TabState},
+            utils::bump_keep_alive,
             views::virtual_carousel::{
                 messages::VirtualCarouselMessage as VCM, planner,
                 registry::MotionState, types::CarouselKey,
             },
         },
     },
-    infra::{
-        constants::virtual_carousel::{self, motion, snap},
-        profiling_scopes,
-    },
+    infra::constants::virtual_carousel::{self, motion, snap},
     state::State,
 };
+
+#[cfg(any(
+    feature = "profile-with-puffin",
+    feature = "profile-with-tracy",
+    feature = "profile-with-tracing",
+))]
+use crate::infra::profiling_scopes;
 use std::time::Instant;
 
-use ferrex_contracts::prelude::MediaLike;
-use ferrex_core::{
-    player_prelude::{LibraryId, MediaID, PosterKind, PosterSize},
-    types::ids::SeriesID,
-};
+use ferrex_core::{player_prelude::LibraryId, types::ids::SeriesID};
 
-use ferrex_model::{MediaType, SeasonID};
+use ferrex_model::SeasonID;
 use iced::{
     Task,
     widget::{operation::scroll_to, scrollable::AbsoluteOffset},
@@ -41,6 +40,9 @@ pub fn handle_virtual_carousel_message(
     state: &mut State,
     msg: VCM,
 ) -> Task<ui::UiMessage> {
+    if !matches!(&msg, VCM::MotionTick(_)) {
+        bump_keep_alive(state);
+    }
     match msg {
         VCM::ViewportChanged(key, viewport) => {
             #[cfg(any(
@@ -56,6 +58,16 @@ pub fn handle_virtual_carousel_message(
                 state.domains.ui.state.carousel_registry.get_mut(&key)
             {
                 vc.update_scroll(viewport);
+
+                // Anchor background noise to the active carousel's horizontal scroll.
+                // This is deterministic: the same scroll_x yields the same background sampling.
+                state
+                    .domains
+                    .ui
+                    .state
+                    .background_shader_state
+                    .set_horizontal_scroll_px(vc.scroll_x);
+
                 // Persist horizontal scroll position for this carousel
                 let saved = CarouselScrollState {
                     scroll_x: vc.scroll_x,
@@ -183,8 +195,16 @@ pub fn handle_virtual_carousel_message(
                                 let snap = planner::snapshot_for_visible(
                                     vc,
                                     total,
-                                    |i| seasons.get(i).map(|s| s.id.to_uuid()),
-                                    Some(PosterKind::Season),
+                                    |i| {
+                                        seasons.get(i).and_then(|s| {
+                                            s.details.primary_poster_iid
+                                        })
+                                    },
+                                    state
+                                        .domains
+                                        .settings
+                                        .display
+                                        .library_poster_quality,
                                     None,
                                     &state.runtime_config,
                                 );
@@ -213,7 +233,11 @@ pub fn handle_virtual_carousel_message(
                                 planner::collect_ranges_ids(
                                     vc,
                                     total,
-                                    |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                                    |i| {
+                                        episodes.get(i).and_then(|e| {
+                                            e.details.primary_still_iid
+                                        })
+                                    },
                                     &state.runtime_config,
                                 );
                             // Build context for all ids
@@ -233,7 +257,11 @@ pub fn handle_virtual_carousel_message(
                                 background_ids: back,
                                 timestamp: Instant::now(),
                                 context: Some(ctx),
-                                poster_kind: None,
+                                poster_size: state
+                                    .domains
+                                    .settings
+                                    .display
+                                    .library_poster_quality,
                             };
                             handle.send(snap);
                         }
@@ -263,8 +291,20 @@ pub fn handle_virtual_carousel_message(
                             let snap = planner::snapshot_for_visible(
                                 vc,
                                 total,
-                                |i| ids.get(i).copied(),
-                                Some(PosterKind::Movie),
+                                |i| {
+                                    ids.get(i).copied().and_then(|id| {
+                                        crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                            state,
+                                            crate::infra::api_types::LibraryType::Movies,
+                                            id,
+                                        )
+                                    })
+                                },
+                                state
+                                    .domains
+                                    .settings
+                                    .display
+                                    .library_poster_quality,
                                 None,
                                 &state.runtime_config,
                             );
@@ -296,8 +336,20 @@ pub fn handle_virtual_carousel_message(
                             let snap = planner::snapshot_for_visible(
                                 vc,
                                 total,
-                                |i| ids.get(i).copied(),
-                                Some(PosterKind::Series),
+                                |i| {
+                                    ids.get(i).copied().and_then(|id| {
+                                        crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                            state,
+                                            crate::infra::api_types::LibraryType::Series,
+                                            id,
+                                        )
+                                    })
+                                },
+                                state
+                                    .domains
+                                    .settings
+                                    .display
+                                    .library_poster_quality,
                                 None,
                                 &state.runtime_config,
                             );
@@ -328,7 +380,11 @@ pub fn handle_virtual_carousel_message(
                                             planner::collect_ranges_ids(
                                                 vc,
                                                 total,
-                                                |i| ids.get(i).copied(),
+                                                |i| {
+                                                    ids.get(i).copied().and_then(|id| {
+                                                        crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                                                    })
+                                                },
                                                 &state.runtime_config,
                                             );
                                         pre.retain(|id| !vis.contains(id));
@@ -336,50 +392,18 @@ pub fn handle_virtual_carousel_message(
                                             !vis.contains(id)
                                                 && !pre.contains(id)
                                         });
-
-                                        let mut ctx = DemandContext::default();
-                                        let library_quality = state
-                                            .domains
-                                            .settings
-                                            .display
-                                            .library_poster_quality;
-                                        for id in vis.iter()
-                                        //.chain(pre.iter())
-                                        //.chain(back.iter())
-                                        {
-                                            if let Ok(media) = state
-                                                .domains
-                                                .ui
-                                                .state
-                                                .repo_accessor
-                                                .get(&MediaID::Series(
-                                                    SeriesID(*id),
-                                                ))
-                                                && matches!(
-                                                    media.media_type(),
-                                                    MediaType::Series
-                                                )
-                                            {
-                                                ctx.override_request(
-                                                    *id,
-                                                    DemandRequestKind::Poster {
-                                                        kind:
-                                                            PosterKind::Series,
-                                                        size: library_quality,
-                                                    },
-                                                );
-                                            }
-                                        }
                                         let snap = DemandSnapshot {
                                             visible_ids: vis,
                                             prefetch_ids: pre,
                                             background_ids: back,
                                             timestamp: std::time::Instant::now(
                                             ),
-                                            context: Some(ctx),
-                                            poster_kind: Some(
-                                                PosterKind::Movie,
-                                            ),
+                                            context: None,
+                                            poster_size: state
+                                                .domains
+                                                .settings
+                                                .display
+                                                .library_poster_quality,
                                         };
                                         handle.send(snap);
                                     }
@@ -398,8 +422,16 @@ pub fn handle_virtual_carousel_message(
                                             planner::snapshot_for_visible(
                                                 vc,
                                                 total,
-                                                |i| ids.get(i).copied(),
-                                                Some(PosterKind::Movie),
+                                                |i| {
+                                                    ids.get(i).copied().and_then(|id| {
+                                                        crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                                                    })
+                                                },
+                                                state
+                                                    .domains
+                                                    .settings
+                                                    .display
+                                                    .library_poster_quality,
                                                 None,
                                                 &state.runtime_config,
                                             );
@@ -420,8 +452,16 @@ pub fn handle_virtual_carousel_message(
                                             planner::snapshot_for_visible(
                                                 vc,
                                                 total,
-                                                |i| ids.get(i).copied(),
-                                                Some(PosterKind::Series),
+                                                |i| {
+                                                    ids.get(i).copied().and_then(|id| {
+                                                        crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                                                    })
+                                                },
+                                                state
+                                                    .domains
+                                                    .settings
+                                                    .display
+                                                    .library_poster_quality,
                                                 None,
                                                 &state.runtime_config,
                                             );
@@ -442,8 +482,16 @@ pub fn handle_virtual_carousel_message(
                                             planner::snapshot_for_visible(
                                                 vc,
                                                 total,
-                                                |i| ids.get(i).copied(),
-                                                Some(PosterKind::Movie),
+                                                |i| {
+                                                    ids.get(i).copied().and_then(|id| {
+                                                        crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                                                    })
+                                                },
+                                                state
+                                                    .domains
+                                                    .settings
+                                                    .display
+                                                    .library_poster_quality,
                                                 None,
                                                 &state.runtime_config,
                                             );
@@ -464,8 +512,16 @@ pub fn handle_virtual_carousel_message(
                                             planner::snapshot_for_visible(
                                                 vc,
                                                 total,
-                                                |i| ids.get(i).copied(),
-                                                Some(PosterKind::Series),
+                                                |i| {
+                                                    ids.get(i).copied().and_then(|id| {
+                                                        crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                                                    })
+                                                },
+                                                state
+                                                    .domains
+                                                    .settings
+                                                    .display
+                                                    .library_poster_quality,
                                                 None,
                                                 &state.runtime_config,
                                             );
@@ -488,11 +544,24 @@ pub fn handle_virtual_carousel_message(
         VCM::FocusKey(key) => {
             // Only allow hover to change focus if there has been recent mouse movement
             let now = Instant::now();
-            let allow =
+            let mut allow =
                 state.domains.ui.state.carousel_focus.has_recent_mouse_move(
                     now,
                     virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS,
                 );
+            // If this is the first hover after cursor entry, accept immediately.
+            if !allow
+                && state
+                    .domains
+                    .ui
+                    .state
+                    .carousel_focus
+                    .last_mouse_move_at
+                    .is_none()
+            {
+                state.domains.ui.state.carousel_focus.record_mouse_move(now);
+                allow = true;
+            }
             if !allow {
                 return Task::none();
             }
@@ -699,7 +768,7 @@ pub fn handle_virtual_carousel_message(
 
             Task::none()
         }
-        VCM::MotionTickActive => {
+        VCM::MotionTick(now) => {
             let Some(key) = active_carousel_key(state) else {
                 return Task::none();
             };
@@ -728,10 +797,11 @@ pub fn handle_virtual_carousel_message(
                 .state
                 .carousel_registry
                 .get_animator_mut(&key)
-                && anim.is_active()
+                && anim.is_active_at(now)
             {
-                let n = anim.tick();
-                finished_snap = n.is_some() && !anim.is_active();
+                // Use frame-synchronized timestamp for smooth animation
+                let n = anim.tick_at(now);
+                finished_snap = n.is_some() && !anim.is_active_at(now);
                 used_next_scroll = n;
             }
 
@@ -752,6 +822,12 @@ pub fn handle_virtual_carousel_message(
                     {
                         vc.set_scroll_x(next_x);
                     }
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_horizontal_scroll_px(next_x);
                     return scroll_to::<ui::UiMessage>(
                         scroll_id,
                         AbsoluteOffset { x: next_x, y: 0.0 },
@@ -794,6 +870,12 @@ pub fn handle_virtual_carousel_message(
                         vc.set_reference_index(ref_i);
                     }
                 }
+                state
+                    .domains
+                    .ui
+                    .state
+                    .background_shader_state
+                    .set_horizontal_scroll_px(next_scroll);
 
                 if finished_snap {
                     state
@@ -960,7 +1042,7 @@ fn start_snap_to_page(
         .state
         .carousel_registry
         .ensure_animator(&key);
-    anim.start(current_x, target_x, duration_ms, easing);
+    anim.start_at(current_x, target_x, duration_ms, easing, Instant::now());
     state.domains.ui.state.carousel_registry.set_motion_state(
         &key,
         MotionState::Snap {
@@ -1115,7 +1197,7 @@ fn start_snap_to_step(
         .state
         .carousel_registry
         .ensure_animator(&key);
-    anim.start(current_x, target_x, duration_ms, easing);
+    anim.start_at(current_x, target_x, duration_ms, easing, Instant::now());
     state.domains.ui.state.carousel_registry.set_motion_state(
         &key,
         MotionState::Snap {
@@ -1225,7 +1307,13 @@ fn handle_release_snap_align(
         .carousel_registry
         .ensure_animator(&key);
 
-    anim.start(current_x, target_x, snap_item_duration, snap_easing);
+    anim.start_at(
+        current_x,
+        target_x,
+        snap_item_duration,
+        snap_easing,
+        Instant::now(),
+    );
 
     state.domains.ui.state.carousel_registry.set_motion_state(
         &key,
@@ -1278,8 +1366,12 @@ fn maybe_send_snapshot_for_key(
                     let snap = planner::snapshot_for_visible(
                         vc,
                         total,
-                        |i| seasons.get(i).map(|s| s.id.to_uuid()),
-                        Some(PosterKind::Season),
+                        |i| {
+                            seasons
+                                .get(i)
+                                .and_then(|s| s.details.primary_poster_iid)
+                        },
+                        state.domains.settings.display.library_poster_quality,
                         None,
                         &state.runtime_config,
                     );
@@ -1307,8 +1399,16 @@ fn maybe_send_snapshot_for_key(
                     let snap = planner::snapshot_for_visible(
                         vc,
                         total,
-                        |i| ids.get(i).copied(),
-                        Some(PosterKind::Movie),
+                        |i| {
+                            ids.get(i).copied().and_then(|id| {
+                                crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                    state,
+                                    crate::infra::api_types::LibraryType::Movies,
+                                    id,
+                                )
+                            })
+                        },
+                        state.domains.settings.display.library_poster_quality,
                         None,
                         &state.runtime_config,
                     );
@@ -1336,8 +1436,16 @@ fn maybe_send_snapshot_for_key(
                     let snap = planner::snapshot_for_visible(
                         vc,
                         total,
-                        |i| ids.get(i).copied(),
-                        Some(PosterKind::Series),
+                        |i| {
+                            ids.get(i).copied().and_then(|id| {
+                                crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                    state,
+                                    crate::infra::api_types::LibraryType::Series,
+                                    id,
+                                )
+                            })
+                        },
+                        state.domains.settings.display.library_poster_quality,
                         None,
                         &state.runtime_config,
                     );
@@ -1360,7 +1468,11 @@ fn maybe_send_snapshot_for_key(
                     let (vis, mut pre, mut back) = planner::collect_ranges_ids(
                         vc,
                         total,
-                        |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                        |i| {
+                            episodes
+                                .get(i)
+                                .and_then(|e| e.details.primary_still_iid)
+                        },
                         &state.runtime_config,
                     );
                     pre.retain(|id| !vis.contains(id));
@@ -1375,7 +1487,11 @@ fn maybe_send_snapshot_for_key(
                         background_ids: back,
                         timestamp: std::time::Instant::now(),
                         context: Some(ctx),
-                        poster_kind: None,
+                        poster_size: state
+                            .domains
+                            .settings
+                            .display
+                            .library_poster_quality,
                     };
                     handle.send(snap);
                 }

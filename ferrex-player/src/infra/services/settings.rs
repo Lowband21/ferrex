@@ -17,6 +17,14 @@ pub struct SettingsApiAdapter {
     client: Arc<ApiClient>,
 }
 
+impl std::fmt::Debug for SettingsApiAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SettingsApiAdapter")
+            .field("client", &"<ApiClient>")
+            .finish()
+    }
+}
+
 impl SettingsApiAdapter {
     pub fn new(client: Arc<ApiClient>) -> Self {
         Self { client }

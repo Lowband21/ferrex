@@ -1,19 +1,28 @@
 //! Individual step views for the setup wizard
 
-use crate::common::focus::ids;
-use crate::common::messages::DomainMessage;
-use crate::domains::auth::messages as auth;
-use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::domains::auth::types::SetupClaimStatus;
-use crate::domains::ui::theme;
-use crate::domains::ui::views::auth::components::{
-    error_message, primary_button,
+use crate::{
+    common::{focus::ids, messages::DomainMessage},
+    domains::{
+        auth::{
+            messages as auth, security::secure_credential::SecureCredential,
+            types::SetupClaimStatus,
+        },
+        ui::{
+            theme,
+            views::auth::{
+                components::{error_message, primary_button},
+                pin_setup::{numeric_keypad, pin_display},
+            },
+        },
+    },
+    infra::design_tokens::FontTokens,
+    state::State,
 };
-use crate::domains::ui::views::auth::pin_setup::{numeric_keypad, pin_display};
-use crate::infra::design_tokens::FontTokens;
-use crate::state::State;
-use iced::widget::{Space, checkbox, column, container, row, text, text_input};
-use iced::{Alignment, Element, Length, Theme};
+
+use iced::{
+    Alignment, Element, Length, Theme,
+    widget::{Space, checkbox, column, container, text, text_input},
+};
 
 /// Welcome step - brief introduction
 pub fn view_welcome_step<'a>(fonts: &FontTokens) -> Element<'a, DomainMessage> {
@@ -115,12 +124,14 @@ pub fn view_account_step<'a>(
             .style(theme::TextInput::style()),
         Space::new().height(8),
         // Show password checkbox
-        checkbox("Show password", show_password)
+        checkbox(show_password)
+            .label("Show password")
             .on_toggle(|_| {
                 DomainMessage::Auth(
                     auth::AuthMessage::ToggleSetupPasswordVisibility,
                 )
             })
+            .style(theme::Checkbox::style())
             .size(16)
             .text_size(fonts.caption),
     ]

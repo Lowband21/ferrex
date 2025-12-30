@@ -11,7 +11,7 @@ virtual_reference_grid!(
 
 virtual_reference_grid!(
     virtual_series_references_grid,
-    &'a ArchivedSeriesReference,
+    &'a ArchivedSeries,
     create_series_card,
     "virtual_series_references_grid"
 );

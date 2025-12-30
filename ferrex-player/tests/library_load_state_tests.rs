@@ -18,6 +18,7 @@ use uuid::Uuid;
 // Handler we want to exercise for load-start transitions
 use ferrex_player::domains::library::update::update_library;
 // Success/failure completion handler (we'll use the failure path)
+use ferrex_player::domains::library::types::LibrariesBootstrapPayload;
 use ferrex_player::domains::library::update_handlers::library_loaded::handle_libraries_loaded;
 
 fn make_user(id: Uuid) -> User {
@@ -37,9 +38,12 @@ fn make_user(id: Uuid) -> User {
 
 #[tokio::test]
 async fn load_is_gated_when_not_authenticated() {
-    let mut state = State::default();
-    // Ensure unauthenticated
-    state.is_authenticated = false;
+    let mut state = State {
+        is_authenticated: false,
+
+        ..Default::default()
+    };
+
     match &state.domains.library.state.load_state {
         LibrariesLoadState::NotStarted => {}
         _ => panic!("expected NotStarted"),
@@ -57,8 +61,11 @@ async fn load_is_gated_when_not_authenticated() {
 
 #[tokio::test]
 async fn start_load_transitions_to_in_progress_when_authenticated() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     // Trigger loading
     let _ = update_library(&mut state, LibraryMessage::LoadLibraries);
@@ -71,8 +78,11 @@ async fn start_load_transitions_to_in_progress_when_authenticated() {
 
 #[tokio::test]
 async fn duplicate_load_during_in_progress_is_idempotent() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     // First load → InProgress
     let _ = update_library(&mut state, LibraryMessage::LoadLibraries);
@@ -87,8 +97,11 @@ async fn duplicate_load_during_in_progress_is_idempotent() {
 
 #[tokio::test]
 async fn failure_transitions_to_failed_and_allows_retry() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     // Begin loading
     let _ = update_library(&mut state, LibraryMessage::LoadLibraries);
@@ -115,9 +128,67 @@ async fn failure_transitions_to_failed_and_allows_retry() {
 }
 
 #[tokio::test]
+async fn successful_load_seeds_repo_with_libraries_index() {
+    use ferrex_model::LibraryType;
+    use ferrex_model::library::LibraryLikeMut;
+    use std::path::PathBuf;
+
+    let mut state = State {
+        is_authenticated: true,
+        ..Default::default()
+    };
+
+    let movies = ferrex_core::player_prelude::Library::new(
+        "Movies".to_string(),
+        LibraryType::Movies,
+        vec![PathBuf::from("/tmp")],
+    );
+
+    let series = ferrex_core::player_prelude::Library::new(
+        "Series".to_string(),
+        LibraryType::Series,
+        vec![PathBuf::from("/tmp")],
+    );
+
+    let payload = LibrariesBootstrapPayload {
+        libraries: vec![movies.clone(), series.clone()],
+        movie_batches: Vec::new(),
+        series_bundles: Vec::new(),
+    };
+
+    let _ = handle_libraries_loaded(&mut state, Ok(payload));
+
+    assert!(state.domains.ui.state.repo_accessor.is_initialized());
+
+    let library_ids = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .libraries_index()
+        .expect("libraries_index should be readable");
+    assert_eq!(library_ids.len(), 2);
+    assert!(library_ids.contains(&movies.id.0));
+    assert!(library_ids.contains(&series.id.0));
+
+    let archived = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_archived_library_yoke(&movies.id.0)
+        .expect("archived library lookup should succeed")
+        .expect("movies library should exist in repo seed");
+    assert_eq!(archived.get().name.to_string(), "Movies");
+}
+
+#[tokio::test]
 async fn succeeded_same_session_ignores_duplicate_load() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     let user_id = Uuid::now_v7();
     let user = make_user(user_id);
@@ -149,8 +220,11 @@ async fn succeeded_same_session_ignores_duplicate_load() {
 
 #[tokio::test]
 async fn succeeded_different_server_triggers_reload() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     let user_id = Uuid::now_v7();
     let user = make_user(user_id);
@@ -179,8 +253,11 @@ async fn succeeded_different_server_triggers_reload() {
 
 #[tokio::test]
 async fn succeeded_different_user_triggers_reload() {
-    let mut state = State::default();
-    state.is_authenticated = true;
+    let mut state = State {
+        is_authenticated: true,
+
+        ..Default::default()
+    };
 
     // Original user/session
     let user_a = Uuid::now_v7();

@@ -1,5 +1,7 @@
 pub mod subscriptions;
 
+use std::time::Instant;
+
 use crate::domains::ui::{
     background_ui::BackgroundMessage, feedback_ui::FeedbackMessage,
     header_ui::HeaderMessage, interaction_ui::InteractionMessage,
@@ -13,6 +15,10 @@ use iced::Size;
 
 #[derive(Clone)]
 pub enum UiMessage {
+    /// Frame-synchronized tick (from `window::frames()`), used to drive
+    /// animation/motion updates without multiple per-frame subscriptions.
+    FrameTick(Instant),
+
     Shell(UiShellMessage),
     Interaction(InteractionMessage),
 
@@ -32,6 +38,13 @@ pub enum UiMessage {
     // Background and transition updates
     Background(BackgroundMessage),
 
+    #[cfg(feature = "debug-cache-overlay")]
+    CacheOverlayTick,
+    #[cfg(feature = "debug-cache-overlay")]
+    CacheOverlayUpdated(
+        crate::domains::ui::views::cache_debug_overlay::CacheOverlaySample,
+    ),
+
     // No-op variant for UI elements that are not yet implemented
     NoOp,
 }
@@ -39,6 +52,7 @@ pub enum UiMessage {
 impl UiMessage {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::FrameTick(_) => "UI::FrameTick",
             Self::Shell(msg) => msg.name(),
             Self::Interaction(msg) => msg.name(),
             Self::Library(msg) => msg.name(),
@@ -52,6 +66,10 @@ impl UiMessage {
             Self::PosterMenu(_) => "UI::PosterMenu",
             Self::Window(msg) => msg.name(),
             Self::Background(msg) => msg.name(),
+            #[cfg(feature = "debug-cache-overlay")]
+            Self::CacheOverlayTick => "UI::CacheOverlayTick",
+            #[cfg(feature = "debug-cache-overlay")]
+            Self::CacheOverlayUpdated(_) => "UI::CacheOverlayUpdated",
 
             Self::NoOp => "UI::NoOp",
         }
@@ -61,6 +79,7 @@ impl UiMessage {
 impl std::fmt::Debug for UiMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::FrameTick(_) => write!(f, "UI::FrameTick"),
             Self::Shell(msg) => write!(f, "UI::Shell({:?})", msg),
             Self::Interaction(msg) => write!(f, "UI::Interaction({:?})", msg),
             Self::Library(msg) => write!(f, "UI::Library({:?})", msg),
@@ -76,6 +95,12 @@ impl std::fmt::Debug for UiMessage {
             Self::PosterMenu(msg) => write!(f, "UI::PosterMenu({:?})", msg),
             Self::Window(msg) => write!(f, "UI::Window({:?})", msg),
             Self::Background(msg) => write!(f, "UI::Background({:?})", msg),
+            #[cfg(feature = "debug-cache-overlay")]
+            Self::CacheOverlayTick => write!(f, "UI::CacheOverlayTick"),
+            #[cfg(feature = "debug-cache-overlay")]
+            Self::CacheOverlayUpdated(sample) => {
+                write!(f, "UI::CacheOverlayUpdated({:?})", sample)
+            }
             Self::NoOp => write!(f, "UI::NoOp"),
         }
     }

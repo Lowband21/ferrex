@@ -19,11 +19,6 @@ pub fn sort_order_toggle<'a>(
         SortOrder::Descending => Icon::ArrowDown,
     };
 
-    let tooltip = match current_order {
-        SortOrder::Ascending => "Sort ascending (click for descending)",
-        SortOrder::Descending => "Sort descending (click for ascending)",
-    };
-
     container(
         button(
             container(icon_text_with_size(icon, 16.0))

@@ -1,7 +1,7 @@
 //! ViewModel for the Home view that shows carousels
 
 use ferrex_core::player_prelude::{Media, MovieID, SeriesID};
-use ferrex_model::{MediaID, MovieReference, SeriesReference};
+use ferrex_model::{MediaID, MovieReference, Series};
 use uuid::Uuid;
 
 use super::{ViewModel, VisibleItems};
@@ -26,7 +26,7 @@ pub struct HomeViewModel {
 
     /// Cached movies and series for rendering (only cloned when IDs change)
     cached_movies: Vec<MovieReference>,
-    cached_series: Vec<SeriesReference>,
+    cached_series: Vec<Series>,
 
     /// Carousel state for movies
     movies_carousel: CarouselState,
@@ -102,7 +102,7 @@ impl HomeViewModel {
 
     /// Get all sorted series (for rendering)
     /// Returns reference to cached series
-    pub fn all_series(&self) -> &[SeriesReference] {
+    pub fn all_series(&self) -> &[Series] {
         &self.cached_series
     }
 }

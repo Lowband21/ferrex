@@ -105,22 +105,20 @@ pub fn application_with_presets(
             .get(crate::domains::ui::windows::WindowKind::Main)
         {
             view::view(state, id)
+        } else if !state.is_authenticated {
+            crate::domains::ui::views::auth::view_auth(
+                state,
+                &state.domains.auth.state.auth_flow,
+                state.domains.auth.state.user_permissions.as_ref(),
+            )
+            .map(DomainMessage::from)
         } else {
-            if !state.is_authenticated {
-                crate::domains::ui::views::auth::view_auth(
-                    state,
-                    &state.domains.auth.state.auth_flow,
-                    state.domains.auth.state.user_permissions.as_ref(),
-                )
-                .map(DomainMessage::from)
-            } else {
-                iced::widget::container(
-                    iced::widget::Space::new()
-                        .width(iced::Length::Fill)
-                        .height(iced::Length::Fill),
-                )
-                .into()
-            }
+            iced::widget::container(
+                iced::widget::Space::new()
+                    .width(iced::Length::Fill)
+                    .height(iced::Length::Fill),
+            )
+            .into()
         }
     }
 

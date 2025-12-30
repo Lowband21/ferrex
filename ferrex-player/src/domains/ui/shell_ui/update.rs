@@ -3,10 +3,10 @@ use crate::{
     domains::{
         metadata::demand_planner::DemandSnapshot,
         ui::{
+            search_surface,
             tabs::{self, TabId, TabState},
             types::ViewState,
             update_handlers::{
-                home_focus,
                 home_tab::{
                     emit_initial_all_tab_snapshots_combined, init_all_tab_view,
                 },
@@ -16,36 +16,46 @@ use crate::{
             windows,
         },
     },
-    infra::{api_types::LibraryType, constants::layout},
+    infra::constants::layout,
     state::State,
 };
-use ferrex_core::player_prelude::{LibraryId, PosterKind};
+use ferrex_core::player_prelude::{LibraryId, PosterSize};
 use iced::{
     Task,
     widget::{operation::scroll_to, scrollable::AbsoluteOffset},
 };
-use std::time::Instant;
 
 use super::{Scope, UiShellMessage};
 
-#[cfg(feature = "demo")]
-use crate::domains::ui::update_handlers::demo_controls;
-
 /// Helper to build a demand snapshot for a library tab
 fn build_library_demand_snapshot(
+    state: &State,
     lib_state: &tabs::state::LibraryTabState,
     prefetch_rows: usize,
+    poster_size: PosterSize,
 ) -> DemandSnapshot {
     let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
     let vr = lib_state.grid_state.visible_range.clone();
     if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-        visible_ids.extend(slice.iter().copied());
+        visible_ids.extend(slice.iter().copied().filter_map(|id| {
+            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                state,
+                lib_state.library_type,
+                id,
+            )
+        }));
     }
 
     let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
     let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
     if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-        prefetch_ids.extend(slice.iter().copied());
+        prefetch_ids.extend(slice.iter().copied().filter_map(|id| {
+            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                state,
+                lib_state.library_type,
+                id,
+            )
+        }));
     }
     prefetch_ids.retain(|id| !visible_ids.contains(id));
 
@@ -55,15 +65,16 @@ fn build_library_demand_snapshot(
     );
     let mut background_ids: Vec<uuid::Uuid> = Vec::new();
     if let Some(slice) = lib_state.cached_index_ids.get(br) {
-        background_ids.extend(slice.iter().copied());
+        background_ids.extend(slice.iter().copied().filter_map(|id| {
+            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                state,
+                lib_state.library_type,
+                id,
+            )
+        }));
     }
     background_ids
         .retain(|id| !visible_ids.contains(id) && !prefetch_ids.contains(id));
-
-    let poster_kind = match lib_state.library_type {
-        LibraryType::Movies => Some(PosterKind::Movie),
-        LibraryType::Series => Some(PosterKind::Series),
-    };
 
     DemandSnapshot {
         visible_ids,
@@ -71,7 +82,7 @@ fn build_library_demand_snapshot(
         background_ids,
         timestamp: std::time::Instant::now(),
         context: None,
-        poster_kind,
+        poster_size,
     }
 }
 
@@ -190,6 +201,46 @@ pub fn update_shell_ui(
                         .map(DomainMessage::Ui);
                     tasks.push(restore_task);
 
+                    // Sync the background's deterministic noise anchoring to the current Home scroll inputs.
+                    // - Vertical offset comes from the Home view's main scrollable
+                    // - Horizontal offset comes from the active carousel (if any), using persisted state when available
+                    let (home_scroll_y, active_carousel_key) =
+                        match state.tab_manager.get_tab(TabId::Home) {
+                            Some(TabState::Home(all_state)) => (
+                                all_state.focus.scroll_y,
+                                all_state.focus.active_carousel.clone(),
+                            ),
+                            _ => (0.0, None),
+                        };
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_vertical_scroll_px(home_scroll_y);
+                    if let Some(key) = active_carousel_key
+                        && let Some(saved) = state
+                            .domains
+                            .ui
+                            .state
+                            .scroll_manager
+                            .get_carousel_scroll(&key)
+                    {
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .set_horizontal_scroll_px(saved.scroll_x);
+                    } else {
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .set_horizontal_scroll_px(0.0);
+                    }
+
                     // Emit cross-domain event
                     events.push(CrossDomainEvent::LibrarySelectHome);
 
@@ -208,9 +259,16 @@ pub fn update_shell_ui(
                     {
                         let prefetch_rows =
                             state.runtime_config.prefetch_rows_above();
+                        let poster_size = state
+                            .domains
+                            .settings
+                            .display
+                            .library_poster_quality;
                         let snapshot = build_library_demand_snapshot(
+                            state,
                             lib_state,
                             prefetch_rows,
+                            poster_size,
                         );
                         handle.send(snapshot);
                     }
@@ -218,6 +276,30 @@ pub fn update_shell_ui(
                     // Restore tab scroll position
                     let scroll_task = restore_library_tab_scroll(state, lib_id);
                     tasks.push(scroll_task);
+
+                    // Sync background offsets immediately, since programmatic `scroll_to` restores
+                    // do not necessarily emit `on_scroll` viewport callbacks.
+                    let tab_id = TabId::Library(lib_id);
+                    let restored_y = state
+                        .domains
+                        .ui
+                        .state
+                        .scroll_manager
+                        .get_tab_scroll(&tab_id)
+                        .map(|s| s.position)
+                        .unwrap_or(0.0);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_horizontal_scroll_px(0.0);
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .set_vertical_scroll_px(restored_y);
 
                     // Emit cross-domain event
                     events.push(CrossDomainEvent::LibrarySelected(lib_id));
@@ -241,14 +323,18 @@ pub fn update_shell_ui(
 
             DomainUpdateResult::with_events(Task::batch(tasks), events)
         }
-        UiShellMessage::OpenSearchWindow => {
-            windows::controller::open_search(state, None)
+        UiShellMessage::OpenSearchOverlay => {
+            search_surface::open_overlay(state, None)
         }
-        UiShellMessage::OpenSearchWindowWithSeed(seed) => {
-            windows::controller::open_search(state, Some(seed))
+        UiShellMessage::OpenSearchOverlayWithSeed(seed) => {
+            search_surface::open_overlay(state, Some(seed))
         }
-        UiShellMessage::SearchWindowOpened(id) => {
+        UiShellMessage::PopOutSearch => search_surface::pop_out(state),
+        UiShellMessage::CloseSearch => search_surface::close(state),
+        UiShellMessage::SearchDetachedOpened(id) => {
             state.search_window_id = Some(id);
+            state.domains.search.state.presentation =
+                crate::domains::search::types::SearchPresentation::DetachedWindow;
             windows::controller::on_search_opened(state, id)
         }
         UiShellMessage::MainWindowOpened(id) => {
@@ -260,7 +346,11 @@ pub fn update_shell_ui(
             init_all_tab_view(state);
             emit_initial_all_tab_snapshots_combined(state);
             bump_keep_alive(state);
-            DomainUpdateResult::task(Task::none())
+            if state.domains.search.state.presentation.is_overlay() {
+                windows::controller::focus_search_input(state)
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
         }
         UiShellMessage::MainWindowUnfocused => {
             // No special handling currently; keep behavior simple
@@ -269,14 +359,8 @@ pub fn update_shell_ui(
         UiShellMessage::RawWindowClosed(id) => {
             windows::controller::on_raw_window_closed(state, id)
         }
-        UiShellMessage::FocusSearchWindow => {
-            windows::controller::focus_search(state)
-        }
         UiShellMessage::FocusSearchInput => {
             windows::controller::focus_search_input(state)
-        }
-        UiShellMessage::CloseSearchWindow => {
-            windows::controller::close_search(state)
         }
         UiShellMessage::ToggleFullscreen => DomainUpdateResult::with_events(
             Task::none(),
@@ -532,16 +616,13 @@ pub fn update_shell_ui(
         UiShellMessage::UpdateSearchQuery(query) => {
             let mut result = search_updates::update_search_query(state, query);
 
-            if state.windows.get(windows::WindowKind::Search).is_none() {
-                let open = windows::controller::open_search(state, None);
+            if !state.domains.search.state.presentation.is_open() {
+                let open = search_surface::open_overlay(state, None);
                 result.task = Task::batch([result.task, open.task]);
                 result.events.extend(open.events);
             }
 
             result
-        }
-        UiShellMessage::BeginSearchFromKeyboard(seed) => {
-            search_updates::begin_search_from_keyboard(state, seed)
         }
         UiShellMessage::ExecuteSearch => {
             // Forward directly to search domain

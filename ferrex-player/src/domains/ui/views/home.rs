@@ -1,22 +1,37 @@
-use crate::domains::ui::interaction_ui::InteractionMessage;
-use crate::domains::ui::messages::UiMessage;
-use crate::domains::ui::tabs::{TabId, TabState};
-use crate::domains::ui::theme;
-use crate::domains::ui::update_handlers::virtual_carousel_helpers as vchelper;
-use crate::domains::ui::views::grid::{
-    movie_reference_card_with_state, series_reference_card_with_state,
+use crate::{
+    domains::ui::{
+        interaction_ui::InteractionMessage,
+        messages::UiMessage,
+        tabs::{TabId, TabState},
+        theme,
+        views::{
+            grid::{
+                movie_reference_card_with_state,
+                series_reference_card_with_state,
+            },
+            virtual_carousel::{self, types::CarouselKey},
+        },
+        widgets::min_thumb_scrollable,
+    },
+    infra::{
+        constants::{
+            grid as grid_constants,
+            virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS,
+        },
+        shader_widgets::poster::PosterInstanceKey,
+    },
+    state::State,
 };
-use crate::domains::ui::views::virtual_carousel::{self, types::CarouselKey};
-use crate::infra::LibraryType;
-use crate::infra::constants::virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS;
-use crate::infra::shader_widgets::poster::PosterInstanceKey;
-use crate::state::State;
-use ferrex_core::player_prelude::PosterKind;
+
 use ferrex_core::player_prelude::{MediaID, MovieID, SeriesID};
+
+use ferrex_model::LibraryType;
+
 use iced::{
     Element, Length,
-    widget::{Id as WidgetId, column, container, scrollable, text},
+    widget::{Id as WidgetId, column, container, text},
 };
+
 use std::time::Instant;
 
 // Helper function for carousel view used in All mode
@@ -43,14 +58,16 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
     // Scale the section gap and page padding based on user scaling preference
     let section_gap = 30.0 * scaled_layout.scale;
-    let page_padding = 20.0 * scaled_layout.scale;
-    let mut content = column![].spacing(section_gap).padding(page_padding);
-    let mut added_count = 0;
+    let page_vertical_padding = 20.0 * scaled_layout.scale;
 
-    log::debug!(
-        "view_all_content: library_info has {} libraries",
-        state.tab_manager.library_info().len()
-    );
+    let mut content = column![]
+        .spacing(section_gap)
+        // Carousels apply their own horizontal padding; keep the page-level
+        // padding vertical-only so we have a single source of truth for X
+        // insets and avoid double-padding interactions with the scrollbar gutter.
+        .padding([page_vertical_padding, 0.0])
+        .width(Length::Fill);
+    let mut added_count = 0;
 
     // Curated carousels at top of All view
     if let Some(tab) = state.tab_manager.get_tab(TabId::Home)
@@ -72,7 +89,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
-                let ids_for_emit = ids.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -130,38 +146,8 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     is_active,
                     fonts,
                     scaled_layout,
+                    grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                 );
-                // Emit a snapshot for the currently visible window (mixed Movie/Series)
-                if let Some(vc) =
-                    state.domains.ui.state.carousel_registry.get(&key)
-                {
-                    let total = ids_for_emit.len();
-                    let (vis, mut pre, mut back) =
-                        virtual_carousel::planner::collect_ranges_ids(
-                            vc,
-                            total,
-                            |i| ids_for_emit.get(i).copied(),
-                            &state.runtime_config,
-                        );
-                    pre.retain(|id| !vis.contains(id));
-                    back.retain(|id| !vis.contains(id) && !pre.contains(id));
-                    let mut all = vis.clone();
-                    all.extend(pre.iter().copied());
-                    all.extend(back.iter().copied());
-                    let ctx = vchelper::build_mixed_poster_context(state, &all);
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        handle.send(crate::domains::metadata::demand_planner::DemandSnapshot {
-                                visible_ids: vis,
-                                prefetch_ids: pre,
-                                background_ids: back,
-                                timestamp: Instant::now(),
-                                context: Some(ctx),
-                                poster_kind: None,
-                            });
-                    }
-                }
                 added_count += 1;
                 content = content.push(carousel);
             }
@@ -183,7 +169,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
-                let ids_for_emit = ids.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -222,13 +207,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     is_active,
                     fonts,
                     scaled_layout,
-                );
-                vchelper::emit_snapshot_for_carousel_simple(
-                    state,
-                    &key,
-                    total,
-                    |i| ids_for_emit.get(i).copied(),
-                    Some(PosterKind::Movie),
+                    grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                 );
                 added_count += 1;
                 content = content.push(carousel);
@@ -251,7 +230,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
-                let ids_for_emit = ids.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -290,13 +268,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     is_active,
                     fonts,
                     scaled_layout,
-                );
-                vchelper::emit_snapshot_for_carousel_simple(
-                    state,
-                    &key,
-                    total,
-                    |i| ids_for_emit.get(i).copied(),
-                    Some(PosterKind::Series),
+                    grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                 );
                 added_count += 1;
                 content = content.push(carousel);
@@ -319,7 +291,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
-                let ids_for_emit = ids.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -358,13 +329,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     is_active,
                     fonts,
                     scaled_layout,
-                );
-                vchelper::emit_snapshot_for_carousel_simple(
-                    state,
-                    &key,
-                    total,
-                    |i| ids_for_emit.get(i).copied(),
-                    Some(PosterKind::Movie),
+                    grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                 );
                 added_count += 1;
                 content = content.push(carousel);
@@ -387,7 +352,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
                 let total = ids.len();
                 let ids_for_closure = ids.clone();
-                let ids_for_emit = ids.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -426,13 +390,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     is_active,
                     fonts,
                     scaled_layout,
-                );
-                vchelper::emit_snapshot_for_carousel_simple(
-                    state,
-                    &key,
-                    total,
-                    |i| ids_for_emit.get(i).copied(),
-                    Some(PosterKind::Series),
+                    grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                 );
                 added_count += 1;
                 content = content.push(carousel);
@@ -440,11 +398,6 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
         }
     }
     for (library_id, library_type) in state.tab_manager.library_info() {
-        log::debug!(
-            "Processing library {} of type {:?}",
-            library_id,
-            library_type
-        );
         match library_type {
             LibraryType::Movies => {
                 // Use cached sorted IDs from the library tab to avoid per-frame re-sorts
@@ -466,14 +419,8 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             && cf.hovered_key.as_ref() == Some(&key))
                             || (cf.keyboard_active_key.as_ref() == Some(&key));
                         let ids = lib_state.cached_index_ids.clone();
-                        log::debug!(
-                            "All view: Using cached {} movie IDs for library {}",
-                            ids.len(),
-                            library_id
-                        );
                         let total = ids.len();
                         let ids_for_closure = ids.clone();
-                        let ids_for_emit = ids.clone();
                         let key_for_card = key.clone();
                         let carousel = virtual_carousel::virtual_carousel(
                             key.clone(),
@@ -516,13 +463,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             is_active,
                             fonts,
                             scaled_layout,
-                        );
-                        vchelper::emit_snapshot_for_carousel_simple(
-                            state,
-                            &key,
-                            total,
-                            |i| ids_for_emit.get(i).copied(),
-                            Some(PosterKind::Movie),
+                            grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                         );
                         added_count += 1;
                         content = content.push(carousel);
@@ -547,14 +488,8 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             && cf.hovered_key.as_ref() == Some(&key))
                             || (cf.keyboard_active_key.as_ref() == Some(&key));
                         let ids = lib_state.cached_index_ids.clone();
-                        log::debug!(
-                            "All view: Using cached {} series IDs for library {}",
-                            ids.len(),
-                            library_id
-                        );
                         let total = ids.len();
                         let ids_for_closure = ids.clone();
-                        let ids_for_emit = ids.clone();
                         let key_for_card = key.clone();
                         let carousel = virtual_carousel::virtual_carousel(
                             key.clone(),
@@ -597,13 +532,7 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                             is_active,
                             fonts,
                             scaled_layout,
-                        );
-                        vchelper::emit_snapshot_for_carousel_simple(
-                            state,
-                            &key,
-                            total,
-                            |i| ids_for_emit.get(i).copied(),
-                            Some(PosterKind::Series),
+                            grid_constants::VERTICAL_SCROLLBAR_RESERVED_WIDTH,
                         );
                         added_count += 1;
                         content = content.push(carousel);
@@ -642,12 +571,23 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
         WidgetId::unique()
     };
 
-    scrollable(content)
+    let min_thumb_px = state
+        .domains
+        .settings
+        .display
+        .scrollbar_scroller_min_length_px;
+
+    min_thumb_scrollable(content, min_thumb_px)
         .id(scroll_id)
-        .direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::default(),
-        ))
         .on_scroll(|viewport| InteractionMessage::HomeScrolled(viewport).into())
+        .scrollbar_config(
+            grid_constants::VERTICAL_SCROLLBAR_WIDTH as f32,
+            grid_constants::VERTICAL_SCROLLBAR_SCROLLER_WIDTH as f32,
+            0.0,
+        )
+        // Reserve space for the scrollbar when vertically overflowing so it
+        // never overlays carousel content at wide window sizes.
+        .embed_scrollbar(0.0)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

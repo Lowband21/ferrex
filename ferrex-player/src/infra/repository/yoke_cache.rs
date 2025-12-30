@@ -50,6 +50,10 @@ impl<Y> YokeCache<Y> {
         self.inner.read().map.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.read().map.is_empty()
+    }
+
     pub fn contains_key(&self, id: &Uuid) -> bool {
         self.inner.read().map.contains_key(id)
     }

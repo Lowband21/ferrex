@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::infra::shader_widgets::color_picker::AccentColorConfig;
 
 /// Theme settings state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ThemeState {
     /// Accent color configuration (HSLuv-based with harmony support)
     pub accent_color: AccentColorConfig,
@@ -16,15 +16,6 @@ pub struct ThemeState {
     /// Whether color picker interaction is active (for UI state)
     #[serde(skip)]
     pub picker_active: bool,
-}
-
-impl Default for ThemeState {
-    fn default() -> Self {
-        Self {
-            accent_color: AccentColorConfig::default(),
-            picker_active: false,
-        }
-    }
 }
 
 impl ThemeState {

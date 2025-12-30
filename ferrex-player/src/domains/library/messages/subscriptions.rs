@@ -1,4 +1,5 @@
 use crate::common::messages::DomainMessage;
+use crate::domains::library::LibrariesLoadState;
 use crate::state::State;
 use iced::Subscription;
 use std::collections::HashSet;
@@ -6,6 +7,15 @@ use std::sync::Arc;
 
 /// Creates all library-related subscriptions
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
+    // Only enable SSE subscriptions after libraries have successfully loaded
+    // This prevents connection attempts before authentication is complete
+    if !matches!(
+        state.domains.library.state.load_state,
+        LibrariesLoadState::Succeeded { .. }
+    ) {
+        return Subscription::none();
+    }
+
     let mut subscriptions = vec![];
 
     // Subscribe to scan progress for each active scan ID we know about

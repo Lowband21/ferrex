@@ -24,7 +24,7 @@ use iced::{
     Element, Event, Length, Point, Rectangle,
     advanced::graphics::Viewport,
     mouse, wgpu,
-    widget::shader::{Primitive, Program},
+    widget::shader::{Pipeline as ShaderPipeline, Primitive, Program},
 };
 use std::sync::Arc;
 
@@ -340,6 +340,19 @@ pub struct ColorPickerRenderer {
     state: State,
 }
 
+impl ShaderPipeline for ColorPickerRenderer {
+    fn new(
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        ColorPickerRenderer {
+            pipeline: Pipeline::new(device, format),
+            state: State::default(),
+        }
+    }
+}
+
 impl Pipeline {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         // Load shader
@@ -367,7 +380,7 @@ impl Pipeline {
                 }],
             });
 
-        // Create pipeline layout
+        // Create provider layout
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Color Picker Pipeline Layout"),
@@ -375,7 +388,7 @@ impl Pipeline {
                 push_constant_ranges: &[],
             });
 
-        // Create render pipeline
+        // Create render provider
         let render_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Color Picker Pipeline"),
@@ -423,23 +436,11 @@ impl Pipeline {
 }
 
 impl Primitive for ColorPickerPrimitive {
-    type Renderer = ColorPickerRenderer;
-
-    fn initialize(
-        &self,
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self::Renderer {
-        ColorPickerRenderer {
-            pipeline: Pipeline::new(device, format),
-            state: State::default(),
-        }
-    }
+    type Pipeline = ColorPickerRenderer;
 
     fn prepare(
         &self,
-        renderer: &mut Self::Renderer,
+        renderer: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bounds: &Rectangle,
@@ -485,7 +486,7 @@ impl Primitive for ColorPickerPrimitive {
 
     fn draw(
         &self,
-        renderer: &Self::Renderer,
+        renderer: &Self::Pipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         let Some(globals_bind_group) =

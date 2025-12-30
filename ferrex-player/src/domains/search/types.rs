@@ -9,6 +9,27 @@ use crate::infra::api_types::Media;
 
 pub const SEARCH_RESULTS_SCROLL_ID: &str = "search-window-results";
 
+/// Where search UI is currently presented
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchPresentation {
+    /// Search UI is hidden
+    Hidden,
+    /// Search UI is shown as an in-app overlay
+    Overlay,
+    /// Search UI is shown in a detached window
+    DetachedWindow,
+}
+
+impl SearchPresentation {
+    pub fn is_open(self) -> bool {
+        !matches!(self, SearchPresentation::Hidden)
+    }
+
+    pub fn is_overlay(self) -> bool {
+        matches!(self, SearchPresentation::Overlay)
+    }
+}
+
 /// Search UI mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMode {
@@ -31,7 +52,7 @@ pub enum SearchStrategy {
 
 /// Individual search result with relevance info
 #[derive(Debug, Clone)]
-pub struct SearchResult {
+pub struct SearchResponse {
     /// The media reference
     pub media_ref: Media,
     /// Display title
@@ -52,9 +73,9 @@ pub struct SearchResult {
 
 /// Search cache entry
 #[derive(Debug, Clone)]
-pub struct CachedSearchResults {
+pub struct CachedSearchResponses {
     /// The cached results
-    pub results: Vec<SearchResult>,
+    pub results: Vec<SearchResponse>,
     /// When this cache entry was created
     pub timestamp: Instant,
     /// Total number of results (for pagination)
@@ -73,9 +94,11 @@ pub struct SearchState {
     /// Previous query (for incremental search)
     pub previous_query: Option<String>,
     /// Current search results
-    pub results: Vec<SearchResult>,
+    pub results: Vec<SearchResponse>,
     /// Whether a search is in progress
     pub is_searching: bool,
+    /// Current search presentation surface
+    pub presentation: SearchPresentation,
     /// Current UI mode
     pub mode: SearchMode,
     /// Total result count (for pagination)
@@ -91,7 +114,7 @@ pub struct SearchState {
     /// Indicates that escape was pressed once and next press should close
     pub escape_pending: bool,
     /// Search result cache (query -> results)
-    pub cache: HashMap<String, CachedSearchResults>,
+    pub cache: HashMap<String, CachedSearchResponses>,
     /// Cache TTL
     pub cache_ttl: Duration,
     /// Last search timestamp (for debouncing)
@@ -121,6 +144,7 @@ impl Default for SearchState {
             previous_query: None,
             results: Vec::new(),
             is_searching: false,
+            presentation: SearchPresentation::Hidden,
             mode: SearchMode::Dropdown,
             total_results: 0,
             displayed_results: 0,
@@ -168,7 +192,7 @@ impl SearchState {
     pub fn get_cached_results(
         &self,
         query: &str,
-    ) -> Option<&CachedSearchResults> {
+    ) -> Option<&CachedSearchResponses> {
         self.cache.get(query).and_then(|cached| {
             if cached.timestamp.elapsed() < self.cache_ttl {
                 Some(cached)
@@ -182,13 +206,13 @@ impl SearchState {
     pub fn cache_results(
         &mut self,
         query: String,
-        results: Vec<SearchResult>,
+        results: Vec<SearchResponse>,
         strategy: SearchStrategy,
     ) {
         let total_count = results.len();
         self.cache.insert(
             query.clone(),
-            CachedSearchResults {
+            CachedSearchResponses {
                 results,
                 timestamp: Instant::now(),
                 total_count,
@@ -239,7 +263,7 @@ impl SearchState {
     }
 
     /// Get currently selected result
-    pub fn get_selected(&self) -> Option<&SearchResult> {
+    pub fn get_selected(&self) -> Option<&SearchResponse> {
         self.selected_index.and_then(|i| self.results.get(i))
     }
 

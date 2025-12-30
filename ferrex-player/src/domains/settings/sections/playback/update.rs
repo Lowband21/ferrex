@@ -85,10 +85,11 @@ fn set_seek_forward_coarse(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(secs) = value.parse::<f64>() {
-        if secs > 0.0 && secs <= 120.0 {
-            state.domains.settings.playback.seek_forward_coarse = secs;
-        }
+    if let Ok(secs) = value.parse::<f64>()
+        && secs > 0.0
+        && secs <= 120.0
+    {
+        state.domains.settings.playback.seek_forward_coarse = secs;
     }
     DomainUpdateResult::none()
 }
@@ -97,10 +98,11 @@ fn set_seek_backward_coarse(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(secs) = value.parse::<f64>() {
-        if secs > 0.0 && secs <= 120.0 {
-            state.domains.settings.playback.seek_backward_coarse = secs;
-        }
+    if let Ok(secs) = value.parse::<f64>()
+        && secs > 0.0
+        && secs <= 120.0
+    {
+        state.domains.settings.playback.seek_backward_coarse = secs;
     }
     DomainUpdateResult::none()
 }
@@ -109,10 +111,11 @@ fn set_seek_forward_fine(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(secs) = value.parse::<f64>() {
-        if secs > 0.0 && secs <= 60.0 {
-            state.domains.settings.playback.seek_forward_fine = secs;
-        }
+    if let Ok(secs) = value.parse::<f64>()
+        && secs > 0.0
+        && secs <= 60.0
+    {
+        state.domains.settings.playback.seek_forward_fine = secs;
     }
     DomainUpdateResult::none()
 }
@@ -121,10 +124,11 @@ fn set_seek_backward_fine(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(secs) = value.parse::<f64>() {
-        if secs > 0.0 && secs <= 60.0 {
-            state.domains.settings.playback.seek_backward_fine = secs;
-        }
+    if let Ok(secs) = value.parse::<f64>()
+        && secs > 0.0
+        && secs <= 60.0
+    {
+        state.domains.settings.playback.seek_backward_fine = secs;
     }
     DomainUpdateResult::none()
 }

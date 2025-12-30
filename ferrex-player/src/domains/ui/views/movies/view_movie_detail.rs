@@ -5,7 +5,6 @@ use crate::{
         views::grid::macros::parse_hex_color, widgets::image_for::image_for,
     },
     infra::{
-        api_types::MediaDetailsOption,
         shader_widgets::poster::{
             PosterFace, PosterInstanceKey, animation::AnimationBehavior,
         },
@@ -14,12 +13,10 @@ use crate::{
     state::State,
 };
 
-use ferrex_core::{
-    traits::id::MediaIDLike,
-    types::{details::ArchivedMediaDetailsOption, ids::MovieID},
-};
+use ferrex_contracts::prelude::MovieLike;
+use ferrex_core::{traits::id::MediaIDLike, types::ids::MovieID};
 
-use ferrex_model::{ImageSize, MediaType, Priority};
+use ferrex_model::{EnhancedMovieDetails, ImageSize, Priority};
 use iced::{
     Element, Length,
     widget::{Space, Stack, column, container, row, scrollable, text},
@@ -40,6 +37,8 @@ pub fn view_movie_detail<'a>(
     movie_id: MovieID,
 ) -> Element<'a, UiMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
+    let detail_poster_quality =
+        state.domains.settings.display.detail_poster_quality;
 
     // Borrow from UI yoke cache to satisfy lifetime 'a
     let movie_uuid = movie_id.to_uuid();
@@ -67,9 +66,14 @@ pub fn view_movie_detail<'a>(
             content = content
                 .push(Space::new().height(Length::Fixed(content_offset)));
 
+            let movie_details =
+                deserialize::<EnhancedMovieDetails, Error>(&movie.details)
+                    .unwrap();
+
             let mut poster_element = image_for(media_id.to_uuid())
-                .size(ImageSize::poster_large())
-                .image_type(MediaType::Movie)
+                .iid(movie_details.primary_poster_iid)
+                .skip_request(movie_details.primary_poster_iid.is_none())
+                .size(ImageSize::Poster(detail_poster_quality))
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
                 .priority(Priority::Visible)
@@ -114,77 +118,36 @@ pub fn view_movie_detail<'a>(
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             );
 
-            let movie_details =
-                deserialize::<MediaDetailsOption, Error>(&movie.details)
-                    .unwrap();
-
-            // Extract movie details for easier access
-            let movie_details_opt = if let Some(details) =
-                movie_details.as_movie()
-            {
-                log::debug!(
-                    "[MovieDetail] Movie '{}' has full TMDB details with overview",
-                    movie.title
-                );
-                Some(details.clone())
-            } else {
-                match &movie.details {
-                    ArchivedMediaDetailsOption::Endpoint(endpoint) => {
-                        log::warn!(
-                            "[MovieDetail] Movie '{}' only has Endpoint: {}, NOT Details!",
-                            movie.title,
-                            endpoint
-                        );
-                    }
-                    _ => {
-                        log::warn!(
-                            "[MovieDetail] Movie '{}' has unexpected details variant",
-                            movie.title
-                        );
-                    }
-                }
-                None
-            };
-
             // Director info
-            if let Some(ref movie_details) = movie_details_opt {
-                let directors: Vec<&str> = movie_details
-                    .crew
-                    .iter()
-                    .filter(|c| c.job == "Director")
-                    .map(|d| d.name.as_str())
-                    .collect();
+            let directors: Vec<&str> = movie_details
+                .crew
+                .iter()
+                .filter(|c| c.job == "Director")
+                .map(|d| d.name.as_str())
+                .collect();
 
-                if !directors.is_empty() {
-                    details = details.push(
-                        text(format!("Directed by {}", directors.join(", ")))
-                            .size(fonts.micro)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                    );
-                }
+            if !directors.is_empty() {
+                details = details.push(
+                    text(format!("Directed by {}", directors.join(", ")))
+                        .size(fonts.micro)
+                        .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                );
             }
 
             // Basic info (year, duration, rating)
             let mut info_parts = vec![];
 
             // Year
-            if let Some(ref movie_details) = movie_details_opt
-                && let Some(release_date) = &movie_details.release_date
-                && let Some(year) = release_date.split('-').next()
-            {
-                info_parts.push(year.to_string());
-            }
+            info_parts.push(movie.release_year().unwrap().to_owned());
 
             // Duration - prefer TMDB runtime over file metadata
-            if let Some(ref movie_details) = movie_details_opt {
-                if let Some(runtime) = movie_details.runtime {
-                    let hours = runtime / 60;
-                    let minutes = runtime % 60;
-                    if hours > 0 {
-                        info_parts.push(format!("{}h {}m", hours, minutes));
-                    } else {
-                        info_parts.push(format!("{}m", minutes));
-                    }
+            if let Some(runtime) = movie_details.runtime {
+                let hours = runtime / 60;
+                let minutes = runtime % 60;
+                if hours > 0 {
+                    info_parts.push(format!("{}h {}m", hours, minutes));
+                } else {
+                    info_parts.push(format!("{}m", minutes));
                 }
             } else if let ArchivedOption::Some(metadata) =
                 &movie.file.media_file_metadata
@@ -224,45 +187,43 @@ pub fn view_movie_detail<'a>(
             }
 
             // Genres
-            if let Some(ref movie_details) = movie_details_opt {
-                if !movie_details.genres.is_empty() {
-                    let genre_text = movie_details
-                        .genres
-                        .iter()
-                        .map(|genre| genre.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    details = details.push(
-                        text(genre_text)
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+            if !movie_details.genres.is_empty() {
+                let genre_text = movie_details
+                    .genres
+                    .iter()
+                    .map(|genre| genre.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                details = details.push(
+                    text(genre_text)
+                        .size(fonts.caption)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                );
+            }
+
+            // Rating and votes
+            if let Some(rating) = movie_details.vote_average {
+                let mut rating_row = row![
+                    text("★")
+                        .size(fonts.body)
+                        .color(theme::MediaServerTheme::WARNING),
+                    Space::new().width(5),
+                    text(format!("{:.1}", rating))
+                        .size(fonts.caption)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY)
+                ]
+                .spacing(3)
+                .align_y(iced::Alignment::Center);
+
+                if let Some(votes) = movie_details.vote_count {
+                    rating_row = rating_row.push(
+                        text(format!(" ({} votes)", votes))
+                            .size(fonts.small)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
                     );
                 }
 
-                // Rating and votes
-                if let Some(rating) = movie_details.vote_average {
-                    let mut rating_row = row![
-                        text("★")
-                            .size(fonts.body)
-                            .color(theme::MediaServerTheme::WARNING),
-                        Space::new().width(5),
-                        text(format!("{:.1}", rating))
-                            .size(fonts.caption)
-                            .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                    ]
-                    .spacing(3)
-                    .align_y(iced::Alignment::Center);
-
-                    if let Some(votes) = movie_details.vote_count {
-                        rating_row = rating_row.push(
-                            text(format!(" ({} votes)", votes))
-                                .size(fonts.small)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        );
-                    }
-
-                    details = details.push(rating_row);
-                }
+                details = details.push(rating_row);
             }
 
             let button_row =
@@ -278,36 +239,33 @@ pub fn view_movie_detail<'a>(
             details = details.push(button_row);
 
             // Metadata sections
-            if let Some(ref movie_details) = movie_details_opt {
-                // Synopsis
-                if let Some(desc) = &movie_details.overview {
-                    details = details.push(Space::new().height(20));
-                    details =
-                        details.push(text("Synopsis").size(fonts.subtitle));
-                    details = details.push(
-                        container(text(desc.to_string()).size(fonts.caption))
-                            .padding(10)
-                            .width(Length::Fill),
-                    );
+            // Synopsis
+            if let Some(desc) = &movie_details.overview {
+                details = details.push(Space::new().height(20));
+                details = details.push(text("Synopsis").size(fonts.subtitle));
+                details = details.push(
+                    container(text(desc.to_string()).size(fonts.caption))
+                        .padding(10)
+                        .width(Length::Fill),
+                );
 
-                    // Production companies below synopsis
-                    if !movie_details.production_companies.is_empty() {
-                        let companies = movie_details
-                            .production_companies
-                            .iter()
-                            .map(|company| company.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        details = details.push(Space::new().height(15));
-                        details = details.push(row![
-                            text("Production: ")
-                                .size(fonts.caption)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                            text(companies)
-                                .size(fonts.caption)
-                                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                        ]);
-                    }
+                // Production companies below synopsis
+                if !movie_details.production_companies.is_empty() {
+                    let companies = movie_details
+                        .production_companies
+                        .iter()
+                        .map(|company| company.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    details = details.push(Space::new().height(15));
+                    details = details.push(row![
+                        text("Production: ")
+                            .size(fonts.caption)
+                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                        text(companies)
+                            .size(fonts.caption)
+                            .color(theme::MediaServerTheme::TEXT_PRIMARY)
+                    ]);
                 }
             }
 
@@ -471,11 +429,9 @@ pub fn view_movie_detail<'a>(
             }
 
             // Cast section - now in a full-width container at the bottom
-            if let Some(movie_details) = movie.details.as_movie() {
-                let cast_section =
-                    components::create_cast_scrollable(&movie_details.cast);
-                content = content.push(cast_section);
-            }
+            let cast_section =
+                components::create_cast_scrollable(&movie.details.cast);
+            content = content.push(cast_section);
 
             // Create the main content container
             let content_container = container(content).width(Length::Fill);

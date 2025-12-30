@@ -375,8 +375,7 @@ impl HlsClient {
         let variant = master_playlist
             .variants
             .iter()
-            .filter(|v| v.bandwidth <= target_bandwidth)
-            .next_back()
+            .rfind(|v| v.bandwidth <= target_bandwidth)
             .unwrap_or(&master_playlist.variants[0]); // Fallback to lowest quality
 
         log::info!(

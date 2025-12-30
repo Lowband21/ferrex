@@ -1,4 +1,4 @@
-//! High-performance profiling infrastructure using the `profiling` crate
+//! High-performance profiling infra using the `profiling` crate
 //!
 //! This module provides a thin abstraction over the `profiling` crate,
 //! which itself abstracts over multiple profiling backends (puffin, tracy, etc).
@@ -37,6 +37,37 @@ pub struct Profiler {
 
     #[cfg(feature = "memory-stats")]
     peak_memory: AtomicU64,
+}
+
+impl std::fmt::Debug for Profiler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = f.debug_struct("Profiler");
+        debug_struct.field("enabled", &self.enabled.load(Ordering::Relaxed));
+
+        #[cfg(feature = "profiling-stats")]
+        {
+            debug_struct.field(
+                "frame_counter",
+                &self.frame_counter.load(Ordering::Relaxed),
+            );
+            debug_struct.field("frame_times", &"<Histogram>");
+            debug_struct.field("last_report", &"<Instant>");
+        }
+
+        #[cfg(feature = "memory-stats")]
+        {
+            debug_struct.field(
+                "baseline_memory",
+                &self.baseline_memory.load(Ordering::Relaxed),
+            );
+            debug_struct.field(
+                "peak_memory",
+                &self.peak_memory.load(Ordering::Relaxed),
+            );
+        }
+
+        debug_struct.finish()
+    }
 }
 
 impl Profiler {

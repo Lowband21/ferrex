@@ -26,6 +26,7 @@ impl Default for CalibrationResults {
 }
 
 /// Search calibrator for startup performance testing
+#[derive(Debug)]
 pub struct SearchCalibrator;
 
 impl SearchCalibrator {

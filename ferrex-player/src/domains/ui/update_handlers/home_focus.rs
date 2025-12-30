@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use iced::Task;
 use iced::widget::{operation::scroll_to, scrollable::AbsoluteOffset};
 
@@ -26,6 +28,15 @@ pub fn handle_home_scrolled(
         home_state.focus.scroll_y = abs.y;
         home_state.focus.viewport_height = bounds.height;
     }
+
+    // Keep background noise deterministically anchored to the Home scroll position.
+    // We only update Y here; horizontal offset is driven by carousel ViewportChanged events.
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_vertical_scroll_px(viewport.absolute_offset().y);
     Task::none()
 }
 
@@ -172,37 +183,38 @@ pub fn handle_home_focus_prev(state: &mut State) -> Task<UiMessage> {
     Task::none()
 }
 
-fn start_vertical_snap_to_key(
-    state: &mut State,
-    key: crate::domains::ui::views::virtual_carousel::types::CarouselKey,
-) -> Task<UiMessage> {
-    // Read snap animation settings from runtime config
-    let snap_page_duration = state.runtime_config.snap_page_duration_ms();
-    let snap_easing = state.runtime_config.snap_easing().to_u8();
+// fn start_vertical_snap_to_key(
+//     state: &mut State,
+//     key: crate::domains::ui::views::virtual_carousel::types::CarouselKey,
+// ) -> Task<UiMessage> {
+//     // Read snap animation settings from runtime config
+//     let snap_page_duration = state.runtime_config.snap_page_duration_ms();
+//     let snap_easing = state.runtime_config.snap_easing().to_u8();
 
-    let Some(TabState::Home(home_state)) =
-        state.tab_manager.get_tab_mut(TabId::Home)
-    else {
-        return Task::none();
-    };
-    let Some(target_top) = home_state.focus.section_top_y(&key) else {
-        return Task::none();
-    };
-    let current = home_state.focus.scroll_y;
-    // Align near the top with a small offset for breathing room
-    let target_y = (target_top - 8.0).max(0.0);
-    if (target_y - current).abs() < 1.0 {
-        return Task::none();
-    }
-    home_state.focus.vertical_animator.start(
-        current,
-        target_y,
-        snap_page_duration,
-        snap_easing,
-    );
-    // Motion ticks will drive the scroll via handle_home_focus_tick
-    Task::none()
-}
+//     let Some(TabState::Home(home_state)) =
+//         state.tab_manager.get_tab_mut(TabId::Home)
+//     else {
+//         return Task::none();
+//     };
+//     let Some(target_top) = home_state.focus.section_top_y(&key) else {
+//         return Task::none();
+//     };
+//     let current = home_state.focus.scroll_y;
+//     // Align near the top with a small offset for breathing room
+//     let target_y = (target_top - 8.0).max(0.0);
+//     if (target_y - current).abs() < 1.0 {
+//         return Task::none();
+//     }
+//     home_state.focus.vertical_animator.start_at(
+//         current,
+//         target_y,
+//         snap_page_duration,
+//         snap_easing,
+//         Instant::now(),
+//     );
+//     // Motion ticks will drive the scroll via handle_home_focus_tick
+//     Task::none()
+// }
 
 fn start_vertical_snap_to_y(
     state: &mut State,
@@ -221,11 +233,12 @@ fn start_vertical_snap_to_y(
     if (target_y - current).abs() < 1.0 {
         return Task::none();
     }
-    home_state.focus.vertical_animator.start(
+    home_state.focus.vertical_animator.start_at(
         current,
         target_y,
         snap_page_duration,
         snap_easing,
+        Instant::now(),
     );
     Task::none()
 }
@@ -238,19 +251,29 @@ fn start_vertical_snap_to_y(
     ),
     profiling::function
 )]
-pub fn handle_home_focus_tick(state: &mut State) -> Task<UiMessage> {
+pub fn handle_home_focus_tick(
+    state: &mut State,
+    now: Instant,
+) -> Task<UiMessage> {
     let Some(TabState::Home(home_state)) =
         state.tab_manager.get_tab_mut(TabId::Home)
     else {
         return Task::none();
     };
 
-    if !home_state.focus.vertical_animator.is_active() {
+    if !home_state.focus.vertical_animator.is_active_at(now) {
         return Task::none();
     }
 
-    if let Some(next_y) = home_state.focus.vertical_animator.tick() {
+    // Use frame-synchronized timestamp for smooth animation
+    if let Some(next_y) = home_state.focus.vertical_animator.tick_at(now) {
         home_state.focus.scroll_y = next_y;
+        state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .set_vertical_scroll_px(next_y);
         let id = home_state.focus.scrollable_id.clone();
         return scroll_to::<UiMessage>(
             id,

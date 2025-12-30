@@ -1,6 +1,6 @@
 //! Libraries section messages (Admin)
 
-use super::state::LibraryType;
+use ferrex_model::LibraryType;
 use uuid::Uuid;
 
 /// Messages for the libraries settings section

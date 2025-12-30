@@ -113,7 +113,7 @@ pub fn view_auth<'a>(
             user_permissions,
         ),
 
-        CheckingDevice { user } => {
+        CheckingDevice { user: _user } => {
             view_loading_users(state) // Show loading while checking device
         }
 
@@ -145,7 +145,10 @@ pub fn view_auth<'a>(
             error,
         } => view_pin_setup(state, user, pin, confirm_pin, error.as_deref()),
 
-        Authenticated { user, mode } => {
+        Authenticated {
+            user: _user,
+            mode: _mode,
+        } => {
             // This state should not render auth views - the app should show main content
             view_loading_users(state) // Fallback
         }

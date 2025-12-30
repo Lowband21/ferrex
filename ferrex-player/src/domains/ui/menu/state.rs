@@ -148,46 +148,55 @@ impl PosterMenuState {
 
     /// Settling phase: periodic potential (sin-based gravity wells) with friction.
     fn step_settling(&mut self, dt: f32, must_reach_opposite: bool) -> bool {
-        // Periodic potential creates stable points at 0, PI, 2*PI...
-        // sin(2*angle) has zeros at 0, PI/2, PI, 3PI/2, 2PI...
-        // -sin(2*angle) pulls toward 0, PI, 2*PI (stable) and repels from PI/2, 3PI/2
-        let snap_force = -SNAP_K * (2.0 * self.angle).sin();
-        let damping_force = -SETTLE_DAMPING_B * self.velocity;
-        self.velocity += (snap_force + damping_force) * dt;
+        let target_angle = self.nearest_stable();
+        if (self.angle - target_angle).abs() > STOPPED_ANGLE_THRESHOLD {
+            // Periodic potential creates stable points at 0, PI, 2*PI...
+            // sin(2*angle) has zeros at 0, PI/2, PI, 3PI/2, 2PI...
+            // -sin(2*angle) pulls toward 0, PI, 2*PI (stable) and repels from PI/2, 3PI/2
+            let snap_force = -SNAP_K * (2.0 * self.angle).sin();
+            let damping_force = -SETTLE_DAMPING_B * self.velocity;
+            self.velocity += (snap_force + damping_force) * dt;
 
-        // Check if we need to ensure landing on opposite face
-        if must_reach_opposite {
-            let current_face = self.face_from_angle();
-            // If we're slowing down on the same face we started, nudge
-            if current_face != self.target_face
-                && self.velocity.abs() < NUDGE_VELOCITY_THRESHOLD
-            {
-                debug!("Applying nudge impulse to reach target face");
-                self.velocity += NUDGE_IMPULSE * dt;
+            // Check if we need to ensure landing on opposite face
+            if must_reach_opposite {
+                let current_face = self.face_from_angle();
+                // If we're slowing down on the same face we started, nudge
+                if current_face != self.target_face
+                    && self.velocity.abs() < NUDGE_VELOCITY_THRESHOLD
+                {
+                    debug!("Applying nudge impulse to reach target face");
+                    self.velocity += NUDGE_IMPULSE * dt;
+                }
             }
+
+            // Integrate position
+            self.angle += self.velocity * dt;
+            self.clamp_angle_lower();
+
+            // Check for settling
+            self.check_and_snap_settling()
+        } else {
+            self.phase = InteractionPhase::Idle;
+            false
         }
-
-        // Integrate position
-        self.angle += self.velocity * dt;
-        self.clamp_angle_lower();
-
-        // Check for settling
-        self.check_and_snap_settling()
     }
 
     /// Idle phase: direct spring toward target face.
     fn step_idle(&mut self, dt: f32) -> bool {
         let target_angle = self.next_stable();
+        if (self.angle - target_angle).abs() > STOPPED_ANGLE_THRESHOLD {
+            let spring_force = SPRING_K * (target_angle - self.angle);
+            let damping_force = -DAMPING_B * self.velocity;
+            self.velocity += (spring_force + damping_force) * dt;
 
-        let spring_force = SPRING_K * (target_angle - self.angle);
-        let damping_force = -DAMPING_B * self.velocity;
-        self.velocity += (spring_force + damping_force) * dt;
+            // Integrate position
+            self.angle += self.velocity * dt;
+            self.clamp_angle_lower();
 
-        // Integrate position
-        self.angle += self.velocity * dt;
-        self.clamp_angle_lower();
-
-        self.check_and_snap_settling()
+            self.check_and_snap_settling()
+        } else {
+            false
+        }
     }
 
     /// Check if settled during settling phase and snap to stable point.
@@ -202,13 +211,13 @@ impl PosterMenuState {
                     return true;
                 }
 
-                debug!(
-                    "Settling with velocity {} and angle delta {} less than thresholds {} and {}",
-                    self.velocity,
-                    (self.angle - nearest_stable),
-                    SETTLE_VELOCITY_THRESHOLD,
-                    SETTLE_ANGLE_THRESHOLD
-                );
+                // debug!(
+                //     "Settling with velocity {} and angle delta {} less than thresholds {} and {}",
+                //     self.velocity,
+                //     (self.angle - nearest_stable),
+                //     SETTLE_VELOCITY_THRESHOLD,
+                //     SETTLE_ANGLE_THRESHOLD
+                // );
 
                 self.phase = InteractionPhase::Idle;
                 self.velocity = 0.0;

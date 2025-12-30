@@ -4,6 +4,7 @@
 
 pub mod media_root_browser;
 pub mod messages;
+pub mod repo_snapshot;
 pub mod server;
 pub mod types;
 pub mod update;
@@ -15,8 +16,10 @@ use self::{
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::repository::accessor::{Accessor, ReadWrite};
 use crate::infra::services::api::ApiService;
+#[cfg(feature = "demo")]
+use ferrex_core::player_prelude::LibraryId;
 use ferrex_core::player_prelude::{
-    LibraryId, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
+    Library, LibraryMediaCache, ScanConfig, ScanMetrics, ScanProgressEvent,
     ScanSnapshotDto,
 };
 use iced::Task;
@@ -45,6 +48,8 @@ pub struct LibraryDomainState {
     pub media_root_browser: MediaRootBrowserState,
 
     pub api_service: Option<Arc<dyn ApiService>>,
+
+    pub libraries: Vec<Library>,
 
     pub repo_accessor: Accessor<ReadWrite>,
     #[cfg(feature = "demo")]
@@ -84,6 +89,7 @@ impl LibraryDomainState {
             scan_config: None,
             media_root_browser: MediaRootBrowserState::default(),
             api_service,
+            libraries: Vec::new(),
             repo_accessor,
             #[cfg(feature = "demo")]
             demo_controls: DemoControlsState::default(),
@@ -108,12 +114,6 @@ impl LibraryDomain {
     pub fn new(state: LibraryDomainState) -> Self {
         Self { state }
     }
-
-    //pub fn update(&mut self, message: LibraryMessage) -> Task<DomainMessage> {
-    //    // This is a stub - the actual update_library function is called from the main update loop
-    //    // We don't call it here to avoid circular dependencies
-    //    Task::none()
-    //}
 
     pub fn handle_event(
         &mut self,

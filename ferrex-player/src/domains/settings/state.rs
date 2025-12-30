@@ -1,4 +1,8 @@
 use ferrex_core::player_prelude::UserScale;
+
+use crate::domains::auth::security::secure_credential::SecureCredential;
+use crate::domains::ui::views::settings::device_management::DeviceManagementState;
+
 use serde::{Deserialize, Serialize};
 
 /// Settings domain state
@@ -7,25 +11,12 @@ pub struct SettingsState {
     /// Current section in the unified settings sidebar (new)
     pub current_section: SettingsSection,
 
-    /// Current settings view (legacy - being replaced by SettingsSection)
-    pub current_view: SettingsView,
-
+    // /// Current settings view (legacy - being replaced by SettingsSection)
+    // pub current_view: SettingsView,
     pub security: SecurityState,
     pub profile: ProfileState,
     pub preferences: PreferencesState,
-    pub device_management_state:
-        crate::domains::ui::views::settings::device_management::DeviceManagementState,
-}
-
-/// Current settings view (legacy - being replaced by SettingsSection)
-#[derive(Debug, Clone, Default, PartialEq)]
-pub enum SettingsView {
-    #[default]
-    Main,
-    Profile,
-    Preferences,
-    Security,
-    DeviceManagement,
+    pub device_management_state: DeviceManagementState,
 }
 
 // =============================================================================
@@ -121,24 +112,18 @@ impl std::fmt::Display for SettingsSection {
 #[derive(Debug, Clone)]
 pub struct SecurityState {
     // Password change fields
-    pub password_current:
-        crate::domains::auth::security::secure_credential::SecureCredential,
-    pub password_new:
-        crate::domains::auth::security::secure_credential::SecureCredential,
-    pub password_confirm:
-        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub password_current: SecureCredential,
+    pub password_new: SecureCredential,
+    pub password_confirm: SecureCredential,
     pub password_error: Option<String>,
     pub password_loading: bool,
     pub password_show: bool,
     pub showing_password_change: bool,
 
     // PIN change fields
-    pub pin_current:
-        crate::domains::auth::security::secure_credential::SecureCredential,
-    pub pin_new:
-        crate::domains::auth::security::secure_credential::SecureCredential,
-    pub pin_confirm:
-        crate::domains::auth::security::secure_credential::SecureCredential,
+    pub pin_current: SecureCredential,
+    pub pin_new: SecureCredential,
+    pub pin_confirm: SecureCredential,
     pub pin_error: Option<String>,
     pub pin_loading: bool,
     pub showing_pin_change: bool,
@@ -214,24 +199,16 @@ pub enum ThemePreference {
 impl Default for SecurityState {
     fn default() -> Self {
         Self {
-            password_current:
-                crate::domains::auth::security::secure_credential::SecureCredential::from(""),
-            password_new: crate::domains::auth::security::secure_credential::SecureCredential::from(
-                "",
-            ),
-            password_confirm:
-                crate::domains::auth::security::secure_credential::SecureCredential::from(""),
+            password_current: SecureCredential::from(""),
+            password_new: SecureCredential::from(""),
+            password_confirm: SecureCredential::from(""),
             password_error: None,
             password_loading: false,
             password_show: false,
             showing_password_change: false,
-            pin_current: crate::domains::auth::security::secure_credential::SecureCredential::from(
-                "",
-            ),
-            pin_new: crate::domains::auth::security::secure_credential::SecureCredential::from(""),
-            pin_confirm: crate::domains::auth::security::secure_credential::SecureCredential::from(
-                "",
-            ),
+            pin_current: SecureCredential::from(""),
+            pin_new: SecureCredential::from(""),
+            pin_confirm: SecureCredential::from(""),
             pin_error: None,
             pin_loading: false,
             showing_pin_change: false,
@@ -252,18 +229,12 @@ impl Default for SecurityState {
 impl SecurityState {
     /// Clear all sensitive data
     pub fn clear_sensitive_data(&mut self) {
-        self.password_current =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
-        self.password_new =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
-        self.password_confirm =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
-        self.pin_current =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
-        self.pin_new =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
-        self.pin_confirm =
-            crate::domains::auth::security::secure_credential::SecureCredential::from("");
+        self.password_current = SecureCredential::from("");
+        self.password_new = SecureCredential::from("");
+        self.password_confirm = SecureCredential::from("");
+        self.pin_current = SecureCredential::from("");
+        self.pin_new = SecureCredential::from("");
+        self.pin_confirm = SecureCredential::from("");
     }
 }
 

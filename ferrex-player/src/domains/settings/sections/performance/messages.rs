@@ -41,6 +41,7 @@ pub enum PerformanceMessage {
     // Animation Effects subsection
     SetAnimationHoverScale(f32),
     SetAnimationHoverTransitionMs(u64),
+    SetAnimationHoverScaleDownDelayMs(u64),
 }
 
 impl PerformanceMessage {
@@ -114,6 +115,9 @@ impl PerformanceMessage {
             }
             Self::SetAnimationHoverTransitionMs(_) => {
                 "Performance::SetAnimationHoverTransitionMs"
+            }
+            Self::SetAnimationHoverScaleDownDelayMs(_) => {
+                "Performance::SetAnimationHoverScaleDownDelayMs"
             }
         }
     }

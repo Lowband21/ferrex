@@ -9,6 +9,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Test data generator with deterministic randomization
+#[derive(Debug)]
 pub struct FixtureGenerator {
     rng: StdRng,
     counters: HashMap<String, usize>,
@@ -47,12 +48,12 @@ impl FixtureGenerator {
 
     /// Generate a random number in range
     pub fn random_in_range(&mut self, min: i32, max: i32) -> i32 {
-        self.rng.gen_range(min..=max)
+        self.rng.random_range(min..=max)
     }
 
     /// Generate a random boolean
     pub fn random_bool(&mut self) -> bool {
-        self.rng.gen_bool(0.5)
+        self.rng.random_bool(0.5)
     }
 
     /// Generate a random email
@@ -63,7 +64,7 @@ impl FixtureGenerator {
     /// Generate a random timestamp
     pub fn random_timestamp(&mut self) -> chrono::DateTime<chrono::Utc> {
         use chrono::Utc;
-        let days_ago = self.rng.gen_range(0..365);
+        let days_ago = self.rng.random_range(0..365);
         Utc::now() - chrono::Duration::days(days_ago)
     }
 
@@ -72,7 +73,7 @@ impl FixtureGenerator {
         if items.is_empty() {
             None
         } else {
-            let index = self.rng.gen_range(0..items.len());
+            let index = self.rng.random_range(0..items.len());
             Some(&items[index])
         }
     }
@@ -107,6 +108,17 @@ pub struct Scenario<T> {
     name: String,
     description: String,
     setup: Box<dyn Fn() -> T + Send + Sync>,
+}
+
+impl<T> std::fmt::Debug for Scenario<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Scenario")
+            .field("name", &self.name)
+            .field("description", &self.description)
+            .field("output_type", &std::any::type_name::<T>())
+            .field("setup", &"<fn() -> T>")
+            .finish()
+    }
 }
 
 impl<T> Scenario<T> {
@@ -144,6 +156,17 @@ pub struct ScenarioCollection<T> {
     scenarios: Vec<Scenario<T>>,
 }
 
+impl<T> std::fmt::Debug for ScenarioCollection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let scenario_names: Vec<&str> =
+            self.scenarios.iter().map(|s| s.name()).collect();
+        f.debug_struct("ScenarioCollection")
+            .field("scenario_names", &scenario_names)
+            .field("output_type", &std::any::type_name::<T>())
+            .finish()
+    }
+}
+
 impl<T> ScenarioCollection<T> {
     /// Create a new scenario collection
     pub fn new() -> Self {
@@ -153,7 +176,7 @@ impl<T> ScenarioCollection<T> {
     }
 
     /// Add a scenario to the collection
-    pub fn add(mut self, scenario: Scenario<T>) -> Self {
+    pub fn add_scenario(mut self, scenario: Scenario<T>) -> Self {
         self.scenarios.push(scenario);
         self
     }
@@ -186,6 +209,17 @@ impl<T> Default for ScenarioCollection<T> {
 /// Factory for creating related test objects
 pub struct TestFactory<T> {
     templates: HashMap<String, Arc<dyn Fn() -> T + Send + Sync>>,
+}
+
+impl<T> std::fmt::Debug for TestFactory<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let template_names: Vec<String> =
+            self.templates.keys().cloned().collect();
+        f.debug_struct("TestFactory")
+            .field("template_names", &template_names)
+            .field("output_type", &std::any::type_name::<T>())
+            .finish()
+    }
 }
 
 impl<T> TestFactory<T> {
@@ -286,15 +320,17 @@ pub mod examples {
     /// Create common user scenarios
     pub fn user_scenarios() -> ScenarioCollection<Vec<UserFixture>> {
         ScenarioCollection::new()
-            .add(Scenario::new(
+            .add_scenario(Scenario::new(
                 "empty_system",
                 "No users in the system",
                 std::vec::Vec::new,
             ))
-            .add(Scenario::new("single_admin", "Single admin user", || {
-                vec![UserFixture::typical().with_admin(true)]
-            }))
-            .add(Scenario::new(
+            .add_scenario(Scenario::new(
+                "single_admin",
+                "Single admin user",
+                || vec![UserFixture::typical().with_admin(true)],
+            ))
+            .add_scenario(Scenario::new(
                 "mixed_users",
                 "Mix of admin and regular users",
                 || {
@@ -305,7 +341,7 @@ pub mod examples {
                     ]
                 },
             ))
-            .add(Scenario::new(
+            .add_scenario(Scenario::new(
                 "large_user_base",
                 "Many users for performance testing",
                 || {

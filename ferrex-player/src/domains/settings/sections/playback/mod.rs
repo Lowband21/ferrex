@@ -17,6 +17,7 @@ use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
 /// Playback section marker for type-safe section identification
+#[derive(Debug)]
 pub struct PlaybackSection;
 
 /// Update playback settings state

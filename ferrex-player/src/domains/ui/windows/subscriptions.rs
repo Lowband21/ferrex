@@ -1,8 +1,8 @@
 use crate::{
     common::messages::DomainMessage,
     domains::ui::{
-        messages::UiMessage, shell_ui::UiShellMessage,
-        window_ui::WindowUiMessage, windows::WindowKind,
+        shell_ui::UiShellMessage, window_ui::WindowUiMessage,
+        windows::WindowKind,
     },
     state::State,
 };

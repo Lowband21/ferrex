@@ -134,7 +134,9 @@ pub fn handle_set_user_scale(
         SizeProvider::new(state.domains.ui.state.scaling_context);
 
     // 6. Recompute the scaled layout for virtual grids/carousels
-    state.domains.ui.state.scaled_layout = ScaledLayout::new(effective_scale);
+    let poster_gap = state.domains.settings.display.grid_poster_gap;
+    state.domains.ui.state.scaled_layout =
+        ScaledLayout::new(effective_scale, poster_gap);
 
     // 6.5. Update poster text scale for GPU uniform
     poster::set_text_scale(effective_scale);
@@ -194,7 +196,9 @@ pub fn handle_set_scale_preset(
     state.domains.ui.state.size_provider = SizeProvider::new(context);
 
     // 5. Recompute the scaled layout for virtual grids/carousels
-    state.domains.ui.state.scaled_layout = ScaledLayout::new(effective_scale);
+    let poster_gap = state.domains.settings.display.grid_poster_gap;
+    state.domains.ui.state.scaled_layout =
+        ScaledLayout::new(effective_scale, poster_gap);
 
     // 6. Update poster text scale for GPU uniform
     poster::set_text_scale(effective_scale);

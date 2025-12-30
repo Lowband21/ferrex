@@ -19,6 +19,7 @@ use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
 /// Server section marker for type-safe section identification
+#[derive(Debug)]
 pub struct ServerSection;
 
 /// Update server settings state

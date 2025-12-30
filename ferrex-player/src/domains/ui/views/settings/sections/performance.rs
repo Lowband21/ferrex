@@ -17,6 +17,7 @@ use crate::domains::ui::widgets::setting_controls::{
     setting_row, setting_section, setting_slider, setting_slider_u64,
     setting_slider_usize,
 };
+use crate::infra::units::ByteSize;
 use crate::state::State;
 
 /// Render the performance settings section
@@ -224,6 +225,17 @@ pub fn view_performance_section<'a>(
             fonts,
         ),
         setting_slider_u64(
+            "Scale Down Delay",
+            config.animation_hover_scale_down_delay_ms(),
+            0..=500,
+            "ms",
+            |v| RuntimeConfigMessage::HoverScaleDownDelay(v).into(),
+            fonts,
+        ),
+    ]));
+
+    content = content.push(setting_row(vec![
+        setting_slider_u64(
             "Default Duration",
             config.animation_default_duration_ms(),
             50..=500,
@@ -231,9 +243,6 @@ pub fn view_performance_section<'a>(
             |v| RuntimeConfigMessage::AnimationDuration(v).into(),
             fonts,
         ),
-    ]));
-
-    content = content.push(setting_row(vec![
         setting_slider_u64(
             "Initial Fade",
             config.animation_texture_fade_initial_ms(),
@@ -303,6 +312,51 @@ pub fn view_performance_section<'a>(
             1..=10,
             "items",
             |v| RuntimeConfigMessage::CarouselBackground(v).into(),
+            fonts,
+        ),
+    ]));
+
+    content = content.push(Space::new().height(12));
+
+    // ========== IMAGE CACHE ==========
+    content = content.push(setting_section(
+        "Image Cache",
+        Some("On-disk cache + bounded RAM for images"),
+        fonts,
+    ));
+
+    let ram_mib = config.image_cache_ram_max_bytes().as_mib();
+    let disk_mib = config.image_cache_disk_max_bytes().as_mib();
+
+    content = content.push(setting_row(vec![
+        setting_slider_u64(
+            "RAM Max",
+            ram_mib as u64,
+            256..=8192,
+            "MiB",
+            |v| {
+                RuntimeConfigMessage::ImageCacheRamMax(ByteSize::from_mib(v))
+                    .into()
+            },
+            fonts,
+        ),
+        setting_slider_u64(
+            "Disk Max",
+            disk_mib as u64,
+            1024..=65536,
+            "MiB",
+            |v| {
+                RuntimeConfigMessage::ImageCacheDiskMax(ByteSize::from_mib(v))
+                    .into()
+            },
+            fonts,
+        ),
+        setting_slider_u64(
+            "Disk TTL",
+            config.image_cache_disk_ttl_days(),
+            1..=90,
+            "days",
+            |v| RuntimeConfigMessage::ImageCacheDiskTtlDays(v).into(),
             fonts,
         ),
     ]));

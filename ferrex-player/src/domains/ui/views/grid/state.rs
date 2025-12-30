@@ -1,5 +1,6 @@
 use iced::widget::{Id, scrollable};
 
+use crate::infra::constants::grid;
 use crate::infra::constants::layout::calculations::ScaledLayout;
 use std::ops::Range;
 
@@ -77,11 +78,20 @@ impl VirtualGridState {
 
     /// Update columns based on viewport width
     pub fn update_columns(&mut self, viewport_width: f32) {
-        use crate::infra::constants::{calculations, poster, scale_presets};
+        use crate::infra::constants::{
+            calculations, layout::grid, poster, scale_presets,
+        };
 
         // Calculate columns using centralized logic
         let scale = scale_presets::DEFAULT_SCALE;
-        self.columns = calculations::calculate_columns(viewport_width, scale);
+        let poster_gap = grid::EFFECTIVE_SPACING * scale;
+        let effective_viewport_width =
+            (viewport_width - grid::VERTICAL_SCROLLBAR_RESERVED_WIDTH).max(1.0);
+        self.columns = calculations::calculate_columns(
+            effective_viewport_width,
+            scale,
+            poster_gap,
+        );
 
         // Keep item width based on scale
         self.item_width = poster::BASE_WIDTH * scale;
@@ -159,6 +169,7 @@ impl VirtualGridState {
     pub fn update_scroll(&mut self, viewport: scrollable::Viewport) {
         self.scroll_position = viewport.absolute_offset().y;
         self.viewport_height = viewport.bounds().height;
+        self.viewport_width = viewport.bounds().width;
         self.calculate_visible_range();
     }
 
@@ -189,11 +200,17 @@ impl VirtualGridState {
     pub fn resize(&mut self, width: f32) {
         log::debug!("Resize: updating columns for width {}", width);
 
-        use crate::infra::constants::{calculations, scale_presets};
+        use crate::infra::constants::{
+            calculations, layout::grid, scale_presets,
+        };
 
         let scale = scale_presets::DEFAULT_SCALE;
         let old_columns = self.columns;
-        self.columns = calculations::calculate_columns(width, scale);
+        let poster_gap = grid::EFFECTIVE_SPACING * scale;
+        let effective_width =
+            (width - grid::VERTICAL_SCROLLBAR_RESERVED_WIDTH).max(1.0);
+        self.columns =
+            calculations::calculate_columns(effective_width, scale, poster_gap);
 
         // If columns changed, log it but don't recalculate visible range yet
         // The scrollable widget needs to report its viewport dimensions first
@@ -222,7 +239,10 @@ impl VirtualGridState {
         self.item_width = scaled_layout.poster_width;
 
         // Recalculate columns for current viewport
-        self.columns = scaled_layout.calculate_columns(self.viewport_width);
+        let effective_width = (self.viewport_width
+            - grid::VERTICAL_SCROLLBAR_RESERVED_WIDTH)
+            .max(1.0);
+        self.columns = scaled_layout.calculate_columns(effective_width);
 
         log::info!(
             "Grid scale updated: row_height {} -> {}, item_width {} -> {}, columns {} -> {}",
@@ -245,12 +265,15 @@ impl VirtualGridState {
         width: f32,
         scaled_layout: &ScaledLayout,
     ) {
-        log::debug!("Resize with scale: updating columns for width {}", width);
+        log::trace!("Resize with scale: updating columns for width {}", width);
 
         let old_columns = self.columns;
-        self.columns = scaled_layout.calculate_columns(width);
+        let effective_width =
+            (width - grid::VERTICAL_SCROLLBAR_RESERVED_WIDTH).max(0.0);
+        self.columns = scaled_layout.calculate_columns(effective_width);
         self.item_width = scaled_layout.poster_width;
         self.row_height = scaled_layout.row_height;
+        self.viewport_width = width;
 
         if old_columns != self.columns {
             log::debug!(

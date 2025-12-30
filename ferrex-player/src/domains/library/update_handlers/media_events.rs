@@ -13,7 +13,6 @@ use ferrex_core::player_prelude::{
     ImageRequest, ImageSize, LibraryId, MediaIDLike, MediaOps, Priority,
     SeasonID, SeriesID,
 };
-use ferrex_model::MediaType;
 
 /// Result of applying media events to the repository
 #[derive(Debug, Default)]
@@ -37,6 +36,32 @@ pub fn apply_media_discovered(
     }
 
     for media in references {
+        if let Media::Movie(movie) = &media {
+            match state
+                .domains
+                .library
+                .state
+                .repo_accessor
+                .is_movie_backed_by_batch(&movie.id)
+            {
+                Ok(true) => {
+                    log::debug!(
+                        "Dropping discovered movie {}: already backed by a batch",
+                        movie.id
+                    );
+                    continue;
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    log::warn!(
+                        "Failed to check movie batch backing for {}: {}",
+                        movie.id,
+                        err
+                    );
+                }
+            }
+        }
+
         let Some(library_id) = media_library_id(&media) else {
             continue;
         };
@@ -57,7 +82,7 @@ pub fn apply_media_discovered(
                     FirstDisplayHint::FlipOnce
                 };
 
-            if let Some(request) = image_request_for_media(&media) {
+            if let Some(request) = image_request_for_media(state, &media) {
                 state
                     .domains
                     .metadata
@@ -67,9 +92,8 @@ pub fn apply_media_discovered(
             }
         }
 
-        let should_upsert = should_upsert_media(state, &media);
-        if should_upsert {
-            // Track parent relations only when applying
+        if should_track_children_change(state, &media) {
+            // Track parent relations only when the current view cares
             match &media {
                 Media::Season(season) => {
                     outcome.affected_series.insert(season.series_id);
@@ -79,55 +103,6 @@ pub fn apply_media_discovered(
                 }
                 _ => {}
             }
-
-            let media_uuid = media.media_id().to_uuid();
-            match state
-                .domains
-                .library
-                .state
-                .repo_accessor
-                .upsert(media, &library_id)
-            {
-                Ok(()) => {
-                    outcome.touched_libraries.insert(library_id);
-                }
-                Err(err) => {
-                    log::error!(
-                        "Failed to upsert discovered media {} in library {}: {}",
-                        media_uuid,
-                        library_id,
-                        err
-                    );
-                }
-            }
-        }
-    }
-
-    outcome
-}
-
-/// Apply a single updated media reference.
-pub fn apply_media_updated(
-    state: &mut State,
-    media: Media,
-) -> MediaEventApplyOutcome {
-    let mut outcome = MediaEventApplyOutcome::default();
-
-    let Some(library_id) = media_library_id(&media) else {
-        return outcome;
-    };
-
-    let should_upsert = should_upsert_media(state, &media);
-    if should_upsert {
-        // Track parent relations for precise UI refreshes
-        match &media {
-            Media::Season(season) => {
-                outcome.affected_series.insert(season.series_id);
-            }
-            Media::Episode(ep) => {
-                outcome.affected_seasons.insert(ep.season_id);
-            }
-            _ => {}
         }
 
         let media_uuid = media.media_id().to_uuid();
@@ -143,12 +118,85 @@ pub fn apply_media_updated(
             }
             Err(err) => {
                 log::error!(
-                    "Failed to apply media update {} in library {}: {}",
+                    "Failed to upsert discovered media {} in library {}: {}",
                     media_uuid,
                     library_id,
                     err
                 );
             }
+        }
+    }
+
+    outcome
+}
+
+/// Apply a single updated media reference.
+pub fn apply_media_updated(
+    state: &mut State,
+    media: Media,
+) -> MediaEventApplyOutcome {
+    let mut outcome = MediaEventApplyOutcome::default();
+
+    if let Media::Movie(movie) = &media {
+        match state
+            .domains
+            .library
+            .state
+            .repo_accessor
+            .is_movie_backed_by_batch(&movie.id)
+        {
+            Ok(true) => {
+                log::debug!(
+                    "Dropping updated movie {}: already backed by a batch",
+                    movie.id
+                );
+                return outcome;
+            }
+            Ok(false) => {}
+            Err(err) => {
+                log::warn!(
+                    "Failed to check movie batch backing for {}: {}",
+                    movie.id,
+                    err
+                );
+            }
+        }
+    }
+
+    let Some(library_id) = media_library_id(&media) else {
+        return outcome;
+    };
+
+    if should_track_children_change(state, &media) {
+        match &media {
+            Media::Season(season) => {
+                outcome.affected_series.insert(season.series_id);
+            }
+            Media::Episode(ep) => {
+                outcome.affected_seasons.insert(ep.season_id);
+            }
+            _ => {}
+        }
+    }
+
+    let media_uuid = media.media_id().to_uuid();
+    match state
+        .domains
+        .library
+        .state
+        .repo_accessor
+        .upsert(media, &library_id)
+    {
+        Ok(()) => {
+            outcome.touched_libraries.insert(library_id);
+        }
+        Err(err) => {
+            log::error!(
+                "Failed to apply media update {} in library {}: {}",
+                media_uuid,
+                library_id,
+                err
+            );
         }
     }
 
@@ -166,44 +214,44 @@ fn media_library_id(media: &Media) -> Option<LibraryId> {
     }
 }
 
-fn image_request_for_media(media: &Media) -> Option<ImageRequest> {
+fn image_request_for_media(
+    state: &State,
+    media: &Media,
+) -> Option<ImageRequest> {
     match media {
-        Media::Movie(movie) => Some(
+        Media::Movie(movie) => movie.details.primary_poster_iid.map(|iid| {
             ImageRequest::new(
-                movie.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Movie,
+                iid,
+                ImageSize::Poster(
+                    state.domains.settings.display.library_poster_quality,
+                ),
             )
             .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Series(series) => Some(
+        }),
+        Media::Series(series) => series.details.primary_poster_iid.map(|iid| {
             ImageRequest::new(
-                series.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Series,
+                iid,
+                ImageSize::Poster(
+                    state.domains.settings.display.library_poster_quality,
+                ),
             )
             .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Season(season) => Some(
+        }),
+        Media::Season(season) => season.details.primary_poster_iid.map(|iid| {
             ImageRequest::new(
-                season.id.to_uuid(),
-                ImageSize::poster(),
-                MediaType::Season,
+                iid,
+                ImageSize::Poster(
+                    state.domains.settings.display.library_poster_quality,
+                ),
             )
             .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
-        Media::Episode(episode) => Some(
-            ImageRequest::new(
-                *episode.id.as_uuid(),
-                ImageSize::thumbnail(),
-                MediaType::Episode,
-            )
-            .with_priority(Priority::Visible)
-            .with_index(0),
-        ),
+        }),
+        Media::Episode(episode) => {
+            episode.details.primary_still_iid.map(|iid| {
+                ImageRequest::new(iid, ImageSize::thumbnail())
+                    .with_priority(Priority::Visible)
+            })
+        }
     }
 }
 
@@ -223,9 +271,9 @@ pub fn build_children_changed_events(
     events
 }
 
-fn should_upsert_media(state: &State, media: &Media) -> bool {
+fn should_track_children_change(state: &State, media: &Media) -> bool {
     match media {
-        Media::Movie(_) | Media::Series(_) => true,
+        Media::Movie(_) | Media::Series(_) => false,
         Media::Season(season) => match &state.domains.ui.state.view {
             ViewState::SeriesDetail { series_id, .. } => {
                 season.series_id == *series_id

@@ -4,17 +4,23 @@ use ferrex_core::player_prelude::UserScale;
 use ferrex_model::{Library, LibraryId};
 pub use update::update_settings_ui;
 
-use crate::domains::{
-    library::media_root_browser,
-    settings::{
-        sections::{
-            display::messages::DisplayMessage, theme::messages::ThemeMessage,
-        },
-        state::SettingsSection,
-    },
-    ui::{messages::UiMessage, views::settings::device_management::UserDevice},
-};
 use crate::infra::design_tokens::ScalePreset;
+use crate::{
+    domains::{
+        library::media_root_browser,
+        settings::{
+            sections::{
+                display::messages::DisplayMessage,
+                theme::messages::ThemeMessage,
+            },
+            state::SettingsSection,
+        },
+        ui::{
+            messages::UiMessage, views::settings::device_management::UserDevice,
+        },
+    },
+    infra::units::ByteSize,
+};
 
 use uuid::Uuid;
 
@@ -45,6 +51,7 @@ pub enum RuntimeConfigMessage {
     // Animation Effects
     HoverScale(f32),
     HoverTransition(u64),
+    HoverScaleDownDelay(u64),
     AnimationDuration(u64),
     TextureFadeInitial(u64),
     TextureFade(u64),
@@ -56,6 +63,11 @@ pub enum RuntimeConfigMessage {
     CarouselPrefetch(usize),
     CarouselBackground(usize),
     KeepAlive(u64),
+
+    // Image Cache
+    ImageCacheRamMax(ByteSize),
+    ImageCacheDiskMax(ByteSize),
+    ImageCacheDiskTtlDays(u64),
 
     // Player Seeking
     SeekForwardCoarse(f64),
@@ -107,12 +119,7 @@ pub enum SettingsUiMessage {
     DatabaseCleared(Result<(), String>),
 
     // User settings navigation
-    ShowProfile, // Redundant?
-    ShowUserProfile,
-    ShowUserPreferences,
-    ShowUserSecurity,
-    ShowDeviceManagement,
-    BackToSettings,
+    ShowSettings,
     Logout,
 
     // Security settings
@@ -240,12 +247,7 @@ impl SettingsUiMessage {
             Self::DatabaseCleared(_) => "UI::DatabaseCleared",
 
             // User settings navigation
-            Self::ShowProfile => "UI::ShowProfile",
-            Self::ShowUserProfile => "UI::ShowUserProfile",
-            Self::ShowUserPreferences => "UI::ShowUserPreferences",
-            Self::ShowUserSecurity => "UI::ShowUserSecurity",
-            Self::ShowDeviceManagement => "UI::ShowDeviceManagement",
-            Self::BackToSettings => "UI::BackToSettings",
+            Self::ShowSettings => "UI::ShowSettings",
             Self::Logout => "UI::Logout",
 
             // Security settings
@@ -394,23 +396,8 @@ impl std::fmt::Debug for SettingsUiMessage {
             SettingsUiMessage::DatabaseCleared(_) => {
                 write!(f, "UI::DatabaseCleared")
             }
-            SettingsUiMessage::ShowProfile => {
-                write!(f, "UI::ShowUserProfile")
-            }
-            SettingsUiMessage::ShowUserProfile => {
-                write!(f, "UI::ShowUserProfile")
-            }
-            SettingsUiMessage::ShowUserPreferences => {
-                write!(f, "UI::ShowUserPreferences")
-            }
-            SettingsUiMessage::ShowUserSecurity => {
-                write!(f, "UI::ShowUserSecurity")
-            }
-            SettingsUiMessage::ShowDeviceManagement => {
-                write!(f, "UI::ShowDeviceManagement")
-            }
-            SettingsUiMessage::BackToSettings => {
-                write!(f, "UI::BackToSettings")
+            SettingsUiMessage::ShowSettings => {
+                write!(f, "UI::ShowSettings")
             }
             SettingsUiMessage::Logout => write!(f, "UI::Logout"),
             SettingsUiMessage::ShowChangePassword => {

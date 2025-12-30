@@ -12,12 +12,9 @@ use crate::{
             },
             home::view_home_content,
         },
-        widgets::collect_cached_handles_for_media,
     },
     state::State,
 };
-use ferrex_core::player_prelude::ImageSize;
-use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, text},
@@ -163,15 +160,16 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                 // Deduplicate
                                 ids.sort_unstable();
                                 ids.dedup();
-                                let handles = collect_cached_handles_for_media(
-                                    ids.into_iter(),
-                                    MediaType::Movie,
-                                    ImageSize::poster(),
-                                );
-                                let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
+                                // let handles = collect_cached_handles_for_media(
+                                //     ids.into_iter(),
+                                //     MediaType::Movie,
+                                //     ImageSize::poster(),
+                                // );
+                                // let budget = crate::infra::constants::performance_config::texture_upload::MAX_UPLOADS_PER_FRAME as usize;
                                 //let preloader = texture_preloader(handles, budget);
 
-                                let grid = virtual_movie_references_grid(
+                                // column![preloader, grid].into()
+                                virtual_movie_references_grid(
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
@@ -180,10 +178,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                             .into()
                                     },
                                     state,
-                                );
-
-                                // column![preloader, grid].into()
-                                grid
+                                )
                             }
                             LibraryType::Series => {
                                 let visible_range =
@@ -204,14 +199,16 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                 }
                                 ids.sort_unstable();
                                 ids.dedup();
-                                let handles = collect_cached_handles_for_media(
-                                    ids.into_iter(),
-                                    MediaType::Series,
-                                    ImageSize::poster(),
-                                );
+
+                                // let handles = collect_cached_handles_for_media(
+                                //     ids.into_iter(),
+                                //     MediaType::Series,
+                                //     ImageSize::poster(),
+                                // );
                                 // let preloader = texture_preloader(handles, budget);
 
-                                let grid = virtual_series_references_grid(
+                                // column![preloader, grid].into()
+                                virtual_series_references_grid(
                                     &lib_state.cached_index_ids,
                                     &lib_state.grid_state,
                                     &state.domains.ui.state.hovered_media_id,
@@ -220,10 +217,7 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                                             .into()
                                     },
                                     state,
-                                );
-
-                                // column![preloader, grid].into()
-                                grid
+                                )
                             }
                         },
                         TabState::Home(_all_state) => {
@@ -231,10 +225,6 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
                             view_home_content(state)
                         }
                     }
-                }
-                _ => {
-                    // Other modes not implemented yet
-                    view_home_content(state)
                 }
             };
 
@@ -250,11 +240,14 @@ pub fn view_library(state: &State) -> Element<'_, UiMessage> {
             if let Some(panel) = filter_panel {
                 main_col = main_col.push(panel);
             }
-            let main_content = main_col.push(
-                container(library_content)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            );
+            let main_content = main_col
+                .push(
+                    container(library_content)
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill);
 
             main_content.into()
         }

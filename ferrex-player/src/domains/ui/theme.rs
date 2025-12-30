@@ -1,6 +1,6 @@
 use iced::{
-    Background, Border, Color, Shadow, Theme, theme,
-    widget::{button, container, scrollable, slider, text_input},
+    Background, Border, Color, Shadow, Theme, Vector, theme,
+    widget::{button, checkbox, container, scrollable, slider, text_input},
 };
 
 use crate::domains::ui::types::ViewState;
@@ -15,13 +15,7 @@ impl MediaServerTheme {
     // Core colors
     pub const BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0); // #000000
     pub const BACKGROUND_DARK: Color = Color::from_rgb(0.1, 0.1, 0.10);
-    //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.31, 0.094, 0.333);
-    //pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.20, 0.05, 0.30);
-    // pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.12, 0.05, 0.16);
     pub const BACKGROUND_ACCENT: Color = Color::from_rgb(0.01, 0.01, 0.01);
-    // pub const ACCENT: Color = Color::from_rgb(0.0, 0.5, 1.0); // #0080FF
-    // pub const ACCENT_HOVER: Color = Color::from_rgb(0.0, 0.6, 1.0); // #0099FF
-    // pub const ACCENT_GLOW: Color = Color::from_rgba(0.0, 0.5, 1.0, 0.3); // Blue glow
     pub const ACCENT: Color = Color::from_rgb(0.867, 0.0, 0.867);
     pub const ACCENT_HOVER: Color = Color::from_rgb(0.9, 0.0, 0.9);
     pub const ACCENT_GLOW: Color = Color::from_rgba(0.867, 0.5, 0.867, 0.3);
@@ -90,30 +84,25 @@ impl MediaServerTheme {
         if let Some(main_id) = state
             .windows
             .get(crate::domains::ui::windows::WindowKind::Main)
+            && window.map(|w| w == main_id).unwrap_or(true)
+            && matches!(state.domains.ui.state.view, ViewState::Player)
+            && let Some(video) = state.domains.player.state.video_opt.as_ref()
         {
-            if window.map(|w| w == main_id).unwrap_or(true)
-                && matches!(state.domains.ui.state.view, ViewState::Player)
-            {
-                if let Some(video) =
-                    state.domains.player.state.video_opt.as_ref()
-                {
-                    // Only make the background transparent when using Wayland.
-                    // Treat any preference other than ForceAppsink on Wayland as Wayland-backed,
-                    // which includes PreferWayland.
-                    let pref = video.backend();
-                    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                        use_transparent_bg = !matches!(
-                            pref,
-                            subwave_unified::video::BackendPreference::ForceAppsink
-                        );
-                    } else {
-                        // On non-Wayland, only enable if explicitly forced to Wayland
-                        use_transparent_bg = matches!(
-                            pref,
-                            subwave_unified::video::BackendPreference::ForceWayland
-                        );
-                    }
-                }
+            // Only make the background transparent when using Wayland.
+            // Treat any preference other than ForceAppsink on Wayland as Wayland-backed,
+            // which includes PreferWayland.
+            let pref = video.backend();
+            if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                use_transparent_bg = !matches!(
+                    pref,
+                    subwave_unified::video::BackendPreference::ForceAppsink
+                );
+            } else {
+                // On non-Wayland, only enable if explicitly forced to Wayland
+                use_transparent_bg = matches!(
+                    pref,
+                    subwave_unified::video::BackendPreference::ForceWayland
+                );
             }
         }
 
@@ -132,6 +121,7 @@ impl MediaServerTheme {
 }
 
 // Container styles using closures
+#[derive(Debug)]
 pub enum Container {
     Default,
     Card,
@@ -305,6 +295,7 @@ impl Container {
 }
 
 // Button styles using closures
+#[derive(Debug)]
 pub enum Button {
     Primary,
     Secondary,
@@ -484,7 +475,7 @@ impl Button {
                         width: 1.0,
                         radius: 0.0.into(),
                     },
-                    shadow: Shadow::default(),
+                    shadow,
                     snap: false,
                 }
             },
@@ -507,7 +498,7 @@ impl Button {
                     text_color: MediaServerTheme::TEXT_PRIMARY,
                     background: Some(Background::Color(background)),
                     border: Border {
-                        color: Color::TRANSPARENT,
+                        color: border_color,
                         width: 1.0,
                         radius: 0.0.into(),
                     },
@@ -839,6 +830,7 @@ impl Button {
 }
 
 // Scrollable style
+#[derive(Debug)]
 pub struct Scrollable;
 
 impl Scrollable {
@@ -861,7 +853,7 @@ impl Scrollable {
                         radius: 4.0.into(),
                     },
                     scroller: scrollable::Scroller {
-                        color: scroller_color,
+                        background: Background::Color(scroller_color),
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
@@ -879,7 +871,7 @@ impl Scrollable {
                         radius: 4.0.into(),
                     },
                     scroller: scrollable::Scroller {
-                        color: scroller_color,
+                        background: Background::Color(scroller_color),
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
@@ -888,12 +880,27 @@ impl Scrollable {
                     },
                 },
                 gap: None,
+                auto_scroll: scrollable::AutoScroll {
+                    background: Background::Color(MediaServerTheme::CARD_BG),
+                    border: Border {
+                        color: MediaServerTheme::BORDER_COLOR,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow {
+                        color: Color::BLACK,
+                        offset: Vector::ZERO,
+                        blur_radius: 2.0,
+                    },
+                    icon: MediaServerTheme::TEXT_PRIMARY,
+                },
             }
         }
     }
 }
 
 // Slider style
+#[derive(Debug)]
 pub struct Slider;
 
 impl Slider {
@@ -929,7 +936,86 @@ impl Slider {
     }
 }
 
+// Checkbox style
+#[derive(Debug)]
+pub struct Checkbox;
+
+impl Checkbox {
+    pub fn style() -> fn(&Theme, checkbox::Status) -> checkbox::Style {
+        |_, status| {
+            let (is_checked, is_hovered, is_disabled) = match status {
+                checkbox::Status::Active { is_checked } => {
+                    (is_checked, false, false)
+                }
+                checkbox::Status::Hovered { is_checked } => {
+                    (is_checked, true, false)
+                }
+                checkbox::Status::Disabled { is_checked } => {
+                    (is_checked, false, true)
+                }
+            };
+
+            let (background, border_color, icon_color, text_color) =
+                if is_disabled {
+                    let background = if is_checked {
+                        crate::infra::theme::darken(accent(), 0.35)
+                    } else {
+                        MediaServerTheme::SURFACE_DIM
+                    };
+
+                    (
+                        background,
+                        MediaServerTheme::BORDER_COLOR,
+                        MediaServerTheme::TEXT_DIMMED,
+                        MediaServerTheme::TEXT_DIMMED,
+                    )
+                } else if is_checked {
+                    let accent =
+                        if is_hovered { accent_hover() } else { accent() };
+
+                    (
+                        accent,
+                        accent,
+                        MediaServerTheme::TEXT_PRIMARY,
+                        MediaServerTheme::TEXT_PRIMARY,
+                    )
+                } else {
+                    let background = if is_hovered {
+                        MediaServerTheme::CARD_HOVER
+                    } else {
+                        MediaServerTheme::CARD_BG
+                    };
+
+                    let border_color = if is_hovered {
+                        accent()
+                    } else {
+                        MediaServerTheme::BORDER_COLOR
+                    };
+
+                    (
+                        background,
+                        border_color,
+                        MediaServerTheme::TEXT_PRIMARY,
+                        MediaServerTheme::TEXT_SECONDARY,
+                    )
+                };
+
+            checkbox::Style {
+                background: Background::Color(background),
+                icon_color,
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                text_color: Some(text_color),
+            }
+        }
+    }
+}
+
 // Text input style
+#[derive(Debug)]
 pub struct TextInput;
 
 impl Default for TextInput {

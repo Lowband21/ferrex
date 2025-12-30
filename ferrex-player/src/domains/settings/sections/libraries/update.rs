@@ -1,9 +1,13 @@
 //! Libraries section update handlers (Admin)
 
-use super::messages::{LibrariesMessage, ScanStatus};
-use super::state::{LibrarySummary, LibraryType};
-use crate::common::messages::DomainUpdateResult;
-use crate::state::State;
+use super::{
+    messages::{LibrariesMessage, ScanStatus},
+    state::LibrarySummary,
+};
+
+use crate::{common::messages::DomainUpdateResult, state::State};
+
+use ferrex_model::LibraryType;
 use uuid::Uuid;
 
 /// Main message handler for libraries section

@@ -1,5 +1,7 @@
 pub mod admin;
 pub mod auth;
+#[cfg(feature = "debug-cache-overlay")]
+pub mod cache_debug_overlay;
 pub mod error;
 pub mod grid;
 pub mod header;

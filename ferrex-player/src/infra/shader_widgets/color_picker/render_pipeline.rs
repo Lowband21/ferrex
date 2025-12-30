@@ -1,4 +1,4 @@
-//! Render pipeline and GPU types for the color picker
+//! Render provider and GPU types for the color picker
 
 use bytemuck::{Pod, Zeroable};
 

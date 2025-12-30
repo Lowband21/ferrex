@@ -265,6 +265,7 @@ mod tests {
     };
     use chrono::Utc;
     use ferrex_core::player_prelude::{LibraryId, ScanStageLatencySummary};
+    use ferrex_model::SubjectKey;
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
 
@@ -278,7 +279,7 @@ mod tests {
             total_items: 100,
             sequence: 42,
             current_path: Some("/path".to_string()),
-            path_key: Some("key".to_string()),
+            path_key: Some(SubjectKey::path("/path").expect("path key")),
             p95_stage_latencies_ms: ScanStageLatencySummary {
                 scan: 1,
                 analyze: 2,

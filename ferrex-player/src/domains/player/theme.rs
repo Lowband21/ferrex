@@ -578,19 +578,22 @@ pub fn toggler_dark(
     let is_toggled = match status {
         toggler::Status::Active { is_toggled } => is_toggled,
         toggler::Status::Hovered { is_toggled } => is_toggled,
-        toggler::Status::Disabled => false,
+        toggler::Status::Disabled { is_toggled } => is_toggled,
     };
 
     toggler::Style {
-        background: if is_toggled {
+        background: iced::Background::Color(if is_toggled {
             accent()
         } else {
             Color::from_rgba(1.0, 1.0, 1.0, 0.2)
-        },
+        }),
         background_border_width: 0.0,
         background_border_color: Color::TRANSPARENT,
-        foreground: Color::WHITE,
+        foreground: iced::Background::Color(Color::WHITE),
         foreground_border_width: 0.0,
         foreground_border_color: Color::TRANSPARENT,
+        text_color: None,
+        border_radius: None,
+        padding_ratio: 0.1,
     }
 }

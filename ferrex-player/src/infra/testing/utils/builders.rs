@@ -8,9 +8,11 @@ use std::marker::PhantomData;
 pub trait RequiredField {}
 
 /// Marker type for a field that has been set
+#[derive(Debug)]
 pub struct Set;
 
 /// Marker type for a field that has not been set
+#[derive(Debug)]
 pub struct NotSet;
 
 impl RequiredField for Set {}
@@ -24,6 +26,7 @@ pub trait Builder {
 }
 
 /// Example: User builder with required and optional fields
+#[derive(Debug)]
 pub struct UserBuilder<Name = NotSet, Email = NotSet> {
     name: Option<String>,
     email: Option<String>,
@@ -196,6 +199,15 @@ macro_rules! builder {
 /// Collection builder for building multiple related objects
 pub struct CollectionBuilder<T> {
     items: Vec<T>,
+}
+
+impl<T> std::fmt::Debug for CollectionBuilder<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CollectionBuilder")
+            .field("item_type", &std::any::type_name::<T>())
+            .field("items_len", &self.items.len())
+            .finish()
+    }
 }
 
 impl<T> CollectionBuilder<T> {

@@ -1,5 +1,7 @@
 //! Local message types for virtual carousel interactions (scaffold)
 
+use std::time::Instant;
+
 use iced::widget::scrollable;
 
 use super::types::CarouselKey;
@@ -27,7 +29,8 @@ pub enum VirtualCarouselMessage {
     StartLeftActive,
     StopRightActive,
     StopLeftActive,
-    MotionTickActive,
+    /// Frame-synchronized tick with timestamp from window::frames()
+    MotionTick(Instant),
     SetBoostActive(bool),
 
     // Viewport / scroll reporting

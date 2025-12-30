@@ -4,7 +4,6 @@ use crate::{
 };
 
 use iced::Task;
-use std::time::Instant;
 use subwave_unified::video::SubwaveVideo;
 
 // Helper functions
@@ -57,7 +56,7 @@ pub fn load_video(
     // Mark that we're loading
     state.domains.player.state.is_loading_video = true;
 
-    // Preserve any resume/duration hints before closing the current pipeline
+    // Preserve any resume/duration hints before closing the current provider
     let pending_resume_hint =
         state.domains.player.state.pending_resume_position;
     let duration_hint_before_close =
@@ -148,9 +147,9 @@ pub fn load_video(
     // Override HDR decision if filename suggests HDR but metadata is missing
     let use_hdr_pipeline_final = if needs_metadata_fetch {
         log::warn!(
-            "No HDR metadata available, using filename heuristics for pipeline selection"
+            "No HDR metadata available, using filename heuristics for provider selection"
         );
-        true // Use HDR pipeline for likely HDR content even without metadata
+        true // Use HDR provider for likely HDR content even without metadata
     } else {
         use_hdr_pipeline
     };
@@ -213,12 +212,5 @@ pub fn load_video(
                 ),
             )
         }
-    }
-}
-
-fn update_controls(state: &mut State, show: bool) {
-    state.domains.player.state.controls = show;
-    if show {
-        state.domains.player.state.controls_time = Instant::now();
     }
 }

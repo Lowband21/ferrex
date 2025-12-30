@@ -1,4 +1,4 @@
-//! Shared theme infrastructure for accent colors
+//! Shared theme infra for accent colors
 //!
 //! This module provides the accent color system used by both the UI and Player domains.
 //! It enables user-configurable accent colors with live updates.
@@ -25,6 +25,7 @@
 
 pub mod accent;
 pub mod colors;
+pub mod media_theme_color;
 
 // Re-export primary types and functions
 pub use accent::{
@@ -32,3 +33,4 @@ pub use accent::{
     accent, accent_glow, accent_hover, reset_accent, set_accent,
 };
 pub use colors::{brighten, darken, lighten, with_alpha};
+pub use media_theme_color::fallback_theme_color_for;

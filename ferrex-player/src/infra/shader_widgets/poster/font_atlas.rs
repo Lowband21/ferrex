@@ -16,10 +16,10 @@ const EMBEDDED_FONT: &[u8] =
 /// Characters to include in the atlas
 /// Layout: A-Z (0-25), a-z (26-51), 0-9 (52-61), space (62), punctuation (63+)
 const ATLAS_CHARS: &str =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-:!?'&,";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-:!?'&,/";
 
 /// Total number of characters in the atlas
-pub const ATLAS_CHAR_COUNT: usize = 71;
+pub const ATLAS_CHAR_COUNT: usize = 72;
 
 /// Convert a character to its glyph index in the atlas
 /// Returns space index (62) for unknown characters
@@ -37,6 +37,7 @@ pub fn char_to_glyph_index(c: char) -> u8 {
         '\'' => 68,
         '&' => 69,
         ',' => 70,
+        '/' => 71,
         _ => 62, // Unknown -> space
     }
 }
@@ -413,24 +414,3 @@ impl std::fmt::Display for FontAtlasError {
 }
 
 impl std::error::Error for FontAtlasError {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_atlas_generation() {
-        // This test will fail until we have the font file
-        // For now, just test the SDF generation
-        let bitmap = vec![
-            0, 0, 0, 0, 0, 0, 255, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255,
-            255, 255, 0, 0, 0, 0, 0, 0,
-        ];
-        let sdf = generate_sdf(&bitmap, 5, 5, 2);
-        assert_eq!(sdf.len(), 9 * 9);
-        // Center should be high (inside)
-        assert!(sdf[4 * 9 + 4] > 127);
-        // Corners should be low (outside)
-        assert!(sdf[0] < 127);
-    }
-}

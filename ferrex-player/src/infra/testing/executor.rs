@@ -40,6 +40,19 @@ pub struct TestExecutor {
     max_iterations: usize,
 }
 
+impl std::fmt::Debug for TestExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestExecutor")
+            .field("mode", &self.mode)
+            .field("executed_count", &self.executed_count)
+            .field("max_iterations", &self.max_iterations)
+            .field("pending_tasks", &self.pending_count())
+            .field("scheduled_tasks", &self.scheduled_count())
+            .field("virtual_time", &self.current_time())
+            .finish()
+    }
+}
+
 impl TestExecutor {
     /// Create a new test executor
     pub fn new() -> Self {
@@ -248,7 +261,7 @@ fn create_test_waker(
     pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
 ) -> Waker {
     struct TestWake {
-        pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
+        _pending_tasks: Arc<Mutex<VecDeque<BoxedFuture>>>,
     }
 
     impl Wake for TestWake {
@@ -258,7 +271,9 @@ fn create_test_waker(
         }
     }
 
-    let wake = Arc::new(TestWake { pending_tasks });
+    let wake = Arc::new(TestWake {
+        _pending_tasks: pending_tasks,
+    });
     Waker::from(wake)
 }
 

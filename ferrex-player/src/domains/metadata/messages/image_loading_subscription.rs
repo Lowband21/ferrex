@@ -1,12 +1,14 @@
 use super::MetadataMessage;
-use crate::infra::services::api::ApiService;
 
-use ferrex_core::{
-    api::routes::{utils, v1},
-    player_prelude::ImageSize,
+use crate::infra::{
+    cache::PlayerDiskImageCache,
+    constants::image::IMAGE_PENDING_RETRY_DELAY,
+    services::api::{ApiService, ImageFetchResult},
 };
 
-use ferrex_model::MediaType;
+use ferrex_core::api::routes::v1;
+
+use ferrex_model::image::ImageQuery;
 use futures::{
     StreamExt,
     stream::{self, FuturesUnordered},
@@ -14,13 +16,13 @@ use futures::{
 
 use iced::Subscription;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 /// Creates a subscription for loading images from the server
-pub fn image_loading(
+pub(crate) fn image_loading(
     api_service: Arc<dyn ApiService>,
     server_url: String,
     receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+    disk_cache: Option<Arc<PlayerDiskImageCache>>,
 ) -> Subscription<MetadataMessage> {
     // Subscription data that includes both ID and context
     #[derive(Debug, Clone)]
@@ -29,11 +31,12 @@ pub fn image_loading(
         api_service: Arc<dyn ApiService>,
         server_url: String,
         receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+        disk_cache: Option<Arc<PlayerDiskImageCache>>,
     }
 
     impl PartialEq for ImageLoaderSubscription {
         fn eq(&self, other: &Self) -> bool {
-            self.id == other.id
+            self.id == other.id && self.server_url == other.server_url
         }
     }
     impl Eq for ImageLoaderSubscription {}
@@ -41,6 +44,7 @@ pub fn image_loading(
     impl std::hash::Hash for ImageLoaderSubscription {
         fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
             self.id.hash(state);
+            self.server_url.hash(state);
         }
     }
 
@@ -49,6 +53,7 @@ pub fn image_loading(
         api_service,
         server_url,
         receiver,
+        disk_cache,
     };
 
     Subscription::run_with(subscription, |sub| {
@@ -68,19 +73,18 @@ pub fn image_loading(
             Arc::clone(&sub.api_service),
             sub.server_url.clone(),
             Arc::clone(&sub.receiver),
+            sub.disk_cache.clone(),
         )
     })
 }
 
-// (legacy single-flight stream removed in favor of concurrent version)
-
-// New: concurrent image loader stream with adaptive pacing
 fn image_loader_stream_concurrent(
     api_service: Arc<dyn ApiService>,
     server_url: String,
     wake_receiver_arc: Arc<
         Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
     >,
+    disk_cache: Option<Arc<PlayerDiskImageCache>>,
 ) -> impl futures::Stream<Item = MetadataMessage> {
     enum ImageLoaderState {
         Running {
@@ -89,7 +93,6 @@ fn image_loader_stream_concurrent(
             inflight:
                 FuturesUnordered<tokio::task::JoinHandle<MetadataMessage>>,
         },
-        Finished,
     }
 
     log::debug!("image_loader_stream (concurrent): Creating stream");
@@ -104,6 +107,7 @@ fn image_loader_stream_concurrent(
             let server_url = server_url.clone();
             let api_service = Arc::clone(&api_service);
             let wake_receiver_arc = Arc::clone(&wake_receiver_arc);
+            let disk_cache = disk_cache.clone();
             async move {
                 match state {
                     ImageLoaderState::Running {
@@ -116,7 +120,7 @@ fn image_loader_stream_concurrent(
                         // configured limit.
                         let desired_concurrency: usize =
                             crate::infra::service_registry::get_image_service()
-                                .map(|svc| svc.get().max_concurrent())
+                                .map(|svc| svc.max_concurrent())
                                 .unwrap_or(8);
 
                         // Fill pool with new requests if available
@@ -126,13 +130,13 @@ fn image_loader_stream_concurrent(
                             }
 
                             let request = match crate::infra::service_registry::get_image_service() {
-                                Some(image_service) => image_service.get().get_next_request(),
+                                Some(image_service) => image_service.get_next_request(),
                                 _ => None,
                             };
                             let Some(request) = request else { break };
 
                             if let Some(image_service) = crate::infra::service_registry::get_image_service() {
-                                image_service.get().mark_loading(&request);
+                                image_service.mark_loading(&request);
                             }
 
                             let (cancel_tx, cancel_rx) =
@@ -141,7 +145,6 @@ fn image_loader_stream_concurrent(
                                 crate::infra::service_registry::get_image_service()
                             {
                                 image_service
-                                    .get()
                                     .register_inflight_cancel(&request, cancel_tx);
                             } else {
                                 drop(cancel_tx);
@@ -149,58 +152,27 @@ fn image_loader_stream_concurrent(
 
                             let api = Arc::clone(&api_service);
                             let srv = server_url.clone();
+                            let disk_cache = disk_cache.clone();
                             let request_for_fetch = request.clone();
                             let request_for_cancel = request.clone();
                             let task = tokio::spawn(async move {
                                 let fetch = async move {
-                                    let mut buf = Uuid::encode_buffer();
-                                    // Build media type/id mapping (including Person)
-                                    let (media_type, id) =
-                                        match &request_for_fetch.image_type {
-                                            MediaType::Movie => (
-                                                "movie",
-                                                request_for_fetch
-                                                    .media_id
-                                                    .hyphenated()
-                                                    .encode_lower(&mut buf),
-                                            ),
-                                            MediaType::Series => (
-                                                "series",
-                                                request_for_fetch
-                                                    .media_id
-                                                    .hyphenated()
-                                                    .encode_lower(&mut buf),
-                                            ),
-                                            MediaType::Season => (
-                                                "season",
-                                                request_for_fetch
-                                                    .media_id
-                                                    .hyphenated()
-                                                    .encode_lower(&mut buf),
-                                            ),
-                                            MediaType::Episode => (
-                                                "episode",
-                                                request_for_fetch
-                                                    .media_id
-                                                    .hyphenated()
-                                                    .encode_lower(&mut buf),
-                                            ),
-                                            MediaType::Person => (
-                                                "person",
-                                                request_for_fetch
-                                                    .media_id
-                                                    .hyphenated()
-                                                    .encode_lower(&mut buf),
-                                            ),
-                                        };
-
-                                    let size = request_for_fetch.size;
-                                    let category = match size {
-                                        ImageSize::Poster(_) => "poster",
-                                        ImageSize::Backdrop(_) => "backdrop",
-                                        ImageSize::Thumbnail(_) => "thumbnail",
-                                        ImageSize::Profile(_) => "cast",
-                                    };
+                                    if let Some(cache) = disk_cache.as_ref()
+                                        && let Some(bytes) = cache
+                                            .read_bytes(&request_for_fetch)
+                                            .await
+                                    {
+                                        let (handle, estimated_bytes) =
+                                            crate::infra::cache::handle_from_encoded_bytes(
+                                                &request_for_fetch,
+                                                bytes,
+                                            );
+                                        return MetadataMessage::UnifiedImageLoaded(
+                                            request_for_fetch,
+                                            handle,
+                                            estimated_bytes,
+                                        );
+                                    }
 
                                     if srv.is_empty() {
                                         return MetadataMessage::UnifiedImageLoadFailed(
@@ -209,79 +181,34 @@ fn image_loader_stream_concurrent(
                                         );
                                     }
 
-                                    // Use a single source of truth for target pixel dimensions
-                                    // from ferrex-model's ImageSize::dimensions().
-                                    // Exceptions:
-                                    // - Episode still thumbnails are 16:9 (override to 400x225)
-                                    // - If dimensions() returns (0,0) (dynamic), fall back to legacy defaults
-                                    let (target_w, target_h): (u32, u32) = {
-                                        match (
-                                            request_for_fetch.image_type,
-                                            size,
-                                        ) {
-                                            // Episode stills are wide thumbnails (16:9)
-                                            (
-                                                MediaType::Episode,
-                                                ImageSize::Thumbnail(_),
-                                            ) => (400, 225),
-                                            // Default: derive from model dimensions
-                                            _ => {
-                                                if let Some((w, h)) =
-                                                    size.dimensions()
-                                                {
-                                                    (w, h)
-                                                } else {
-                                                    // Conservative generic 2:3 default
-                                                    (185, 278)
-                                                }
-                                            }
-                                        }
+                                    let image_query = ImageQuery {
+                                        iid: request_for_fetch.iid,
+                                        imz: request_for_fetch.size,
                                     };
 
-                                    let index_str = request_for_fetch
-                                        .image_index
-                                        .to_string();
-                                    let path = utils::replace_params(
+                                    let result = api.as_ref().get_image(
                                         v1::images::SERVE,
-                                        &[
-                                            ("{type}", media_type),
-                                            ("{id}", id),
-                                            ("{category}", category),
-                                            ("{index}", index_str.as_str()),
-                                        ],
+                                        image_query,
                                     );
 
-                                    // Pass the full ImageSize enum to the server for semantic info.
-                                    // Server can use this to make better decisions about which variant to serve.
-                                    let image_size_json =
-                                        serde_json::to_string(&size)
-                                            .unwrap_or_else(|_| {
-                                                target_w.to_string()
-                                            });
-                                    let result = api.as_ref().get_bytes(
-                                        &path,
-                                        Some(("image_size", &image_size_json)),
+                                    let full_url = format!(
+                                        "{}{}",
+                                        srv,
+                                        v1::images::SERVE,
                                     );
+
                                     match result.await {
-                                        Ok(bytes) => {
+                                        Ok(ImageFetchResult::Ready(bytes)) => {
                                             let byte_len = bytes.len();
                                             if byte_len == 0 {
                                                 let msg = format!(
-                                                    "Empty image body for path {}",
-                                                    path
+                                                    "Image request failed with url {} and ImageQuery {:#?}",
+                                                    full_url, image_query
                                                 );
-                                                log::error!("{}", msg);
-                                                let full_url = format!(
-                                                    "{}{}?image_size={}",
-                                                    srv, path, image_size_json
-                                                );
+
                                                 crate::infra::image_log::log_fetch_failure_once(
-                                                    request_for_fetch.media_id,
-                                                    category,
-                                                    size,
-                                                    target_w,
+                                                    image_query,
                                                     &full_url,
-                                                    &msg,
                                                 );
                                                 return MetadataMessage::UnifiedImageLoadFailed(
                                                     request_for_fetch,
@@ -337,138 +264,89 @@ fn image_loader_stream_concurrent(
                                             ) {
                                                 let msg = format!(
                                                     "Response does not look like a supported image for path {} ({} bytes)",
-                                                    path, byte_len
+                                                    full_url, byte_len
                                                 );
                                                 log::error!("{}", msg);
-                                                let full_url = format!(
-                                                    "{}{}?image_size={}",
-                                                    srv, path, image_size_json
-                                                );
+
                                                 crate::infra::image_log::log_fetch_failure_once(
-                                                    request_for_fetch.media_id,
-                                                    category,
-                                                    size,
-                                                    target_w,
+                                                    image_query,
                                                     &full_url,
-                                                    &msg,
                                                 );
+
                                                 return MetadataMessage::UnifiedImageLoadFailed(request_for_fetch, msg);
                                             }
 
-                                            // Decode and resize to exact widget dimensions before creating the handle.
-                                            // Treat any decode failure as fatal to avoid uploading corrupt/partial bytes.
-                                            let decoded =
-                                                match ::image::load_from_memory(
-                                                    &bytes,
-                                                ) {
-                                                    Ok(img) => img,
-                                                    Err(e) => {
-                                                        let msg = format!(
-                                                            "Image decode failed for path {}: {}",
-                                                            path, e
-                                                        );
-                                                        log::error!("{}", msg);
-                                                        let full_url = format!(
-                                                            "{}{}?image_size={}",
-                                                            srv,
-                                                            path,
-                                                            image_size_json
-                                                        );
-                                                        crate::infra::image_log::log_fetch_failure_once(
-                                                        request_for_fetch.media_id,
-                                                        category,
-                                                        size,
-                                                        target_w,
-                                                        &full_url,
-                                                        &format!("{}", e),
-                                                    );
-                                                        return MetadataMessage::UnifiedImageLoadFailed(
-                                                        request_for_fetch,
-                                                        msg,
-                                                    );
-                                                    }
-                                                };
-
-                                            let resized = decoded.resize_exact(
-                                                target_w,
-                                                target_h,
-                                                ::image::imageops::FilterType::Triangle,
-                                            );
-                                            let rgba = resized.to_rgba8();
-                                            let raw = rgba.into_raw();
-                                            let expected = (target_w as usize)
-                                                * (target_h as usize)
-                                                * 4usize;
-                                            if raw.len() != expected {
-                                                let msg = format!(
-                                                    "Decoded size mismatch for {}: got {} bytes, expected {}",
-                                                    path,
-                                                    raw.len(),
-                                                    expected
-                                                );
-                                                log::error!("{}", msg);
-                                                let full_url = format!(
-                                                    "{}{}?image_size={}",
-                                                    srv, path, image_size_json
-                                                );
-                                                crate::infra::image_log::log_fetch_failure_once(
-                                                    request_for_fetch.media_id,
-                                                    category,
-                                                    size,
-                                                    target_w,
-                                                    &full_url,
-                                                    &msg,
-                                                );
-                                                return MetadataMessage::UnifiedImageLoadFailed(
-                                                    request_for_fetch,
-                                                    msg,
-                                                );
+                                            if let Some(cache) =
+                                                disk_cache.as_ref()
+                                            {
+                                                cache
+                                                    .write_bytes(
+                                                        &request_for_fetch,
+                                                        &bytes,
+                                                    )
+                                                    .await;
                                             }
 
-                                            let handle =
-                                                iced::widget::image::Handle::from_rgba(
-                                                    target_w,
-                                                    target_h,
-                                                    raw,
+                                            let (handle, estimated_bytes) =
+                                                crate::infra::cache::handle_from_encoded_bytes(
+                                                    &request_for_fetch,
+                                                    bytes,
                                                 );
-
-                                            // Temporary diagnostics: log one-time successful fetch
-                                            let full_url = format!(
-                                                "{}{}?image_size={}",
-                                                srv, path, image_size_json
-                                            );
-                                            crate::infra::image_log::log_fetch_once(
-                                                request_for_fetch.media_id,
-                                                category,
-                                                size,
-                                                target_w,
-                                                &full_url,
-                                                byte_len,
-                                            );
                                             MetadataMessage::UnifiedImageLoaded(
                                                 request_for_fetch,
                                                 handle,
+                                                estimated_bytes,
                                             )
+                                        }
+                                        Ok(ImageFetchResult::Pending {
+                                            retry_after,
+                                        }) => {
+                                            let delay = retry_after.unwrap_or(
+                                                IMAGE_PENDING_RETRY_DELAY,
+                                            );
+                                            if let Some(image_service) =
+                                                crate::infra::service_registry::get_image_service()
+                                            {
+                                                image_service
+                                                    .mark_pending(&request_for_fetch);
+                                            }
+
+                                            let retry_request =
+                                                request_for_fetch.clone();
+                                            tokio::spawn(async move {
+                                                tokio::time::sleep(delay).await;
+                                                if let Some(
+                                                    image_service,
+                                                ) =
+                                                    crate::infra::service_registry::get_image_service()
+                                                {
+                                                    image_service
+                                                        .request_image(
+                                                            retry_request,
+                                                        );
+                                                }
+                                            });
+
+                                            log::debug!(
+                                                "Image pending (iid={}, size={:?}); retrying in {:?}",
+                                                request_for_fetch.iid,
+                                                request_for_fetch.size,
+                                                delay
+                                            );
+
+                                            MetadataMessage::NoOp
                                         }
                                         Err(e) => {
                                             let msg = format!(
                                                 "Image download failed with path: {}\n Error: {}",
-                                                path, e
+                                                full_url, e
                                             );
                                             log::error!("{}", msg);
-                                            // Temporary diagnostics: log one-time fetch failure
-                                            let full_url = format!(
-                                                "{}{}?image_size={}",
-                                                srv, path, image_size_json
-                                            );
+
                                             crate::infra::image_log::log_fetch_failure_once(
-                                                request_for_fetch.media_id,
-                                                category,
-                                                size,
-                                                target_w,
-                                                &full_url,
-                                                &format!("{}", e),
-                                            );
+                                                            image_query,
+                                                            &full_url,
+                                                        );
                                             MetadataMessage::UnifiedImageLoadFailed(
                                                 request_for_fetch,
                                                 msg,
@@ -480,7 +358,7 @@ fn image_loader_stream_concurrent(
                                 tokio::select! {
                                     _ = cancel_rx => {
                                         if let Some(image_service) = crate::infra::service_registry::get_image_service() {
-                                            image_service.get().mark_cancelled(&request_for_cancel);
+                                            image_service.mark_cancelled(&request_for_cancel);
                                         }
                                         MetadataMessage::UnifiedImageCancelled(request_for_cancel)
                                     }
@@ -516,15 +394,12 @@ fn image_loader_stream_concurrent(
                             if ADAPT_COUNTER.fetch_add(
                                 1,
                                 std::sync::atomic::Ordering::Relaxed,
-                            ) % 8
-                                == 0
-                            {
-                                if let Some(svc) =
+                            ).is_multiple_of(8)
+                                && let Some(svc) =
                                     crate::infra::service_registry::get_image_service()
                                 {
-                                    svc.get().adapt_concurrency();
+                                    svc.adapt_concurrency();
                                 }
-                            }
 
                             return Some((
                                 msg,
@@ -537,20 +412,14 @@ fn image_loader_stream_concurrent(
                         }
 
                         // No tasks: wait for wake-up
-                        if receiver.is_none() {
-                            if let Ok(mut guard) = wake_receiver_arc.lock() {
-                                if let Some(rx) = guard.take() {
-                                    receiver = Some(rx);
-                                }
-                            }
+                        if receiver.is_none()
+                            && let Ok(mut guard) = wake_receiver_arc.lock()
+                            && let Some(res) = guard.take()
+                        {
+                            receiver = Some(res);
                         }
-                        if let Some(ref mut rx) = receiver {
-                            let _ = rx.recv().await;
-                        } else {
-                            tokio::time::sleep(
-                                std::time::Duration::from_millis(250),
-                            )
-                            .await;
+                        if let Some(ref mut res) = receiver {
+                            let _ = res.recv().await;
                         }
 
                         Some((
@@ -562,7 +431,6 @@ fn image_loader_stream_concurrent(
                             },
                         ))
                     }
-                    ImageLoaderState::Finished => None,
                 }
             }
         },

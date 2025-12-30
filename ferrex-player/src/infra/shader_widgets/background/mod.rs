@@ -5,11 +5,13 @@
 
 pub mod state;
 pub mod transitions;
+pub mod types;
 
 pub use crate::domains::ui::messages::UiMessage;
+pub use types::ContentOffsetPx;
 
 use crate::{
-    domains::ui::types::BackdropAspectMode,
+    domains::ui::{theme::MediaServerTheme, types::BackdropAspectMode},
     infra::shader_widgets::background::transitions::generate_random_gradient_center,
 };
 
@@ -19,7 +21,7 @@ use iced::{
     Color, Element, Length, Rectangle, Vector,
     advanced::{graphics::Viewport, image::Id as ImageId},
     mouse, wgpu,
-    widget::shader::{Primitive, Program},
+    widget::shader::{Pipeline as ShaderPipeline, Primitive, Program},
 };
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -37,12 +39,8 @@ pub enum BackgroundEffect {
     FloatingParticles { count: u32, size: f32 },
     /// Wave ripple effect
     WaveRipple { frequency: f32, amplitude: f32 },
-    /// Backdrop image with gradient fade
-    BackdropGradient {
-        image_handle: Option<iced::widget::image::Handle>,
-        fade_start: f32, // Where fade starts (0.0 = top, 1.0 = bottom)
-        fade_end: f32,   // Where fade ends completely
-    },
+    /// Backdrop image composited over a gradient background
+    BackdropGradient,
 }
 
 /// Background theme presets
@@ -181,6 +179,7 @@ pub struct BackgroundShaderProgram {
     pub secondary_color: Color,
     pub start_time: Instant,
     pub scroll_offset: f32,
+    pub content_offset_px: ContentOffsetPx,
     /// Transition data
     pub prev_primary_color: Color,
     pub prev_secondary_color: Color,
@@ -236,6 +235,7 @@ impl<Message> Program<Message> for BackgroundShaderProgram {
             start_time: self.start_time,
             program_id: self.id,
             scroll_offset: self.scroll_offset,
+            content_offset_px: self.content_offset_px,
             // Pass through transition data
             prev_primary_color: self.prev_primary_color,
             prev_secondary_color: self.prev_secondary_color,
@@ -267,6 +267,8 @@ pub struct BackgroundPrimitive {
     pub program_id: usize,
     /// Scroll offset for fixed backdrop positioning
     pub scroll_offset: f32,
+    /// Content-space offset for deterministic noise anchoring
+    pub content_offset_px: ContentOffsetPx,
     /// Transition data
     pub prev_primary_color: Color,
     pub prev_secondary_color: Color,
@@ -306,46 +308,49 @@ struct Globals {
     // Texture and scroll
     texture_params: [f32; 4], // texture_aspect, scroll_offset, header_offset, 0 (offset 128, size 16)
 
+    // Content-space offset (for deterministic noise anchoring)
+    content_offset_px: [f32; 4], // content_offset_px.x, content_offset_px.y, 0, 0 (offset 144, size 16)
+
     // Transition colors
-    prev_primary_color: [f32; 4], // offset 144, size 16
-    prev_secondary_color: [f32; 4], // offset 160, size 16
+    prev_primary_color: [f32; 4], // offset 160, size 16
+    prev_secondary_color: [f32; 4], // offset 176, size 16
 
     // Transition parameters
-    transition_params: [f32; 4], // transition_progress, backdrop_opacity, backdrop_slide_offset, backdrop_scale (offset 176, size 16)
+    transition_params: [f32; 4], // transition_progress, backdrop_opacity, backdrop_slide_offset, backdrop_scale (offset 192, size 16)
 
     // Gradient and depth
-    gradient_center: [f32; 4], // gradient_center.x, gradient_center.y, 0, 0 (offset 192, size 16)
-    depth_params: [f32; 4], // region_count, base_depth, shadow_intensity, shadow_distance (offset 208, size 16)
-    ambient_light: [f32; 4], // light_dir.x, light_dir.y, 0, 0 (offset 224, size 16)
+    gradient_center: [f32; 4], // gradient_center.x, gradient_center.y, 0, 0 (offset 208, size 16)
+    depth_params: [f32; 4], // region_count, base_depth, shadow_intensity, shadow_distance (offset 224, size 16)
+    ambient_light: [f32; 4], // light_dir.x, light_dir.y, 0, 0 (offset 240, size 16)
 
     // Depth regions (up to 8)
-    region1_bounds: [f32; 4], // x, y, width, height (offset 240, size 16)
-    region1_depth_params: [f32; 4], // depth, edge_transition_type, edge_width, shadow_enabled (offset 256, size 16)
-    region1_shadow_params: [f32; 4], // shadow_intensity, z_order, border_width, border_opacity (offset 272, size 16)
-    region1_border_color: [f32; 4],  // r, g, b, a (offset 288, size 16)
+    region1_bounds: [f32; 4], // x, y, width, height (offset 256, size 16)
+    region1_depth_params: [f32; 4], // depth, edge_transition_type, edge_width, shadow_enabled (offset 272, size 16)
+    region1_shadow_params: [f32; 4], // shadow_intensity, z_order, border_width, border_opacity (offset 288, size 16)
+    region1_border_color: [f32; 4],  // r, g, b, a (offset 304, size 16)
 
-    region2_bounds: [f32; 4], // (offset 304, size 16)
-    region2_depth_params: [f32; 4], // (offset 320, size 16)
-    region2_shadow_params: [f32; 4], // (offset 336, size 16)
-    region2_border_color: [f32; 4], // (offset 352, size 16)
+    region2_bounds: [f32; 4], // (offset 320, size 16)
+    region2_depth_params: [f32; 4], // (offset 336, size 16)
+    region2_shadow_params: [f32; 4], // (offset 352, size 16)
+    region2_border_color: [f32; 4], // (offset 368, size 16)
 
-    region3_bounds: [f32; 4], // (offset 368, size 16)
-    region3_depth_params: [f32; 4], // (offset 384, size 16)
-    region3_shadow_params: [f32; 4], // (offset 400, size 16)
-    region3_border_color: [f32; 4], // (offset 416, size 16)
+    region3_bounds: [f32; 4], // (offset 384, size 16)
+    region3_depth_params: [f32; 4], // (offset 400, size 16)
+    region3_shadow_params: [f32; 4], // (offset 416, size 16)
+    region3_border_color: [f32; 4], // (offset 432, size 16)
 
-    region4_bounds: [f32; 4], // (offset 432, size 16)
-    region4_depth_params: [f32; 4], // (offset 448, size 16)
-    region4_shadow_params: [f32; 4], // (offset 464, size 16)
-    region4_border_color: [f32; 4], // (offset 480, size 16)
+    region4_bounds: [f32; 4], // (offset 448, size 16)
+    region4_depth_params: [f32; 4], // (offset 464, size 16)
+    region4_shadow_params: [f32; 4], // (offset 480, size 16)
+    region4_border_color: [f32; 4], // (offset 496, size 16)
 
-                              // Total: 496 bytes (31 * 16)
+                              // Total: 512 bytes (32 * 16)
 }
 
 // Compile-time assertion to verify our struct size
 const _: () = {
     let size = std::mem::size_of::<Globals>();
-    assert!(size == 496, "Globals struct size mismatch");
+    assert!(size == 512, "Globals struct size mismatch");
 };
 
 /// Pipeline state
@@ -390,6 +395,19 @@ struct State {
 pub struct BackgroundRenderer {
     pipeline: Pipeline,
     state: State,
+}
+
+impl ShaderPipeline for BackgroundRenderer {
+    fn new(
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        BackgroundRenderer {
+            pipeline: Pipeline::new(device, format),
+            state: State::default(),
+        }
+    }
 }
 
 #[cfg_attr(
@@ -513,7 +531,7 @@ impl Pipeline {
                 ],
             });
 
-        // Create pipeline layout
+        // Create provider layout
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Background Pipeline Layout"),
@@ -524,7 +542,7 @@ impl Pipeline {
                 push_constant_ranges: &[],
             });
 
-        // Create render pipeline
+        // Create render provider
         let render_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Background Pipeline"),
@@ -666,8 +684,9 @@ fn load_texture(
         );
         debug_assert!(
             height == 1
-                || row_stride % (wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
-                    == 0,
+                || row_stride.is_multiple_of(
+                    wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize
+                ),
             "Multi-row upload without padding should be aligned",
         );
         // Already aligned; we can upload directly
@@ -681,7 +700,7 @@ fn load_texture(
             &image_data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some((width * bytes_per_pixel) as u32),
+                bytes_per_row: Some(width * bytes_per_pixel),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d {
@@ -743,19 +762,7 @@ fn load_texture(
     profiling::all_functions
 )]
 impl Primitive for BackgroundPrimitive {
-    type Renderer = BackgroundRenderer;
-
-    fn initialize(
-        &self,
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self::Renderer {
-        BackgroundRenderer {
-            pipeline: Pipeline::new(device, format),
-            state: State::default(),
-        }
-    }
+    type Pipeline = BackgroundRenderer;
 
     #[cfg_attr(
         any(
@@ -767,7 +774,7 @@ impl Primitive for BackgroundPrimitive {
     )]
     fn prepare(
         &self,
-        renderer: &mut Self::Renderer,
+        renderer: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _bounds: &Rectangle,
@@ -800,7 +807,7 @@ impl Primitive for BackgroundPrimitive {
         }
 
         if state.globals_buffer.is_none() {
-            const EXPECTED_SIZE: u64 = 496;
+            const EXPECTED_SIZE: u64 = 512;
 
             let globals_buffer =
                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -825,13 +832,7 @@ impl Primitive for BackgroundPrimitive {
             state.globals_bind_group = Some(globals_bind_group);
         }
 
-        let backdrop_handle = match &self.effect {
-            BackgroundEffect::BackdropGradient {
-                image_handle: Some(handle),
-                ..
-            } => Some(handle),
-            _ => self.backdrop_handle.as_ref(),
-        };
+        let backdrop_handle = self.backdrop_handle.as_ref();
 
         if let Some(handle) = backdrop_handle {
             let image_id = handle.id();
@@ -885,13 +886,23 @@ impl Primitive for BackgroundPrimitive {
         }
 
         let time = self.start_time.elapsed().as_secs_f32();
+        log::trace!(
+            "BackgroundPrimitive::prepare effect={:?} time={:.3} scroll_offset={} content_offset_px=({}, {}) viewport={}x{}",
+            self.effect,
+            time,
+            self.scroll_offset,
+            self.content_offset_px.x,
+            self.content_offset_px.y,
+            viewport.logical_size().width,
+            viewport.logical_size().height
+        );
         let effect_type = match &self.effect {
             BackgroundEffect::Solid => 0.0,
             BackgroundEffect::Gradient => 1.0,
             BackgroundEffect::SubtleNoise { .. } => 2.0,
             BackgroundEffect::FloatingParticles { .. } => 3.0,
             BackgroundEffect::WaveRipple { .. } => 4.0,
-            BackgroundEffect::BackdropGradient { .. } => 5.0,
+            BackgroundEffect::BackdropGradient => 5.0,
         };
 
         let (effect_param1, effect_param2) = match &self.effect {
@@ -904,7 +915,7 @@ impl Primitive for BackgroundPrimitive {
                 frequency,
                 amplitude,
             } => (*frequency, *amplitude),
-            BackgroundEffect::BackdropGradient { .. } => {
+            BackgroundEffect::BackdropGradient => {
                 // For BackdropGradient, effect_param2 holds aspect_mode (0.0 = Auto, 1.0 = Force21x9)
                 let aspect_mode = match self.backdrop_aspect_mode {
                     BackdropAspectMode::Auto => 0.0,
@@ -912,15 +923,6 @@ impl Primitive for BackgroundPrimitive {
                 };
                 (0.0, aspect_mode)
             }
-        };
-
-        let (fade_start, fade_end) = match &self.effect {
-            BackgroundEffect::BackdropGradient {
-                fade_start,
-                fade_end,
-                ..
-            } => (*fade_start, *fade_end),
-            _ => (0.0, 0.0),
         };
 
         let transform: [f32; 16] = viewport.projection().into();
@@ -976,6 +978,12 @@ impl Primitive for BackgroundPrimitive {
                     backdrop_coverage_uv, // Pre-calculated coverage for shader
                 ]
             },
+            content_offset_px: [
+                self.content_offset_px.x,
+                self.content_offset_px.y,
+                0.0,
+                0.0,
+            ],
             prev_primary_color: [
                 self.prev_primary_color.r,
                 self.prev_primary_color.g,
@@ -1121,7 +1129,7 @@ impl Primitive for BackgroundPrimitive {
 
     fn draw(
         &self,
-        renderer: &Self::Renderer,
+        renderer: &Self::Pipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         let Some(globals_bind_group) =
@@ -1154,6 +1162,7 @@ impl Primitive for BackgroundPrimitive {
 }
 
 /// Background shader widget
+#[derive(Debug)]
 pub struct BackgroundShader {
     effect: BackgroundEffect,
     theme: BackgroundTheme,
@@ -1161,7 +1170,9 @@ pub struct BackgroundShader {
     primary_color: Color,
     secondary_color: Color,
     start_time: Instant,
+    program_id: usize,
     scroll_offset: f32,
+    content_offset_px: ContentOffsetPx,
     // Transition data
     prev_primary_color: Color,
     prev_secondary_color: Color,
@@ -1190,8 +1201,6 @@ pub struct BackgroundShader {
 impl BackgroundShader {
     /// Create a new background shader with default settings
     pub fn new() -> Self {
-        use crate::domains::ui::theme::MediaServerTheme;
-
         let primary = MediaServerTheme::SOFT_GREY_DARK;
         let secondary = MediaServerTheme::SOFT_GREY_LIGHT;
 
@@ -1202,7 +1211,9 @@ impl BackgroundShader {
             primary_color: primary,
             secondary_color: secondary,
             start_time: Instant::now(),
+            program_id: 0,
             scroll_offset: 0.0,
+            content_offset_px: ContentOffsetPx::default(),
             // Initialize transitions
             prev_primary_color: primary,
             prev_secondary_color: secondary,
@@ -1256,6 +1267,24 @@ impl BackgroundShader {
         self
     }
 
+    /// Set the content-space offset (in logical pixels) used to anchor noise to scroll input.
+    pub fn content_offset_px(mut self, offset: ContentOffsetPx) -> Self {
+        self.content_offset_px = offset;
+        self
+    }
+
+    /// Set the stable program id for this background shader instance.
+    pub fn program_id(mut self, id: usize) -> Self {
+        self.program_id = id;
+        self
+    }
+
+    /// Set the stable start time for time-based effects.
+    pub fn start_time(mut self, start_time: Instant) -> Self {
+        self.start_time = start_time;
+        self
+    }
+
     /// Set the header offset for detail views
     pub fn header_offset(mut self, offset: f32) -> Self {
         self.header_offset = offset;
@@ -1268,7 +1297,7 @@ impl BackgroundShader {
         self
     }
 
-    /// Set backdrop image with gradient fade
+    /// Set the backdrop image to be composited by the shader program.
     pub fn backdrop(mut self, handle: iced::widget::image::Handle) -> Self {
         self.backdrop_handle = Some(handle);
         self
@@ -1283,21 +1312,6 @@ impl BackgroundShader {
     /// Set the backdrop aspect mode
     pub fn backdrop_aspect_mode(mut self, mode: BackdropAspectMode) -> Self {
         self.backdrop_aspect_mode = mode;
-        self
-    }
-
-    /// Set backdrop with custom fade parameters
-    pub fn backdrop_with_fade(
-        mut self,
-        handle: iced::widget::image::Handle,
-        fade_start: f32,
-        fade_end: f32,
-    ) -> Self {
-        self.effect = BackgroundEffect::BackdropGradient {
-            image_handle: Some(handle),
-            fade_start,
-            fade_end,
-        };
         self
     }
 
@@ -1350,10 +1364,6 @@ pub fn background_shader() -> BackgroundShader {
 
 impl<'a> From<BackgroundShader> for Element<'a, UiMessage> {
     fn from(background: BackgroundShader) -> Self {
-        // Generate a unique ID for this background shader instance
-        let id = BACKGROUND_ID_COUNTER
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
         iced::widget::shader(BackgroundShaderProgram {
             effect: background.effect,
             theme: background.theme,
@@ -1361,6 +1371,7 @@ impl<'a> From<BackgroundShader> for Element<'a, UiMessage> {
             primary_color: background.primary_color,
             secondary_color: background.secondary_color,
             start_time: background.start_time,
+            content_offset_px: background.content_offset_px,
             scroll_offset: background.scroll_offset,
             // Pass through transition data
             prev_primary_color: background.prev_primary_color,
@@ -1375,7 +1386,7 @@ impl<'a> From<BackgroundShader> for Element<'a, UiMessage> {
             header_offset: background.header_offset,
             backdrop_aspect_mode: background.backdrop_aspect_mode,
             backdrop_aspect_ratio: background.backdrop_aspect_ratio,
-            id,
+            id: background.program_id,
         })
         .width(Length::Fill)
         .height(Length::Fill)

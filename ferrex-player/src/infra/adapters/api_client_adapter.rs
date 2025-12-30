@@ -9,28 +9,31 @@ use crate::infra::{
     api_client::SetupStatus,
     api_types::ConfirmClaimResponse,
     repository::{RepositoryError, RepositoryResult},
-    services::api::ApiService,
+    services::api::{ApiService, ImageFetchResult},
 };
 
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
     FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
     LibraryId, LibraryMediaResponse, Media, MediaID, MediaQuery,
-    MediaRootBrowseResponse, MediaWithStatus, NextEpisode,
+    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
+    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
-    SeasonWatchStatus, SeriesWatchStatus, SortBy, SortOrder, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
-    UserWatchState,
+    SeasonWatchStatus, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus, SortBy, SortOrder,
+    StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
+    UserPermissions, UserWatchState,
 };
 use ferrex_core::player_prelude::{MediaIDLike, hash_filter_spec};
 use ferrex_core::{
     api::routes::{
-        utils::replace_param,
+        utils::{replace_param, replace_params},
         v1::{self, admin::MEDIA_ROOT_BROWSER},
     },
     player_prelude::StartClaimResponse,
 };
 
+use ferrex_model::image::ImageQuery;
 use rkyv::{rancor::Error, util::AlignedVec};
 
 use std::{
@@ -105,10 +108,8 @@ impl ApiClientAdapter {
 
             // Map MediaID to raw UUIDs (movies-only for now)
             for mid in resp.ids {
-                match mid {
-                    MediaID::Movie(m) => all_ids.push(m.to_uuid()),
-                    // Ignore non-movie entries for now
-                    _ => {}
+                if let MediaID::Movie(m) = mid {
+                    all_ids.push(m.to_uuid())
                 }
             }
 
@@ -236,11 +237,41 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
-    async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
+    async fn get_image(
+        &self,
+        path: &str,
+        iq: ImageQuery,
+    ) -> RepositoryResult<ImageFetchResult> {
         self.client
-            .get(v1::libraries::COLLECTION)
+            .get_image(path, iq)
             .await
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_libraries(&self) -> RepositoryResult<Vec<Library>> {
+        let bytes = self
+            .client
+            .get_rkyv(v1::libraries::COLLECTION, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        let decoded = rkyv::from_bytes::<Vec<Library>, rkyv::rancor::Error>(
+            bytes.as_slice(),
+        )
+        .map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "rkyv decode /libraries: {:?}",
+                e
+            ))
+        })?;
+
+        log::debug!(
+            "[Library] decoded /libraries snapshot: libraries={} bytes={}",
+            decoded.len(),
+            bytes.len()
+        );
+
+        Ok(decoded)
     }
 
     async fn fetch_library_media(
@@ -279,6 +310,170 @@ impl ApiService for ApiClientAdapter {
         })?;
 
         Ok(response.media)
+    }
+
+    async fn fetch_movie_reference_batch(
+        &self,
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+    ) -> RepositoryResult<AlignedVec> {
+        let path = replace_params(
+            v1::libraries::movie_batches::ITEM,
+            &[
+                ("{id}", library_id.to_uuid().to_string()),
+                ("{batch_id}", batch_id.as_u32().to_string()),
+            ],
+        );
+
+        self.client
+            .get_rkyv(&path, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_movie_reference_batch_bundle(
+        &self,
+        library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec> {
+        let path = replace_param(
+            v1::libraries::movie_batches::COLLECTION,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        );
+
+        self.client
+            .get_rkyv(&path, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn sync_movie_reference_batches(
+        &self,
+        library_id: LibraryId,
+        request: MovieBatchSyncRequest,
+    ) -> RepositoryResult<MovieBatchSyncResponse> {
+        let path = replace_param(
+            v1::libraries::movie_batches::SYNC,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        );
+
+        self.client
+            .post::<MovieBatchSyncRequest, MovieBatchSyncResponse>(
+                &path, &request,
+            )
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_movie_reference_batches(
+        &self,
+        library_id: LibraryId,
+        request: MovieBatchFetchRequest,
+    ) -> RepositoryResult<AlignedVec> {
+        let url = self.client.build_url(replace_param(
+            v1::libraries::movie_batches::FETCH,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        ));
+
+        let request = self.client.client.post(&url).json(&request);
+        let request = self.client.build_request(request).await;
+        let bytes = self
+            .client
+            .execute_rkyv_request(request)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        let mut aligned = AlignedVec::with_capacity(bytes.len());
+        aligned.extend_from_slice(&bytes);
+        if aligned.capacity() > aligned.len() * 2 {
+            aligned.shrink_to_fit();
+        }
+
+        Ok(aligned)
+    }
+
+    async fn fetch_series_bundle(
+        &self,
+        library_id: LibraryId,
+        series_id: SeriesID,
+    ) -> RepositoryResult<AlignedVec> {
+        let path = replace_params(
+            v1::libraries::series_bundles::ITEM,
+            &[
+                ("{id}", library_id.to_uuid().to_string()),
+                ("{series_id}", series_id.to_uuid().to_string()),
+            ],
+        );
+
+        self.client
+            .get_rkyv(&path, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_series_bundle_bundle(
+        &self,
+        library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec> {
+        let path = replace_param(
+            v1::libraries::series_bundles::COLLECTION,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        );
+
+        self.client
+            .get_rkyv(&path, None)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn sync_series_bundles(
+        &self,
+        library_id: LibraryId,
+        request: SeriesBundleSyncRequest,
+    ) -> RepositoryResult<SeriesBundleSyncResponse> {
+        let path = replace_param(
+            v1::libraries::series_bundles::SYNC,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        );
+
+        self.client
+            .post::<SeriesBundleSyncRequest, SeriesBundleSyncResponse>(
+                &path, &request,
+            )
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn fetch_series_bundles(
+        &self,
+        library_id: LibraryId,
+        request: SeriesBundleFetchRequest,
+    ) -> RepositoryResult<AlignedVec> {
+        let url = self.client.build_url(replace_param(
+            v1::libraries::series_bundles::FETCH,
+            "{id}",
+            library_id.to_uuid().to_string(),
+        ));
+
+        let request = self.client.client.post(&url).json(&request);
+        let request = self.client.build_request(request).await;
+        let bytes = self
+            .client
+            .execute_rkyv_request(request)
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        let mut aligned = AlignedVec::with_capacity(bytes.len());
+        aligned.extend_from_slice(&bytes);
+        if aligned.capacity() > aligned.len() * 2 {
+            aligned.shrink_to_fit();
+        }
+
+        Ok(aligned)
     }
 
     async fn health_check(&self) -> RepositoryResult<bool> {
@@ -657,11 +852,11 @@ impl ApiService for ApiClientAdapter {
         path: Option<&str>,
     ) -> RepositoryResult<MediaRootBrowseResponse> {
         let mut url = MEDIA_ROOT_BROWSER.to_string();
-        if let Some(rel) = path {
-            if !rel.is_empty() {
-                url.push_str("?path=");
-                url.push_str(&urlencoding::encode(rel));
-            }
+        if let Some(rel) = path
+            && !rel.is_empty()
+        {
+            url.push_str("?path=");
+            url.push_str(&urlencoding::encode(rel));
         }
 
         self.client
@@ -685,6 +880,17 @@ impl ApiService for ApiClientAdapter {
     ) -> RepositoryResult<DemoStatus> {
         self.client
             .post(v1::admin::demo::RESET, &request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    #[cfg(feature = "demo")]
+    async fn resize_demo(
+        &self,
+        request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus> {
+        self.client
+            .post(v1::admin::demo::RESIZE, &request)
             .await
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }

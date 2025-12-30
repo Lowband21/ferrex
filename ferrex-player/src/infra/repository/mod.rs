@@ -1,16 +1,20 @@
 pub mod accessor;
-pub mod repository;
+pub mod media_repo;
+pub mod movie_batches;
+pub mod series_bundles;
 pub mod yoke_cache;
 
 pub use accessor::*;
-pub use repository::*;
+pub use media_repo::*;
+pub use movie_batches::*;
+pub use series_bundles::*;
 
 use std::sync::Arc;
 
 use ferrex_core::player_prelude::{
     ArchivedEpisodeReference, ArchivedLibrary, ArchivedMedia,
-    ArchivedMovieReference, ArchivedSeasonReference, ArchivedSeriesReference,
-    Media, MediaOps, MovieReference, SeriesReference,
+    ArchivedMovieReference, ArchivedSeasonReference, ArchivedSeries, Media,
+    MediaOps, MovieReference, Series,
 };
 use rkyv::util::AlignedVec;
 use yoke::Yoke;
@@ -50,9 +54,8 @@ pub type ArcMovieYoke =
     Arc<Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>>;
 pub type MovieYoke = Yoke<&'static ArchivedMovieReference, Arc<AlignedVec>>;
 
-pub type ArcSeriesYoke =
-    Arc<Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>>;
-pub type SeriesYoke = Yoke<&'static ArchivedSeriesReference, Arc<AlignedVec>>;
+pub type ArcSeriesYoke = Arc<Yoke<&'static ArchivedSeries, Arc<AlignedVec>>>;
+pub type SeriesYoke = Yoke<&'static ArchivedSeries, Arc<AlignedVec>>;
 
 pub type SeasonYoke = Yoke<&'static ArchivedSeasonReference, Arc<AlignedVec>>;
 pub type EpisodeYoke = Yoke<&'static ArchivedEpisodeReference, Arc<AlignedVec>>;
@@ -83,7 +86,7 @@ impl MaybeYoked for MovieReference {
 }
 
 impl MaybeYoked for SeriesYoke {
-    type InnerRef = ArchivedSeriesReference;
+    type InnerRef = ArchivedSeries;
 
     fn get(&self) -> &Self::InnerRef {
         self.get()
@@ -92,15 +95,15 @@ impl MaybeYoked for SeriesYoke {
 
 impl MaybeYoked for ArcSeriesYoke {
     //type Deserialized = SeriesReference;
-    type InnerRef = ArchivedSeriesReference;
+    type InnerRef = ArchivedSeries;
 
     fn get(&self) -> &Self::InnerRef {
         self.as_ref().get()
     }
 }
 
-impl MaybeYoked for SeriesReference {
-    type InnerRef = SeriesReference;
+impl MaybeYoked for Series {
+    type InnerRef = Series;
 
     fn get(&self) -> &Self::InnerRef {
         self

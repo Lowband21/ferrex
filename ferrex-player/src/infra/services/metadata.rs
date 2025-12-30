@@ -7,7 +7,7 @@ use crate::infra::repository::RepositoryResult;
 use async_trait::async_trait;
 use ferrex_core::player_prelude::{
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails,
-    MovieReference, SeasonDetails, SeriesReference,
+    MovieReference, SeasonDetails, Series,
 };
 
 /// Search result from metadata provider
@@ -52,15 +52,15 @@ pub trait MetadataService: Send + Sync {
     async fn get_season_details(
         &self,
         series_id: u64,
-        season_number: u8,
+        season_number: u16,
     ) -> RepositoryResult<SeasonDetails>;
 
     /// Get episode details
     async fn get_episode_details(
         &self,
         series_id: u64,
-        season_number: u8,
-        episode_number: u8,
+        season_number: u16,
+        episode_number: u16,
     ) -> RepositoryResult<EpisodeDetails>;
 
     /// Batch fetch metadata for multiple movies
@@ -84,7 +84,7 @@ pub trait MetadataService: Send + Sync {
     /// Update series metadata
     async fn update_series_metadata(
         &self,
-        series: &mut SeriesReference,
+        series: &mut Series,
     ) -> RepositoryResult<()>;
 
     /// Get image URL from path
@@ -115,6 +115,21 @@ pub mod mock {
     pub struct MockMetadataService {
         pub search_movies_called: Arc<RwLock<Vec<String>>>,
         pub get_movie_details_called: Arc<RwLock<Vec<u64>>>,
+    }
+
+    impl std::fmt::Debug for MockMetadataService {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MockMetadataService")
+                .field("search_movies_called", &"<RwLock<Vec<String>>>")
+                .field("get_movie_details_called", &"<RwLock<Vec<u64>>>")
+                .finish()
+        }
+    }
+
+    impl Default for MockMetadataService {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl MockMetadataService {
@@ -210,6 +225,8 @@ pub mod mock {
                 collection: None,
                 recommendations: Vec::new(),
                 similar: Vec::new(),
+                primary_poster_iid: None,
+                primary_backdrop_iid: None,
             })
         }
 
@@ -226,6 +243,8 @@ pub mod mock {
                 last_air_date: Some("2024-12-01".to_string()),
                 number_of_seasons: Some(2),
                 number_of_episodes: Some(20),
+                available_seasons: Some(1),
+                available_episodes: Some(10),
                 vote_average: Some(8.0),
                 vote_count: Some(500),
                 popularity: Some(80.0),
@@ -266,13 +285,15 @@ pub mod mock {
                 episode_groups: Vec::new(),
                 recommendations: Vec::new(),
                 similar: Vec::new(),
+                primary_poster_iid: None,
+                primary_backdrop_iid: None,
             })
         }
 
         async fn get_season_details(
             &self,
             _series_id: u64,
-            season_number: u8,
+            season_number: u16,
         ) -> RepositoryResult<SeasonDetails> {
             Ok(SeasonDetails {
                 id: 1,
@@ -288,14 +309,15 @@ pub mod mock {
                 videos: Vec::new(),
                 keywords: Vec::new(),
                 translations: Vec::new(),
+                primary_poster_iid: None,
             })
         }
 
         async fn get_episode_details(
             &self,
             _series_id: u64,
-            season_number: u8,
-            episode_number: u8,
+            season_number: u16,
+            episode_number: u16,
         ) -> RepositoryResult<EpisodeDetails> {
             Ok(EpisodeDetails {
                 id: 1,
@@ -317,6 +339,7 @@ pub mod mock {
                 guest_stars: Vec::new(),
                 crew: Vec::new(),
                 content_ratings: Vec::new(),
+                primary_still_iid: None,
             })
         }
 
@@ -352,7 +375,7 @@ pub mod mock {
 
         async fn update_series_metadata(
             &self,
-            _series: &mut SeriesReference,
+            _series: &mut Series,
         ) -> RepositoryResult<()> {
             // Mock implementation - just return success
             Ok(())

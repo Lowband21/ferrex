@@ -5,6 +5,7 @@ use ferrex_model::PosterSize;
 use super::messages::DisplayMessage;
 use super::state::{GridSize, ThemePreference};
 use crate::common::messages::DomainUpdateResult;
+use crate::infra::constants::layout::calculations::ScaledLayout;
 use crate::state::State;
 
 /// Main message handler for display section
@@ -46,8 +47,8 @@ pub fn handle_message(
         }
 
         // Spacing
-        DisplayMessage::SetGridEffectiveSpacing(spacing) => {
-            set_grid_effective_spacing(state, spacing)
+        DisplayMessage::SetGridPosterGap(spacing) => {
+            set_grid_poster_gap(state, spacing)
         }
         DisplayMessage::SetGridRowSpacing(spacing) => {
             set_grid_row_spacing(state, spacing)
@@ -82,6 +83,11 @@ pub fn handle_message(
         }
         DisplayMessage::SetDetailPosterQuality(quality) => {
             set_detail_poster_quality(state, quality)
+        }
+
+        // Scrollbar
+        DisplayMessage::SetScrollbarScrollerMinLength(value) => {
+            set_scrollbar_scroller_min_length(state, value)
         }
     }
 }
@@ -136,10 +142,10 @@ fn set_poster_base_width(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(width) = value.parse::<f32>() {
-        if width >= 100.0 && width <= 500.0 {
-            state.domains.settings.display.poster_base_width = width;
-        }
+    if let Ok(width) = value.parse::<f32>()
+        && (100.0..=500.0).contains(&width)
+    {
+        state.domains.settings.display.poster_base_width = width;
     }
     DomainUpdateResult::none()
 }
@@ -148,10 +154,10 @@ fn set_poster_base_height(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(height) = value.parse::<f32>() {
-        if height >= 150.0 && height <= 750.0 {
-            state.domains.settings.display.poster_base_height = height;
-        }
+    if let Ok(height) = value.parse::<f32>()
+        && (150.0..=750.0).contains(&height)
+    {
+        state.domains.settings.display.poster_base_height = height;
     }
     DomainUpdateResult::none()
 }
@@ -160,10 +166,10 @@ fn set_poster_corner_radius(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(radius) = value.parse::<f32>() {
-        if radius >= 0.0 && radius <= 50.0 {
-            state.domains.settings.display.poster_corner_radius = radius;
-        }
+    if let Ok(radius) = value.parse::<f32>()
+        && (0.0..=50.0).contains(&radius)
+    {
+        state.domains.settings.display.poster_corner_radius = radius;
     }
     DomainUpdateResult::none()
 }
@@ -177,14 +183,12 @@ fn set_poster_text_area_height(
 }
 
 // Spacing handlers - accept String for UI-visible fields
-fn set_grid_effective_spacing(
-    state: &mut State,
-    value: String,
-) -> DomainUpdateResult {
-    if let Ok(spacing) = value.parse::<f32>() {
-        if spacing >= 0.0 && spacing <= 100.0 {
-            state.domains.settings.display.grid_effective_spacing = spacing;
-        }
+fn set_grid_poster_gap(state: &mut State, value: String) -> DomainUpdateResult {
+    if let Ok(spacing) = value.parse::<f32>()
+        && (0.0..=100.0).contains(&spacing)
+    {
+        state.domains.settings.display.grid_poster_gap = spacing;
+        refresh_grid_layout(state);
     }
     DomainUpdateResult::none()
 }
@@ -193,12 +197,28 @@ fn set_grid_row_spacing(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(spacing) = value.parse::<f32>() {
-        if spacing >= 0.0 && spacing <= 200.0 {
-            state.domains.settings.display.grid_row_spacing = spacing;
-        }
+    if let Ok(spacing) = value.parse::<f32>()
+        && (0.0..=200.0).contains(&spacing)
+    {
+        state.domains.settings.display.grid_row_spacing = spacing;
     }
     DomainUpdateResult::none()
+}
+
+fn refresh_grid_layout(state: &mut State) {
+    let effective_scale =
+        state.domains.ui.state.scaling_context.effective_scale();
+    let poster_gap = state.domains.settings.display.grid_poster_gap;
+    state.domains.ui.state.scaled_layout =
+        ScaledLayout::new(effective_scale, poster_gap);
+
+    for tab_id in state.tab_manager.tab_ids() {
+        if let Some(tab) = state.tab_manager.get_tab_mut(tab_id)
+            && let Some(grid_state) = tab.grid_state_mut()
+        {
+            grid_state.update_for_scale(&state.domains.ui.state.scaled_layout);
+        }
+    }
 }
 
 fn set_grid_viewport_padding(
@@ -227,10 +247,10 @@ fn set_animation_hover_scale(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(scale) = value.parse::<f32>() {
-        if scale >= 1.0 && scale <= 1.5 {
-            state.domains.settings.display.animation_hover_scale = scale;
-        }
+    if let Ok(scale) = value.parse::<f32>()
+        && (1.0..=1.5).contains(&scale)
+    {
+        state.domains.settings.display.animation_hover_scale = scale;
     }
     DomainUpdateResult::none()
 }
@@ -239,10 +259,10 @@ fn set_animation_default_duration(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(ms) = value.parse::<u64>() {
-        if ms >= 100 && ms <= 2000 {
-            state.domains.settings.display.animation_default_duration_ms = ms;
-        }
+    if let Ok(ms) = value.parse::<u64>()
+        && (100..=2000).contains(&ms)
+    {
+        state.domains.settings.display.animation_default_duration_ms = ms;
     }
     DomainUpdateResult::none()
 }
@@ -277,5 +297,23 @@ fn set_detail_poster_quality(
     quality: PosterSize,
 ) -> DomainUpdateResult {
     state.domains.settings.display.detail_poster_quality = quality;
+    DomainUpdateResult::none()
+}
+
+fn set_scrollbar_scroller_min_length(
+    state: &mut State,
+    value: String,
+) -> DomainUpdateResult {
+    if let Ok(px) = value.parse::<f32>()
+        && px.is_finite()
+        && (2.0..=120.0).contains(&px)
+    {
+        state
+            .domains
+            .settings
+            .display
+            .scrollbar_scroller_min_length_px = px;
+    }
+
     DomainUpdateResult::none()
 }

@@ -6,7 +6,7 @@
 
 use crate::common::messages::DomainMessage;
 use crate::domains::ui::{
-    types::ViewState, views::grid::VirtualGridState,
+    tabs::TabId, types::ViewState, views::grid::VirtualGridState,
     views::virtual_carousel::types::CarouselKey,
 };
 use ferrex_core::player_prelude::LibraryId;
@@ -240,26 +240,13 @@ impl ScrollPositionManager {
     }
 
     /// Save scroll state for a specific tab
-    pub fn save_tab_scroll(
-        &mut self,
-        tab_id: &crate::domains::ui::tabs::TabId,
-        state: ScrollState,
-    ) {
+    pub fn save_tab_scroll(&mut self, tab_id: &TabId, state: ScrollState) {
         let key = Self::tab_scroll_key(tab_id);
-        let position = state.position; // Save position before moving state
         self.save_state(key, state);
-        log::debug!(
-            "Saved scroll state for tab {:?} at position {}",
-            tab_id,
-            position
-        );
     }
 
     /// Get scroll state for a specific tab
-    pub fn get_tab_scroll(
-        &self,
-        tab_id: &crate::domains::ui::tabs::TabId,
-    ) -> Option<&ScrollState> {
+    pub fn get_tab_scroll(&self, tab_id: &TabId) -> Option<&ScrollState> {
         let key = Self::tab_scroll_key(tab_id);
         let state = self.get_state(&key);
         if let Some(s) = state {
@@ -273,10 +260,7 @@ impl ScrollPositionManager {
     }
 
     /// Clear scroll state for a specific tab
-    pub fn clear_tab_scroll(
-        &mut self,
-        tab_id: &crate::domains::ui::tabs::TabId,
-    ) {
+    pub fn clear_tab_scroll(&mut self, tab_id: &TabId) {
         let key = Self::tab_scroll_key(tab_id);
         self.clear_state(&key);
     }
@@ -337,10 +321,10 @@ impl ScrollPositionManager {
     }
 
     /// Generate key for tab-specific scroll state
-    fn tab_scroll_key(tab_id: &crate::domains::ui::tabs::TabId) -> String {
+    fn tab_scroll_key(tab_id: &TabId) -> String {
         match tab_id {
-            crate::domains::ui::tabs::TabId::Home => "tab.all".to_string(),
-            crate::domains::ui::tabs::TabId::Library(id) => {
+            TabId::Home => "tab.all".to_string(),
+            TabId::Library(id) => {
                 format!("tab.library.{}", id)
             }
         }
@@ -615,7 +599,7 @@ impl ScrollStateExt for crate::state::State {
         if library_id.is_some() {
             if let Some(lib_id) = library_id {
                 self.tab_manager.set_active_tab_with_scroll(
-                    crate::domains::ui::tabs::TabId::Library(lib_id),
+                    TabId::Library(lib_id),
                     &mut self.domains.ui.state.scroll_manager,
                     self.window_size.width,
                     scaled_layout,
@@ -623,7 +607,7 @@ impl ScrollStateExt for crate::state::State {
             }
         } else {
             self.tab_manager.set_active_tab_with_scroll(
-                crate::domains::ui::tabs::TabId::Home,
+                TabId::Home,
                 &mut self.domains.ui.state.scroll_manager,
                 self.window_size.width,
                 scaled_layout,

@@ -293,55 +293,65 @@ impl MediaEventState {
             // These events indicate we should refresh our library data
             MediaEvent::MovieAdded { movie } => {
                 log::info!("Movie added: {}", movie.title.as_str());
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Movie(movie)]))
+                Some(LibraryMessage::MediaDiscovered(vec![Media::Movie(
+                    Box::new(movie),
+                )]))
+            }
+            MediaEvent::MovieBatchFinalized {
+                library_id,
+                batch_id,
+            } => {
+                log::info!(
+                    "Movie batch finalized: library {} batch {}",
+                    library_id,
+                    batch_id
+                );
+                Some(LibraryMessage::FetchMovieBatch {
+                    library_id,
+                    batch_id,
+                })
             }
             MediaEvent::SeriesAdded { series } => {
-                log::info!("Series added: {}", series.title.as_str());
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Series(
-                    series,
-                )]))
-            }
-            MediaEvent::SeasonAdded { season } => {
                 log::info!(
-                    "Season added: S{} for series {}",
-                    season.season_number.value(),
-                    season.series_id.as_str()
+                    "Discarding empty series match: {}",
+                    series.title.as_str()
                 );
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Season(
-                    season,
-                )]))
+                None
             }
-            MediaEvent::EpisodeAdded { episode } => {
+            MediaEvent::SeriesBundleFinalized {
+                library_id,
+                series_id,
+            } => {
                 log::info!(
-                    "Episode added: S{}E{}",
-                    episode.season_number.value(),
-                    episode.episode_number.value()
+                    "Series Bundle finalized: library {} series id {}",
+                    library_id,
+                    series_id
                 );
-                Some(LibraryMessage::MediaDiscovered(vec![Media::Episode(
-                    episode,
-                )]))
+                Some(LibraryMessage::FetchSeriesBundle {
+                    library_id,
+                    series_id,
+                })
             }
-
             // Updates require refreshing existing data
             MediaEvent::MovieUpdated { movie } => {
-                log::info!("Movie updated: {}", movie.title.as_str());
-                Some(LibraryMessage::MediaUpdated(Media::Movie(movie)))
+                log::info!(
+                    "Movie updated MediaEvent received, no action taken: {}",
+                    movie.title.as_str()
+                );
+                // Some(LibraryMessage::MediaUpdated(Media::Movie(Box::new(
+                //     movie,
+                // ))))
+                None
             }
             MediaEvent::SeriesUpdated { series } => {
-                log::info!("Series updated: {}", series.title.as_str());
-                Some(LibraryMessage::MediaUpdated(Media::Series(series)))
-            }
-            MediaEvent::SeasonUpdated { season } => {
-                log::info!("Season updated: S{}", season.season_number.value());
-                Some(LibraryMessage::MediaUpdated(Media::Season(season)))
-            }
-            MediaEvent::EpisodeUpdated { episode } => {
                 log::info!(
-                    "Episode updated: S{}E{}",
-                    episode.season_number.value(),
-                    episode.episode_number.value()
+                    "Series updated MediaEvent received, no action taken: {}",
+                    series.title.as_str()
                 );
-                Some(LibraryMessage::MediaUpdated(Media::Episode(episode)))
+                // Some(LibraryMessage::MediaUpdated(Media::Series(Box::new(
+                //     series,
+                // ))))
+                None
             }
 
             // Deletion events

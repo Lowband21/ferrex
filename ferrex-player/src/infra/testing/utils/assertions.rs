@@ -89,6 +89,7 @@ pub trait EventuallyExt {
         F: Fn() -> T + Send;
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Eventually;
 
 impl EventuallyExt for Eventually {

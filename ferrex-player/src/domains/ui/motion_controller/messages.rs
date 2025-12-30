@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Up,
@@ -8,6 +10,7 @@ pub enum Direction {
 pub enum MotionMessage {
     Start(Direction),
     Stop(Direction),
-    Tick,
+    /// Frame-synchronized tick with timestamp from window::frames()
+    Tick(Instant),
     SetBoost(bool),
 }

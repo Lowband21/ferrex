@@ -110,14 +110,20 @@ pub fn handle_event(
         // User authenticated - store in state
         CrossDomainEvent::UserAuthenticated(user, permissions) => {
             state.is_authenticated = true;
+            state.domains.auth.state.is_authenticated = true;
             state.domains.auth.state.user_permissions = Some(permissions);
             log::info!("[CrossDomain] User {} authenticated", user.username);
-            Task::none()
+
+            // Defensive: ensure the post-auth initialization runs even if an
+            // AuthenticationComplete event is not emitted (or is dropped due to
+            // a future refactor). The helper is already idempotent and guarded.
+            handle_authentication_complete(state)
         }
 
         // User logged out - clear state
         CrossDomainEvent::UserLoggedOut => {
             state.is_authenticated = false;
+            state.domains.auth.state.is_authenticated = false;
             state.domains.auth.state.user_permissions = None;
             log::info!(
                 "[CrossDomain] User logged out - emitting cleanup events"

@@ -1,7 +1,5 @@
 //! Library management view with permission-based controls
 
-use std::sync::Arc;
-
 use crate::{
     common::ui_utils::icon_text,
     domains::{
@@ -16,8 +14,8 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::{
-    ArchivedLibrary, ArchivedLibraryType, Library, LibraryId,
-    ScanLifecycleStatus, ScanSnapshotDto,
+    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus,
+    ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use iced::widget::text_input;
@@ -26,9 +24,8 @@ use iced::{
     widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
-use rkyv::{deserialize, rancor::Error, util::AlignedVec};
+use rkyv::{deserialize, rancor::Error};
 use uuid::Uuid;
-use yoke::Yoke;
 
 #[cfg_attr(
     any(
@@ -41,33 +38,6 @@ use yoke::Yoke;
 pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
     let permissions = state.permission_checker();
 
-    // Check if user has permission to view libraries
-    if !permissions.can_view_admin_dashboard() {
-        return container(
-            column![
-                text("Access Denied")
-                    .size(32)
-                    .color(theme::MediaServerTheme::ERROR),
-                Space::new().height(20),
-                text("You don't have permission to view library settings")
-                    .size(16)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                Space::new().height(40),
-                button("Back to Admin Dashboard")
-                    .on_press(SettingsUiMessage::HideLibraryManagement.into())
-                    .style(theme::Button::Secondary.style())
-                    .padding([12, 20]),
-            ]
-            .spacing(20)
-            .align_x(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .into();
-    }
-
     // If form is open, show the form instead
     if let Some(form_data) = &state.domains.library.state.library_form_data {
         return view_library_form(state, form_data);
@@ -76,21 +46,8 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
     let mut content = column![].spacing(20).padding(20);
 
     // Build header with conditional buttons
-    let mut header_row = row![
-        button(
-            row![icon_text(Icon::ArrowLeft), text(" Back to Library")]
-                .spacing(5)
-                .align_y(iced::Alignment::Center)
-        )
-        .on_press(SettingsUiMessage::HideLibraryManagement.into())
-        .style(theme::Button::Secondary.style()),
-        Space::new().width(Length::Fill),
-        text("Library Management")
-            .size(28)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        Space::new().width(Length::Fill),
-    ]
-    .align_y(iced::Alignment::Center);
+    let mut header_row =
+        row![Space::new().width(Length::Fill)].align_y(iced::Alignment::Center);
 
     // Add Create Library button only if user has permission
     if permissions.has_permission("libraries:create") {
@@ -192,12 +149,9 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
         .into()
 }
 
-type LibraryYoke = Yoke<&'static ArchivedLibrary, Arc<AlignedVec>>;
-
 fn create_library_card<'a>(
     repo_accessor: Accessor<ReadOnly>,
     library_id: &Uuid,
-    //library: &'a LibraryYoke,
     permissions: &permissions::PermissionChecker,
 ) -> Element<'a, UiMessage> {
     let library_opt =
@@ -352,11 +306,9 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 "Active scans map empty but {:} progress frames buffered; scan UI may be out of sync",
                 state.domains.library.state.latest_progress.len()
             );
-        } else {
-            log::debug!("Active scans panel rendered with no active scans");
         }
     } else {
-        log::debug!(
+        log::trace!(
             "Rendering active scans panel with {} entries",
             scans.len()
         );
@@ -505,7 +457,7 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 .ui
                 .state
                 .repo_accessor
-                .get_archived_library_yoke(&snapshot.library_id.as_uuid())
+                .get_archived_library_yoke(snapshot.library_id.as_uuid())
                 .ok()
                 .and_then(|opt| opt)
                 .map(|yoke| yoke.get().name.to_string())
@@ -739,7 +691,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, UiMessage> {
             .padding([10, 20])
     } else {
         button(apply_label)
-            .on_press(SettingsUiMessage::DemoApplySizing.into())
+            .on_press(SettingsUiMessage::DemoApplySizing)
             .style(theme::Button::Primary.style())
             .padding([10, 20])
     };
@@ -758,7 +710,7 @@ fn demo_controls_panel(state: &State) -> Element<'_, UiMessage> {
             .padding([10, 20])
     } else {
         button(refresh_label)
-            .on_press(SettingsUiMessage::DemoRefreshStatus.into())
+            .on_press(SettingsUiMessage::DemoRefreshStatus)
             .style(theme::Button::Secondary.style())
             .padding([10, 20])
     };

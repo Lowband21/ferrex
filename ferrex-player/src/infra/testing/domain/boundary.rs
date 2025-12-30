@@ -40,6 +40,15 @@ pub struct InMemoryEventBus {
     events: Arc<Mutex<Vec<String>>>,
 }
 
+impl std::fmt::Debug for InMemoryEventBus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let events_len = self.events.lock().map(|events| events.len()).ok();
+        f.debug_struct("InMemoryEventBus")
+            .field("events_len", &events_len)
+            .finish()
+    }
+}
+
 impl InMemoryEventBus {
     pub fn new() -> Self {
         Self {
@@ -72,6 +81,17 @@ impl Default for InMemoryEventBus {
 pub struct DomainBoundary {
     services: HashMap<String, Box<dyn ServiceDependency>>,
     event_bus: Box<dyn EventBus>,
+}
+
+impl std::fmt::Debug for DomainBoundary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let service_names: Vec<String> =
+            self.services.keys().cloned().collect();
+        f.debug_struct("DomainBoundary")
+            .field("service_names", &service_names)
+            .field("event_bus", &"<dyn EventBus>")
+            .finish()
+    }
 }
 
 impl DomainBoundary {
@@ -166,6 +186,25 @@ pub struct MockService {
     command_errors: Arc<Mutex<HashMap<String, String>>>,
 }
 
+impl std::fmt::Debug for MockService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let commands_len =
+            self.commands.lock().map(|commands| commands.len()).ok();
+        let responses_len = self
+            .query_responses
+            .lock()
+            .map(|responses| responses.len())
+            .ok();
+        let errors_len =
+            self.command_errors.lock().map(|errors| errors.len()).ok();
+        f.debug_struct("MockService")
+            .field("commands_len", &commands_len)
+            .field("query_responses_len", &responses_len)
+            .field("command_errors_len", &errors_len)
+            .finish()
+    }
+}
+
 impl MockService {
     pub fn new() -> Self {
         Self {
@@ -248,6 +287,15 @@ impl Default for MockService {
 pub struct DomainBoundaryBuilder {
     services: HashMap<String, Box<dyn ServiceDependency>>,
     event_bus: Option<Box<dyn EventBus>>,
+}
+
+impl std::fmt::Debug for DomainBoundaryBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DomainBoundaryBuilder")
+            .field("services_len", &self.services.len())
+            .field("event_bus_set", &self.event_bus.is_some())
+            .finish()
+    }
 }
 
 impl DomainBoundaryBuilder {

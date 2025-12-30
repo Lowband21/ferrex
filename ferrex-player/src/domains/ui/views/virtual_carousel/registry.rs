@@ -146,9 +146,7 @@ impl CarouselRegistry {
     }
 
     pub fn ensure_animator(&mut self, key: &CarouselKey) -> &mut SnapAnimator {
-        self.animators
-            .entry(key.clone())
-            .or_insert_with(SnapAnimator::new)
+        self.animators.entry(key.clone()).or_default()
     }
 
     pub fn get_animator(&self, key: &CarouselKey) -> Option<&SnapAnimator> {

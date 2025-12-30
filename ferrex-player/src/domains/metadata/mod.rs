@@ -11,7 +11,6 @@ pub mod update_handlers;
 
 use self::demand_planner::PlannerHandle;
 use self::image_service::UnifiedImageService;
-use self::messages::MetadataMessage;
 use crate::common::messages::{CrossDomainEvent, DomainMessage};
 use crate::infra::services::api::ApiService;
 use iced::Task;
@@ -28,7 +27,7 @@ pub struct MetadataDomainState {
     pub loading_posters: HashSet<String>,
     pub tmdb_poster_urls: HashMap<String, String>,
     pub metadata_fetch_attempts: HashMap<String, Instant>,
-    pub image_service: UnifiedImageService,
+    pub image_service: Arc<UnifiedImageService>,
     pub image_receiver:
         Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
 
@@ -55,7 +54,7 @@ impl MetadataDomainState {
         server_url: String,
         //media_store: Arc<StdRwLock<MediaStore>>,
         api_service: Option<Arc<dyn ApiService>>,
-        image_service: UnifiedImageService,
+        image_service: Arc<UnifiedImageService>,
     ) -> Self {
         let (planner_handle, planner_join) =
             self::demand_planner::start_planner(image_service.clone());
@@ -91,13 +90,6 @@ pub struct MetadataDomain {
 impl MetadataDomain {
     pub fn new(state: MetadataDomainState) -> Self {
         Self { state }
-    }
-
-    /// Update function - delegates to existing update_metadata logic
-    pub fn update(&mut self, message: MetadataMessage) -> Task<DomainMessage> {
-        // This will call the existing update_metadata function
-        // For now, we return Task::none() to make it compile
-        Task::none()
     }
 
     pub fn handle_event(

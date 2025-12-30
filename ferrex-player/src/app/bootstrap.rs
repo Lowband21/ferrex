@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use iced::Task;
-use rkyv::ArchiveUnsized;
 use uuid::Uuid;
 
 use crate::common::messages::DomainMessage;
@@ -29,7 +28,7 @@ impl AppConfig {
             #[cfg(feature = "demo")]
             demo_mode: false,
             #[cfg(feature = "demo")]
-            demo_credentials: (Arc::from("demo"), Arc::from("demo")),
+            demo_credentials: (Arc::from("demo"), Arc::from("demodemo")),
         }
     }
 
@@ -53,11 +52,17 @@ impl AppConfig {
             let demo_credentials = (
                 Arc::from(
                     std::env::var("FERREX_DEMO_USERNAME")
-                        .unwrap_or_else(|_| "demo".into()),
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "demo".into()),
                 ),
                 Arc::from(
                     std::env::var("FERREX_DEMO_PASSWORD")
-                        .unwrap_or_else(|_| "demo".into()),
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "demodemo".into()),
                 ),
             );
 
@@ -182,12 +187,17 @@ fn apply_test_stubs(state: &mut State) {
     state.domains.library.state.api_service = Some(api_stub.clone());
     state.domains.media.state.api_service = Some(api_stub.clone());
     state.domains.metadata.state.api_service = Some(api_stub.clone());
-    state.domains.streaming.state.api_service = api_stub.clone();
+
+    #[cfg(feature = "unimplemented")]
+    {
+        state.domains.streaming.state.api_service = api_stub.clone();
+    }
+
     state.domains.user_management.state.api_service = Some(api_stub.clone());
     state.domains.player.api_service = Some(api_stub.clone());
 
     state.domains.search =
-        SearchDomain::new_with_metrics(Some(api_stub.clone()));
+        SearchDomain::new_with_metrics(Some(api_stub.clone()), None);
 }
 
 #[cfg(not(any(test, feature = "iced_tester")))]

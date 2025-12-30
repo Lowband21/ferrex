@@ -3,7 +3,9 @@
 use crate::common::messages::DomainMessage;
 use iced::{
     Element, Length, Theme,
-    widget::{Button, Container, Space, button, container, text},
+    widget::{
+        Button, Column, Container, Space, button, column, container, row, text,
+    },
 };
 
 #[cfg_attr(
@@ -33,7 +35,7 @@ pub fn auth_container<'a>(
     ),
     profiling::function
 )]
-pub fn auth_card<'a>(
+pub fn login_card<'a>(
     content: impl Into<Element<'a, DomainMessage>>,
 ) -> Container<'a, DomainMessage> {
     container(content)
@@ -51,6 +53,43 @@ pub fn auth_card<'a>(
                 ..Default::default()
             }
         })
+}
+
+#[cfg_attr(
+    any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ),
+    profiling::function
+)]
+pub fn auth_card<'a>(
+    content: impl Into<Element<'a, DomainMessage>>,
+) -> Column<'a, DomainMessage> {
+    column![
+        Space::new().height(Length::FillPortion(2)),
+        row![
+            Space::new().width(Length::FillPortion(2)),
+            container(content)
+                .width(Length::FillPortion(16))
+                .padding(30)
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                        background: Some(palette.background.weak.color.into()),
+                        border: iced::Border {
+                            color: palette.background.strong.color,
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                }),
+            Space::new().width(Length::FillPortion(2)),
+        ]
+        .height(Length::FillPortion(16)),
+        Space::new().height(Length::FillPortion(2)),
+    ]
 }
 
 /// Creates a primary button with consistent styling

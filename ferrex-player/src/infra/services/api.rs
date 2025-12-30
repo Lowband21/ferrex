@@ -13,15 +13,26 @@ use ferrex_core::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
         CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
         Library, LibraryId, Media, MediaQuery, MediaRootBrowseResponse,
-        MediaWithStatus, NextEpisode, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
+        MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
+        MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
+        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+        ScanMetrics, SeasonWatchStatus, SeriesBundleFetchRequest,
+        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
         SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
         UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
+use ferrex_model::image::ImageQuery;
 use rkyv::util::AlignedVec;
 use std::fmt::Debug;
+use std::time::Duration;
 use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub enum ImageFetchResult {
+    Ready(Vec<u8>),
+    Pending { retry_after: Option<Duration> },
+}
 
 /// Generic API service trait for server communication
 #[async_trait]
@@ -39,6 +50,13 @@ pub trait ApiService: Send + Sync + Debug {
         query: Option<(&str, &str)>,
     ) -> RepositoryResult<Vec<u8>>;
 
+    /// Make a GET request that returns raw bytes with typed ImageSize
+    async fn get_image(
+        &self,
+        path: &str,
+        size: ImageQuery,
+    ) -> RepositoryResult<ImageFetchResult>;
+
     // === Common API operations ===
 
     /// Fetch all libraries from the server
@@ -49,6 +67,68 @@ pub trait ApiService: Send + Sync + Debug {
         &self,
         library_id: Uuid,
     ) -> RepositoryResult<Vec<Media>>;
+
+    /// Fetch a finalized movie reference batch by (library_id, batch_id).
+    ///
+    /// Returns raw rkyv bytes so the player can keep this batch zero-copy.
+    async fn fetch_movie_reference_batch(
+        &self,
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+    ) -> RepositoryResult<AlignedVec>;
+
+    /// Fetch all finalized movie reference batches for a library as a single bundle.
+    ///
+    /// Returns raw rkyv bytes so the player can keep per-batch payloads zero-copy.
+    async fn fetch_movie_reference_batch_bundle(
+        &self,
+        library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec>;
+
+    /// Compare cached movie batch versions against the server and get a list of updates.
+    async fn sync_movie_reference_batches(
+        &self,
+        library_id: LibraryId,
+        request: MovieBatchSyncRequest,
+    ) -> RepositoryResult<MovieBatchSyncResponse>;
+
+    /// Fetch a subset of movie batches for a library as a single rkyv bundle.
+    async fn fetch_movie_reference_batches(
+        &self,
+        library_id: LibraryId,
+        request: MovieBatchFetchRequest,
+    ) -> RepositoryResult<AlignedVec>;
+
+    /// Fetch a single series bundle by (library_id, series_id).
+    ///
+    /// Returns raw rkyv bytes so the player can keep this series archive zero-copy.
+    async fn fetch_series_bundle(
+        &self,
+        library_id: LibraryId,
+        series_id: SeriesID,
+    ) -> RepositoryResult<AlignedVec>;
+
+    /// Fetch all series bundles for a library as a single bundle.
+    ///
+    /// Returns raw rkyv bytes so the player can keep per-series payloads isolated.
+    async fn fetch_series_bundle_bundle(
+        &self,
+        library_id: LibraryId,
+    ) -> RepositoryResult<AlignedVec>;
+
+    /// Compare cached series bundle versions against the server and get a list of updates.
+    async fn sync_series_bundles(
+        &self,
+        library_id: LibraryId,
+        request: SeriesBundleSyncRequest,
+    ) -> RepositoryResult<SeriesBundleSyncResponse>;
+
+    /// Fetch a subset of series bundles for a library as a single rkyv bundle.
+    async fn fetch_series_bundles(
+        &self,
+        library_id: LibraryId,
+        request: SeriesBundleFetchRequest,
+    ) -> RepositoryResult<AlignedVec>;
 
     // === Library management ===
     /// Create a library on the server
@@ -123,6 +203,12 @@ pub trait ApiService: Send + Sync + Debug {
 
     #[cfg(feature = "demo")]
     async fn reset_demo(
+        &self,
+        request: DemoResetRequest,
+    ) -> RepositoryResult<DemoStatus>;
+
+    #[cfg(feature = "demo")]
+    async fn resize_demo(
         &self,
         request: DemoResetRequest,
     ) -> RepositoryResult<DemoStatus>;

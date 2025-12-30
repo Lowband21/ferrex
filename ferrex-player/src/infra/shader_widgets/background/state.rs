@@ -10,7 +10,7 @@ use crate::{
     infra::{
         constants::layout::{backdrop, detail, header},
         shader_widgets::background::{
-            BackgroundShader, DepthRegion, EdgeTransition,
+            BackgroundShader, ContentOffsetPx, DepthRegion, EdgeTransition,
             transitions::{
                 BackdropTransitionState, ColorTransitionState,
                 GradientTransitionState, generate_random_gradient_center,
@@ -18,6 +18,7 @@ use crate::{
         },
     },
 };
+use std::time::Instant;
 
 /// Computed backdrop dimensions - single source of truth for positioning
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,8 +42,12 @@ pub struct BackgroundShaderState {
     pub backdrop_handle: Option<iced::widget::image::Handle>,
     pub backdrop_aspect_ratio: Option<f32>,
     pub backdrop_aspect_mode: BackdropAspectMode,
-    pub backdrop_fade_start: f32,
-    pub backdrop_fade_end: f32,
+    /// Stable start time for time-based background effects.
+    pub start_time: Instant,
+    /// Stable id used to key renderer-side per-primitive data.
+    pub program_id: usize,
+    /// Content-space offset for deterministic, scroll-anchored noise.
+    pub content_offset_px: ContentOffsetPx,
     pub scroll_offset: f32,
     pub gradient_center: (f32, f32),
     pub depth_layout: DepthLayout,
@@ -68,8 +73,10 @@ impl Default for BackgroundShaderState {
                 crate::infra::constants::layout::backdrop::SOURCE_ASPECT,
             ),
             backdrop_aspect_mode: BackdropAspectMode::default(),
-            backdrop_fade_start: 0.92,
-            backdrop_fade_end: 1.0,
+            start_time: Instant::now(),
+            program_id: super::BACKGROUND_ID_COUNTER
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            content_offset_px: ContentOffsetPx::default(),
             scroll_offset: 0.0,
             gradient_center: initial_center,
             depth_layout: DepthLayout {
@@ -97,13 +104,33 @@ impl Default for BackgroundShaderState {
     profiling::all_functions
 )]
 impl BackgroundShaderState {
+    /// Set the vertical scroll offset in logical pixels and keep dependent offsets in sync.
+    pub fn set_vertical_scroll_px(&mut self, y: f32) {
+        self.scroll_offset = y;
+        self.content_offset_px.y = y;
+    }
+
+    /// Set the horizontal scroll offset (for carousel-like content) in logical pixels.
+    pub fn set_horizontal_scroll_px(&mut self, x: f32) {
+        self.content_offset_px.x = x;
+    }
+
+    /// Replace the full 2D content offset.
+    pub fn set_content_offset_px(&mut self, offset: ContentOffsetPx) {
+        self.content_offset_px = offset;
+        self.scroll_offset = offset.y;
+    }
+
     /// Build a configured background shader instance for the provided view state.
     /// All shared properties (color, offsets, depth layout) are sourced from this persistent state
     /// so call sites do not need to manually wire them each frame.
     pub fn build_shader(&self, view: &ViewState) -> BackgroundShader {
         let mut shader = background_shader()
+            .program_id(self.program_id)
+            .start_time(self.start_time)
             .colors(self.primary_color, self.secondary_color)
             .scroll_offset(self.scroll_offset)
+            .content_offset_px(self.content_offset_px)
             .gradient_center(self.gradient_center)
             .backdrop_aspect_mode(self.backdrop_aspect_mode)
             .backdrop_aspect_ratio(self.backdrop_aspect_ratio)
@@ -131,10 +158,6 @@ impl BackgroundShaderState {
     }
 
     /// Retrieve the configured fade window for backdrop images.
-    pub fn backdrop_fade(&self) -> (f32, f32) {
-        (self.backdrop_fade_start, self.backdrop_fade_end)
-    }
-
     /// Updates depth regions based on the current view and window size
     pub fn update_depth_lines(
         &mut self,
@@ -144,13 +167,6 @@ impl BackgroundShaderState {
         current_library_id: Option<uuid::Uuid>,
     ) {
         self.depth_layout.regions.clear();
-
-        log::debug!(
-            "Updating depth lines for view: {:?}, window: {}x{}",
-            view,
-            window_width,
-            window_height
-        );
 
         match view {
             ViewState::Library => {
@@ -177,12 +193,6 @@ impl BackgroundShaderState {
                     z_order: 1,
                     border: None,
                 });
-
-                log::debug!(
-                    "Added library regions with controls: {}, start: {}",
-                    current_library_id.is_some(),
-                    content_start
-                );
             }
             ViewState::MovieDetail { .. }
             | ViewState::SeriesDetail { .. }

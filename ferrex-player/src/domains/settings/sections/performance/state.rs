@@ -6,6 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_animation_hover_scale_down_delay_ms() -> u64 {
+    crate::infra::constants::layout::animation::HOVER_SCALE_DOWN_DELAY_MS
+}
+
 /// Performance settings state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceState {
@@ -72,6 +76,9 @@ pub struct PerformanceState {
     pub animation_hover_scale: f32,
     /// Hover scale transition duration in ms (default: 150)
     pub animation_hover_transition_ms: u64,
+    /// Delay before scaling down after hover ends in ms (default: 75)
+    #[serde(default = "default_animation_hover_scale_down_delay_ms")]
+    pub animation_hover_scale_down_delay_ms: u64,
 }
 
 impl Default for PerformanceState {
@@ -113,6 +120,8 @@ impl Default for PerformanceState {
             // Animation Effects (matches constants::layout::animation)
             animation_hover_scale: 1.05,
             animation_hover_transition_ms: 150,
+            animation_hover_scale_down_delay_ms:
+                default_animation_hover_scale_down_delay_ms(),
         }
     }
 }

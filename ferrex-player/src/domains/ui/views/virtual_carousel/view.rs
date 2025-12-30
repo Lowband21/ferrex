@@ -30,6 +30,7 @@ pub fn virtual_carousel<'a, F>(
     is_active: bool,
     fonts: &crate::infra::design_tokens::FontTokens,
     scaled_layout: &ScaledLayout,
+    viewport_right_reserved_px: f32,
 ) -> Element<'a, UiMessage>
 where
     F: Fn(usize) -> Option<Element<'a, UiMessage>>,
@@ -90,7 +91,16 @@ where
         theme::MediaServerTheme::TEXT_PRIMARY
     };
 
-    let h_padding = scaled_layout.min_viewport_padding();
+    let base_padding = scaled_layout.min_viewport_padding().max(0.0);
+    let viewport_right_reserved_px = viewport_right_reserved_px.max(0.0);
+
+    // Carousels already apply their own "page" padding. When a parent scrollable
+    // reserves layout space on the right (e.g. an embedded vertical scrollbar),
+    // we subtract that reserved space from the carousel's own *right* padding so
+    // the overall inset from the window edge stays stable (and symmetric).
+    let left_padding = base_padding;
+    let right_padding = (base_padding - viewport_right_reserved_px).max(0.0);
+
     let header = container(
         row![
             text(title).size(fonts.title).color(title_color),
@@ -101,7 +111,13 @@ where
         .align_y(iced::Alignment::Center)
         .width(Length::Fill),
     )
-    .padding([0, h_padding as u16]);
+    .width(Length::Fill)
+    .padding(iced::Padding {
+        top: 0.0,
+        right: right_padding,
+        bottom: 0.0,
+        left: left_padding,
+    });
 
     // Build windowed row with spacers
     let stride = state.item_width + state.item_spacing;
@@ -168,7 +184,15 @@ where
         .height(Length::Fixed(scaled_layout.row_height));
 
     // Apply horizontal padding; no additional styling for active state
-    let scroll_padded = container(scroll).padding([0, h_padding as u16]);
+    let scroll_padded =
+        container(scroll)
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: right_padding,
+                bottom: 0.0,
+                left: left_padding,
+            });
     let header_spacing = vcl::HEADER_SCROLL_SPACING * scaled_layout.scale;
     let section =
         column![header, Space::new().height(header_spacing), scroll_padded]
@@ -182,6 +206,7 @@ where
         .on_exit(UiMessage::VirtualCarousel(
             super::messages::VirtualCarouselMessage::BlurKey(key_for_exit),
         ));
+    let section_with_hover = container(section_with_hover).width(Length::Fill);
 
     if is_active {
         // Add a slim left accent rail matching the section height
@@ -191,9 +216,13 @@ where
         let rail = container(Space::new().height(Length::Fixed(rail_h)))
             .width(Length::Fixed(3.0))
             .style(rail_style);
-        row![rail, section_with_hover].into()
+        row![rail, section_with_hover].width(Length::Fill).into()
     } else {
-        section_with_hover.into()
+        let rail_space = Space::new().width(3.0);
+
+        row![rail_space, section_with_hover]
+            .width(Length::Fill)
+            .into()
     }
 }
 

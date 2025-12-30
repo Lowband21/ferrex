@@ -1,32 +1,40 @@
-use ferrex_player::app::AppConfig;
-use ferrex_player::common::messages::DomainMessage;
-use ferrex_player::domains;
-use ferrex_player::state::State;
-use ferrex_player::{subscriptions, update, view};
+use ferrex_player::{
+    app::AppConfig,
+    common::messages::DomainMessage,
+    domains::{
+        self,
+        ui::{
+            shell_ui::UiShellMessage, theme::MediaServerTheme,
+            windows::WindowKind,
+        },
+    },
+    state::State,
+    subscriptions, update, view,
+};
 
 use env_logger::{Builder, Target};
-use iced::window;
-use iced::{Font, Task, Theme};
-use iced_aw::ICED_AW_FONT_BYTES;
 use log::LevelFilter;
+
+use iced::{Font, Task, Theme, window};
+use iced_aw::ICED_AW_FONT_BYTES;
 
 fn init_logger() {
     Builder::new()
         .target(Target::Stdout)
-        .filter_level(LevelFilter::Warn)
-        .filter_module("ferrex-player", LevelFilter::Debug)
+        .filter_level(LevelFilter::Info)
+        .filter_module("ferrex_player", LevelFilter::Debug)
         .init();
 }
 
 fn main() -> iced::Result {
     if std::env::var("RUST_LOG").is_err() {
-        log::warn!(
-            "Failed to initialize logger from env, falling back to default"
-        );
         init_logger();
+        log::warn!(
+            "Failed to initialize logger from env, fell back to default"
+        );
     } else {
-        log::warn!("Initializing logger from env");
         env_logger::init();
+        log::warn!("Initialized logger from env");
     }
 
     #[cfg(any(
@@ -177,6 +185,10 @@ fn main() -> iced::Result {
         id: Some("ferrex-player".to_string()),
         antialiasing: false,
         default_font: Font::MONOSPACE,
+        #[cfg(not(target_os = "macos"))]
+        vsync: false,
+        #[cfg(target_os = "macos")]
+        vsync: true,
         ..Default::default()
     };
 
@@ -186,7 +198,7 @@ fn main() -> iced::Result {
 
             // Explicitly open the main window for daemon-based multi-window
             let (main_id, open) = window::open(window::Settings {
-                size: iced::Size::new(1280.0, 720.0),
+                size: iced::Size::new(1620.0, 1080.0),
                 resizable: true,
                 decorations: true,
                 transparent: true,
@@ -194,18 +206,13 @@ fn main() -> iced::Result {
             });
 
             // Track main window id immediately
-            state
-                .windows
-                .set(crate::domains::ui::windows::WindowKind::Main, main_id);
+            state.windows.set(WindowKind::Main, main_id);
 
             let boot = Task::batch([
                 auth_task,
                 open.map(|_| DomainMessage::NoOp),
                 Task::done(DomainMessage::Ui(
-                    domains::ui::shell_ui::UiShellMessage::MainWindowOpened(
-                        main_id,
-                    )
-                    .into(),
+                    UiShellMessage::MainWindowOpened(main_id).into(),
                 )),
             ]);
 
@@ -221,7 +228,7 @@ fn main() -> iced::Result {
     .title(|state: &State, window_id| {
         if state
             .windows
-            .get(crate::domains::ui::windows::WindowKind::Search)
+            .get(WindowKind::Search)
             .is_some_and(|id| id == window_id)
         {
             "Ferrex Search".to_string()
@@ -230,10 +237,7 @@ fn main() -> iced::Result {
         }
     })
     .theme(|state: &State, window| {
-        ferrex_player::domains::ui::theme::MediaServerTheme::theme_for_state(
-            state,
-            Some(window),
-        )
+        MediaServerTheme::theme_for_state(state, Some(window))
     })
     .run()
 }

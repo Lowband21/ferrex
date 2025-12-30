@@ -7,7 +7,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tokio::fs::{create_dir_all, read};
 
 use aes_gcm::{
     Aes256Gcm, Key, Nonce,
@@ -133,21 +134,22 @@ impl AuthStorage {
         let wrap_path = self
             .cache_path
             .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
+            .unwrap_or_else(|| Path::new("."))
             .join("device_key_wrap.key");
         let wrap_key = if wrap_path.exists() {
-            tokio::fs::read(&wrap_path).await?
+            read(&wrap_path).await?
         } else {
             let mut key = [0u8; 32];
-            getrandom::getrandom(&mut key)
+            getrandom::fill(&mut key)
                 .map_err(|e| anyhow::anyhow!("rng failed: {}", e))?;
             if let Some(parent) = wrap_path.parent() {
-                tokio::fs::create_dir_all(parent).await?;
+                create_dir_all(parent).await?;
             }
             tokio::fs::write(&wrap_path, &key).await?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+
                 let mut perms =
                     tokio::fs::metadata(&wrap_path).await?.permissions();
                 perms.set_mode(0o600);

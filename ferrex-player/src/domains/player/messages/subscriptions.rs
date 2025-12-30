@@ -3,6 +3,8 @@ use crate::domains::player::messages::PlayerMessage;
 use crate::infra::constants::player::seeking::*;
 use crate::state::State;
 use iced::Subscription;
+use iced::event;
+use iced::keyboard::{self, Key, Modifiers, key::Named};
 
 /// Creates all player-related subscriptions (keyboard + overlay timers)
 pub fn subscription(state: &State) -> Subscription<DomainMessage> {
@@ -55,7 +57,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 }
 
 fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
-    if state.search_window_id.is_some() {
+    if state.domains.search.state.presentation.is_open() {
         return Subscription::none();
     }
 
@@ -71,46 +73,60 @@ fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
         return Subscription::none();
     }
 
-    iced::keyboard::on_key_press(|key, modifiers| {
-        use iced::keyboard::{Key, key::Named};
-        let msg = match key {
-            Key::Named(Named::Space) => Some(PlayerMessage::PlayPause),
-            Key::Named(Named::ArrowLeft) => {
-                if modifiers.shift() {
-                    Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_FINE))
-                } else {
-                    Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_COURSE))
-                }
-            }
-            Key::Named(Named::ArrowRight) => {
-                if modifiers.shift() {
-                    Some(PlayerMessage::SeekRelative(SEEK_FORWARD_FINE))
-                } else {
-                    Some(PlayerMessage::SeekRelative(SEEK_FORWARD_COURSE))
-                }
-            }
-            Key::Named(Named::ArrowUp) => Some(PlayerMessage::SetVolume(1.1)),
-            Key::Named(Named::ArrowDown) => Some(PlayerMessage::SetVolume(0.9)),
-            Key::Named(Named::Escape) => None,
-            Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
-                Some(PlayerMessage::ToggleFullscreen)
-            }
-            Key::Named(Named::F11) => Some(PlayerMessage::ToggleFullscreen),
-            Key::Character(c) if c.as_str() == "m" || c.as_str() == "M" => {
-                Some(PlayerMessage::ToggleMute)
-            }
-            Key::Character(c) if c.as_str() == "s" || c.as_str() == "S" => {
-                if modifiers.shift() {
-                    Some(PlayerMessage::ToggleSubtitleMenu)
-                } else {
-                    Some(PlayerMessage::CycleSubtitleSimple)
-                }
-            }
-            Key::Character(c) if c.as_str() == "a" || c.as_str() == "A" => {
-                Some(PlayerMessage::CycleAudioTrack)
-            }
-            _ => None,
+    event::listen_with(|event, _status, _id| {
+        let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            ..
+        }) = event
+        else {
+            return None;
         };
-        msg.map(DomainMessage::Player)
+        handle_player_key_press(key, modifiers)
     })
+}
+
+fn handle_player_key_press(
+    key: Key,
+    modifiers: Modifiers,
+) -> Option<DomainMessage> {
+    let msg = match key {
+        Key::Named(Named::Space) => Some(PlayerMessage::PlayPause),
+        Key::Named(Named::ArrowLeft) => {
+            if modifiers.shift() {
+                Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_FINE))
+            } else {
+                Some(PlayerMessage::SeekRelative(SEEK_BACKWARD_COURSE))
+            }
+        }
+        Key::Named(Named::ArrowRight) => {
+            if modifiers.shift() {
+                Some(PlayerMessage::SeekRelative(SEEK_FORWARD_FINE))
+            } else {
+                Some(PlayerMessage::SeekRelative(SEEK_FORWARD_COURSE))
+            }
+        }
+        Key::Named(Named::ArrowUp) => Some(PlayerMessage::SetVolume(1.1)),
+        Key::Named(Named::ArrowDown) => Some(PlayerMessage::SetVolume(0.9)),
+        Key::Named(Named::Escape) => None,
+        Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
+            Some(PlayerMessage::ToggleFullscreen)
+        }
+        Key::Named(Named::F11) => Some(PlayerMessage::ToggleFullscreen),
+        Key::Character(c) if c.as_str() == "m" || c.as_str() == "M" => {
+            Some(PlayerMessage::ToggleMute)
+        }
+        Key::Character(c) if c.as_str() == "s" || c.as_str() == "S" => {
+            if modifiers.shift() {
+                Some(PlayerMessage::ToggleSubtitleMenu)
+            } else {
+                Some(PlayerMessage::CycleSubtitleSimple)
+            }
+        }
+        Key::Character(c) if c.as_str() == "a" || c.as_str() == "A" => {
+            Some(PlayerMessage::CycleAudioTrack)
+        }
+        _ => None,
+    };
+    msg.map(DomainMessage::Player)
 }

@@ -1,6 +1,6 @@
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::errors::{
-    AuthError, AuthResult, DeviceError, NetworkError, StorageError, TokenError,
+    AuthError, AuthResult, NetworkError, StorageError, TokenError,
 };
 use crate::domains::auth::state_types::{AuthState, AuthStateStore};
 use base64::Engine as _;
@@ -509,9 +509,9 @@ impl AuthManager {
 
         // Update auth state with new token
         self.auth_state.authenticate(
-            user.clone(),
+            *user,
             response.clone(),
-            permissions.clone(),
+            *permissions,
             server_url.clone(),
         );
 
@@ -547,9 +547,9 @@ impl AuthManager {
 
             Some(StoredAuth {
                 token: token.clone(),
-                user: user.clone(),
+                user: *user,
                 server_url,
-                permissions: Some(permissions.clone()),
+                permissions: Some(*permissions),
                 stored_at: now,
                 device_trust_expires_at: trust_expires_at,
                 refresh_token: Some(token.refresh_token.clone()),
@@ -1078,14 +1078,13 @@ impl AuthManager {
             .auth_storage
             .load_user_summaries_for_server(self.api_client.base_url())
             .await
+            && let Some(u) = users.into_iter().find(|u| u.id == user_id)
         {
-            if let Some(u) = users.into_iter().find(|u| u.id == user_id) {
-                return Some(DeviceAuthStatus {
-                    device_registered: true,
-                    has_pin: u.has_pin,
-                    remaining_attempts: None,
-                });
-            }
+            return Some(DeviceAuthStatus {
+                device_registered: true,
+                has_pin: u.has_pin,
+                remaining_attempts: None,
+            });
         }
         None
     }
@@ -1109,17 +1108,16 @@ impl AuthManager {
                     break;
                 }
             }
-            if updated {
-                if let Err(e) = self
+            if updated
+                && let Err(e) = self
                     .auth_storage
                     .save_user_summaries_for_server(
                         self.api_client.base_url(),
                         &users,
                     )
                     .await
-                {
-                    warn!("Failed to update cached user summaries: {}", e);
-                }
+            {
+                warn!("Failed to update cached user summaries: {}", e);
             }
         }
     }
@@ -1168,7 +1166,7 @@ impl AuthManager {
     /// Get current authenticated user
     pub async fn get_current_user(&self) -> Option<User> {
         self.auth_state.with_state(|state| match state {
-            AuthState::Authenticated { user, .. } => Some(user.clone()),
+            AuthState::Authenticated { user, .. } => Some(*user.clone()),
             _ => None,
         })
     }
@@ -1177,7 +1175,7 @@ impl AuthManager {
     pub async fn get_current_permissions(&self) -> Option<UserPermissions> {
         self.auth_state.with_state(|state| match state {
             AuthState::Authenticated { permissions, .. } => {
-                Some(permissions.clone())
+                Some(*permissions.clone())
             }
             _ => None,
         })
@@ -1255,7 +1253,7 @@ impl AuthManager {
                 self.auth_state.authenticate(
                     updated_user,
                     token.clone(),
-                    permissions.clone(),
+                    *permissions,
                     server_url,
                 );
             }

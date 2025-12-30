@@ -7,6 +7,7 @@ use ferrex_core::{
     api::types::{CreateLibraryRequest, UpdateLibraryRequest},
     types::{ids::LibraryId, library::LibraryType},
 };
+use ferrex_model::MovieReferenceBatchSize;
 use iced::Task;
 use std::path::PathBuf;
 
@@ -26,6 +27,7 @@ pub fn handle_create_library(
             .collect(),
         scan_interval_minutes: library.scan_interval_minutes,
         enabled: library.enabled,
+        movie_ref_batch_size: library.movie_ref_batch_size.get(),
         start_scan,
     };
 
@@ -55,6 +57,7 @@ pub fn handle_library_created(
             Task::perform(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
+                    state.disk_media_repo_cache.clone(),
                 ),
                 |res| {
                     LibraryMessage::LibrariesLoaded(
@@ -94,6 +97,7 @@ pub fn handle_update_library(
         ),
         scan_interval_minutes: Some(library.scan_interval_minutes),
         enabled: Some(library.enabled),
+        movie_ref_batch_size: None,
     };
 
     let api = state.api_service.clone();
@@ -123,6 +127,7 @@ pub fn handle_library_updated(
             Task::perform(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
+                    state.disk_media_repo_cache.clone(),
                 ),
                 |res| {
                     LibraryMessage::LibrariesLoaded(
@@ -181,6 +186,7 @@ pub fn handle_library_deleted(
             Task::perform(
                 super::library_loaded::fetch_libraries(
                     state.api_service.clone(),
+                    state.disk_media_repo_cache.clone(),
                 ),
                 |res| {
                     LibraryMessage::LibrariesLoaded(
@@ -302,6 +308,7 @@ pub fn handle_reset_library(
                     .collect(),
                 scan_interval_minutes: lib.scan_interval_minutes,
                 enabled: lib.enabled,
+                movie_ref_batch_size: lib.movie_ref_batch_size.get(),
                 start_scan: true,
             };
             let _id = create_api
@@ -466,6 +473,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
             watch_for_changes: true,
             analyze_on_scan: true,
             max_retry_attempts: 3,
+            movie_ref_batch_size: MovieReferenceBatchSize::default(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -490,6 +498,7 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
                             library.scan_interval_minutes,
                         ),
                         enabled: Some(library.enabled),
+                        movie_ref_batch_size: None,
                     };
                     api.update_library(library.id, req).await.map(|_| library)
                 },
@@ -518,6 +527,9 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
                             .collect(),
                         scan_interval_minutes: library.scan_interval_minutes,
                         enabled: library.enabled,
+                        movie_ref_batch_size: library
+                            .movie_ref_batch_size
+                            .get(),
                         start_scan,
                     };
                     api.create_library(req).await.map(|_| library)

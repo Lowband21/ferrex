@@ -13,6 +13,7 @@ pub mod messages;
 pub mod motion_controller;
 pub mod playback_ui;
 pub mod scroll_manager;
+pub mod search_surface;
 pub mod settings_ui;
 pub mod shell_ui;
 pub mod tabs;
@@ -156,6 +157,11 @@ pub struct UIDomainState {
 
     // Toast notification manager
     pub toast_manager: feedback_ui::ToastManager,
+
+    #[cfg(feature = "debug-cache-overlay")]
+    pub cache_overlay_sample: Option<
+        crate::domains::ui::views::cache_debug_overlay::CacheOverlaySample,
+    >,
 }
 
 impl UIDomainState {}

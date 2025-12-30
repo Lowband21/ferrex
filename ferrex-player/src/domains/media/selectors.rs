@@ -9,6 +9,7 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{EpisodeID, MediaIDLike, SeasonID, SeriesID};
+use ferrex_model::{EpisodeReference, Media};
 
 /// For a series: choose the first in-progress episode, else the first
 /// unwatched episode. If all are completed (or no watch state), fallback to
@@ -140,9 +141,9 @@ pub fn select_next_episode_for_season(
 fn resolve_episode_using_accessor(
     accessor: &Accessor<ReadOnly>,
     episode_id: &EpisodeID,
-) -> Option<ferrex_core::player_prelude::EpisodeReference> {
+) -> Option<Box<EpisodeReference>> {
     accessor.get(episode_id).ok().and_then(|m| match m {
-        ferrex_core::player_prelude::Media::Episode(ep) => Some(ep),
+        Media::Episode(ep) => Some(ep),
         _ => None,
     })
 }

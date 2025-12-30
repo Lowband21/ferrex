@@ -17,6 +17,7 @@ use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
 /// Performance section marker for type-safe section identification
+#[derive(Debug)]
 pub struct PerformanceSection;
 
 /// Update performance settings state

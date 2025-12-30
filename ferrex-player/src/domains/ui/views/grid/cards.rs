@@ -27,16 +27,16 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{
-    ImageSize, MediaDetailsOptionLike, MediaID, MediaIDLike, MediaOps, MovieID,
-    MovieLike, Priority, SeriesID, SeriesLike, WatchProgress,
+    ImageSize, MediaID, MediaIDLike, MediaOps, MovieID, MovieLike, Priority,
+    SeriesID, SeriesLike, WatchProgress,
 };
 
-use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{column, container, mouse_area},
 };
 
+use rkyv::option::ArchivedOption;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -124,6 +124,8 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Get scaled layout for dynamic poster dimensions
     let scaled_layout = &state.domains.ui.state.scaled_layout;
+    let poster_quality = state.domains.settings.display.library_poster_quality;
+    let poster_request_size = ImageSize::Poster(poster_quality);
 
     // Try from UI yoke cache first
     let uuid = movie_id.to_uuid();
@@ -184,8 +186,7 @@ pub fn movie_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(movie_id.to_uuid())
-                        .size(ImageSize::poster())
-                        .image_type(MediaType::Movie)
+                        .size(poster_request_size)
                         .radius(scaled_layout.corner_radius)
                         .width(Length::Fixed(scaled_layout.poster_width))
                         .height(Length::Fixed(scaled_layout.poster_height))
@@ -247,6 +248,10 @@ pub fn movie_reference_card_with_state<'a>(
     //let release_data = movie.release_date();
     //let year = movie.release_year();
     let theme_color = movie.theme_color();
+    let poster_iid = match &movie.details.primary_poster_iid {
+        ArchivedOption::Some(iid) => Some(*iid),
+        ArchivedOption::None => None,
+    };
 
     // Determine priority based on visibility and hover state
     let priority = if is_hovered || is_visible {
@@ -257,15 +262,15 @@ pub fn movie_reference_card_with_state<'a>(
 
     // Create image with watch progress and scroll tier
     let mut img = image_for(media_id.to_uuid())
-        .size(ImageSize::poster())
-        .image_type(MediaType::Movie)
+        .iid(poster_iid)
+        .skip_request(poster_iid.is_none())
+        .size(poster_request_size)
         .radius(scaled_layout.corner_radius)
         .width(Length::Fixed(scaled_layout.poster_width))
         .height(Length::Fixed(scaled_layout.poster_height))
         .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
-        .skip_request(true)
         .is_hovered(is_hovered)
         .on_play(PlaybackMessage::PlayMediaWithId(media_id).into())
         .on_click(UiShellMessage::ViewMovieDetails(movie_id).into());
@@ -371,6 +376,8 @@ pub fn series_reference_card_with_state<'a>(
 
     // Get scaled layout for dynamic poster dimensions
     let scaled_layout = &state.domains.ui.state.scaled_layout;
+    let poster_quality = state.domains.settings.display.library_poster_quality;
+    let poster_request_size = ImageSize::Poster(poster_quality);
 
     // Try from UI yoke cache first
     let uuid = series_id.to_uuid();
@@ -383,7 +390,7 @@ pub fn series_reference_card_with_state<'a>(
     {
         Some(arc) => arc.clone(),
         _ => {
-            // Lazily fetch from repo and insert into cache (do not remove handlers or legacy comments)
+            // Lazily fetch from repo and insert into cache
             match state
                 .domains
                 .ui
@@ -431,8 +438,7 @@ pub fn series_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(series_id.to_uuid())
-                        .size(ImageSize::poster())
-                        .image_type(MediaType::Series)
+                        .size(poster_request_size)
                         .radius(scaled_layout.corner_radius)
                         .width(Length::Fixed(scaled_layout.poster_width))
                         .height(Length::Fixed(scaled_layout.poster_height))
@@ -487,11 +493,12 @@ pub fn series_reference_card_with_state<'a>(
     };
     let series = yoke_arc.get();
 
-    let _media_id = series.media_id();
     let series_id = series.id();
-    let _num_seasons = series.num_seasons();
     let theme_color = series.theme_color();
-    let details_opt = &series.details;
+    let poster_iid = match &series.details.primary_poster_iid {
+        ArchivedOption::Some(iid) => Some(*iid),
+        ArchivedOption::None => None,
+    };
 
     // Determine priority based on visibility and hover state
     let priority = if is_hovered || is_visible {
@@ -500,16 +507,11 @@ pub fn series_reference_card_with_state<'a>(
         Priority::Preload
     };
 
-    // Determine if we have a poster_path; if absent, skip fetching and render placeholder
-    // let has_poster_path = details_opt
-    //     .as_series()
-    //     .and_then(|d| d.poster_path.as_ref())
-    //     .is_some();
-
     // Create image with scroll tier
     let mut img = image_for(series_id.to_uuid())
-        .size(ImageSize::poster())
-        .image_type(MediaType::Series)
+        .iid(poster_iid)
+        .skip_request(poster_iid.is_none())
+        .size(poster_request_size)
         .radius(scaled_layout.corner_radius)
         .width(Length::Fixed(scaled_layout.poster_width))
         .height(Length::Fixed(scaled_layout.poster_height))
@@ -517,7 +519,6 @@ pub fn series_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
-        .skip_request(true)
         .on_play(PlaybackMessage::PlaySeriesNextEpisode(series_id).into())
         .on_click(UiShellMessage::ViewTvShow(series_id).into());
 
@@ -578,8 +579,29 @@ pub fn series_reference_card_with_state<'a>(
     // Add title and meta text to be rendered by the shader
     let title = truncate(&mut series.title().to_string());
     img = img.title(title);
-    if let Some(year) = details_opt.get_release_year() {
-        img = img.meta(year.to_string());
+
+    // 18+5 = 23
+    let mut buf = String::with_capacity(25);
+    if let ArchivedOption::Some(available_seasons) =
+        series.details.available_seasons
+        && let ArchivedOption::Some(num_seasons) =
+            series.details.number_of_seasons
+    {
+        buf.push_str(&available_seasons.to_string());
+        buf.push_str(" of ");
+        buf.push_str(&num_seasons.to_string());
+        buf.push_str(" seasons");
+        img = img.meta(buf);
+    } else {
+        buf.push_str(
+            &series
+                .details
+                .number_of_seasons
+                .unwrap_or(0.into())
+                .to_string(),
+        );
+        buf.push_str(" seasons");
+        img = img.meta(buf);
     }
 
     let image_element: Element<'_, UiMessage> = img.into();
@@ -671,7 +693,7 @@ pub fn season_reference_card_with_state<'a, Season: MaybeYoked>(
             //subtitle: &subtitle,
             subtitle: "Blank",
             image: {
-                key: season_id,
+                key: season_id.to_uuid(),
                 type: poster,
                 fallback: "📺",
             },

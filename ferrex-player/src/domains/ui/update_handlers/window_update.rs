@@ -5,9 +5,7 @@ use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::views::virtual_carousel::{
     planner, types::CarouselKey,
 };
-use crate::infra::api_types::LibraryType;
 use crate::{domains::ui::messages::UiMessage, state::State};
-use ferrex_core::player_prelude::PosterKind;
 use ferrex_model::SeasonID;
 
 #[cfg_attr(
@@ -19,7 +17,7 @@ use ferrex_model::SeasonID;
     profiling::function
 )]
 pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
-    log::debug!("Window resized to: {}x{}", size.width, size.height);
+    // log::trace!("Window resized to: {}x{}", size.width, size.height);
 
     // Grid state handling moved to ViewModels
 
@@ -61,52 +59,65 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
         );
 
     // Emit snapshot for active library tab after columns update.
-    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-        if let crate::domains::ui::tabs::TabState::Library(lib_state) =
+    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
+        && let crate::domains::ui::tabs::TabState::Library(lib_state) =
             state.tab_manager.active_tab()
-        {
-            let now = std::time::Instant::now();
-            let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
-            let vr = lib_state.grid_state.visible_range.clone();
-            if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-                visible_ids.extend(slice.iter().copied());
-            }
+    {
+        let poster_size = state.domains.settings.display.library_poster_quality;
+        let now = std::time::Instant::now();
+        let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
+        let vr = lib_state.grid_state.visible_range.clone();
+        if let Some(slice) = lib_state.cached_index_ids.get(vr) {
+            visible_ids.extend(slice.iter().copied().filter_map(|id| {
+                crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                    state,
+                    lib_state.library_type,
+                    id,
+                )
+            }));
+        }
 
-            let prefetch_rows = state.runtime_config.prefetch_rows_above();
-            let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
-            let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
-            if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-                prefetch_ids.extend(slice.iter().copied());
-            }
+        let prefetch_rows = state.runtime_config.prefetch_rows_above();
+        let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
+        let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
+        if let Some(slice) = lib_state.cached_index_ids.get(pr) {
+            prefetch_ids.extend(slice.iter().copied().filter_map(|id| {
+                crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                    state,
+                    lib_state.library_type,
+                    id,
+                )
+            }));
+        }
 
-            prefetch_ids.retain(|id| !visible_ids.contains(id));
-            let br = lib_state.grid_state.get_background_range(
+        prefetch_ids.retain(|id| !visible_ids.contains(id));
+        let br = lib_state.grid_state.get_background_range(
                 prefetch_rows,
                 crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
             );
-            let mut background_ids: Vec<uuid::Uuid> = Vec::new();
-            if let Some(slice) = lib_state.cached_index_ids.get(br) {
-                background_ids.extend(slice.iter().copied());
-            }
-            background_ids.retain(|id| {
-                !visible_ids.contains(id) && !prefetch_ids.contains(id)
-            });
-
-            let poster_kind = match lib_state.library_type {
-                LibraryType::Movies => Some(PosterKind::Movie),
-                LibraryType::Series => Some(PosterKind::Series),
-            };
-
-            let snapshot = DemandSnapshot {
-                visible_ids,
-                prefetch_ids,
-                background_ids,
-                timestamp: now,
-                context: None,
-                poster_kind,
-            };
-            handle.send(snapshot);
+        let mut background_ids: Vec<uuid::Uuid> = Vec::new();
+        if let Some(slice) = lib_state.cached_index_ids.get(br) {
+            background_ids.extend(slice.iter().copied().filter_map(|id| {
+                crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                    state,
+                    lib_state.library_type,
+                    id,
+                )
+            }));
         }
+        background_ids.retain(|id| {
+            !visible_ids.contains(id) && !prefetch_ids.contains(id)
+        });
+
+        let snapshot = DemandSnapshot {
+            visible_ids,
+            prefetch_ids,
+            background_ids,
+            timestamp: now,
+            context: None,
+            poster_size,
+        };
+        handle.send(snapshot);
     }
 
     // Update virtual carousels with new width (trial support)
@@ -140,28 +151,32 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
         } => {
             let key = CarouselKey::ShowSeasons(series_id.to_uuid());
             if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
-            {
-                if let Ok(seasons) = state
+                && let Ok(seasons) = state
                     .domains
                     .ui
                     .state
                     .repo_accessor
                     .get_series_seasons(&series_id)
+            {
+                let poster_size =
+                    state.domains.settings.display.library_poster_quality;
+                let total = seasons.len();
+                let snap = planner::snapshot_for_visible(
+                    vc,
+                    total,
+                    |i| {
+                        seasons
+                            .get(i)
+                            .and_then(|s| s.details.primary_poster_iid)
+                    },
+                    poster_size,
+                    None,
+                    &state.runtime_config,
+                );
+                if let Some(handle) =
+                    state.domains.metadata.state.planner_handle.as_ref()
                 {
-                    let total = seasons.len();
-                    let snap = planner::snapshot_for_visible(
-                        vc,
-                        total,
-                        |i| seasons.get(i).map(|s| s.id.to_uuid()),
-                        Some(ferrex_core::player_prelude::PosterKind::Season),
-                        None,
-                        &state.runtime_config,
-                    );
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        handle.send(snap);
-                    }
+                    handle.send(snap);
                 }
             }
         }
@@ -172,6 +187,8 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
             let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
             if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
             {
+                let poster_size =
+                    state.domains.settings.display.library_poster_quality;
                 let episodes = state
                     .domains
                     .ui
@@ -183,7 +200,11 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
                 let (vis, mut pre, mut back) = planner::collect_ranges_ids(
                     vc,
                     total,
-                    |i| episodes.get(i).map(|e| e.id.to_uuid()),
+                    |i| {
+                        episodes
+                            .get(i)
+                            .and_then(|e| e.details.primary_still_iid)
+                    },
                     &state.runtime_config,
                 );
                 pre.retain(|id| !vis.contains(id));
@@ -198,7 +219,7 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
                     background_ids: back,
                     timestamp: std::time::Instant::now(),
                     context: Some(ctx),
-                    poster_kind: None,
+                    poster_size,
                 };
                 if let Some(handle) =
                     state.domains.metadata.state.planner_handle.as_ref()

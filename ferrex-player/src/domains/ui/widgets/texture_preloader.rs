@@ -1,6 +1,5 @@
-use ferrex_model::MediaType;
 use iced::widget::image::Handle;
-use iced::widget::shader::{Primitive, Program};
+use iced::widget::shader::{Pipeline, Primitive, Program};
 use iced::{Element, Length};
 use iced::{Rectangle, mouse};
 use iced_wgpu::primitive::{
@@ -64,20 +63,26 @@ impl Program<UiMessage> for TexturePreloaderProgram {
     }
 }
 
-impl Primitive for TexturePreloaderPrimitive {
-    type Renderer = ();
+/// No-op provider for batched primitives.
+#[derive(Debug)]
+pub struct NoopPipeline;
 
-    fn initialize(
-        &self,
+impl Pipeline for NoopPipeline {
+    fn new(
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
-    ) -> Self::Renderer {
+    ) -> Self {
+        NoopPipeline
     }
+}
+
+impl Primitive for TexturePreloaderPrimitive {
+    type Pipeline = NoopPipeline;
 
     fn prepare(
         &self,
-        _renderer: &mut Self::Renderer,
+        _pipeline: &mut Self::Pipeline,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _bounds: &Rectangle,
@@ -192,8 +197,7 @@ pub fn texture_preloader(
 /// Collect cached handles for the given media IDs, if already decoded and present in the image cache.
 /// This does not trigger network requests; it only returns handles that are already available.
 pub fn collect_cached_handles_for_media(
-    ids: impl IntoIterator<Item = uuid::Uuid>,
-    image_type: MediaType,
+    iids: impl IntoIterator<Item = uuid::Uuid>,
     size: ImageSize,
 ) -> Vec<Handle> {
     use crate::infra::service_registry;
@@ -205,12 +209,11 @@ pub fn collect_cached_handles_for_media(
     let image_service = image_service.unwrap();
 
     let mut out = Vec::new();
-    for id in ids {
-        let request = ImageRequest::new(id, size, image_type)
-            .with_priority(Priority::Visible)
-            .with_index(0);
+    for iid in iids {
+        let request =
+            ImageRequest::new(iid, size).with_priority(Priority::Visible);
         if let Some((handle, _loaded_at)) =
-            image_service.get().get_with_load_time(&request)
+            image_service.get_with_load_time(&request)
         {
             out.push(handle.clone());
         }

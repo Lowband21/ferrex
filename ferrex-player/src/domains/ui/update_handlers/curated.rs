@@ -1,17 +1,23 @@
-//! Curated carousels for the All tab
+//! Curated carousels for the Home tab
 //!
 //! Computes and initializes curated lists: Continue Watching, Recently Added
 //! (Movies/Series), and Recently Released (Movies/Series). Separated from
 //! generic virtual carousel helpers to keep responsibilities focused and
 //! make future extensions straightforward.
+use ferrex_core::player_prelude::{
+    LibraryId, SortBy, SortOrder, compare_media,
+};
+use ferrex_model::{
+    EpisodeID, LibraryType, Media, MediaID, MovieID, SeasonID, SeriesID,
+};
 
 use crate::{
     domains::{
-        metadata::demand_planner::{
-            DemandContext, DemandRequestKind, DemandSnapshot,
-        },
+        metadata::demand_planner::DemandSnapshot,
         ui::{
             tabs::{TabId, TabState},
+            update_handlers::emit_snapshot_for_carousel_simple,
+            utils::primary_poster_iid_for_movie_or_series,
             views::virtual_carousel::{
                 planner,
                 types::{CarouselConfig, CarouselKey},
@@ -22,14 +28,7 @@ use crate::{
     state::State,
 };
 
-use ferrex_core::player_prelude::{
-    LibraryId, PosterKind, PosterSize, SortBy, SortOrder, compare_media,
-};
-use ferrex_model::{
-    EpisodeID, LibraryType, Media, MediaID, MovieID, SeasonID, SeriesID,
-};
-use log::info;
-
+use log::debug;
 use std::cmp::Ordering;
 use uuid::Uuid;
 
@@ -326,6 +325,7 @@ pub fn emit_initial_curated_snapshots(state: &mut State) {
     else {
         return;
     };
+    let poster_size = state.domains.settings.display.library_poster_quality;
     let all_state = match state.tab_manager.get_tab(TabId::Home) {
         Some(TabState::Home(s)) => s,
         _ => return,
@@ -346,43 +346,37 @@ pub fn emit_initial_curated_snapshots(state: &mut State) {
             // fall back to a small head window to kick off image loads.
             if vc.visible_range.start == vc.visible_range.end {
                 let head = usize::min(total, HEAD_WINDOW);
-                let visible_ids: Vec<_> =
-                    (0..head).filter_map(|i| ids.get(i).copied()).collect();
-                // Build explicit context for both Movie/Series ids
-                let ctx = crate::domains::ui::update_handlers::virtual_carousel_helpers::build_mixed_poster_context(
-                    state,
-                    &visible_ids,
-                );
-
+                let visible_ids: Vec<_> = (0..head)
+                    .filter_map(|i| {
+                        ids.get(i).copied().and_then(|id| {
+                            crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                        })
+                    })
+                    .collect();
                 let snap = DemandSnapshot {
                     visible_ids,
                     prefetch_ids: Vec::new(),
                     background_ids: Vec::new(),
                     timestamp: std::time::Instant::now(),
-                    context: Some(ctx),
-                    // Use explicit per-id overrides rather than a fallback kind
-                    poster_kind: None,
+                    context: None,
+                    poster_size,
                 };
                 handle.send(snap);
             } else {
                 let (vis, mut pre, mut back) = planner::collect_ranges_ids(
                     vc,
                     total,
-                    |i| ids.get(i).copied(),
+                    |i| {
+                        ids.get(i).copied().and_then(|id| {
+                            crate::domains::ui::utils::primary_poster_iid_for_movie_or_series(state, id)
+                        })
+                    },
                     &state.runtime_config,
                 );
                 pre.retain(|id| !vis.contains(id));
                 back.retain(|id| !vis.contains(id) && !pre.contains(id));
-                // Build explicit context for both Movie/Series ids in the union
-                let mut all = vis.clone();
-                all.extend(pre.iter().copied());
-                all.extend(back.iter().copied());
-                let ctx = crate::domains::ui::update_handlers::virtual_carousel_helpers::build_mixed_poster_context(
-                    state,
-                    &all,
-                );
 
-                info!(
+                debug!(
                     "Sending snapshot request for {} visible posters, {} prefetch, and {} background.",
                     vis.len(),
                     pre.len(),
@@ -394,46 +388,31 @@ pub fn emit_initial_curated_snapshots(state: &mut State) {
                     prefetch_ids: pre,
                     background_ids: back,
                     timestamp: std::time::Instant::now(),
-                    context: Some(ctx),
-                    poster_kind: None,
+                    context: None,
+                    poster_size,
                 };
                 handle.send(snap);
             }
         }
     }
 
-    // Simple helpers for the remaining lists
-    let send_simple = |key: &'static str,
-                       poster: PosterKind,
-                       ids: &Vec<Uuid>| {
+    let send_simple = |key: &'static str, ids: &Vec<Uuid>| {
         let carousel_key = CarouselKey::Custom(key);
-        crate::domains::ui::update_handlers::virtual_carousel_helpers::emit_snapshot_for_carousel_simple(
+        emit_snapshot_for_carousel_simple(
             state,
             &carousel_key,
             ids.len(),
-            |i| ids.get(i).copied(),
-            Some(poster),
+            |i| {
+                ids.get(i).copied().and_then(|id| {
+                    primary_poster_iid_for_movie_or_series(state, id)
+                })
+            },
+            poster_size,
         );
     };
 
-    send_simple(
-        "RecentlyAddedMovies",
-        PosterKind::Movie,
-        &all_state.recent_movies,
-    );
-    send_simple(
-        "RecentlyAddedSeries",
-        PosterKind::Series,
-        &all_state.recent_series,
-    );
-    send_simple(
-        "RecentlyReleasedMovies",
-        PosterKind::Movie,
-        &all_state.released_movies,
-    );
-    send_simple(
-        "RecentlyReleasedSeries",
-        PosterKind::Series,
-        &all_state.released_series,
-    );
+    send_simple("RecentlyAddedMovies", &all_state.recent_movies);
+    send_simple("RecentlyAddedSeries", &all_state.recent_series);
+    send_simple("RecentlyReleasedMovies", &all_state.released_movies);
+    send_simple("RecentlyReleasedSeries", &all_state.released_series);
 }

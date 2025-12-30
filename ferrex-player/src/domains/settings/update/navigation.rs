@@ -1,12 +1,13 @@
-use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::domains::auth::security::SecureCredential;
-use crate::domains::settings::messages::SettingsMessage;
-use crate::domains::settings::state::{
-    SettingsSection, SettingsView as SettingsSubview,
+use crate::{
+    common::messages::{DomainMessage, DomainUpdateResult},
+    domains::{
+        auth::security::SecureCredential,
+        settings::{messages::SettingsMessage, state::SettingsSection},
+        ui::shell_ui::UiShellMessage,
+    },
+    state::State,
 };
-use crate::domains::ui;
-use crate::domains::ui::shell_ui::UiShellMessage;
-use crate::state::State;
+
 use iced::Task;
 
 /// Handle navigation to a settings section (new unified sidebar)
@@ -56,8 +57,6 @@ pub fn handle_navigate_to_section(
 
 /// Handle showing profile view
 pub fn handle_show_profile(state: &mut State) -> DomainUpdateResult {
-    state.domains.settings.current_view = SettingsSubview::Profile;
-
     // Load current user profile data
     let svc = state.domains.auth.state.auth_service.clone();
     let task = Task::perform(
@@ -78,43 +77,8 @@ pub fn handle_show_profile(state: &mut State) -> DomainUpdateResult {
     DomainUpdateResult::task(task.map(DomainMessage::Settings))
 }
 
-/// Handle showing preferences view
-pub fn handle_show_preferences(state: &mut State) -> DomainUpdateResult {
-    state.domains.settings.current_view = SettingsSubview::Preferences;
-
-    // Load current preferences
-    let svc = state.domains.auth.state.auth_service.clone();
-
-    let task = Task::perform(
-        async move {
-            // Get auto-login preference from auth storage
-            svc.is_current_user_auto_login_enabled()
-                .await
-                .unwrap_or(false)
-        },
-        |enabled| {
-            // Set the initial state then return message
-            SettingsMessage::AutoLoginToggled(Ok(enabled))
-        },
-    );
-    DomainUpdateResult::task(task.map(DomainMessage::Settings))
-}
-
-/// Handle showing security view
-pub fn handle_show_security(state: &mut State) -> DomainUpdateResult {
-    state.domains.settings.current_view = SettingsSubview::Security;
-
-    // Check if user has PIN when entering security view
-    DomainUpdateResult::task(
-        Task::done(SettingsMessage::CheckUserHasPin)
-            .map(DomainMessage::Settings),
-    )
-}
-
 /// Handle back to main settings view
 pub fn handle_back_to_main(state: &mut State) -> DomainUpdateResult {
-    state.domains.settings.current_view = SettingsSubview::Main;
-
     // Clear any sensitive data from security state
     state.domains.settings.security.password_current =
         SecureCredential::new(String::new());

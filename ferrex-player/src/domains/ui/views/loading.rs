@@ -4,12 +4,16 @@ use crate::{
     domains::ui::{messages::UiMessage, shell_ui::UiShellMessage},
     state::State,
 };
-use ferrex_core::player_prelude::TranscodingStatus;
 use iced::{
     Element, Length,
-    widget::{Space, button, column, container, progress_bar, row, text},
+    widget::{Space, button, column, container, row, text},
 };
 use lucide_icons::Icon;
+
+#[cfg(feature = "unimplemented")]
+use ferrex_core::player_prelude::TranscodingStatus;
+#[cfg(feature = "unimplemented")]
+use iced::widget::progress_bar;
 
 #[cfg_attr(
     any(
@@ -20,7 +24,7 @@ use lucide_icons::Icon;
     profiling::function
 )]
 pub fn view_loading_video<'a>(
-    state: &'a State,
+    #[allow(unused)] state: &'a State,
     url: &'a str,
 ) -> Element<'a, UiMessage> {
     let mut content = column![].spacing(20).align_x(iced::Alignment::Center);
@@ -45,7 +49,7 @@ pub fn view_loading_video<'a>(
     let mut loading_content =
         column![].spacing(20).align_x(iced::Alignment::Center);
 
-    // Spinner icon (using refresh icon that will be animated via CSS)
+    // Spinner icon
     loading_content = loading_content.push(
         text(Icon::RefreshCw.unicode())
             .font(lucide_font())
@@ -54,11 +58,15 @@ pub fn view_loading_video<'a>(
     );
 
     // Main loading text
+    #[cfg(feature = "unimplemented")]
     let loading_text = if state.domains.streaming.state.using_hls {
         "Starting Adaptive Streaming"
     } else {
         "Loading Video"
     };
+
+    #[cfg(not(feature = "unimplemented"))]
+    let loading_text = "Loading Video";
 
     loading_content = loading_content.push(
         text(loading_text)
@@ -66,69 +74,72 @@ pub fn view_loading_video<'a>(
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
     );
 
-    // Status message based on transcoding state
-    let status_message = match &state.domains.streaming.state.transcoding_status
+    #[cfg(feature = "unimplemented")]
     {
-        Some(TranscodingStatus::Pending) => {
-            "Initializing transcoding...".to_string()
-        }
-        Some(TranscodingStatus::Queued) => {
-            "Waiting in transcoding queue...".to_string()
-        }
-        Some(TranscodingStatus::Processing { progress }) => {
-            format!("Processing: {:.0}%", progress * 100.0)
-        }
-        Some(TranscodingStatus::Completed) => {
-            "Video ready, starting playback...".to_string()
-        }
-        Some(TranscodingStatus::Failed { error }) => {
-            format!("Error: {}", error)
-        }
-        Some(TranscodingStatus::Cancelled) => {
-            "Transcoding cancelled".to_string()
-        }
-        None => {
-            if state.domains.streaming.state.using_hls {
-                "Preparing adaptive bitrate streams...".to_string()
-            } else {
-                "Connecting to server...".to_string()
-            }
-        }
-    };
+        // Status message based on transcoding state
+        let status_message =
+            match &state.domains.streaming.state.transcoding_status {
+                Some(TranscodingStatus::Pending) => {
+                    "Initializing transcoding...".to_string()
+                }
+                Some(TranscodingStatus::Queued) => {
+                    "Waiting in transcoding queue...".to_string()
+                }
+                Some(TranscodingStatus::Processing { progress }) => {
+                    format!("Processing: {:.0}%", progress * 100.0)
+                }
+                Some(TranscodingStatus::Completed) => {
+                    "Video ready, starting playback...".to_string()
+                }
+                Some(TranscodingStatus::Failed { error }) => {
+                    format!("Error: {}", error)
+                }
+                Some(TranscodingStatus::Cancelled) => {
+                    "Transcoding cancelled".to_string()
+                }
+                None => {
+                    if state.domains.streaming.state.using_hls {
+                        "Preparing adaptive bitrate streams...".to_string()
+                    } else {
+                        "Connecting to server...".to_string()
+                    }
+                }
+            };
 
-    loading_content = loading_content.push(
-        text(status_message)
-            .size(16)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    );
-
-    // Show progress bar if transcoding
-    if let Some(TranscodingStatus::Processing { progress }) =
-        &state.domains.streaming.state.transcoding_status
-    {
-        loading_content = loading_content.push(Space::new().height(10));
         loading_content = loading_content.push(
-            container(progress_bar(0.0..=1.0, *progress))
-                .width(Length::Fixed(300.0))
-                .height(Length::Fixed(8.0)),
+            text(status_message)
+                .size(16)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
-    }
 
-    // Additional info
-    if state.domains.streaming.state.using_hls {
-        loading_content = loading_content.push(Space::new().height(20));
-        loading_content = loading_content.push(
-            column![
-                text("✓ Non-blocking adaptive streaming enabled")
-                    .size(14)
-                    .color(theme::MediaServerTheme::SUCCESS),
-                text("✓ Quality will adjust based on bandwidth")
-                    .size(14)
-                    .color(theme::MediaServerTheme::SUCCESS),
-            ]
-            .spacing(5)
-            .align_x(iced::Alignment::Center),
-        );
+        // Show progress bar if transcoding
+        if let Some(TranscodingStatus::Processing { progress }) =
+            &state.domains.streaming.state.transcoding_status
+        {
+            loading_content = loading_content.push(Space::new().height(10));
+            loading_content = loading_content.push(
+                container(progress_bar(0.0..=1.0, *progress))
+                    .width(Length::Fixed(300.0))
+                    .height(Length::Fixed(8.0)),
+            );
+        }
+
+        // Additional info
+        if state.domains.streaming.state.using_hls {
+            loading_content = loading_content.push(Space::new().height(20));
+            loading_content = loading_content.push(
+                column![
+                    text("✓ Non-blocking adaptive streaming enabled")
+                        .size(14)
+                        .color(theme::MediaServerTheme::SUCCESS),
+                    text("✓ Quality will adjust based on bandwidth")
+                        .size(14)
+                        .color(theme::MediaServerTheme::SUCCESS),
+                ]
+                .spacing(5)
+                .align_x(iced::Alignment::Center),
+            );
+        }
     }
 
     loading_content = loading_content.push(Space::new().height(20));

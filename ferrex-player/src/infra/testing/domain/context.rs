@@ -55,6 +55,19 @@ pub struct GenericDomainContext<S> {
     pub recorder: TestRecorder,
 }
 
+impl<S> std::fmt::Debug for GenericDomainContext<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenericDomainContext")
+            .field("state_type", &std::any::type_name::<S>())
+            .field("events_len", &self.events.len())
+            .field("executor", &self.executor)
+            .field("time_provider", &"<dyn TimeProvider>")
+            .field("mock_registry", &self.mock_registry)
+            .field("recorder", &"<TestRecorder>")
+            .finish()
+    }
+}
+
 impl<S> GenericDomainContext<S>
 where
     S: Default + Send,
@@ -108,6 +121,19 @@ pub struct DomainContextBuilder<S> {
     executor: Option<TestExecutor>,
     mock_registry: Option<MockRegistry>,
     recorder: Option<TestRecorder>,
+}
+
+impl<S> std::fmt::Debug for DomainContextBuilder<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DomainContextBuilder")
+            .field("state_type", &std::any::type_name::<S>())
+            .field("state_set", &self.state.is_some())
+            .field("time_provider_set", &self.time_provider.is_some())
+            .field("executor_set", &self.executor.is_some())
+            .field("mock_registry_set", &self.mock_registry.is_some())
+            .field("recorder_set", &self.recorder.is_some())
+            .finish()
+    }
 }
 
 impl<S> DomainContextBuilder<S>
@@ -192,6 +218,19 @@ pub struct SimpleTestContext {
     time_provider: Box<dyn TimeProvider>,
     mock_registry: MockRegistry,
     recorder: TestRecorder,
+}
+
+impl std::fmt::Debug for SimpleTestContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimpleTestContext")
+            .field("state_len", &self.state.len())
+            .field("events_len", &self.events.len())
+            .field("executor", &self.executor)
+            .field("time_provider", &"<dyn TimeProvider>")
+            .field("mock_registry", &self.mock_registry)
+            .field("recorder", &"<TestRecorder>")
+            .finish()
+    }
 }
 
 impl SimpleTestContext {

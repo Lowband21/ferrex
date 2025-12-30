@@ -15,23 +15,7 @@ use crate::state::State;
 pub fn view_libraries_section<'a>(state: &'a State) -> Element<'a, UiMessage> {
     let fonts = state.domains.ui.state.size_provider.font;
 
-    // TODO: Implement libraries section UI
-    // - Library list
-    //   - Library name
-    //   - Library path
-    //   - Library type (Movies/TV Shows/Music/etc)
-    //   - Item count
-    //   - Last scan timestamp
-    //   - Scan progress (if scanning)
-    //   - Edit button
-    //   - Delete button
-    //   - Scan controls (Start/Pause/Cancel)
-    // - Add library button
-    // - Library form (add/edit)
-    //   - Name input
-    //   - Path input with browse button
-    //   - Type dropdown
-    //   - Save/Cancel buttons
+    // TODO: Implement library list + add/edit UI.
 
     let content = column![
         text("Library Management")

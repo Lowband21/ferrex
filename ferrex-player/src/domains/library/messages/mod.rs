@@ -3,12 +3,13 @@ pub mod scan_subscription;
 pub mod subscriptions;
 
 use crate::domains::library::media_root_browser;
-use crate::infra::api_types::{Library, Media, MediaID};
+use crate::domains::library::types::LibrariesBootstrapPayload;
+use crate::infra::api_types::{Library as ApiLibrary, Media, MediaID};
+use ferrex_core::player_prelude::Library as CoreLibrary;
 use ferrex_core::player_prelude::{
-    LibraryId, LibraryMediaResponse, MediaFile, ScanConfig, ScanMetrics,
-    ScanProgressEvent, ScanSnapshotDto,
+    LibraryId, LibraryMediaResponse, MediaFile, MovieBatchId, ScanConfig,
+    ScanMetrics, ScanProgressEvent, ScanSnapshotDto, SeriesID,
 };
-use rkyv::util::AlignedVec;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -18,15 +19,16 @@ pub enum LibraryMessage {
     RefreshLibrary,
 
     // Library management
-    LibrariesLoaded(Result<AlignedVec, String>),
+    LibrariesListLoaded(Result<Vec<CoreLibrary>, String>),
+    LibrariesLoaded(Result<LibrariesBootstrapPayload, String>),
     LoadLibraries,
     CreateLibrary {
-        library: Library,
+        library: ApiLibrary,
         start_scan: bool,
     },
-    LibraryCreated(Result<Library, String>),
-    UpdateLibrary(Library),
-    LibraryUpdated(Result<Library, String>),
+    LibraryCreated(Result<ApiLibrary, String>),
+    UpdateLibrary(ApiLibrary),
+    LibraryUpdated(Result<ApiLibrary, String>),
     DeleteLibrary(LibraryId),
     LibraryDeleted(Result<LibraryId, String>),
     SelectLibrary(Option<LibraryId>),
@@ -34,7 +36,7 @@ pub enum LibraryMessage {
     ScanLibrary(LibraryId),
 
     // Library form management
-    ShowLibraryForm(Option<Library>),
+    ShowLibraryForm(Option<ApiLibrary>),
     HideLibraryForm,
     UpdateLibraryFormName(String),
     UpdateLibraryFormType(String),
@@ -100,15 +102,30 @@ pub enum LibraryMessage {
     MediaUpdated(Media),
     MediaDeleted(MediaID),
 
+    // Movie reference batching
+    FetchMovieBatch {
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+    },
+    MovieBatchLoaded {
+        library_id: LibraryId,
+        batch_id: MovieBatchId,
+        result: Result<rkyv::util::AlignedVec, String>,
+    },
+
+    // Series bundles (series + seasons + episodes)
+    FetchSeriesBundle {
+        library_id: LibraryId,
+        series_id: SeriesID,
+    },
+    SeriesBundleLoaded {
+        library_id: LibraryId,
+        series_id: SeriesID,
+        result: Result<rkyv::util::AlignedVec, String>,
+    },
+
     // No-operation message
     NoOp,
-
-    // Batch metadata handling
-    MediaDetailsBatch(Vec<Media>),
-    BatchMetadataComplete,
-
-    // View model updates
-    RefreshViewModels,
 }
 
 impl LibraryMessage {
@@ -119,6 +136,7 @@ impl LibraryMessage {
             Self::RefreshLibrary => "Library::RefreshLibrary",
 
             // Library management
+            Self::LibrariesListLoaded(_) => "Library::LibrariesListLoaded",
             Self::LibrariesLoaded(_) => "Library::LibrariesLoaded",
             Self::LoadLibraries => "Library::LoadLibraries",
             Self::CreateLibrary { .. } => "Library::CreateLibrary",
@@ -180,16 +198,16 @@ impl LibraryMessage {
             Self::MediaDiscovered(_) => "Library::MediaDiscovered",
             Self::MediaUpdated(_) => "Library::MediaUpdated",
             Self::MediaDeleted(_) => "Library::MediaDeleted",
+            Self::FetchMovieBatch { .. } => "Library::FetchMovieReferenceBatch",
+            Self::MovieBatchLoaded { .. } => {
+                "Library::MovieReferenceBatchLoaded"
+            }
+            Self::FetchSeriesBundle { .. } => "Library::FetchSeriesBundle",
+            Self::SeriesBundleLoaded { .. } => "Library::SeriesBundleLoaded",
 
             // No-op
             Self::NoOp => "Library::NoOp",
 
-            // Batch metadata handling
-            Self::MediaDetailsBatch(_) => "Library::MediaDetailsBatch",
-            Self::BatchMetadataComplete => "Library::BatchMetadataComplete",
-
-            // View model updates
-            Self::RefreshViewModels => "Library::RefreshViewModels",
             // Scanner diagnostics
             Self::FetchScanMetrics => "Library::FetchScanMetrics",
             Self::ScanMetricsLoaded(_) => "Library::ScanMetricsLoaded",
@@ -213,11 +231,23 @@ impl std::fmt::Debug for LibraryMessage {
             Self::RefreshLibrary => write!(f, "Library::RefreshLibrary"),
 
             // Library management
-            Self::LibrariesLoaded(result) => match result {
-                Ok(libs) => write!(
+            Self::LibrariesListLoaded(result) => match result {
+                Ok(libraries) => write!(
                     f,
-                    "Library::LibrariesLoaded(Ok: {} libraries)",
-                    libs.len()
+                    "Library::LibrariesListLoaded(Ok: libraries={})",
+                    libraries.len()
+                ),
+                Err(e) => {
+                    write!(f, "Library::LibrariesListLoaded(Err: {})", e)
+                }
+            },
+            Self::LibrariesLoaded(result) => match result {
+                Ok(payload) => write!(
+                    f,
+                    "Library::LibrariesLoaded(Ok: libraries={} movie_batches={} series_bundles={})",
+                    payload.libraries.len(),
+                    payload.movie_batches.len(),
+                    payload.series_bundles.len()
                 ),
                 Err(e) => write!(f, "Library::LibrariesLoaded(Err: {})", e),
             },
@@ -420,20 +450,62 @@ impl std::fmt::Debug for LibraryMessage {
             Self::MediaDeleted(id) => {
                 write!(f, "Library::MediaDeleted({})", id)
             }
+            Self::FetchMovieBatch {
+                library_id,
+                batch_id,
+            } => write!(
+                f,
+                "Library::FetchMovieReferenceBatch(library_id={}, batch_id={})",
+                library_id, batch_id
+            ),
+            Self::MovieBatchLoaded {
+                library_id,
+                batch_id,
+                result,
+            } => match result {
+                Ok(bytes) => write!(
+                    f,
+                    "Library::MovieReferenceBatchLoaded(library_id={}, batch_id={}, bytes={})",
+                    library_id,
+                    batch_id,
+                    bytes.len()
+                ),
+                Err(err) => write!(
+                    f,
+                    "Library::MovieReferenceBatchLoaded(library_id={}, batch_id={}, err={})",
+                    library_id, batch_id, err
+                ),
+            },
+            Self::FetchSeriesBundle {
+                library_id,
+                series_id,
+            } => write!(
+                f,
+                "Library::FetchSeriesBundle(library_id={}, series_id={})",
+                library_id, series_id
+            ),
+            Self::SeriesBundleLoaded {
+                library_id,
+                series_id,
+                result,
+            } => match result {
+                Ok(bytes) => write!(
+                    f,
+                    "Library::SeriesBundleLoaded(library_id={}, series_id={}, bytes={})",
+                    library_id,
+                    series_id,
+                    bytes.len()
+                ),
+                Err(err) => write!(
+                    f,
+                    "Library::SeriesBundleLoaded(library_id={}, series_id={}, err={})",
+                    library_id, series_id, err
+                ),
+            },
 
             // No-op
             Self::NoOp => write!(f, "Library::NoOp"),
 
-            // Batch metadata handling
-            Self::MediaDetailsBatch(batch) => {
-                write!(f, "Library::MediaDetailsBatch({} items)", batch.len())
-            }
-            Self::BatchMetadataComplete => {
-                write!(f, "Library::BatchMetadataComplete")
-            }
-
-            // View model refresh
-            Self::RefreshViewModels => write!(f, "Library::RefreshViewModels"),
             // Scanner diagnostics
             Self::FetchScanMetrics => write!(f, "Library::FetchScanMetrics"),
             Self::ScanMetricsLoaded(result) => match result {
@@ -461,8 +533,8 @@ impl std::fmt::Debug for LibraryMessage {
 /// Cross-domain events that library domain can emit
 #[derive(Clone, Debug)]
 pub enum LibraryEvent {
-    LibraryCreated(Library),
-    LibraryUpdated(Library),
+    LibraryCreated(ApiLibrary),
+    LibraryUpdated(ApiLibrary),
     LibraryDeleted(Uuid),
     LibrarySelected(Uuid),
     ScanStarted(String),   // scan_id

@@ -1,7 +1,7 @@
 //! Search domain messages
 
 use super::metrics::SearchPerformanceMetrics;
-use super::types::{SearchMode, SearchResult};
+use super::types::{SearchMode, SearchResponse};
 use crate::infra::api_types::Media;
 
 pub mod subscriptions;
@@ -39,7 +39,7 @@ pub enum SearchMessage {
     /// Results received from search execution
     ResultsReceived {
         query: String,
-        results: Vec<SearchResult>,
+        results: Vec<SearchResponse>,
         total_count: usize,
     },
     /// Search error occurred

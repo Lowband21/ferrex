@@ -1,13 +1,15 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use super::types::SearchStrategy;
+
 /// Maximum number of performance samples to keep in history
 const MAX_HISTORY_SIZE: usize = 100;
 
 /// Performance metrics for a single search execution
 #[derive(Debug, Clone)]
 pub struct SearchPerformanceMetrics {
-    pub strategy: super::types::SearchStrategy,
+    pub strategy: SearchStrategy,
     pub query_length: usize,
     pub field_count: usize,
     pub execution_time: Duration,
@@ -53,9 +55,9 @@ impl PerformanceHistory {
     /// Add a performance metric to history
     pub fn add_metric(&mut self, metric: SearchPerformanceMetrics) {
         let queue = match metric.strategy {
-            super::types::SearchStrategy::Client => &mut self.client_metrics,
-            super::types::SearchStrategy::Server => &mut self.server_metrics,
-            super::types::SearchStrategy::Hybrid => &mut self.hybrid_metrics,
+            SearchStrategy::Client => &mut self.client_metrics,
+            SearchStrategy::Server => &mut self.server_metrics,
+            SearchStrategy::Hybrid => &mut self.hybrid_metrics,
         };
 
         if queue.len() >= MAX_HISTORY_SIZE {
@@ -75,12 +77,12 @@ impl PerformanceHistory {
     /// Get average execution time for a strategy
     pub fn get_average_execution_time(
         &self,
-        strategy: super::types::SearchStrategy,
+        strategy: SearchStrategy,
     ) -> Option<Duration> {
         let metrics = match strategy {
-            super::types::SearchStrategy::Client => &self.client_metrics,
-            super::types::SearchStrategy::Server => &self.server_metrics,
-            super::types::SearchStrategy::Hybrid => &self.hybrid_metrics,
+            SearchStrategy::Client => &self.client_metrics,
+            SearchStrategy::Server => &self.server_metrics,
+            SearchStrategy::Hybrid => &self.hybrid_metrics,
         };
 
         if metrics.is_empty() {
@@ -103,14 +105,11 @@ impl PerformanceHistory {
     }
 
     /// Get success rate for a strategy
-    pub fn get_success_rate(
-        &self,
-        strategy: super::types::SearchStrategy,
-    ) -> f32 {
+    pub fn get_success_rate(&self, strategy: SearchStrategy) -> f32 {
         let metrics = match strategy {
-            super::types::SearchStrategy::Client => &self.client_metrics,
-            super::types::SearchStrategy::Server => &self.server_metrics,
-            super::types::SearchStrategy::Hybrid => &self.hybrid_metrics,
+            SearchStrategy::Client => &self.client_metrics,
+            SearchStrategy::Server => &self.server_metrics,
+            SearchStrategy::Hybrid => &self.hybrid_metrics,
         };
 
         if metrics.is_empty() {
@@ -134,12 +133,12 @@ impl PerformanceHistory {
     /// Get 95th percentile execution time for a strategy
     pub fn get_p95_execution_time(
         &self,
-        strategy: super::types::SearchStrategy,
+        strategy: SearchStrategy,
     ) -> Option<Duration> {
         let metrics = match strategy {
-            super::types::SearchStrategy::Client => &self.client_metrics,
-            super::types::SearchStrategy::Server => &self.server_metrics,
-            super::types::SearchStrategy::Hybrid => &self.hybrid_metrics,
+            SearchStrategy::Client => &self.client_metrics,
+            SearchStrategy::Server => &self.server_metrics,
+            SearchStrategy::Hybrid => &self.hybrid_metrics,
         };
 
         let mut times: Vec<Duration> = metrics
@@ -160,13 +159,13 @@ impl PerformanceHistory {
     /// Check if recent performance indicates issues
     pub fn has_recent_failures(
         &self,
-        strategy: super::types::SearchStrategy,
+        strategy: SearchStrategy,
         threshold: f32,
     ) -> bool {
         let metrics = match strategy {
-            super::types::SearchStrategy::Client => &self.client_metrics,
-            super::types::SearchStrategy::Server => &self.server_metrics,
-            super::types::SearchStrategy::Hybrid => &self.hybrid_metrics,
+            SearchStrategy::Client => &self.client_metrics,
+            SearchStrategy::Server => &self.server_metrics,
+            SearchStrategy::Hybrid => &self.hybrid_metrics,
         };
 
         let recent_count = 5.min(metrics.len());

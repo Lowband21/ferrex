@@ -68,10 +68,12 @@ async fn login_success_emits_authentication_complete() {
 
 #[tokio::test]
 async fn watch_state_loaded_does_not_emit_authentication_complete() {
-    let mut state = State::default();
+    let mut state = State {
+        is_authenticated: true,
+        ..Default::default()
+    };
 
     // Simulate already authenticated state so watch-state handler still runs
-    state.is_authenticated = true;
     state.domains.auth.state.is_authenticated = true;
 
     let result_ok: DomainUpdateResult =

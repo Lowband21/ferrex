@@ -46,17 +46,6 @@ pub fn update_settings(
             sections::performance::update(state, msg)
         }
 
-        // Navigation (legacy)
-        SettingsMessage::ShowProfile => navigation::handle_show_profile(state),
-        SettingsMessage::ShowPreferences => {
-            navigation::handle_show_preferences(state)
-        }
-        SettingsMessage::ShowSecurity => {
-            navigation::handle_show_security(state)
-        }
-        SettingsMessage::BackToMain => navigation::handle_back_to_main(state),
-        SettingsMessage::BackToHome => navigation::handle_back_to_home(state),
-
         // Security - Password
         SettingsMessage::ShowChangePassword => {
             security::handle_show_change_password(state)

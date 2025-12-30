@@ -1,25 +1,33 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use ferrex_model::LibraryId;
+
+use crate::{
+    app::bootstrap::{self, AppConfig},
+    common::messages::DomainMessage,
+    domains::{
+        auth::{
+            dto::UserListItemDto,
+            security::secure_credential::SecureCredential,
+            types::{
+                AuthenticationFlow, SetupClaimStatus, SetupStep,
+                TransitionDirection,
+            },
+        },
+        settings::state::PreferencesState,
+        ui::{
+            shell_ui::Scope,
+            types::ViewState,
+            views::settings::device_management::{
+                DeviceManagementState, UserDevice,
+            },
+        },
+    },
+    state::State,
+};
 
 use chrono::Utc;
-use ferrex_model::LibraryId;
 use iced::{Preset, Task};
+use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
-
-use crate::app::bootstrap::{self, AppConfig};
-use crate::common::messages::DomainMessage;
-use crate::domains::auth::dto::UserListItemDto;
-use crate::domains::auth::security::secure_credential::SecureCredential;
-use crate::domains::auth::types::{
-    AuthenticationFlow, SetupClaimStatus, SetupStep, TransitionDirection,
-};
-use crate::domains::settings::state::{PreferencesState, SettingsView};
-use crate::domains::ui::shell_ui::Scope;
-use crate::domains::ui::types::ViewState;
-use crate::domains::ui::views::settings::device_management::{
-    DeviceManagementState, UserDevice,
-};
-use crate::state::State;
 
 pub fn collect(config: &Arc<AppConfig>) -> Vec<Preset<State, DomainMessage>> {
     vec![
@@ -113,7 +121,6 @@ fn auth_devices_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
                 mode: crate::domains::auth::types::AuthenticationMode::Online,
             };
 
-        state.domains.settings.current_view = SettingsView::DeviceManagement;
         state.domains.settings.device_management_state =
             DeviceManagementState {
                 devices: vec![

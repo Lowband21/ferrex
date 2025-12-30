@@ -1,11 +1,14 @@
 use iced::{Point, Task, window};
 
-use crate::common::messages::{DomainMessage, DomainUpdateResult};
-use crate::domains::search::types::SearchMode;
-use crate::domains::ui::windows::WindowKind;
-use crate::domains::ui::{messages as ui, shell_ui::UiShellMessage};
-use crate::infra::constants::layout;
-use crate::state::State;
+use crate::{
+    common::messages::{DomainMessage, DomainUpdateResult},
+    domains::{
+        search::types::SearchPresentation,
+        ui::{shell_ui::UiShellMessage, windows::WindowKind},
+    },
+    infra::constants::layout,
+    state::State,
+};
 
 fn search_window_size() -> iced::Size {
     iced::Size::new(layout::search::WINDOW_WIDTH, layout::search::WINDOW_HEIGHT)
@@ -42,7 +45,8 @@ pub fn open_search(
     state: &mut State,
     seed: Option<String>,
 ) -> DomainUpdateResult {
-    state.domains.search.state.set_mode(SearchMode::Dropdown);
+    state.domains.search.state.presentation =
+        SearchPresentation::DetachedWindow;
 
     if let Some(existing_id) = state.windows.get(WindowKind::Search) {
         state.search_window_id = Some(existing_id);
@@ -77,7 +81,7 @@ pub fn open_search(
     state.search_window_id = Some(id);
 
     tasks.push(open.map(|opened| {
-        DomainMessage::Ui(UiShellMessage::SearchWindowOpened(opened).into())
+        DomainMessage::Ui(UiShellMessage::SearchDetachedOpened(opened).into())
     }));
 
     DomainUpdateResult::task(Task::batch(tasks))
@@ -106,8 +110,8 @@ pub fn focus_search(state: &State) -> DomainUpdateResult {
 }
 
 pub fn focus_search_input(state: &State) -> DomainUpdateResult {
-    if state.search_window_id.is_some() {
-        DomainUpdateResult::task(super::focus::focus_search_window_input())
+    if state.domains.search.state.presentation.is_open() {
+        DomainUpdateResult::task(super::focus::focus_active_search_input(state))
     } else {
         DomainUpdateResult::task(Task::none())
     }
@@ -115,7 +119,6 @@ pub fn focus_search_input(state: &State) -> DomainUpdateResult {
 
 pub fn close_search(state: &mut State) -> DomainUpdateResult {
     if let Some(id) = state.search_window_id.take() {
-        state.domains.search.state.set_mode(SearchMode::Dropdown);
         let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
         tasks.push(window::close(id));
         push_main_focus(&mut tasks, state);
@@ -136,6 +139,8 @@ pub fn on_raw_window_closed(
         }
         if matches!(kind, WindowKind::Search) {
             state.search_window_id = None;
+            state.domains.search.state.presentation =
+                SearchPresentation::Hidden;
             push_main_focus(&mut tasks, state);
         }
     }

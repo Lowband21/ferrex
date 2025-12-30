@@ -44,6 +44,7 @@ struct FailedAttempts {
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug)]
 pub struct MockAuthService {
     users: Arc<RwLock<Vec<User>>>,
     user_pins: Arc<RwLock<Vec<MockUserPin>>>,

@@ -99,6 +99,9 @@ pub fn handle_message(
         PerformanceMessage::SetAnimationHoverTransitionMs(ms) => {
             set_animation_hover_transition_ms(state, ms)
         }
+        PerformanceMessage::SetAnimationHoverScaleDownDelayMs(ms) => {
+            set_animation_hover_scale_down_delay_ms(state, ms)
+        }
     }
 }
 
@@ -107,10 +110,10 @@ fn set_scroll_debounce_ms(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(ms) = value.parse::<u64>() {
-        if ms >= 5 && ms <= 200 {
-            state.domains.settings.performance.scroll_debounce_ms = ms;
-        }
+    if let Ok(ms) = value.parse::<u64>()
+        && (5..=200).contains(&ms)
+    {
+        state.domains.settings.performance.scroll_debounce_ms = ms;
     }
     DomainUpdateResult::none()
 }
@@ -124,10 +127,10 @@ fn set_scroll_decay_tau_ms(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(ms) = value.parse::<u64>() {
-        if ms >= 50 && ms <= 1000 {
-            state.domains.settings.performance.scroll_decay_tau_ms = ms;
-        }
+    if let Ok(ms) = value.parse::<u64>()
+        && (50..=1000).contains(&ms)
+    {
+        state.domains.settings.performance.scroll_decay_tau_ms = ms;
     }
     DomainUpdateResult::none()
 }
@@ -141,10 +144,10 @@ fn set_scroll_max_velocity(
     state: &mut State,
     value: String,
 ) -> DomainUpdateResult {
-    if let Ok(v) = value.parse::<f32>() {
-        if v >= 1.0 && v <= 20.0 {
-            state.domains.settings.performance.scroll_max_velocity = v;
-        }
+    if let Ok(v) = value.parse::<f32>()
+        && (1.0..=20.0).contains(&v)
+    {
+        state.domains.settings.performance.scroll_max_velocity = v;
     }
     DomainUpdateResult::none()
 }
@@ -288,6 +291,7 @@ fn set_animation_hover_scale(
     let clamped = scale.clamp(1.0, 1.2);
     state.domains.settings.performance.animation_hover_scale = clamped;
     state.runtime_config.animation_hover_scale = Some(clamped);
+    crate::infra::shader_widgets::poster::set_hover_scale(clamped);
     state.runtime_config.mark_dirty();
     DomainUpdateResult::none()
 }
@@ -304,6 +308,26 @@ fn set_animation_hover_transition_ms(
         .performance
         .animation_hover_transition_ms = clamped;
     state.runtime_config.animation_hover_transition_ms = Some(clamped);
+    crate::infra::shader_widgets::poster::set_hover_transition_ms(clamped);
+    state.runtime_config.mark_dirty();
+    DomainUpdateResult::none()
+}
+
+fn set_animation_hover_scale_down_delay_ms(
+    state: &mut State,
+    ms: u64,
+) -> DomainUpdateResult {
+    // Clamp to reasonable range: 0ms (immediate) to 500ms (noticeable)
+    let clamped = ms.clamp(0, 500);
+    state
+        .domains
+        .settings
+        .performance
+        .animation_hover_scale_down_delay_ms = clamped;
+    state.runtime_config.animation_hover_scale_down_delay_ms = Some(clamped);
+    crate::infra::shader_widgets::poster::set_hover_scale_down_delay_ms(
+        clamped,
+    );
     state.runtime_config.mark_dirty();
     DomainUpdateResult::none()
 }

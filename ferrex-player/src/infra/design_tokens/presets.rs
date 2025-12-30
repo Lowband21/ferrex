@@ -16,11 +16,12 @@ use super::ScalingContext;
 /// | `Large`  | 1.2x  | Easier reading, larger UI     |
 /// | `Huge`   | 1.5x  | Extra large, accessibility    |
 /// | `TV`     | 2.0x  | TV/10-foot UI, couch viewing  |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ScalePreset {
     /// Compact mode - 80% scale for dense layouts
     Compact,
     /// Default - 100% scale, standard desktop usage
+    #[default]
     Default,
     /// Large - 120% scale for easier reading
     Large,
@@ -77,12 +78,6 @@ impl ScalePreset {
         Self::Huge,
         Self::TV,
     ];
-}
-
-impl Default for ScalePreset {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl std::fmt::Display for ScalePreset {

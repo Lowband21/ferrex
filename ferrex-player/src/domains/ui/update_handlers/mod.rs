@@ -8,6 +8,7 @@ pub mod demo_controls;
 pub mod home_focus;
 pub mod home_tab;
 pub mod navigation_updates;
+pub mod scroll_prefetch;
 pub mod scroll_updates;
 pub mod search_updates;
 pub mod virtual_carousel_helpers;

@@ -1,14 +1,10 @@
-use std::time::{Duration, Instant};
-
-use crate::domains::metadata::demand_planner::DemandSnapshot;
-use crate::infra::api_types::LibraryType;
 use crate::{
     domains::ui::{messages::UiMessage, tabs::TabState},
     state::State,
 };
-use ferrex_core::player_prelude::PosterKind;
-use ferrex_core::player_prelude::{MediaID, MediaIDLike};
+
 use iced::{Task, widget::scrollable::Viewport};
+use std::time::Instant;
 
 #[cfg_attr(
     any(
@@ -28,8 +24,18 @@ pub fn handle_detail_view_scrolled(
         "DetailViewScrolled: Updating background shader scroll offset to {}",
         scroll_offset
     );
-    state.domains.ui.state.background_shader_state.scroll_offset =
-        scroll_offset;
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_horizontal_scroll_px(0.0);
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_vertical_scroll_px(scroll_offset);
 
     // TODO: This is cumbersome, fix it
     let uuid = state
@@ -68,6 +74,23 @@ pub fn handle_tab_grid_scrolled(
     state: &mut State,
     viewport: Viewport,
 ) -> Task<UiMessage> {
+    // Keep the background shader visually attached to the scrolled grid content.
+    // This prevents a “static wallpaper” effect under fast scrolling.
+    let scroll_y = viewport.absolute_offset().y;
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_horizontal_scroll_px(0.0);
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_vertical_scroll_px(scroll_y);
+    log::trace!("TabGridScrolled: background scroll_offset={scroll_y}");
+
     // Get the active tab and update its scroll state
     let active_tab_id = state.tab_manager.active_tab_id();
 
@@ -81,6 +104,34 @@ pub fn handle_tab_grid_scrolled(
             TabState::Home(_all_state) => {
                 // All tab uses carousel, not virtual grid - no grid state to update
             }
+        }
+    }
+
+    // Abort kinetic motion when reaching scroll bounds
+    if state.domains.ui.state.motion_controller.is_active()
+        && let Some(TabState::Library(lib_state)) =
+            state.tab_manager.get_tab(active_tab_id)
+    {
+        let grid = &lib_state.grid_state;
+        let scroll_y = viewport.absolute_offset().y;
+
+        // Compute max scroll
+        let total_rows = grid.total_items.div_ceil(grid.columns.max(1));
+        let content_height = total_rows as f32 * grid.row_height;
+        let viewport_h = viewport.bounds().height.max(1.0);
+        let max_scroll = if content_height > viewport_h {
+            content_height - viewport_h
+        } else {
+            0.0
+        };
+
+        let at_top = scroll_y <= 0.5;
+        let at_bottom = scroll_y >= max_scroll - 0.5;
+        let dir = state.domains.ui.state.motion_controller.direction();
+
+        // Stop motion if scrolling into a bound
+        if (at_top && dir < 0) || (at_bottom && dir > 0) {
+            state.domains.ui.state.motion_controller.abort();
         }
     }
 
@@ -102,152 +153,10 @@ pub fn handle_tab_grid_scrolled(
         viewport.absolute_offset().y
     );
 
-    // Track timing for planner snapshots and yoke prefetch throttling
-    let now = Instant::now();
+    crate::domains::ui::update_handlers::scroll_prefetch::maybe_run_grid_scroll_prefetch(
+        state,
+        Instant::now(),
+    );
 
-    // Emit a planner snapshot for the active library tab (visible + prefetch)
-    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-        if let crate::domains::ui::tabs::TabState::Library(lib_state) =
-            state.tab_manager.active_tab()
-        {
-            let mut visible_ids: Vec<uuid::Uuid> = Vec::new();
-            let vr = lib_state.grid_state.visible_range.clone();
-            if let Some(slice) = lib_state.cached_index_ids.get(vr) {
-                visible_ids.extend(slice.iter().copied());
-            }
-
-            let prefetch_rows = state.runtime_config.prefetch_rows_above();
-            let pr = lib_state.grid_state.get_preload_range(prefetch_rows);
-            let mut prefetch_ids: Vec<uuid::Uuid> = Vec::new();
-            if let Some(slice) = lib_state.cached_index_ids.get(pr) {
-                prefetch_ids.extend(slice.iter().copied());
-            }
-
-            // Deduplicate
-            prefetch_ids.retain(|id| !visible_ids.contains(id));
-            let br = lib_state.grid_state.get_background_range(
-                prefetch_rows,
-                crate::infra::constants::layout::virtual_grid::BACKGROUND_ROWS_BELOW,
-            );
-            let mut background_ids: Vec<uuid::Uuid> = Vec::new();
-            if let Some(slice) = lib_state.cached_index_ids.get(br) {
-                background_ids.extend(slice.iter().copied());
-            }
-            background_ids.retain(|id| {
-                !visible_ids.contains(id) && !prefetch_ids.contains(id)
-            });
-
-            let poster_kind = match lib_state.library_type {
-                LibraryType::Movies => Some(PosterKind::Movie),
-                LibraryType::Series => Some(PosterKind::Series),
-            };
-
-            let snapshot = DemandSnapshot {
-                visible_ids,
-                prefetch_ids,
-                background_ids,
-                timestamp: now,
-                context: None,
-                poster_kind,
-            };
-            handle.send(snapshot);
-        }
-    }
-
-    // Rate-limit yoke prefetch work to avoid hammering the repo accessor
-    let debounce_ms = state.runtime_config.scroll_debounce_ms();
-    let should_prefetch = state
-        .domains
-        .ui
-        .state
-        .last_prefetch_tick
-        .map(|last| last.elapsed() >= Duration::from_millis(debounce_ms / 2))
-        .unwrap_or(true);
-
-    if should_prefetch {
-        state.domains.ui.state.last_prefetch_tick = Some(now);
-
-        // PoC yoke prefetch: limit frequency by the same gating used for debounced task creation
-        // Prefetch only currently visible items to keep changes minimal
-        let visible_items = state.tab_manager.get_active_tab_visible_items();
-        let mut prefetched = 0usize;
-        for archived_id in visible_items.iter() {
-            // Deserialize archived ID to runtime MediaID
-            if let Ok(media_id) =
-                rkyv::deserialize::<MediaID, rkyv::rancor::Error>(archived_id)
-            {
-                match media_id {
-                    MediaID::Movie(mid) => {
-                        let uuid = mid.to_uuid();
-                        // Skip if already cached
-                        if state
-                            .domains
-                            .ui
-                            .state
-                            .movie_yoke_cache
-                            .contains_key(&uuid)
-                        {
-                            continue;
-                        }
-                        // Fetch and insert into cache
-                        if let Ok(yoke) = state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_movie_yoke(&MediaID::Movie(mid))
-                        {
-                            state
-                                .domains
-                                .ui
-                                .state
-                                .movie_yoke_cache
-                                .insert(uuid, std::sync::Arc::new(yoke));
-                            prefetched += 1;
-                            if prefetched >= 64 {
-                                // cap per cycle
-                                break;
-                            }
-                        }
-                    }
-                    MediaID::Series(mid) => {
-                        let uuid = mid.to_uuid();
-                        if state
-                            .domains
-                            .ui
-                            .state
-                            .series_yoke_cache
-                            .contains_key(&uuid)
-                        {
-                            continue;
-                        }
-                        if let Ok(yoke) = state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_series_yoke(&MediaID::Series(mid))
-                        {
-                            state
-                                .domains
-                                .ui
-                                .state
-                                .series_yoke_cache
-                                .insert(uuid, std::sync::Arc::new(yoke));
-                            prefetched += 1;
-                            if prefetched >= 64 {
-                                break;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Task::none()
-    } else {
-        // Too soon since last prefetch pass, skip to avoid redundant work
-        Task::none()
-    }
+    Task::none()
 }

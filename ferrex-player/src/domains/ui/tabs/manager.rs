@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use super::{TabId, TabState};
 use crate::infra::api_types::LibraryType;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
+use ferrex_core::player_prelude::Library;
 
 /// Manages all tab states in the application
 #[derive(Debug)]
@@ -59,18 +60,16 @@ impl TabManager {
         self.library_info.insert(library_id, library_type);
     }
 
-    /// Update library information from the repo accessor
-    pub fn update_libraries(&mut self) {
-        self.library_info.clear(); // Clear BEFORE populating, not after
+    /// Update library information from the latest libraries list.
+    ///
+    /// This is intentionally decoupled from `MediaRepo`: the repo's core storage
+    /// is batches/bundles, while library metadata comes from the library domain/API.
+    pub fn set_libraries(&mut self, libraries: &[Library]) {
+        self.library_info.clear();
 
-        if self.repo_accessor.is_initialized()
-            && let Ok(libraries) = self.repo_accessor.get_libraries()
-        {
-            for library in libraries {
-                if library.enabled {
-                    self.library_info.insert(library.id, library.library_type);
-                    self.register_library(library.id, library.library_type);
-                }
+        for library in libraries {
+            if library.enabled {
+                self.register_library(library.id, library.library_type);
             }
         }
 
@@ -301,7 +300,7 @@ impl TabManager {
     pub fn refresh_active_tab(&mut self) {
         match self.get_active_tab() {
             TabState::Library(state) => state.refresh_from_repo(),
-            TabState::Home(state) => {
+            TabState::Home(_state) => {
                 // Refresh All view model
                 //state.view_model.refresh_from_repo();
             }
@@ -313,7 +312,7 @@ impl TabManager {
         for (_, tab) in self.tabs.iter_mut() {
             match tab {
                 TabState::Library(state) => state.refresh_from_repo(),
-                TabState::Home(state) => {} //state.view_model.refresh_from_repo(),
+                TabState::Home(_state) => {} //state.view_model.refresh_from_repo(),
             }
         }
     }
@@ -343,6 +342,14 @@ impl TabManager {
         self.tabs
             .get(&self.active_tab)
             .map(|tab| tab.get_visible_items())
+            .unwrap_or_default()
+    }
+
+    /// Get the currently visible media items from the active tab
+    pub fn get_active_tab_prefetch_items(&self) -> Vec<ArchivedMediaID> {
+        self.tabs
+            .get(&self.active_tab)
+            .map(|tab| tab.get_prefetch_items())
             .unwrap_or_default()
     }
 }

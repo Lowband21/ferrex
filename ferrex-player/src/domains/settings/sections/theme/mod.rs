@@ -14,6 +14,7 @@ use crate::common::messages::DomainUpdateResult;
 use crate::state::State;
 
 /// Theme section marker for type-safe section identification
+#[derive(Debug)]
 pub struct ThemeSection;
 
 /// Update theme settings state

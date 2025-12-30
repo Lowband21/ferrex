@@ -4,7 +4,7 @@ use iced::Task;
 
 /// Handle update display name
 pub fn handle_update_display_name(
-    state: &mut State,
+    _state: &mut State,
     name: String,
 ) -> DomainUpdateResult {
     // TODO: Store display name in profile state when we add it
@@ -14,7 +14,7 @@ pub fn handle_update_display_name(
 
 /// Handle update email
 pub fn handle_update_email(
-    state: &mut State,
+    _state: &mut State,
     email: String,
 ) -> DomainUpdateResult {
     // TODO: Store email in profile state when we add it
@@ -23,7 +23,7 @@ pub fn handle_update_email(
 }
 
 /// Handle submit profile changes
-pub fn handle_submit_profile_changes(state: &mut State) -> DomainUpdateResult {
+pub fn handle_submit_profile_changes(_state: &mut State) -> DomainUpdateResult {
     // TODO: Implement when we have profile state
     log::warn!("Profile changes submission not yet implemented");
     DomainUpdateResult::task(Task::none())
@@ -31,7 +31,7 @@ pub fn handle_submit_profile_changes(state: &mut State) -> DomainUpdateResult {
 
 /// Handle profile change result
 pub fn handle_profile_change_result(
-    state: &mut State,
+    _state: &mut State,
     result: Result<(), String>,
 ) -> DomainUpdateResult {
     match result {

@@ -14,8 +14,6 @@ use crate::{
 };
 
 use ferrex_core::player_prelude::{ArchivedCastMember, ImageSize};
-
-use ferrex_model::MediaType;
 use iced::{
     Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
@@ -25,6 +23,7 @@ use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
 
 use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -54,7 +53,7 @@ pub fn create_cast_scrollable(
     // placeholders appear at the end of the carousel.
     for actor in cast
         .iter()
-        .filter(|a| matches!(a.profile_media_id, ArchivedOption::Some(_)))
+        .filter(|a| matches!(a.image_id, ArchivedOption::Some(_)))
     {
         let cast_card = create_cast_card(actor);
         cast_row = cast_row.push(cast_card);
@@ -62,7 +61,7 @@ pub fn create_cast_scrollable(
 
     for actor in cast
         .iter()
-        .filter(|a| matches!(a.profile_media_id, ArchivedOption::None))
+        .filter(|a| matches!(a.image_id, ArchivedOption::None))
     {
         let cast_card = create_cast_card(actor);
         cast_row = cast_row.push(cast_card);
@@ -95,38 +94,35 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, UiMessage> {
         .width(Length::Fixed(card_width))
         .align_x(iced::Alignment::Center);
 
-    let profile_uuid = match &actor.profile_media_id {
-        ArchivedOption::Some(uuid) => Some(*uuid),
+    let profile_iid = match &actor.image_id {
+        ArchivedOption::Some(iid) => Some(*iid),
         ArchivedOption::None => None,
     };
+    let media_id = profile_iid
+        .or_else(|| Some(Uuid::from_u128(actor.id.to_native() as u128)))
+        .unwrap();
 
-    let profile_index = match &actor.profile_image_index {
-        ArchivedOption::Some(index) => index.to_native(),
-        ArchivedOption::None => 0,
+    let profile_image: Element<'static, UiMessage> = if profile_iid.is_some() {
+        image_for(media_id)
+            .iid(profile_iid)
+            .size(ImageSize::profile())
+            .skip_request(profile_iid.is_none())
+            .animation_behavior(AnimationBehavior::constant(
+                PosterAnimationType::flip(),
+            ))
+            .width(Length::Fixed(card_width))
+            .height(Length::Fixed(image_height))
+            .radius(CORNER_RADIUS)
+            .placeholder(Icon::User)
+            .into()
+    } else {
+        container(icon_text(Icon::User))
+            .width(Length::Fixed(card_width))
+            .height(Length::Fixed(image_height))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
     };
-
-    let profile_image: Element<'static, UiMessage> =
-        if let Some(uuid) = profile_uuid {
-            image_for(uuid)
-                .size(ImageSize::profile())
-                .image_type(MediaType::Person)
-                .animation_behavior(AnimationBehavior::constant(
-                    PosterAnimationType::flip(),
-                ))
-                .width(Length::Fixed(card_width))
-                .height(Length::Fixed(image_height))
-                .radius(CORNER_RADIUS)
-                .image_index(profile_index)
-                .placeholder(Icon::User)
-                .into()
-        } else {
-            container(icon_text(Icon::User))
-                .width(Length::Fixed(card_width))
-                .height(Length::Fixed(image_height))
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .into()
-        };
 
     card_content = card_content.push(profile_image);
 

@@ -3,9 +3,12 @@
 //! This module provides a RuntimeConfig struct with Option<T> fields that override
 //! the default constants. Accessor methods fall back to constants when None.
 
-use crate::infra::constants::{
-    layout::animation, layout::virtual_grid, performance_config, player,
-    virtual_carousel,
+use crate::infra::{
+    constants::{
+        layout::{animation, virtual_grid},
+        memory_usage, performance_config, player, virtual_carousel,
+    },
+    units::ByteSize,
 };
 
 /// Easing function type for animations
@@ -102,6 +105,8 @@ pub struct RuntimeConfig {
     pub animation_hover_scale: Option<f32>,
     /// Hover scale transition duration (ms)
     pub animation_hover_transition_ms: Option<u64>,
+    /// Delay before scaling down after hover ends (ms)
+    pub animation_hover_scale_down_delay_ms: Option<u64>,
     /// Default animation duration (ms)
     pub animation_default_duration_ms: Option<u64>,
     /// Initial texture fade duration (ms)
@@ -122,6 +127,14 @@ pub struct RuntimeConfig {
     pub carousel_background_items: Option<usize>,
     /// Keep-alive duration (ms)
     pub keep_alive_ms: Option<u64>,
+
+    // ========== IMAGE CACHE (CPU + DISK) ==========
+    /// Hard cap for loaded images held in RAM (bytes).
+    pub image_cache_ram_max_bytes: Option<ByteSize>,
+    /// Disk cache maximum size (bytes).
+    pub image_cache_disk_max_bytes: Option<ByteSize>,
+    /// Disk cache TTL (days).
+    pub image_cache_disk_ttl_days: Option<u64>,
 
     // ========== PLAYER SEEKING ==========
     /// Coarse seek forward (seconds)
@@ -259,6 +272,11 @@ impl RuntimeConfig {
             .unwrap_or(animation::HOVER_TRANSITION_MS)
     }
 
+    pub fn animation_hover_scale_down_delay_ms(&self) -> u64 {
+        self.animation_hover_scale_down_delay_ms
+            .unwrap_or(animation::HOVER_SCALE_DOWN_DELAY_MS)
+    }
+
     pub fn animation_default_duration_ms(&self) -> u64 {
         self.animation_default_duration_ms
             .unwrap_or(animation::DEFAULT_DURATION_MS)
@@ -285,16 +303,12 @@ impl RuntimeConfig {
             texture_fade_ms: self.animation_texture_fade_ms(),
             hover_scale: self.animation_hover_scale(),
             hover_transition_ms: self.animation_hover_transition_ms(),
+            hover_scale_down_delay_ms: self
+                .animation_hover_scale_down_delay_ms(),
         }
     }
 
     // ========== GPU/MEMORY ACCESSORS ==========
-
-    pub fn texture_max_uploads(&self) -> u32 {
-        self.texture_max_uploads.unwrap_or(
-            performance_config::texture_upload::MAX_UPLOADS_PER_FRAME,
-        )
-    }
 
     pub fn prefetch_rows_above(&self) -> usize {
         self.prefetch_rows_above
@@ -318,6 +332,31 @@ impl RuntimeConfig {
 
     pub fn keep_alive_ms(&self) -> u64 {
         self.keep_alive_ms.unwrap_or(virtual_grid::KEEP_ALIVE_MS)
+    }
+
+    // ========== IMAGE CACHE ACCESSORS ==========
+
+    pub fn image_cache_ram_max_bytes(&self) -> ByteSize {
+        self.image_cache_ram_max_bytes
+            .unwrap_or(ByteSize::from_bytes(memory_usage::MAX_RAM_BYTES))
+    }
+
+    pub fn image_cache_disk_max_bytes(&self) -> ByteSize {
+        self.image_cache_disk_max_bytes
+            .unwrap_or(ByteSize::from_bytes(
+                memory_usage::MAX_IMAGE_CACHE_BYTES,
+            ))
+    }
+
+    pub fn image_cache_disk_ttl_days(&self) -> u64 {
+        self.image_cache_disk_ttl_days.unwrap_or(30)
+    }
+
+    pub fn image_cache_disk_ttl(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(
+            self.image_cache_disk_ttl_days()
+                .saturating_mul(24 * 60 * 60),
+        )
     }
 
     // ========== PLAYER SEEKING ACCESSORS ==========

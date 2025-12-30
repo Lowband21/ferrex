@@ -58,9 +58,12 @@ pub fn view_library_form<'a>(
         .align_y(iced::Alignment::Center),
     );
 
-    // Error messages
-    if !state.domains.library.state.library_form_errors.is_empty() {
-        content = content.push(
+    // Keep a stable widget tree before the form fields to preserve focus when
+    // validation errors appear/disappear.
+    let error_box: Element<'a, UiMessage> =
+        if state.domains.library.state.library_form_errors.is_empty() {
+            Space::new().height(Length::Fixed(0.0)).into()
+        } else {
             container(
                 column(
                     state
@@ -81,9 +84,10 @@ pub fn view_library_form<'a>(
             )
             .padding(10)
             .style(theme::Container::ErrorBox.style())
-            .width(Length::Fill),
-        );
-    }
+            .width(Length::Fill)
+            .into()
+        };
+    content = content.push(error_box);
 
     // Form fields
     let mut form_content = column![].spacing(15);
@@ -221,17 +225,23 @@ pub fn view_library_form<'a>(
 
     // Enabled checkbox
     form_content = form_content.push(
-        checkbox("Enable this library", form_data.enabled)
+        checkbox(form_data.enabled)
             .on_toggle(|_| SettingsUiMessage::ToggleLibraryFormEnabled.into())
+            .label("Enabled")
+            .style(theme::Checkbox::style())
+            .spacing(8)
             .text_size(16),
     );
 
     if !form_data.editing {
         form_content = form_content.push(
-            checkbox("Start initial scan after creation", form_data.start_scan)
+            checkbox(form_data.start_scan)
                 .on_toggle(|_| {
                     SettingsUiMessage::ToggleLibraryFormStartScan.into()
                 })
+                .label("Start scan immediately")
+                .style(theme::Checkbox::style())
+                .spacing(8)
                 .text_size(16),
         );
     }

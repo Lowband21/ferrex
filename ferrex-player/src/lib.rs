@@ -2,7 +2,7 @@
 //!
 //! This crate contains the desktop player's library surfaces used by the
 //! executable in `src/main.rs`. Modules here are primarily application glue,
-//! UI domains, and infrastructure helpers that are still evolving.
+//! UI domains, and infra helpers that are still evolving.
 //!
 //! Notes
 //! - Public items are subject to change while the UI and domains stabilize.

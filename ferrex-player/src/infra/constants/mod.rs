@@ -2,6 +2,7 @@
 
 pub mod curated;
 pub mod flip;
+pub mod image;
 pub mod layout;
 pub mod menu;
 pub mod performance_config;

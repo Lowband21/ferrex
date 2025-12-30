@@ -1,5 +1,7 @@
 pub mod update;
 
+use std::time::Instant;
+
 use crate::{
     domains::ui::{messages::UiMessage, motion_controller::MotionMessage},
     infra::shader_widgets::poster::PosterInstanceKey,
@@ -18,7 +20,8 @@ pub enum InteractionMessage {
     HomeScrolled(scrollable::Viewport),
     HomeFocusNext,
     HomeFocusPrev,
-    HomeFocusTick,
+    /// Frame-synchronized tick with timestamp from window::frames()
+    HomeFocusTick(Instant),
 
     // Kinetic grid scrolling (arrow keys)
     KineticScroll(MotionMessage),
@@ -44,7 +47,7 @@ impl InteractionMessage {
             Self::HomeScrolled(_) => "UI::HomeViewScrolled",
             Self::HomeFocusNext => "UI::HomeFocusNext",
             Self::HomeFocusPrev => "UI::HomeFocusPrev",
-            Self::HomeFocusTick => "UI::HomeFocusTick",
+            Self::HomeFocusTick(_) => "UI::HomeFocusTick",
 
             Self::KineticScroll(_) => "UI::KineticScroll",
 
@@ -69,7 +72,7 @@ impl std::fmt::Debug for InteractionMessage {
             }
             Self::HomeFocusNext => write!(f, "UI::AllFocusNext"),
             Self::HomeFocusPrev => write!(f, "UI::AllFocusPrev"),
-            Self::HomeFocusTick => write!(f, "UI::AllFocusTick"),
+            Self::HomeFocusTick(_) => write!(f, "UI::AllFocusTick"),
             Self::KineticScroll(_) => write!(f, "UI::KineticScroll"),
             Self::MouseMoved => write!(f, "UI::MouseMoved"),
             Self::MediaHovered(key) => {

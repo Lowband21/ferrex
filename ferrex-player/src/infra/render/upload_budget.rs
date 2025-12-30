@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use log::{info, warn};
+use log::warn;
 
 /// Configuration for the upload budget system.
 #[derive(Debug, Clone)]
@@ -157,18 +157,34 @@ impl TimingBasedBudget {
         self.avg_upload_time = Duration::from_micros(updated_us.max(100));
     }
 
-    /// Called at end of frame for logging/metrics. Currently a no-op but
-    /// reserved for future telemetry integration.
+    /// Called at end of frame for logging/metrics.
     pub fn end_frame(&mut self) {
         // Log stats if debug logging is enabled
-        if log::log_enabled!(log::Level::Debug) && self.uploads_this_frame > 0 {
-            log::debug!(
-                "UploadBudget: {} uploads in {:?}, avg={:?}, remaining={:?}",
-                self.uploads_this_frame,
-                self.upload_time_this_frame,
-                self.avg_upload_time,
-                self.remaining_budget()
-            );
+        #[cfg(debug_assertions)]
+        if log::log_enabled!(log::Level::Debug)
+            && self.upload_time_this_frame > self.config.frame_budget / 2
+        {
+            let remaining_budget = self.remaining_budget();
+            if self.remaining_budget() < self.config.frame_budget / 10 {
+                log::warn!(
+                    "Ended frame with less than 10% of upload budget remaining:"
+                );
+                log::warn!(
+                    "UploadBudget: {} uploads in {:?}, avg={:?}, remaining={:?}",
+                    self.uploads_this_frame,
+                    self.upload_time_this_frame,
+                    self.avg_upload_time,
+                    remaining_budget,
+                );
+            } else {
+                log::debug!(
+                    "UploadBudget: {} uploads in {:?}, avg={:?}, remaining={:?}",
+                    self.uploads_this_frame,
+                    self.upload_time_this_frame,
+                    self.avg_upload_time,
+                    remaining_budget,
+                );
+            }
         }
     }
 
