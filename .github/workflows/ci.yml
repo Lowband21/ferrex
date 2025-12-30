@@ -22,7 +22,7 @@ jobs:
       max-parallel: 3
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       # Install system dependencies per OS for glib/gstreamer and pkg-config
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
