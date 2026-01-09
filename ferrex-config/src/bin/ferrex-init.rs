@@ -554,7 +554,6 @@ async fn main() -> Result<()> {
                     StackModeArg::Local => false,
                 });
 
-                let clean = if reset_db { true } else { clean };
                 let force_init = if reset_db { true } else { force_init };
 
                 let opts = StackOptions {

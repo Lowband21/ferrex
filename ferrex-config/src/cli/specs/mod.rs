@@ -402,15 +402,31 @@ pub fn host_server_spec(
             "Host server mode is not supported with tailscale compose overlay"
         );
     }
-    let mut spec = CommandSpec::new("cargo");
-    spec.cwd = Some(workspace_root());
-    spec.args = vec!["run".into(), "-p".into(), "ferrex-server".into()];
-    if opts.profile == "release" {
-        spec.args.push("--release".into());
+
+    let mut bin_path = compose_root();
+    let path_ext = PathBuf::from(
+        format!("target/{}/ferrex-server", opts.profile).as_str(),
+    );
+    bin_path.push(path_ext);
+
+    let mut spec = if !opts.clean
+        && let Ok(path_norm) = std::fs::canonicalize(&bin_path)
+        && let Some(path_norm_str) = path_norm.to_str()
+    {
+        CommandSpec::new(path_norm_str)
     } else {
-        spec.args.push("--profile".into());
-        spec.args.push(opts.profile.clone());
-    }
+        let mut spec = CommandSpec::new("cargo");
+        spec.cwd = Some(workspace_root());
+        spec.args = vec!["run".into(), "-p".into(), "ferrex-server".into()];
+        if opts.profile == "release" {
+            spec.args.push("--release".into());
+        } else {
+            spec.args.push("--profile".into());
+            spec.args.push(opts.profile.clone());
+        }
+
+        spec
+    };
 
     for (k, v) in env_map {
         spec.env.push((k.clone(), v.clone()));
@@ -580,7 +596,7 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
     let project_name = resolve_project_name(opts);
     info!("Bringing up {} compose project", project_name);
 
-    if opts.clean {
+    if opts.clean || opts.reset_db {
         info!("Cleaning up old containers");
 
         let down = compose_down_spec(
@@ -641,7 +657,7 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
         }
         ServerMode::Host => {
             // Bring up only db/cache.
-            if opts.clean {
+            if opts.clean || opts.reset_db {
                 let down = compose_down_services_spec(
                     opts,
                     &project_name,

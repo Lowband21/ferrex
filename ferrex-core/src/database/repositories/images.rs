@@ -481,7 +481,7 @@ impl ImageRepository for PostgresImageRepository {
                 )
                 .fetch_one(&self.pool)
                 .await
-                .map_err(|e| MediaError::Database(e))?;
+                .map_err(MediaError::Database)?;
 
                 warn!(
                     "[upsert_image] cache_key collision: cache_key={} existing_image_id={} requested_image_id={}",
