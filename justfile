@@ -42,59 +42,59 @@ export SQLX_OFFLINE := 'true'
 
 [no-cd]
 up *args: ensure-installed
-    ferrex-init stack up {{ args }}
+    ferrexctl stack up {{ args }}
 
 [no-cd]
 up-nochk *args:
-    ferrex-init stack up {{ args }}
+    ferrexctl stack up {{ args }}
 
 [no-cd]
 up-noinstall *args:
-    cargo run -p ferrex-config --bin ferrex-init -- stack up {{ args }}
+    cargo run -p ferrexctl --bin ferrexctl -- stack up {{ args }}
 
 [no-cd]
 down *args='--clean': ensure-installed
-    ferrex-init stack down {{ args }}
+    ferrexctl stack down {{ args }}
 
 [no-cd]
 down-nochk *args='--clean':
-    ferrex-init stack down {{ args }}
+    ferrexctl stack down {{ args }}
 
 [no-cd]
 config *args="--runner host": ensure-installed
-    ferrex-init init {{ args }}
+    ferrexctl init {{ args }}
 
 [no-cd]
 check-config *args:
-    ferrex-init check {{ args }}
+    ferrexctl check {{ args }}
 
 [no-cd]
 logs service="ferrex":
-    ferrex-init logs --service {{ service }} --follow
+    ferrexctl logs --service {{ service }} --follow
 
 [no-cd]
 db-preflight profile="release" wild="auto" *args="":
-    DATABASE_URL=$DATABASE_URL_ADMIN ferrex-init db preflight --profile {{ profile }} --wild {{ wild }} {{ args }}
+    DATABASE_URL=$DATABASE_URL_ADMIN ferrexctl db preflight --profile {{ profile }} --wild {{ wild }} {{ args }}
 
 [no-cd]
 db-migrate profile="release" wild="auto" *args="":
-    DATABASE_URL=$DATABASE_URL_ADMIN ferrex-init db migrate --profile {{ profile }} --wild {{ wild }} {{ args }}
+    DATABASE_URL=$DATABASE_URL_ADMIN ferrexctl db migrate --profile {{ profile }} --wild {{ wild }} {{ args }}
 
 alias shst := show-setup-token
 
 [no-cd]
 @show-setup-token *args: ensure-installed ensure-env
-    ferrex-init show-token {{ args }}
+    ferrexctl show-token {{ args }}
 
 alias cpst := copy-setup-token
 
 [no-cd]
 @copy-setup-token *args: ensure-env
-    ferrex-init show-token {{ args }} | wl-copy >/dev/null 2>&1
+    ferrexctl show-token {{ args }} | wl-copy >/dev/null 2>&1
 
 [no-cd]
 rebuild-server profile="release" wild="1":
-    ferrex-init stack down --clean || true
+    ferrexctl stack down --clean || true
     FERREX_BUILD_PROFILE={{ profile }} FERREX_ENABLE_WILD={{ wild }} docker build -f docker/Dockerfile.prod --build-arg BUILD_PROFILE={{ profile }} --build-arg ENABLE_WILD={{ wild }} -t ferrex/server:local .
 
 [no-cd]
@@ -106,24 +106,24 @@ rebuild-server profile="release" wild="1":
 
 [no-cd]
 @ensure-installed:
-    # Determine if ferrex-init is missing or older than the source tree; reinstall when stale.
+    # Determine if ferrexctl is missing or older than the source tree; reinstall when stale.
     # Temporary until crate is published
     need_build=1; \
-    if command -v ferrex-init >/dev/null 2>&1; then \
-        bin_path="$(command -v ferrex-init)"; \
-        src_mtime=$(find ferrex-config -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 | xargs -0 stat -c %Y | sort -nr | head -n1); \
+    if command -v ferrexctl >/dev/null 2>&1; then \
+        bin_path="$(command -v ferrexctl)"; \
+        src_mtime=$(find ferrexctl -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 | xargs -0 stat -c %Y | sort -nr | head -n1); \
         bin_mtime=$(stat -c %Y "$bin_path"); \
         if [ "$src_mtime" -le "$bin_mtime" ]; then need_build=0; fi; \
     fi; \
     if [ "$need_build" -eq 1 ]; then \
-        echo "Installing/updating ferrex-init from workspace..."; \
-        cargo install --path ferrex-config --bin ferrex-init --force >/dev/null 2>&1 || cargo install --path ferrex-config --bin ferrex-init --force; \
+        echo "Installing/updating ferrexctl from workspace..."; \
+        cargo install --path ferrexctl --bin ferrexctl --force >/dev/null 2>&1 || cargo install --path ferrexctl --bin ferrexctl --force; \
     fi
 
 # Manual grey-box init/config validation (requires docker + local resources)
 [no-cd]
 init-e2e: ensure-installed
-    cargo test -p ferrex-config --test init_e2e --jobs 1 -- --ignored # --nocapture
+    cargo test -p ferrexctl --test init_e2e --jobs 1 -- --ignored # --nocapture
 
 #########################
 # Development shortcuts #

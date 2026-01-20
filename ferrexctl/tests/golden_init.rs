@@ -4,7 +4,7 @@ use std::{
     os::unix::fs::PermissionsExt,
 };
 
-use ferrex_config::{
+use ferrexctl::{
     cli::{InitOptions, RotateTarget, gen_init_merge_env, generate_init_kv},
     constants::{IGNORED_KEYS, MANAGED_KEYS},
     env_writer::{
@@ -45,7 +45,7 @@ fn render_kv(lines: &[(String, String)]) -> String {
 async fn golden_init_non_interactive_basic() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "1") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "1") };
 
     let dir = tempdir().expect("tempdir");
     let env_path = dir.path().join(".env");
@@ -55,7 +55,7 @@ async fn golden_init_non_interactive_basic() {
     let kv = generate_init_kv(&opts).await.expect("generate init");
     let rendered = render_kv(&kv);
 
-    unsafe { std::env::remove_var("FERREX_INIT_TEST_SEED") };
+    unsafe { std::env::remove_var("FERREXCTL_TEST_SEED") };
 
     // Just verify key fields are present with expected values, don't check exact order
     assert!(rendered.contains("DEV_MODE=true"));
@@ -77,7 +77,7 @@ async fn golden_init_non_interactive_basic() {
 async fn golden_init_non_interactive_existing_prod_advanced() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "1") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "1") };
     // Signal that DB rotation is safe (simulates --reset-db path)
     unsafe { std::env::set_var("FERREX_INTERNAL_DB_RESET", "1") };
 
@@ -107,7 +107,7 @@ REDIS_URL=redis://10.0.0.20:6379
     let kv = generate_init_kv(&opts).await.expect("generate init");
     let rendered = render_kv(&kv);
 
-    unsafe { std::env::remove_var("FERREX_INIT_TEST_SEED") };
+    unsafe { std::env::remove_var("FERREXCTL_TEST_SEED") };
     unsafe { std::env::remove_var("FERREX_INTERNAL_DB_RESET") };
 
     assert!(rendered.contains("DATABASE_HOST=db"));
@@ -123,7 +123,7 @@ REDIS_URL=redis://10.0.0.20:6379
 async fn tailscale_mode_overrides_container_hosts() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "2") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "2") };
 
     let dir = tempdir().expect("tempdir");
     let env_path = dir.path().join(".env");
@@ -251,9 +251,7 @@ CUSTOM_VAR=1
 
     // ASCII banner from the template should be present.
     assert!(
-        merged.contains(
-            "# Run `just start` to populate `.env` based on this template"
-        ),
+        merged.contains("populate `.env` based on this template"),
         "expected template header to be preserved"
     );
 
@@ -303,7 +301,7 @@ CUSTOM_VAR=1
 async fn rotate_db_only_changes_database_secrets() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "3") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "3") };
     // Signal that DB rotation is safe (simulates --reset-db path)
     unsafe { std::env::set_var("FERREX_INTERNAL_DB_RESET", "1") };
 
@@ -331,7 +329,7 @@ FERREX_SETUP_TOKEN=keep_setup
         .await
         .expect("generate init with rotation");
 
-    unsafe { std::env::remove_var("FERREX_INIT_TEST_SEED") };
+    unsafe { std::env::remove_var("FERREXCTL_TEST_SEED") };
     unsafe { std::env::remove_var("FERREX_INTERNAL_DB_RESET") };
 
     let map: HashMap<_, _> = outcome.kv.into_iter().collect();
@@ -358,7 +356,7 @@ FERREX_SETUP_TOKEN=keep_setup
 async fn rotate_auth_only_changes_auth_secrets() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "4") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "4") };
 
     let dir = tempdir().expect("tempdir");
     let env_path = dir.path().join(".env");
@@ -382,7 +380,7 @@ FERREX_SETUP_TOKEN=keep_setup
         .await
         .expect("generate init with auth rotate");
 
-    unsafe { std::env::remove_var("FERREX_INIT_TEST_SEED") };
+    unsafe { std::env::remove_var("FERREXCTL_TEST_SEED") };
 
     let map: HashMap<_, _> = outcome.kv.into_iter().collect();
 
@@ -407,7 +405,7 @@ FERREX_SETUP_TOKEN=keep_setup
 async fn rotate_all_changes_db_and_auth_even_with_file_secrets() {
     let _guard = ENV_LOCK.lock().await;
     clear_host_overrides();
-    unsafe { std::env::set_var("FERREX_INIT_TEST_SEED", "5") };
+    unsafe { std::env::set_var("FERREXCTL_TEST_SEED", "5") };
     // Signal that DB rotation is safe (simulates --reset-db path)
     // Note: --rotate all only rotates DB if FERREX_INTERNAL_DB_RESET is set
     unsafe { std::env::set_var("FERREX_INTERNAL_DB_RESET", "1") };
@@ -454,7 +452,7 @@ FERREX_SETUP_TOKEN_FILE={}
         .await
         .expect("generate init with rotate all");
 
-    unsafe { std::env::remove_var("FERREX_INIT_TEST_SEED") };
+    unsafe { std::env::remove_var("FERREXCTL_TEST_SEED") };
     unsafe { std::env::remove_var("FERREX_INTERNAL_DB_RESET") };
 
     let map: HashMap<_, _> = outcome.kv.into_iter().collect();

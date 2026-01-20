@@ -1,4 +1,4 @@
-//! Manual, ignored grey-box tests that exercise `ferrex-init` end-to-end.
+//! Manual, ignored grey-box tests that exercise `ferrexctl` end-to-end.
 //! They spawn the real binary, drive the TUI via a scripted adapter, and run
 //! docker compose stacks against a throwaway project root. These are meant for
 //! manual validation (run with `just init-e2e`) and are skipped in CI.
@@ -62,10 +62,10 @@ impl Harness {
             &env_file,
             format!(
                 "\
-SERVER_PORT={app}
-FERREX_SERVER_URL=http://localhost:{app}
-DATABASE_PORT={db}
-DATABASE_HOST=localhost
+                SERVER_PORT={app}
+                FERREX_SERVER_URL=http://localhost:{app}
+                DATABASE_PORT={db}
+                DATABASE_HOST=localhost
                 REDIS_URL=redis://127.0.0.1:{redis}
                 MEDIA_ROOT={}
                 CACHE_DIR={}
@@ -89,20 +89,20 @@ DATABASE_HOST=localhost
     }
 
     fn bin(&self) -> Command {
-        let bin = find_ferrex_init_binary().expect(
-            "binary path not set (run via cargo test or set FERREX_INIT_E2E_BIN=/abs/path/to/ferrex-init)",
+        let bin = find_ferrexctl_binary().expect(
+            "binary path not set (run via cargo test or set FERREXCTL_E2E_BIN=/abs/path/to/ferrexctl)",
         );
         if !bin.exists() {
             panic!(
-                "ferrex-init binary not found at: {} (current dir: {:?})",
+                "ferrexctl binary not found at: {} (current dir: {:?})",
                 bin.display(),
                 std::env::current_dir()
             );
         }
-        eprintln!("using ferrex-init binary: {}", bin.display());
+        eprintln!("using ferrexctl binary: {}", bin.display());
         let mut cmd = Command::new(bin);
         cmd.env("FERREX_COMPOSE_ROOT", &self.compose_root)
-            .env("FERREX_INIT_AUTO_CONFIRM", "1");
+            .env("FERREXCTL_AUTO_CONFIRM", "1");
         cmd
     }
 
@@ -124,9 +124,9 @@ DATABASE_HOST=localhost
             .arg("--env-file")
             .arg(&self.env_file)
             .arg("--tui")
-            .env("FERREX_INIT_TUI_SCRIPT", &script_path)
-            .env("FERREX_INIT_TUI_TRACE", &trace_path)
-            .env("FERREX_INIT_TEST_SEED", "111")
+            .env("FERREXCTL_TUI_SCRIPT", &script_path)
+            .env("FERREXCTL_TUI_TRACE", &trace_path)
+            .env("FERREXCTL_TEST_SEED", "111")
             .status()?;
 
         if !status.success() {
@@ -144,7 +144,7 @@ DATABASE_HOST=localhost
             .arg("--env-file")
             .arg(&self.env_file)
             .arg("--non-interactive")
-            .env("FERREX_INIT_TEST_SEED", "222")
+            .env("FERREXCTL_TEST_SEED", "222")
             .status()?;
         if !status.success() {
             anyhow::bail!(
@@ -389,11 +389,11 @@ fn docker_available() -> bool {
         .unwrap_or(false)
 }
 
-fn find_ferrex_init_binary() -> Option<PathBuf> {
+fn find_ferrexctl_binary() -> Option<PathBuf> {
     let mut discovered_paths = Vec::new();
 
     // 1. Check environment variable first (highest priority)
-    if let Ok(p) = std::env::var("FERREX_INIT_E2E_BIN") {
+    if let Ok(p) = std::env::var("FERREXCTL_E2E_BIN") {
         let path = PathBuf::from(p);
         // Convert relative paths to absolute paths based on current directory
         if path.is_relative()
@@ -403,7 +403,7 @@ fn find_ferrex_init_binary() -> Option<PathBuf> {
         {
             discovered_paths.push(abs_path.clone());
             eprintln!(
-                "  [binary discovery] Found via FERREX_INIT_E2E_BIN (resolved): {}",
+                "  [binary discovery] Found via FERREXCTL_E2E_BIN (resolved): {}",
                 abs_path.display()
             );
             eprintln!(
@@ -415,7 +415,7 @@ fn find_ferrex_init_binary() -> Option<PathBuf> {
         if path.exists() {
             discovered_paths.push(path.clone());
             eprintln!(
-                "  [binary discovery] Found via FERREX_INIT_E2E_BIN: {}",
+                "  [binary discovery] Found via FERREXCTL_E2E_BIN: {}",
                 path.display()
             );
             eprintln!(
@@ -425,13 +425,13 @@ fn find_ferrex_init_binary() -> Option<PathBuf> {
             return Some(path);
         }
         eprintln!(
-            "  [binary discovery] FERREX_INIT_E2E_BIN set but file not found: {}",
+            "  [binary discovery] FERREXCTL_E2E_BIN set but file not found: {}",
             path.display()
         );
     }
 
     // 2. Check PATH using which (second priority)
-    if let Ok(path) = which::which("ferrex-init") {
+    if let Ok(path) = which::which("ferrexctl") {
         discovered_paths.push(path.clone());
         eprintln!(
             "  [binary discovery] Found in PATH via which: {}",
@@ -446,8 +446,8 @@ fn find_ferrex_init_binary() -> Option<PathBuf> {
 
     // 3. Check local build directories (fallback)
     let local_paths = [
-        PathBuf::from("target/debug/ferrex-init"),
-        PathBuf::from("target/release/ferrex-init"),
+        PathBuf::from("target/debug/ferrexctl"),
+        PathBuf::from("target/release/ferrexctl"),
     ];
 
     for local_path in &local_paths {
@@ -469,10 +469,10 @@ fn find_ferrex_init_binary() -> Option<PathBuf> {
     }
 
     // No binary found
-    eprintln!("  [binary discovery] No ferrex-init binary found!");
+    eprintln!("  [binary discovery] No ferrexctl binary found!");
     eprintln!("  [binary discovery] Attempted methods:");
-    eprintln!("    1. FERREX_INIT_E2E_BIN environment variable");
-    eprintln!("    2. PATH lookup via 'which ferrex-init'");
+    eprintln!("    1. FERREXCTL_E2E_BIN environment variable");
+    eprintln!("    2. PATH lookup via 'which ferrexctl'");
     eprintln!(
         "    3. Local build directories: target/debug/ and target/release/"
     );

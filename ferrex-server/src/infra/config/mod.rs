@@ -1,4 +1,4 @@
-pub use ferrex_config::{
+pub use ferrexctl::{
     AuthConfig, CacheConfig, Config, ConfigLoad, ConfigLoadError, ConfigLoader,
     ConfigMetadata, ConfigWarnings, CorsConfig, DatabaseConfig, FfmpegConfig,
     HstsLayerConfig, HstsSettings, MediaConfig, RateLimitSource, RateLimitSpec,

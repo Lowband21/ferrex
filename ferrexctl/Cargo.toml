@@ -1,12 +1,18 @@
 [package]
-name = "ferrex-config"
+name = "ferrexctl"
 version.workspace = true
+rust-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme = "../README.md"
-description = "Shared configuration generation and loading utilities for Ferrex"
+readme = "README.md"
+description = "Ferrex configuration bootstrapper (library + CLI)"
+keywords = ["ferrex", "config", "dotenv", "docker-compose", "cli"]
+categories = ["command-line-utilities"]
+
+[lints]
+workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -32,7 +38,7 @@ toml = { version = "^0.9", default-features = false, features = [
 tracing.workspace = true
 tracing-subscriber.workspace = true
 axum.workspace = true
-ferrex-core = { path = "../ferrex-core" }
+ferrex-model = { workspace = true, features = ["serde"] }
 tempfile.workspace = true
 tokio.workspace = true
 regex.workspace = true

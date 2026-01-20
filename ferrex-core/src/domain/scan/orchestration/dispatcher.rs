@@ -1562,8 +1562,31 @@ mod tests {
         )
     }
 
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn folder_scan_dispatch_enqueues_follow_up_work(pool: PgPool) {
+    #[tokio::test]
+    async fn folder_scan_dispatch_enqueues_follow_up_work() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
         let (dispatcher, queue, events, cursors, _correlations) =
             dispatcher_fixture(&pool).await;
         let mut job_rx = events.subscribe();

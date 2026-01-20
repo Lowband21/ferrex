@@ -4,9 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, anyhow};
-use ferrex_core::domain::users::auth::rate_limit::{
-    EndpointLimits, TrustedSources,
-};
+use ferrex_model::rate_limit::{EndpointLimits, TrustedSources};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;

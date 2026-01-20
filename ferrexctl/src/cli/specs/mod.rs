@@ -617,8 +617,7 @@ pub async fn stack_up(opts: &options::StackOptions) -> Result<StackOutcome> {
     if opts.reset_db {
         // Confirmation prompt for destructive operation
         if !opts.init_non_interactive && !opts.skip_confirmation {
-            let auto_confirm =
-                std::env::var("FERREX_INIT_AUTO_CONFIRM").is_ok();
+            let auto_confirm = std::env::var("FERREXCTL_AUTO_CONFIRM").is_ok();
             if !auto_confirm {
                 use dialoguer::{Confirm, console::Term};
                 let confirmed = Confirm::new()

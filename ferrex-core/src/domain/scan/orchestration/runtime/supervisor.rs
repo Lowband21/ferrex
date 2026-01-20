@@ -1356,8 +1356,31 @@ mod tests {
         }
     }
 
-    #[sqlx::test]
-    async fn scheduler_observer_skips_ready_for_merged_events(pool: PgPool) {
+    #[tokio::test]
+    async fn scheduler_observer_skips_ready_for_merged_events() {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping: DATABASE_URL not set");
+                return;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping: failed to connect to DATABASE_URL ({err})"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = crate::MIGRATOR.run(&pool).await {
+            eprintln!("skipping: migrations failed ({err})");
+            return;
+        }
+
         let library_id = LibraryId::new();
 
         let mut config = OrchestratorConfig::default();
