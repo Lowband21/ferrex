@@ -9,7 +9,6 @@ pub mod image_service;
 #[cfg(feature = "database")]
 pub mod indices;
 
-#[cfg(feature = "ffmpeg")]
 pub mod metadata;
 
 pub mod providers;

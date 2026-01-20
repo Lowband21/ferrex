@@ -98,7 +98,7 @@ fn validate_url_password_match(
             message: format!(
                 "{url_key} contains password that does not match {password_key}"
             ),
-            hint: "Run `ferrex-init init --rotate db` to regenerate consistent credentials".to_string(),
+            hint: "Run `ferrexctl init --rotate db` to regenerate consistent credentials".to_string(),
         });
     }
 
