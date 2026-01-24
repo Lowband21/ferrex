@@ -64,22 +64,33 @@ impl fmt::Display for ImageCacheKey {
 /// - human-readable
 /// - versioned (prefix)
 /// - specific to logical image size to avoid collisions
+///
+/// This function is a hot path within the image pipeline,
+/// being used for ever image request created.
+///
+/// By pre-allocating a string and utilizing str references directly,
+/// we're able to avoid unnecessary heap allocations.
+///
+/// These optimizations have a significant perf impact,
+/// especially over simply using `format!`.
+#[inline]
 pub fn image_cache_key_for(iid: Uuid, imz: ImageSize) -> ImageCacheKey {
-    let iid = iid.simple();
-    let w = imz.width_name();
-    let imz = imz.image_variant().to_string();
-    let mut string = String::with_capacity(16 + 32 + 16 + 8);
-    string.push_str("images/v1/");
-    string.push_str(&iid.to_string());
-    string.push_str(&w);
-    string.push_str(&imz);
-    ImageCacheKey(string)
-    // ImageCacheKey::new(format!(
-    //     "images/v1/iid/{}/{}/{}",
-    //     iid.as_hyphenated(),
-    //     imz.image_variant(),
-    //     imz.width_name()
-    // ))
+    let variant: &str = imz.image_variant_str_path(); // includes '/' prefix and suffix
+    let width: &str = imz.width_name_str();
+
+    // "images/v2/iid/" = 14 bytes, UUID hyphenated = 36 bytes
+    let mut s = String::with_capacity(14 + 36 + variant.len() + width.len());
+
+    s.push_str("images/v2/iid/");
+
+    let mut buf = Uuid::encode_buffer();
+    let uuid_str = iid.as_hyphenated().encode_lower(&mut buf);
+    s.push_str(uuid_str);
+
+    s.push_str(variant);
+    s.push_str(width);
+
+    ImageCacheKey(s)
 }
 
 /// Minimal metadata returned from a successful store write.
