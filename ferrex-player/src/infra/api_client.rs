@@ -79,14 +79,25 @@ impl ApiClient {
             } else {
                 format!("http://{}", trimmed)
             };
-            if with_scheme != original {
+            let mut normalized = with_scheme.trim_end_matches('/').to_string();
+
+            // Back-compat: if a user pastes an API base like `http://host:port/api/v1`,
+            // strip the version suffix so callers can pass `/api/v1/...` and `/api/v2/...`.
+            for suffix in ["/api/v1", "/api/v2"] {
+                if normalized.ends_with(suffix) {
+                    normalized.truncate(normalized.len() - suffix.len());
+                    normalized = normalized.trim_end_matches('/').to_string();
+                    break;
+                }
+            }
+            if normalized != original {
                 log::warn!(
                     "[ApiClient] Normalized base URL from '{}' to '{}'",
                     original,
-                    with_scheme
+                    normalized
                 );
             }
-            with_scheme
+            normalized
         }
 
         let base_url = normalize(base_url);
@@ -161,11 +172,13 @@ impl ApiClient {
         if p.starts_with("http://") || p.starts_with("https://") {
             return p.to_string();
         }
-        if p.contains("api/v1/") {
-            let path = p.trim_start_matches('/');
+
+        // If the caller provides an absolute API path (e.g. `/api/v1/...` or `/api/v2/...`),
+        // treat it as already versioned and do not prepend `api_version`.
+        let path = p.trim_start_matches('/');
+        if path.starts_with("api/") {
             format!("{}/{}", self.base_url, path)
         } else {
-            let path = p.trim_start_matches('/');
             format!("{}/api/{}/{}", self.base_url, self.api_version, path)
         }
     }
@@ -537,6 +550,74 @@ impl ApiClient {
         match response.status() {
             StatusCode::OK => {
                 // Check content type
+                let content_type = response
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+
+                if content_type.contains("application/octet-stream") {
+                    let size_hint =
+                        response.content_length().unwrap_or(1024 * 1024)
+                            as usize;
+                    let mut aligned = AlignedVec::with_capacity(size_hint);
+                    let bytes = response.bytes().await?;
+                    aligned.extend_from_slice(&bytes);
+                    if aligned.capacity() > aligned.len() * 2 {
+                        aligned.shrink_to_fit();
+                    }
+                    Ok(aligned)
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Expected application/octet-stream from {} but got '{}'",
+                        url,
+                        content_type
+                    ))
+                }
+            }
+            StatusCode::UNAUTHORIZED => {
+                self.set_token(None).await;
+                Err(anyhow::anyhow!("Unauthorized - please login again"))
+            }
+            status => {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                Err(anyhow::anyhow!(
+                    "Request failed with status {}: {}",
+                    status,
+                    error_text
+                ))
+            }
+        }
+    }
+
+    /// POST request with authentication, returns raw rkyv bytes.
+    pub async fn post_rkyv(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+    ) -> Result<AlignedVec> {
+        let url = self.build_url(path);
+        log::debug!("POST rkyv request to: {}", url);
+
+        let request = self.client.post(&url).body(body);
+        let request = self
+            .build_request(request)
+            .await
+            .header("Accept", "application/octet-stream")
+            .header("Content-Type", "application/octet-stream");
+
+        let timeout = Self::rkyv_timeout_for_url(&url);
+        let request = request.timeout(timeout);
+
+        let response = request.send().await.with_context(|| {
+            format!("POST rkyv {} (timeout {:?})", url, timeout)
+        })?;
+
+        match response.status() {
+            StatusCode::OK => {
                 let content_type = response
                     .headers()
                     .get("content-type")

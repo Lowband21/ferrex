@@ -88,6 +88,7 @@ once_cell = "1.21"
 serde.workspace = true
 serde_json.workspace = true
 rkyv = { workspace = true }
+rancor.workspace = true
 
 # HTTP client for media server
 reqwest.workspace = true

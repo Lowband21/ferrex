@@ -98,6 +98,7 @@ rkyv = { version = "0.8.12", default-features = false, features = [
   "pointer_width_32",
   "uuid-1",
 ] }
+rancor = { version = "0.1.1", default-features = false, features = ["alloc"] }
 
 # Error handling
 anyhow = "1.0"

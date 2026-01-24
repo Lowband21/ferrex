@@ -80,6 +80,11 @@ pub fn update_metadata(
             let task = crate::domains::metadata::update_handlers::unified_image::handle_unified_image_cancelled(state, request);
             DomainUpdateResult::task(task.map(DomainMessage::Metadata))
         }
+        MetadataMessage::ImageBlobReady(request, token) => {
+            state.image_service.set_ready_token(&request, token);
+            state.image_service.request_image(request);
+            DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
+        }
         MetadataMessage::NoOp => {
             DomainUpdateResult::task(Task::none().map(DomainMessage::Metadata))
         }

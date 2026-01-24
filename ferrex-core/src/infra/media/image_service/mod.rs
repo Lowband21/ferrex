@@ -8,10 +8,12 @@ use crate::{
     },
     error::{MediaError, Result},
     infra::cache::{
-        ImageBlobStore, ImageCacheKey, ImageCacheRoot, image_cache_key_for,
+        CachedImageBlobMeta, ImageBlobStore, ImageCacheRoot, ImageFileStore,
+        image_cache_key_for,
     },
 };
 
+use ferrex_model::ImageReadyEvent;
 use ferrex_model::{
     ImageSize,
     image::{ImageDimensions, ImageVariant},
@@ -30,8 +32,9 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
-use tokio::sync::{Mutex, Notify, Semaphore};
+use tokio::sync::{Mutex, Notify, Semaphore, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -45,9 +48,11 @@ pub struct ImageService {
     media_files: Arc<dyn MediaFilesReadPort>,
     pub(crate) images: Arc<dyn ImageRepository>,
     blob_store: ImageBlobStore,
+    file_store: ImageFileStore,
     http_client: reqwest::Client,
     /// Non-blocking cache fill coordination (server can enqueue without awaiting).
-    in_flight: Arc<Mutex<HashSet<String>>>,
+    in_flight: Arc<std::sync::Mutex<HashSet<String>>>,
+    cache_fill_tx: mpsc::Sender<CacheFillJob>,
     // Per-variant singleflight to avoid duplicate downloads of the same size
     in_flight_variants:
         Arc<Mutex<std::collections::HashMap<String, Arc<Notify>>>>,
@@ -55,13 +60,26 @@ pub struct ImageService {
     // Diagnostics: counts of singleflight leaders/waiters for variants
     sf_variant_leaders: Arc<AtomicU64>,
     sf_variant_waiters: Arc<AtomicU64>,
+    // Diagnostics: cache-fill queue pressure
+    cache_fill_enqueued: Arc<AtomicU64>,
+    cache_fill_dropped: Arc<AtomicU64>,
+    image_events: broadcast::Sender<ImageReadyEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct CacheFillJob {
+    key: String,
+    iid: Uuid,
+    imz: ImageSize,
+    policy: CachePolicy,
 }
 
 impl fmt::Debug for ImageService {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let in_flight = self
             .in_flight
-            .try_lock()
+            .lock()
+            .ok()
             .map(|guard| guard.len())
             .unwrap_or(0);
 
@@ -72,6 +90,7 @@ impl fmt::Debug for ImageService {
             )
             .field("image_repository", &type_name_of_val(self.images.as_ref()))
             .field("image_cache_root", &self.blob_store.root())
+            .field("image_blob_root", &self.file_store.root())
             .field("http_client", &self.http_client)
             .field("in_flight_requests", &in_flight)
             .field("permits_available", &self.permits.available_permits())
@@ -82,6 +101,14 @@ impl fmt::Debug for ImageService {
             .field(
                 "sf_variant_waiters",
                 &self.sf_variant_waiters.load(Ordering::Relaxed),
+            )
+            .field(
+                "cache_fill_enqueued",
+                &self.cache_fill_enqueued.load(Ordering::Relaxed),
+            )
+            .field(
+                "cache_fill_dropped",
+                &self.cache_fill_dropped.load(Ordering::Relaxed),
             )
             .finish()
     }
@@ -120,14 +147,59 @@ impl ImageService {
                 .join(image_cache_dir)
         };
 
-        Self {
+        // Materialized, immutable blobs live alongside the `cacache` root in a dedicated subdir.
+        let image_blob_dir = image_cache_dir.join("blobs-v2");
+        if let Err(err) = std::fs::create_dir_all(&image_blob_dir) {
+            warn!(
+                "Failed to create image blob dir {:?}: {}",
+                image_blob_dir, err
+            );
+        }
+
+        let (image_events, _) = broadcast::channel::<ImageReadyEvent>(4096);
+
+        let cache_fill_queue_size =
+            std::env::var("IMAGE_CACHE_FILL_QUEUE_SIZE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(4096)
+                .max(1);
+        let default_cache_fill_concurrency = {
+            let db_max = std::env::var("DB_MAX_CONNECTIONS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(100)
+                .max(1);
+            // Leave room for request traffic + other subsystems by keeping image fill
+            // to a conservative fraction of the DB pool.
+            let db_budget = (db_max / 4).max(1);
+            std::cmp::min(download_concurrency.max(1), db_budget)
+        };
+        let cache_fill_concurrency =
+            std::env::var("IMAGE_CACHE_FILL_CONCURRENCY")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(default_cache_fill_concurrency)
+                .max(1);
+        let cache_fill_max_retries =
+            std::env::var("IMAGE_CACHE_FILL_MAX_RETRIES")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(5);
+
+        let (cache_fill_tx, cache_fill_rx) =
+            mpsc::channel::<CacheFillJob>(cache_fill_queue_size);
+
+        let svc = Self {
             media_files,
             images,
             blob_store: ImageBlobStore::new(ImageCacheRoot::new(
                 image_cache_dir,
             )),
+            file_store: ImageFileStore::new(image_blob_dir),
             http_client,
-            in_flight: Arc::new(Mutex::new(HashSet::new())),
+            in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            cache_fill_tx,
             in_flight_variants: Arc::new(Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -135,6 +207,63 @@ impl ImageService {
             permits: Arc::new(Semaphore::new(download_concurrency.max(1))),
             sf_variant_leaders: Arc::new(AtomicU64::new(0)),
             sf_variant_waiters: Arc::new(AtomicU64::new(0)),
+            cache_fill_enqueued: Arc::new(AtomicU64::new(0)),
+            cache_fill_dropped: Arc::new(AtomicU64::new(0)),
+            image_events,
+        };
+
+        svc.start_cache_fill_workers(
+            cache_fill_rx,
+            cache_fill_concurrency,
+            cache_fill_max_retries,
+        );
+        info!(
+            "Image cache-fill queue initialized: workers={}, queue_size={}, max_retries={}",
+            cache_fill_concurrency,
+            cache_fill_queue_size,
+            cache_fill_max_retries
+        );
+
+        svc
+    }
+
+    pub fn subscribe_image_events(
+        &self,
+    ) -> broadcast::Receiver<ImageReadyEvent> {
+        self.image_events.subscribe()
+    }
+
+    pub fn image_blob_path(&self, token: &str) -> Result<std::path::PathBuf> {
+        self.file_store.path_for_token(token)
+    }
+
+    fn start_cache_fill_workers(
+        &self,
+        rx: mpsc::Receiver<CacheFillJob>,
+        concurrency: usize,
+        max_retries: usize,
+    ) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            warn!(
+                "Image cache-fill workers not started (no Tokio runtime available)"
+            );
+            return;
+        }
+
+        let rx = Arc::new(Mutex::new(rx));
+        for worker_id in 0..concurrency {
+            let svc = self.clone();
+            let rx = Arc::clone(&rx);
+            tokio::spawn(async move {
+                loop {
+                    let job = {
+                        let mut guard = rx.lock().await;
+                        guard.recv().await
+                    };
+                    let Some(job) = job else { break };
+                    svc.run_cache_fill_job(job, worker_id, max_retries).await;
+                }
+            });
         }
     }
 
@@ -155,26 +284,36 @@ impl ImageService {
             imz.to_tmdb_param()
         );
 
-        let svc = self.clone();
-        tokio::spawn(async move {
-            if !svc.try_begin_enqueue(&key).await {
-                return;
-            }
+        if !self.try_begin_enqueue(&key) {
+            return;
+        }
 
-            let res = svc.cached_image(iid, imz, policy).await;
-            if let Err(err) = res {
+        let job = CacheFillJob {
+            key: key.clone(),
+            iid,
+            imz,
+            policy,
+        };
+
+        match self.cache_fill_tx.try_send(job) {
+            Ok(()) => {
+                self.cache_fill_enqueued.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(err) => {
+                self.cache_fill_dropped.fetch_add(1, Ordering::Relaxed);
                 warn!(
-                    "[enqueue_cache_fill] Background cache fill failed: iid={}, imz={:?}, err={}",
+                    "[enqueue_cache_fill] Dropped cache fill (queue full/closed): iid={}, imz={:?}, err={}",
                     iid, imz, err
                 );
+                self.finish_enqueue(&key);
             }
-
-            svc.finish_enqueue(&key).await;
-        });
+        }
     }
 
-    async fn try_begin_enqueue(&self, key: &str) -> bool {
-        let mut set = self.in_flight.lock().await;
+    fn try_begin_enqueue(&self, key: &str) -> bool {
+        let Ok(mut set) = self.in_flight.lock() else {
+            return false;
+        };
         if set.contains(key) {
             return false;
         }
@@ -182,9 +321,107 @@ impl ImageService {
         true
     }
 
-    async fn finish_enqueue(&self, key: &str) {
-        let mut set = self.in_flight.lock().await;
-        set.remove(key);
+    fn finish_enqueue(&self, key: &str) {
+        if let Ok(mut set) = self.in_flight.lock() {
+            set.remove(key);
+        }
+    }
+
+    async fn run_cache_fill_job(
+        &self,
+        job: CacheFillJob,
+        worker_id: usize,
+        max_retries: usize,
+    ) {
+        let CacheFillJob {
+            key,
+            iid,
+            imz,
+            policy,
+        } = job;
+
+        let mut attempt = 0usize;
+        let mut backoff = Duration::from_millis(200);
+        let max_backoff = Duration::from_secs(5);
+
+        loop {
+            let res = self.cache_fill_ensure_ready(iid, imz, policy).await;
+            match res {
+                Ok(_) => break,
+                Err(err)
+                    if attempt < max_retries
+                        && is_retryable_cache_fill_error(&err) =>
+                {
+                    attempt += 1;
+                    warn!(
+                        "[enqueue_cache_fill] Cache fill retrying (attempt {}/{}): worker={}, iid={}, imz={:?}, err={}",
+                        attempt, max_retries, worker_id, iid, imz, err
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = std::cmp::min(backoff * 2, max_backoff);
+                }
+                Err(err) => {
+                    warn!(
+                        "[enqueue_cache_fill] Background cache fill failed: worker={}, iid={}, imz={:?}, err={}",
+                        worker_id, iid, imz, err
+                    );
+                    break;
+                }
+            }
+        }
+
+        self.finish_enqueue(&key);
+    }
+
+    async fn cache_fill_ensure_ready(
+        &self,
+        iid: Uuid,
+        imz: ImageSize,
+        policy: CachePolicy,
+    ) -> Result<()> {
+        let record = self.cached_image(iid, imz, policy).await?;
+
+        match self.ensure_materialized_and_emit(&record).await {
+            Ok(()) => Ok(()),
+            Err(err)
+                if policy == CachePolicy::Ensure
+                    && matches!(
+                        err,
+                        MediaError::NotFound(_) | MediaError::InvalidMedia(_)
+                    ) =>
+            {
+                warn!(
+                    "[cache_fill] Cache entry missing/corrupt after DB hit; attempting refresh: iid={}, imz={:?}, err={}",
+                    iid, record.imz, err
+                );
+                let refreshed = self
+                    .cached_image(iid, record.imz, CachePolicy::Refresh)
+                    .await?;
+                self.ensure_materialized_and_emit(&refreshed).await
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn ensure_materialized_and_emit(
+        &self,
+        record: &ImageRecord,
+    ) -> Result<()> {
+        let token = ImageFileStore::token_from_integrity(&record.integrity);
+
+        if !self.file_store.exists(&token).await? {
+            let bytes = self
+                .read_cached_bytes_by_key(record.iid, record.imz)
+                .await?;
+            self.file_store.write_if_missing(&token, &bytes).await?;
+        }
+
+        let _ = self.image_events.send(ImageReadyEvent {
+            iid: record.iid,
+            imz: record.imz,
+            token,
+        });
+        Ok(())
     }
 
     /// Read cached image bytes for a database record.
@@ -195,8 +432,27 @@ impl ImageService {
         &self,
         record: &ImageRecord,
     ) -> Result<Vec<u8>> {
-        let key = ImageCacheKey::new(record.cache_key.clone());
+        self.read_cached_bytes_by_key(record.iid, record.imz).await
+    }
+
+    /// Read cached image bytes directly by `(iid, imz)` without involving the DB.
+    pub async fn read_cached_bytes_by_key(
+        &self,
+        iid: Uuid,
+        imz: ImageSize,
+    ) -> Result<Vec<u8>> {
+        let key = image_cache_key_for(iid, imz);
         self.blob_store.read(&key).await
+    }
+
+    /// Read cached image metadata directly by `(iid, imz)` without involving the DB.
+    pub async fn read_cached_meta_by_key(
+        &self,
+        iid: Uuid,
+        imz: ImageSize,
+    ) -> Result<Option<CachedImageBlobMeta>> {
+        let key = image_cache_key_for(iid, imz);
+        self.blob_store.metadata(&key).await
     }
 
     /// Download and cache an image variant, keeping metadata in sync with the media_variant table.
@@ -295,6 +551,11 @@ impl ImageService {
 
         let cache_key = image_cache_key_for(iin.iid, iin.imz);
         let stored = self.blob_store.write(&cache_key, &bytes).await?;
+        let integrity_string = stored.integrity.to_string();
+        let token = ImageFileStore::token_from_integrity(&integrity_string);
+        self.file_store
+            .write_if_missing(&token, bytes.as_ref())
+            .await?;
 
         let theme_color =
             if matches!(lup.imz.image_variant(), ImageVariant::Poster) {
@@ -314,7 +575,7 @@ impl ImageService {
         let owned = OwnedImgMeta {
             tmdb_path: tmdb_path.to_string(),
             cache_key: cache_key.to_string(),
-            integrity: stored.integrity.to_string(),
+            integrity: integrity_string,
             theme_color,
         };
 
@@ -344,7 +605,13 @@ impl ImageService {
             ctx.byte_len
         );
 
-        self.images.upsert_image(&ctx).await
+        let record = self.images.upsert_image(&ctx).await?;
+        let _ = self.image_events.send(ImageReadyEvent {
+            iid: record.iid,
+            imz: record.imz,
+            token,
+        });
+        Ok(record)
     }
 
     pub async fn generate_episode_thumbnail(
@@ -482,6 +749,11 @@ impl ImageService {
         );
 
         let stored = self.blob_store.write(&cache_key, &encoded_jpeg).await?;
+        let integrity_string = stored.integrity.to_string();
+        let token = ImageFileStore::token_from_integrity(&integrity_string);
+        self.file_store
+            .write_if_missing(&token, &encoded_jpeg)
+            .await?;
 
         // let file_size_i32 = bytes.len() as i32;
 
@@ -501,7 +773,7 @@ impl ImageService {
 
         let owned = OwnedImgMeta {
             cache_key: cache_key.to_string(),
-            integrity: stored.integrity.to_string(),
+            integrity: integrity_string,
             theme_color,
         };
 
@@ -538,7 +810,13 @@ impl ImageService {
             ctx.byte_len
         );
 
-        self.images.upsert_image(&ctx).await
+        let record = self.images.upsert_image(&ctx).await?;
+        let _ = self.image_events.send(ImageReadyEvent {
+            iid: record.iid,
+            imz: record.imz,
+            token,
+        });
+        Ok(record)
 
         // if let Some(existing_image) =
         //     self.images.lookup_variant_by_hash(&hash).await?
@@ -931,6 +1209,20 @@ impl ImageService {
     /// Clean up orphaned images
     pub async fn cleanup_orphaned(&self) -> Result<u32> {
         self.images.cleanup_orphaned_images().await
+    }
+}
+
+fn is_retryable_cache_fill_error(err: &MediaError) -> bool {
+    match err {
+        MediaError::Http(e) => e.is_timeout() || e.is_connect(),
+        MediaError::HttpStatus { status, .. } => {
+            status.as_u16() == 429 || status.is_server_error()
+        }
+        #[cfg(feature = "database")]
+        MediaError::Database(sqlx::Error::PoolTimedOut) => true,
+        #[cfg(feature = "database")]
+        MediaError::Database(sqlx::Error::PoolClosed) => true,
+        _ => false,
     }
 }
 

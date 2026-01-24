@@ -1,6 +1,7 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::error::{MediaError, Result};
@@ -88,6 +89,14 @@ pub struct StoredImageBlob {
     pub byte_len: usize,
 }
 
+/// Minimal metadata returned from a cache index lookup.
+#[derive(Debug, Clone)]
+pub struct CachedImageBlobMeta {
+    pub integrity: Integrity,
+    pub byte_len: usize,
+    pub written_at: SystemTime,
+}
+
 /// A thin typed wrapper over `cacache` for image blobs.
 #[derive(Clone, Debug)]
 pub struct ImageBlobStore {
@@ -101,6 +110,28 @@ impl ImageBlobStore {
 
     pub fn root(&self) -> &ImageCacheRoot {
         &self.root
+    }
+
+    pub async fn metadata(
+        &self,
+        key: &ImageCacheKey,
+    ) -> Result<Option<CachedImageBlobMeta>> {
+        let meta = cacache::metadata(self.root.as_path(), key.as_str())
+            .await
+            .map_err(|e| {
+            MediaError::Internal(format!("cacache metadata failed: {e}"))
+        })?;
+
+        Ok(meta.map(|m| {
+            // `cacache` uses unix millis in `time`.
+            let millis = u64::try_from(m.time).unwrap_or(u64::MAX);
+            let written_at = UNIX_EPOCH + Duration::from_millis(millis);
+            CachedImageBlobMeta {
+                integrity: m.integrity,
+                byte_len: m.size,
+                written_at,
+            }
+        }))
     }
 
     pub async fn read(&self, key: &ImageCacheKey) -> Result<Vec<u8>> {
@@ -203,7 +234,7 @@ mod tests {
         let key = image_cache_key_for(iid, imz);
         assert_eq!(
             key.as_str(),
-            "images/v1/iid/01234567-89ab-cdef-0123-456789abcdef/poster/w185"
+            "images/v2/iid/01234567-89ab-cdef-0123-456789abcdef/poster/w185"
         );
     }
 }

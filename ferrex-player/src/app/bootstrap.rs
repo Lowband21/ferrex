@@ -107,6 +107,11 @@ fn sanitize_server_url(input: &str) -> String {
         // Default to http if no scheme provided to avoid TLS issues with self-signed
         format!("http://{}", trimmed)
     }
+    .trim_end_matches('/')
+    .trim_end_matches("/api/v1")
+    .trim_end_matches("/api/v2")
+    .trim_end_matches('/')
+    .to_string()
 }
 
 /// Boot logic used both by the runtime application and presets.
