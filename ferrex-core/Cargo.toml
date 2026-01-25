@@ -84,7 +84,7 @@ rand.workspace = true
 ordered-float = { version = "^5", default-features = false }
 
 # File watching
-notify = { version = "^7", optional = true }
+notify = { version = "^8", optional = true }
 
 # Image processing
 image = { workspace = true, optional = true }
