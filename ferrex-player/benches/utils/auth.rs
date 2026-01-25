@@ -26,16 +26,24 @@ pub async fn setup_benchmark_authentication(
                 && stored_auth.user.preferences.auto_login_enabled;
 
             if auto_login_enabled {
-                log::info!("✅ Auto-login enabled, applying stored authentication...");
+                log::info!(
+                    "✅ Auto-login enabled, applying stored authentication..."
+                );
 
                 // Step 3: Apply the stored auth
                 match auth_service.apply_stored_auth(stored_auth).await {
                     Ok(()) => {
-                        log::info!("✅ Benchmark authentication successful via autologin");
+                        log::info!(
+                            "✅ Benchmark authentication successful via autologin"
+                        );
                         return Ok(());
                     }
                     Err(e) => {
-                        return Err(format!("Failed to apply stored auth: {}", e).into());
+                        return Err(format!(
+                            "Failed to apply stored auth: {}",
+                            e
+                        )
+                        .into());
                     }
                 }
             } else {
@@ -46,7 +54,9 @@ pub async fn setup_benchmark_authentication(
             return Err("No stored authentication found. Please login to the application with auto-login enabled and try again.".into());
         }
         Err(e) => {
-            return Err(format!("Failed to load stored authentication: {}", e).into());
+            return Err(
+                format!("Failed to load stored authentication: {}", e).into()
+            );
         }
     }
 }

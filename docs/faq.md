@@ -1,5 +1,5 @@
 # FAQ
-  
+
 Common questions about platforms, playback, and workflows.
 
 ## Why is HDR Wayland‑only today?

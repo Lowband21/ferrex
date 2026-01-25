@@ -11,7 +11,8 @@ pub fn evaluate(password: &str) -> PasswordStrength {
             score: 0,
             warning: Some("Password is empty".to_string()),
             suggestions: vec![
-                "Use a password with a mix of words, numbers, and symbols".to_string(),
+                "Use a password with a mix of words, numbers, and symbols"
+                    .to_string(),
             ],
         };
     }

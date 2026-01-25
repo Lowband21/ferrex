@@ -29,7 +29,10 @@ pub(crate) struct RankedTitleCandidate {
 }
 
 pub(crate) fn supports_title_only_search(search: &SearchQuery) -> bool {
-    matches!(search.fields.as_slice(), [SearchField::Title])
+    matches!(
+        search.fields.as_slice(),
+        [SearchField::Title] | [SearchField::All]
+    )
 }
 
 pub(crate) fn rank_title_candidates(
@@ -42,15 +45,32 @@ pub(crate) fn rank_title_candidates(
     }
 
     let query_lower = query.to_lowercase();
+    let query_tokens: Vec<&str> = query_lower
+        .split_whitespace()
+        .filter(|token| !token.is_empty())
+        .collect();
+    let primary_token = query_tokens.first().copied();
     let matcher = SkimMatcherV2::default().ignore_case();
 
     let mut ranked = Vec::new();
 
     for candidate in candidates {
         let title_lower = candidate.title.to_lowercase();
-        let Some(base_score) = matcher.fuzzy_match(&candidate.title, query)
-        else {
-            continue;
+        let base_score = match matcher.fuzzy_match(&candidate.title, query) {
+            Some(score) => score,
+            None => {
+                if title_lower.contains(&query_lower) {
+                    0
+                } else if let Some(token) = primary_token {
+                    if !title_lower.contains(token) {
+                        continue;
+                    }
+                    matcher.fuzzy_match(&candidate.title, token).unwrap_or(0)
+                        / 2
+                } else {
+                    continue;
+                }
+            }
         };
 
         let score = apply_match_bonuses(

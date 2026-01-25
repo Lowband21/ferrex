@@ -3,19 +3,19 @@
 // This provides mock implementations and utilities for testing
 // the refresh token functionality
 
-use ferrex_player::domains::auth::manager::AuthManager;
-use ferrex_player::domains::auth::errors::{AuthError, TokenError};
-use ferrex_player::infra::api_client::ApiClient;
+use chrono::{Duration, Utc};
 use ferrex_core::{
     auth::domain::value_objects::SessionScope,
     rbac::UserPermissions,
     user::{AuthToken, User},
 };
-use chrono::{Duration, Utc};
-use uuid::Uuid;
+use ferrex_player::domains::auth::errors::{AuthError, TokenError};
+use ferrex_player::domains::auth::manager::AuthManager;
+use ferrex_player::infra::api_client::ApiClient;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Mock server state for testing
 pub struct MockAuthServer {
@@ -40,7 +40,12 @@ impl MockAuthServer {
         }
     }
 
-    pub async fn add_refresh_token(&self, token: String, user_id: Uuid, device_id: String) {
+    pub async fn add_refresh_token(
+        &self,
+        token: String,
+        user_id: Uuid,
+        device_id: String,
+    ) {
         let data = RefreshTokenData {
             user_id,
             expires_at: Utc::now() + Duration::days(30),
@@ -57,7 +62,10 @@ impl MockAuthServer {
         *self.refresh_count.read().await
     }
 
-    pub async fn validate_refresh_token(&self, token: &str) -> Result<AuthToken, String> {
+    pub async fn validate_refresh_token(
+        &self,
+        token: &str,
+    ) -> Result<AuthToken, String> {
         // Increment refresh count
         let mut count = self.refresh_count.write().await;
         *count += 1;

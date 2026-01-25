@@ -5,17 +5,15 @@
 //! the entire monolithic State struct.
 
 use ferrex_core::{
-    api::types::Library,
-    domain::watch::UserWatchState,
-    rbac::UserPermissions,
+    api::types::Library, domain::watch::UserWatchState, rbac::UserPermissions,
     user::User,
 };
 use ferrex_player::{
-    auth_manager::AuthManager,
     api_client::ApiClient,
+    auth_manager::AuthManager,
     media_store::MediaStore,
     metadata_service::MetadataService,
-    state::{AuthenticationFlow, ViewState, ViewMode, SortBy, SortOrder},
+    state::{AuthenticationFlow, SortBy, SortOrder, ViewMode, ViewState},
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -111,14 +109,16 @@ pub trait UserManagementState {
 
 /// A trait that combines all domain states for integration testing
 pub trait IntegrationState:
-    AuthState +
-    LibraryState +
-    MediaState +
-    UIState +
-    MetadataState +
-    SettingsState +
-    StreamingState +
-    UserManagementState {}
+    AuthState
+    + LibraryState
+    + MediaState
+    + UIState
+    + MetadataState
+    + SettingsState
+    + StreamingState
+    + UserManagementState
+{
+}
 
 #[cfg(test)]
 mod tests {
@@ -171,7 +171,10 @@ mod tests {
             self.user_permissions.as_ref()
         }
 
-        fn set_user_permissions(&mut self, permissions: Option<UserPermissions>) {
+        fn set_user_permissions(
+            &mut self,
+            permissions: Option<UserPermissions>,
+        ) {
             self.user_permissions = permissions;
         }
 

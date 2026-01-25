@@ -11,8 +11,10 @@ use ferrex_player::{
 use tokio::runtime::Runtime;
 
 use crate::{
-    init::init_bench::{self, benchmark_full_initialization, full_initialization_operation},
     INIT, INITIALIZED_STATE,
+    init::init_bench::{
+        self, benchmark_full_initialization, full_initialization_operation,
+    },
 };
 
 use super::auth::setup_benchmark_authentication;
@@ -45,7 +47,9 @@ pub struct BenchmarkGlobalState {
 /// This ensures all benchmarks use the same real server data for consistency
 pub fn get_or_initialize_global_state() -> Arc<BenchmarkGlobalState> {
     INIT.call_once(|| {
-        log::info!("🚀 Initializing global benchmark state with real server data...");
+        log::info!(
+            "🚀 Initializing global benchmark state with real server data..."
+        );
 
         let rt = Runtime::new().unwrap();
         let global_state = rt.block_on(async {
@@ -57,7 +61,9 @@ pub fn get_or_initialize_global_state() -> Arc<BenchmarkGlobalState> {
                     let mut real_series = Vec::new();
 
                     // Extract from library caches
-                    for (_, cache) in &state.domains.library.state.library_media_cache {
+                    for (_, cache) in
+                        &state.domains.library.state.library_media_cache
+                    {
                         match cache {
                             LibraryMediaCache::Movies { references } => {
                                 real_movies.extend(references.clone());
@@ -66,7 +72,8 @@ pub fn get_or_initialize_global_state() -> Arc<BenchmarkGlobalState> {
                                 series_references_sorted,
                                 ..
                             } => {
-                                real_series.extend(series_references_sorted.clone());
+                                real_series
+                                    .extend(series_references_sorted.clone());
                             }
                         }
                     }
@@ -86,11 +93,16 @@ pub fn get_or_initialize_global_state() -> Arc<BenchmarkGlobalState> {
                 }
                 Err(e) => {
                     log::error!("❌ Failed to initialize global state: {}", e);
-                    log::warn!("🔄 Falling back to minimal state for benchmarks");
+                    log::warn!(
+                        "🔄 Falling back to minimal state for benchmarks"
+                    );
 
                     // Fallback to minimal state
-                    let state = State::new("https://localhost:3000".to_string());
-                    service_registry::init_registry(state.image_service.clone());
+                    let state =
+                        State::new("https://localhost:3000".to_string());
+                    service_registry::init_registry(
+                        state.image_service.clone(),
+                    );
 
                     BenchmarkGlobalState {
                         state: Arc::new(state),

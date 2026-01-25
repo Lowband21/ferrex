@@ -66,7 +66,7 @@ iced_aw = { git = "https://github.com/Lowband21/iced_aw_ferrex.git", default-fea
 ] }
 
 # iced_toasts = { git = "https://github.com/Gomango999/iced-toasts.git" }
-  
+
 
 # Icons
 lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git", features = [

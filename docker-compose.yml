@@ -89,4 +89,3 @@ services:
       - ${MEDIA_ROOT:-./media}:/media:ro
       # Optional TLS certs if terminating at app
       # - ./certs:/certs:ro
-
