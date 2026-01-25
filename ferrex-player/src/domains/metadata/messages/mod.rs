@@ -1,4 +1,5 @@
 pub mod image_cache_cleanup_subscription;
+pub mod image_events_subscription;
 pub mod image_loading_subscription;
 pub mod subscription;
 pub mod subscriptions;
@@ -21,6 +22,7 @@ pub enum MetadataMessage {
     UnifiedImageLoaded(ImageRequest, iced::widget::image::Handle, u64),
     UnifiedImageLoadFailed(ImageRequest, String),
     UnifiedImageCancelled(ImageRequest),
+    ImageBlobReady(ImageRequest, String),
 
     NoOp,
 }
@@ -41,6 +43,7 @@ impl MetadataMessage {
             MetadataMessage::UnifiedImageCancelled(_) => {
                 "Metadata::UnifiedImageCancelled"
             }
+            MetadataMessage::ImageBlobReady(_, _) => "Metadata::ImageBlobReady",
             MetadataMessage::SeriesSortingCompleted(_) => {
                 "Metadata::SeriesSortingCompleted"
             }
@@ -75,6 +78,11 @@ impl std::fmt::Debug for MetadataMessage {
             Self::UnifiedImageCancelled(req) => f
                 .debug_tuple("Metadata::UnifiedImageCancelled")
                 .field(req)
+                .finish(),
+            Self::ImageBlobReady(req, token) => f
+                .debug_tuple("Metadata::ImageBlobReady")
+                .field(req)
+                .field(token)
                 .finish(),
             Self::SeriesSortingCompleted(series) => write!(
                 f,

@@ -31,7 +31,10 @@ pub use library::{
     SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
     UpdateLibraryRequest,
 };
-pub use media::ImageData;
+pub use media::{
+    ImageData, ImageManifestItem, ImageManifestRequest, ImageManifestResponse,
+    ImageManifestResult, ImageManifestStatus,
+};
 pub use media_repo_sync::{
     MovieBatchFetchRequest, MovieBatchSyncRequest, MovieBatchSyncResponse,
     MovieBatchVersionManifestEntry, SeriesBundleFetchRequest,
@@ -60,7 +63,10 @@ pub mod player {
         SeriesBundleBlob, SeriesBundleBundleResponse, SeriesBundleResponse,
         UpdateLibraryRequest,
     };
-    pub use super::media::ImageData;
+    pub use super::media::{
+        ImageData, ImageManifestItem, ImageManifestRequest,
+        ImageManifestResponse, ImageManifestResult, ImageManifestStatus,
+    };
     pub use super::media_repo_sync::{
         MovieBatchFetchRequest, MovieBatchSyncRequest, MovieBatchSyncResponse,
         MovieBatchVersionManifestEntry, SeriesBundleFetchRequest,

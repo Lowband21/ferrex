@@ -14,10 +14,11 @@ use crate::infra::{
 
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
-    FilterIndicesRequest, IndicesResponse, LatestProgressResponse, Library,
-    LibraryId, LibraryMediaResponse, Media, MediaID, MediaQuery,
-    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
-    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
+    FilterIndicesRequest, ImageManifestRequest, ImageManifestResponse,
+    IndicesResponse, LatestProgressResponse, Library, LibraryId,
+    LibraryMediaResponse, Media, MediaID, MediaQuery, MediaRootBrowseResponse,
+    MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
+    MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
     SeasonWatchStatus, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
     SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus, SortBy, SortOrder,
@@ -245,6 +246,23 @@ impl ApiService for ApiClientAdapter {
         self.client
             .get_image(path, iq)
             .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
+    async fn post_image_manifest(
+        &self,
+        request: ImageManifestRequest,
+    ) -> RepositoryResult<ImageManifestResponse> {
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        let bytes = self
+            .client
+            .post_rkyv(v1::images::MANIFEST, body.into_vec())
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))?;
+
+        rkyv::from_bytes::<ImageManifestResponse, rkyv::rancor::Error>(&bytes)
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 

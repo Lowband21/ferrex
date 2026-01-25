@@ -6,14 +6,14 @@
 // - Device trust integration
 // - API client retry mechanism
 
-use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
+use chrono::{Duration, Utc};
 use ferrex_core::domain::users::{
     auth::domain::value_objects::SessionScope,
     user::{AuthToken, User},
 };
-use chrono::{Duration, Utc};
-use uuid::Uuid;
+use ferrex_player::domains::auth::storage::{AuthStorage, StoredAuth};
 use tempfile::TempDir;
+use uuid::Uuid;
 
 fn create_test_user() -> User {
     User {
@@ -65,11 +65,15 @@ async fn test_token_stored_with_refresh_token() {
 
     // Save auth
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // Load and verify
-    let loaded = storage.load_auth(fingerprint).await
+    let loaded = storage
+        .load_auth(fingerprint)
+        .await
         .expect("Should load auth")
         .expect("Auth should exist");
 
@@ -101,17 +105,27 @@ async fn test_expired_token_triggers_refresh_attempt() {
 
     // Save auth
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // Load auth - in real scenario, AuthManager would trigger refresh
-    let loaded = storage.load_auth(fingerprint).await
+    let loaded = storage
+        .load_auth(fingerprint)
+        .await
         .expect("Should load auth")
         .expect("Auth should exist");
 
     // Verify expired token is loaded (refresh would happen in AuthManager)
-    assert_eq!(loaded.token.expires_in, 0, "Token should be expired (expires_in == 0)");
-    assert!(loaded.refresh_token.is_some(), "Refresh token should be present");
+    assert_eq!(
+        loaded.token.expires_in, 0,
+        "Token should be expired (expires_in == 0)"
+    );
+    assert!(
+        loaded.refresh_token.is_some(),
+        "Refresh token should be present"
+    );
 }
 
 #[tokio::test]
@@ -138,7 +152,9 @@ async fn test_device_trust_persists_across_refresh() {
 
     // Save auth
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // Simulate refresh by updating token but keeping device trust
@@ -153,11 +169,15 @@ async fn test_device_trust_persists_across_refresh() {
         refresh_token: Some(new_token.refresh_token.clone()),
     };
 
-    storage.save_auth(&refreshed_auth, fingerprint).await
+    storage
+        .save_auth(&refreshed_auth, fingerprint)
+        .await
         .expect("Should save refreshed auth");
 
     // Load and verify
-    let loaded = storage.load_auth(fingerprint).await
+    let loaded = storage
+        .load_auth(fingerprint)
+        .await
         .expect("Should load auth")
         .expect("Auth should exist");
 
@@ -177,7 +197,7 @@ async fn test_missing_refresh_token_clears_auth() {
     let token = AuthToken {
         access_token: "<REDACTED>".to_string(),
         refresh_token: String::new(), // Empty refresh token
-        expires_in: 0, // Expired (0 means expired),
+        expires_in: 0,                // Expired (0 means expired),
         session_id: None,
         device_session_id: None,
         user_id: None,
@@ -197,17 +217,27 @@ async fn test_missing_refresh_token_clears_auth() {
 
     // Save auth
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // In real scenario, AuthManager would detect expired token with no refresh
     // and clear the auth. Here we just verify the state
-    let loaded = storage.load_auth(fingerprint).await
+    let loaded = storage
+        .load_auth(fingerprint)
+        .await
         .expect("Should load auth")
         .expect("Auth should exist");
 
-    assert!(loaded.refresh_token.is_none(), "Refresh token should be missing");
-    assert_eq!(loaded.token.expires_in, 0, "Token should be expired (expires_in == 0)");
+    assert!(
+        loaded.refresh_token.is_none(),
+        "Refresh token should be missing"
+    );
+    assert_eq!(
+        loaded.token.expires_in, 0,
+        "Token should be expired (expires_in == 0)"
+    );
 }
 
 #[tokio::test]
@@ -234,17 +264,27 @@ async fn test_token_within_buffer_triggers_refresh() {
 
     // Save auth
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // Load auth
-    let loaded = storage.load_auth(fingerprint).await
+    let loaded = storage
+        .load_auth(fingerprint)
+        .await
         .expect("Should load auth")
         .expect("Auth should exist");
 
     // Token should be within refresh buffer (30 seconds < 60 seconds buffer)
-    assert!(loaded.token.expires_in <= 60, "Token should be within refresh buffer");
-    assert!(loaded.refresh_token.is_some(), "Refresh token should be present for refresh");
+    assert!(
+        loaded.token.expires_in <= 60,
+        "Token should be within refresh buffer"
+    );
+    assert!(
+        loaded.refresh_token.is_some(),
+        "Refresh token should be present for refresh"
+    );
 }
 
 #[tokio::test]
@@ -269,7 +309,9 @@ async fn test_concurrent_refresh_attempts() {
     };
 
     let fingerprint = "test_fingerprint";
-    storage.save_auth(&stored_auth, fingerprint).await
+    storage
+        .save_auth(&stored_auth, fingerprint)
+        .await
         .expect("Should save auth successfully");
 
     // Simulate concurrent loads (which would trigger refresh in real scenario)
@@ -279,7 +321,9 @@ async fn test_concurrent_refresh_attempts() {
         let fingerprint_clone = fingerprint.to_string();
 
         let handle = tokio::spawn(async move {
-            let loaded = storage_clone.load_auth(&fingerprint_clone).await
+            let loaded = storage_clone
+                .load_auth(&fingerprint_clone)
+                .await
                 .expect("Should load auth")
                 .expect("Auth should exist");
             (i, loaded)
@@ -290,6 +334,10 @@ async fn test_concurrent_refresh_attempts() {
     // Wait for all loads to complete
     for handle in handles {
         let (index, loaded) = handle.await.expect("Task should complete");
-        assert!(loaded.refresh_token.is_some(), "Load {} should have refresh token", index);
+        assert!(
+            loaded.refresh_token.is_some(),
+            "Load {} should have refresh token",
+            index
+        );
     }
 }

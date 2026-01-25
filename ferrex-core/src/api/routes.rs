@@ -148,9 +148,14 @@ pub mod v1 {
     }
 
     pub mod images {
-        pub const SERVE: &str = v1_path!("/images");
         /// Refresh (invalidate) all cached images for a media item
         pub const REFRESH: &str = v1_path!("/media/{type}/{id}/refresh-images");
+        /// Batch image readiness lookup (rkyv request/response).
+        pub const MANIFEST: &str = v1_path!("/images/manifest");
+        /// Immutable, content-addressed image blob (token is hex).
+        pub const BLOB_ITEM: &str = v1_path!("/images/blob/{token}");
+        /// SSE stream for image readiness notifications.
+        pub const EVENTS: &str = v1_path!("/images/events");
     }
 
     pub mod stream {

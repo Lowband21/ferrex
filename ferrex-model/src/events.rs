@@ -187,9 +187,62 @@ impl MediaEvent {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ImageSseEventType {
+    Ready,
+}
+
+impl ImageSseEventType {
+    pub const fn event_name(self) -> &'static str {
+        match self {
+            Self::Ready => "image.ready",
+        }
+    }
+}
+
+impl fmt::Display for ImageSseEventType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.event_name())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseImageSseEventTypeError {
+    invalid_value: String,
+}
+
+impl ParseImageSseEventTypeError {
+    pub fn new(value: &str) -> Self {
+        Self {
+            invalid_value: value.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for ParseImageSseEventTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid image SSE event type: {}", self.invalid_value)
+    }
+}
+
+impl std::error::Error for ParseImageSseEventTypeError {}
+
+impl FromStr for ImageSseEventType {
+    type Err = ParseImageSseEventTypeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "image.ready" => Ok(Self::Ready),
+            other => Err(ParseImageSseEventTypeError::new(other)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MediaSseEventType, ScanSseEventType};
+    use super::{ImageSseEventType, MediaSseEventType, ScanSseEventType};
     use std::str::FromStr;
 
     #[test]
@@ -249,6 +302,15 @@ mod tests {
         ] {
             assert_eq!(value.event_name(), name);
             assert_eq!(MediaSseEventType::from_str(name).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn image_event_name_roundtrip() {
+        {
+            let (name, value) = ("image.ready", ImageSseEventType::Ready);
+            assert_eq!(value.event_name(), name);
+            assert_eq!(ImageSseEventType::from_str(name).unwrap(), value);
         }
     }
 }

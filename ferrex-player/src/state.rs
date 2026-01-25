@@ -112,6 +112,14 @@ pub struct State {
 impl State {
     /// Create a new State with the given server URL
     pub fn new(server_url: String) -> Self {
+        let server_url = server_url
+            .trim()
+            .trim_end_matches('/')
+            .trim_end_matches("/api/v1")
+            .trim_end_matches("/api/v2")
+            .trim_end_matches('/')
+            .to_string();
+
         // Create shared resources
         // Initialize MediaRepo (will be populated when libraries are loaded)
         let media_repo = Arc::new(StdRwLock::new(None));

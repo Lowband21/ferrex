@@ -2,7 +2,10 @@ use ferrex_player::domains::auth::types::{AuthenticationFlow, CredentialType};
 use ferrex_player::domains::auth::update_handlers::auth_updates;
 use ferrex_player::state::State;
 
-fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::domain::users::user::User {
+fn make_user(
+    id: uuid::Uuid,
+    username: &str,
+) -> ferrex_core::domain::users::user::User {
     ferrex_core::domain::users::user::User {
         id,
         username: username.to_string(),
@@ -11,7 +14,8 @@ fn make_user(id: uuid::Uuid, username: &str) -> ferrex_core::domain::users::user
         email: None,
         is_active: true,
         last_login: None,
-        preferences: ferrex_core::domain::users::user::UserPreferences::default(),
+        preferences: ferrex_core::domain::users::user::UserPreferences::default(
+        ),
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }
@@ -28,7 +32,10 @@ fn users_loaded_success_sets_selecting_user() {
         last_login: None,
     };
 
-    let _ = auth_updates::handle_users_loaded(&mut state, Ok(vec![user_dto.clone()]));
+    let _ = auth_updates::handle_users_loaded(
+        &mut state,
+        Ok(vec![user_dto.clone()]),
+    );
 
     match &state.domains.auth.state.auth_flow {
         AuthenticationFlow::SelectingUser { users, error } => {
@@ -51,13 +58,23 @@ fn device_status_with_pin_shows_pin_entry() {
         remaining_attempts: Some(3),
     };
 
-    let _ = auth_updates::handle_device_status_checked(&mut state, user.clone(), Ok(status));
+    let _ = auth_updates::handle_device_status_checked(
+        &mut state,
+        user.clone(),
+        Ok(status),
+    );
 
     match &state.domains.auth.state.auth_flow {
-        AuthenticationFlow::EnteringCredentials { user: u, input_type, .. } => {
+        AuthenticationFlow::EnteringCredentials {
+            user: u,
+            input_type,
+            ..
+        } => {
             assert_eq!(u.username, "bob");
             match input_type {
-                CredentialType::Pin { max_length } => assert_eq!(*max_length, 4),
+                CredentialType::Pin { max_length } => {
+                    assert_eq!(*max_length, 4)
+                }
                 _ => panic!("expected PIN input type"),
             }
         }
@@ -76,10 +93,18 @@ fn device_status_no_pin_shows_password_entry() {
         remaining_attempts: None,
     };
 
-    let _ = auth_updates::handle_device_status_checked(&mut state, user.clone(), Ok(status));
+    let _ = auth_updates::handle_device_status_checked(
+        &mut state,
+        user.clone(),
+        Ok(status),
+    );
 
     match &state.domains.auth.state.auth_flow {
-        AuthenticationFlow::EnteringCredentials { user: u, input_type, .. } => {
+        AuthenticationFlow::EnteringCredentials {
+            user: u,
+            input_type,
+            ..
+        } => {
             assert_eq!(u.username, "carol");
             match input_type {
                 CredentialType::Password => {}
