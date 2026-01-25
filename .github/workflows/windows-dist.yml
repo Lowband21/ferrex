@@ -105,7 +105,7 @@ jobs:
           "ZIP_FILE=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ferrex-player-windows
           path: ${{ env.ZIP_FILE }}
