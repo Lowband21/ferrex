@@ -1,7 +1,7 @@
 # Multi-stage build for ferrex-server on Unraid
 
 # Build stage
-FROM rust:1.90.0-slim-trixie AS builder
+FROM rust:1.93.0-slim-trixie AS builder
 ARG BUILD_PROFILE=priority
 ARG ENABLE_WILD=1
 # Ensure cargo-installed tools resolve during RUN instructions.
