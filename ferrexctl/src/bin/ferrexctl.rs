@@ -8,7 +8,10 @@ use ferrexctl::{
         self, CheckOptions, InitOptions, RotateTarget,
         db::{stack_db_migrate, stack_db_preflight},
         options::StackOptions,
-        package::{package_flatpak, package_preflight, package_release},
+        package::{
+            package_flatpak, package_preflight, package_release,
+            package_release_init,
+        },
         specs::{stack_down, stack_logs, stack_status, stack_up},
         stack::{ServerMode, StackMode},
     },
@@ -172,6 +175,21 @@ enum PackageAction {
             help = "Skip specific check (can be repeated)"
         )]
         skip: Vec<PreflightSkipArg>,
+    },
+    ReleaseInit {
+        version: String,
+        #[arg(long, help = "Skip Docker image build/push")]
+        no_image: bool,
+        #[arg(long, help = "Also tag image as :latest")]
+        tag_latest: bool,
+        #[arg(long, help = "Show what would be done without executing")]
+        dry_run: bool,
+        #[arg(long, help = "Skip preflight checks")]
+        skip_preflight: bool,
+        #[arg(long, help = "Run preflight in offline mode")]
+        offline_preflight: bool,
+        #[arg(long, help = "Skip binary build")]
+        skip_build: bool,
     },
 }
 
@@ -798,6 +816,26 @@ async fn main() -> Result<()> {
                     .collect();
                 package_preflight(scope_str, offline, dry_run, &skip_checks)
                     .await?;
+            }
+            PackageAction::ReleaseInit {
+                version,
+                no_image,
+                tag_latest,
+                dry_run,
+                skip_preflight,
+                offline_preflight,
+                skip_build,
+            } => {
+                package_release_init(
+                    &version,
+                    no_image,
+                    tag_latest,
+                    dry_run,
+                    skip_preflight,
+                    offline_preflight,
+                    skip_build,
+                )
+                .await?;
             }
         },
     }

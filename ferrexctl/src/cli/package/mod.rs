@@ -683,3 +683,557 @@ pub async fn package_release(
 
     Ok(())
 }
+
+fn read_ferrexctl_version() -> Result<String> {
+    let workspace = workspace_root();
+    let cargo_toml_path = workspace.join("ferrexctl").join("Cargo.toml");
+
+    let content = fs::read_to_string(&cargo_toml_path).with_context(|| {
+        format!(
+            "failed to read ferrexctl Cargo.toml at {}",
+            cargo_toml_path.display()
+        )
+    })?;
+
+    match parse_ferrexctl_version(&content) {
+        Some(version) => Ok(version),
+        None => {
+            let workspace_cargo_path = workspace.join("Cargo.toml");
+            let workspace_content = fs::read_to_string(&workspace_cargo_path)
+                .with_context(|| {
+                format!(
+                    "failed to read workspace Cargo.toml at {}",
+                    workspace_cargo_path.display()
+                )
+            })?;
+            parse_workspace_version(&workspace_content).with_context(
+                || "failed to parse version from workspace Cargo.toml",
+            )
+        }
+    }
+}
+
+fn parse_ferrexctl_version(cargo_toml: &str) -> Option<String> {
+    let mut in_package = false;
+
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+
+        if trimmed == "[package]" {
+            in_package = true;
+            continue;
+        }
+
+        if in_package {
+            if trimmed.starts_with('[') && trimmed != "[package]" {
+                in_package = false;
+                continue;
+            }
+
+            if trimmed.starts_with("version") {
+                if let Some(eq_pos) = trimmed.find('=') {
+                    let value = trimmed[eq_pos + 1..].trim();
+                    if value.starts_with('"') {
+                        let version = value.trim_matches('"').trim();
+                        return Some(version.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_workspace_version(cargo_toml: &str) -> Option<String> {
+    let mut in_workspace_package = false;
+
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+
+        if trimmed == "[workspace.package]" {
+            in_workspace_package = true;
+            continue;
+        }
+
+        if in_workspace_package {
+            if trimmed.starts_with('[') {
+                in_workspace_package = false;
+                continue;
+            }
+
+            if trimmed.starts_with("version") {
+                if let Some(eq_pos) = trimmed.find('=') {
+                    let value = trimmed[eq_pos + 1..].trim();
+                    let version = value.trim_matches('"').trim();
+                    return Some(version.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn get_git_repo_slug() -> Result<String> {
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .context("failed to run git remote get-url origin")?;
+
+    if !output.status.success() {
+        bail!("no git remote named 'origin' found");
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    let https_re =
+        regex::Regex::new(r"^https://github\.com/([^/]+)/([^/]+)(\.git)?$")
+            .map_err(|e| anyhow::anyhow!("invalid regex: {}", e))?;
+    if let Some(caps) = https_re.captures(&url) {
+        let owner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let repo = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        return Ok(format!("{}/{}", owner, repo.trim_end_matches(".git")));
+    }
+
+    let ssh_re =
+        regex::Regex::new(r"^git@github\.com:([^/]+)/([^/]+)(\.git)?$")
+            .map_err(|e| anyhow::anyhow!("invalid regex: {}", e))?;
+    if let Some(caps) = ssh_re.captures(&url) {
+        let owner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let repo = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        return Ok(format!("{}/{}", owner, repo.trim_end_matches(".git")));
+    }
+
+    bail!("unsupported origin url (expected github): {}", url)
+}
+
+fn ensure_clean_tree() -> Result<()> {
+    let diff_output = Command::new("git")
+        .args(["diff", "--quiet"])
+        .output()
+        .context("failed to run git diff")?;
+
+    let cached_output = Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .output()
+        .context("failed to run git diff --cached")?;
+
+    if !diff_output.status.success() || !cached_output.status.success() {
+        bail!(
+            "working tree not clean; commit or stash changes before releasing"
+        );
+    }
+
+    Ok(())
+}
+
+fn ensure_gh() -> Result<()> {
+    which::which("gh").context("missing required command: gh")?;
+
+    let status = Command::new("gh")
+        .args(["auth", "status"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("failed to run gh auth status")?;
+
+    if !status.success() {
+        bail!("gh not authenticated; run: gh auth login");
+    }
+
+    Ok(())
+}
+
+fn ensure_docker() -> Result<()> {
+    which::which("docker").context("missing required command: docker")?;
+
+    let status = Command::new("docker")
+        .args(["info"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("failed to run docker info")?;
+
+    if !status.success() {
+        bail!("docker daemon not available");
+    }
+
+    Ok(())
+}
+
+fn ghcr_login() -> Result<()> {
+    let user_output = Command::new("gh")
+        .args(["api", "user", "-q", ".login"])
+        .output()
+        .context("failed to get gh user")?;
+
+    if !user_output.status.success() {
+        bail!("unable to get gh user");
+    }
+    let user = String::from_utf8_lossy(&user_output.stdout)
+        .trim()
+        .to_string();
+
+    let token_output = Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .context("failed to get gh auth token")?;
+
+    if !token_output.status.success() {
+        bail!("unable to get gh auth token");
+    }
+    let token = String::from_utf8_lossy(&token_output.stdout)
+        .trim()
+        .to_string();
+
+    if user.is_empty() || token.is_empty() {
+        bail!("unable to get gh auth token/user");
+    }
+
+    let mut child = Command::new("docker")
+        .args(["login", "ghcr.io", "-u", &user, "--password-stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to spawn docker login")?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(token.as_bytes())
+            .context("failed to write token to docker login")?;
+    }
+
+    let status = child.wait().context("failed to wait for docker login")?;
+
+    if !status.success() {
+        bail!("docker login to ghcr.io failed");
+    }
+
+    Ok(())
+}
+
+fn build_ferrexctl_binary(version: &str, output_path: &Path) -> Result<()> {
+    let workspace = workspace_root();
+    let script_path = workspace.join("scripts/build/ferrexctl-binary.sh");
+
+    let status = Command::new("bash")
+        .arg(&script_path)
+        .args([version, output_path.to_str().unwrap_or("")])
+        .current_dir(&workspace)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to run ferrexctl-binary.sh script at {}",
+                script_path.display()
+            )
+        })?;
+
+    if !status.success() {
+        bail!("ferrexctl-binary.sh build failed");
+    }
+
+    Ok(())
+}
+
+fn build_and_push_docker_image(
+    repo: &str,
+    version: &str,
+    tag_latest: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let image = format!(
+        "ghcr.io/{}/ferrexctl:{}",
+        repo.split('/').next().unwrap_or(repo),
+        version
+    );
+
+    if dry_run {
+        println!("[dry-run] would build/push image: {}", image);
+        if tag_latest {
+            let latest_image = format!(
+                "ghcr.io/{}/ferrexctl:latest",
+                repo.split('/').next().unwrap_or(repo)
+            );
+            println!("[dry-run] would also tag as: {}", latest_image);
+        }
+        return Ok(());
+    }
+
+    ensure_docker()?;
+    ghcr_login()?;
+
+    println!("Building/pushing image: {}", image);
+
+    let workspace = workspace_root();
+    let mut args = vec![
+        "buildx".to_string(),
+        "build".to_string(),
+        "--platform".to_string(),
+        "linux/amd64".to_string(),
+        "-f".to_string(),
+        "docker/Dockerfile.init".to_string(),
+        "-t".to_string(),
+        image.clone(),
+        "--push".to_string(),
+        ".".to_string(),
+    ];
+
+    if tag_latest {
+        let latest_image = format!(
+            "ghcr.io/{}/ferrexctl:latest",
+            repo.split('/').next().unwrap_or(repo)
+        );
+        args.push("-t".to_string());
+        args.push(latest_image);
+    }
+
+    let status = Command::new("docker")
+        .args(&args)
+        .current_dir(&workspace)
+        .status()
+        .context("failed to run docker buildx build")?;
+
+    if !status.success() {
+        bail!("docker buildx build failed");
+    }
+
+    println!("Successfully pushed: {}", image);
+
+    Ok(())
+}
+
+fn generate_sha256sums(dir: &Path) -> Result<()> {
+    let entries: Vec<_> = fs::read_dir(dir)
+        .with_context(|| {
+            format!("failed to read directory: {}", dir.display())
+        })?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            path.is_file() && path.file_name() != Some(OsStr::new("SHA256SUMS"))
+        })
+        .map(|e| e.path())
+        .collect();
+
+    let mut checksums = Vec::new();
+    for path in entries {
+        let filename = path
+            .file_name()
+            .context("file has no name")?
+            .to_str()
+            .context("filename not UTF-8")?
+            .to_string();
+        let sha256 = compute_sha256(&path)?;
+        checksums.push((filename, sha256));
+    }
+
+    checksums.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut content = String::new();
+    for (filename, sha256) in &checksums {
+        content.push_str(&format!("{}  {}\n", sha256, filename));
+    }
+
+    let sha256sums_path = dir.join("SHA256SUMS");
+    fs::write(&sha256sums_path, content).with_context(|| {
+        format!("failed to write SHA256SUMS: {}", sha256sums_path.display())
+    })?;
+
+    println!("Wrote: {}", sha256sums_path.display());
+
+    Ok(())
+}
+
+fn create_github_release(
+    repo: &str,
+    tag: &str,
+    assets: &[PathBuf],
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        println!(
+            "[dry-run] would create draft GitHub Release: {} (repo={})",
+            tag, repo
+        );
+        println!("[dry-run] with assets:");
+        for asset in assets {
+            println!("  - {}", asset.display());
+        }
+        println!("[dry-run] would rely on CI (tag push) to verify/publish");
+        return Ok(());
+    }
+
+    ensure_gh()?;
+
+    // Check if release already exists
+    let check_output = Command::new("gh")
+        .args(["release", "view", tag])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .context("failed to check if release exists")?;
+
+    if check_output.status.success() {
+        bail!(
+            "release/tag already exists: {} (refusing to overwrite)",
+            tag
+        );
+    }
+
+    println!("Creating draft GitHub Release with tag {} in {}", tag, repo);
+
+    let mut args = vec![
+        "release".to_string(),
+        "create".to_string(),
+        tag.to_string(),
+        "--repo".to_string(),
+        repo.to_string(),
+        "--draft".to_string(),
+        "--title".to_string(),
+        format!("ferrexctl {}", tag),
+        "--notes".to_string(),
+        "".to_string(),
+        "--target".to_string(),
+        "HEAD".to_string(),
+    ];
+
+    for asset in assets {
+        args.push(asset.to_str().unwrap_or("").to_string());
+    }
+
+    let status = Command::new("gh")
+        .args(&args)
+        .status()
+        .context("failed to run gh release create")?;
+
+    if !status.success() {
+        bail!("gh release create failed");
+    }
+
+    println!("Done. Draft release created for tag: {}", tag);
+
+    Ok(())
+}
+
+/// Initialize a draft GitHub Release for ferrexctl
+pub async fn package_release_init(
+    version: &str,
+    no_image: bool,
+    tag_latest: bool,
+    dry_run: bool,
+    skip_preflight: bool,
+    offline_preflight: bool,
+    skip_build: bool,
+) -> Result<()> {
+    let cargo_version = read_ferrexctl_version()?;
+    if cargo_version != version {
+        bail!(
+            "ferrexctl version mismatch: ferrexctl/Cargo.toml={} requested={}",
+            cargo_version,
+            version
+        );
+    }
+
+    let tag = format!("ferrexctl-v{}", version);
+
+    println!("Release init configuration:");
+    println!("  Tag:     {}", tag);
+    println!("  Version: {}", version);
+    println!("  Dry run: {}", dry_run);
+    println!();
+
+    if !dry_run {
+        ensure_clean_tree()?;
+    }
+
+    if !skip_preflight {
+        let scope = if offline_preflight { "init" } else { "init" };
+        let skip_checks: Vec<String> = vec![];
+        package_preflight(scope, offline_preflight, dry_run, &skip_checks)
+            .await?;
+        println!();
+    } else {
+        println!("Skipping preflight checks (--skip-preflight)");
+        println!();
+    }
+
+    if !dry_run {
+        ensure_gh()?;
+    }
+
+    let repo = get_git_repo_slug()?;
+    let workspace = workspace_root();
+    let dist_dir = workspace.join("dist-release").join(&tag);
+
+    if dry_run {
+        println!("[dry-run] would create: {}", dist_dir.display());
+    } else {
+        fs::create_dir_all(&dist_dir).with_context(|| {
+            format!("failed to create dist directory: {}", dist_dir.display())
+        })?;
+    }
+
+    let mut assets: Vec<PathBuf> = vec![];
+
+    let tarball_name = format!("ferrexctl_linux_x86_64_{}.tar.gz", version);
+    let tarball_path = dist_dir.join(&tarball_name);
+
+    println!(
+        "Building ferrexctl binary tarball → {}",
+        tarball_path.display()
+    );
+
+    if skip_build {
+        println!(
+            "[skip-build] would build tarball → {}",
+            tarball_path.display()
+        );
+    } else if dry_run {
+        println!("[dry-run] would build tarball → {}", tarball_path.display());
+        assets.push(tarball_path.clone());
+    } else {
+        build_ferrexctl_binary(version, &tarball_path)?;
+        assets.push(tarball_path.clone());
+    }
+
+    if !no_image {
+        build_and_push_docker_image(&repo, version, tag_latest, dry_run)?;
+    } else {
+        println!("Skipping Docker image build (--no-image)");
+    }
+
+    let manifest_path = dist_dir.join("manifest.json");
+    if dry_run {
+        println!("[dry-run] would write: {}", manifest_path.display());
+        assets.push(manifest_path.clone());
+    } else {
+        let manifest_artifacts: Vec<PathBuf> =
+            assets.iter().filter(|p| p.exists()).cloned().collect();
+        let manifest = generate_manifest(&tag, version, &manifest_artifacts)?;
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .context("failed to serialize manifest")?;
+        fs::write(&manifest_path, manifest_json).with_context(|| {
+            format!("failed to write manifest: {}", manifest_path.display())
+        })?;
+        println!("Wrote: {}", manifest_path.display());
+        assets.push(manifest_path.clone());
+    }
+
+    if dry_run {
+        let sha256sums_path = dist_dir.join("SHA256SUMS");
+        println!("[dry-run] would write: {}", sha256sums_path.display());
+        assets.push(sha256sums_path);
+    } else {
+        generate_sha256sums(&dist_dir)?;
+        let sha256sums_path = dist_dir.join("SHA256SUMS");
+        assets.push(sha256sums_path);
+    }
+
+    println!();
+    create_github_release(&repo, &tag, &assets, dry_run)?;
+
+    Ok(())
+}
