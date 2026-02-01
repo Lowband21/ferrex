@@ -203,11 +203,12 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let (database_app_password, app_rotated) = resolve_secret_with_sources(
         &existing_env,
         "DATABASE_APP_PASSWORD",
-        &[
+        [
             "DATABASE_APP_PASSWORD_FILE",
             "FERREX_APP_PASSWORD_FILE",
             "DATABASE_PASSWORD_FILE",
-        ],
+        ]
+        .as_slice(),
         app_password_default.clone(),
         rotate_db,
         32,
@@ -219,7 +220,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let (database_admin_password, admin_rotated) = resolve_secret_with_sources(
         &existing_env,
         "DATABASE_ADMIN_PASSWORD",
-        &["DATABASE_ADMIN_PASSWORD_FILE"],
+        ["DATABASE_ADMIN_PASSWORD_FILE"].as_slice(),
         admin_password_default.clone(),
         rotate_db,
         32,
@@ -377,7 +378,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let (auth_password_pepper, pepper_rotated) = resolve_secret_with_sources(
         &existing_env,
         "AUTH_PASSWORD_PEPPER",
-        &["AUTH_PASSWORD_PEPPER_FILE"],
+        ["AUTH_PASSWORD_PEPPER_FILE"].as_slice(),
         auth_defaults
             .password_pepper
             .clone()
@@ -392,7 +393,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let (auth_token_key, token_rotated) = resolve_secret_with_sources(
         &existing_env,
         "AUTH_TOKEN_KEY",
-        &["AUTH_TOKEN_KEY_FILE"],
+        ["AUTH_TOKEN_KEY_FILE"].as_slice(),
         auth_defaults
             .token_key
             .clone()
@@ -407,7 +408,7 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let (setup_token, setup_rotated) = resolve_secret_with_sources(
         &existing_env,
         "FERREX_SETUP_TOKEN",
-        &["FERREX_SETUP_TOKEN_FILE"],
+        ["FERREX_SETUP_TOKEN_FILE"].as_slice(),
         auth_defaults
             .setup_token
             .clone()

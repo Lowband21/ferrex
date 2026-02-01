@@ -10,24 +10,26 @@ use std::process::{Command, Stdio};
 use crate::cli::utils::workspace_root;
 use crate::packaging_config::{PackagingConfig, PreflightConfig};
 
-const REQUIRED_TOOLS: &[&str] = &[
+const REQUIRED_TOOLS: &[&str] = [
     "flatpak",
     "flatpak-builder",
     "python3",
     "tar",
     "appstreamcli",
-];
+]
+.as_slice();
 
-const STATE_MODULES: &[&str] = &[
+const STATE_MODULES: &[&str] = [
     "rust-toolchain",
     "gstreamer",
     "gst-plugins-base",
     "gst-plugins-good",
     "gst-plugins-bad",
     "ferrex-player",
-];
+]
+.as_slice();
 
-const TAR_EXCLUDES: &[&str] = &[
+const TAR_EXCLUDES: &[&str] = [
     "--exclude=./.flatpak-builder",
     "--exclude=./target",
     "--exclude=./target-nix",
@@ -39,7 +41,8 @@ const TAR_EXCLUDES: &[&str] = &[
     "--exclude=./.direnv",
     "--exclude=./.git",
     "--exclude=./pgsock",
-];
+]
+.as_slice();
 
 fn check_required_tools() -> Result<()> {
     for tool in REQUIRED_TOOLS {
@@ -483,8 +486,11 @@ pub async fn package_release(
     if dry_run {
         println!("[dry-run] would write: {}", manifest_path.display());
     } else {
-        let manifest =
-            generate_manifest(&tag, &version, &[flatpak_path.clone()])?;
+        let manifest = generate_manifest(
+            &tag,
+            &version,
+            std::slice::from_ref(&flatpak_path),
+        )?;
         let manifest_json = serde_json::to_string_pretty(&manifest)
             .context("failed to serialize manifest")?;
         fs::write(&manifest_path, manifest_json).with_context(|| {
