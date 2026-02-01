@@ -1237,3 +1237,250 @@ pub async fn package_release_init(
 
     Ok(())
 }
+
+fn detect_windows_flavor(target: &str) -> Result<&'static str> {
+    if target.contains("-gnu") {
+        Ok("gnu")
+    } else if target.contains("-msvc") {
+        Ok("msvc")
+    } else {
+        bail!(
+            "Unknown target flavor for {} (expected -gnu or -msvc)",
+            target
+        )
+    }
+}
+
+fn locate_gstreamer_root(
+    target: &str,
+    override_path: Option<&Path>,
+) -> Result<PathBuf> {
+    if let Some(path) = override_path {
+        return Ok(path.to_path_buf());
+    }
+
+    let flavor = detect_windows_flavor(target)?;
+    let env_var = if flavor == "gnu" {
+        "GST_MINGW_ROOT"
+    } else {
+        "GST_MSVC_ROOT"
+    };
+
+    if let Ok(path) = std::env::var(env_var) {
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    if flavor == "gnu" {
+        let default_path = PathBuf::from(
+            "/home/lowband/gstreamer-windows/PFiles64/gstreamer/1.0/mingw_x86_64",
+        );
+        if default_path.exists() {
+            return Ok(default_path);
+        }
+    }
+
+    bail!(
+        "GStreamer root not set. Provide --gst-root or set {} environment variable",
+        env_var
+    )
+}
+
+fn validate_gstreamer_root(gst_root: &Path) -> Result<()> {
+    let bin_dir = gst_root.join("bin");
+    let plugins_dir = gst_root.join("lib").join("gstreamer-1.0");
+
+    if !bin_dir.exists() {
+        bail!(
+            "Invalid GStreamer root (bin/ missing): {}",
+            gst_root.display()
+        );
+    }
+
+    if !plugins_dir.exists() {
+        bail!(
+            "Invalid GStreamer root (lib/gstreamer-1.0 missing): {}",
+            gst_root.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let filename = path
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("Invalid file name"))?;
+            let dst_path = dst.join(filename);
+            fs::copy(&path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn create_zip_archive(stage_dir: &Path, zip_path: &Path) -> Result<()> {
+    let status = Command::new("zip")
+        .args([
+            "-r",
+            zip_path.to_str().unwrap_or(""),
+            stage_dir.to_str().unwrap_or(""),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("failed to run zip command")?;
+
+    if !status.success() {
+        bail!("zip command failed");
+    }
+
+    Ok(())
+}
+
+fn read_workspace_version() -> Result<String> {
+    let workspace = workspace_root();
+    let cargo_toml_path = workspace.join("Cargo.toml");
+
+    let content = fs::read_to_string(&cargo_toml_path).with_context(|| {
+        format!(
+            "failed to read workspace Cargo.toml at {}",
+            cargo_toml_path.display()
+        )
+    })?;
+
+    parse_workspace_version(&content)
+        .with_context(|| "failed to parse version from workspace Cargo.toml")
+}
+
+pub async fn package_windows(
+    target: &str,
+    profile: &str,
+    gst_root_override: Option<&Path>,
+    out_dir: Option<&Path>,
+    dry_run: bool,
+) -> Result<()> {
+    let flavor = detect_windows_flavor(target)?;
+    let gst_root = locate_gstreamer_root(target, gst_root_override)?;
+
+    println!("Windows packaging configuration:");
+    println!("  Target:  {}", target);
+    println!("  Profile: {}", profile);
+    println!("  Flavor:  {}", flavor);
+    println!("  GStreamer root: {}", gst_root.display());
+    if dry_run {
+        println!("  Mode:    dry-run");
+    }
+    println!();
+
+    validate_gstreamer_root(&gst_root)?;
+
+    let workspace = workspace_root();
+    let exe_path = workspace
+        .join("target")
+        .join(target)
+        .join(profile)
+        .join("ferrex-player.exe");
+
+    if !exe_path.exists() {
+        bail!(
+            "Built exe not found: {}. Run cargo build first.",
+            exe_path.display()
+        );
+    }
+
+    let stage_dir = workspace.join("dist-windows");
+    let bin_dir = stage_dir.join("bin");
+    let plugins_dir = stage_dir.join("lib").join("gstreamer-1.0");
+    let build_windows_dir = workspace.join("utils").join("build-windows");
+
+    if dry_run {
+        println!(
+            "[dry-run] would stage distribution at: {}",
+            stage_dir.display()
+        );
+        println!("[dry-run] would copy:");
+        println!("  - {} → {}/", exe_path.display(), stage_dir.display());
+        println!(
+            "  - {}/run-ferrex.bat → {}/",
+            build_windows_dir.display(),
+            stage_dir.display()
+        );
+        println!(
+            "  - {}/run-ferrex.ps1 → {}/",
+            build_windows_dir.display(),
+            stage_dir.display()
+        );
+        println!(
+            "  - {}/README.txt → {}/",
+            build_windows_dir.display(),
+            stage_dir.display()
+        );
+        println!(
+            "  - {}/bin/*.dll → {}/",
+            gst_root.display(),
+            bin_dir.display()
+        );
+        println!(
+            "  - {}/lib/gstreamer-1.0/*.dll → {}/",
+            gst_root.display(),
+            plugins_dir.display()
+        );
+    } else {
+        if stage_dir.exists() {
+            fs::remove_dir_all(&stage_dir)?;
+        }
+        fs::create_dir_all(&bin_dir)?;
+        fs::create_dir_all(&plugins_dir)?;
+
+        fs::copy(&exe_path, stage_dir.join("ferrex-player.exe"))?;
+        fs::copy(
+            build_windows_dir.join("run-ferrex.bat"),
+            stage_dir.join("run-ferrex.bat"),
+        )?;
+        fs::copy(
+            build_windows_dir.join("run-ferrex.ps1"),
+            stage_dir.join("run-ferrex.ps1"),
+        )?;
+        fs::copy(
+            build_windows_dir.join("README.txt"),
+            stage_dir.join("README.txt"),
+        )?;
+
+        copy_dir_contents(&gst_root.join("bin"), &bin_dir)?;
+        copy_dir_contents(
+            &gst_root.join("lib").join("gstreamer-1.0"),
+            &plugins_dir,
+        )?;
+
+        println!("Staged distribution at: {}", stage_dir.display());
+    }
+
+    let version = read_workspace_version()?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let zip_name = format!(
+        "ferrex-player_windows_{}_{}_{}.zip",
+        version, timestamp, flavor
+    );
+    let out_dir = out_dir.unwrap_or_else(|| Path::new("."));
+    let zip_path = out_dir.join(&zip_name);
+
+    if dry_run {
+        println!("[dry-run] would create zip: {}", zip_path.display());
+    } else {
+        create_zip_archive(&stage_dir, &zip_path)?;
+        println!("Created: {}", zip_path.display());
+
+        let sha256 = compute_sha256(&zip_path)?;
+        println!("SHA256: {}", sha256);
+    }
+
+    Ok(())
+}

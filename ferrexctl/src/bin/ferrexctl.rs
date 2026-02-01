@@ -10,7 +10,7 @@ use ferrexctl::{
         options::StackOptions,
         package::{
             package_flatpak, package_preflight, package_release,
-            package_release_init,
+            package_release_init, package_windows,
         },
         specs::{stack_down, stack_logs, stack_status, stack_up},
         stack::{ServerMode, StackMode},
@@ -190,6 +190,22 @@ enum PackageAction {
         offline_preflight: bool,
         #[arg(long, help = "Skip binary build")]
         skip_build: bool,
+    },
+    Windows {
+        #[arg(
+            long,
+            default_value = "x86_64-pc-windows-gnu",
+            help = "Target triple"
+        )]
+        target: String,
+        #[arg(long, default_value = "release", help = "Cargo profile")]
+        profile: String,
+        #[arg(long, help = "Override GStreamer root path")]
+        gst_root: Option<PathBuf>,
+        #[arg(long, help = "Output directory for zip")]
+        out: Option<PathBuf>,
+        #[arg(long, help = "Show what would be done without executing")]
+        dry_run: bool,
     },
 }
 
@@ -834,6 +850,22 @@ async fn main() -> Result<()> {
                     skip_preflight,
                     offline_preflight,
                     skip_build,
+                )
+                .await?;
+            }
+            PackageAction::Windows {
+                target,
+                profile,
+                gst_root,
+                out,
+                dry_run,
+            } => {
+                package_windows(
+                    &target,
+                    &profile,
+                    gst_root.as_deref(),
+                    out.as_deref(),
+                    dry_run,
                 )
                 .await?;
             }
