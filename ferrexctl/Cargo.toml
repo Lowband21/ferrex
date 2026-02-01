@@ -53,3 +53,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 tempfile.workspace = true
 once_cell = "1.19"
 assert_cmd = "2.0"
+predicates = "3.1"
