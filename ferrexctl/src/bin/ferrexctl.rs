@@ -58,6 +58,9 @@ enum Command {
         /// Print the generated key/value pairs without writing .env
         #[arg(long)]
         print_only: bool,
+        /// Postgres performance preset (small, medium, large, custom)
+        #[arg(long)]
+        postgres_preset: Option<String>,
     },
     /// Validate configuration and connectivity
     Check {
@@ -345,6 +348,9 @@ enum StackAction {
             help = "Skip confirmation prompts for destructive operations"
         )]
         yes: bool,
+        /// Postgres performance preset (small, medium, large, custom)
+        #[arg(long)]
+        postgres_preset: Option<String>,
     },
     Down {
         #[arg(long, default_value = ".env")]
@@ -434,6 +440,7 @@ async fn main() -> Result<()> {
             docker_image,
             mount_suffix,
             print_only,
+            postgres_preset,
         } => {
             let opts = InitOptions {
                 env_path: env_file.clone(),
@@ -443,6 +450,7 @@ async fn main() -> Result<()> {
                 rotate: rotate.into(),
                 force,
                 tui,
+                postgres_preset,
             };
             let auto_confirm = std::env::var("FERREXCTL_AUTO_CONFIRM").is_ok();
 
@@ -646,6 +654,7 @@ async fn main() -> Result<()> {
                 project,
                 tailscale_serve,
                 yes,
+                postgres_preset,
             } => {
                 let tailscale_serve = tailscale_serve.unwrap_or(match mode {
                     StackModeArg::Tailscale => true,
@@ -670,6 +679,7 @@ async fn main() -> Result<()> {
                     init_advanced: advanced,
                     force_init,
                     tailscale_serve,
+                    postgres_preset,
                     skip_confirmation: yes,
                 };
                 let outcome = stack_up(&opts).await?;
@@ -687,7 +697,7 @@ async fn main() -> Result<()> {
             } => {
                 let options = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    false, clean, false, false, false, project, false,
+                    false, clean, false, false, false, project, false, None,
                 );
                 let outcome = stack_down(&options).await?;
                 print_stack_outcome("down", &outcome);
@@ -716,6 +726,7 @@ async fn main() -> Result<()> {
                 false,
                 project,
                 false,
+                None,
             );
             stack_status(&opts).await?;
         }
@@ -744,6 +755,7 @@ async fn main() -> Result<()> {
                 false,
                 project,
                 false,
+                None,
             );
             let svc = if service.trim().is_empty() {
                 None
@@ -765,7 +777,7 @@ async fn main() -> Result<()> {
             } => {
                 let opts = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    false, false, true, false, false, project, false,
+                    false, false, true, false, false, project, false, None,
                 );
                 stack_db_preflight(&opts, &args).await?;
             }
@@ -924,6 +936,7 @@ fn stack_opts_from_args(
     force_init: bool,
     project: Option<String>,
     tailscale_serve: bool,
+    postgres_preset: Option<String>,
 ) -> StackOptions {
     let wild_opt = wild.as_option_bool();
     let stack_mode: StackMode = mode.into();
@@ -945,6 +958,7 @@ fn stack_opts_from_args(
         tailscale_serve,
         init_tui: true,
         skip_confirmation: false,
+        postgres_preset,
     }
 }
 

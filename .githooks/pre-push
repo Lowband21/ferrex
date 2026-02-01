@@ -15,4 +15,36 @@ stdin_file=$(mktemp -t pre-commit-pre-push.XXXXXX)
 trap 'rm -f "$stdin_file"' EXIT
 cat >"$stdin_file"
 
+if [[ "${FERREX_SKIP_RELEASE_PREFLIGHT:-}" != "1" ]]; then
+  # If we're pushing release tags, run the local preflight first. This helps
+  # catch mistakes before CI/publishing.
+  scopes=()
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" == refs/tags/v* ]]; then
+      scopes+=("workspace")
+    elif [[ "$remote_ref" == refs/tags/ferrex-init-v* ]]; then
+      scopes+=("init")
+    fi
+  done <"$stdin_file"
+
+  if [[ "${#scopes[@]}" -gt 0 ]]; then
+    repo_root="$(git rev-parse --show-toplevel)"
+    cd "$repo_root"
+    # Deduplicate scopes.
+    uniq_scopes=()
+    for s in "${scopes[@]}"; do
+      seen=0
+      for u in "${uniq_scopes[@]}"; do
+        [[ "$u" == "$s" ]] && seen=1 && break
+      done
+      [[ "$seen" -eq 0 ]] && uniq_scopes+=("$s")
+    done
+
+    for s in "${uniq_scopes[@]}"; do
+      echo "Running release preflight for scope: $s"
+      scripts/release/preflight.sh --scope "$s"
+    done
+  fi
+fi
+
 exec pre-commit run --hook-stage pre-push --remote-name "${1:-}" --remote-url "${2:-}" <"$stdin_file"

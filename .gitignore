@@ -29,6 +29,12 @@ out/
 dist-windows/
 build-windows/lib/
 build-windows/bin/
+dist-release/
+result/
+.direnv/
+target-nix/
+.flatpak-builder/
+*.flatpak
 *.pid
 
 # Logs
@@ -76,8 +82,7 @@ tarpaulin-report.html
 cache/
 !*/src/*/cache/
 
-# Test scripts (keep some, ignore others)
-scripts/
+# Scripts are tracked; avoid ignoring the whole directory.
 
 *.zip
 

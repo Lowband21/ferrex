@@ -35,7 +35,7 @@ Existing home media tools are flexible but often not fast in the ways that feel 
 
 ## Who it’s for
 
-Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.27.x development series for correct HDR metadata passthrough (tested with **GStreamer 1.27.50** as of **2025-12-30**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
+Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.27.x development series for correct HDR metadata passthrough (tested with **GStreamer 1.27.2**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
 
 ## Highlights
 
@@ -45,25 +45,41 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 - Wayland HDR pipeline with a subsurface strategy tailored for native output.
 - mpv hand‑off with watch status tracking maintained.
 
-## Screenshots / Demo
-
-- Visit the showcase at [ferrex.lowband.me](https://ferrex.lowband.me/).
-- Fastest way to try it: see [Demo Mode](docs/demo-mode.md) to seed a disposable library.
-
 ## Quickstart
 
-### Build Prerequisites
+### Docker/Podman
 
 - Docker + Docker Compose
-- Rust toolchain (stable 1.90+, edition 2024)
-- just (https://github.com/casey/just)
-- Linux: GStreamer + FFmpeg development headers (see the CI workflow for the current package list)
-- mpv (optional; currently required on windows for playback)
+- `TMDB_API_KEY` (required for metadata; leave blank to disable)
 
-### Start the stack
+1) Create `.env` from the template and set at least `MEDIA_ROOT`:
 
 ```bash
-# from repo root
+cp .env.example .env
+${EDITOR:-nano} .env
+```
+
+2) Start the stack (Postgres, Redis, Ferrex server):
+
+```bash
+docker compose up -d
+```
+
+Optional performance preset (huge pages + io_uring + larger Postgres buffers):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d
+```
+
+Unraid note: see `docs/unraid.md` for recommended paths and `PUID`/`PGID` support.
+
+### Development (build from source)
+
+- Rust toolchain (stable 1.90+, edition 2024)
+- just (https://github.com/casey/just)
+- Linux: GStreamer + FFmpeg development headers (see CI workflow)
+
+```bash
 just start
 # equivalent: ferrexctl stack up
 ```
@@ -73,8 +89,6 @@ just start
 ```bash
 just run-player-release
 ```
-
-This bootstraps configuration, generates strong Postgres credentials into `.env` in the project root, and launches Postgres, Redis, and the Ferrex server. Keep `.env` backed up—it contains generated passwords.
 
 More options (profiles, logging, tailscale, host vs docker server): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
 
@@ -104,7 +118,7 @@ Ferrex is under active development.
 
 See [Security Policy](.github/SECURITY.md) for details.
 
-## Architecture (bird’s‑eye)
+## Architecture
 
 See [Architecture](docs/architecture.md) for the diagram and component responsibilities (server, player, core, video backend, and UI stack).
 
@@ -112,15 +126,9 @@ See [Architecture](docs/architecture.md) for the diagram and component responsib
 
 See [Configuration](docs/configuration.md) for options and workflows, and [`.env.example`](.env.example) for the authoritative reference of environment variables.
 
-
-
 ## FAQ
 
 See the [FAQ](docs/faq.md).
-
-## Known Issues
-
-Track and report issues at: https://github.com/Lowband21/ferrex/issues
 
 ## Development
 

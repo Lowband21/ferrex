@@ -1,0 +1,52 @@
+version: '3.9'
+
+# Performance overlay:
+# - Enables io_uring + huge pages (try) and larger memory settings for Postgres.
+# - Use only after confirming your host has the RAM/SHM budget and kernel support.
+services:
+  db:
+    security_opt:
+      - "seccomp:./seccomp-allow-iouring.json"
+    command:
+      - "postgres"
+      - "-c"
+      - "io_method=io_uring"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=15500MB"
+      - "-c"
+      - "effective_cache_size=24GB"
+      - "-c"
+      - "maintenance_work_mem=2GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "checkpoint_timeout=30min"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=200"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=12MB"
+      - "-c"
+      - "huge_pages=on"
+      - "-c"
+      - "min_wal_size=4GB"
+      - "-c"
+      - "max_wal_size=64GB"
+      - "-c"
+      - "wal_compression=on"
+      - "-c"
+      - "max_worker_processes=32"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_workers=32"
+      - "-c"
+      - "max_parallel_maintenance_workers=2"
+    shm_size: "32g"

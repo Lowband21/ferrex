@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Ferrex Player
+Comment=Native media player for Ferrex server with zero-copy HDR on Wayland
+GenericName=Media Player
+Exec=ferrex-player
+Icon=io.github.lowband21.FerrexPlayer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+Keywords=media;video;streaming;hdr;wayland;player;
+StartupNotify=true
+StartupWMClass=ferrex-player

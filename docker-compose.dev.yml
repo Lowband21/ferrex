@@ -1,0 +1,14 @@
+version: '3.9'
+
+# Development overlay:
+# - Builds the server image from the local workspace.
+# - Intended for `just start` / `ferrexctl stack up` flows.
+services:
+  ferrex:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.prod
+      args:
+        BUILD_PROFILE: ${FERREX_BUILD_PROFILE:-release}
+        ENABLE_WILD: ${FERREX_ENABLE_WILD:-1}
+    image: ferrex/server:local

@@ -7,17 +7,52 @@ volumes:
 services:
   db:
     image: postgres:18
+    container_name: ferrex_media_db
     security_opt:
       - "seccomp:./seccomp-allow-iouring.json"
-    container_name: ferrex_media_db
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=8GB"
-      - "-c"
       - "io_method=io_uring"
       - "-c"
-      - "max_connections=100"
+      - "max_connections=${FERREX_POSTGRES_MAX_CONNECTIONS:-100}"
+      - "-c"
+      - "shared_buffers=${FERREX_POSTGRES_SHARED_BUFFERS:-15500MB}"
+      - "-c"
+      - "effective_cache_size=${FERREX_POSTGRES_EFFECTIVE_CACHE_SIZE:-48GB}"
+      - "-c"
+      - "maintenance_work_mem=${FERREX_POSTGRES_MAINTENANCE_WORK_MEM:-2GB}"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "checkpoint_timeout=30min"
+      - "-c"
+      - "wal_buffers=${FERREX_POSTGRES_WAL_BUFFERS:-16MB}"
+      - "-c"
+      - "default_statistics_target=500"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=${FERREX_POSTGRES_WORK_MEM:-69905MB}"
+      - "-c"
+      - "huge_pages=${FERREX_POSTGRES_HUGE_PAGES:-on}"
+      - "-c"
+      - "min_wal_size=${FERREX_POSTGRES_MIN_WAL_SIZE:-4GB}"
+      - "-c"
+      - "max_wal_size=${FERREX_POSTGRES_MAX_WAL_SIZE:-16GB}"
+      - "-c"
+      - "wal_compression=on"
+      - "-c"
+      - "max_worker_processes=20"
+      - "-c"
+      - "max_parallel_workers_per_gather=10"
+      - "-c"
+      - "max_parallel_workers=20"
+      - "-c"
+      - "max_parallel_maintenance_workers=4"
+    shm_size: "${FERREX_POSTGRES_SHM_SIZE:-24g}"
     environment:
       DATABASE_ADMIN_USER: ${DATABASE_ADMIN_USER:-postgres}
       DATABASE_ADMIN_PASSWORD: ${DATABASE_ADMIN_PASSWORD}
@@ -32,10 +67,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Postgres 18+ stores data in a major-version-specific subdirectory.
+      # Mount the parent dir so upgrades can use pg_upgrade --link cleanly.
       - postgres-data:/var/lib/postgresql
       - ./pgsock:/var/run/postgresql
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
-    shm_size: "1g"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$DATABASE_ADMIN_USER\" -d postgres"]
       interval: 5s
@@ -55,13 +91,7 @@ services:
 
   # Ferrex server (built locally; exposes port 3000)
   ferrex:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.prod
-      args:
-        BUILD_PROFILE: ${FERREX_BUILD_PROFILE:-release}
-        ENABLE_WILD: ${FERREX_ENABLE_WILD:-1}
-    image: ferrex/server:local
+    image: ${FERREX_SERVER_IMAGE:-ghcr.io/lowband21/ferrex-server:latest}
     container_name: ferrex_media_server
     depends_on:
       db:

@@ -483,6 +483,11 @@ pub async fn gen_init_merge_env(opts: &InitOptions) -> Result<InitOutcome> {
     let postgres_initdb_args = ensure_quoted_if_needed(&postgres_initdb_args);
     push("POSTGRES_INITDB_ARGS", postgres_initdb_args);
 
+    // Apply postgres preset configuration if specified
+    if let Some(ref preset) = opts.postgres_preset {
+        apply_postgres_preset(preset, &existing_env, &mut push)?;
+    }
+
     push("REDIS_URL", redis_url_host.clone().unwrap_or_default());
     push(
         "REDIS_URL_CONTAINER",
@@ -563,6 +568,75 @@ fn load_env_map(path: &Path) -> Result<HashMap<String, String>> {
     }
 
     Ok(map)
+}
+
+/// Apply postgres performance preset configuration.
+/// Presets define default values for postgres tuning parameters.
+/// Individual env vars can still override preset values.
+fn apply_postgres_preset(
+    preset: &str,
+    existing_env: &HashMap<String, String>,
+    push: &mut dyn FnMut(&str, String),
+) -> Result<()> {
+    let preset_lower = preset.to_lowercase();
+
+    let (
+        shared_buffers,
+        effective_cache_size,
+        work_mem,
+        max_connections,
+        shm_size,
+        maintenance_work_mem,
+    ) = match preset_lower.as_str() {
+        "small" => ("512MB", "2GB", "16MB", "50", "2g", "256MB"),
+        "medium" => ("4GB", "12GB", "64MB", "100", "8g", "1GB"),
+        "large" => ("16GB", "48GB", "256MB", "200", "32g", "2GB"),
+        "custom" => {
+            // For custom preset, only set FERREX_POSTGRES_PRESET and let individual vars handle values
+            push("FERREX_POSTGRES_PRESET", preset.to_string());
+            return Ok(());
+        }
+        _ => {
+            bail!(
+                "Invalid postgres preset: {}. Valid presets: small, medium, large, custom",
+                preset
+            );
+        }
+    };
+
+    // Only set values if not already defined in existing env (allow env vars to override preset)
+    if !existing_env.contains_key("FERREX_POSTGRES_SHARED_BUFFERS") {
+        push("FERREX_POSTGRES_SHARED_BUFFERS", shared_buffers.to_string());
+    }
+    if !existing_env.contains_key("FERREX_POSTGRES_EFFECTIVE_CACHE_SIZE") {
+        push(
+            "FERREX_POSTGRES_EFFECTIVE_CACHE_SIZE",
+            effective_cache_size.to_string(),
+        );
+    }
+    if !existing_env.contains_key("FERREX_POSTGRES_WORK_MEM") {
+        push("FERREX_POSTGRES_WORK_MEM", work_mem.to_string());
+    }
+    if !existing_env.contains_key("FERREX_POSTGRES_MAX_CONNECTIONS") {
+        push(
+            "FERREX_POSTGRES_MAX_CONNECTIONS",
+            max_connections.to_string(),
+        );
+    }
+    if !existing_env.contains_key("FERREX_POSTGRES_SHM_SIZE") {
+        push("FERREX_POSTGRES_SHM_SIZE", shm_size.to_string());
+    }
+    if !existing_env.contains_key("FERREX_POSTGRES_MAINTENANCE_WORK_MEM") {
+        push(
+            "FERREX_POSTGRES_MAINTENANCE_WORK_MEM",
+            maintenance_work_mem.to_string(),
+        );
+    }
+
+    // Always set the preset name for reference
+    push("FERREX_POSTGRES_PRESET", preset.to_string());
+
+    Ok(())
 }
 
 fn build_postgres_url(

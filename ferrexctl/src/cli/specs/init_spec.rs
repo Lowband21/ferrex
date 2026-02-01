@@ -127,6 +127,11 @@ pub async fn ensure_env_initialized(
         cmd.arg("--rotate").arg("db");
     }
 
+    // Pass through postgres preset if specified
+    if let Some(ref preset) = opts.postgres_preset {
+        cmd.arg("--postgres-preset").arg(preset);
+    }
+
     let status = cmd.status().await.context("failed to run ferrexctl init")?;
     if !status.success() {
         bail!("ferrexctl init exited with {}", status);

@@ -2139,7 +2139,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-contracts"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "ferrex-model",
  "log",
@@ -2149,7 +2149,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-core"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-model"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "chrono",
  "rkyv 0.8.14",
@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-player"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-server"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2345,11 +2345,12 @@ dependencies = [
 
 [[package]]
 name = "ferrexctl"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "assert_cmd",
  "axum",
+ "chrono",
  "clap",
  "crossterm",
  "dialoguer",
@@ -2363,6 +2364,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",

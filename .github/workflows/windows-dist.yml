@@ -11,9 +11,6 @@ on:
         description: "Cargo profile"
         default: "release"
         required: true
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write

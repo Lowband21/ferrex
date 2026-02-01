@@ -6,7 +6,20 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
-- No notable changes yet.
+### Added
+- Flatpak packaging with desktop integration (desktop file, metainfo)
+- release-please workflow for automated releases on PR merge
+- crates.io publishing workflow for ferrex-model, ferrex-contracts, ferrexctl
+- Flatpak CI workflow for automated builds
+
+### Changed
+- Renamed ferrex-config/ferrex-init to ferrexctl throughout
+- Updated Docker images workflow to use ferrexctl naming
+- Version bumped to 0.1.0-alpha for initial release
+
+### Fixed
+- Fixed stale references to ferrex-config package (now ferrexctl)
+- Fixed Docker init container to use correct binary name
 
 ## [0.1.0-alpha] - 2025-11-03
 

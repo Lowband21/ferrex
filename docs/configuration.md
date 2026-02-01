@@ -42,6 +42,27 @@ just start
 just run-player-release
 ```
 
+## Compose Files / Overlays
+
+- `docker-compose.yml` is the default self-host stack and pulls the published server image.
+- `docker-compose.dev.yml` adds a local build of `ferrex-server` (used by `just` via `FERREX_COMPOSE_FILES`).
+- `docker-compose.perf.yml` enables the Postgres performance preset (huge pages `try`, io_uring, larger buffers).
+
+Unraid: see `docs/unraid.md`.
+
+## Nix (NixOS)
+
+This repo includes a flake for local development and for running the player with
+a pinned Linux GStreamer build.
+
+```bash
+# dev shell
+nix develop
+
+# run player (NixOS-friendly)
+nix run .#ferrex-player
+```
+
 ## Profiles and Performance
 
 Ferrex defines useful build profiles for faster iteration and improved runtime performance:
