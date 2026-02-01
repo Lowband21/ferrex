@@ -5,6 +5,7 @@
 
 pub mod db;
 pub mod options;
+pub mod package;
 pub mod prompt_menu;
 pub mod specs;
 pub mod stack;

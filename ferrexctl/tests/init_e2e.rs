@@ -103,6 +103,16 @@ impl Harness {
         let mut cmd = Command::new(bin);
         cmd.env("FERREX_COMPOSE_ROOT", &self.compose_root)
             .env("FERREXCTL_AUTO_CONFIRM", "1");
+
+        // With the new packaging layout, the default docker-compose.yml pulls a
+        // published image. For local-e2e runs we usually want to build from the
+        // workspace via docker-compose.dev.yml (unless explicitly using a prebuilt image).
+        let use_prebuilt = std::env::var("FERREX_TEST_USE_PREBUILT")
+            .unwrap_or_default()
+            == "1";
+        if !use_prebuilt {
+            cmd.env("FERREX_COMPOSE_FILES", "docker-compose.dev.yml");
+        }
         cmd
     }
 
@@ -293,7 +303,11 @@ fn copy_compose_files(target_root: &Path, ports: Ports) -> anyhow::Result<()> {
         .to_path_buf();
 
     // Copy and sanitize compose files
-    for name in ["docker-compose.yml", "docker-compose.tailscale.yml"] {
+    for name in [
+        "docker-compose.yml",
+        "docker-compose.dev.yml",
+        "docker-compose.tailscale.yml",
+    ] {
         let src = manifest_root.join(name);
         if !src.exists() {
             continue;

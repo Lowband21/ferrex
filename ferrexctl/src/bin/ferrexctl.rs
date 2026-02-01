@@ -8,6 +8,7 @@ use ferrexctl::{
         self, CheckOptions, InitOptions, RotateTarget,
         db::{stack_db_migrate, stack_db_preflight},
         options::StackOptions,
+        package::{package_flatpak, package_release},
         specs::{stack_down, stack_logs, stack_status, stack_up},
         stack::{ServerMode, StackMode},
     },
@@ -47,7 +48,7 @@ enum Command {
         force: bool,
         #[arg(long, value_enum, default_value = "auto")]
         runner: RunnerArg,
-        #[arg(long, default_value = "ghcr.io/ferrex/init:latest")]
+        #[arg(long, default_value = "ghcr.io/lowband21/ferrexctl:latest")]
         docker_image: String,
         #[arg(long)]
         mount_suffix: Option<String>,
@@ -122,6 +123,33 @@ enum Command {
     Db {
         #[command(subcommand)]
         action: DbAction,
+    },
+    /// Package and release management
+    Package {
+        #[command(subcommand)]
+        action: PackageAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PackageAction {
+    /// Build Flatpak bundle
+    Flatpak {
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Generate release artifacts (Flatpak + manifest + checksums)
+    Release {
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long, help = "Skip preflight checks")]
+        skip_preflight: bool,
+        #[arg(long, help = "Dry run (don't write artifacts)")]
+        dry_run: bool,
     },
 }
 
@@ -691,6 +719,25 @@ async fn main() -> Result<()> {
                     ..Default::default()
                 };
                 stack_db_migrate(&opts, &args).await?;
+            }
+        },
+        Command::Package { action } => match action {
+            PackageAction::Flatpak { output, version } => {
+                package_flatpak(output.as_deref(), version.as_deref()).await?;
+            }
+            PackageAction::Release {
+                version,
+                output_dir,
+                skip_preflight,
+                dry_run,
+            } => {
+                package_release(
+                    version.as_deref(),
+                    output_dir.as_deref(),
+                    skip_preflight,
+                    dry_run,
+                )
+                .await?;
             }
         },
     }
