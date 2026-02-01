@@ -11,6 +11,12 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - release-please workflow for automated releases on PR merge
 - crates.io publishing workflow for ferrex-model, ferrex-contracts, ferrexctl
 - Flatpak CI workflow for automated builds
+- **ferrexctl packaging commands**:
+  - `ferrexctl package preflight` - Run pre-release checks (fmt, clippy, tests, deny, audit)
+  - `ferrexctl package release-init` - Create GitHub releases with binaries and Docker images
+  - `ferrexctl package windows` - Build Windows portable packages with GStreamer bundling
+- **Postgres performance presets** - Configure postgres tuning via `FERREX_POSTGRES_PRESET` (small, medium, large, custom)
+- **Unraid Community Apps template** - Template for easy Unraid deployment
 
 ### Changed
 - Renamed ferrex-config/ferrex-init to ferrexctl throughout

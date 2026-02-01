@@ -92,6 +92,26 @@ just run-player-release
 
 More options (profiles, logging, tailscale, host vs docker server): see [Configuration](docs/configuration.md) and the [Contributing Guide](.github/CONTRIBUTING.md).
 
+## Packaging and Release
+
+Ferrex provides `ferrexctl` commands for packaging and release automation:
+
+```bash
+# Run preflight checks (fmt, clippy, tests, deny, audit)
+ferrexctl package preflight --scope=workspace
+
+# Create a release (builds binary, docker image, GitHub release)
+ferrexctl package release-init 0.1.0-alpha --dry-run
+
+# Package for Windows (cross-compilation with GStreamer bundling)
+ferrexctl package windows --target=x86_64-pc-windows-gnu
+
+# Build Flatpak bundle
+ferrexctl package flatpak
+```
+
+See `ferrexctl --help` for all packaging options.
+
 ## Platform Support
 
 - Linux / Wayland: primary target. Zero‑copy HDR pipeline via GStreamer (dev 1.27.x) and Wayland subsurfaces.

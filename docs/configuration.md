@@ -97,6 +97,50 @@ Alternatively, set `RUST_LOG` directly in `.env`.
 
 Ferrex includes a feature‑gated demo mode that seeds disposable libraries for exploration and testing. See `docs/demo-mode.md` for full details and environment variables.
 
+## Postgres Performance Configuration
+
+Ferrex supports configurable Postgres performance presets for different hardware configurations:
+
+### Presets
+
+Use `FERREX_POSTGRES_PRESET` to select a predefined configuration:
+
+- **`small`** (4-8GB RAM): shared_buffers=512MB, effective_cache_size=2GB, work_mem=16MB, max_connections=50
+- **`medium`** (16-32GB RAM): shared_buffers=4GB, effective_cache_size=12GB, work_mem=64MB, max_connections=100
+- **`large`** (64GB+ RAM): shared_buffers=16GB, effective_cache_size=48GB, work_mem=256MB, max_connections=200
+- **`custom`**: Use individual environment variables (see below)
+
+### Usage
+
+```bash
+# During initial setup
+ferrexctl init --postgres-preset=medium
+
+# Or set manually in .env
+FERREX_POSTGRES_PRESET=medium
+```
+
+### Individual Overrides
+
+You can override specific parameters regardless of preset:
+
+- `FERREX_POSTGRES_SHARED_BUFFERS` - Shared memory for Postgres (e.g., "4GB")
+- `FERREX_POSTGRES_EFFECTIVE_CACHE_SIZE` - OS cache estimate (e.g., "12GB")
+- `FERREX_POSTGRES_WORK_MEM` - Per-operation memory (e.g., "64MB")
+- `FERREX_POSTGRES_MAX_CONNECTIONS` - Max concurrent connections (e.g., "100")
+- `FERREX_POSTGRES_SHM_SIZE` - Docker shm_size (e.g., "8g")
+- `FERREX_POSTGRES_MAINTENANCE_WORK_MEM` - Maintenance operations memory
+- `FERREX_POSTGRES_WAL_BUFFERS` - Write-ahead log buffers
+- `FERREX_POSTGRES_HUGE_PAGES` - Huge pages support ("on" or "off")
+- `FERREX_POSTGRES_MIN_WAL_SIZE` - Minimum WAL size
+- `FERREX_POSTGRES_MAX_WAL_SIZE` - Maximum WAL size
+
+Example with overrides:
+```bash
+FERREX_POSTGRES_PRESET=medium
+FERREX_POSTGRES_SHARED_BUFFERS=8GB  # Override preset value
+```
+
 ## TLS / HTTPS
 
 Ferrex can terminate TLS directly. If you prefer a reverse proxy (nginx, Caddy, Traefik), terminate TLS there and run Ferrex over HTTP on localhost.
