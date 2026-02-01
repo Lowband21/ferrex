@@ -8,7 +8,7 @@ use ferrexctl::{
         self, CheckOptions, InitOptions, RotateTarget,
         db::{stack_db_migrate, stack_db_preflight},
         options::StackOptions,
-        package::{package_flatpak, package_release},
+        package::{package_flatpak, package_preflight, package_release},
         specs::{stack_down, stack_logs, stack_status, stack_up},
         stack::{ServerMode, StackMode},
     },
@@ -150,6 +150,28 @@ enum PackageAction {
         skip_preflight: bool,
         #[arg(long, help = "Dry run (don't write artifacts)")]
         dry_run: bool,
+    },
+    /// Run preflight checks (fmt, clippy, tests, deny, audit)
+    Preflight {
+        #[arg(
+            long,
+            value_enum,
+            help = "Scope of checks: workspace (all packages) or init (ferrexctl only)"
+        )]
+        scope: PreflightScopeArg,
+        #[arg(
+            long,
+            help = "Run in offline mode (adds --offline to cargo commands)"
+        )]
+        offline: bool,
+        #[arg(long, help = "List checks without running them")]
+        dry_run: bool,
+        #[arg(
+            long,
+            value_enum,
+            help = "Skip specific check (can be repeated)"
+        )]
+        skip: Vec<PreflightSkipArg>,
     },
 }
 
@@ -325,6 +347,21 @@ enum StackModeArg {
 enum ServerModeArg {
     Docker,
     Host,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PreflightScopeArg {
+    Workspace,
+    Init,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PreflightSkipArg {
+    Fmt,
+    Clippy,
+    Test,
+    Deny,
+    Audit,
 }
 impl From<RotateArg> for RotateTarget {
     fn from(val: RotateArg) -> Self {
@@ -738,6 +775,29 @@ async fn main() -> Result<()> {
                     dry_run,
                 )
                 .await?;
+            }
+            PackageAction::Preflight {
+                scope,
+                offline,
+                dry_run,
+                skip,
+            } => {
+                let scope_str = match scope {
+                    PreflightScopeArg::Workspace => "workspace",
+                    PreflightScopeArg::Init => "init",
+                };
+                let skip_checks: Vec<String> = skip
+                    .iter()
+                    .map(|s| match s {
+                        PreflightSkipArg::Fmt => "fmt".to_string(),
+                        PreflightSkipArg::Clippy => "clippy".to_string(),
+                        PreflightSkipArg::Test => "test".to_string(),
+                        PreflightSkipArg::Deny => "deny".to_string(),
+                        PreflightSkipArg::Audit => "audit".to_string(),
+                    })
+                    .collect();
+                package_preflight(scope_str, offline, dry_run, &skip_checks)
+                    .await?;
             }
         },
     }

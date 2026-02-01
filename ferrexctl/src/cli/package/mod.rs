@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::cli::utils::workspace_root;
-use crate::packaging_config::{PackagingConfig, PreflightConfig};
+use crate::packaging_config::{
+    PackagingConfig, PreflightConfig, PreflightScope,
+};
 
 const REQUIRED_TOOLS: &[&str] = [
     "flatpak",
@@ -370,14 +372,26 @@ fn run_preflight_checks(preflight: &PreflightConfig) -> Result<()> {
 
     if preflight.run_clippy {
         println!("== preflight: clippy ==");
-        let mut args = vec![
-            "clippy",
+        let mut args = vec!["clippy"];
+        if preflight.scope == PreflightScope::Init {
+            args.extend(["-p", "ferrexctl"]);
+        } else {
+            args.extend([
+                "-p",
+                "ferrex-server",
+                "-p",
+                "ferrex-player",
+                "-p",
+                "ferrexctl",
+            ]);
+        }
+        args.extend([
             "--all-targets",
             "--all-features",
             "--",
             "-D",
             "warnings",
-        ];
+        ]);
         if preflight.offline {
             args.insert(1, "--offline");
         }
@@ -391,8 +405,8 @@ fn run_preflight_checks(preflight: &PreflightConfig) -> Result<()> {
     }
 
     if preflight.run_tests {
-        println!("== preflight: tests ==");
-        let mut args = vec!["test"];
+        println!("== preflight: tests (ferrexctl) ==");
+        let mut args = vec!["test", "-p", "ferrexctl"];
         if preflight.offline {
             args.push("--offline");
         }
@@ -405,23 +419,142 @@ fn run_preflight_checks(preflight: &PreflightConfig) -> Result<()> {
         }
     }
 
-    if preflight.run_audit {
-        if which::which("cargo-audit").is_ok() {
-            println!("== preflight: audit ==");
+    if preflight.run_deny && !preflight.offline {
+        if which::which("cargo-deny").is_ok() {
+            println!("== preflight: cargo deny ==");
             let status = Command::new("cargo")
-                .args(["audit"])
+                .args(["deny", "check"])
                 .status()
-                .context("failed to run cargo audit")?;
+                .context("failed to run cargo deny")?;
             if !status.success() {
-                bail!("cargo audit failed");
+                bail!("cargo deny check failed");
             }
         } else {
             println!(
-                "== preflight: audit skipped (cargo-audit not installed) =="
+                "== preflight: cargo deny skipped (cargo-deny not installed) =="
             );
         }
     }
 
+    if preflight.run_audit {
+        if which::which("cargo-audit").is_ok() {
+            if preflight.offline {
+                let cargo_home =
+                    std::env::var("CARGO_HOME").unwrap_or_else(|_| {
+                        format!(
+                            "{}/.cargo",
+                            std::env::var("HOME").unwrap_or_default()
+                        )
+                    });
+                let advisory_db =
+                    std::path::Path::new(&cargo_home).join("advisory-db");
+                if advisory_db.exists() {
+                    println!("== preflight: cargo audit (offline) ==");
+                    let status = Command::new("cargo")
+                        .args(["audit", "--no-fetch"])
+                        .status()
+                        .context("failed to run cargo audit")?;
+                    if !status.success() {
+                        bail!("cargo audit failed");
+                    }
+                } else {
+                    println!(
+                        "== preflight: cargo audit (offline) skipped: advisory DB not present =="
+                    );
+                }
+            } else {
+                println!("== preflight: cargo audit ==");
+                let status = Command::new("cargo")
+                    .args(["audit"])
+                    .status()
+                    .context("failed to run cargo audit")?;
+                if !status.success() {
+                    bail!("cargo audit failed");
+                }
+            }
+        } else {
+            println!(
+                "== preflight: cargo audit skipped (cargo-audit not installed) =="
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Run preflight checks for packaging
+pub async fn package_preflight(
+    scope: &str,
+    offline: bool,
+    dry_run: bool,
+    skip: &[String],
+) -> Result<()> {
+    let scope_enum = match scope {
+        "init" => PreflightScope::Init,
+        _ => PreflightScope::Workspace,
+    };
+
+    let mut config = PreflightConfig {
+        offline,
+        scope: scope_enum,
+        ..PreflightConfig::default()
+    };
+
+    for check in skip {
+        match check.as_str() {
+            "fmt" => config.run_fmt = false,
+            "clippy" => config.run_clippy = false,
+            "test" => config.run_tests = false,
+            "deny" => config.run_deny = false,
+            "audit" => config.run_audit = false,
+            _ => {}
+        }
+    }
+
+    if dry_run {
+        println!("Preflight checks (dry-run):");
+        println!("  Scope: {scope}");
+        println!("  Offline: {offline}");
+        println!();
+        println!("Checks that would run:");
+        if config.run_fmt {
+            println!("  - cargo fmt --all --check");
+        }
+        if config.run_clippy {
+            if config.scope == PreflightScope::Init {
+                println!(
+                    "  - cargo clippy -p ferrexctl --all-targets --all-features -- -D warnings"
+                );
+            } else {
+                println!(
+                    "  - cargo clippy -p ferrex-server -p ferrex-player -p ferrexctl --all-targets --all-features -- -D warnings"
+                );
+            }
+        }
+        if config.run_tests {
+            println!("  - cargo test -p ferrexctl");
+        }
+        if config.run_deny && !config.offline {
+            println!("  - cargo deny check");
+        }
+        if config.run_audit {
+            if config.offline {
+                println!("  - cargo audit --no-fetch (if advisory DB present)");
+            } else {
+                println!("  - cargo audit");
+            }
+        }
+        let skipped: Vec<&str> = skip.iter().map(|s| s.as_str()).collect();
+        if !skipped.is_empty() {
+            println!();
+            println!("Skipped checks: {}", skipped.join(", "));
+        }
+        return Ok(());
+    }
+
+    run_preflight_checks(&config)?;
+
+    println!("== preflight: ok ==");
     Ok(())
 }
 

@@ -67,8 +67,10 @@ pub struct PreflightConfig {
     pub run_fmt: bool,
     pub run_clippy: bool,
     pub run_tests: bool,
+    pub run_deny: bool,
     pub run_audit: bool,
     pub offline: bool,
+    pub scope: PreflightScope,
 }
 
 impl Default for PreflightConfig {
@@ -77,9 +79,24 @@ impl Default for PreflightConfig {
             run_fmt: true,
             run_clippy: true,
             run_tests: true,
+            run_deny: true,
             run_audit: false,
             offline: false,
+            scope: PreflightScope::Workspace,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PreflightScope {
+    Workspace,
+    Init,
+}
+
+impl Default for PreflightScope {
+    fn default() -> Self {
+        Self::Workspace
     }
 }
 
