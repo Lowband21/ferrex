@@ -366,3 +366,374 @@ pub fn format_bytes_as_pg(bytes: u64) -> String {
         bytes.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pg_memory_size_parses_various_units() {
+        assert_eq!(parse_pg_memory_size("512MB").unwrap(), 512 * MB);
+        assert_eq!(parse_pg_memory_size("2GB").unwrap(), 2 * GB);
+        assert_eq!(parse_pg_memory_size("16kB").unwrap(), 16 * KB);
+        assert_eq!(parse_pg_memory_size("1TB").unwrap(), 1 * TB);
+        assert_eq!(parse_pg_memory_size("1024").unwrap(), 1024);
+    }
+
+    #[test]
+    fn parse_pg_memory_size_handles_unit_case_variations() {
+        assert_eq!(parse_pg_memory_size("512mb").unwrap(), 512 * MB);
+        assert_eq!(parse_pg_memory_size("2gb").unwrap(), 2 * GB);
+        assert_eq!(parse_pg_memory_size("16kb").unwrap(), 16 * KB);
+        assert_eq!(parse_pg_memory_size("16KB").unwrap(), 16 * KB);
+    }
+
+    #[test]
+    fn parse_pg_memory_size_rejects_empty_string() {
+        let result = parse_pg_memory_size("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn parse_pg_memory_size_rejects_whitespace_only() {
+        let result = parse_pg_memory_size("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_pg_memory_size_rejects_missing_number() {
+        let result = parse_pg_memory_size("MB");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing numeric"));
+    }
+
+    #[test]
+    fn parse_pg_memory_size_rejects_unsupported_unit() {
+        let result = parse_pg_memory_size("100PB");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unsupported"));
+    }
+
+    #[test]
+    fn parse_pg_memory_size_rejects_invalid_number() {
+        let result = parse_pg_memory_size("abcMB");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn compute_tuning_small_preset_work_mem_calculation() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        let effective_cache = shared_buffers * 3;
+        let calculated = effective_cache / (max_connections as u64 * 3);
+        let expected = calculated.clamp(4 * MB, 512 * MB);
+        assert_eq!(tuning.work_mem_bytes, expected);
+        assert!(tuning.work_mem_bytes >= 4 * MB);
+    }
+    #[test]
+    fn compute_tuning_small_preset_calculates_effective_cache_size() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.effective_cache_size_bytes, shared_buffers * 3);
+    }
+
+    #[test]
+    fn compute_tuning_small_preset_clamps_maintenance_work_mem() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        let expected = (shared_buffers / 4).clamp(64 * MB, 2 * GB);
+        assert_eq!(tuning.maintenance_work_mem_bytes, expected);
+        assert_eq!(tuning.maintenance_work_mem_bytes, 128 * MB);
+    }
+
+    #[test]
+    fn compute_tuning_small_preset_uses_low_statistics_target() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.default_statistics_target, 100);
+    }
+
+    #[test]
+    fn compute_tuning_small_preset_uses_low_parallel_workers() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.max_parallel_workers_per_gather, 2);
+    }
+
+    #[test]
+    fn compute_tuning_large_preset_uses_high_statistics_target() {
+        let shared_buffers = 16 * GB;
+        let max_connections = 200;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.default_statistics_target, 500);
+    }
+
+    #[test]
+    fn compute_tuning_large_preset_uses_high_parallel_workers() {
+        let shared_buffers = 16 * GB;
+        let max_connections = 200;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.max_parallel_workers_per_gather, 4);
+    }
+
+    #[test]
+    fn compute_tuning_large_preset_clamps_maintenance_work_mem_to_max() {
+        let shared_buffers = 16 * GB;
+        let max_connections = 200;
+        let tuning = compute_tuning(shared_buffers, max_connections);
+
+        assert_eq!(tuning.maintenance_work_mem_bytes, 2 * GB);
+    }
+
+    #[test]
+    fn compute_tuning_returns_expected_static_values() {
+        let tuning = compute_tuning(1 * GB, 100);
+
+        assert_eq!(tuning.random_page_cost, 1.1);
+        assert_eq!(tuning.effective_io_concurrency, 200);
+    }
+
+    #[test]
+    fn compute_admin_tuning_small_preset_uses_low_parallel_workers() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let admin = compute_admin_tuning(shared_buffers, max_connections);
+
+        assert_eq!(admin.max_parallel_workers, 4);
+    }
+
+    #[test]
+    fn compute_admin_tuning_small_preset_uses_small_wal_sizes() {
+        let shared_buffers = 512 * MB;
+        let max_connections = 50;
+        let admin = compute_admin_tuning(shared_buffers, max_connections);
+
+        assert_eq!(admin.min_wal_size_bytes, 1 * GB);
+        assert_eq!(admin.max_wal_size_bytes, 4 * GB);
+    }
+
+    #[test]
+    fn compute_admin_tuning_large_preset_uses_high_parallel_workers() {
+        let shared_buffers = 16 * GB;
+        let max_connections = 200;
+        let admin = compute_admin_tuning(shared_buffers, max_connections);
+
+        assert_eq!(admin.max_parallel_workers, 8);
+    }
+
+    #[test]
+    fn compute_admin_tuning_large_preset_uses_large_wal_sizes() {
+        let shared_buffers = 16 * GB;
+        let max_connections = 200;
+        let admin = compute_admin_tuning(shared_buffers, max_connections);
+
+        assert_eq!(admin.min_wal_size_bytes, 4 * GB);
+        assert_eq!(admin.max_wal_size_bytes, 16 * GB);
+    }
+
+    #[test]
+    fn compute_admin_tuning_returns_expected_static_values() {
+        let admin = compute_admin_tuning(1 * GB, 100);
+
+        assert_eq!(admin.checkpoint_completion_target, 0.9);
+        assert!(admin.wal_compression);
+        assert_eq!(admin.checkpoint_timeout, "15min");
+    }
+
+    #[test]
+    fn build_set_statements_returns_seven_statements() {
+        let params = compute_tuning(512 * MB, 50);
+        let statements = build_set_statements(&params);
+
+        assert_eq!(statements.len(), 7);
+    }
+
+    #[test]
+    fn build_set_statements_contains_expected_prefixes() {
+        let params = compute_tuning(512 * MB, 50);
+        let statements = build_set_statements(&params);
+
+        assert!(statements.iter().any(|s| s.starts_with("SET work_mem")));
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET effective_cache_size"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET random_page_cost"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET effective_io_concurrency"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET maintenance_work_mem"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET default_statistics_target"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SET max_parallel_workers_per_gather"))
+        );
+    }
+
+    #[test]
+    fn build_set_statements_formats_work_mem_correctly() {
+        let mut params = compute_tuning(512 * MB, 50);
+        params.work_mem_bytes = 4 * MB;
+        let statements = build_set_statements(&params);
+
+        let work_mem_stmt = statements
+            .iter()
+            .find(|s| s.starts_with("SET work_mem"))
+            .unwrap();
+        assert!(work_mem_stmt.contains("'4MB'"));
+    }
+
+    #[test]
+    fn build_alter_system_statements_returns_six_statements() {
+        let params = compute_admin_tuning(512 * MB, 50);
+        let statements = build_alter_system_statements(&params);
+
+        assert_eq!(statements.len(), 6);
+    }
+
+    #[test]
+    fn build_alter_system_statements_contains_expected_prefixes() {
+        let params = compute_admin_tuning(512 * MB, 50);
+        let statements = build_alter_system_statements(&params);
+
+        assert!(statements.iter().any(|s| {
+            s.starts_with("ALTER SYSTEM SET checkpoint_completion_target")
+        }));
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("ALTER SYSTEM SET wal_compression"))
+        );
+        assert!(statements.iter().any(|s| s.starts_with("ALTER SYSTEM SET max_parallel_workers")));
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("ALTER SYSTEM SET checkpoint_timeout"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("ALTER SYSTEM SET min_wal_size"))
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("ALTER SYSTEM SET max_wal_size"))
+        );
+    }
+
+    #[test]
+    fn build_alter_system_statements_formats_wal_compression_on() {
+        let mut params = compute_admin_tuning(512 * MB, 50);
+        params.wal_compression = true;
+        let statements = build_alter_system_statements(&params);
+
+        let wal_stmt = statements
+            .iter()
+            .find(|s| s.contains("wal_compression"))
+            .unwrap();
+        assert!(wal_stmt.contains("'on'"));
+    }
+
+    #[test]
+    fn build_alter_system_statements_formats_wal_compression_off() {
+        let mut params = compute_admin_tuning(512 * MB, 50);
+        params.wal_compression = false;
+        let statements = build_alter_system_statements(&params);
+
+        let wal_stmt = statements
+            .iter()
+            .find(|s| s.contains("wal_compression"))
+            .unwrap();
+        assert!(wal_stmt.contains("'off'"));
+    }
+
+    #[test]
+    fn format_bytes_as_pg_formats_gigabytes() {
+        assert_eq!(format_bytes_as_pg(1 * GB), "1GB");
+        assert_eq!(format_bytes_as_pg(16 * GB), "16GB");
+    }
+
+    #[test]
+    fn format_bytes_as_pg_formats_megabytes() {
+        assert_eq!(format_bytes_as_pg(512 * MB), "512MB");
+        assert_eq!(format_bytes_as_pg(1024 * MB), "1GB");
+    }
+
+    #[test]
+    fn format_bytes_as_pg_formats_kilobytes() {
+        assert_eq!(format_bytes_as_pg(16 * KB), "16kB");
+        assert_eq!(format_bytes_as_pg(1024 * KB), "1MB");
+    }
+
+    #[test]
+    fn format_bytes_as_pg_formats_terabytes() {
+        assert_eq!(format_bytes_as_pg(1 * TB), "1TB");
+        assert_eq!(format_bytes_as_pg(2 * TB), "2TB");
+    }
+
+    #[test]
+    fn format_bytes_as_pg_returns_raw_for_non_aligned() {
+        assert_eq!(format_bytes_as_pg(1000), "1000");
+        assert_eq!(format_bytes_as_pg(1536), "1536");
+        assert_eq!(format_bytes_as_pg(1000000), "1000000");
+    }
+
+    #[test]
+    fn format_bytes_as_pg_handles_zero() {
+        assert_eq!(format_bytes_as_pg(0), "0TB");
+    }
+
+    #[test]
+    fn compute_tuning_handles_zero_connections() {
+        let tuning = compute_tuning(1 * GB, 0);
+
+        assert!(tuning.work_mem_bytes >= 4 * MB);
+    }
+
+    #[test]
+    fn compute_admin_tuning_medium_preset_uses_medium_wal_sizes() {
+        let shared_buffers = 4 * GB;
+        let admin = compute_admin_tuning(shared_buffers, 100);
+
+        assert_eq!(admin.min_wal_size_bytes, 2 * GB);
+        assert_eq!(admin.max_wal_size_bytes, 8 * GB);
+    }
+
+    #[test]
+    fn compute_tuning_medium_preset_uses_medium_statistics_target() {
+        let shared_buffers = 4 * GB;
+        let tuning = compute_tuning(shared_buffers, 100);
+
+        assert_eq!(tuning.default_statistics_target, 200);
+    }
+}
