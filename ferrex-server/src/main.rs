@@ -62,6 +62,7 @@ use ferrex_server::{
             },
         },
         orchestration::ScanOrchestrator,
+        postgres_tuning,
         scan::scan_manager::ScanControlPlane,
         startup::{ProdStartupHooks, StartupHooks},
         websocket,
@@ -90,9 +91,10 @@ use ferrex_server::handlers::users::auth::tls::{
 };
 use ferrex_server::infra::thumbnail_service::ThumbnailService;
 use serde_json::{Value, json};
+use sqlx::postgres::PgConnectOptions;
 use std::{
-    collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc,
-    time::Duration,
+    collections::HashMap, net::SocketAddr, path::PathBuf, str::FromStr,
+    sync::Arc, time::Duration,
 };
 use tokio::sync::Mutex;
 use tower_http::{
@@ -191,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_db_preflight(args: &ServeArgs) -> anyhow::Result<()> {
     let ConfigBootstrap { database_url, .. } =
         load_runtime_config(args).await?;
-    let pg = PostgresDatabase::new(&database_url)
+    let pg = PostgresDatabase::new(&database_url, None)
         .await
         .context("failed to connect to PostgreSQL for preflight")?;
     pg.preflight_only()
@@ -204,7 +206,7 @@ async fn run_db_preflight(args: &ServeArgs) -> anyhow::Result<()> {
 async fn run_db_migrate(args: &ServeArgs) -> anyhow::Result<()> {
     let ConfigBootstrap { database_url, .. } =
         load_runtime_config(args).await?;
-    let pg = PostgresDatabase::new(&database_url)
+    let pg = PostgresDatabase::new(&database_url, None)
         .await
         .context("failed to connect to PostgreSQL for migration")?;
     pg.initialize_schema()
@@ -397,11 +399,16 @@ struct ResourceBootstrap {
 async fn wire_app_resources(
     config: Arc<Config>,
     database_url: &str,
+    tuning_statements: Option<Vec<String>>,
     tmdb_provider: Arc<TmdbApiProvider>,
     with_cache: bool,
     #[cfg(feature = "demo")] demo_coordinator: Option<Arc<DemoCoordinator>>,
 ) -> anyhow::Result<ResourceBootstrap> {
-    let db_context = match DatabaseContext::connect_postgres(database_url).await
+    let db_context = match DatabaseContext::connect_postgres(
+        database_url,
+        tuning_statements,
+    )
+    .await
     {
         Ok(context) => {
             info!("Successfully connected to PostgreSQL");
@@ -742,9 +749,13 @@ where
         demo_coordinator,
     } = load_runtime_config(&args).await?;
 
+    let tuning_statements =
+        resolve_postgres_tuning_statements(&database_url).await;
+
     let ResourceBootstrap { context, state } = wire_app_resources(
         Arc::clone(&config),
         &database_url,
+        tuning_statements,
         tmdb_provider,
         with_cache,
         #[cfg(feature = "demo")]
@@ -828,6 +839,75 @@ where
     }
 
     Ok(())
+}
+
+async fn resolve_postgres_tuning_statements(
+    database_url: &str,
+) -> Option<Vec<String>> {
+    if std::env::var("FERREX_POSTGRES_AUTO_TUNE")
+        .ok()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("false"))
+    {
+        info!("Postgres auto-tuning disabled");
+        return None;
+    }
+
+    let connect_options = match PgConnectOptions::from_str(database_url) {
+        Ok(options) => options,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Failed to parse database URL for postgres auto-tuning, proceeding without"
+            );
+            return None;
+        }
+    };
+
+    let temp_pool = match sqlx::PgPool::connect_with(connect_options).await {
+        Ok(pool) => pool,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Failed to establish postgres auto-tuning probe connection, proceeding without"
+            );
+            return None;
+        }
+    };
+
+    let tuning_params = match postgres_tuning::resolve_tuning(&temp_pool).await
+    {
+        Ok(params) => params,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Failed to resolve postgres auto-tuning, proceeding without"
+            );
+            temp_pool.close().await;
+            return None;
+        }
+    };
+
+    temp_pool.close().await;
+
+    match tuning_params {
+        Some(params) => {
+            info!(
+                work_mem = %postgres_tuning::format_bytes_as_pg(params.work_mem_bytes),
+                effective_cache_size = %postgres_tuning::format_bytes_as_pg(params.effective_cache_size_bytes),
+                maintenance_work_mem = %postgres_tuning::format_bytes_as_pg(params.maintenance_work_mem_bytes),
+                random_page_cost = params.random_page_cost,
+                effective_io_concurrency = params.effective_io_concurrency,
+                default_statistics_target = params.default_statistics_target,
+                max_parallel_workers_per_gather = params.max_parallel_workers_per_gather,
+                "Postgres auto-tuning applied"
+            );
+            Some(postgres_tuning::build_set_statements(&params))
+        }
+        None => {
+            info!("Postgres auto-tuning disabled");
+            None
+        }
+    }
 }
 
 // Parse a comma-separated list of cipher suite names into Vec<String>

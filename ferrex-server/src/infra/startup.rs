@@ -2,9 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use async_trait::async_trait;
-#[cfg(feature = "demo")]
-use tracing::info;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::infra::{app_context::AppContext, app_state::AppState};
 
@@ -33,6 +31,8 @@ impl StartupHooks for ProdStartupHooks {
         state: &AppState,
         #[cfg(feature = "demo")] demo_coordinator: Option<Arc<DemoCoordinator>>,
     ) -> Result<()> {
+        info!("Running production startup hooks");
+
         #[cfg(feature = "demo")]
         if let Some(coordinator) = demo_coordinator.as_ref() {
             coordinator.ensure_demo_user(state).await?;
