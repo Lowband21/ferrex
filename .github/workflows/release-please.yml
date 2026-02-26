@@ -25,18 +25,3 @@ jobs:
           release-type: rust
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-  trigger-release:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Trigger release workflow
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Release created: ${{ needs.release-please.outputs.tag_name }}"
-          echo "Version: ${{ needs.release-please.outputs.version }}"

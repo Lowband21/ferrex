@@ -68,12 +68,43 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Download all dist artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: dist-*
           merge-multiple: true
           path: dist-collect
+
+      - name: Generate manifest and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/release/lib.sh
+
+          mapfile -t artifacts < <(
+            find dist-collect -maxdepth 1 -type f \
+              ! -name 'manifest.json' \
+              ! -name 'SHA256SUMS' \
+              -printf '%f\n' | LC_ALL=C sort
+          )
+          [[ ${#artifacts[@]} -gt 0 ]] || die "no artifacts found in dist-collect"
+
+          tag="${GITHUB_REF_NAME}"
+          version="${tag}"
+          if [[ "${tag}" == v* ]]; then
+            version="${tag#v}"
+          fi
+
+          write_manifest \
+            "dist-collect/manifest.json" \
+            "${tag}" \
+            "${version}" \
+            "workspace" \
+            "${artifacts[@]/#/dist-collect/}"
+          write_sha256sums "dist-collect"
 
       - name: Create GitHub Release and upload assets
         uses: ncipollo/release-action@v1
