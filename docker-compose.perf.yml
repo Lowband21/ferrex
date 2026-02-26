@@ -1,7 +1,8 @@
 version: '3.9'
 
-# Performance overlay:
-# - Enables io_uring + huge pages (try) and larger memory settings for Postgres.
+# Performance overlay for 64GB+ RAM hosts with io_uring kernel support:
+# - Enables io_uring + huge pages and larger memory settings for Postgres.
+# - Uses environment variable interpolation for large preset defaults.
 # - Use only after confirming your host has the RAM/SHM budget and kernel support.
 services:
   db:
@@ -12,13 +13,13 @@ services:
       - "-c"
       - "io_method=io_uring"
       - "-c"
-      - "max_connections=200"
+      - "max_connections=${FERREX_POSTGRES_MAX_CONNECTIONS:-200}"
       - "-c"
-      - "shared_buffers=15500MB"
+      - "shared_buffers=${FERREX_POSTGRES_SHARED_BUFFERS:-16GB}"
       - "-c"
-      - "effective_cache_size=24GB"
+      - "effective_cache_size=${FERREX_POSTGRES_EFFECTIVE_CACHE_SIZE:-48GB}"
       - "-c"
-      - "maintenance_work_mem=2GB"
+      - "maintenance_work_mem=${FERREX_POSTGRES_MAINTENANCE_WORK_MEM:-2GB}"
       - "-c"
       - "checkpoint_completion_target=0.9"
       - "-c"
@@ -32,13 +33,13 @@ services:
       - "-c"
       - "effective_io_concurrency=200"
       - "-c"
-      - "work_mem=12MB"
+      - "work_mem=${FERREX_POSTGRES_WORK_MEM:-256MB}"
       - "-c"
-      - "huge_pages=on"
+      - "huge_pages=${FERREX_POSTGRES_HUGE_PAGES:-on}"
       - "-c"
-      - "min_wal_size=4GB"
+      - "min_wal_size=${FERREX_POSTGRES_MIN_WAL_SIZE:-4GB}"
       - "-c"
-      - "max_wal_size=64GB"
+      - "max_wal_size=${FERREX_POSTGRES_MAX_WAL_SIZE:-16GB}"
       - "-c"
       - "wal_compression=on"
       - "-c"
@@ -48,5 +49,5 @@ services:
       - "-c"
       - "max_parallel_workers=32"
       - "-c"
-      - "max_parallel_maintenance_workers=2"
-    shm_size: "32g"
+      - "max_parallel_maintenance_workers=4"
+    shm_size: "${FERREX_POSTGRES_SHM_SIZE:-32g}"
