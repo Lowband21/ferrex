@@ -17,6 +17,22 @@ pub struct TuningParams {
     pub max_parallel_workers_per_gather: u32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdminTuningParams {
+    pub checkpoint_completion_target: f64,
+    pub wal_compression: bool,
+    pub max_parallel_workers: u32,
+    pub checkpoint_timeout: &'static str,
+    pub min_wal_size_bytes: u64,
+    pub max_wal_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetectedParams {
+    pub shared_buffers_bytes: u64,
+    pub max_connections: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TuningSource {
     AutoDetected,
@@ -96,7 +112,95 @@ pub fn compute_tuning(
     }
 }
 
-pub async fn detect_and_compute(pool: &PgPool) -> Result<TuningParams> {
+pub fn compute_admin_tuning(
+    shared_buffers_bytes: u64,
+    _max_connections: u32,
+) -> AdminTuningParams {
+    let max_parallel_workers =
+        if shared_buffers_bytes < 2 * GB { 4 } else { 8 };
+
+    let min_wal_size_bytes = if shared_buffers_bytes < 2 * GB {
+        1 * GB
+    } else if shared_buffers_bytes < 12 * GB {
+        2 * GB
+    } else {
+        4 * GB
+    };
+
+    let max_wal_size_bytes = if shared_buffers_bytes < 2 * GB {
+        4 * GB
+    } else if shared_buffers_bytes < 12 * GB {
+        8 * GB
+    } else {
+        16 * GB
+    };
+
+    AdminTuningParams {
+        checkpoint_completion_target: 0.9,
+        wal_compression: true,
+        max_parallel_workers,
+        checkpoint_timeout: "15min",
+        min_wal_size_bytes,
+        max_wal_size_bytes,
+    }
+}
+
+pub fn build_alter_system_statements(
+    params: &AdminTuningParams,
+) -> Vec<String> {
+    vec![
+        format!(
+            "ALTER SYSTEM SET checkpoint_completion_target = {};",
+            params.checkpoint_completion_target
+        ),
+        format!(
+            "ALTER SYSTEM SET wal_compression = '{}';",
+            if params.wal_compression { "on" } else { "off" }
+        ),
+        format!(
+            "ALTER SYSTEM SET max_parallel_workers = {};",
+            params.max_parallel_workers
+        ),
+        format!(
+            "ALTER SYSTEM SET checkpoint_timeout = '{}';",
+            params.checkpoint_timeout
+        ),
+        format!(
+            "ALTER SYSTEM SET min_wal_size = '{}';",
+            format_bytes_as_pg(params.min_wal_size_bytes)
+        ),
+        format!(
+            "ALTER SYSTEM SET max_wal_size = '{}';",
+            format_bytes_as_pg(params.max_wal_size_bytes)
+        ),
+    ]
+}
+
+pub async fn apply_admin_tuning(
+    admin_pool: &PgPool,
+    params: &AdminTuningParams,
+) -> Result<()> {
+    for statement in build_alter_system_statements(params) {
+        sqlx::query(&statement)
+            .execute(admin_pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to apply admin tuning statement '{}'",
+                    statement
+                )
+            })?;
+    }
+
+    sqlx::query("SELECT pg_reload_conf();")
+        .execute(admin_pool)
+        .await
+        .context("failed to reload postgres configuration")?;
+
+    Ok(())
+}
+
+pub async fn detect_raw(pool: &PgPool) -> Result<DetectedParams> {
     let shared_buffers_row: (String,) = sqlx::query_as("SHOW shared_buffers")
         .fetch_one(pool)
         .await
@@ -124,19 +228,22 @@ pub async fn detect_and_compute(pool: &PgPool) -> Result<TuningParams> {
             )
         })?;
 
-    Ok(compute_tuning(shared_buffers_bytes, max_connections))
+    Ok(DetectedParams {
+        shared_buffers_bytes,
+        max_connections,
+    })
 }
 
-pub async fn resolve_tuning(pool: &PgPool) -> Result<Option<TuningParams>> {
-    if std::env::var("FERREX_POSTGRES_AUTO_TUNE")
-        .ok()
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("false"))
-    {
-        return Ok(None);
-    }
+pub async fn detect_and_compute(pool: &PgPool) -> Result<TuningParams> {
+    let detected = detect_raw(pool).await?;
 
-    let mut params = detect_and_compute(pool).await?;
+    Ok(compute_tuning(
+        detected.shared_buffers_bytes,
+        detected.max_connections,
+    ))
+}
 
+pub fn apply_env_overrides(params: &mut TuningParams) -> Result<()> {
     if let Ok(work_mem) = std::env::var("FERREX_POSTGRES_WORK_MEM") {
         params.work_mem_bytes =
             parse_pg_memory_size(&work_mem).with_context(|| {
@@ -191,11 +298,27 @@ pub async fn resolve_tuning(pool: &PgPool) -> Result<Option<TuningParams>> {
         std::env::var("FERREX_POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER")
     {
         params.max_parallel_workers_per_gather =
-            max_parallel_workers_per_gather.parse::<u32>().with_context(|| {
-                "invalid FERREX_POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER override"
-                    .to_string()
-            })?;
+            max_parallel_workers_per_gather
+                .parse::<u32>()
+                .with_context(|| {
+                    "invalid FERREX_POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER override"
+                        .to_string()
+                })?;
     }
+
+    Ok(())
+}
+
+pub async fn resolve_tuning(pool: &PgPool) -> Result<Option<TuningParams>> {
+    if std::env::var("FERREX_POSTGRES_AUTO_TUNE")
+        .ok()
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("false"))
+    {
+        return Ok(None);
+    }
+
+    let mut params = detect_and_compute(pool).await?;
+    apply_env_overrides(&mut params)?;
 
     Ok(Some(params))
 }
