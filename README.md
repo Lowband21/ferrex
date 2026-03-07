@@ -65,7 +65,7 @@ Self‑hosters and performance‑minded enthusiasts who value a fluid desktop ex
 ```bash
 # from repo root
 just start
-# equivalent: ferrex-init stack up
+# equivalent: ferrexctl stack up
 ```
 
 ### And the player:

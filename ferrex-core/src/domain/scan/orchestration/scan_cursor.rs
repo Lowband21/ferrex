@@ -134,7 +134,40 @@ pub fn diff_cursor(
 
 /// Normalize path for consistent cursor keys.
 pub fn normalize_path(path: &Path) -> Result<String> {
-    Ok(path.normalize()?.as_path().to_string_lossy().to_string())
+    match path.normalize() {
+        Ok(normalized) => {
+            Ok(normalized.as_path().to_string_lossy().to_string())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Ok(normalize_path_lexically(path).to_string_lossy().to_string())
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn normalize_path_lexically(path: &Path) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+
+    let mut out = PathBuf::new();
+    let mut anchored = false;
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => {
+                anchored = true;
+                out.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() && !anchored {
+                    out.push(component.as_os_str());
+                }
+            }
+            Component::Normal(_) => out.push(component.as_os_str()),
+        }
+    }
+
+    out
 }
 
 /// Repository trait for persisting scan cursors.

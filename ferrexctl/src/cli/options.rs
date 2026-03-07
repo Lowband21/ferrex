@@ -107,7 +107,7 @@ impl InitOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-/// Options for configuration validation (`ferrex-init check`).
+/// Options for configuration validation (`ferrexctl check`).
 pub struct CheckOptions {
     pub config_path: Option<PathBuf>,
     pub env_file: Option<PathBuf>,

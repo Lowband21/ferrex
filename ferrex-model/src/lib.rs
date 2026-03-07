@@ -23,6 +23,7 @@ pub mod media_id;
 pub mod media_type;
 pub mod numbers;
 pub mod prelude;
+pub mod rate_limit;
 #[cfg(feature = "rkyv")]
 pub mod rkyv_wrappers;
 pub mod scan;
@@ -70,6 +71,10 @@ pub use media_id::ArchivedMediaID;
 pub use media_id::MediaID;
 pub use media_type::ImageMediaType;
 pub use media_type::VideoMediaType;
+pub use rate_limit::{
+    EndpointLimits, RateLimitAlgorithm, RateLimitKey, RateLimitRule,
+    TrustedSources,
+};
 pub use subject_key::{NormalizedPathKey, OpaqueSubjectKey, SubjectKey};
 pub use transcoding::{
     TranscodingJobResponse, TranscodingProgressDetails, TranscodingStatus,

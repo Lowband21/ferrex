@@ -1,4 +1,4 @@
-//! CLI-facing init/check helpers shared by `ferrex-init` and `ferrex-server`.
+//! CLI-facing init/check helpers shared by `ferrexctl` and `ferrex-server`.
 //!
 //! The functions here generate managed key/value pairs for `.env`, perform
 //! connectivity checks, and expose options structs consumed by the binaries.
@@ -764,7 +764,7 @@ pub async fn run_config_check(opts: &CheckOptions) -> Result<()> {
 }
 
 fn generate_secret(len: usize) -> String {
-    if let Ok(seed_str) = std::env::var("FERREX_INIT_TEST_SEED")
+    if let Ok(seed_str) = std::env::var("FERREXCTL_TEST_SEED")
         && let Ok(seed) = seed_str.parse::<u64>()
     {
         let seeded = StdRng::seed_from_u64(seed);

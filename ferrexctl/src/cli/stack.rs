@@ -1,4 +1,4 @@
-//! Docker compose orchestration used by `ferrex-init stack`.
+//! Docker compose orchestration used by `ferrexctl stack`.
 //!
 //! This module builds command specs for compose up/down flows, derives project
 //! names, and can optionally start the server in host mode while still using

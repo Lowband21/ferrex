@@ -3,7 +3,7 @@ use std::{collections::HashSet, fs, path::PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, console::Term};
-use ferrex_config::{
+use ferrexctl::{
     cli::{
         self, CheckOptions, InitOptions, RotateTarget,
         db::{stack_db_migrate, stack_db_preflight},
@@ -21,7 +21,7 @@ use ferrex_config::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
-#[command(name = "ferrex-init", about = "Ferrex configuration bootstrapper")]
+#[command(name = "ferrexctl", about = "Ferrex configuration bootstrapper")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -345,8 +345,7 @@ async fn main() -> Result<()> {
                 force,
                 tui,
             };
-            let auto_confirm =
-                std::env::var("FERREX_INIT_AUTO_CONFIRM").is_ok();
+            let auto_confirm = std::env::var("FERREXCTL_AUTO_CONFIRM").is_ok();
 
             let runner_choice = match runner {
                 RunnerArg::Auto => RunnerChoice::Auto,
@@ -774,7 +773,7 @@ fn stack_opts_from_args(
 
 fn print_stack_outcome(
     action: &str,
-    outcome: &ferrex_config::cli::stack::StackOutcome,
+    outcome: &ferrexctl::cli::stack::StackOutcome,
 ) {
     let files: Vec<String> = outcome
         .compose_files

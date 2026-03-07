@@ -1,4 +1,4 @@
-//! Runtime selection and docker runner utilities for `ferrex-init`.
+//! Runtime selection and docker runner utilities for `ferrexctl`.
 //!
 //! Contains heuristics for host vs docker selection and SELinux/Podman mount
 //! suffix detection, plus a small wrapper that executes the init image and
@@ -57,10 +57,7 @@ pub fn choose_runner(choice: RunnerChoice) -> Runner {
         RunnerChoice::Host => Runner::Host,
         RunnerChoice::Docker => Runner::Docker,
         RunnerChoice::Auto => {
-            if Command::new("ferrex-init")
-                .arg("--version")
-                .output()
-                .is_ok()
+            if Command::new("ferrexctl").arg("--version").output().is_ok()
                 || Command::new("cargo").arg("--version").output().is_ok()
             {
                 Runner::Host
@@ -83,7 +80,7 @@ pub fn run_docker_init(
     force: bool,
     mount_suffix: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
-    let runtime = std::env::var("FERREX_INIT_DOCKER_CMD")
+    let runtime = std::env::var("FERREXCTL_DOCKER_CMD")
         .unwrap_or_else(|_| "docker".into());
     if !env_file.exists() {
         // Ensure parent exists so docker can mount it readable/creatable.
@@ -116,19 +113,19 @@ pub fn run_docker_init(
         .arg("FERREX_ENV_FILE=/app/.env");
 
     if non_interactive {
-        cmd.args(["-e", "FERREX_INIT_NON_INTERACTIVE=1"]);
+        cmd.args(["-e", "FERREXCTL_NON_INTERACTIVE=1"]);
     }
     if tailscale {
-        cmd.args(["-e", "FERREX_INIT_TAILSCALE=1"]);
+        cmd.args(["-e", "FERREXCTL_TAILSCALE=1"]);
     }
     if advanced {
-        cmd.args(["-e", "FERREX_INIT_ADVANCED_CONFIG=1"]);
+        cmd.args(["-e", "FERREXCTL_ADVANCED_CONFIG=1"]);
     }
     if force {
-        cmd.args(["-e", "FERREX_INIT_FORCE_CONFIG=1"]);
+        cmd.args(["-e", "FERREXCTL_FORCE_CONFIG=1"]);
     }
     if let Some(rot) = rotate {
-        cmd.args(["-e", &format!("FERREX_INIT_ROTATE={}", rot)]);
+        cmd.args(["-e", &format!("FERREXCTL_ROTATE={}", rot)]);
     }
 
     cmd.arg(image)

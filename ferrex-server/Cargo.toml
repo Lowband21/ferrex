@@ -125,7 +125,7 @@ rand.workspace = true
 
 # Internal dependencies
 ferrex-core = { path = "../ferrex-core" }
-ferrex-config = { path = "../ferrex-config" }
+ferrexctl = { path = "../ferrexctl" }
 ferrex-model = { path = "../ferrex-model", features = ["serde"] }
 
 [dev-dependencies]

@@ -5,7 +5,7 @@ members = [
   "ferrex-player",
   "ferrex-model",
   "ferrex-contracts",
-  "ferrex-config",
+  "ferrexctl",
 ]
 default-members = ["ferrex-server", "ferrex-core"]
 resolver = "3"
@@ -52,12 +52,14 @@ missing_debug_implementations = "warn"
 
 [workspace.dependencies.ferrex-model]
 path = "ferrex-model"
+version = "0.1.0"
 
 [workspace.dependencies.ferrex-contracts]
 path = "ferrex-contracts"
+version = "0.1.0"
 
-[workspace.dependencies.ferrex-config]
-path = "ferrex-config"
+[workspace.dependencies.ferrexctl]
+path = "ferrexctl"
 
 [workspace.dependencies]
 # Async runtime
@@ -202,7 +204,7 @@ config = "0.15"
 url = "2.5"
 
 # tmdb
-tmdb-api = { git = "https://github.com/jdrouet/tmdb-api.git", tag = "v1.0.0-alpha.5" } # , features = ["reqwest-middleware"] }
+tmdb-api = "1.0.0-alpha.5"
 
 # Testing
 mockall = "0.14"

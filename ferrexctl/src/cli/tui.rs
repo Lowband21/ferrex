@@ -315,8 +315,8 @@ fn run_app(
 }
 
 fn event_source_from_env() -> Result<Box<dyn EventSource>> {
-    if let Ok(path) = std::env::var("FERREX_INIT_TUI_SCRIPT") {
-        let trace = std::env::var("FERREX_INIT_TUI_TRACE").ok();
+    if let Ok(path) = std::env::var("FERREXCTL_TUI_SCRIPT") {
+        let trace = std::env::var("FERREXCTL_TUI_TRACE").ok();
         let src = ScriptEventSource::from_path(
             PathBuf::from(path),
             trace.map(PathBuf::from),

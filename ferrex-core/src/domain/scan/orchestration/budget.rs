@@ -6,6 +6,7 @@ use std::{fmt, sync::Arc};
 
 use crate::error::Result;
 use crate::types::ids::LibraryId;
+pub use crate::types::scan::orchestration::budget::BudgetConfig;
 
 /// Different types of workloads that can be budget-limited
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -23,29 +24,6 @@ pub struct BudgetToken {
     pub workload: WorkloadType,
     pub library_id: LibraryId,
     pub acquired_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// Configuration for workload limits
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BudgetConfig {
-    pub library_scan_limit: usize, // Default 1 - one library scan at a time
-    pub media_analysis_limit: usize, // Default low to avoid disk overload
-    pub metadata_limit: usize,     // Default 2 * CPU count
-    pub indexing_limit: usize,     // Default moderate
-    pub image_fetch_limit: usize,  // Poster/backdrop workers
-}
-
-impl Default for BudgetConfig {
-    fn default() -> Self {
-        let cpu_count = num_cpus::get();
-        Self {
-            library_scan_limit: 1,
-            media_analysis_limit: 4,
-            metadata_limit: cpu_count * 2,
-            indexing_limit: cpu_count,
-            image_fetch_limit: 4,
-        }
-    }
 }
 
 /// Trait for managing workload budgets across the orchestrator

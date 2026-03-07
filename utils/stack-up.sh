@@ -14,9 +14,9 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if command -v ferrex-init >/dev/null 2>&1; then
-  exec ferrex-init stack "$ACTION" "$@"
+if command -v ferrexctl >/dev/null 2>&1; then
+  exec ferrexctl stack "$ACTION" "$@"
 else
   cd "$ROOT_DIR"
-  exec cargo run -q -p ferrex-config --bin ferrex-init -- stack "$ACTION" "$@"
+  exec cargo run -q -p ferrexctl --bin ferrexctl -- stack "$ACTION" "$@"
 fi

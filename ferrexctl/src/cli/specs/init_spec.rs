@@ -91,9 +91,9 @@ pub async fn ensure_env_initialized(
         warn!("Initialization detected as required");
     }
 
-    // Run `ferrex-init init` via the current binary to reuse the existing CLI surface.
-    let exe = std::env::current_exe()
-        .context("failed to locate ferrex-init binary")?;
+    // Run `ferrexctl init` via the current binary to reuse the existing CLI surface.
+    let exe =
+        std::env::current_exe().context("failed to locate ferrexctl binary")?;
     let mut cmd = Command::new(exe);
     cmd.arg("init").arg("--env-file").arg(&opts.env_file);
 
@@ -127,12 +127,9 @@ pub async fn ensure_env_initialized(
         cmd.arg("--rotate").arg("db");
     }
 
-    let status = cmd
-        .status()
-        .await
-        .context("failed to run ferrex-init init")?;
+    let status = cmd.status().await.context("failed to run ferrexctl init")?;
     if !status.success() {
-        bail!("ferrex-init init exited with {}", status);
+        bail!("ferrexctl init exited with {}", status);
     }
     Ok(())
 }

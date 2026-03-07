@@ -2,7 +2,7 @@
 //!
 //! This crate centralizes `.env` generation/rotation, config loading/validation,
 //! runner selection (host vs docker), and lightweight stack orchestration. Both
-//! the `ferrex-init` binary and `ferrex-server` re-export these utilities so
+//! the `ferrexctl` binary and `ferrex-server` re-export these utilities so
 //! there is a single source of truth for config defaults, managed keys, and
 //! validation rules.
 
