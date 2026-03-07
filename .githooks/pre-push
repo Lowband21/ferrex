@@ -22,7 +22,7 @@ if [[ "${FERREX_SKIP_RELEASE_PREFLIGHT:-}" != "1" ]]; then
   while read -r local_ref local_sha remote_ref remote_sha; do
     if [[ "$remote_ref" == refs/tags/v* ]]; then
       scopes+=("workspace")
-    elif [[ "$remote_ref" == refs/tags/ferrex-init-v* ]]; then
+    elif [[ "$remote_ref" == refs/tags/ferrexctl-v* ]]; then
       scopes+=("init")
     fi
   done <"$stdin_file"
