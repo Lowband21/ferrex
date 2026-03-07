@@ -81,13 +81,13 @@
       # Common outputHashes for all git-sourced crates
       commonOutputHashes = {
         # gtk-rs-core (glib, gio, etc.)
-        "gio-sys-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
+        "gio-sys-0.22.0-alpha.2" = "sha256-eI5uaPU5WchJ/7A5NWPF5CPK9iwz7A91IKONK7lkDok=";
         "glib-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
         "glib-macros-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
         "glib-sys-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
         "gobject-sys-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
         # gstreamer-rs
-        "gstreamer-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
+        "gstreamer-0.25.0-alpha.1" = "sha256-x9LCeI+gtGg8SnpEKfvOSK0NvCNyM2k+REPoP/jHbW8=";
         "gstreamer-app-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
         "gstreamer-app-sys-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
         "gstreamer-base-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
