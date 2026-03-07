@@ -90,9 +90,15 @@ impl PostgresDatabase {
                                 .execute(&mut *conn)
                                 .await;
                         for statement in tuning_statements.iter() {
-                            let _ = sqlx::query(statement)
-                                .execute(&mut *conn)
-                                .await;
+                            if let Err(e) =
+                                sqlx::query(statement).execute(&mut *conn).await
+                            {
+                                warn!(
+                                    statement,
+                                    error = %e,
+                                    "postgres tuning statement failed"
+                                );
+                            }
                         }
                         Ok(())
                     })
