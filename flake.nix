@@ -324,6 +324,8 @@
         ferrexctl = self.packages.${final.system}.ferrexctl;
       };
 
+      homeManagerModules.ferrex-player = import ./nix/modules/ferrex-player-hm.nix;
+
       devShells = forAllSystems (
         system:
         let
