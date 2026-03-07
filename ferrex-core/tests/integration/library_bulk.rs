@@ -27,7 +27,7 @@ use ferrex_core::domain::scan::orchestration::context::{
 };
 use ferrex_core::domain::scan::orchestration::correlation::CorrelationCache;
 use ferrex_core::domain::scan::orchestration::dispatcher::{
-    DefaultJobDispatcher, DispatcherActors, DispatchStatus,
+    DefaultJobDispatcher, DispatchStatus, DispatcherActors,
 };
 use ferrex_core::domain::scan::orchestration::job::{
     ImageFetchJob, JobKind, MediaAnalyzeJob, MediaFingerprint,
@@ -46,7 +46,9 @@ use ferrex_core::domain::scan::orchestration::series_state::{
     InMemorySeriesScanStateRepository, SeriesScanStateRepository,
 };
 use ferrex_core::error::Result;
-use ferrex_core::types::{LibraryId, LibraryReference, LibraryType, MediaID, SeriesID, VideoMediaType};
+use ferrex_core::types::{
+    LibraryId, LibraryReference, LibraryType, MediaID, SeriesID, VideoMediaType,
+};
 
 fn norm(path: &Path) -> String {
     normalize_path(path)
@@ -84,7 +86,10 @@ impl MediaAnalyzeActor for StubAnalyze {
 struct StubMetadata;
 #[async_trait]
 impl MetadataActor for StubMetadata {
-    async fn enrich(&self, command: MetadataCommand) -> Result<MediaReadyForIndex> {
+    async fn enrich(
+        &self,
+        command: MetadataCommand,
+    ) -> Result<MediaReadyForIndex> {
         Ok(MediaReadyForIndex {
             library_id: command.job.library_id,
             media_id: command.job.media_id,
@@ -242,7 +247,10 @@ async fn bulk_seed_depth1_and_recursive_followups(pool: PgPool) -> Result<()> {
     let mut seen = Vec::new();
     for row in rows.iter() {
         let payload: serde_json::Value = row.payload.clone();
-        let folder = payload["payload"]["folder_path_norm"].as_str().unwrap_or("").to_string();
+        let folder = payload["payload"]["folder_path_norm"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         seen.push(folder);
     }
     assert!(seen.contains(&expect1), "X1 must be enqueued at depth-1");
@@ -307,13 +315,18 @@ async fn bulk_seed_depth1_and_recursive_followups(pool: PgPool) -> Result<()> {
     let mut child_seen = false;
     for row in children.iter() {
         let payload: serde_json::Value = row.payload.clone();
-        let folder = payload["payload"]["folder_path_norm"].as_str().unwrap_or("");
+        let folder = payload["payload"]["folder_path_norm"]
+            .as_str()
+            .unwrap_or("");
         if folder == child1 || folder == child2 {
             child_seen = true;
             break;
         }
     }
-    assert!(child_seen, "expected a child subfolder scan to be enqueued by dispatcher");
+    assert!(
+        child_seen,
+        "expected a child subfolder scan to be enqueued by dispatcher"
+    );
 
     Ok(())
 }

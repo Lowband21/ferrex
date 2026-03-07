@@ -21,13 +21,18 @@ fn password_change_validates_and_emits_event() {
     state.domains.settings.security.password_confirm =
         ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("NewPass1");
 
-    let result = update::update_settings(&mut state, SettingsMessage::SubmitPasswordChange);
+    let result = update::update_settings(
+        &mut state,
+        SettingsMessage::SubmitPasswordChange,
+    );
 
     // Emits AuthCommandRequested(ChangePassword) and sets loading, no error
     assert!(state.domains.settings.security.password_loading);
     assert!(state.domains.settings.security.password_error.is_none());
     let change_cmd = result.events.iter().any(|e| match e {
-        CrossDomainEvent::AuthCommandRequested(AuthCommand::ChangePassword { .. }) => true,
+        CrossDomainEvent::AuthCommandRequested(
+            AuthCommand::ChangePassword { .. },
+        ) => true,
         _ => false,
     });
     assert!(change_cmd, "should request ChangePassword auth command");
@@ -45,7 +50,10 @@ fn password_change_validation_errors_no_event() {
     state.domains.settings.security.password_confirm =
         ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("short");
 
-    let result = update::update_settings(&mut state, SettingsMessage::SubmitPasswordChange);
+    let result = update::update_settings(
+        &mut state,
+        SettingsMessage::SubmitPasswordChange,
+    );
 
     assert!(result.events.is_empty());
     assert!(state.domains.settings.security.password_error.is_some());
@@ -62,10 +70,13 @@ fn pin_set_and_change_emit_correct_commands() {
     state.domains.settings.security.pin_confirm =
         ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("1234");
 
-    let result = update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
+    let result =
+        update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
     assert!(state.domains.settings.security.pin_loading);
     let set_cmd = result.events.iter().any(|e| match e {
-        CrossDomainEvent::AuthCommandRequested(AuthCommand::SetUserPin { .. }) => true,
+        CrossDomainEvent::AuthCommandRequested(AuthCommand::SetUserPin {
+            ..
+        }) => true,
         _ => false,
     });
     assert!(set_cmd, "should request SetUserPin when user has no PIN");
@@ -80,20 +91,29 @@ fn pin_set_and_change_emit_correct_commands() {
     state.domains.settings.security.pin_confirm =
         ferrex_player::domains::auth::security::secure_credential::SecureCredential::from("2222");
 
-    let result = update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
+    let result =
+        update::update_settings(&mut state, SettingsMessage::SubmitPinChange);
     assert!(state.domains.settings.security.pin_loading);
     let change_cmd = result.events.iter().any(|e| match e {
-        CrossDomainEvent::AuthCommandRequested(AuthCommand::ChangeUserPin { .. }) => true,
+        CrossDomainEvent::AuthCommandRequested(
+            AuthCommand::ChangeUserPin { .. },
+        ) => true,
         _ => false,
     });
-    assert!(change_cmd, "should request ChangeUserPin when user has a PIN");
+    assert!(
+        change_cmd,
+        "should request ChangeUserPin when user has a PIN"
+    );
 }
 
 #[test]
 fn auto_login_toggle_updates_state_on_result() {
     let mut state = create_test_state();
     // Simulate successful toggle completion message
-    let _ = update::update_settings(&mut state, SettingsMessage::AutoLoginToggled(Ok(true)));
+    let _ = update::update_settings(
+        &mut state,
+        SettingsMessage::AutoLoginToggled(Ok(true)),
+    );
 
     assert!(state.domains.settings.preferences.auto_login_enabled);
     assert!(state.domains.auth.state.auto_login_enabled);

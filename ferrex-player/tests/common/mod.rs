@@ -4,10 +4,6 @@
 //! of the Ferrex player, including mock builders, assertion helpers, and
 //! async task execution utilities.
 
-pub mod assertions;
-pub mod fixtures;
-pub mod mocks;
-pub mod scenario;
 pub mod state_traits;
 
 use ferrex_player::messages::DomainMessage;

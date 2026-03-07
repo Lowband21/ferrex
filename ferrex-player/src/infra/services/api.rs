@@ -11,15 +11,16 @@ use ferrex_core::{
     api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
-        CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-        Library, LibraryId, Media, MediaQuery, MediaRootBrowseResponse,
-        MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
-        MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
-        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
-        ScanMetrics, SeasonWatchStatus, SeriesBundleFetchRequest,
-        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
-        SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
-        UpdateProgressRequest, User, UserPermissions, UserWatchState,
+        CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
+        ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
+        Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
+        MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
+        MovieBatchSyncResponse, NextEpisode, ScanCommandAcceptedResponse,
+        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
+        SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+        SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus,
+        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
+        UserPermissions, UserWatchState,
     },
 };
 use ferrex_model::image::ImageQuery;
@@ -56,6 +57,12 @@ pub trait ApiService: Send + Sync + Debug {
         path: &str,
         size: ImageQuery,
     ) -> RepositoryResult<ImageFetchResult>;
+
+    /// Batch image readiness lookup (v2, rkyv request/response).
+    async fn post_image_manifest(
+        &self,
+        request: ImageManifestRequest,
+    ) -> RepositoryResult<ImageManifestResponse>;
 
     // === Common API operations ===
 

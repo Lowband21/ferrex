@@ -1470,6 +1470,17 @@ mod tests {
         .await
         .expect("seed library row");
 
+        sqlx::query(
+            r#"
+            DELETE FROM orchestrator_jobs
+            WHERE library_id = $1
+            "#,
+        )
+        .bind(library_id.as_uuid())
+        .execute(pool)
+        .await
+        .expect("clear fixture jobs");
+
         let movie_root_path = MovieRootPath::try_new_under_library_root(
             "/library",
             "/library/movie",
@@ -1487,12 +1498,13 @@ mod tests {
             movie_root_path,
         });
 
+        let unique_hash = format!("test-{}", Uuid::now_v7());
         let folder_actor = Arc::new(StubFolderActor {
             plan: FolderListingPlan {
                 directories: vec![PathBuf::from("/library/movie/child")],
                 media_files: vec![PathBuf::from("/library/movie/movie.mkv")],
                 ancillary_files: vec![],
-                generated_listing_hash: "abc123".into(),
+                generated_listing_hash: unique_hash.clone(),
             },
             discovered: vec![MediaFileDiscovered {
                 library_id,
@@ -1517,7 +1529,7 @@ mod tests {
                 context,
                 discovered_files: 1,
                 enqueued_subfolders: 1,
-                listing_hash: "abc123".into(),
+                listing_hash: unique_hash,
                 completed_at: Utc::now(),
             },
         }) as Arc<dyn FolderScanActor>;
@@ -1620,9 +1632,13 @@ mod tests {
         assert!(analyze.is_some(), "expected media analyze job to be queued");
 
         // Verify cursor written
+        let folder_path = match &lease.job.payload {
+            JobPayload::FolderScan(job) => job.context.folder_path_norm(),
+            _ => panic!("expected folder scan payload"),
+        };
         let cursor_id = ScanCursorId::new(
             lease.job.payload.library_id(),
-            &vec![PathBuf::from("/library")],
+            &vec![PathBuf::from(folder_path)],
         );
         let cursor = cursors.get(&cursor_id).await.expect("cursor read");
         assert!(

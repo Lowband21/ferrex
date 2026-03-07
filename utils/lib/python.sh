@@ -26,7 +26,7 @@ PY
 }
 
 ferrex_detect_python() {
-  if [[ "${FERREX_PYTHON_BIN_SET:-0}" -eq 1 ]]; then
+  if [[ ${FERREX_PYTHON_BIN_SET:-0} -eq 1 ]]; then
     return 0
   fi
 

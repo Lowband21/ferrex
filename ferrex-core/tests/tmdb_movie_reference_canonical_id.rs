@@ -40,6 +40,7 @@ fn build_movie_reference(
     movie_id: MovieID,
     tmdb_id: u64,
     file_path: &str,
+    poster_iid: Uuid,
 ) -> MovieReference {
     let details = EnhancedMovieDetails {
         id: tmdb_id,
@@ -66,7 +67,7 @@ fn build_movie_reference(
         poster_path: None,
         backdrop_path: None,
         logo_path: None,
-        primary_poster_iid: None,
+        primary_poster_iid: Some(poster_iid),
         primary_backdrop_iid: None,
         images: MediaImages::default(),
         cast: Vec::new(),
@@ -109,6 +110,24 @@ fn build_movie_reference(
     }
 }
 
+async fn seed_poster_image(pool: &PgPool, poster_iid: Uuid, movie_uuid: Uuid) {
+    sqlx::query(
+        r#"
+        INSERT INTO tmdb_image_variants (
+            id, tmdb_path, media_id, image_variant, media_type, width, height,
+            vote_avg, vote_cnt, is_primary
+        )
+        VALUES ($1, $2, $3, 'poster', 'movie', 300, 450, 9.0, 100, true)
+        "#,
+    )
+    .bind(poster_iid)
+    .bind(format!("/poster-{}.jpg", poster_iid))
+    .bind(movie_uuid)
+    .execute(pool)
+    .await
+    .expect("seed poster image");
+}
+
 #[sqlx::test]
 async fn movie_reference_conflict_returns_canonical_id(pool: PgPool) {
     let repo = PostgresMediaReferencesRepository::new(pool.clone());
@@ -119,11 +138,15 @@ async fn movie_reference_conflict_returns_canonical_id(pool: PgPool) {
     let tmdb_id = 42;
 
     let first_id = MovieID::new();
+    let poster_iid = Uuid::now_v7();
+    seed_poster_image(&pool, poster_iid, first_id.to_uuid()).await;
+
     let movie1 = build_movie_reference(
         library_id,
         first_id,
         tmdb_id,
         "/test/movies/movie-a.mkv",
+        poster_iid,
     );
     let stored1 = repo
         .store_movie_reference(&movie1)
@@ -138,6 +161,7 @@ async fn movie_reference_conflict_returns_canonical_id(pool: PgPool) {
         second_id,
         tmdb_id,
         "/test/movies/movie-b.mkv",
+        poster_iid,
     );
     let stored2 = repo
         .store_movie_reference(&movie2)

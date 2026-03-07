@@ -54,6 +54,9 @@ pub struct UnifiedImageService {
     // Single cache for all images
     cache: Arc<DashMap<ImageRequest, ImageEntry>>,
 
+    // Ready immutable blob tokens keyed by request (v2 image pipeline).
+    ready_tokens: Arc<DashMap<ImageRequest, String>>,
+
     // Priority queue for pending loads (using u8 priority, higher is better)
     queue: Arc<Mutex<PriorityQueue<ImageRequest, u8>>>,
 
@@ -97,6 +100,7 @@ impl UnifiedImageService {
 
         let service = Self {
             cache: Arc::new(DashMap::new()),
+            ready_tokens: Arc::new(DashMap::new()),
             queue: Arc::new(Mutex::new(PriorityQueue::new())),
             loading: Arc::new(DashMap::new()),
             load_sender,
@@ -111,6 +115,24 @@ impl UnifiedImageService {
         };
 
         (service, load_receiver)
+    }
+
+    pub fn set_ready_token(&self, request: &ImageRequest, token: String) {
+        self.ready_tokens.insert(request.clone(), token);
+        // Clear pending throttle so an SSE notification can trigger an immediate fetch.
+        if let Some(mut entry) = self.cache.get_mut(request)
+            && matches!(entry.state, LoadState::Pending)
+        {
+            entry.last_failure = None;
+        }
+    }
+
+    pub fn ready_token(&self, request: &ImageRequest) -> Option<String> {
+        self.ready_tokens.get(request).map(|t| t.value().clone())
+    }
+
+    pub fn clear_ready_token(&self, request: &ImageRequest) {
+        self.ready_tokens.remove(request);
     }
 
     /// Maximum allowed concurrent loads for the unified image service.
@@ -415,6 +437,7 @@ impl UnifiedImageService {
         handle: Handle,
         estimated_bytes: u64,
     ) {
+        self.clear_ready_token(request);
         self.loading.remove(request);
         let now = std::time::Instant::now();
 
@@ -477,6 +500,7 @@ impl UnifiedImageService {
     }
 
     pub fn mark_failed(&self, request: &ImageRequest, error: String) {
+        self.clear_ready_token(request);
         self.loading.remove(request);
 
         // Check if this is a 404 error (image doesn't exist on server)
@@ -552,6 +576,7 @@ impl UnifiedImageService {
     }
 
     pub fn mark_pending(&self, request: &ImageRequest) {
+        self.clear_ready_token(request);
         self.loading.remove(request);
 
         let now = std::time::Instant::now();
@@ -619,9 +644,41 @@ impl UnifiedImageService {
     }
 
     pub fn mark_cancelled(&self, request: &ImageRequest) {
+        self.clear_ready_token(request);
         self.loading.remove(request);
         let _ = self.remove_entry_and_account(request);
         self.clear_inflight_cancel(request);
+    }
+
+    /// Pop up to `max` queued requests (highest priority first) for manifest lookup.
+    ///
+    /// This removes requests from the queue temporarily; callers should requeue
+    /// any requests they still want to download after manifest processing.
+    pub fn take_manifest_batch(&self, max: usize) -> Vec<ImageRequest> {
+        let Ok(mut queue) = self.queue.lock() else {
+            return Vec::new();
+        };
+
+        let mut batch = Vec::with_capacity(max);
+        let mut skipped = Vec::new();
+
+        while batch.len() < max {
+            let Some((req, prio)) = queue.pop() else {
+                break;
+            };
+            if self.loading.contains_key(&req) {
+                skipped.push((req, prio));
+                continue;
+            }
+            batch.push(req);
+        }
+
+        // Restore any items we skipped due to being in-flight.
+        for (req, prio) in skipped {
+            queue.push(req, prio);
+        }
+
+        batch
     }
 
     pub fn get_next_request(&self) -> Option<ImageRequest> {

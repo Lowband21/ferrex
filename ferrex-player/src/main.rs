@@ -29,12 +29,10 @@ fn init_logger() {
 fn main() -> iced::Result {
     if std::env::var("RUST_LOG").is_err() {
         init_logger();
-        log::warn!(
-            "Failed to initialize logger from env, fell back to default"
-        );
+        log::info!("RUST_LOG not set; using default logger");
     } else {
         env_logger::init();
-        log::warn!("Initialized logger from env");
+        log::info!("Initialized logger from env");
     }
 
     #[cfg(any(

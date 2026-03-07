@@ -7,7 +7,7 @@ set -euo pipefail
 #   stack-up.sh up|down [options]  -> explicit action
 
 ACTION="up"
-if [[ "${1:-}" == "up" || "${1:-}" == "down" ]]; then
+if [[ ${1:-} == "up" || ${1:-} == "down" ]]; then
   ACTION="$1"
   shift
 fi

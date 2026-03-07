@@ -206,6 +206,9 @@ impl PostgresQueryRepository {
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
+            let subsequence_pattern = build_subsequence_regex(search_text);
+            let token_like_pattern = first_token_like_pattern(search_text);
+
             sql_builder.push(" AND (");
             sql_builder.push("mr.title ILIKE ");
             sql_builder.push_bind(substring_pattern.clone());
@@ -214,6 +217,14 @@ impl PostgresQueryRepository {
             sql_builder.push_bind(search_text);
             sql_builder.push(") > ");
             sql_builder.push_bind(similarity_threshold);
+            if let Some(ref pattern) = subsequence_pattern {
+                sql_builder.push(" OR LOWER(mr.title) ~ ");
+                sql_builder.push_bind(pattern.clone());
+            }
+            if let Some(ref pattern) = token_like_pattern {
+                sql_builder.push(" OR LOWER(mr.title) LIKE ");
+                sql_builder.push_bind(pattern.clone());
+            }
             sql_builder.push(")");
 
             let prefix_pattern = format!("{}%", escaped);
@@ -292,6 +303,9 @@ impl PostgresQueryRepository {
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
+            let subsequence_pattern = build_subsequence_regex(search_text);
+            let token_like_pattern = first_token_like_pattern(search_text);
+
             sql_builder.push(" AND (");
             sql_builder.push("s.title ILIKE ");
             sql_builder.push_bind(substring_pattern.clone());
@@ -300,6 +314,14 @@ impl PostgresQueryRepository {
             sql_builder.push_bind(search_text);
             sql_builder.push(") > ");
             sql_builder.push_bind(similarity_threshold);
+            if let Some(ref pattern) = subsequence_pattern {
+                sql_builder.push(" OR LOWER(s.title) ~ ");
+                sql_builder.push_bind(pattern.clone());
+            }
+            if let Some(ref pattern) = token_like_pattern {
+                sql_builder.push(" OR LOWER(s.title) LIKE ");
+                sql_builder.push_bind(pattern.clone());
+            }
             sql_builder.push(")");
 
             let prefix_pattern = format!("{}%", escaped);
@@ -381,6 +403,9 @@ impl PostgresQueryRepository {
         } else {
             let similarity_threshold = similarity_threshold(query_len);
             let substring_pattern = format!("%{}%", escaped);
+            let subsequence_pattern = build_subsequence_regex(search_text);
+            let token_like_pattern = first_token_like_pattern(search_text);
+
             sql_builder.push(" AND (");
             sql_builder.push("em.name ILIKE ");
             sql_builder.push_bind(substring_pattern.clone());
@@ -389,6 +414,14 @@ impl PostgresQueryRepository {
             sql_builder.push_bind(search_text);
             sql_builder.push(") > ");
             sql_builder.push_bind(similarity_threshold);
+            if let Some(ref pattern) = subsequence_pattern {
+                sql_builder.push(" OR LOWER(em.name) ~ ");
+                sql_builder.push_bind(pattern.clone());
+            }
+            if let Some(ref pattern) = token_like_pattern {
+                sql_builder.push(" OR LOWER(em.name) LIKE ");
+                sql_builder.push_bind(pattern.clone());
+            }
             sql_builder.push(")");
 
             let prefix_pattern = format!("{}%", escaped);
@@ -1474,4 +1507,34 @@ fn similarity_threshold(query_len: usize) -> f32 {
         5..=8 => 0.10,
         _ => 0.15,
     }
+}
+
+fn build_subsequence_regex(query: &str) -> Option<String> {
+    let clean: String = query.chars().filter(|c| c.is_alphanumeric()).collect();
+    if clean.len() < 2 || clean.len() > 24 {
+        return None;
+    }
+    let mut pattern = String::with_capacity(clean.len() * 3);
+    for (i, ch) in clean.chars().enumerate() {
+        if i > 0 {
+            pattern.push_str(".*");
+        }
+        if ch.is_ascii_alphabetic() {
+            pattern.push(ch.to_ascii_lowercase());
+        } else {
+            pattern.push(ch);
+        }
+    }
+    Some(pattern)
+}
+
+fn first_token_like_pattern(query: &str) -> Option<String> {
+    let mut tokens = query.split_whitespace().filter(|t| !t.is_empty());
+    let first = tokens.next()?;
+    tokens.next()?;
+    let clean: String = first.chars().filter(|c| c.is_alphanumeric()).collect();
+    if clean.len() < 2 {
+        return None;
+    }
+    Some(format!("%{}%", clean.to_lowercase()))
 }

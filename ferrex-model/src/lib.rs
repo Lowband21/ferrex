@@ -16,6 +16,7 @@ pub mod files;
 pub mod filter_types;
 pub mod ids;
 pub mod image;
+pub mod image_events;
 pub mod library;
 pub mod media;
 pub mod media_events;
@@ -52,6 +53,7 @@ pub use image::{
     BackdropSize, EpisodeSize, ImageSize, PosterSize, ProfileSize,
 };
 pub use image::{ImageRequest, Priority};
+pub use image_events::ImageReadyEvent;
 #[cfg(feature = "rkyv")]
 pub use library::{ArchivedLibrary, ArchivedLibraryExt, ArchivedLibraryType};
 pub use library::{Library, LibraryLike, LibraryLikeMut, LibraryType};

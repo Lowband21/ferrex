@@ -23,7 +23,10 @@ use crate::{
         admin::{dev_handlers, media_root},
         handle_websocket::websocket_handler,
         media::{
-            handle_image::serve_image_handler,
+            handle_image::{
+                get_image_blob_handler, image_events_sse_handler,
+                post_image_manifest_handler,
+            },
             handle_library::{
                 create_library_handler, delete_library_handler,
                 get_libraries_with_media_handler, get_library_handler,
@@ -90,7 +93,7 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
         //
         .merge(create_libraries_routes(state.clone()))
         .merge(create_scan_routes(state.clone()))
-        .merge(create_metadata_routes(state.clone()))
+        .merge(create_image_routes(state.clone()))
         // Merge protected routes
         .merge(create_protected_routes(state.clone()))
         // Merge admin routes
@@ -364,9 +367,11 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
         ))
 }
 
-fn create_metadata_routes(state: AppState) -> Router<AppState> {
+fn create_image_routes(state: AppState) -> Router<AppState> {
     Router::new()
-        .route(v1::images::SERVE, get(serve_image_handler))
+        .route(v1::images::MANIFEST, post(post_image_manifest_handler))
+        .route(v1::images::BLOB_ITEM, get(get_image_blob_handler))
+        .route(v1::images::EVENTS, get(image_events_sse_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

@@ -789,7 +789,7 @@ mod tests {
         let mut limits = PlayerDiskImageCacheLimits::defaults();
         limits.touch_interval = std::time::Duration::from_secs(0);
         limits.max_bytes = crate::infra::units::ByteSize::from_bytes(0);
-        limits.ttl = std::time::Duration::from_millis(2);
+        limits.ttl = std::time::Duration::from_millis(100);
 
         let cache = PlayerDiskImageCache::try_new_for_root(
             root.clone(),
@@ -809,7 +809,7 @@ mod tests {
         cache.write_bytes(&req_a, &[1u8; 128]).await;
         cache.write_bytes(&req_b, &[2u8; 128]).await;
 
-        tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         let _ = cache.read_bytes(&req_a).await;
         cache.flush_access_index_for_tests().await;
 

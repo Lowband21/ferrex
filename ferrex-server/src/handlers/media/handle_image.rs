@@ -1,188 +1,211 @@
+use axum::{
+    body::{Body, Bytes},
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response, Sse},
+};
+use base64::{
+    Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
+};
+use ferrex_core::{
+    api::types::{
+        ImageManifestRequest, ImageManifestResponse, ImageManifestResult,
+        ImageManifestStatus,
+    },
+    infra::{cache::ImageFileStore, image_service::CachePolicy},
+};
+use ferrex_model::events::ImageSseEventType;
+use httpdate::{fmt_http_date, parse_http_date};
+use rkyv::util::AlignedVec;
+use rkyv::{from_bytes, rancor::Error as RkyvError, to_bytes};
+use std::{convert::Infallible, time::Duration};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tokio_util::io::ReaderStream;
+use tracing::{error, warn};
+use uuid::Uuid;
+
 use crate::{
     handlers::media::image_validation::validate_magic_bytes,
     infra::app_state::AppState,
 };
 
-use axum::{
-    body::Body,
-    extract::{self, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
-};
-use ferrex_core::{
-    database::traits::ImageRecord, error::MediaError,
-    infra::image_service::CachePolicy,
-};
-use ferrex_model::{ImageSize, image::ImageQuery};
+const BLOB_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
-// Used by demo feature
-#[allow(unused)]
-use ferrex_model::image::ImageVariant;
-
-use httpdate::{fmt_http_date, parse_http_date};
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-use thiserror::Error;
-use tracing::{error, warn};
-
-/// Maximum image size to serve (50 MB). Images larger than this are rejected.
-/// This prevents memory exhaustion from malicious or corrupted files.
-const MAX_IMAGE_SIZE_BYTES: u64 = 50 * 1024 * 1024;
-
-/// Size threshold for logging warnings about large images (5 MB).
-const LARGE_IMAGE_WARN_THRESHOLD: u64 = 5 * 1024 * 1024;
-
-// Simple counters for image responses on this process
-static IMAGE_RESP_200: AtomicU64 = AtomicU64::new(0);
-static IMAGE_RESP_304: AtomicU64 = AtomicU64::new(0);
-static IMAGE_RESP_MISS: AtomicU64 = AtomicU64::new(0);
-
-/// Errors that can occur during image lookup or loading.
-#[derive(Debug, Error)]
-enum ImageError {
-    #[error("image too large: {0} bytes")]
-    TooLarge(u64),
-    #[error("cache read failed: {0}")]
-    CacheRead(#[from] MediaError),
-    #[error("cache entry missing or corrupt")]
-    CorruptOrMissingCache,
-    #[error("not modified")]
-    NotModified(ImageNotModified),
-    #[cfg(feature = "demo")]
-    #[error("not available in demo mode")]
-    DemoError,
-}
-
-/// Indicates a conditional request matched and we should return 304.
-#[derive(Debug)]
-struct ImageNotModified {
-    etag: String,
-    last_modified: String,
-}
-
-/// Fully-loaded cached image with headers already computed.
-#[derive(Debug)]
-struct CachedImage {
-    bytes: Vec<u8>,
-    content_type: &'static str,
-    len: usize,
-    etag: String,
-    last_modified: String,
-}
-
-/// Serve cached images
-pub async fn serve_image_handler(
-    headers: HeaderMap,
+/// POST /api/v1/images/manifest - Batch image readiness lookup (rkyv request/response).
+pub async fn post_image_manifest_handler(
     State(state): State<AppState>,
-    extract::Json(query): extract::Json<ImageQuery>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> impl IntoResponse {
-    let t_start = std::time::Instant::now();
+    // rkyv expects aligned bytes; axum's `Bytes` is not guaranteed to be aligned,
+    // which can cause intermittent decode failures under load.
+    let mut aligned: AlignedVec = AlignedVec::with_capacity(body.len());
+    aligned.extend_from_slice(&body);
 
-    let elapsed = || t_start.elapsed().as_millis();
+    let request = match from_bytes::<ImageManifestRequest, RkyvError>(&aligned)
+    {
+        Ok(req) => req,
+        Err(err) => {
+            let content_type = headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            warn!(
+                "image manifest decode failed: {err} (content-type='{}', bytes={})",
+                content_type,
+                body.len()
+            );
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
 
-    // Fast path: serve cached bytes if available, otherwise enqueue the image
-    let uow = state.unit_of_work();
-    let repo = uow.images.clone();
+    let mut results = Vec::with_capacity(request.requests.len());
 
-    let record = match repo.lookup_cached_image(query.iid, query.imz).await {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Failed to lookup cached image record: {}", e);
+    for item in request.requests {
+        let iid: Uuid = item.iid;
+        let imz = item.imz;
+
+        #[cfg(feature = "demo")]
+        {
+            if matches!(
+                imz.image_variant(),
+                ferrex_model::image::ImageVariant::Thumbnail
+            ) {
+                results.push(ImageManifestResult {
+                    iid,
+                    imz,
+                    status: ImageManifestStatus::Missing {
+                        reason:
+                            "thumbnail images are not available in demo mode"
+                                .to_string(),
+                    },
+                });
+                continue;
+            }
+        }
+
+        let meta = match state
+            .image_service()
+            .read_cached_meta_by_key(iid, imz)
+            .await
+        {
+            Ok(meta) => meta,
+            Err(err) => {
+                error!(
+                    "image manifest meta lookup failed: iid={}, imz={:?}, err={}",
+                    iid, imz, err
+                );
+                results.push(ImageManifestResult {
+                    iid,
+                    imz,
+                    status: ImageManifestStatus::Pending {
+                        retry_after_ms: 1_000,
+                    },
+                });
+                state.image_service().enqueue_cache(
+                    iid,
+                    imz,
+                    CachePolicy::Ensure,
+                );
+                continue;
+            }
+        };
+
+        let Some(meta) = meta else {
+            results.push(ImageManifestResult {
+                iid,
+                imz,
+                status: ImageManifestStatus::Pending {
+                    retry_after_ms: 1_000,
+                },
+            });
+            state
+                .image_service()
+                .enqueue_cache(iid, imz, CachePolicy::Ensure);
+            continue;
+        };
+
+        let token =
+            ImageFileStore::token_from_integrity(&meta.integrity.to_string());
+        let blob_exists = match state.image_service().image_blob_path(&token) {
+            Ok(path) => tokio::fs::try_exists(path).await.unwrap_or(false),
+            Err(_) => false,
+        };
+
+        if blob_exists {
+            results.push(ImageManifestResult {
+                iid,
+                imz,
+                status: ImageManifestStatus::Ready {
+                    token,
+                    byte_len: meta.byte_len as u64,
+                },
+            });
+            continue;
+        }
+
+        // Cached in `cacache`, but not yet materialized for the immutable blob path.
+        state
+            .image_service()
+            .enqueue_cache(iid, imz, CachePolicy::Ensure);
+        results.push(ImageManifestResult {
+            iid,
+            imz,
+            status: ImageManifestStatus::Pending {
+                retry_after_ms: 1_000,
+            },
+        });
+    }
+
+    let response = ImageManifestResponse { results };
+    let bytes = match to_bytes::<RkyvError>(&response) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            error!("image manifest encode failed: {err}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
-    if let Some(record) = record {
-        match get_cached_image(&state, &record, &headers).await {
-            Ok(cached) => {
-                IMAGE_RESP_200.fetch_add(1, Ordering::Relaxed);
-                return build_image_response(
-                    cached,
-                    record.imz,
-                    query.imz,
-                    elapsed(),
-                )
-                .into_response();
-            }
-            Err(ImageError::NotModified(not_mod)) => {
-                IMAGE_RESP_304.fetch_add(1, Ordering::Relaxed);
-                return build_not_modified_response(
-                    not_mod,
-                    record.imz,
-                    query.imz,
-                    elapsed(),
-                )
-                .into_response();
-            }
-            Err(ImageError::CorruptOrMissingCache) => {
-                state.image_service().enqueue_cache(
-                    query.iid,
-                    query.imz,
-                    CachePolicy::Refresh,
-                );
-            }
-            Err(ImageError::TooLarge(_)) => {
-                return StatusCode::UNPROCESSABLE_ENTITY.into_response();
-            }
-            #[cfg(feature = "demo")]
-            Err(ImageError::DemoError) => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-            Err(e) => {
-                error!("Failed to load cached image bytes: {}", e);
-            }
-        }
-    } else {
-        state.image_service().enqueue_cache(
-            query.iid,
-            query.imz,
-            CachePolicy::Ensure,
-        );
-    }
-
-    IMAGE_RESP_MISS.fetch_add(1, Ordering::Relaxed);
-    cache_miss_response(query.imz, elapsed()).into_response()
+    (
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        Bytes::from(bytes.into_vec()),
+    )
+        .into_response()
 }
 
-/// Load cached image bytes atomically and honor conditional headers.
-async fn get_cached_image(
-    state: &AppState,
-    record: &ImageRecord,
-    headers: &HeaderMap,
-) -> Result<CachedImage, ImageError> {
-    #[cfg(feature = "demo")]
-    if matches!(record.imz.image_variant(), ImageVariant::Thumbnail) {
-        return Err(ImageError::DemoError);
-    }
-    let byte_len = record.byte_len.max(0) as u64;
-    if byte_len > MAX_IMAGE_SIZE_BYTES {
-        return Err(ImageError::TooLarge(byte_len));
-    }
+/// GET /api/v1/images/blob/{token} - Content-addressed immutable image blob.
+pub async fn get_image_blob_handler(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> impl IntoResponse {
+    let etag = format!("\"{token}\"");
 
-    if byte_len > LARGE_IMAGE_WARN_THRESHOLD {
-        warn!(
-            "Serving large image from cache: iid={}, imz={:?} ({} bytes)",
-            record.iid, record.imz, byte_len
-        );
-    }
-
-    let modified = system_time_from_utc(record.modified_at);
-    let last_modified = fmt_http_date(modified);
-    let etag = format!("\"{}\"", record.integrity);
-
-    // Conditional headers
     if let Some(if_none_match) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         && if_none_match.split(',').any(|t| t.trim() == etag)
     {
-        return Err(ImageError::NotModified(ImageNotModified {
-            etag: etag.clone(),
-            last_modified: last_modified.clone(),
-        }));
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, BLOB_CACHE_CONTROL)
+            .body(Body::empty())
+            .unwrap();
     }
+
+    let path = match state.image_service().image_blob_path(&token) {
+        Ok(path) => path,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let meta = match tokio::fs::metadata(&path).await {
+        Ok(m) => m,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let modified = meta.modified().unwrap_or(std::time::SystemTime::now());
+    let last_modified = fmt_http_date(modified);
 
     if let Some(if_modified_since) = headers
         .get(header::IF_MODIFIED_SINCE)
@@ -190,102 +213,79 @@ async fn get_cached_image(
         && let Ok(since_time) = parse_http_date(if_modified_since)
         && modified <= since_time
     {
-        return Err(ImageError::NotModified(ImageNotModified {
-            etag: etag.clone(),
-            last_modified: last_modified.clone(),
-        }));
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::LAST_MODIFIED, last_modified)
+            .header(header::CACHE_CONTROL, BLOB_CACHE_CONTROL)
+            .body(Body::empty())
+            .unwrap();
     }
 
-    let bytes = state
-        .image_service()
-        .read_cached_bytes(record)
-        .await
-        .map_err(|e| match &e {
-            MediaError::NotFound(_) | MediaError::InvalidMedia(_) => {
-                ImageError::CorruptOrMissingCache
-            }
-            _ => ImageError::CacheRead(e),
-        })?;
-
-    let byte_len = bytes.len();
-
-    if byte_len != record.byte_len as usize {
-        return Err(ImageError::CorruptOrMissingCache);
-    }
-
-    let content_type = match validate_magic_bytes(&bytes) {
-        Ok(ct) => ct,
-        Err(_) => return Err(ImageError::CorruptOrMissingCache),
+    // Sniff content type via magic bytes (small read) without loading the whole file.
+    let content_type = match tokio::fs::File::open(&path).await {
+        Ok(mut f) => {
+            use tokio::io::AsyncReadExt;
+            let mut head = [0u8; 16];
+            let n = f.read(&mut head).await.unwrap_or(0);
+            validate_magic_bytes(&head[..n])
+                .unwrap_or("application/octet-stream")
+        }
+        Err(_) => "application/octet-stream",
     };
 
-    Ok(CachedImage {
-        len: byte_len,
-        bytes,
-        content_type,
-        etag,
-        last_modified,
-    })
-}
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let stream = ReaderStream::new(file);
 
-/// Build a 200 OK response for a cached image.
-fn build_image_response(
-    cached: CachedImage,
-    served: ImageSize,
-    requested: ImageSize,
-    latency_ms: u128,
-) -> Response {
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, cached.content_type)
-        .header(header::CONTENT_LENGTH, cached.len.to_string())
-        .header(header::ETAG, cached.etag)
-        .header(header::LAST_MODIFIED, cached.last_modified)
-        // .header(header::CACHE_CONTROL, "public, max-age=604800, immutable")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::PRAGMA, "no-cache")
-        .header("X-Variant-Served", served.to_tmdb_param())
-        .header("X-Variant-Requested", requested.to_tmdb_param())
-        .header("X-Serve-Latency-Ms", latency_ms.to_string())
-        .body(Body::from(cached.bytes))
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, meta.len().to_string())
+        .header(header::ETAG, etag)
+        .header(header::LAST_MODIFIED, last_modified)
+        .header(header::CACHE_CONTROL, BLOB_CACHE_CONTROL)
+        .body(Body::from_stream(stream))
         .unwrap()
 }
 
-/// Build a 304 Not Modified response using computed cache headers.
-fn build_not_modified_response(
-    not_mod: ImageNotModified,
-    served: ImageSize,
-    requested: ImageSize,
-    latency_ms: u128,
-) -> Response {
-    Response::builder()
-        .status(StatusCode::NOT_MODIFIED)
-        .header(header::ETAG, not_mod.etag)
-        .header(header::LAST_MODIFIED, not_mod.last_modified)
-        // .header(header::CACHE_CONTROL, "public, max-age=604800, immutable")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::PRAGMA, "no-cache")
-        .header("X-Variant-Served", served.to_tmdb_param())
-        .header("X-Variant-Requested", requested.to_tmdb_param())
-        .header("X-Serve-Latency-Ms", latency_ms.to_string())
-        .body(Body::empty())
-        .unwrap()
-}
+/// GET /api/v1/images/events - SSE stream for image readiness notifications.
+pub async fn image_events_sse_handler(
+    State(state): State<AppState>,
+) -> Sse<
+    impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>,
+> {
+    use axum::response::sse::{Event, KeepAlive};
 
-fn cache_miss_response(requested: ImageSize, latency_ms: u128) -> Response {
-    Response::builder()
-        .status(StatusCode::ACCEPTED)
-        // Do not let clients cache miss responses.
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("X-Variant-Requested", requested.to_tmdb_param())
-        .header("X-Serve-Latency-Ms", latency_ms.to_string())
-        .header("X-Cache", "miss")
-        .body(Body::empty())
-        .unwrap()
-}
+    let receiver = state.image_service().subscribe_image_events();
 
-fn system_time_from_utc(dt: chrono::DateTime<chrono::Utc>) -> SystemTime {
-    let secs = dt.timestamp().max(0) as u64;
-    UNIX_EPOCH + Duration::from_secs(secs)
+    let stream = async_stream::stream! {
+        let mut live = BroadcastStream::new(receiver);
+        while let Some(item) = live.next().await {
+            match item {
+                Ok(evt) => {
+                    let Ok(bytes) = to_bytes::<RkyvError>(&evt) else {
+                        continue;
+                    };
+                    let data = BASE64_STANDARD.encode(bytes.as_slice());
+                    yield Ok::<Event, Infallible>(
+                        Event::default()
+                            .event(ImageSseEventType::Ready.event_name())
+                            .data(data),
+                    );
+                }
+                Err(err) => {
+                    warn!("image SSE broadcast error: {err}");
+                }
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
 }

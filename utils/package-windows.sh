@@ -23,7 +23,10 @@ PROFILE="release"
 GST_ROOT_OVERRIDE=""
 OUT_DIR="."
 
-die() { echo "Error: $*" >&2; exit 1; }
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
 
 usage() {
   cat <<EOF
@@ -40,11 +43,26 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --target) TARGET=${2:-}; shift 2 ;;
-    --profile) PROFILE=${2:-}; shift 2 ;;
-    --gst-root) GST_ROOT_OVERRIDE=${2:-}; shift 2 ;;
-    --out) OUT_DIR=${2:-}; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
+    --target)
+      TARGET=${2:-}
+      shift 2
+      ;;
+    --profile)
+      PROFILE=${2:-}
+      shift 2
+      ;;
+    --gst-root)
+      GST_ROOT_OVERRIDE=${2:-}
+      shift 2
+      ;;
+    --out)
+      OUT_DIR=${2:-}
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
@@ -57,9 +75,9 @@ GST_ROOT=""
 case "$TARGET" in
   *-gnu)
     FLAVOR="gnu"
-    if [[ -n "$GST_ROOT_OVERRIDE" ]]; then
+    if [[ -n $GST_ROOT_OVERRIDE ]]; then
       GST_ROOT="$GST_ROOT_OVERRIDE"
-    elif [[ -n "${GST_MINGW_ROOT:-}" ]]; then
+    elif [[ -n ${GST_MINGW_ROOT:-} ]]; then
       GST_ROOT="$GST_MINGW_ROOT"
     elif [[ -d "/home/lowband/gstreamer-windows/PFiles64/gstreamer/1.0/mingw_x86_64" ]]; then
       # Convenience default for this workspace
@@ -68,16 +86,16 @@ case "$TARGET" in
     ;;
   *-msvc)
     FLAVOR="msvc"
-    if [[ -n "$GST_ROOT_OVERRIDE" ]]; then
+    if [[ -n $GST_ROOT_OVERRIDE ]]; then
       GST_ROOT="$GST_ROOT_OVERRIDE"
-    elif [[ -n "${GST_MSVC_ROOT:-}" ]]; then
+    elif [[ -n ${GST_MSVC_ROOT:-} ]]; then
       GST_ROOT="$GST_MSVC_ROOT"
     fi
     ;;
   *) die "Unknown target flavor for $TARGET (expected -gnu or -msvc)" ;;
 esac
 
-[[ -n "$GST_ROOT" ]] || die "GStreamer root not set. Provide --gst-root or set GST_MINGW_ROOT/GST_MSVC_ROOT"
+[[ -n $GST_ROOT ]] || die "GStreamer root not set. Provide --gst-root or set GST_MINGW_ROOT/GST_MSVC_ROOT"
 [[ -d "$GST_ROOT/bin" ]] || die "Invalid GStreamer root (bin/ missing): $GST_ROOT"
 [[ -d "$GST_ROOT/lib/gstreamer-1.0" ]] || die "Invalid GStreamer root (lib/gstreamer-1.0 missing): $GST_ROOT"
 
@@ -85,15 +103,15 @@ esac
 PC_CACHE_DIR="$PWD/cache/pkgconfig/${TARGET}"
 mkdir -p "$PC_CACHE_DIR"
 PC_SOURCE_DIR="$GST_ROOT/lib/pkgconfig"
-if [[ -d "$PC_SOURCE_DIR" ]]; then
+if [[ -d $PC_SOURCE_DIR ]]; then
   for pc_path in "$PC_SOURCE_DIR"/*.pc; do
-    [[ -f "$pc_path" ]] || continue
+    [[ -f $pc_path ]] || continue
     pc_file=$(basename "$pc_path")
     awk -v ROOT="$GST_ROOT" '
       BEGIN{FS=OFS="="}
       /^prefix=/ {print "prefix=" ROOT; next}
       {print}
-    ' "$pc_path" > "$PC_CACHE_DIR/$pc_file"
+    ' "$pc_path" >"$PC_CACHE_DIR/$pc_file"
   done
 else
   die "pkg-config directory missing under $GST_ROOT"
@@ -111,7 +129,7 @@ eval "export PKG_CONFIG_LIBDIR_${TARGET_ENV}=$PC_CACHE_DIR"
 export PKG_CONFIG_SYSROOT_DIR="$GST_ROOT"
 eval "export PKG_CONFIG_SYSROOT_DIR_${TARGET_ENV}=$GST_ROOT"
 
-if [[ "$TARGET" == "x86_64-pc-windows-gnu" ]]; then
+if [[ $TARGET == "x86_64-pc-windows-gnu" ]]; then
   command -v x86_64-w64-mingw32-gcc >/dev/null || die "x86_64-w64-mingw32-gcc not found in PATH"
   eval "export CC_${TARGET_ENV}=x86_64-w64-mingw32-gcc"
   eval "export CXX_${TARGET_ENV}=x86_64-w64-mingw32-g++"
@@ -125,7 +143,7 @@ EXE_PATH="target/${TARGET}/${PROFILE}/ferrex-player.exe"
 echo "Building ferrex-player for ${TARGET} (${PROFILE})..."
 cargo build -p ferrex-player --target "$TARGET" --profile "$PROFILE"
 
-[[ -f "$EXE_PATH" ]] || die "Built exe not found: $EXE_PATH"
+[[ -f $EXE_PATH ]] || die "Built exe not found: $EXE_PATH"
 
 # Stage distribution
 STAGE="dist-windows"
@@ -151,7 +169,7 @@ ZIP_NAME="ferrex-player_windows_${VER:-0.1.0}_${STAMP}_${FLAVOR}.zip"
   cd "$OUT_DIR"
   rm -f "$ZIP_NAME"
   # Use relative path to stage so the zip contains dist-windows/*
-  if [[ "$OUT_DIR" == "." ]]; then
+  if [[ $OUT_DIR == "." ]]; then
     zip -r "$ZIP_NAME" "$STAGE" >/dev/null
   else
     zip -r "$ZIP_NAME" "$PWD/$STAGE" >/dev/null

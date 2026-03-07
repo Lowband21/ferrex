@@ -7,7 +7,7 @@ use ferrex_model::{
 use async_trait::async_trait;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
@@ -107,9 +107,7 @@ impl ImageRepository for PostgresImageRepository {
             )
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| {
-                    MediaError::Internal(format!("Failed to get image: {}", e))
-                })?;
+                .map_err(MediaError::Database)?;
 
             return rows.map(|r| self.map_variant_row(r)).transpose();
         }
@@ -167,7 +165,7 @@ impl ImageRepository for PostgresImageRepository {
         )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to get image: {}", e)))?;
+            .map_err(MediaError::Database)?;
 
         row.map(|r| self.map_variant_row(r)).transpose()
     }
@@ -189,7 +187,7 @@ impl ImageRepository for PostgresImageRepository {
         )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| MediaError::Internal(format!("Failed to get image: {}", e)))?;
+            .map_err(MediaError::Database)?;
 
         row.map(|r| self.map_variant_row(r)).transpose()
     }
@@ -234,12 +232,7 @@ impl ImageRepository for PostgresImageRepository {
             )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to lookup cached image by iid: {}",
-                    e
-                ))
-            })?;
+            .map_err(MediaError::Database)?;
 
             Ok(row.map(|r| self.map_cached_row(r)))
         }
@@ -275,12 +268,7 @@ impl ImageRepository for PostgresImageRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to lookup cached image by iid: {}",
-                e
-            ))
-        })?;
+        .map_err(MediaError::Database)?;
 
         Ok(row.map(|r| self.map_cached_row(r)))
     }
@@ -318,12 +306,7 @@ impl ImageRepository for PostgresImageRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to lookup cached image by iid: {}",
-                e
-            ))
-        })?;
+        .map_err(MediaError::Database)?;
 
         Ok(row.map(|r| self.map_cached_row(r)))
     }
@@ -401,7 +384,7 @@ impl ImageRepository for PostgresImageRepository {
             ctx.imz.image_variant()
         );
 
-        let maybe_row = sqlx::query_as!(
+        let row = sqlx::query_as!(
             CachedImageRow,
             r#"
             INSERT INTO cached_images (
@@ -416,16 +399,15 @@ impl ImageRepository for PostgresImageRepository {
                 byte_len
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (cache_key) DO UPDATE SET
+            ON CONFLICT (image_id, width) DO UPDATE SET
                 image_variant = EXCLUDED.image_variant,
-                width = EXCLUDED.width,
                 height = EXCLUDED.height,
                 size_variant = EXCLUDED.size_variant,
                 theme_color = EXCLUDED.theme_color,
+                cache_key = EXCLUDED.cache_key,
                 integrity = EXCLUDED.integrity,
                 byte_len = EXCLUDED.byte_len,
                 modified_at = now()
-            WHERE cached_images.image_id = EXCLUDED.image_id
             RETURNING
                 cached_images.image_id,
                 cached_images.image_variant AS "image_variant!: ImageVariant",
@@ -449,7 +431,7 @@ impl ImageRepository for PostgresImageRepository {
             ctx.integrity,
             ctx.byte_len
         )
-            .fetch_optional(&self.pool)
+            .fetch_one(&self.pool)
             .await
             .map_err(|e| {
                 error!(
@@ -462,38 +444,6 @@ impl ImageRepository for PostgresImageRepository {
                 );
                 MediaError::Database(e)
             })?;
-
-        let row = match maybe_row {
-            Some(row) => row,
-            None => {
-                // This indicates a cache_key collision (same cache_key but a different image_id).
-                // That should be impossible if cache_key generation is correct, so surface it as a
-                // domain conflict with enough information to debug.
-                let existing = sqlx::query_as!(
-                    CachedImageKeyOwnerRow,
-                    r#"
-                    SELECT
-                        image_id
-                    FROM cached_images
-                    WHERE cache_key = $1
-                    "#,
-                    ctx.cache_key
-                )
-                .fetch_one(&self.pool)
-                .await
-                .map_err(MediaError::Database)?;
-
-                warn!(
-                    "[upsert_image] cache_key collision: cache_key={} existing_image_id={} requested_image_id={}",
-                    ctx.cache_key, existing.image_id, ctx.iid
-                );
-
-                return Err(MediaError::Conflict(format!(
-                    "cache_key collision for cached_images (cache_key={}, existing_image_id={}, requested_image_id={})",
-                    ctx.cache_key, existing.image_id, ctx.iid
-                )));
-            }
-        };
 
         let record = self.map_cached_row(row);
         info!(
@@ -763,11 +713,6 @@ struct CachedImageRow {
     byte_len: i32,
     created_at: DateTime<Utc>,
     modified_at: DateTime<Utc>,
-}
-
-#[derive(sqlx::FromRow)]
-struct CachedImageKeyOwnerRow {
-    image_id: Uuid,
 }
 
 impl PostgresImageRepository {

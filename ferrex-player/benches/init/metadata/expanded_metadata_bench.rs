@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use criterion::Criterion;
 use ferrex_player::{
-    domains::media::library::{fetch_libraries, fetch_library_media_references},
+    domains::media::library::{
+        fetch_libraries, fetch_library_media_references,
+    },
     infra::{
         api::types::{Library, LibraryType},
         service_registry,
@@ -158,12 +160,15 @@ pub async fn batch_metadata_operation(
         println!("   2. Sign in with your credentials");
         println!("   3. Enable 'Auto-login' in Settings → Security");
         println!("   4. Close the app and re-run the benchmark");
-        return Err(format!("Authentication required for benchmarks: {}", e).into());
+        return Err(
+            format!("Authentication required for benchmarks: {}", e).into()
+        );
     }
 
     // Load real libraries from server
     let libraries = fetch_libraries(state.server_url.clone()).await?;
-    let enabled_libraries: Vec<_> = libraries.iter().filter(|lib| lib.enabled).collect();
+    let enabled_libraries: Vec<_> =
+        libraries.iter().filter(|lib| lib.enabled).collect();
 
     if enabled_libraries.is_empty() {
         return Err("No enabled libraries found for benchmarking".into());
@@ -196,17 +201,25 @@ pub async fn batch_metadata_operation(
             .collect::<Vec<&Library>>(),
         "both_capped_100" => enabled_libraries.into(),
         "both_uncapped" => enabled_libraries.into(),
-        scenario => return Err(format!("Invalid scenario: {}", scenario).into()),
+        scenario => {
+            return Err(format!("Invalid scenario: {}", scenario).into());
+        }
     };
 
     // Process each library for batch metadata fetching
     let libraries_count = libraries_to_test.len();
     for library in libraries_to_test {
-        log::info!("📚 Processing library: {} for batch metadata", library.name);
+        log::info!(
+            "📚 Processing library: {} for batch metadata",
+            library.name
+        );
 
         // Load media references
-        let media_response =
-            fetch_library_media_references(state.server_url.clone(), library.id).await?;
+        let media_response = fetch_library_media_references(
+            state.server_url.clone(),
+            library.id,
+        )
+        .await?;
         log::info!(
             "📋 Loaded {} media references from {}",
             media_response.media.len(),
@@ -238,7 +251,9 @@ pub async fn batch_metadata_operation(
                         library.id,
                         media_response.media.into_iter().take(100).collect(),
                     )],
-                    "movies_uncapped" => vec![(library.id, media_response.media)],
+                    "movies_uncapped" => {
+                        vec![(library.id, media_response.media)]
+                    }
                     "tv_capped_100" => vec![(
                         library.id,
                         media_response.media.into_iter().take(100).collect(),
@@ -280,7 +295,11 @@ pub async fn batch_metadata_operation(
                         result.items_successfully_fetched,
                         result.items_needing_metadata,
                         result.success_rate(),
-                        if result.verification_passed { "PASSED" } else { "FAILED" }
+                        if result.verification_passed {
+                            "PASSED"
+                        } else {
+                            "FAILED"
+                        }
                     );
 
                     // Log any errors
@@ -302,7 +321,10 @@ pub async fn batch_metadata_operation(
                 }
             }
         } else {
-            log::info!("ℹ️  No items need metadata fetching in {}", library.name);
+            log::info!(
+                "ℹ️  No items need metadata fetching in {}",
+                library.name
+            );
         }
     }
 

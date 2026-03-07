@@ -1873,7 +1873,7 @@ impl TmdbMetadataActor {
                 });
 
         let enhanced = EnhancedMovieDetails {
-            id: tmdb_details.inner.id as u64,
+            id: tmdb_details.inner.id,
             title: tmdb_details.inner.title.clone(),
             original_title: Some(tmdb_details.inner.original_title.clone()),
             overview: Some(tmdb_details.inner.overview.clone()),
@@ -2511,7 +2511,7 @@ impl TmdbMetadataActor {
         };
 
         let enhanced = EnhancedSeriesDetails {
-            id: details.inner.id as u64,
+            id: details.inner.id,
             name: details.inner.name.clone(),
             original_name: Some(details.inner.original_name.clone()),
             overview: details.inner.overview.clone(),

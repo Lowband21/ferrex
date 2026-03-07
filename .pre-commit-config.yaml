@@ -1,13 +1,16 @@
 # Shared, tracked pre-commit configuration for all worktrees.
-# Install: pipx install pre-commit  (or pip install --user pre-commit)
-# One-time setup (from repo root dir):
-#   git config core.hooksPath .githooks
-# First run (optional): pre-commit run --all-files
+#
+# Works with both prek (recommended) and pre-commit:
+#   prek: nix shell provides all dependencies; faster Rust-native hooks
+#   pre-commit: falls back to remote repos with Python environments
+#
+# Setup:
+#   prek install        # or: pre-commit install
+#   prek run --all-files  # or: pre-commit run --all-files
 
 minimum_pre_commit_version: "3.0.0"
 default_stages: [pre-commit]
 
-# Exclude common build/output dirs across worktrees
 exclude: |
   ^(
     (?:.*/)?target/|
@@ -17,7 +20,6 @@ exclude: |
   )
 
 repos:
-  # Run Rust formatter first to auto-fix .rs files
   - repo: local
     hooks:
       - id: enforce-signed-commits-config
@@ -27,57 +29,39 @@ repos:
         pass_filenames: false
         entry: bash
         args:
-          - -lc
+          - -c
           - |
-              set -euo pipefail
-              # Ensure commit signing is enabled in this repo (or globally)
-              if [[ "$(git config --get commit.gpgSign || echo false)" != "true" ]]; then
-                echo "ERROR: commit.gpgSign is not enabled. Enable it with:" >&2
-                echo "  git config --global commit.gpgSign true" >&2
-                echo "Optionally set per-repo: git config commit.gpgSign true" >&2
-                exit 1
-              fi
-              # Recommend a signing key configured
-              if ! git config --get user.signingkey >/dev/null; then
-                echo "WARNING: user.signingkey is not set. Git will try a default key." >&2
-                echo "Set one with: git config --global user.signingkey <your-key>" >&2
-              fi
-              # Surface signing format for clarity (openpgp default or ssh)
-              fmt=$(git config --get gpg.format || echo openpgp)
-              echo "Commit signing is enabled (gpg.format=${fmt})."
+            set -euo pipefail
+            if [[ "$(git config --get commit.gpgSign || echo false)" != "true" ]]; then
+              echo "ERROR: commit.gpgSign is not enabled. Enable with: git config --global commit.gpgSign true" >&2
+              exit 1
+            fi
+            if ! git config --get user.signingkey >/dev/null; then
+              echo "WARNING: user.signingkey is not set." >&2
+            fi
+            echo "Commit signing is enabled (gpg.format=$(git config --get gpg.format || echo openpgp))."
+
       - id: rustfmt-fix
         name: rustfmt (auto-fix staged .rs files)
-        entry: bash
-        args:
-          - -lc
-          - |
-              set -euo pipefail
-              if ! command -v rustfmt >/dev/null 2>&1; then
-                # Try to install via rustup if available
-                if command -v rustup >/dev/null 2>&1; then
-                  rustup component add rustfmt >/dev/null 2>&1 || true
-                fi
-              fi
-              if ! command -v rustfmt >/dev/null 2>&1; then
-                echo "rustfmt not found. Install with: rustup component add rustfmt" >&2
-                exit 1
-              fi
-              # Determine workspace edition (fallback to 2024) using grep/sed
-              edition=$(grep -E -m1 '^\s*edition\s*=\s*"(20[0-9]{2})"' Cargo.toml | sed -E 's/.*"(20[0-9]{2})".*/\1/' || true)
-              : "${edition:=2024}"
-              # Filter to .rs files only (pre-commit already does this, but be safe)
-              mapfile -t files < <(printf "%s\n" "$@" | grep -E '\\.rs$' || true)
-              (( ${#files[@]} == 0 )) && exit 0
-              # Format only the staged files to avoid touching unrelated files
-              rustfmt --edition ${edition} --emit files "${files[@]}"
         language: system
         pass_filenames: true
         files: \.rs$
         stages: [pre-commit]
+        entry: bash
+        args:
+          - -c
+          - |
+            set -euo pipefail
+            command -v rustfmt >/dev/null 2>&1 || { echo "rustfmt not found" >&2; exit 1; }
+            edition=$(grep -E -m1 '^\s*edition\s*=\s*"(20[0-9]{2})"' Cargo.toml 2>/dev/null | sed -E 's/.*"(20[0-9]{2})".*/\1/' || echo "2024")
+            files=()
+            for f in "$@"; do [[ "$f" == *.rs ]] && files+=("$f"); done
+            (( ${#files[@]} == 0 )) && exit 0
+            rustfmt --edition "${edition}" --emit files "${files[@]}"
+          - --
 
-  # Basic hygiene + config syntax checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
         args: ["--markdown-linebreak-ext=md"]
@@ -91,37 +75,35 @@ repos:
       - id: check-json
       - id: detect-private-key
       - id: check-case-conflict
-      # To block commits directly to main, uncomment the hook below.
-      # - id: no-commit-to-branch
-      #   args: ["--branch", "main"]
 
-  # Shell formatting (shfmt) — auto-fix on commit
-  - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.7.0-1
-    hooks:
-      - id: shfmt
-        args: ["-i", "2", "-ci", "-s"]
-
-  # Shell lint (shellcheck)
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
-    hooks:
-      - id: shellcheck
-        args: ["-x"]
-        # -x: follow sourced files if they can be found
-
-  # Dockerfile lint (hadolint) — run at push
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
-    hooks:
-      - id: hadolint
-        stages: [pre-push]
-        files: ^(.*/)?Dockerfile(\..*)?$
-
-  # Local hooks for Rust + tooling
+  # Shell tools - use system binaries when available (nix shell provides these)
   - repo: local
     hooks:
-      # rustfmt check on push (ensure formatted code reaches remote)
+      - id: shfmt
+        name: shfmt (format shell scripts)
+        language: system
+        entry: shfmt -i 2 -ci -s -w
+        files: \.(sh|bash)$
+        types: [shell]
+        stages: [pre-commit]
+
+      - id: shellcheck
+        name: shellcheck (lint shell scripts)
+        language: system
+        entry: shellcheck -x
+        files: \.(sh|bash)$
+        types: [shell]
+        stages: [pre-commit]
+
+      - id: hadolint
+        name: hadolint (lint Dockerfiles)
+        language: system
+        entry: hadolint
+        files: ^(.*/)?Dockerfile(\..*)?$
+        stages: [pre-push]
+
+  - repo: local
+    hooks:
       - id: rustfmt
         name: rustfmt (check)
         entry: cargo fmt --all -- --check
@@ -130,81 +112,70 @@ repos:
         stages: [pre-push]
         always_run: true
 
-      # verify all commits in the push range are signed
       - id: verify-signed-commits
         name: verify commit signatures (push range)
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
         entry: bash
         args:
-          - -lc
+          - -c
           - |
-              set -euo pipefail
-              from_ref="${PRE_COMMIT_FROM_REF:-}"
-              to_ref="${PRE_COMMIT_TO_REF:-}"
-              if [[ -z "$from_ref" || -z "$to_ref" ]]; then
-                # Fallback: compute ahead commits vs upstream if available
-                if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @\{upstream\} 2>/dev/null); then
-                  base=$(git merge-base HEAD "$upstream") || true
-                  from_ref="${base:-}"
-                  to_ref="HEAD"
-                else
-                  from_ref=""
-                  to_ref="HEAD"
-                fi
-              fi
-              if [[ -n "$from_ref" ]]; then
-                range="$from_ref..$to_ref"
+            set -euo pipefail
+            from_ref="${PRE_COMMIT_FROM_REF:-}"
+            to_ref="${PRE_COMMIT_TO_REF:-}"
+            if [[ -z "$from_ref" || -z "$to_ref" ]]; then
+              if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null); then
+                base=$(git merge-base HEAD "$upstream") || true
+                from_ref="${base:-}"
+                to_ref="HEAD"
               else
-                range="$to_ref"
+                from_ref=""
+                to_ref="HEAD"
               fi
-              mapfile -t commits < <(git rev-list --no-merges "$range" || true)
-              (( ${#commits[@]} == 0 )) && exit 0
-              unsigned=()
-              for c in "${commits[@]}"; do
-                sig=$(git log -1 --pretty=format:%G? "$c") || sig="N"
-                # Accept G (good) and U (good, untrusted). Block N (no sig), B (bad), E (error), X (expired), Y (Expired key), R (Revoked), etc.
-                if [[ "$sig" != "G" && "$sig" != "U" ]]; then
-                  unsigned+=("$c:$sig")
-                fi
+            fi
+            [[ -n "$from_ref" ]] && range="$from_ref..$to_ref" || range="$to_ref"
+            mapfile -t commits < <(git rev-list --no-merges "$range" 2>/dev/null || true)
+            (( ${#commits[@]} == 0 )) && exit 0
+            unsigned=()
+            for c in "${commits[@]}"; do
+              sig=$(git log -1 --pretty=format:%G? "$c" 2>/dev/null) || sig="N"
+              [[ "$sig" != "G" && "$sig" != "U" ]] && unsigned+=("$c:$sig")
+            done
+            if (( ${#unsigned[@]} > 0 )); then
+              echo "ERROR: Found unsigned/invalid-signed commits:" >&2
+              for u in "${unsigned[@]}"; do
+                sha=${u%%:*}; code=${u##*:}
+                subj=$(git log -1 --pretty=format:%s "$sha" 2>/dev/null || echo "")
+                echo "  $sha [$code] $subj" >&2
               done
-              if (( ${#unsigned[@]} > 0 )); then
-                echo "ERROR: Found unsigned/invalid-signed commits in push range:" >&2
-                for u in "${unsigned[@]}"; do
-                  sha=${u%%:*}; code=${u##*:}
-                  subj=$(git log -1 --pretty=format:%s "$sha" || echo "")
-                  echo "  $sha [$code]  $subj" >&2
-                done
-                echo >&2
-                echo "Ensure commit signing is enabled (git config commit.gpgSign true) and re-commit with signing (e.g., git commit -S --amend)." >&2
-                exit 1
-              fi
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-        always_run: true
+              echo "Enable signing: git config commit.gpgSign true" >&2
+              exit 1
+            fi
 
-      # clippy on push (heavier); treat warnings as errors
       - id: clippy
         name: cargo clippy (workspace, all targets, all features)
-        # Deny warnings soon
-        entry: bash -lc 'cargo clippy --workspace --all-targets --all-features -- -W warnings'
+        entry: cargo clippy --workspace --all-targets --all-features -- -W warnings
         language: system
         pass_filenames: false
         stages: [pre-push]
         always_run: true
 
-      # SQLx offline drift check on push (requires sqlx-cli and .sqlx/ present)
       - id: sqlx-prepare-check
         name: sqlx prepare --check (offline)
-        entry: bash -lc 'SQLX_OFFLINE=true cargo sqlx prepare --workspace --check'
         language: system
         pass_filenames: false
         stages: [pre-push]
         always_run: true
+        entry: bash
+        args:
+          - -c
+          - SQLX_OFFLINE=true cargo sqlx prepare --workspace --check
 
-      # Cargo deny on push (uses deny.toml). This will fail on errors, not warnings.
       - id: cargo-deny
         name: cargo deny check
-        entry: bash -lc 'cargo deny check'
+        entry: cargo deny check
         language: system
         pass_filenames: false
         stages: [pre-push]

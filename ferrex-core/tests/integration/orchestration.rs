@@ -1,11 +1,10 @@
+use chrono::Utc;
 use sqlx::PgPool;
 use sqlx::Row;
-use chrono::Utc;
-use tokio::task::JoinHandle;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
-use ferrex_core::domain::scan::orchestration::persistence::PostgresQueueService;
 use ferrex_core::domain::scan::orchestration::context::{
     ScanHierarchy, ScanNodeKind,
 };
@@ -14,14 +13,19 @@ use ferrex_core::domain::scan::orchestration::job::{
     JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
     ScanReason,
 };
-use ferrex_core::domain::scan::orchestration::lease::{DequeueRequest, LeaseRenewal, QueueSelector};
+use ferrex_core::domain::scan::orchestration::lease::{
+    DequeueRequest, LeaseRenewal, QueueSelector,
+};
+use ferrex_core::domain::scan::orchestration::persistence::PostgresQueueService;
 use ferrex_core::domain::scan::orchestration::queue::QueueService;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[sqlx::test]
 async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
-    let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
+    let svc = PostgresQueueService::new(pool.clone())
+        .await
+        .expect("svc init");
 
     // Seed one library
     let lib = seed_library(&pool).await;
@@ -38,9 +42,12 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
             enqueue_time: Utc::now(),
             device_id: None,
         };
-        svc.enqueue(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs)))
-            .await
-            .expect("enqueue");
+        svc.enqueue(EnqueueRequest::new(
+            JobPriority::P1,
+            JobPayload::FolderScan(fs),
+        ))
+        .await
+        .expect("enqueue");
     }
 
     // Spawn a few workers that just complete work
@@ -81,11 +88,16 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
     .await
     .expect("counts");
 
-    let mut completed = 0i64; let mut others = 0i64;
+    let mut completed = 0i64;
+    let mut others = 0i64;
     for r in rows {
         let state: String = r.get("state");
         let cnt: i64 = r.get::<Option<i64>, _>("cnt").unwrap_or(0);
-        if state.as_str() == "completed" { completed = cnt; } else { others += cnt; }
+        if state.as_str() == "completed" {
+            completed = cnt;
+        } else {
+            others += cnt;
+        }
     }
     assert_eq!(completed as usize, n);
     assert_eq!(others, 0);
@@ -93,7 +105,9 @@ async fn e2e_bulk_enqueue_dequeue_complete(pool: PgPool) {
 
 #[sqlx::test]
 async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
-    let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
+    let svc = PostgresQueueService::new(pool.clone())
+        .await
+        .expect("svc init");
 
     let lib = seed_library(&pool).await;
     let lib_id = ferrex_core::LibraryID(lib);
@@ -109,15 +123,23 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
             enqueue_time: Utc::now(),
             device_id: None,
         };
-        svc.enqueue(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs)))
-            .await
-            .expect("enqueue");
+        svc.enqueue(EnqueueRequest::new(
+            JobPriority::P1,
+            JobPayload::FolderScan(fs),
+        ))
+        .await
+        .expect("enqueue");
     }
 
     // Lease all
     let mut leased_ids = Vec::new();
     for i in 0..m {
-        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: format!("cr-{}", i), lease_ttl: chrono::Duration::seconds(30), selector: None };
+        let dq = DequeueRequest {
+            kind: JobKind::FolderScan,
+            worker_id: format!("cr-{}", i),
+            lease_ttl: chrono::Duration::seconds(30),
+            selector: None,
+        };
         let lease = svc.dequeue(dq).await.expect("dequeue ok").expect("lease");
         leased_ids.push(lease.job.id.0);
     }
@@ -137,9 +159,16 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
 
     // Now process to completion
     loop {
-        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: "cr-worker".into(), lease_ttl: chrono::Duration::seconds(10), selector: None };
+        let dq = DequeueRequest {
+            kind: JobKind::FolderScan,
+            worker_id: "cr-worker".into(),
+            lease_ttl: chrono::Duration::seconds(10),
+            selector: None,
+        };
         match svc.dequeue(dq).await.expect("dequeue") {
-            Some(lease) => { svc.complete(lease.lease_id).await.expect("complete"); }
+            Some(lease) => {
+                svc.complete(lease.lease_id).await.expect("complete");
+            }
             None => break,
         }
     }
@@ -153,7 +182,9 @@ async fn crash_simulation_expired_leases_recovered(pool: PgPool) {
 
 #[sqlx::test]
 async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
-    let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
+    let svc = PostgresQueueService::new(pool.clone())
+        .await
+        .expect("svc init");
 
     let lib_x = ferrex_core::LibraryID(seed_library(&pool).await);
     let lib_y = ferrex_core::LibraryID(seed_library(&pool).await);
@@ -217,7 +248,10 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
         .await
         .expect("dequeue hit")
         .expect("expected a matching job");
-    assert_eq!(lease_hit.job.id.0, job_c.job_id.0, "selector should target job C");
+    assert_eq!(
+        lease_hit.job.id.0, job_c.job_id.0,
+        "selector should target job C"
+    );
 
     let ids = vec![job_a.job_id.0, job_b.job_id.0, job_c.job_id.0];
     let rows = sqlx::query!(
@@ -237,9 +271,18 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
         states.insert(row.id, row.state);
     }
 
-    assert_eq!(states.get(&job_c.job_id.0).map(String::as_str), Some("leased"));
-    assert_eq!(states.get(&job_a.job_id.0).map(String::as_str), Some("ready"));
-    assert_eq!(states.get(&job_b.job_id.0).map(String::as_str), Some("ready"));
+    assert_eq!(
+        states.get(&job_c.job_id.0).map(String::as_str),
+        Some("leased")
+    );
+    assert_eq!(
+        states.get(&job_a.job_id.0).map(String::as_str),
+        Some("ready")
+    );
+    assert_eq!(
+        states.get(&job_b.job_id.0).map(String::as_str),
+        Some("ready")
+    );
 
     let select_miss = DequeueRequest {
         kind: JobKind::FolderScan,
@@ -257,7 +300,10 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
         .expect("dequeue fallback")
         .expect("expected FIFO fallback");
 
-    assert_eq!(lease_fallback.job.id.0, job_a.job_id.0, "fallback should return job A in FIFO order");
+    assert_eq!(
+        lease_fallback.job.id.0, job_a.job_id.0,
+        "fallback should return job A in FIFO order"
+    );
 
     let rows_after = sqlx::query!(
         r#"
@@ -276,14 +322,25 @@ async fn selector_prefers_match_otherwise_fifo(pool: PgPool) {
         states_after.insert(row.id, row.state);
     }
 
-    assert_eq!(states_after.get(&job_a.job_id.0).map(String::as_str), Some("leased"));
-    assert_eq!(states_after.get(&job_b.job_id.0).map(String::as_str), Some("ready"));
-    assert_eq!(states_after.get(&job_c.job_id.0).map(String::as_str), Some("leased"));
+    assert_eq!(
+        states_after.get(&job_a.job_id.0).map(String::as_str),
+        Some("leased")
+    );
+    assert_eq!(
+        states_after.get(&job_b.job_id.0).map(String::as_str),
+        Some("ready")
+    );
+    assert_eq!(
+        states_after.get(&job_c.job_id.0).map(String::as_str),
+        Some("leased")
+    );
 }
 
 #[sqlx::test]
 async fn end_to_end_batch_mixed(pool: PgPool) {
-    let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
+    let svc = PostgresQueueService::new(pool.clone())
+        .await
+        .expect("svc init");
 
     // Seed library
     let lib = seed_library(&pool).await;
@@ -300,7 +357,10 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             enqueue_time: Utc::now(),
             device_id: None,
         };
-        enqueues.push(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs)));
+        enqueues.push(EnqueueRequest::new(
+            JobPriority::P1,
+            JobPayload::FolderScan(fs),
+        ));
     }
     // Duplicate folder_1
     enqueues.push(EnqueueRequest::new(
@@ -334,7 +394,10 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             node: ScanNodeKind::Unknown,
             scan_reason: ScanReason::BulkSeed,
         };
-        enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma)));
+        enqueues.push(EnqueueRequest::new(
+            JobPriority::P2,
+            JobPayload::MediaAnalyze(ma),
+        ));
     }
     // Duplicate analyze_2 fingerprint
     let ma_dupe = MediaAnalyzeJob {
@@ -354,7 +417,10 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         node: ScanNodeKind::Unknown,
         scan_reason: ScanReason::BulkSeed,
     };
-    enqueues.push(EnqueueRequest::new(JobPriority::P2, JobPayload::MediaAnalyze(ma_dupe)));
+    enqueues.push(EnqueueRequest::new(
+        JobPriority::P2,
+        JobPayload::MediaAnalyze(ma_dupe),
+    ));
 
     for i in 0..5 {
         let md = MetadataEnrichJob {
@@ -396,9 +462,15 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
             hierarchy: ScanHierarchy::default(),
             node: ScanNodeKind::Unknown,
             path_norm: format!("/e2e/mixed/index_{i}.json"),
-            idempotency_key: format!("index:{}:/e2e/mixed/index_{i}.json", lib_id),
+            idempotency_key: format!(
+                "index:{}:/e2e/mixed/index_{i}.json",
+                lib_id
+            ),
         };
-        enqueues.push(EnqueueRequest::new(JobPriority::P3, JobPayload::IndexUpsert(ix)));
+        enqueues.push(EnqueueRequest::new(
+            JobPriority::P3,
+            JobPayload::IndexUpsert(ix),
+        ));
     }
 
     for req in enqueues.into_iter().take(20) {
@@ -406,17 +478,24 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
     }
 
     // After 3 dupes, expect 17 rows
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orchestrator_jobs")
-        .fetch_one(&pool)
-        .await
-        .expect("count jobs");
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM orchestrator_jobs")
+            .fetch_one(&pool)
+            .await
+            .expect("count jobs");
     assert_eq!(total, 17);
 
     // Worker pool: process jobs, mix complete/fail and dead-letter after 2 fails
-    let attempts: Arc<Mutex<HashMap<Uuid, u32>>> = Arc::new(Mutex::new(HashMap::new()));
+    let attempts: Arc<Mutex<HashMap<Uuid, u32>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let seen: Arc<Mutex<HashSet<Uuid>>> = Arc::new(Mutex::new(HashSet::new()));
     let done = Arc::new(tokio::sync::atomic::AtomicUsize::new(0));
-    let kinds = [JobKind::FolderScan, JobKind::MediaAnalyze, JobKind::MetadataEnrich, JobKind::IndexUpsert];
+    let kinds = [
+        JobKind::FolderScan,
+        JobKind::MediaAnalyze,
+        JobKind::MetadataEnrich,
+        JobKind::IndexUpsert,
+    ];
 
     let mut handles = vec![];
     for w in 0..4 {
@@ -426,36 +505,82 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
         let done_w = Arc::clone(&done);
         handles.push(tokio::spawn(async move {
             loop {
-                if done_w.load(std::sync::atomic::Ordering::Relaxed) >= 17 { break; }
+                if done_w.load(std::sync::atomic::Ordering::Relaxed) >= 17 {
+                    break;
+                }
                 let mut progressed = false;
                 for kind in kinds {
-                    let dq = DequeueRequest { kind, worker_id: format!("mix-w{w}"), lease_ttl: chrono::Duration::milliseconds(500), selector: None };
+                    let dq = DequeueRequest {
+                        kind,
+                        worker_id: format!("mix-w{w}"),
+                        lease_ttl: chrono::Duration::milliseconds(500),
+                        selector: None,
+                    };
                     if let Ok(Some(lease)) = svc_w.dequeue(dq).await {
                         progressed = true;
                         {
                             let mut s = seen_w.lock().await;
-                            assert!(s.insert(lease.lease_id.0), "duplicate lease seen");
+                            assert!(
+                                s.insert(lease.lease_id.0),
+                                "duplicate lease seen"
+                            );
                         }
-                        let _ = svc_w.renew(LeaseRenewal { lease_id: lease.lease_id, worker_id: format!("mix-w{w}"), extend_by: chrono::Duration::milliseconds(200) }).await;
+                        let _ = svc_w
+                            .renew(LeaseRenewal {
+                                lease_id: lease.lease_id,
+                                worker_id: format!("mix-w{w}"),
+                                extend_by: chrono::Duration::milliseconds(200),
+                            })
+                            .await;
                         // Decide action by job id parity
                         let jid = lease.job.id.0;
-                        let even = (u128::from_be_bytes(*jid.as_bytes()) & 1) == 0;
+                        let even =
+                            (u128::from_be_bytes(*jid.as_bytes()) & 1) == 0;
                         if even {
                             let _ = svc_w.complete(lease.lease_id).await;
-                            done_w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            done_w.fetch_add(
+                                1,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
                         } else {
                             let mut map = attempts_w.lock().await;
                             let e = map.entry(jid).or_insert(0);
-                            if *e < 2 { *e += 1; drop(map); let _ = svc_w.fail(lease.lease_id, true, Some("transient".into())).await; }
-                            else { drop(map); let _ = svc_w.dead_letter(lease.lease_id, Some("exhausted".into())).await; done_w.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+                            if *e < 2 {
+                                *e += 1;
+                                drop(map);
+                                let _ = svc_w
+                                    .fail(
+                                        lease.lease_id,
+                                        true,
+                                        Some("transient".into()),
+                                    )
+                                    .await;
+                            } else {
+                                drop(map);
+                                let _ = svc_w
+                                    .dead_letter(
+                                        lease.lease_id,
+                                        Some("exhausted".into()),
+                                    )
+                                    .await;
+                                done_w.fetch_add(
+                                    1,
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
+                            }
                         }
                     }
                 }
-                if !progressed { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+                if !progressed {
+                    tokio::time::sleep(std::time::Duration::from_millis(10))
+                        .await;
+                }
             }
         }));
     }
-    for h in handles { let _ = h.await; }
+    for h in handles {
+        let _ = h.await;
+    }
 
     let row = sqlx::query(
         "SELECT SUM(CASE WHEN state='completed' THEN 1 ELSE 0 END)::bigint as c, SUM(CASE WHEN state='dead_letter' THEN 1 ELSE 0 END)::bigint as d FROM orchestrator_jobs"
@@ -473,20 +598,39 @@ async fn end_to_end_batch_mixed(pool: PgPool) {
 #[ignore = "measurement only; does not assert behavior"]
 #[sqlx::test]
 async fn bench_stub_latency_logging(pool: PgPool) {
-    let svc = PostgresQueueService::new(pool.clone()).await.expect("svc init");
+    let svc = PostgresQueueService::new(pool.clone())
+        .await
+        .expect("svc init");
     let lib = seed_library(&pool).await;
     let lib_id = ferrex_core::LibraryID(lib);
 
     // Enqueue a small batch and measure dequeue->complete latency
     let n = 10;
     for i in 0..n {
-        let fs = FolderScanJob { library_id: lib_id, folder_path_norm: format!("/bench/{}", i), hierarchy: ScanHierarchy::default(), scan_reason: ScanReason::UserRequested, enqueue_time: Utc::now(), device_id: None };
-        svc.enqueue(EnqueueRequest::new(JobPriority::P1, JobPayload::FolderScan(fs))).await.expect("enqueue");
+        let fs = FolderScanJob {
+            library_id: lib_id,
+            folder_path_norm: format!("/bench/{}", i),
+            hierarchy: ScanHierarchy::default(),
+            scan_reason: ScanReason::UserRequested,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        };
+        svc.enqueue(EnqueueRequest::new(
+            JobPriority::P1,
+            JobPayload::FolderScan(fs),
+        ))
+        .await
+        .expect("enqueue");
     }
 
     let mut latencies = Vec::new();
     loop {
-        let dq = DequeueRequest { kind: JobKind::FolderScan, worker_id: "bench".into(), lease_ttl: chrono::Duration::seconds(5), selector: None };
+        let dq = DequeueRequest {
+            kind: JobKind::FolderScan,
+            worker_id: "bench".into(),
+            lease_ttl: chrono::Duration::seconds(5),
+            selector: None,
+        };
         match svc.dequeue(dq).await.expect("dequeue") {
             Some(lease) => {
                 let start = Utc::now();
@@ -498,8 +642,21 @@ async fn bench_stub_latency_logging(pool: PgPool) {
         }
     }
     latencies.sort();
-    let p95 = if latencies.is_empty() { 0 } else { latencies[(latencies.len() as f64 * 0.95) as usize.min(latencies.len()-1)] };
-    tracing::info!("bench_stub p95_ms={} avg_ms={}", p95, if latencies.is_empty() {0.0} else {latencies.iter().sum::<i64>() as f64 / latencies.len() as f64});
+    let p95 = if latencies.is_empty() {
+        0
+    } else {
+        latencies[((latencies.len() as f64 * 0.95) as usize)
+            .min(latencies.len() - 1)]
+    };
+    tracing::info!(
+        "bench_stub p95_ms={} avg_ms={}",
+        p95,
+        if latencies.is_empty() {
+            0.0
+        } else {
+            latencies.iter().sum::<i64>() as f64 / latencies.len() as f64
+        }
+    );
 }
 
 async fn seed_library(pool: &PgPool) -> uuid::Uuid {

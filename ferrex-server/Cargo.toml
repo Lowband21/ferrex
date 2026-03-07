@@ -34,6 +34,7 @@ httpdate = "^1.0"
 serde.workspace = true
 serde_json.workspace = true
 rkyv.workspace = true
+rancor.workspace = true
 
 toml = { version = "^0.9", default-features = false, features = [
   "parse",

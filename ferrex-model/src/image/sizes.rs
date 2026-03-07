@@ -41,6 +41,28 @@ impl Display for ImageVariant {
     }
 }
 
+impl ImageVariant {
+    #[inline]
+    fn as_str(&self) -> &'static str {
+        match self {
+            ImageVariant::Poster => "poster",
+            ImageVariant::Backdrop => "backdrop",
+            ImageVariant::Thumbnail => "thumbnail",
+            ImageVariant::Profile => "profile",
+        }
+    }
+
+    #[inline]
+    fn as_str_path(&self) -> &'static str {
+        match self {
+            ImageVariant::Poster => "/poster/",
+            ImageVariant::Backdrop => "/backdrop/",
+            ImageVariant::Thumbnail => "/thumbnail/",
+            ImageVariant::Profile => "/profile/",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[cfg_attr(
@@ -328,7 +350,28 @@ impl ImageSize {
         }
     }
 
+    #[inline]
+    pub fn image_variant_str(&self) -> &'static str {
+        match self {
+            ImageSize::Poster(_) => ImageVariant::Poster.as_str(),
+            ImageSize::Backdrop(_) => ImageVariant::Backdrop.as_str(),
+            ImageSize::Thumbnail(_) => ImageVariant::Thumbnail.as_str(),
+            ImageSize::Profile(_) => ImageVariant::Profile.as_str(),
+        }
+    }
+
+    #[inline]
+    pub fn image_variant_str_path(&self) -> &'static str {
+        match self {
+            ImageSize::Poster(_) => ImageVariant::Poster.as_str_path(),
+            ImageSize::Backdrop(_) => ImageVariant::Backdrop.as_str_path(),
+            ImageSize::Thumbnail(_) => ImageVariant::Thumbnail.as_str_path(),
+            ImageSize::Profile(_) => ImageVariant::Profile.as_str_path(),
+        }
+    }
+
     /// Convert to URL string size
+    #[inline]
     pub fn to_tmdb_param(&self) -> &'static str {
         match self {
             ImageSize::Thumbnail(s) => s.to_tmdb_param(),
@@ -365,6 +408,16 @@ impl ImageSize {
             ImageSize::Poster(s) => s.width_name(),
             ImageSize::Backdrop(s) => s.width_name(),
             ImageSize::Profile(s) => s.width_name(),
+        }
+    }
+
+    #[inline]
+    pub fn width_name_str(&self) -> &'static str {
+        match self {
+            ImageSize::Thumbnail(s) => s.width_name_str(),
+            ImageSize::Poster(s) => s.width_name_str(),
+            ImageSize::Backdrop(s) => s.width_name_str(),
+            ImageSize::Profile(s) => s.width_name_str(),
         }
     }
 }
@@ -453,6 +506,16 @@ impl EpisodeSize {
         }
     }
 
+    #[inline]
+    pub fn width_name_str(&self) -> &'static str {
+        match self {
+            Self::CustomResized(_) => "custom",
+            Self::Original(Some(_)) => "original",
+            Self::Original(None) => "original",
+            _ => self.to_tmdb_param(),
+        }
+    }
+
     pub fn sqlx_image_size_variant(&self) -> SqlxImageSizeVariant {
         match self {
             Self::CustomResized(_) => SqlxImageSizeVariant::Resized,
@@ -461,6 +524,7 @@ impl EpisodeSize {
         }
     }
 
+    #[inline]
     pub const fn to_tmdb_param(&self) -> &'static str {
         match self {
             Self::W256 => "w256",
@@ -522,14 +586,13 @@ impl Default for PosterSize {
 
 impl PosterSize {
     /// All available poster sizes for UI enumeration (excluding Original)
-    pub const ALL: [PosterSize; 7] = [
+    pub const ALL: [PosterSize; 6] = [
         Self::W92,
         Self::W154,
         Self::W185,
         Self::W342,
         Self::W500,
         Self::W780,
-        Self::Original(None),
     ];
 
     pub fn from_width(w: u32) -> Self {
@@ -608,6 +671,16 @@ impl PosterSize {
         }
     }
 
+    #[inline]
+    pub fn width_name_str(&self) -> &'static str {
+        match self {
+            Self::CustomResized(_) => "custom",
+            Self::Original(Some(_)) => "original",
+            Self::Original(None) => "original",
+            _ => self.to_tmdb_param(),
+        }
+    }
+
     pub fn sqlx_image_size_variant(&self) -> SqlxImageSizeVariant {
         match self {
             Self::CustomResized(_) => SqlxImageSizeVariant::Resized,
@@ -617,6 +690,7 @@ impl PosterSize {
     }
 
     /// Convert to URL string size
+    #[inline]
     pub const fn to_tmdb_param(&self) -> &'static str {
         match self {
             Self::W92 => "w92",
@@ -735,6 +809,16 @@ impl BackdropSize {
         }
     }
 
+    #[inline]
+    pub fn width_name_str(&self) -> &'static str {
+        match self {
+            Self::CustomResized(_) => "custom",
+            Self::Original(Some(_)) => "original",
+            Self::Original(None) => "original",
+            _ => self.to_tmdb_param(),
+        }
+    }
+
     pub fn sqlx_image_size_variant(&self) -> SqlxImageSizeVariant {
         match self {
             Self::CustomResized(_) => SqlxImageSizeVariant::Resized,
@@ -743,6 +827,7 @@ impl BackdropSize {
         }
     }
 
+    #[inline]
     pub const fn to_tmdb_param(&self) -> &'static str {
         match self {
             Self::W300 => "w300",
@@ -849,6 +934,16 @@ impl ProfileSize {
         }
     }
 
+    #[inline]
+    pub fn width_name_str(&self) -> &'static str {
+        match self {
+            Self::CustomResized(_) => "custom",
+            Self::Original(Some(_)) => "original",
+            Self::Original(None) => "original",
+            _ => self.to_tmdb_param(),
+        }
+    }
+
     pub fn sqlx_image_size_variant(&self) -> SqlxImageSizeVariant {
         match self {
             Self::CustomResized(_) => SqlxImageSizeVariant::Resized,
@@ -857,6 +952,7 @@ impl ProfileSize {
         }
     }
 
+    #[inline]
     pub const fn to_tmdb_param(&self) -> &'static str {
         match self {
             Self::W45 => "w45",

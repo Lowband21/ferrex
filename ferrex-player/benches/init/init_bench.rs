@@ -3,14 +3,17 @@ use std::time::{Duration, Instant};
 use criterion::Criterion;
 use ferrex_player::{
     domains::{
-        library::update_handlers::fetch_libraries, metadata::image_types::{ImageRequest, Priority}
+        library::update_handlers::fetch_libraries,
+        metadata::image_types::{ImageRequest, Priority},
     },
     infra::{api_types::Library, service_registry},
     state::State,
 };
 use tokio::runtime::Runtime;
 
-use crate::utils::{auth::setup_benchmark_authentication, state::InitializationStats};
+use crate::utils::{
+    auth::setup_benchmark_authentication, state::InitializationStats,
+};
 
 // Benchmark 11: Complete Application Initialization (CRITICAL STARTUP PERFORMANCE)
 pub fn benchmark_full_initialization(c: &mut Criterion) {
@@ -132,7 +135,8 @@ pub async fn full_initialization_operation(
 
     // Process libraries (exactly like LibrariesLoaded handler)
     state.domains.library.state.libraries = libraries.clone();
-    let enabled_libraries: Vec<_> = libraries.iter().filter(|lib| lib.enabled).collect();
+    let enabled_libraries: Vec<_> =
+        libraries.iter().filter(|lib| lib.enabled).collect();
     log::info!("🔧 {} libraries are enabled", enabled_libraries.len());
 
     let mut total_media_items = 0;
@@ -153,8 +157,11 @@ pub async fn full_initialization_operation(
         );
 
         // Load media references
-        let media_response =
-            fetch_library_media_references(state.server_url.clone(), library.id).await?;
+        let media_response = fetch_library_media_references(
+            state.server_url.clone(),
+            library.id,
+        )
+        .await?;
         let media_count = media_response.media.len();
         total_media_items += media_count;
 
@@ -194,7 +201,8 @@ pub async fn full_initialization_operation(
                 let metadata_start = Instant::now();
 
                 // Use the actual BatchMetadataFetcher logic instead of simulation
-                let library_data = vec![(library.id, media_response.media.clone())];
+                let library_data =
+                    vec![(library.id, media_response.media.clone())];
 
                 // Call the actual process_libraries_direct method which performs real network requests
                 log::info!("   📡 Executing real batch metadata fetching...");
@@ -240,13 +248,21 @@ pub async fn full_initialization_operation(
                     };
 
                     // Request the image - this should show up in server logs and network activity
-                    if let Some(image_service) = service_registry::get_image_service() {
-                        image_service.get().request_image(image_request.clone());
-                        log::info!("     📡 Image request queued for {}", media_id);
+                    if let Some(image_service) =
+                        service_registry::get_image_service()
+                    {
+                        image_service
+                            .get()
+                            .request_image(image_request.clone());
+                        log::info!(
+                            "     📡 Image request queued for {}",
+                            media_id
+                        );
 
                         // Check if it's immediately available (cache hit)
-                        if let Some((handle, load_time)) =
-                            image_service.get().get_with_load_time(&image_request)
+                        if let Some((handle, load_time)) = image_service
+                            .get()
+                            .get_with_load_time(&image_request)
                         {
                             log::info!(
                                 "     ✅ Cache HIT for {} (loaded at: {:?})",
@@ -254,15 +270,21 @@ pub async fn full_initialization_operation(
                                 load_time
                             );
                         } else {
-                            log::info!("     ⏳ Cache MISS for {} - queued for loading", media_id);
+                            log::info!(
+                                "     ⏳ Cache MISS for {} - queued for loading",
+                                media_id
+                            );
                         }
                     } else {
-                        log::warn!("     ⚠️  No image service available for poster loading");
+                        log::warn!(
+                            "     ⚠️  No image service available for poster loading"
+                        );
                     }
                 }
 
                 // Small delay to allow image loading to start (since it's async)
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(10))
+                    .await;
 
                 // Check again for any that might have loaded quickly
                 for media_ref in sample_media.iter() {
@@ -273,9 +295,12 @@ pub async fn full_initialization_operation(
                         priority: Priority::Visible,
                     };
 
-                    if let Some(image_service) = service_registry::get_image_service() {
-                        if let Some((_, load_time)) =
-                            image_service.get().get_with_load_time(&image_request)
+                    if let Some(image_service) =
+                        service_registry::get_image_service()
+                    {
+                        if let Some((_, load_time)) = image_service
+                            .get()
+                            .get_with_load_time(&image_request)
                         {
                             poster_loaded_count += 1;
                             log::info!(

@@ -5,4 +5,3 @@
 This crate provides both:
 - a library (`ferrexctl`) with shared init/stack/config operations, and
 - a CLI binary (`ferrexctl`).
-

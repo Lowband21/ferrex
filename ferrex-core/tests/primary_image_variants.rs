@@ -45,13 +45,12 @@ async fn movie_details_include_primary_poster_and_backdrop_iids(
         INSERT INTO media_files (
             id, library_id, media_id, media_type, file_path, filename, file_size
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, 'movie', $4, $5, $6)
         "#,
     )
     .bind(file_id)
     .bind(library_id.to_uuid())
     .bind(movie_uuid)
-    .bind(0_i16) // Movie
     .bind(file_path)
     .bind("primary-image.mkv")
     .bind(123_i64)
@@ -74,19 +73,6 @@ async fn movie_details_include_primary_poster_and_backdrop_iids(
     .await
     .expect("insert movie_references");
 
-    sqlx::query(
-        r#"
-        INSERT INTO movie_metadata (movie_id, tmdb_id, title)
-        VALUES ($1, $2, $3)
-        "#,
-    )
-    .bind(movie_uuid)
-    .bind(12345_i64)
-    .bind("Primary Image Test")
-    .execute(&pool)
-    .await
-    .expect("insert movie_metadata");
-
     let poster_iid = Uuid::now_v7();
     let backdrop_iid = Uuid::now_v7();
 
@@ -97,15 +83,13 @@ async fn movie_details_include_primary_poster_and_backdrop_iids(
             iso_lang, vote_avg, vote_cnt, is_primary
         )
         VALUES
-            ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10),
-            ($11, $12, $13, $14, $15, $16, $17, NULL, $18, $19, $20)
+            ($1, $2, $3, 'poster', 'movie', $4, $5, NULL, $6, $7, $8),
+            ($9, $10, $11, 'backdrop', 'movie', $12, $13, NULL, $14, $15, $16)
         "#,
     )
     .bind(poster_iid)
     .bind("/poster-primary.jpg")
     .bind(movie_uuid)
-    .bind(0_i16) // Poster
-    .bind(ImageMediaType::Movie as i16)
     .bind(300_i16)
     .bind(450_i16)
     .bind(9.9_f32)
@@ -114,8 +98,6 @@ async fn movie_details_include_primary_poster_and_backdrop_iids(
     .bind(backdrop_iid)
     .bind("/backdrop-primary.jpg")
     .bind(movie_uuid)
-    .bind(1_i16) // Backdrop
-    .bind(ImageMediaType::Movie as i16)
     .bind(1280_i16)
     .bind(720_i16)
     .bind(9.8_f32)
@@ -124,6 +106,26 @@ async fn movie_details_include_primary_poster_and_backdrop_iids(
     .execute(&pool)
     .await
     .expect("insert tmdb_image_variants");
+
+    sqlx::query(
+        r#"
+        INSERT INTO movie_metadata (
+            movie_id, library_id, batch_id, tmdb_id, title,
+            primary_poster_image_id, primary_backdrop_image_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(movie_uuid)
+    .bind(library_id.to_uuid())
+    .bind(1_i64)
+    .bind(12345_i64)
+    .bind("Primary Image Test")
+    .bind(poster_iid)
+    .bind(backdrop_iid)
+    .execute(&pool)
+    .await
+    .expect("insert movie_metadata");
 
     let movie = repo.get_movie(&movie_id).await?;
 

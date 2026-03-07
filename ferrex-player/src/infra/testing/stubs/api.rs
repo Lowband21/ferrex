@@ -9,15 +9,16 @@ use ferrex_core::domain::users::auth::{
 };
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
-    CreateLibraryRequest, FilterIndicesRequest, LatestProgressResponse,
-    Library, LibraryId, LibraryType, Media, MediaQuery,
-    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
-    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, Platform,
-    Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
-    ScanMetrics, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
-    SeriesBundleSyncResponse, SeriesID, StartClaimResponse, StartScanRequest,
-    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
-    UserPreferences, UserWatchState,
+    CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
+    ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
+    LibraryType, Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
+    MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
+    MovieBatchSyncResponse, Platform, Role, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanConfig, ScanMetrics, SeriesBundleFetchRequest,
+    SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
+    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
+    UpdateProgressRequest, User, UserPermissions, UserPreferences,
+    UserWatchState,
 };
 use ferrex_model::MovieReferenceBatchSize;
 use ferrex_model::image::ImageQuery;
@@ -142,6 +143,15 @@ impl ApiService for TestApiService {
     ) -> RepositoryResult<ImageFetchResult> {
         Err(RepositoryError::QueryFailed(
             "TestApiService::get_image not implemented".into(),
+        ))
+    }
+
+    async fn post_image_manifest(
+        &self,
+        _request: ImageManifestRequest,
+    ) -> RepositoryResult<ImageManifestResponse> {
+        Err(RepositoryError::QueryFailed(
+            "TestApiService::post_image_manifest not implemented".into(),
         ))
     }
 
