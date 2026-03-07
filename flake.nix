@@ -75,7 +75,7 @@
           gst_1_27_2 = gstSet;
         };
 
-      workspaceToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
       workspaceVersion = workspaceToml.workspace.package.version or "0.0.0";
 
       # Common outputHashes for all git-sourced crates
@@ -315,6 +315,14 @@
           default = self.apps.${system}.ferrex-player;
         }
       );
+
+      nixosModules.ferrex-server = import ./nix/modules/ferrex-server.nix;
+
+      overlays.default = final: prev: {
+        ferrex-player = self.packages.${final.system}.ferrex-player;
+        ferrex-server = self.packages.${final.system}.ferrex-server;
+        ferrexctl = self.packages.${final.system}.ferrexctl;
+      };
 
       devShells = forAllSystems (
         system:
