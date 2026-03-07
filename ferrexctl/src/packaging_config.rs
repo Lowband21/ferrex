@@ -190,7 +190,7 @@ impl PackagingConfig {
     }
 }
 
-fn parse_workspace_version(cargo_toml: &str) -> Option<String> {
+pub(crate) fn parse_workspace_version(cargo_toml: &str) -> Option<String> {
     let mut in_workspace_package = false;
 
     for line in cargo_toml.lines() {

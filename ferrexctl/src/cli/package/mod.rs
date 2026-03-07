@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 
 use crate::cli::utils::workspace_root;
 use crate::packaging_config::{
-    PackagingConfig, PreflightConfig, PreflightScope,
+    PackagingConfig, PreflightConfig, PreflightScope, parse_workspace_version,
 };
 
 const REQUIRED_TOOLS: &[&str] = [
@@ -126,14 +126,15 @@ pub async fn package_flatpak(
     tar_args.extend(TAR_EXCLUDES.iter().copied());
     tar_args.extend(["-cf", "-", "."]);
 
-    let tar_cmd = Command::new("tar")
+    let mut tar_cmd = Command::new("tar")
         .current_dir(&workspace)
         .args(&tar_args)
         .stdout(Stdio::piped())
         .spawn()
         .context("failed to spawn tar archive command")?;
 
-    let tar_stdout = tar_cmd.stdout.context("tar stdout not captured")?;
+    let tar_stdout =
+        tar_cmd.stdout.take().context("tar stdout not captured")?;
 
     let untar_status = Command::new("tar")
         .current_dir(&src_dir)
@@ -141,6 +142,14 @@ pub async fn package_flatpak(
         .stdin(tar_stdout)
         .status()
         .context("failed to run tar extract command")?;
+
+    let tar_archive_status = tar_cmd
+        .wait()
+        .context("failed to wait for tar archive command")?;
+
+    if !tar_archive_status.success() {
+        bail!("failed to archive source tree");
+    }
 
     if !untar_status.success() {
         bail!("failed to create sanitized source tree");
@@ -745,36 +754,6 @@ fn parse_ferrexctl_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
-fn parse_workspace_version(cargo_toml: &str) -> Option<String> {
-    let mut in_workspace_package = false;
-
-    for line in cargo_toml.lines() {
-        let trimmed = line.trim();
-
-        if trimmed == "[workspace.package]" {
-            in_workspace_package = true;
-            continue;
-        }
-
-        if in_workspace_package {
-            if trimmed.starts_with('[') {
-                in_workspace_package = false;
-                continue;
-            }
-
-            if trimmed.starts_with("version") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let value = trimmed[eq_pos + 1..].trim();
-                    let version = value.trim_matches('"').trim();
-                    return Some(version.to_string());
-                }
-            }
-        }
-    }
-
-    None
-}
-
 fn get_git_repo_slug() -> Result<String> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
@@ -1150,7 +1129,7 @@ pub async fn package_release_init(
     }
 
     if !skip_preflight {
-        let scope = if offline_preflight { "init" } else { "init" };
+        let scope = "init";
         let skip_checks: Vec<String> = vec![];
         package_preflight(scope, offline_preflight, dry_run, &skip_checks)
             .await?;
@@ -1269,15 +1248,6 @@ fn locate_gstreamer_root(
     if let Ok(path) = std::env::var(env_var) {
         if !path.is_empty() {
             return Ok(PathBuf::from(path));
-        }
-    }
-
-    if flavor == "gnu" {
-        let default_path = PathBuf::from(
-            "/home/lowband/gstreamer-windows/PFiles64/gstreamer/1.0/mingw_x86_64",
-        );
-        if default_path.exists() {
-            return Ok(default_path);
         }
     }
 

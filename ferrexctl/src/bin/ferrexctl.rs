@@ -478,6 +478,7 @@ async fn main() -> Result<()> {
                         },
                         force,
                         mount_suffix.as_deref(),
+                        opts.postgres_preset.as_deref(),
                     )?;
                     cli::InitOutcome {
                         kv,
