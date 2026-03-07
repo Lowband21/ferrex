@@ -54,3 +54,22 @@ jobs:
           name: ferrex-player-flatpak
           path: ferrex-player.flatpak
           retention-days: 7
+
+      - name: Prepare Flatpak release artifact
+        id: prepare_release_artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          filename="ferrex-player_linux_x86_64_${version}.flatpak"
+          mv ferrex-player.flatpak "${filename}"
+          echo "filename=${filename}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attach Flatpak bundle to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: "${{ steps.prepare_release_artifact.outputs.filename }}"
+          artifactErrorsFailBuild: true
