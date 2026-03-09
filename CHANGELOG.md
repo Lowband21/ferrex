@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning once releases begin.
 
-## [0.2.0-alpha](https://github.com/Lowband21/ferrex/compare/v0.1.0-alpha...v0.2.0-alpha) (2026-03-09)
+## 0.1.0-alpha (2026-03-09)
 
 
 ### ⚠ BREAKING CHANGES
