@@ -147,6 +147,18 @@ pub fn compose_files(mode: StackMode, root: &Path) -> Vec<PathBuf> {
     if matches!(mode, StackMode::Tailscale) {
         files.push(root.join("docker-compose.tailscale.yml"));
     }
+    if let Ok(extra) = std::env::var("FERREX_COMPOSE_FILES") {
+        for item in extra.split([',', ';']) {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+            let path = root.join(item);
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+    }
     files
 }
 

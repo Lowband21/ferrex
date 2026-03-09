@@ -11,6 +11,7 @@ pub mod constants;
 pub mod env_writer;
 pub mod loader;
 pub mod models;
+pub mod packaging_config;
 pub mod runner;
 pub mod util;
 pub mod validation;
@@ -24,5 +25,9 @@ pub use models::{
     AuthConfig, CacheConfig, Config, ConfigMetadata, CorsConfig,
     DatabaseConfig, FfmpegConfig, HstsLayerConfig, HstsSettings, MediaConfig,
     RateLimiterSettings, RedisConfig, SecurityConfig, ServerConfig,
+};
+pub use packaging_config::{
+    FlatpakConfig, PackagingConfig, PackagingConfigError, PreflightConfig,
+    ReleaseConfig, VersionConfig, VersionSource,
 };
 pub use validation::{ConfigGuardRailError, ConfigWarning, ConfigWarnings};

@@ -10,6 +10,7 @@ readme = "README.md"
 description = "Ferrex configuration bootstrapper (library + CLI)"
 keywords = ["ferrex", "config", "dotenv", "docker-compose", "cli"]
 categories = ["command-line-utilities"]
+publish = true
 
 [lints]
 workspace = true
@@ -42,11 +43,14 @@ ferrex-model = { workspace = true, features = ["serde"] }
 tempfile.workspace = true
 tokio.workspace = true
 regex.workspace = true
+sha2.workspace = true
+chrono.workspace = true
 urlencoding = "2.1"
+which = "6.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 tempfile.workspace = true
 once_cell = "1.19"
 assert_cmd = "2.0"
-which = "6.0"
+predicates = "3.1"

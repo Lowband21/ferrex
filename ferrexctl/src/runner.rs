@@ -79,6 +79,7 @@ pub fn run_docker_init(
     rotate: Option<&str>,
     force: bool,
     mount_suffix: Option<&str>,
+    postgres_preset: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
     let runtime = std::env::var("FERREXCTL_DOCKER_CMD")
         .unwrap_or_else(|_| "docker".into());
@@ -112,26 +113,17 @@ pub fn run_docker_init(
         .arg("-e")
         .arg("FERREX_ENV_FILE=/app/.env");
 
-    if non_interactive {
-        cmd.args(["-e", "FERREXCTL_NON_INTERACTIVE=1"]);
-    }
-    if tailscale {
-        cmd.args(["-e", "FERREXCTL_TAILSCALE=1"]);
-    }
-    if advanced {
-        cmd.args(["-e", "FERREXCTL_ADVANCED_CONFIG=1"]);
-    }
-    if force {
-        cmd.args(["-e", "FERREXCTL_FORCE_CONFIG=1"]);
-    }
-    if let Some(rot) = rotate {
-        cmd.args(["-e", &format!("FERREXCTL_ROTATE={}", rot)]);
-    }
+    let init_args = docker_init_args(
+        tailscale,
+        advanced,
+        non_interactive,
+        rotate,
+        force,
+        postgres_preset,
+    );
 
     cmd.arg(image)
-        .arg("init")
-        .arg("--env-file")
-        .arg("/app/.env")
+        .args(init_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit());
 
@@ -151,6 +143,45 @@ pub fn run_docker_init(
         return Err(anyhow!("docker runner produced no key/value output"));
     }
     Ok(kv)
+}
+
+fn docker_init_args(
+    tailscale: bool,
+    advanced: bool,
+    non_interactive: bool,
+    rotate: Option<&str>,
+    force: bool,
+    postgres_preset: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "init".to_string(),
+        "--env-file".to_string(),
+        "/app/.env".to_string(),
+        "--print-only".to_string(),
+    ];
+
+    if non_interactive {
+        args.push("--non-interactive".to_string());
+    }
+    if tailscale {
+        args.push("--tailscale".to_string());
+    }
+    if advanced {
+        args.push("--advanced".to_string());
+    }
+    if force {
+        args.push("--force".to_string());
+    }
+    if let Some(rot) = rotate {
+        args.push("--rotate".to_string());
+        args.push(rot.to_string());
+    }
+    if let Some(preset) = postgres_preset {
+        args.push("--postgres-preset".to_string());
+        args.push(preset.to_string());
+    }
+
+    args
 }
 
 #[cfg(test)]
@@ -176,5 +207,35 @@ mod tests {
     fn choose_runner_prefers_host_when_available() {
         let r = choose_runner(RunnerChoice::Auto);
         assert!(matches!(r, Runner::Host | Runner::Docker));
+    }
+
+    #[test]
+    fn docker_init_args_include_forwarded_flags() {
+        let args = docker_init_args(
+            true,
+            true,
+            true,
+            Some("all"),
+            true,
+            Some("small"),
+        );
+        let expected = vec![
+            "init",
+            "--env-file",
+            "/app/.env",
+            "--print-only",
+            "--non-interactive",
+            "--tailscale",
+            "--advanced",
+            "--force",
+            "--rotate",
+            "all",
+            "--postgres-preset",
+            "small",
+        ];
+        assert_eq!(
+            args,
+            expected.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        );
     }
 }

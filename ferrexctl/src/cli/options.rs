@@ -30,6 +30,8 @@ pub struct StackOptions {
     pub tailscale_serve: bool,
     /// Skip confirmation prompts for destructive operations (--yes flag).
     pub skip_confirmation: bool,
+    /// Postgres performance preset (small, medium, large, custom).
+    pub postgres_preset: Option<String>,
 }
 
 impl Default for StackOptions {
@@ -51,6 +53,7 @@ impl Default for StackOptions {
             project_name_override: None,
             tailscale_serve: false,
             skip_confirmation: false,
+            postgres_preset: None,
         }
     }
 }
@@ -65,6 +68,7 @@ pub struct InitOptions {
     pub rotate: RotateTarget,
     pub force: bool,
     pub tui: bool,
+    pub postgres_preset: Option<String>,
 }
 
 impl Default for InitOptions {
@@ -77,6 +81,7 @@ impl Default for InitOptions {
             rotate: RotateTarget::None,
             force: false,
             tui: true,
+            postgres_preset: None,
         }
     }
 }
@@ -91,6 +96,7 @@ impl InitOptions {
             force: false,
             tui: true,
             non_interactive: false,
+            postgres_preset: None,
         }
     }
     pub fn new_non_interactive(env_path: PathBuf, advanced: bool) -> Self {
@@ -102,6 +108,7 @@ impl InitOptions {
             force: false,
             tui: true,
             non_interactive: true,
+            postgres_preset: None,
         }
     }
 }

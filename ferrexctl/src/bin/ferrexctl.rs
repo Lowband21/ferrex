@@ -8,6 +8,10 @@ use ferrexctl::{
         self, CheckOptions, InitOptions, RotateTarget,
         db::{stack_db_migrate, stack_db_preflight},
         options::StackOptions,
+        package::{
+            package_flatpak, package_preflight, package_release,
+            package_release_init, package_windows,
+        },
         specs::{stack_down, stack_logs, stack_status, stack_up},
         stack::{ServerMode, StackMode},
     },
@@ -47,13 +51,16 @@ enum Command {
         force: bool,
         #[arg(long, value_enum, default_value = "auto")]
         runner: RunnerArg,
-        #[arg(long, default_value = "ghcr.io/ferrex/init:latest")]
+        #[arg(long, default_value = "ghcr.io/lowband21/ferrexctl:latest")]
         docker_image: String,
         #[arg(long)]
         mount_suffix: Option<String>,
         /// Print the generated key/value pairs without writing .env
         #[arg(long)]
         print_only: bool,
+        /// Postgres performance preset (small, medium, large, custom)
+        #[arg(long)]
+        postgres_preset: Option<String>,
     },
     /// Validate configuration and connectivity
     Check {
@@ -122,6 +129,86 @@ enum Command {
     Db {
         #[command(subcommand)]
         action: DbAction,
+    },
+    /// Package and release management
+    Package {
+        #[command(subcommand)]
+        action: PackageAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PackageAction {
+    /// Build Flatpak bundle
+    Flatpak {
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Generate release artifacts (Flatpak + manifest + checksums)
+    Release {
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long, help = "Skip preflight checks")]
+        skip_preflight: bool,
+        #[arg(long, help = "Dry run (don't write artifacts)")]
+        dry_run: bool,
+    },
+    /// Run preflight checks (fmt, clippy, tests, deny, audit)
+    Preflight {
+        #[arg(
+            long,
+            value_enum,
+            help = "Scope of checks: workspace (all packages) or init (ferrexctl only)"
+        )]
+        scope: PreflightScopeArg,
+        #[arg(
+            long,
+            help = "Run in offline mode (adds --offline to cargo commands)"
+        )]
+        offline: bool,
+        #[arg(long, help = "List checks without running them")]
+        dry_run: bool,
+        #[arg(
+            long,
+            value_enum,
+            help = "Skip specific check (can be repeated)"
+        )]
+        skip: Vec<PreflightSkipArg>,
+    },
+    ReleaseInit {
+        version: String,
+        #[arg(long, help = "Skip Docker image build/push")]
+        no_image: bool,
+        #[arg(long, help = "Also tag image as :latest")]
+        tag_latest: bool,
+        #[arg(long, help = "Show what would be done without executing")]
+        dry_run: bool,
+        #[arg(long, help = "Skip preflight checks")]
+        skip_preflight: bool,
+        #[arg(long, help = "Run preflight in offline mode")]
+        offline_preflight: bool,
+        #[arg(long, help = "Skip binary build")]
+        skip_build: bool,
+    },
+    Windows {
+        #[arg(
+            long,
+            default_value = "x86_64-pc-windows-gnu",
+            help = "Target triple"
+        )]
+        target: String,
+        #[arg(long, default_value = "release", help = "Cargo profile")]
+        profile: String,
+        #[arg(long, help = "Override GStreamer root path")]
+        gst_root: Option<PathBuf>,
+        #[arg(long, help = "Output directory for zip")]
+        out: Option<PathBuf>,
+        #[arg(long, help = "Show what would be done without executing")]
+        dry_run: bool,
     },
 }
 
@@ -261,6 +348,9 @@ enum StackAction {
             help = "Skip confirmation prompts for destructive operations"
         )]
         yes: bool,
+        /// Postgres performance preset (small, medium, large, custom)
+        #[arg(long)]
+        postgres_preset: Option<String>,
     },
     Down {
         #[arg(long, default_value = ".env")]
@@ -297,6 +387,21 @@ enum StackModeArg {
 enum ServerModeArg {
     Docker,
     Host,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PreflightScopeArg {
+    Workspace,
+    Init,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum PreflightSkipArg {
+    Fmt,
+    Clippy,
+    Test,
+    Deny,
+    Audit,
 }
 impl From<RotateArg> for RotateTarget {
     fn from(val: RotateArg) -> Self {
@@ -335,6 +440,7 @@ async fn main() -> Result<()> {
             docker_image,
             mount_suffix,
             print_only,
+            postgres_preset,
         } => {
             let opts = InitOptions {
                 env_path: env_file.clone(),
@@ -344,6 +450,7 @@ async fn main() -> Result<()> {
                 rotate: rotate.into(),
                 force,
                 tui,
+                postgres_preset,
             };
             let auto_confirm = std::env::var("FERREXCTL_AUTO_CONFIRM").is_ok();
 
@@ -371,6 +478,7 @@ async fn main() -> Result<()> {
                         },
                         force,
                         mount_suffix.as_deref(),
+                        opts.postgres_preset.as_deref(),
                     )?;
                     cli::InitOutcome {
                         kv,
@@ -547,6 +655,7 @@ async fn main() -> Result<()> {
                 project,
                 tailscale_serve,
                 yes,
+                postgres_preset,
             } => {
                 let tailscale_serve = tailscale_serve.unwrap_or(match mode {
                     StackModeArg::Tailscale => true,
@@ -571,6 +680,7 @@ async fn main() -> Result<()> {
                     init_advanced: advanced,
                     force_init,
                     tailscale_serve,
+                    postgres_preset,
                     skip_confirmation: yes,
                 };
                 let outcome = stack_up(&opts).await?;
@@ -588,7 +698,7 @@ async fn main() -> Result<()> {
             } => {
                 let options = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    false, clean, false, false, false, project, false,
+                    false, clean, false, false, false, project, false, None,
                 );
                 let outcome = stack_down(&options).await?;
                 print_stack_outcome("down", &outcome);
@@ -617,6 +727,7 @@ async fn main() -> Result<()> {
                 false,
                 project,
                 false,
+                None,
             );
             stack_status(&opts).await?;
         }
@@ -645,6 +756,7 @@ async fn main() -> Result<()> {
                 false,
                 project,
                 false,
+                None,
             );
             let svc = if service.trim().is_empty() {
                 None
@@ -666,7 +778,7 @@ async fn main() -> Result<()> {
             } => {
                 let opts = stack_opts_from_args(
                     env_file, mode, profile, rust_log, wild, server, false,
-                    false, false, true, false, false, project, false,
+                    false, false, true, false, false, project, false, None,
                 );
                 stack_db_preflight(&opts, &args).await?;
             }
@@ -691,6 +803,84 @@ async fn main() -> Result<()> {
                     ..Default::default()
                 };
                 stack_db_migrate(&opts, &args).await?;
+            }
+        },
+        Command::Package { action } => match action {
+            PackageAction::Flatpak { output, version } => {
+                package_flatpak(output.as_deref(), version.as_deref()).await?;
+            }
+            PackageAction::Release {
+                version,
+                output_dir,
+                skip_preflight,
+                dry_run,
+            } => {
+                package_release(
+                    version.as_deref(),
+                    output_dir.as_deref(),
+                    skip_preflight,
+                    dry_run,
+                )
+                .await?;
+            }
+            PackageAction::Preflight {
+                scope,
+                offline,
+                dry_run,
+                skip,
+            } => {
+                let scope_str = match scope {
+                    PreflightScopeArg::Workspace => "workspace",
+                    PreflightScopeArg::Init => "init",
+                };
+                let skip_checks: Vec<String> = skip
+                    .iter()
+                    .map(|s| match s {
+                        PreflightSkipArg::Fmt => "fmt".to_string(),
+                        PreflightSkipArg::Clippy => "clippy".to_string(),
+                        PreflightSkipArg::Test => "test".to_string(),
+                        PreflightSkipArg::Deny => "deny".to_string(),
+                        PreflightSkipArg::Audit => "audit".to_string(),
+                    })
+                    .collect();
+                package_preflight(scope_str, offline, dry_run, &skip_checks)
+                    .await?;
+            }
+            PackageAction::ReleaseInit {
+                version,
+                no_image,
+                tag_latest,
+                dry_run,
+                skip_preflight,
+                offline_preflight,
+                skip_build,
+            } => {
+                package_release_init(
+                    &version,
+                    no_image,
+                    tag_latest,
+                    dry_run,
+                    skip_preflight,
+                    offline_preflight,
+                    skip_build,
+                )
+                .await?;
+            }
+            PackageAction::Windows {
+                target,
+                profile,
+                gst_root,
+                out,
+                dry_run,
+            } => {
+                package_windows(
+                    &target,
+                    &profile,
+                    gst_root.as_deref(),
+                    out.as_deref(),
+                    dry_run,
+                )
+                .await?;
             }
         },
     }
@@ -747,6 +937,7 @@ fn stack_opts_from_args(
     force_init: bool,
     project: Option<String>,
     tailscale_serve: bool,
+    postgres_preset: Option<String>,
 ) -> StackOptions {
     let wild_opt = wild.as_option_bool();
     let stack_mode: StackMode = mode.into();
@@ -768,6 +959,7 @@ fn stack_opts_from_args(
         tailscale_serve,
         init_tui: true,
         skip_confirmation: false,
+        postgres_preset,
     }
 }
 

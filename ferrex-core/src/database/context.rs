@@ -27,9 +27,13 @@ impl fmt::Debug for DatabaseContext {
 
 impl DatabaseContext {
     /// Establish a PostgreSQL connection and compose the default unit of work.
-    pub async fn connect_postgres(connection_string: &str) -> Result<Self> {
-        let postgres =
-            Arc::new(PostgresDatabase::new(connection_string).await?);
+    pub async fn connect_postgres(
+        connection_string: &str,
+        tuning_statements: Option<Vec<String>>,
+    ) -> Result<Self> {
+        let postgres = Arc::new(
+            PostgresDatabase::new(connection_string, tuning_statements).await?,
+        );
         Self::from_postgres(postgres)
     }
 

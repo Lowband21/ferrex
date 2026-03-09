@@ -12,7 +12,7 @@ use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
 };
-use std::{fmt, path::Path};
+use std::{fmt, path::Path, sync::Arc};
 use tracing::{info, warn};
 
 /// Statistics about the connection pool
@@ -52,7 +52,10 @@ impl fmt::Debug for PostgresDatabase {
 }
 
 impl PostgresDatabase {
-    pub async fn new(connection_string: &str) -> Result<Self> {
+    pub async fn new(
+        connection_string: &str,
+        tuning_statements: Option<Vec<String>>,
+    ) -> Result<Self> {
         // Get pool configuration from environment or use optimized defaults
         let max_connections = std::env::var("DB_MAX_CONNECTIONS")
             .ok()
@@ -67,6 +70,7 @@ impl PostgresDatabase {
         // Configure pool for optimal bulk query performance
         // Integrate env-aware connection option builder to reduce duplication and centralize DSN parsing.
         let connect_options = Self::build_connect_options(connection_string)?;
+        let tuning_statements = Arc::new(tuning_statements.unwrap_or_default());
         let pg_pool = PgPoolOptions::new()
             .max_connections(max_connections) // Configurable for different workloads
             .min_connections(min_connections) // Maintain idle connections
@@ -75,14 +79,30 @@ impl PostgresDatabase {
             .idle_timeout(std::time::Duration::from_secs(600)) // 10 min idle timeout
             .test_before_acquire(true) // Ensure connections are healthy
             // Ensure unqualified names resolve to application schema first.
-            .after_connect(|conn, _meta| {
-                Box::pin(async move {
-                    // Safe to set even if schema doesn't yet exist; Postgres allows arbitrary names in search_path.
-                    let _ = sqlx::query!("SET search_path = ferrex, public")
-                        .execute(conn)
-                        .await;
-                    Ok(())
-                })
+            .after_connect({
+                let tuning_statements = Arc::clone(&tuning_statements);
+                move |conn, _meta| {
+                    let tuning_statements = Arc::clone(&tuning_statements);
+                    Box::pin(async move {
+                        // Safe to set even if schema doesn't yet exist; Postgres allows arbitrary names in search_path.
+                        let _ =
+                            sqlx::query!("SET search_path = ferrex, public")
+                                .execute(&mut *conn)
+                                .await;
+                        for statement in tuning_statements.iter() {
+                            if let Err(e) =
+                                sqlx::query(statement).execute(&mut *conn).await
+                            {
+                                warn!(
+                                    statement,
+                                    error = %e,
+                                    "postgres tuning statement failed"
+                                );
+                            }
+                        }
+                        Ok(())
+                    })
+                }
             })
             .connect_with(connect_options)
             .await

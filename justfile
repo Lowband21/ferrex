@@ -36,6 +36,9 @@ clippy_player_file := 'logs/clippy/clippy_player_' + date + '.log'
 
 export SQLX_OFFLINE := 'true'
 
+# Default to local build overlay when using `just`
+export FERREX_COMPOSE_FILES := 'docker-compose.dev.yml'
+
 #######################################
 # Server Configuration and Management #
 #######################################
@@ -522,10 +525,21 @@ bench-commands:
 [no-cd]
 package-windows target="x86_64-pc-windows-gnu" profile="release" gst_root="" out_dir=".":
     # For MinGW builds, set gst_root or GST_MINGW_ROOT to .../gstreamer/1.0/mingw_x86_64
-    GST_MINGW_ROOT={{ gst_root }} utils/package-windows.sh --target {{ target }} --profile {{ profile }} --out {{ out_dir }}
+    ferrexctl package windows --target {{ target }} --profile {{ profile }} --gst-root={{ gst_root }} --out {{ out_dir }}
 
 [no-cd]
 package-windows-msvc profile="release" gst_root="" out_dir=".":
     # For MSVC builds, gst_root or GST_MSVC_ROOT must point to .../gstreamer/1.0/msvc_x86_64
     if [ -z "{{ gst_root }}" ]; then echo "Set gst_root to MSVC GStreamer root (..../gstreamer/1.0/msvc_x86_64)"; exit 1; fi
-    GST_MSVC_ROOT={{ gst_root }} utils/package-windows.sh --target x86_64-pc-windows-msvc --profile {{ profile }} --out {{ out_dir }}
+    ferrexctl package windows --target x86_64-pc-windows-msvc --profile {{ profile }} --gst-root={{ gst_root }} --out {{ out_dir }}
+
+[no-cd]
+build-player-appimage version:
+
+[no-cd]
+release-workspace version:
+    ferrexctl package release --version {{ version }}
+
+[no-cd]
+release-init version:
+    ferrexctl package release-init {{ version }}

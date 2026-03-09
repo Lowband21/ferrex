@@ -42,7 +42,7 @@
 //! };
 //!
 //! async fn register_and_track(database_url: &str) -> Result<(), Box<dyn std::error::Error>> {
-//!     let db_ctx = DatabaseContext::connect_postgres(database_url).await?;
+//!     let db_ctx = DatabaseContext::connect_postgres(database_url, None).await?;
 //!     let unit_of_work = db_ctx.unit_of_work();
 //!
 //!     let request = RegisterRequest {

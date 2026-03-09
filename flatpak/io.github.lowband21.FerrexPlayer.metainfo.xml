@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lowband21.FerrexPlayer</id>
+  <name>Ferrex Player</name>
+  <summary>Native media player with zero-copy HDR on Wayland</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+
+  <description>
+    <p>
+      Ferrex Player is a native desktop client for Ferrex media server,
+      focused on smooth animated UI, zero-copy HDR playback on Wayland,
+      and high performance browsing of large media libraries.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Zero-copy HDR playback via GStreamer 1.27.x on Wayland</li>
+      <li>Animated poster grids with GPU acceleration</li>
+      <li>Keyboard-driven navigation with smooth scrolling</li>
+      <li>MPV hand-off support for maximum compatibility</li>
+      <li>Responsive UI across sorting, filtering, and searching</li>
+    </ul>
+    <p>
+      Status: Pre-alpha (0.1.0-alpha). The player is under active development
+      and best suited for self-hosters and performance-minded enthusiasts.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.lowband21.FerrexPlayer.desktop</launchable>
+
+  <url type="homepage">https://github.com/Lowband21/ferrex</url>
+  <url type="bugtracker">https://github.com/Lowband21/ferrex/issues</url>
+  <url type="vcs-browser">https://github.com/Lowband21/ferrex</url>
+  <url type="contribute">https://github.com/Lowband21/ferrex/blob/main/.github/CONTRIBUTING.md</url>
+
+  <developer id="io.github.lowband21">
+    <name>Lowband21</name>
+  </developer>
+
+  <provides>
+    <binary>ferrex-player</binary>
+  </provides>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://media.lowband.me/images/grid_fallback.png</image>
+      <caption>Media library grid view with animated poster browsing</caption>
+    </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>Player</category>
+  </categories>
+
+  <releases>
+    <release version="0.1.0-alpha" date="2026-01-22">
+      <description>
+        <p>Initial alpha release featuring:</p>
+        <ul>
+          <li>Zero-copy HDR playback on Wayland via GStreamer 1.27.x</li>
+          <li>Animated poster grid UI with GPU-accelerated rendering</li>
+          <li>Keyboard navigation and smooth scrolling</li>
+          <li>MPV hand-off for cross-platform playback</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#3498db</color>
+    <color type="primary" scheme_preference="dark">#2980b9</color>
+  </branding>
+</component>
