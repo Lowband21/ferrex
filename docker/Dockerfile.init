@@ -1,6 +1,6 @@
 # Multi-stage build for ferrexctl (configuration bootstrapper)
 
-FROM rust:1.90.0-slim-trixie AS builder
+FROM rust:1.94.0-slim-trixie AS builder
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 ENV SQLX_OFFLINE=true
 WORKDIR /app
