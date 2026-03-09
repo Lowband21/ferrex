@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  flatpak:
+  build:
     name: Build Flatpak
     runs-on: ubuntu-latest
     container:
@@ -55,9 +55,22 @@ jobs:
           path: ferrex-player.flatpak
           retention-days: 7
 
-      - name: Prepare Flatpak release artifact
-        id: prepare_release_artifact
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Attach Flatpak to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Flatpak artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ferrex-player-flatpak
+
+      - name: Rename for release
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
@@ -67,9 +80,12 @@ jobs:
           echo "filename=${filename}" >> "${GITHUB_OUTPUT}"
 
       - name: Attach Flatpak bundle to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
-          artifacts: "${{ steps.prepare_release_artifact.outputs.filename }}"
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          artifacts: "${{ steps.prepare.outputs.filename }}"
           artifactErrorsFailBuild: true
