@@ -109,6 +109,7 @@ mod tests {
             tailscale_serve: false,
             init_tui: false,
             skip_confirmation: false,
+            postgres_preset: None,
         }
     }
 

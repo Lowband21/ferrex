@@ -7,6 +7,7 @@ pub mod demo_mode;
 pub mod errors;
 pub mod middleware;
 pub mod orchestration;
+pub mod postgres_tuning;
 pub mod scan;
 pub mod startup;
 pub mod thumbnail_service;

@@ -1,0 +1,102 @@
+app-id: io.github.lowband21.FerrexPlayer
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+command: ferrex-player
+
+build-options:
+  # Keep builds reliable: stripping can break the embedded Rust toolchain
+  # used during the build. We remove the toolchain from the final bundle via
+  # `cleanup`.
+  strip: false
+  no-debuginfo: true
+
+cleanup:
+  - /tools/rust
+
+finish-args:
+  # GPU + graphics
+  - --device=dri
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  # Network access to reach a Ferrex server
+  - --filesystem=xdg-cache
+  - --share=network
+
+modules:
+  - name: rust-toolchain
+    buildsystem: simple
+    build-commands:
+      - sh ./install.sh --prefix=/app/tools/rust
+    sources:
+      - type: archive
+        url: https://static.rust-lang.org/dist/rust-1.92.0-x86_64-unknown-linux-gnu.tar.xz
+        sha256: d2ccef59dd9f7439f2c694948069f789a044dc1addcc0803613232af8f88ee0c
+
+  - name: gstreamer
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+      - -Dintrospection=disabled
+      - -Dauto_features=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.27.2.tar.xz
+        sha256: ce129c7ea92dce3063b029171d1324d203927132fc3e0cf92b784ddd055c241d
+
+  - name: gst-plugins-base
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+      - -Dintrospection=disabled
+      - -Dauto_features=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.27.2.tar.xz
+        sha256: 6f530a0eac4fe3a8e5487c3eea7b1fac307e2a21f056d9b41747818a88be4bf6
+
+  - name: gst-plugins-good
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+      - -Dauto_features=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.27.2.tar.xz
+        sha256: 4f047416d71b102998db4cc513925cb317d87a3409d0ffae3ba218765b0f1ce5
+
+  - name: gst-plugins-bad
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+      - -Dauto_features=disabled
+      - -Dtflite=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.27.2.tar.xz
+        sha256: f4ef4afbc0f71762babed8bba7c2dc4dcd90d5a401e0a79bd05f3b95974976d3
+
+  - name: ferrex-player
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+      append-path: /app/tools/rust/bin
+      env:
+        SQLX_OFFLINE: "true"
+        CARGO_HOME: /run/build/ferrex-player/cargo-home
+        CARGO_TARGET_DIR: /run/build/ferrex-player/target
+        PKG_CONFIG_PATH: /app/lib/pkgconfig:/app/share/pkgconfig
+    build-commands:
+      - cargo build --release -p ferrex-player
+      - install -Dm755 /run/build/ferrex-player/target/release/ferrex-player /app/bin/ferrex-player
+      - install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.desktop /app/share/applications/io.github.lowband21.FerrexPlayer.desktop
+      - install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.metainfo.xml /app/share/metainfo/io.github.lowband21.FerrexPlayer.metainfo.xml
+      - install -Dm644 flatpak/icons/128x128/apps/io.github.lowband21.FerrexPlayer.png /app/share/icons/hicolor/128x128/apps/io.github.lowband21.FerrexPlayer.png
+      - install -Dm644 flatpak/icons/192x192/apps/io.github.lowband21.FerrexPlayer.png /app/share/icons/hicolor/192x192/apps/io.github.lowband21.FerrexPlayer.png
+      - install -Dm644 flatpak/icons/512x512/apps/io.github.lowband21.FerrexPlayer.png /app/share/icons/hicolor/512x512/apps/io.github.lowband21.FerrexPlayer.png
+    sources:
+      - type: dir
+        path: ..

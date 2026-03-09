@@ -1,0 +1,22 @@
+# Multi-stage build for ferrexctl (configuration bootstrapper)
+
+FROM rust:1.90.0-slim-trixie AS builder
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+ENV SQLX_OFFLINE=true
+WORKDIR /app
+
+COPY . .
+
+RUN set -eux; \
+    cargo build --release -p ferrexctl --bin ferrexctl; \
+    cp target/release/ferrexctl /tmp/ferrexctl
+
+FROM debian:trixie-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/ferrexctl /usr/local/bin/ferrexctl
+
+ENTRYPOINT ["/usr/local/bin/ferrexctl"]

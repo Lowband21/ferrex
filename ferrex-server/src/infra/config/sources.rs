@@ -163,6 +163,8 @@ pub struct EnvConfig {
     pub rate_limits: Option<RateLimitSpec>,
     pub scanner_config_path: Option<PathBuf>,
     pub scanner_config_json: Option<String>,
+    pub postgres_auto_tune: Option<bool>,
+    pub database_url_admin: Option<String>,
 }
 
 impl EnvConfig {
@@ -232,6 +234,10 @@ impl EnvConfig {
             std::env::var("SCANNER_CONFIG_PATH").ok().map(PathBuf::from);
         env_config.scanner_config_json =
             std::env::var("SCANNER_CONFIG_JSON").ok();
+        env_config.postgres_auto_tune =
+            parse_bool_var("FERREX_POSTGRES_AUTO_TUNE");
+        env_config.database_url_admin =
+            std::env::var("DATABASE_URL_ADMIN").ok();
 
         // No external config path; environment-only
 

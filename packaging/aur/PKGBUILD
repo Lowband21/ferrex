@@ -1,0 +1,91 @@
+# Maintainer: Lowband21 <lowband21@users.noreply.github.com>
+pkgname=ferrex-player-git
+pkgver=0.1.0.alpha.r0.g0000000
+pkgrel=1
+pkgdesc="Native media player for Ferrex server with zero-copy HDR on Wayland"
+arch=('x86_64')
+url="https://github.com/Lowband21/ferrex"
+license=('MIT' 'Apache-2.0')
+groups=()
+depends=(
+  'glibc'
+  'gcc-libs'
+  'gstreamer'
+  'gst-plugins-base'
+  'gst-plugins-good'
+  'gst-plugins-bad'
+  'gst-libav'
+  'libpulse'
+  'wayland'
+)
+makedepends=(
+  'rust'
+  'cargo'
+  'git'
+  'gstreamer'
+  'gst-plugins-base'
+  'gst-plugins-good'
+  'gst-plugins-bad'
+  'gst-plugins-base-libs'
+  'meson'
+  'pkg-config'
+)
+optdepends=(
+  'mpv: Alternative playback backend'
+)
+provides=('ferrex-player')
+conflicts=('ferrex-player')
+source=("${pkgname}::git+https://github.com/Lowband21/ferrex.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${pkgname}"
+  git describe --long --tags --abbrev=7 --match='v*' 2>/dev/null | \
+    sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g;s/^\.//;s/\.alpha/alpha/' || \
+    echo "0.1.0.alpha.r$(git rev-list --count HEAD).g$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --release -p ferrex-player
+}
+
+check() {
+  cd "${pkgname}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test -p ferrex-player --no-fail-fast || true
+}
+
+package() {
+  cd "${pkgname}"
+
+  # Install binary
+  install -Dm755 target/release/ferrex-player "${pkgdir}/usr/bin/ferrex-player"
+
+  # Install desktop file
+  install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.desktop \
+    "${pkgdir}/usr/share/applications/io.github.lowband21.FerrexPlayer.desktop"
+
+  # Install metainfo
+  install -Dm644 flatpak/io.github.lowband21.FerrexPlayer.metainfo.xml \
+    "${pkgdir}/usr/share/metainfo/io.github.lowband21.FerrexPlayer.metainfo.xml"
+
+  # Install icons
+  for size in 128x128 192x192 512x512; do
+    install -Dm644 "flatpak/icons/${size}/apps/io.github.lowband21.FerrexPlayer.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}/apps/io.github.lowband21.FerrexPlayer.png"
+  done
+
+  # Install licenses
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 LICENSE-APACHE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+  install -Dm644 LICENSE-MIT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
+}

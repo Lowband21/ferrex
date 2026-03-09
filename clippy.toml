@@ -1,0 +1,4 @@
+# Keep clippy strict (`-D warnings`) without forcing large refactors for
+# legitimately-parameterized entrypoints / handlers.
+too-many-arguments-threshold = 24
+type-complexity-threshold = 500

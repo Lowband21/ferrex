@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ferrex</Name>
+  <Repository>ghcr.io/lowband21/ferrex-server</Repository>
+  <Registry>https://ghcr.io/lowband21/ferrex-server</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Lowband21/ferrex/issues</Support>
+  <Project>https://github.com/Lowband21/ferrex</Project>
+  <Overview>Ferrex is a native media server and player focused on delivering a smooth, low-latency experience with hardware-accelerated playback. Features responsive UI, animated poster grids, and Wayland HDR support.</Overview>
+  <Category>MediaServer:Video</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Lowband21/ferrex/main/unraid/ferrex.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Lowband21/ferrex/main/flatpak/icons/128x128/apps/io.github.lowband21.FerrexPlayer.png</Icon>
+  <ExtraParams>--security-opt seccomp=./seccomp-allow-iouring.json</ExtraParams>
+
+  <!-- Required Config entries -->
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp"
+          Description="Web interface port" Type="Port" Display="always"
+          Required="true" Mask="false">3000</Config>
+
+  <Config Name="Config Path" Target="/config" Default="/mnt/user/appdata/ferrex"
+          Mode="rw" Description="Configuration and database files" Type="Path"
+          Display="always" Required="true" Mask="false">/mnt/user/appdata/ferrex</Config>
+
+  <Config Name="Media Library" Target="/media" Default="/mnt/user/media"
+          Mode="ro" Description="Media library path (read-only)" Type="Path"
+          Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+
+  <Config Name="PUID" Target="PUID" Default="99" Mode=""
+          Description="User ID for file permissions" Type="Variable"
+          Display="always" Required="false" Mask="false">99</Config>
+
+  <Config Name="PGID" Target="PGID" Default="100" Mode=""
+          Description="Group ID for file permissions" Type="Variable"
+          Display="always" Required="false" Mask="false">100</Config>
+
+  <Config Name="TMDB API Key" Target="TMDB_API_KEY" Default="" Mode=""
+          Description="TMDB API key for metadata (optional)" Type="Variable"
+          Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="Postgres Preset" Target="FERREX_POSTGRES_PRESET" Default="medium" Mode=""
+          Description="Postgres performance preset: small (4-8GB RAM), medium (16-32GB), large (64GB+)" Type="Variable"
+          Display="advanced" Required="false" Mask="false">medium</Config>
+
+  <Config Name="Log Level" Target="RUST_LOG" Default="info" Mode=""
+          Description="Log level: trace, debug, info, warn, error" Type="Variable"
+          Display="advanced" Required="false" Mask="false">info</Config>
+
+  <Config Name="Database Admin User" Target="DATABASE_ADMIN_USER" Default="postgres" Mode=""
+          Description="Postgres admin username" Type="Variable"
+          Display="advanced-hide" Required="false" Mask="false">postgres</Config>
+
+  <Config Name="Database Admin Password" Target="DATABASE_ADMIN_PASSWORD" Default="" Mode=""
+          Description="Postgres admin password (auto-generated if empty)" Type="Variable"
+          Display="advanced-hide" Required="false" Mask="true"></Config>
+
+  <Config Name="Database App User" Target="DATABASE_APP_USER" Default="ferrex_app" Mode=""
+          Description="Postgres application username" Type="Variable"
+          Display="advanced-hide" Required="false" Mask="false">ferrex_app</Config>
+
+  <Config Name="Database App Password" Target="DATABASE_APP_PASSWORD" Default="" Mode=""
+          Description="Postgres application password (auto-generated if empty)" Type="Variable"
+          Display="advanced-hide" Required="false" Mask="true"></Config>
+</Container>

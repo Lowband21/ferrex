@@ -1,0 +1,51 @@
+# Ferrex Packaging Configuration
+#
+# This file configures packaging and release workflows for ferrexctl.
+# All fields are optional - defaults are used when this file is missing or fields are omitted.
+
+[flatpak]
+# Path to Flatpak manifest file (relative to workspace root)
+manifest_path = "flatpak/io.github.lowband21.FerrexPlayer.yml"
+
+# Flatpak application ID
+app_id = "io.github.lowband21.FerrexPlayer"
+
+# Output directory for built Flatpak artifacts
+output_dir = "dist-release"
+
+# Required tools (checked at runtime):
+# - flatpak
+# - flatpak-builder
+# - python3
+# - tar
+# - appstream
+
+[release]
+# Output directory for release artifacts
+# Artifacts are placed in: {output_dir}/{tag}/
+output_dir = "dist-release"
+
+# Artifact naming convention:
+# ferrex-player_linux_x86_64_{version}.flatpak
+
+[preflight]
+# Run cargo fmt --check before release
+run_fmt = true
+
+# Run cargo clippy before release
+run_clippy = true
+
+# Run cargo test before release
+run_tests = true
+
+# Run cargo audit before release (optional, requires cargo-audit)
+run_audit = true
+
+# Use --offline flag for cargo commands (avoids network access)
+offline = false
+
+[version]
+# Version source: "workspace" (default) or "manual"
+# - workspace: Read from [workspace.package] version in Cargo.toml
+# - manual: Provided via CLI --version flag
+source = "workspace"
