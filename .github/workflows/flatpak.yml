@@ -71,5 +71,9 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
           artifacts: "${{ steps.prepare_release_artifact.outputs.filename }}"
           artifactErrorsFailBuild: true
