@@ -80,11 +80,7 @@ jobs:
           json=""
           for _ in $(seq 1 60); do
             if json="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "X-GitHub-Api-Version: 2022-11-28" "$api" 2>/dev/null)"; then
-              asset_count="$(python3 - <<'PY'
-                import json,sys
-                print(len(json.load(sys.stdin).get("assets") or []))
-                PY
-              <<<"$json")"
+              asset_count="$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("assets") or []))')"
 
               if [[ "$asset_count" -ge 1 ]]; then
                 echo "found release for $tag with assets=$asset_count"
@@ -97,17 +93,8 @@ jobs:
 
           [[ -n "$json" ]] || { echo "error: release not found for $tag" >&2; exit 1; }
 
-          draft="$(python3 - <<'PY'
-            import json,sys
-            print("true" if json.load(sys.stdin).get("draft") else "false")
-            PY
-            <<<"$json")"
-
-          asset_count="$(python3 - <<'PY'
-            import json,sys
-            print(len(json.load(sys.stdin).get("assets") or []))
-            PY
-            <<<"$json")"
+          draft="$(echo "$json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("draft") else "false")')"
+          asset_count="$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("assets") or []))')"
 
           echo "draft=$draft"
           echo "asset_count=$asset_count"
@@ -237,17 +224,8 @@ jobs:
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
           json="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "X-GitHub-Api-Version: 2022-11-28" "$api")"
 
-          release_id="$(python3 - <<'PY'
-            import json,sys
-            print(json.load(sys.stdin)["id"])
-            PY
-          <<<"$json")"
-
-          draft="$(python3 - <<'PY'
-            import json,sys
-            print("true" if json.load(sys.stdin).get("draft") else "false")
-            PY
-          <<<"$json")"
+          release_id="$(echo "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+          draft="$(echo "$json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("draft") else "false")')"
 
           if [[ "$draft" != "true" ]]; then
             echo "release is already published; nothing to do"
