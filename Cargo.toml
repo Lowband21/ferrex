@@ -218,11 +218,6 @@ dashmap = "6.1"
 jsonwebtoken = "10.2"
 argon2 = "0.5"
 
-[workspace.metadata.dist]
-ci = "github"
-targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
-installers = ["shell", "powershell"]
-
 [profile.dev]
 [profile.dev.package.ferrex-player]
 opt-level = 1
@@ -267,6 +262,11 @@ opt-level = 2
 
 [profile.release-lite.package.ferrex-player]
 opt-level = 2
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [patch.crates-io]
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced" }
