@@ -21,11 +21,9 @@ readme = "README.md"
 keywords = [
   "media-server",
   "streaming",
-  "rust",
   "video",
   "hdr",
   "iced",
-  "shader",
 ]
 categories = ["multimedia", "web-programming::http-server"]
 
