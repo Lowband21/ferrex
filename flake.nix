@@ -3,9 +3,10 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
-    { self, nixpkgs, rust-overlay }:
+    { self, nixpkgs, rust-overlay, crane }:
     let
       systems = [
         "x86_64-linux"
@@ -78,52 +79,6 @@
       workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
       workspaceVersion = workspaceToml.workspace.package.version or "0.0.0";
 
-      # Common outputHashes for all git-sourced crates
-      commonOutputHashes = {
-        # gtk-rs-core (glib, gio, etc.) — git+https://github.com/gtk-rs/gtk-rs-core@999d7194
-        "gio-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
-        "glib-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
-        "glib-macros-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
-        "glib-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
-        "gobject-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
-        # gstreamer-rs — git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs@05d28e33
-        "gstreamer-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-app-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-app-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-base-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-base-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-video-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        "gstreamer-video-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
-        # iced-ferrex
-        "iced-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_aw-0.13.0-dev" = "sha256-Z9+uQmaAJrHV6kG2MiSaA+ksWj7FNw3Fr9yeDv8gY5g=";
-        "iced_beacon-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_core-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_debug-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_devtools-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_fonts-0.3.0-dev" = "sha256-hX+45thUQ0cX/Xo36jCS8dllZJxm1c3CSktHSrlu1dw=";
-        "iced_fonts_macros-0.3.0-dev" = "sha256-hX+45thUQ0cX/Xo36jCS8dllZJxm1c3CSktHSrlu1dw=";
-        "iced_futures-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_graphics-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_program-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_renderer-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_runtime-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_selector-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_test-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_tester-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_tiny_skia-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_wgpu-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_widget-0.14.2" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        "iced_winit-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
-        # lucide-icons-iced
-        "lucide-icons-0.525.0" = "sha256-RxSdYtQqeu6Uhv1eN+QGL/e7ioi+7JQP6jm64HAkrHc=";
-        # subwave
-        "subwave_appsink-0.1.0" = "sha256-fFQx1QuN+3fXjm8tGxWTBjapUbbwFlGogBYTW5I5jrQ=";
-        "subwave_core-0.1.0" = "sha256-fFQx1QuN+3fXjm8tGxWTBjapUbbwFlGogBYTW5I5jrQ=";
-        "subwave_unified-0.1.0" = "sha256-fFQx1QuN+3fXjm8tGxWTBjapUbbwFlGogBYTW5I5jrQ=";
-        "subwave_wayland-0.1.0" = "sha256-fFQx1QuN+3fXjm8tGxWTBjapUbbwFlGogBYTW5I5jrQ=";
-      };
     in
     {
       overlays.gst_1_27_2 = gstOverlay_1_27_2;
@@ -145,113 +100,114 @@
           libclang = pkgsPlayer.llvmPackages.libclang;
 
           rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
-          rustPlatform = pkgsPlayer.makeRustPlatform {
-            cargo = rustToolchain;
-            rustc = rustToolchain;
+          craneLib = (crane.mkLib pkgsPlayer).overrideToolchain rustToolchain;
+
+          src = craneLib.cleanCargoSource ./.;
+
+          # Build workspace dependencies once — reused by all three crates.
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
+            pname = "ferrex-workspace-deps";
+            version = workspaceVersion;
+
+            nativeBuildInputs = with pkgsPlayer; [ pkg-config ];
+
+            buildInputs = with pkgsPlayer; [
+              openssl
+              ffmpegPkgPlayer.dev
+            ];
+
+            SQLX_OFFLINE = "true";
           };
 
-          ferrexPlayerBin = rustPlatform.buildRustPackage {
+          cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+            # buildDepsOnly needs the superset of all native/build inputs so
+            # that every workspace crate's deps can compile.
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
+              llvmPackages.clang
+            ]);
+
+            buildInputs = commonArgs.buildInputs ++ [
+              libclang
+
+              gst.gstreamer
+              gst.gst-plugins-base
+              gst.gst-plugins-good
+              gst.gst-plugins-bad
+
+              gst.gstreamer.dev
+              gst.gst-plugins-base.dev
+              gst.gst-plugins-good.dev
+
+              pkgsPlayer.pipewire
+              pkgsPlayer.libva
+              pkgsPlayer.libdrm
+              pkgsPlayer.mesa
+              pkgsPlayer.vulkan-loader
+              pkgsPlayer.wayland
+              pkgsPlayer.libxkbcommon
+              pkgsPlayer.xorg.libX11
+              pkgsPlayer.xorg.libXcursor
+              pkgsPlayer.xorg.libXi
+              pkgsPlayer.xorg.libXrandr
+            ];
+
+            LIBCLANG_PATH = "${libclang.lib}/lib";
+          });
+
+          ferrexPlayerBin = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
             pname = "ferrex-player";
-            version = workspaceVersion;
-            src = ./.;
+            cargoExtraArgs = "-p ferrex-player";
+            doCheck = false;
 
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              outputHashes = commonOutputHashes;
-            };
-
-            nativeBuildInputs = with pkgsPlayer; [
-              pkg-config
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
               llvmPackages.clang
               makeWrapper
+            ]);
+
+            buildInputs = commonArgs.buildInputs ++ [
+              libclang
+
+              gst.gstreamer
+              gst.gst-plugins-base
+              gst.gst-plugins-good
+              gst.gst-plugins-bad
+
+              gst.gstreamer.dev
+              gst.gst-plugins-base.dev
+              gst.gst-plugins-good.dev
+
+              pkgsPlayer.pipewire
+              pkgsPlayer.libva
+              pkgsPlayer.libdrm
+              pkgsPlayer.mesa
+              pkgsPlayer.vulkan-loader
+              pkgsPlayer.wayland
+              pkgsPlayer.libxkbcommon
+              pkgsPlayer.xorg.libX11
+              pkgsPlayer.xorg.libXcursor
+              pkgsPlayer.xorg.libXi
+              pkgsPlayer.xorg.libXrandr
             ];
 
-            buildInputs =
-              [
-                libclang
-                ffmpegPkgPlayer.dev
+            LIBCLANG_PATH = "${libclang.lib}/lib";
+          });
 
-                gst.gstreamer
-                gst.gst-plugins-base
-                gst.gst-plugins-good
-                gst.gst-plugins-bad
-
-                gst.gstreamer.dev
-                gst.gst-plugins-base.dev
-                gst.gst-plugins-good.dev
-
-                pkgsPlayer.pipewire
-                pkgsPlayer.libva
-                pkgsPlayer.libdrm
-                pkgsPlayer.mesa
-                pkgsPlayer.vulkan-loader
-                pkgsPlayer.wayland
-                pkgsPlayer.libxkbcommon
-                pkgsPlayer.xorg.libX11
-                pkgsPlayer.xorg.libXcursor
-                pkgsPlayer.xorg.libXi
-                pkgsPlayer.xorg.libXrandr
-              ];
-
-            # Build only the player crate.
-            cargoBuildFlags = [
-              "-p"
-              "ferrex-player"
-            ];
-
-            env = {
-              SQLX_OFFLINE = "true";
-              LIBCLANG_PATH = "${libclang.lib}/lib";
-            };
-
-            doCheck = false;
-          };
-
-          ferrexServerBin = rustPlatform.buildRustPackage {
+          ferrexServerBin = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
             pname = "ferrex-server";
-            version = workspaceVersion;
-            src = ./.;
-
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              outputHashes = commonOutputHashes;
-            };
-
-            nativeBuildInputs = with pkgsPlayer; [ pkg-config ];
-
-            buildInputs = with pkgsPlayer; [ ffmpegPkgPlayer.dev openssl ];
-
-            cargoBuildFlags = [ "-p" "ferrex-server" ];
-
-            env = {
-              SQLX_OFFLINE = "true";
-            };
-
+            cargoExtraArgs = "-p ferrex-server";
             doCheck = false;
-          };
+          });
 
-          ferrexCtlBin = rustPlatform.buildRustPackage {
+          ferrexCtlBin = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
             pname = "ferrexctl";
-            version = workspaceVersion;
-            src = ./.;
-
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              outputHashes = commonOutputHashes;
-            };
-
-            nativeBuildInputs = with pkgsPlayer; [ pkg-config ];
-
-            buildInputs = with pkgsPlayer; [ ffmpegPkgPlayer.dev openssl ];
-
-            cargoBuildFlags = [ "-p" "ferrexctl" ];
-
-            env = {
-              SQLX_OFFLINE = "true";
-            };
-
+            cargoExtraArgs = "-p ferrexctl";
             doCheck = false;
-          };
+          });
         in
         {
           gstreamer_1_27_2 = gst.gstreamer;
