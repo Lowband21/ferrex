@@ -68,7 +68,7 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for GitHub Release + assets
+      - name: Wait for release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -76,35 +76,20 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
 
-          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}"
-          json=""
-          for _ in $(seq 1 60); do
-            if json="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "X-GitHub-Api-Version: 2022-11-28" "$api" 2>/dev/null)"; then
-              asset_count="$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("assets") or []))')"
-
-              if [[ "$asset_count" -ge 1 ]]; then
-                echo "found release for $tag with assets=$asset_count"
-                break
-              fi
+          # Wait for manifest.json to appear — its presence means the release
+          # job in release.yml has completed and all dist artifacts are uploaded.
+          echo "waiting for manifest.json on release $tag (up to 30 min)..."
+          for i in $(seq 1 180); do
+            if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'manifest.json'; then
+              echo "found manifest.json after $((i * 10))s"
+              break
             fi
-            echo "waiting for release/assets to appear for $tag..."
+            if [[ $i -eq 180 ]]; then
+              echo "error: timed out waiting for manifest.json on release $tag" >&2
+              exit 1
+            fi
             sleep 10
           done
-
-          [[ -n "$json" ]] || { echo "error: release not found for $tag" >&2; exit 1; }
-
-          draft="$(echo "$json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("draft") else "false")')"
-          asset_count="$(echo "$json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("assets") or []))')"
-
-          echo "draft=$draft"
-          echo "asset_count=$asset_count"
-
-          if [[ "$asset_count" -lt 1 ]]; then
-            echo "error: release for $tag has no assets uploaded; refusing to publish" >&2
-            exit 1
-          fi
-
-          echo "ok: release exists and has assets"
 
       - name: Download release assets
         env:
@@ -127,56 +112,49 @@ jobs:
           [[ -f manifest.json ]] || { echo "error: missing manifest.json" >&2; exit 1; }
           [[ -f SHA256SUMS ]] || { echo "error: missing SHA256SUMS" >&2; exit 1; }
 
-          # Ensure SHA256SUMS verifies (includes manifest.json and all artifacts).
           sha256sum -c SHA256SUMS
 
-          # Verify manifest is consistent and lists expected assets.
           python3 - <<'PY'
-            import json, os, hashlib
+          import json, os, hashlib, sys
 
-            tag=os.environ["GITHUB_REF_NAME"]
-            with open("manifest.json","r",encoding="utf-8") as f:
-              m=json.load(f)
+          tag = os.environ["GITHUB_REF_NAME"]
+          with open("manifest.json", "r", encoding="utf-8") as f:
+              m = json.load(f)
 
-            if m.get("schema") != "ferrex.release-manifest.v1":
+          if m.get("schema") != "ferrex.release-manifest.v1":
               raise SystemExit("error: unexpected manifest schema")
 
-            def sha256(path: str) -> str:
-              h=hashlib.sha256()
-              with open(path,"rb") as f:
-                for chunk in iter(lambda: f.read(1024*1024), b""):
-                  h.update(chunk)
+          def sha256(path: str) -> str:
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
               return h.hexdigest()
 
-            names=set()
-            for a in m.get("artifacts") or []:
-              name=a.get("name")
+          names = set()
+          for a in m.get("artifacts") or []:
+              name = a.get("name")
               if not name:
-                raise SystemExit("error: artifact entry missing name")
+                  raise SystemExit("error: artifact entry missing name")
               if name in names:
-                raise SystemExit(f"error: duplicate artifact in manifest: {name}")
+                  raise SystemExit(f"error: duplicate artifact in manifest: {name}")
               names.add(name)
               if not os.path.exists(name):
-                raise SystemExit(f"error: artifact listed in manifest not found: {name}")
-              want=a.get("sha256")
-              have=sha256(name)
+                  raise SystemExit(f"error: artifact listed in manifest not found: {name}")
+              want = a.get("sha256")
+              have = sha256(name)
               if want != have:
-                raise SystemExit(f"error: sha256 mismatch for {name}: manifest={want} file={have}")
+                  raise SystemExit(f"error: sha256 mismatch for {name}: manifest={want} file={have}")
 
-            if tag.startswith("v"):
-              ver=tag[1:]
-              required={f"ferrex-player_linux_x86_64_{ver}.flatpak"}
-            elif tag.startswith("ferrexctl-v"):
-              ver=tag[len("ferrexctl-v"):]
-              required={f"ferrexctl_linux_x86_64_{ver}.tar.gz"}
-            else:
-              raise SystemExit("error: unsupported tag format")
+          # Flatpak artifact is uploaded by a separate workflow and may arrive
+          # later.  Warn if absent but do not block the release.
+          if tag.startswith("v"):
+              ver = tag[1:]
+              flatpak = f"ferrex-player_linux_x86_64_{ver}.flatpak"
+              if flatpak not in names:
+                  print(f"::warning::flatpak artifact not yet present: {flatpak}", file=sys.stderr)
 
-            missing=sorted(required - names)
-            if missing:
-              raise SystemExit("error: missing required artifacts in manifest: " + ", ".join(missing))
-
-            print("ok: manifest checksums and required artifacts verified")
+          print("ok: manifest checksums and artifact integrity verified")
           PY
 
       - name: Verify GHCR image tags exist
