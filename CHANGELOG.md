@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning once releases begin.
 
+## [0.1.1-alpha](https://github.com/Lowband21/ferrex/compare/v0.1.0-alpha...v0.1.1-alpha) (2026-03-10)
+
+
+### Bug Fixes
+
+* **ci:** update dependencies for cargo aduit and fix release flow ([95b43a2](https://github.com/Lowband21/ferrex/commit/95b43a27a85cb648ea8b7347a1c48cfd9726a936))
+
 ## 0.1.0-alpha (2026-03-09)
 
 
