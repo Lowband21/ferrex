@@ -8,6 +8,7 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "include-component-in-tag": false,
+      "bootstrap-sha": "033b3396a0e143d82b3a5f97c1b961e591019e0a",
       "prerelease": true,
       "prerelease-type": "alpha",
       "changelog-sections": [
