@@ -80,21 +80,21 @@
 
       # Common outputHashes for all git-sourced crates
       commonOutputHashes = {
-        # gtk-rs-core (glib, gio, etc.)
-        "gio-sys-0.22.0-alpha.2" = "sha256-eI5uaPU5WchJ/7A5NWPF5CPK9iwz7A91IKONK7lkDok=";
-        "glib-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
-        "glib-macros-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
-        "glib-sys-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
-        "gobject-sys-0.22.0-alpha.2" = "sha256-U79Kin61aAJ7KEeIvZRzNzzl4A2GU7EXuE+/qDfRrxE=";
-        # gstreamer-rs
-        "gstreamer-0.25.0-alpha.1" = "sha256-x9LCeI+gtGg8SnpEKfvOSK0NvCNyM2k+REPoP/jHbW8=";
-        "gstreamer-app-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-app-sys-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-base-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-base-sys-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-sys-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-video-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
-        "gstreamer-video-sys-0.25.0-alpha.1" = "sha256-ut5HuSf5/9xdrq3P+D5fj+nQOeHtPFchIYU3/qFlLZo=";
+        # gtk-rs-core (glib, gio, etc.) — git+https://github.com/gtk-rs/gtk-rs-core@999d7194
+        "gio-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
+        "glib-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
+        "glib-macros-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
+        "glib-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
+        "gobject-sys-0.23.0-alpha" = "sha256-1jWwY1kpp3W6V9zV9Fp70cl4oXc70Q2ieje6fAQHhi8=";
+        # gstreamer-rs — git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs@05d28e33
+        "gstreamer-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-app-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-app-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-base-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-base-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-video-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
+        "gstreamer-video-sys-0.26.0-alpha" = "sha256-VfCWnBpt5hR2JGVBrbKXt/oS1HzrMIHfC3UW1BWZnBE=";
         # iced-ferrex
         "iced-0.14.0" = "sha256-tVqKPy2i9fWEoh2CpItSzwsRytD0w9CNuIbtk9cTJyE=";
         "iced_aw-0.13.0-dev" = "sha256-Z9+uQmaAJrHV6kG2MiSaA+ksWj7FNw3Fr9yeDv8gY5g=";
