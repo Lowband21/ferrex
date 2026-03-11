@@ -7,6 +7,17 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 -- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
+-- Name: pg_uuidv7; Type: EXTENSION; Schema: -; Owner: -
+-- Provides uuid_generate_v7(); the wrapper below keeps the short name
+-- used throughout the schema.  The extension must be installed at the
+-- PostgreSQL server level (e.g. services.ferrex.database.postgresql.extensions).
+CREATE EXTENSION IF NOT EXISTS pg_uuidv7 WITH SCHEMA public;
+
+-- Thin wrapper so column defaults can use the short name uuidv7().
+CREATE OR REPLACE FUNCTION public.uuidv7() RETURNS uuid
+    LANGUAGE sql VOLATILE PARALLEL SAFE
+    AS $$ SELECT public.uuid_generate_v7(); $$;
+
 -- Create the dedicated schema; owner will be the creating role
 CREATE SCHEMA IF NOT EXISTS ferrex;
 

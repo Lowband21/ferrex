@@ -119,6 +119,22 @@ in
       description = "Admin PostgreSQL connection string for migrations (DATABASE_URL_ADMIN).";
     };
 
+    database.createLocally = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Create and configure a local PostgreSQL instance for ferrex.
+        When enabled, this will:
+        - Enable PostgreSQL
+        - Create the ferrex database and user
+        - Install required extensions (pg_uuidv7)
+        - Grant the ferrex user database ownership
+
+        When disabled, you must configure PostgreSQL yourself and ensure
+        the pg_uuidv7 extension is installed at the server level.
+      '';
+    };
+
     database.runMigrations = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -315,6 +331,23 @@ in
       }
     ];
 
+    # ── Default database URL when managing PostgreSQL locally ────────
+
+    services.ferrex.database.url = lib.mkIf cfg.database.createLocally
+      (lib.mkDefault "postgresql:///ferrex?host=/run/postgresql");
+
+    # ── PostgreSQL (optional local instance) ─────────────────────────
+
+    services.postgresql = lib.mkIf cfg.database.createLocally {
+      enable = true;
+      ensureDatabases = [ "ferrex" ];
+      ensureUsers = [{
+        name = cfg.user;
+        ensureDBOwnership = true;
+      }];
+      extensions = ps: [ ps.pg_uuidv7 ];
+    };
+
     # ── Users & directories ──────────────────────────────────────────
 
     users.groups.${cfg.group} = { };
@@ -370,12 +403,41 @@ in
       '';
     };
 
+    # ── PostgreSQL extension provisioning (superuser required) ────────
+    # pg_uuidv7 is not a trusted extension, so the DB owner cannot
+    # CREATE EXTENSION.  This oneshot runs as the postgres superuser
+    # to install all required extensions before the app migration runs.
+
+    systemd.services.ferrex-db-extensions = lib.mkIf cfg.database.createLocally {
+      description = "Ferrex PostgreSQL extension provisioning";
+      after = [ "postgresql.service" ];
+      before = [ "ferrex-db-migrate.service" ];
+      wantedBy = [ "ferrex-db-migrate.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = "postgres";
+        Group = "postgres";
+      };
+      script = ''
+        ${config.services.postgresql.package}/bin/psql -d ferrex -c "
+          CREATE EXTENSION IF NOT EXISTS citext    WITH SCHEMA public;
+          CREATE EXTENSION IF NOT EXISTS pg_trgm   WITH SCHEMA public;
+          CREATE EXTENSION IF NOT EXISTS pgcrypto  WITH SCHEMA public;
+          CREATE EXTENSION IF NOT EXISTS pg_uuidv7 WITH SCHEMA public;
+        "
+      '';
+    };
+
     # ── DB migration service ─────────────────────────────────────────
 
     systemd.services.ferrex-db-migrate = lib.mkIf cfg.database.runMigrations {
       description = "Ferrex database migrations";
       after = [ "postgresql.service" "network.target" ]
+        ++ lib.optional cfg.database.createLocally "ferrex-db-extensions.service"
         ++ lib.optional (cfg.autoGenerateSecrets && cfg.secretsFile == null) "ferrex-secrets-init.service";
+      requires =
+        lib.optional cfg.database.createLocally "ferrex-db-extensions.service";
       before = [ "ferrex-server.service" ];
       wantedBy = [ "ferrex-server.service" ];
       serviceConfig = {

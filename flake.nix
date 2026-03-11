@@ -165,10 +165,10 @@
               pkgsPlayer.vulkan-loader
               pkgsPlayer.wayland
               pkgsPlayer.libxkbcommon
-              pkgsPlayer.xorg.libX11
-              pkgsPlayer.xorg.libXcursor
-              pkgsPlayer.xorg.libXi
-              pkgsPlayer.xorg.libXrandr
+              pkgsPlayer.libx11
+              pkgsPlayer.libxcursor
+              pkgsPlayer.libxi
+              pkgsPlayer.libxrandr
             ];
           });
 
@@ -199,10 +199,10 @@
               pkgsPlayer.vulkan-loader
               pkgsPlayer.wayland
               pkgsPlayer.libxkbcommon
-              pkgsPlayer.xorg.libX11
-              pkgsPlayer.xorg.libXcursor
-              pkgsPlayer.xorg.libXi
-              pkgsPlayer.xorg.libXrandr
+              pkgsPlayer.libx11
+              pkgsPlayer.libxcursor
+              pkgsPlayer.libxi
+              pkgsPlayer.libxrandr
             ];
           });
 
@@ -253,7 +253,7 @@
               fi' \
               --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0" \
               --set GST_PLUGIN_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0" \
-              --prefix LD_LIBRARY_PATH : "${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.xorg.libX11}/lib:${pkgsPlayer.xorg.libXcursor}/lib:${pkgsPlayer.xorg.libXi}/lib:${pkgsPlayer.xorg.libXrandr}/lib:${pkgsPlayer.vulkan-loader}/lib"
+              --prefix LD_LIBRARY_PATH : "${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib"
           '';
 
           ferrex-server = ferrexServerBin;
@@ -286,9 +286,9 @@
       nixosModules.ferrex-server = import ./nix/modules/ferrex-server.nix;
 
       overlays.default = final: prev: {
-        ferrex-player = self.packages.${final.system}.ferrex-player;
-        ferrex-server = self.packages.${final.system}.ferrex-server;
-        ferrexctl = self.packages.${final.system}.ferrexctl;
+        ferrex-player = self.packages.${final.stdenv.hostPlatform.system}.ferrex-player;
+        ferrex-server = self.packages.${final.stdenv.hostPlatform.system}.ferrex-server;
+        ferrexctl = self.packages.${final.stdenv.hostPlatform.system}.ferrexctl;
       };
 
       homeManagerModules.ferrex-player = import ./nix/modules/ferrex-player-hm.nix;
@@ -414,10 +414,10 @@
                 # environment so `cargo run` binaries can find them on NixOS.
                 pkgsPlayer.wayland
                 pkgsPlayer.libxkbcommon
-                pkgsPlayer.xorg.libX11
-                pkgsPlayer.xorg.libXcursor
-                pkgsPlayer.xorg.libXi
-                pkgsPlayer.xorg.libXrandr
+                pkgsPlayer.libx11
+                pkgsPlayer.libxcursor
+                pkgsPlayer.libxi
+                pkgsPlayer.libxrandr
               ];
 
             shellHook = ''
@@ -441,7 +441,7 @@
               export GST_PLUGIN_SYSTEM_PATH_1_0="${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0"
               export GST_PLUGIN_PATH_1_0="$GST_PLUGIN_SYSTEM_PATH_1_0"
 
-              export LD_LIBRARY_PATH="${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.xorg.libX11}/lib:${pkgsPlayer.xorg.libXcursor}/lib:${pkgsPlayer.xorg.libXi}/lib:${pkgsPlayer.xorg.libXrandr}/lib:${pkgsPlayer.vulkan-loader}/lib:''${LD_LIBRARY_PATH:-}"
+              export LD_LIBRARY_PATH="${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib:''${LD_LIBRARY_PATH:-}"
 
               # Prefer system GPU drivers on NixOS for Vulkan/GL discovery.
               if [ -d /run/opengl-driver ]; then
