@@ -105,32 +105,34 @@
           src = craneLib.cleanCargoSource ./.;
 
           # Build workspace dependencies once — reused by all three crates.
+          # libclang + clang are in common because ffmpeg-sys-next uses
+          # bindgen at build time for all three crates.
           commonArgs = {
             inherit src;
             strictDeps = true;
             pname = "ferrex-workspace-deps";
             version = workspaceVersion;
 
-            nativeBuildInputs = with pkgsPlayer; [ pkg-config ];
+            nativeBuildInputs = with pkgsPlayer; [
+              pkg-config
+              llvmPackages.clang
+            ];
 
             buildInputs = with pkgsPlayer; [
+              libclang
               openssl
               ffmpegPkgPlayer.dev
             ];
 
             SQLX_OFFLINE = "true";
+            LIBCLANG_PATH = "${libclang.lib}/lib";
           };
 
           cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
-            # buildDepsOnly needs the superset of all native/build inputs so
-            # that every workspace crate's deps can compile.
-            nativeBuildInputs = commonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
-              llvmPackages.clang
-            ]);
-
+            # buildDepsOnly needs the superset of all build inputs so that
+            # every workspace crate's deps can compile (player needs GStreamer,
+            # Wayland, Vulkan, etc.).
             buildInputs = commonArgs.buildInputs ++ [
-              libclang
-
               gst.gstreamer
               gst.gst-plugins-base
               gst.gst-plugins-good
@@ -152,8 +154,6 @@
               pkgsPlayer.xorg.libXi
               pkgsPlayer.xorg.libXrandr
             ];
-
-            LIBCLANG_PATH = "${libclang.lib}/lib";
           });
 
           ferrexPlayerBin = craneLib.buildPackage (commonArgs // {
@@ -163,13 +163,10 @@
             doCheck = false;
 
             nativeBuildInputs = commonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
-              llvmPackages.clang
               makeWrapper
             ]);
 
             buildInputs = commonArgs.buildInputs ++ [
-              libclang
-
               gst.gstreamer
               gst.gst-plugins-base
               gst.gst-plugins-good
@@ -191,8 +188,6 @@
               pkgsPlayer.xorg.libXi
               pkgsPlayer.xorg.libXrandr
             ];
-
-            LIBCLANG_PATH = "${libclang.lib}/lib";
           });
 
           ferrexServerBin = craneLib.buildPackage (commonArgs // {
