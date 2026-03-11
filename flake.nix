@@ -102,7 +102,23 @@
           rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
           craneLib = (crane.mkLib pkgsPlayer).overrideToolchain rustToolchain;
 
-          src = craneLib.cleanCargoSource ./.;
+          src =
+            let
+              sqlxFilter = path: _type: (builtins.match ".*\.sqlx/.*" path) != null;
+              migrationsFilter = path: _type: (builtins.match ".*/migrations/.*\.sql$" path) != null;
+              wgslFilter = path: _type: (builtins.match ".*\.wgsl$" path) != null;
+              ttfFilter = path: _type: (builtins.match ".*\.ttf$" path) != null;
+            in
+            nixpkgs.lib.cleanSourceWith {
+              src = ./.;
+              filter =
+                path: type:
+                (sqlxFilter path type)
+                || (migrationsFilter path type)
+                || (wgslFilter path type)
+                || (ttfFilter path type)
+                || (craneLib.filterCargoSources path type);
+            };
 
           # Build workspace dependencies once — reused by all three crates.
           # libclang + clang are in common because ffmpeg-sys-next uses
