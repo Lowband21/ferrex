@@ -107,7 +107,7 @@ regex.workspace = true
 dashmap.workspace = true
 num-traits = "0.2.19"
 parking_lot = "0.12.4"
-once_cell = { version = "1.21.3", default-features = false }
+once_cell = { version = "1.21.4", default-features = false }
 
 # Add back later
 # [target.'cfg(unix)'.dependencies]
