@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::{JoinHandle, spawn_blocking};
 use tokio::time::{Duration, timeout};
-use tracing::warn;
+use tracing::{error, info, warn};
 
 pub mod event_bus;
 pub mod watcher;
@@ -198,10 +198,20 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                     let mut guard = libraries.write().await;
                     if let Some(entry) = guard.get_mut(&library_id) {
                         entry.watchers = Some(watchers);
+                        info!(%library_id, "fs_watch watchers initialized");
+                    } else {
+                        warn!(
+                            %library_id,
+                            "fs_watch init completed but library was already removed"
+                        );
                     }
                 }
                 Ok(Err(err)) => {
                     let msg = err.to_string();
+                    error!(
+                        %library_id,
+                        "fs_watch initialization failed: {}", msg
+                    );
                     observer.on_error(library_id, &msg);
                     let mut guard = libraries.write().await;
                     if let Some(entry) = guard.remove(&library_id) {
@@ -211,6 +221,10 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                 Err(join_err) => {
                     let msg =
                         format!("watcher initialization panicked: {join_err}");
+                    error!(
+                        %library_id,
+                        "fs_watch initialization panicked: {}", join_err
+                    );
                     observer.on_error(library_id, &msg);
                     let mut guard = libraries.write().await;
                     if let Some(entry) = guard.remove(&library_id) {
@@ -255,8 +269,13 @@ struct LibraryWatch {
 
 impl LibraryWatch {
     fn shutdown(self) {
-        self.flush_task.abort();
-        // Dropping `watchers` stops notify streams.
+        let Self { watchers, flush_task } = self;
+        // Drop watchers first — this stops the notify streams and
+        // ensures all in-flight callbacks complete, releasing their
+        // channel senders. The watch loop then exits naturally when
+        // rx.recv() returns None.
+        drop(watchers);
+        flush_task.abort();
     }
 }
 
