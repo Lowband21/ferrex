@@ -269,7 +269,10 @@ struct LibraryWatch {
 
 impl LibraryWatch {
     fn shutdown(self) {
-        let Self { watchers, flush_task } = self;
+        let Self {
+            watchers,
+            flush_task,
+        } = self;
         // Drop watchers first — this stops the notify streams and
         // ensures all in-flight callbacks complete, releasing their
         // channel senders. The watch loop then exits naturally when
