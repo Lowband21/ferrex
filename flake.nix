@@ -17,10 +17,11 @@
       # GStreamer pin for Linux player builds.
       #
       # We keep this as an overlay so both devShells and packages can share it.
-      gstOverlay_1_27_2 =
+      # 1.28.1 is the current stable release (bug-fix on top of 1.28.0).
+      gstOverlay_1_28_1 =
         final: prev:
         let
-          version = "1.27.2";
+          version = "1.28.1";
 
           gstSet = prev.gst_all_1.overrideScope (
             gstFinal: gstPrev: {
@@ -28,7 +29,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-${version}.tar.xz";
-                  hash = "sha256-zhKcfqktzjBjsCkXHRMk0gOScTL8Pgz5K3hN3QVcJB0=";
+                  hash = "sha256-tl4v+jW9v4eYy3XCP/w9BeSE5ING/3VGhEuoUhdmRQQ=";
                 };
               });
 
@@ -36,7 +37,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-${version}.tar.xz";
-                  hash = "sha256-b1MKDqxP46jlSHw+6nsfrDB+KiHwVtm0F0eBioi+S/Y=";
+                  hash = "sha256-FEakwqkv9deNiOhaWZ8AOEQdUzMyNvDHLXLyGpwTJJc=";
                 };
               });
 
@@ -44,7 +45,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-${version}.tar.xz";
-                  hash = "sha256-TwR0FtcbECmY20zFE5JcsxfYejQJ0P+uO6IYdlsPHOU=";
+                  hash = "sha256-c44mruQbemIFDkC4GtwBehEKfzLR7En6agMAhGxENo0=";
                 };
               });
 
@@ -52,28 +53,74 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-${version}.tar.xz";
-                  hash = "sha256-9O9K+8D3F2K6vti7p8LcTc2Q1aQB4Keb0F87lZdJdtM=";
+                  hash = "sha256-VsFZN4f4tVUIk9WeT/Kea8zPNJczFvpV40zkk+BDE6I=";
+                };
+                buildInputs = (old.buildInputs or [ ]) ++ [
+                  prev.libdrm
+                  prev.systemdMinimal  # for libudev
+                ];
+                # Start from the nixpkgs base flags and layer our overrides.
+                # Meson last-wins, so our values take precedence.
+                #
+                # The previous overlay used -Dauto_features=disabled which
+                # turned off ALL optional plugins (including AV1, Vulkan,
+                # DRM, closedcaption, …).  This caused decodebin3 to report
+                # "Missing element: AV1 decoder" and tear down the audio
+                # chain.  The flags below match the old manual meson build.
+                mesonFlags =
+                  (old.mesonFlags or [ ])
+                  ++ [
+                    # --- features from the old working meson build ---
+                    "-Dgpl=enabled"
+                    "-Dwayland=enabled"
+                    "-Dva=enabled"
+                    # Vulkan plugin has GIR introspection issues in the
+                    # Nix sandbox (exit code 126 running test binaries).
+                    # Disable for now — not needed for A/V decode.
+                    "-Dvulkan=disabled"
+                    "-Dvulkan-video=disabled"
+                    "-Ddrm=enabled"
+                    "-Dudev=enabled"
+                    "-Dkms=enabled"
+                    "-Dclosedcaption=enabled"
+                    # --- deps not (yet) packaged in nixpkgs ---
+                    "-Dmpeghdec=disabled"
+                    "-Dtflite=disabled"
+                    "-Dwpe2=disabled"
+                    "-Dwebrtc=disabled"
+                    "-Dwebrtcdsp=disabled"
+                    "-Dlcevcdecoder=disabled"
+                    # Skip docs to reduce build time.
+                    "-Ddoc=disabled"
+                  ];
+              });
+
+              gst-plugins-ugly = gstPrev.gst-plugins-ugly.overrideAttrs (old: {
+                inherit version;
+                src = prev.fetchurl {
+                  url = "https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-${version}.tar.xz";
+                  hash = "sha256-QILzywY/zMP/wE5asIVLr96C0bNz6zyeqigRXdP5Wng=";
                 };
                 mesonFlags =
                   (old.mesonFlags or [ ])
                   ++ [
-                    # Avoid enabling every new "auto" plugin in the 1.27.x dev series,
-                    # since some optional deps aren't packaged in nixpkgs yet.
-                    "-Dauto_features=disabled"
-                    # This is a dev-shell dependency; skip docs to reduce build time and
-                    # avoid doc/introspection coupling issues.
-                    "-Ddoc=disabled"
-                    "-Dwayland=enabled"
-                    "-Dva=enabled"
-                    # Optional TensorFlow Lite plugin (dependency not packaged in nixpkgs today).
-                    "-Dtflite=disabled"
+                    "-Dgpl=enabled"
                   ];
+              });
+
+              gst-libav = gstPrev.gst-libav.overrideAttrs (_old: {
+                inherit version;
+                src = prev.fetchurl {
+                  url = "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-${version}.tar.xz";
+                  # Will fail on first build — Nix will print the correct hash.
+                  hash = "sha256-v6karKOND9it3N1VnjW3VB4/MqX0EBlOxLoYBA3v7ps=";
+                };
               });
             }
           );
         in
         {
-          gst_1_27_2 = gstSet;
+          gst_1_28_1 = gstSet;
         };
 
       workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
@@ -81,7 +128,7 @@
 
     in
     {
-      overlays.gst_1_27_2 = gstOverlay_1_27_2;
+      overlays.gst_1_28_1 = gstOverlay_1_28_1;
 
       packages = forAllSystems (
         system:
@@ -89,12 +136,12 @@
           pkgsPlayer = import nixpkgs {
             inherit system;
             overlays = [
-              self.overlays.gst_1_27_2
+              self.overlays.gst_1_28_1
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
           };
-          gst = pkgsPlayer.gst_1_27_2;
+          gst = pkgsPlayer.gst_1_28_1;
           ffmpegPkgPlayer =
             if pkgsPlayer ? ffmpeg-full then pkgsPlayer.ffmpeg-full else pkgsPlayer.ffmpeg;
           libclang = pkgsPlayer.llvmPackages.libclang;
@@ -153,6 +200,8 @@
               gst.gst-plugins-base
               gst.gst-plugins-good
               gst.gst-plugins-bad
+              gst.gst-plugins-ugly
+              gst.gst-libav
 
               gst.gstreamer.dev
               gst.gst-plugins-base.dev
@@ -187,6 +236,8 @@
               gst.gst-plugins-base
               gst.gst-plugins-good
               gst.gst-plugins-bad
+              gst.gst-plugins-ugly
+              gst.gst-libav
 
               gst.gstreamer.dev
               gst.gst-plugins-base.dev
@@ -221,15 +272,17 @@
           });
         in
         {
-          gstreamer_1_27_2 = gst.gstreamer;
-          gst_plugins_base_1_27_2 = gst.gst-plugins-base;
-          gst_plugins_good_1_27_2 = gst.gst-plugins-good;
-          gst_plugins_bad_1_27_2 = gst.gst-plugins-bad;
+          gstreamer_1_28_1 = gst.gstreamer;
+          gst_plugins_base_1_28_1 = gst.gst-plugins-base;
+          gst_plugins_good_1_28_1 = gst.gst-plugins-good;
+          gst_plugins_bad_1_28_1 = gst.gst-plugins-bad;
+          gst_plugins_ugly_1_28_1 = gst.gst-plugins-ugly;
+          gst_libav_1_28_1 = gst.gst-libav;
 
           ferrex-player-bin = ferrexPlayerBin;
 
           # Nix-friendly wrapper:
-          # - forces plugin discovery to the pinned GStreamer 1.27.2 set
+          # - forces plugin discovery to the pinned GStreamer 1.28.1 set
           # - sets LD_LIBRARY_PATH for dlopen-loaded Wayland/X11/Vulkan libs
           ferrex-player = pkgsPlayer.runCommand "ferrex-player-${workspaceVersion}" {
             nativeBuildInputs = [ pkgsPlayer.makeWrapper ];
@@ -251,8 +304,8 @@
                   fi
                 fi
               fi' \
-              --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0" \
-              --set GST_PLUGIN_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0" \
+              --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0" \
+              --set GST_PLUGIN_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0" \
               --prefix LD_LIBRARY_PATH : "${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib"
           '';
 
@@ -305,12 +358,12 @@
           pkgsPlayer = import nixpkgs {
             inherit system;
             overlays = [
-              self.overlays.gst_1_27_2
+              self.overlays.gst_1_28_1
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
           };
-          gst = pkgsPlayer.gst_1_27_2;
+          gst = pkgsPlayer.gst_1_28_1;
 
           rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
 
@@ -395,6 +448,8 @@
                 gst.gst-plugins-base
                 gst.gst-plugins-good
                 gst.gst-plugins-bad
+                gst.gst-plugins-ugly
+                gst.gst-libav
 
                 # Headers/pkg-config for builds.
                 gst.gstreamer.dev
@@ -438,7 +493,7 @@
               # to the `bin` output in some contexts, which does *not* contain
               # `lib/gstreamer-1.0`. Use `.out` explicitly so core elements are
               # discoverable.
-              export GST_PLUGIN_SYSTEM_PATH_1_0="${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0"
+              export GST_PLUGIN_SYSTEM_PATH_1_0="${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0"
               export GST_PLUGIN_PATH_1_0="$GST_PLUGIN_SYSTEM_PATH_1_0"
 
               export LD_LIBRARY_PATH="${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib:''${LD_LIBRARY_PATH:-}"

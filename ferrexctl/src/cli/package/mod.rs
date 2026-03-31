@@ -27,6 +27,7 @@ const STATE_MODULES: &[&str] = [
     "gst-plugins-base",
     "gst-plugins-good",
     "gst-plugins-bad",
+    "gst-plugins-ugly",
     "ferrex-player",
 ]
 .as_slice();
