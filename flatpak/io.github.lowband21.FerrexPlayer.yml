@@ -43,8 +43,8 @@ modules:
       - -Dauto_features=disabled
     sources:
       - type: archive
-        url: https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.27.2.tar.xz
-        sha256: ce129c7ea92dce3063b029171d1324d203927132fc3e0cf92b784ddd055c241d
+        url: https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.1.tar.xz
+        sha256: b65e2ffa35bdbf8798cb75c23ffc3d05e484e48346ff7546844ba85217664504
 
   - name: gst-plugins-base
     buildsystem: meson
@@ -54,8 +54,8 @@ modules:
       - -Dauto_features=disabled
     sources:
       - type: archive
-        url: https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.27.2.tar.xz
-        sha256: 6f530a0eac4fe3a8e5487c3eea7b1fac307e2a21f056d9b41747818a88be4bf6
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.1.tar.xz
+        sha256: 1446a4c2a92ff5d78d88e85a599f0038441d53333236f0c72d72f21a9c132497
 
   - name: gst-plugins-good
     buildsystem: meson
@@ -64,19 +64,46 @@ modules:
       - -Dauto_features=disabled
     sources:
       - type: archive
-        url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.27.2.tar.xz
-        sha256: 4f047416d71b102998db4cc513925cb317d87a3409d0ffae3ba218765b0f1ce5
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.1.tar.xz
+        sha256: 738e26aee41b7a62050e40b81adc017a110a7f32d1ec49fa6a0300846c44368d
 
   - name: gst-plugins-bad
     buildsystem: meson
     config-opts:
       - -Ddoc=disabled
-      - -Dauto_features=disabled
+      - -Dgpl=enabled
+      - -Dwayland=enabled
+      - -Dva=enabled
+      - -Dclosedcaption=enabled
       - -Dtflite=disabled
+      - -Dmpeghdec=disabled
+      - -Dwpe2=disabled
+      - -Dwebrtc=disabled
+      - -Dwebrtcdsp=disabled
+      - -Dlcevcdecoder=disabled
     sources:
       - type: archive
-        url: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.27.2.tar.xz
-        sha256: f4ef4afbc0f71762babed8bba7c2dc4dcd90d5a401e0a79bd05f3b95974976d3
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.1.tar.xz
+        sha256: 56c1593787f8b5550893d59e4ff29e6bcccf34973316fa55e34ce493e04313a2
+
+  - name: gst-plugins-ugly
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+      - -Dgpl=enabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-1.28.1.tar.xz
+        sha256: 4082f3cb063fccc3ffc04e5ab0854bafde82d1b373eb3c9eaa28115dd3f95a78
+
+  - name: gst-libav
+    buildsystem: meson
+    config-opts:
+      - -Ddoc=disabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.1.tar.xz
+        sha256: bfa91aaca38d0fd8addcdd559e35b7541e3f32a5f410194ec4ba18040defee9b
 
   - name: ferrex-player
     buildsystem: simple

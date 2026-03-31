@@ -74,8 +74,11 @@ lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git"
 ] }
 
 # Unified video abstraction based on subwave
-subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
-subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
+# subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
+# subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
+
+subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
+subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
 
 # Async runtime
 tokio.workspace = true

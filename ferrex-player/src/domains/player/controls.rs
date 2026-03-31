@@ -307,11 +307,8 @@ impl PlayerDomainState {
                         )
                         .align_y(iced::alignment::Vertical::Center),
                         Space::new().width(Length::Fixed(20.0)),
-                        // Subtitle button (with indicator if text subtitles are available)
-                        if self
-                            .available_subtitle_tracks
-                            .iter()
-                            .any(|t| t.is_text_based())
+                        // Subtitle button (with indicator if subtitles are available)
+                        if !self.available_subtitle_tracks.is_empty()
                         {
                             button(
                                 text(Icon::MessageSquare.unicode())
@@ -588,16 +585,7 @@ impl PlayerDomainState {
             // Create options list with "Disabled" as first option
             let mut subtitle_options = vec![SubtitleOption::Disabled];
             for track in &self.available_subtitle_tracks {
-                // Only show text-based subtitles in the UI
-                if track.is_text_based() {
-                    subtitle_options.push(SubtitleOption::Track(track.clone()));
-                } else {
-                    log::debug!(
-                        "Filtering out non-text subtitle track {}: codec={:?}",
-                        track.index,
-                        track.codec
-                    );
-                }
+                subtitle_options.push(SubtitleOption::Track(track.clone()));
             }
 
             // Determine current selection
@@ -703,11 +691,10 @@ impl PlayerDomainState {
                 .style(theme::button_menu_item)
                 .padding([6, 10]),
                 Space::new().height(Length::Fixed(5.0)),
-                // Subtitle tracks (text-based only)
+                // All subtitle tracks (text + PGS bitmap)
                 column(
                     self.available_subtitle_tracks
                         .iter()
-                        .filter(|track| track.is_text_based())
                         .map(|track| {
                             let is_selected = self.subtitles_enabled
                                 && self.current_subtitle_track
