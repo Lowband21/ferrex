@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning once releases begin.
 
+## [0.1.2-alpha](https://github.com/Lowband21/ferrex/compare/v0.1.1-alpha...v0.1.2-alpha) (2026-03-31)
+
+
+### Features
+
+* nix crane migration, GStreamer 1.28.1 upgrade, and full subtitle support ([#32](https://github.com/Lowband21/ferrex/issues/32)) ([6ae162d](https://github.com/Lowband21/ferrex/commit/6ae162dc05d58ccd0b8edf29b68a1c061fefc616))
+
 ## [0.1.1-alpha](https://github.com/Lowband21/ferrex/compare/v0.1.0-alpha...v0.1.1-alpha) (2026-03-10)
 
 
