@@ -4,6 +4,7 @@ import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.AuthInterceptor
 import com.ferrex.android.core.api.FerrexApiClient
 import com.ferrex.android.core.api.ServerConfig
+import com.ferrex.android.core.api.TokenRefreshAuthenticator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,7 @@ class AuthManager @Inject constructor(
     private val storage: EncryptedStorage,
     private val serverConfig: ServerConfig,
     private val authInterceptor: AuthInterceptor,
+    private val tokenRefreshAuthenticator: TokenRefreshAuthenticator,
 ) {
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.Loading)
     val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
@@ -33,6 +35,12 @@ class AuthManager @Inject constructor(
      * recovery from stored tokens.
      */
     suspend fun initialize() {
+        // Wire up the authenticator callbacks
+        tokenRefreshAuthenticator.refreshTokenProvider = { storage.refreshToken }
+        tokenRefreshAuthenticator.onTokenRefreshed = { accessToken, refreshToken ->
+            storage.storeTokens(accessToken, refreshToken, storage.username)
+        }
+
         val savedUrl = storage.serverUrl
         if (savedUrl.isNullOrBlank()) {
             _sessionState.value = SessionState.NoServer

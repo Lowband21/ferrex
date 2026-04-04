@@ -11,6 +11,8 @@ import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.ui.auth.AuthViewModel
 import com.ferrex.android.ui.auth.LoginScreen
 import com.ferrex.android.ui.auth.ServerConnectScreen
+import com.ferrex.android.ui.home.HomeScreen
+import com.ferrex.android.ui.library.LibraryViewModel
 
 @Composable
 fun FerrexNavGraph() {
@@ -23,7 +25,7 @@ fun FerrexNavGraph() {
         is SessionState.NoServer -> Route.ServerConnect
         is SessionState.NeedsLogin -> Route.Login
         is SessionState.Authenticated -> Route.Home
-        is SessionState.Loading -> Route.ServerConnect // Show connect while checking
+        is SessionState.Loading -> Route.ServerConnect
     }
 
     NavHost(
@@ -56,8 +58,26 @@ fun FerrexNavGraph() {
         }
 
         composable<Route.Home> {
-            // Placeholder — Phase 3
-            androidx.compose.material3.Text("Home — coming in Phase 3")
+            val libraryViewModel: LibraryViewModel = hiltViewModel()
+            HomeScreen(
+                libraryViewModel = libraryViewModel,
+                onMovieClick = { movieId ->
+                    navController.navigate(Route.MovieDetail(movieId))
+                },
+                onSearchClick = {
+                    navController.navigate(Route.Search)
+                },
+            )
+        }
+
+        composable<Route.MovieDetail> {
+            // Phase 6 — placeholder
+            androidx.compose.material3.Text("Movie Detail — coming in Phase 6")
+        }
+
+        composable<Route.Search> {
+            // Phase 4 — placeholder
+            androidx.compose.material3.Text("Search — coming in Phase 4")
         }
     }
 }
