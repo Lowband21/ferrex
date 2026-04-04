@@ -32,4 +32,11 @@ flatc --kotlin \
   "$SCHEMA_DIR/auth.fbs" \
   "$SCHEMA_DIR/image.fbs"
 
-echo "✓ Kotlin FlatBuffers code generated in $OUT_DIR"
+# Post-process: patch version constant to match the Maven-available runtime.
+# flatc 25.12.19 (from nixpkgs) generates FLATBUFFERS_25_12_19, but Maven
+# Central only has the flatbuffers-java 25.2.10 runtime. The validateVersion()
+# method is never called automatically — it's an optional compile-time check.
+MAVEN_VERSION="25_2_10"
+find "$OUT_DIR/ferrex" -name "*.kt" -exec sed -i "s/FLATBUFFERS_[0-9_]*/FLATBUFFERS_${MAVEN_VERSION}/g" {} +
+
+echo "✓ Kotlin FlatBuffers code generated in $OUT_DIR (patched for runtime $MAVEN_VERSION)"
