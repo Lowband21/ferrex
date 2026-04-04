@@ -1,3 +1,6 @@
+# Plans (local-only, never committed — specs are the source of truth)
+docs/plans/
+
 # Rust
 .cargo/*
 !.cargo/audit.toml
