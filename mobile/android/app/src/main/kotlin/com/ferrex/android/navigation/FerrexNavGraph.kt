@@ -11,8 +11,15 @@ import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.ui.auth.AuthViewModel
 import com.ferrex.android.ui.auth.LoginScreen
 import com.ferrex.android.ui.auth.ServerConnectScreen
+import com.ferrex.android.ui.detail.DetailViewModel
+import com.ferrex.android.ui.detail.MovieDetailScreen
+import com.ferrex.android.ui.detail.SeriesDetailScreen
 import com.ferrex.android.ui.home.HomeScreen
 import com.ferrex.android.ui.library.LibraryViewModel
+import com.ferrex.android.ui.player.PlayerScreen
+import com.ferrex.android.ui.player.PlayerViewModel
+import com.ferrex.android.ui.search.SearchScreen
+import com.ferrex.android.ui.search.SearchViewModel
 
 @Composable
 fun FerrexNavGraph() {
@@ -20,7 +27,6 @@ fun FerrexNavGraph() {
     val authViewModel: AuthViewModel = hiltViewModel()
     val sessionState by authViewModel.sessionState.collectAsState()
 
-    // Determine start destination based on session state
     val startDestination: Route = when (sessionState) {
         is SessionState.NoServer -> Route.ServerConnect
         is SessionState.NeedsLogin -> Route.Login
@@ -32,6 +38,8 @@ fun FerrexNavGraph() {
         navController = navController,
         startDestination = startDestination,
     ) {
+        // ── Auth flow ───────────────────────────────────────────
+
         composable<Route.ServerConnect> {
             ServerConnectScreen(
                 viewModel = authViewModel,
@@ -57,6 +65,21 @@ fun FerrexNavGraph() {
             )
         }
 
+        composable<Route.Register> {
+            // Registration screen — deferred, use login for now
+            LoginScreen(
+                viewModel = authViewModel,
+                onLoginSuccess = {
+                    navController.navigate(Route.Home) {
+                        popUpTo(Route.Register) { inclusive = true }
+                    }
+                },
+                onNavigateToRegister = {},
+            )
+        }
+
+        // ── Main flow ───────────────────────────────────────────
+
         composable<Route.Home> {
             val libraryViewModel: LibraryViewModel = hiltViewModel()
             HomeScreen(
@@ -70,14 +93,48 @@ fun FerrexNavGraph() {
             )
         }
 
+        // ── Detail views ────────────────────────────────────────
+
         composable<Route.MovieDetail> {
-            // Phase 6 — placeholder
-            androidx.compose.material3.Text("Movie Detail — coming in Phase 6")
+            val detailViewModel: DetailViewModel = hiltViewModel()
+            MovieDetailScreen(
+                viewModel = detailViewModel,
+                onBack = { navController.popBackStack() },
+                onPlay = { mediaId ->
+                    navController.navigate(Route.Player(mediaId))
+                },
+            )
         }
 
+        composable<Route.SeriesDetail> {
+            val detailViewModel: DetailViewModel = hiltViewModel()
+            SeriesDetailScreen(
+                viewModel = detailViewModel,
+                onBack = { navController.popBackStack() },
+                onEpisodeClick = { mediaId ->
+                    navController.navigate(Route.Player(mediaId))
+                },
+            )
+        }
+
+        // ── Player ──────────────────────────────────────────────
+
+        composable<Route.Player> {
+            val playerViewModel: PlayerViewModel = hiltViewModel()
+            PlayerScreen(viewModel = playerViewModel)
+        }
+
+        // ── Search ──────────────────────────────────────────────
+
         composable<Route.Search> {
-            // Phase 4 — placeholder
-            androidx.compose.material3.Text("Search — coming in Phase 4")
+            val searchViewModel: SearchViewModel = hiltViewModel()
+            SearchScreen(
+                viewModel = searchViewModel,
+                onBack = { navController.popBackStack() },
+                onMovieClick = { movieId ->
+                    navController.navigate(Route.MovieDetail(movieId))
+                },
+            )
         }
     }
 }
