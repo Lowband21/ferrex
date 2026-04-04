@@ -1,0 +1,18 @@
+[package]
+name = "ferrex-flatbuffers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FlatBuffers serialization layer for ferrex mobile clients"
+
+[dependencies]
+flatbuffers = "25.2.10"
+ferrex-model = { workspace = true, features = ["serde"] }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# For round-trip tests
+serde_json = { workspace = true }

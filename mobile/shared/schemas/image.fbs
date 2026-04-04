@@ -1,0 +1,48 @@
+// FlatBuffers schema: Image manifest & readiness types
+// Mirrors ferrex-model/src/image_events.rs and image pipeline contracts.
+
+include "ids.fbs";
+include "common.fbs";
+
+namespace ferrex.image;
+
+/// POST /api/v1/images/manifest request — batch lookup of image readiness.
+table ImageManifestRequest {
+  queries: [ImageQuery];
+}
+
+/// Individual image query within a manifest request.
+table ImageQuery {
+  iid:      ferrex.ids.Uuid (required);   // image variant id
+  category: ferrex.common.ImageCategory;
+}
+
+/// POST /api/v1/images/manifest response.
+table ImageManifestResponse {
+  entries: [ImageManifestEntry];
+}
+
+enum ImageStatus : byte {
+  Ready   = 0,
+  Pending = 1,
+  Failed  = 2,
+}
+
+/// Single entry in the manifest response.
+table ImageManifestEntry {
+  iid:    ferrex.ids.Uuid (required);
+  status: ImageStatus;
+  /// Content-addressed blob token — present only when status == Ready.
+  /// Client fetches GET /api/v1/images/blob/{token}.
+  token:  string;
+}
+
+/// SSE event: an image just became ready.
+/// Mirrors ferrex-model::ImageReadyEvent.
+table ImageReadyEvent {
+  iid:      ferrex.ids.Uuid (required);
+  category: ferrex.common.ImageCategory;
+  token:    string (required);
+}
+
+root_type ImageManifestResponse;

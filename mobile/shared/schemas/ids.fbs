@@ -1,0 +1,49 @@
+// FlatBuffers schema: Strongly-typed ID types
+// Mirrors ferrex-model/src/ids.rs and ferrex-model/src/media_id.rs
+//
+// UUID representation: [ubyte:16] — raw bytes, big-endian byte order
+// (matches uuid::Uuid::as_bytes() / UUID.uuid layout).
+// Each platform provides to_uuid/from_uuid helpers.
+
+namespace ferrex.ids;
+
+/// Fixed-size UUID stored as 16 raw bytes.
+/// Layout matches RFC 4122 / uuid crate byte order.
+struct Uuid {
+  b0:  ubyte;
+  b1:  ubyte;
+  b2:  ubyte;
+  b3:  ubyte;
+  b4:  ubyte;
+  b5:  ubyte;
+  b6:  ubyte;
+  b7:  ubyte;
+  b8:  ubyte;
+  b9:  ubyte;
+  b10: ubyte;
+  b11: ubyte;
+  b12: ubyte;
+  b13: ubyte;
+  b14: ubyte;
+  b15: ubyte;
+}
+
+/// Tagged media identifier — discriminated union of typed IDs.
+union MediaIdVariant {
+  MovieId,
+  SeriesId,
+  SeasonId,
+  EpisodeId,
+}
+
+table MovieId    { id: Uuid (required); }
+table SeriesId   { id: Uuid (required); }
+table SeasonId   { id: Uuid (required); }
+table EpisodeId  { id: Uuid (required); }
+
+/// Wrapper for the MediaID enum.
+table MediaId {
+  variant: MediaIdVariant;
+}
+
+root_type MediaId;

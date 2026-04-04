@@ -1,0 +1,73 @@
+// FlatBuffers schema: Media file metadata
+// Mirrors ferrex-model/src/files.rs
+
+include "ids.fbs";
+include "common.fbs";
+
+namespace ferrex.files;
+
+/// Physical media file on disk.
+/// Mobile clients use this primarily for codec info, resolution, and duration.
+table MediaFile {
+  id:            ferrex.ids.Uuid (required);
+  media_id_type: ferrex.common.VideoMediaType;
+  media_id_uuid: ferrex.ids.Uuid;
+  path:          string;       // server-side path (informational for mobile)
+  filename:      string (required);
+  size:          uint64;       // bytes
+  discovered_at: ferrex.common.Timestamp;
+  created_at:    ferrex.common.Timestamp;
+  metadata:      MediaFileMetadata;
+  library_id:    ferrex.ids.Uuid;
+}
+
+/// Technical metadata extracted from the file via FFmpeg.
+table MediaFileMetadata {
+  // Playback info
+  duration:    double;    // seconds
+  width:       uint32;
+  height:      uint32;
+  video_codec: string;
+  audio_codec: string;
+  bitrate:     uint64;
+  framerate:   double;
+  file_size:   uint64;
+
+  // HDR
+  color_primaries: string;
+  color_transfer:  string;
+  color_space:     string;
+  bit_depth:       uint32;
+
+  // Parsed info from filename
+  parsed_info: ParsedMediaInfo;
+}
+
+/// Discriminated parsed filename info.
+union ParsedMediaInfoVariant {
+  ParsedMovieInfo,
+  ParsedEpisodeInfo,
+}
+
+table ParsedMediaInfo {
+  variant: ParsedMediaInfoVariant;
+}
+
+table ParsedMovieInfo {
+  title:         string (required);
+  year:          uint16;
+  resolution:    string;
+  source:        string;
+  release_group: string;
+}
+
+table ParsedEpisodeInfo {
+  show_name:     string (required);
+  season:        uint16;
+  episode:       uint16;
+  episode_title: string;
+  year:          uint16;
+  resolution:    string;
+  source:        string;
+  release_group: string;
+}

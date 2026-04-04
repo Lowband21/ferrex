@@ -1,5 +1,6 @@
 pub mod app_context;
 pub mod app_state;
+pub mod content_negotiation;
 pub mod cache;
 pub mod config;
 pub mod constants;

@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-contracts"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "ferrex-model",
  "log",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-core"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2193,8 +2193,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrex-flatbuffers"
+version = "0.1.2-alpha"
+dependencies = [
+ "chrono",
+ "ferrex-model",
+ "flatbuffers",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "ferrex-model"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "chrono",
  "rkyv 0.8.15",
@@ -2207,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-player"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2280,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-server"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2296,9 +2307,11 @@ dependencies = [
  "dialoguer",
  "dotenvy",
  "ferrex-core",
+ "ferrex-flatbuffers",
  "ferrex-model",
  "ferrexctl",
  "ffmpeg-next",
+ "flatbuffers",
  "futures",
  "futures-util",
  "httpdate",
@@ -2338,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "ferrexctl"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2428,6 +2441,16 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "flatbuffers"
+version = "25.12.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35f6839d7b3b98adde531effaf34f0c2badc6f4735d26fe74709d8e513a96ef3"
+dependencies = [
+ "bitflags 2.11.0",
+ "rustc_version",
+]
 
 [[package]]
 name = "flate2"

@@ -1,0 +1,343 @@
+// FlatBuffers schema: TMDB detail types
+// Mirrors ferrex-model/src/details.rs
+//
+// These are the largest tables — cast, crew, genres, images, etc.
+// FlatBuffers' zero-copy access shines here: mobile clients read individual
+// fields without deserializing the entire details blob.
+
+include "ids.fbs";
+
+namespace ferrex.details;
+
+// ─── Supporting types ───────────────────────────────────────────────
+
+table GenreInfo {
+  id:   uint64;
+  name: string (required);
+}
+
+table ProductionCompany {
+  id:             uint64;
+  name:           string (required);
+  origin_country: string;
+}
+
+table ProductionCountry {
+  iso_3166_1: string (required);
+  name:       string (required);
+}
+
+table SpokenLanguage {
+  iso_639_1: string;
+  name:      string (required);
+}
+
+table NetworkInfo {
+  id:             uint64;
+  name:           string (required);
+  origin_country: string;
+}
+
+table CastMember {
+  id:                   uint64;
+  person_id:            ferrex.ids.Uuid;
+  credit_id:            string;
+  cast_id:              uint64;
+  name:                 string (required);
+  original_name:        string;
+  character:            string;
+  profile_path:         string;
+  order:                uint32;
+  gender:               ubyte;
+  known_for_department: string;
+  adult:                bool;
+  popularity:           float;
+  also_known_as:        [string];
+  external_ids:         PersonExternalIds;
+  image_slot:           uint32;
+  image_id:             ferrex.ids.Uuid;
+}
+
+table CrewMember {
+  id:                   uint64;
+  person_id:            ferrex.ids.Uuid;
+  credit_id:            string;
+  name:                 string (required);
+  job:                  string;
+  department:           string;
+  profile_path:         string;
+  gender:               ubyte;
+  known_for_department: string;
+  adult:                bool;
+  popularity:           float;
+  original_name:        string;
+  also_known_as:        [string];
+  external_ids:         PersonExternalIds;
+  profile_iid:          ferrex.ids.Uuid;
+}
+
+table PersonExternalIds {
+  imdb_id:      string;
+  facebook_id:  string;
+  instagram_id: string;
+  twitter_id:   string;
+  wikidata_id:  string;
+  tiktok_id:    string;
+  youtube_id:   string;
+}
+
+table ExternalIds {
+  imdb_id:      string;
+  tvdb_id:      uint32;
+  facebook_id:  string;
+  instagram_id: string;
+  twitter_id:   string;
+  wikidata_id:  string;
+  tiktok_id:    string;
+  youtube_id:   string;
+  freebase_id:  string;
+  freebase_mid: string;
+}
+
+table Video {
+  key:          string (required);
+  name:         string;
+  site:         string;
+  video_type:   string;
+  official:     bool;
+  iso_639_1:    string;
+  iso_3166_1:   string;
+  published_at: string;
+  size:         uint32;
+}
+
+table Keyword {
+  id:   uint64;
+  name: string (required);
+}
+
+table AlternativeTitle {
+  title:      string (required);
+  iso_3166_1: string;
+  title_type: string;
+}
+
+table Translation {
+  iso_3166_1:   string;
+  iso_639_1:    string;
+  name:         string;
+  english_name: string;
+  title:        string;
+  overview:     string;
+  homepage:     string;
+  tagline:      string;
+}
+
+table CollectionInfo {
+  id:            uint64;
+  name:          string (required);
+  poster_path:   string;
+  backdrop_path: string;
+}
+
+table RelatedMediaRef {
+  tmdb_id: uint64;
+  title:   string;
+}
+
+table ContentRating {
+  iso_3166_1:    string (required);
+  rating:        string;
+  rating_system: string;
+  descriptors:   [string];
+}
+
+table ReleaseDateEntry {
+  certification: string;
+  release_date:  string;
+  release_type:  int32;
+  note:          string;
+  iso_639_1:     string;
+  descriptors:   [string];
+}
+
+table ReleaseDatesByCountry {
+  iso_3166_1:    string (required);
+  release_dates: [ReleaseDateEntry];
+}
+
+table EpisodeGroupMembership {
+  id:          string (required);
+  name:        string (required);
+  description: string;
+  group_type:  string;
+}
+
+// ─── Image metadata (mirrors ferrex-model/src/image/metadata.rs) ────
+
+table ImageMetadata {
+  file_path:    string;
+  width:        uint64;
+  height:       uint64;
+  aspect_ratio: double;
+  iso_639_1:    string;
+  vote_average: double;
+  vote_count:   uint64;
+}
+
+table ImageWithMetadata {
+  endpoint: string;
+  metadata: ImageMetadata;
+}
+
+table MediaImages {
+  posters:   [ImageWithMetadata];
+  backdrops: [ImageWithMetadata];
+  logos:     [ImageWithMetadata];
+  stills:    [ImageWithMetadata];
+}
+
+// ─── Detail types ───────────────────────────────────────────────────
+
+/// Full TMDB movie details. Mirrors ferrex-model::EnhancedMovieDetails.
+table EnhancedMovieDetails {
+  // Basic
+  id:                   uint64;
+  title:                string;
+  original_title:       string;
+  overview:             string;
+  release_date:         string;
+  runtime:              uint32;
+  vote_average:         float;
+  vote_count:           uint32;
+  popularity:           float;
+  content_rating:       string;
+  content_ratings:      [ContentRating];
+  release_dates:        [ReleaseDatesByCountry];
+  genres:               [GenreInfo];
+  spoken_languages:     [SpokenLanguage];
+  production_companies: [ProductionCompany];
+  production_countries: [ProductionCountry];
+  homepage:             string;
+  status:               string;
+  tagline:              string;
+  budget:               uint64;
+  revenue:              uint64;
+
+  // Media assets
+  poster_path:          string;
+  backdrop_path:        string;
+  logo_path:            string;
+  primary_poster_iid:   ferrex.ids.Uuid;
+  primary_backdrop_iid: ferrex.ids.Uuid;
+  images:               MediaImages;
+
+  // Credits
+  cast:                 [CastMember];
+  crew:                 [CrewMember];
+
+  // Additional
+  videos:               [Video];
+  keywords:             [Keyword];
+  external_ids:         ExternalIds;
+  alternative_titles:   [AlternativeTitle];
+  translations:         [Translation];
+  collection:           CollectionInfo;
+  recommendations:      [RelatedMediaRef];
+  similar:              [RelatedMediaRef];
+}
+
+/// Full TMDB series details. Mirrors ferrex-model::EnhancedSeriesDetails.
+table EnhancedSeriesDetails {
+  // Basic
+  id:                   uint64;
+  name:                 string;
+  original_name:        string;
+  overview:             string;
+  first_air_date:       string;
+  last_air_date:        string;
+  number_of_seasons:    uint16;
+  number_of_episodes:   uint16;
+  available_seasons:    uint16;
+  available_episodes:   uint16;
+  vote_average:         float;
+  vote_count:           uint32;
+  popularity:           float;
+  content_rating:       string;
+  content_ratings:      [ContentRating];
+  release_dates:        [ReleaseDatesByCountry];
+  genres:               [GenreInfo];
+  networks:             [NetworkInfo];
+  origin_countries:     [string];
+  spoken_languages:     [SpokenLanguage];
+  production_companies: [ProductionCompany];
+  production_countries: [ProductionCountry];
+  homepage:             string;
+  status:               string;
+  tagline:              string;
+  in_production:        bool;
+
+  // Media assets
+  poster_path:          string;
+  backdrop_path:        string;
+  logo_path:            string;
+  primary_poster_iid:   ferrex.ids.Uuid;
+  primary_backdrop_iid: ferrex.ids.Uuid;
+  images:               MediaImages;
+
+  // Credits
+  cast:                 [CastMember];
+  crew:                 [CrewMember];
+
+  // Additional
+  videos:               [Video];
+  keywords:             [Keyword];
+  external_ids:         ExternalIds;
+  alternative_titles:   [AlternativeTitle];
+  translations:         [Translation];
+  episode_groups:       [EpisodeGroupMembership];
+  recommendations:      [RelatedMediaRef];
+  similar:              [RelatedMediaRef];
+}
+
+/// TMDB season details. Mirrors ferrex-model::SeasonDetails.
+table SeasonDetails {
+  id:                uint64;
+  season_number:     uint16;
+  name:              string;
+  overview:          string;
+  air_date:          string;
+  episode_count:     uint16;
+  poster_path:       string;
+  primary_poster_iid: ferrex.ids.Uuid;
+  runtime:           uint32;
+  external_ids:      ExternalIds;
+  images:            MediaImages;
+  videos:            [Video];
+  keywords:          [Keyword];
+  translations:      [Translation];
+}
+
+/// TMDB episode details. Mirrors ferrex-model::EpisodeDetails.
+table EpisodeDetails {
+  id:                 uint64;
+  episode_number:     uint16;
+  season_number:      uint16;
+  name:               string;
+  overview:           string;
+  air_date:           string;
+  runtime:            uint32;
+  still_path:         string;
+  primary_still_iid:  ferrex.ids.Uuid;
+  vote_average:       float;
+  vote_count:         uint32;
+  production_code:    string;
+  external_ids:       ExternalIds;
+  images:             MediaImages;
+  videos:             [Video];
+  keywords:           [Keyword];
+  translations:       [Translation];
+  guest_stars:        [CastMember];
+  crew:               [CrewMember];
+  content_ratings:    [ContentRating];
+}

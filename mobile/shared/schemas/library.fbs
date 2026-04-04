@@ -1,0 +1,75 @@
+// FlatBuffers schema: Library types
+// Mirrors ferrex-model/src/library.rs
+//
+// Mobile clients receive library metadata via GET /libraries.
+// The full Library (with media refs) is NOT sent over the wire in v1 —
+// media comes via batch sync endpoints. This schema covers the metadata.
+
+include "ids.fbs";
+include "common.fbs";
+include "media.fbs";
+
+namespace ferrex.library;
+
+/// Library metadata as returned by GET /api/v1/libraries.
+/// Mobile v1 does NOT include the `media` field — media is fetched
+/// via the batch sync protocol instead.
+table Library {
+  id:                    ferrex.ids.Uuid (required);
+  name:                  string (required);
+  library_type:          ferrex.common.LibraryType;
+  paths:                 [string];
+  scan_interval_minutes: uint32;
+  last_scan:             ferrex.common.Timestamp;
+  enabled:               bool = true;
+  auto_scan:             bool = true;
+  watch_for_changes:     bool = true;
+  analyze_on_scan:       bool;
+  max_retry_attempts:    uint32 = 3;
+  movie_ref_batch_size:  uint32 = 100;
+  created_at:            ferrex.common.Timestamp;
+  updated_at:            ferrex.common.Timestamp;
+  /// Populated only for specific detail endpoints, not list responses.
+  media:                 [ferrex.media.Media];
+}
+
+/// Response for GET /api/v1/libraries.
+table LibraryList {
+  items: [Library];
+}
+
+/// Batch version entry — used in the sync protocol.
+table BatchVersion {
+  batch_id: uint32;
+  version:  uint64;
+}
+
+/// Request body for POST /libraries/{id}/movie-batches:sync
+table BatchSyncRequest {
+  cached_versions: [BatchVersion];
+}
+
+/// Response for batch sync — tells client which batches are stale.
+table BatchSyncResponse {
+  stale_batch_ids:   [uint32];
+  deleted_batch_ids: [uint32];
+  server_versions:   [BatchVersion];
+}
+
+/// Request body for POST /libraries/{id}/movie-batches:fetch
+table BatchFetchRequest {
+  batch_ids: [uint32];
+}
+
+/// Response for batch fetch — full batch data.
+table BatchFetchResponse {
+  batches: [MediaBatchData];
+}
+
+table MediaBatchData {
+  batch_id: uint32;
+  version:  uint64;
+  items:    [ferrex.media.Media];
+}
+
+root_type LibraryList;

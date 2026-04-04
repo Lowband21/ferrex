@@ -123,7 +123,10 @@ pub async fn get_library_media_handler(
 
 pub async fn get_libraries_with_media_handler(
     State(state): State<AppState>,
+    accept: crate::infra::content_negotiation::AcceptFormat,
 ) -> impl IntoResponse {
+    use crate::infra::content_negotiation::{AcceptFormat, NegotiatedResponse};
+
     let request_started = Instant::now();
     let uow = state.unit_of_work();
 
@@ -136,6 +139,31 @@ pub async fn get_libraries_with_media_handler(
         }
     };
     let libraries = demo_mode::filter_library_references(&state, libraries);
+
+    // ── FlatBuffers path: return lightweight library metadata only ──
+    // Mobile clients fetch media via the batch sync endpoints, not /libraries.
+    if accept == AcceptFormat::FlatBuffers {
+        let fb_bytes = ferrex_flatbuffers::conversions::library::serialize_library_reference_list(&libraries);
+        let elapsed = request_started.elapsed();
+        info!(
+            "Libraries (FlatBuffers): {} libraries, {} bytes, {:?}",
+            libraries.len(), fb_bytes.len(), elapsed
+        );
+        return Ok(NegotiatedResponse::flatbuffers(fb_bytes).into_response());
+    }
+
+    // ── JSON path: return lightweight library metadata ──
+    if accept == AcceptFormat::Json {
+        let json = ferrex_core::api::types::ApiResponse::success(&libraries);
+        let elapsed = request_started.elapsed();
+        info!(
+            "Libraries (JSON): {} libraries, {:?}",
+            libraries.len(), elapsed
+        );
+        return Ok(NegotiatedResponse::json(&json).into_response());
+    }
+
+    // ── rkyv path: existing behavior (full libraries with media) ──
     let refs_elapsed = refs_started.elapsed();
 
     // Library snapshots can be expensive: each library has a potentially large
@@ -239,10 +267,7 @@ pub async fn get_libraries_with_media_handler(
         total_elapsed
     );
 
-    Ok::<_, StatusCode>((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        Bytes::from(bytes.into_vec()),
-    ))
+    Ok::<_, StatusCode>(NegotiatedResponse::rkyv(bytes.into_vec()).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -623,8 +648,13 @@ pub async fn manual_match_media_handler(
 /// Get all libraries (without media references)
 pub async fn list_libraries_handler(
     State(state): State<AppState>,
-) -> Result<Json<ApiResponse<Vec<LibraryReference>>>, StatusCode> {
-    info!("Listing all libraries");
+    accept: crate::infra::content_negotiation::AcceptFormat,
+) -> crate::infra::content_negotiation::NegotiatedResponse {
+    use crate::infra::content_negotiation::NegotiatedResponse;
+    #[allow(unused_imports)]
+    use crate::infra::content_negotiation as cn;
+
+    info!("Listing all libraries (format: {:?})", accept);
 
     match state
         .unit_of_work()
@@ -636,11 +666,19 @@ pub async fn list_libraries_handler(
             let libraries =
                 demo_mode::filter_library_references(&state, libraries);
             info!("Found {} libraries", libraries.len());
-            Ok(Json(ApiResponse::success(libraries)))
+
+            cn::respond(
+                accept,
+                &ApiResponse::success(&libraries),
+                || ferrex_flatbuffers::conversions::library::serialize_library_reference_list(&libraries),
+            )
         }
         Err(e) => {
             error!("Failed to list libraries: {}", e);
-            Ok(Json(ApiResponse::error(e.to_string())))
+            NegotiatedResponse::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &e.to_string(),
+            )
         }
     }
 }

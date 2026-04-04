@@ -1,0 +1,94 @@
+// FlatBuffers schema: Authentication types
+// Mirrors ferrex-core/src/domain/users/user.rs and device.rs
+//
+// Auth request bodies are small and infrequent — the main value of
+// FlatBuffers here is consistent tooling, not zero-copy perf.
+
+include "ids.fbs";
+include "common.fbs";
+
+namespace ferrex.auth;
+
+/// POST /api/v1/auth/login request.
+table LoginRequest {
+  username:    string (required);
+  password:    string (required);
+  device_name: string;
+}
+
+/// POST /api/v1/auth/register request.
+table RegisterRequest {
+  username:     string (required);
+  password:     string (required);
+  display_name: string (required);
+}
+
+/// Token pair returned by login / register / refresh.
+table AuthToken {
+  access_token:  string (required);
+  refresh_token: string (required);
+  expires_in:    uint32;    // seconds until access_token expires
+  session_id:    ferrex.ids.Uuid;
+}
+
+/// POST /api/v1/auth/refresh request.
+table RefreshRequest {
+  refresh_token: string (required);
+}
+
+/// POST /api/v1/auth/device/login request.
+table DeviceLoginRequest {
+  username:          string (required);
+  password:          string (required);
+  device_name:       string;
+  remember_device:   bool;
+  device_public_key: string;  // base64-encoded ed25519 public key
+  device_key_alg:    string;  // default "ed25519"
+}
+
+/// POST /api/v1/auth/device/pin request.
+table PinLoginRequest {
+  device_id:        ferrex.ids.Uuid (required);
+  client_proof:     string (required);
+  challenge_id:     ferrex.ids.Uuid (required);
+  device_signature: string (required);
+}
+
+/// Platform enumeration for device registration.
+enum Platform : byte {
+  Unknown = 0,
+  iOS     = 1,
+  Android = 2,
+  Desktop = 3,
+  Web     = 4,
+}
+
+/// Server-side device registration record.
+table DeviceRegistration {
+  id:              ferrex.ids.Uuid (required);
+  user_id:         ferrex.ids.Uuid (required);
+  device_id:       ferrex.ids.Uuid (required);
+  device_name:     string;
+  platform:        Platform;
+  app_version:     string;
+  pin_configured:  bool;
+  registered_at:   ferrex.common.Timestamp;
+  last_used_at:    ferrex.common.Timestamp;
+  expires_at:      ferrex.common.Timestamp;  // all-zero = never
+}
+
+/// GET /api/v1/setup/status response.
+table SetupStatus {
+  needs_setup:        bool;
+  registration_open:  bool;
+}
+
+/// GET /api/v1/users/me response.
+table UserProfile {
+  id:           ferrex.ids.Uuid (required);
+  username:     string;
+  display_name: string;
+  created_at:   ferrex.common.Timestamp;
+}
+
+root_type AuthToken;

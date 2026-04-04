@@ -1,0 +1,90 @@
+// FlatBuffers schema: Media reference types
+// Mirrors ferrex-model/src/media.rs — lightweight references used in
+// library grids & batch sync responses.
+
+include "ids.fbs";
+include "common.fbs";
+include "details.fbs";
+include "files.fbs";
+
+namespace ferrex.media;
+
+/// Top-level media discriminator matching ferrex-model::Media.
+union MediaVariant {
+  MovieReference,
+  SeriesReference,
+  SeasonReference,
+  EpisodeReference,
+}
+
+/// Wrapper table so we can put Media in vectors.
+table Media {
+  variant: MediaVariant;
+}
+
+/// Lightweight movie reference for poster grids / batch sync.
+/// Mirrors ferrex-model::MovieReference.
+table MovieReference {
+  id:          ferrex.ids.Uuid (required);
+  library_id:  ferrex.ids.Uuid (required);
+  batch_id:    uint32;          // 0 = unassigned
+  tmdb_id:     uint64;
+  title:       string (required);
+  details:     ferrex.details.EnhancedMovieDetails;
+  endpoint:    string;          // stream/detail URL path
+  file:        ferrex.files.MediaFile;
+  theme_color: string;          // hex e.g. "#2C3E50", null if absent
+}
+
+/// Lightweight series reference.
+/// Mirrors ferrex-model::Series.
+table SeriesReference {
+  id:            ferrex.ids.Uuid (required);
+  library_id:    ferrex.ids.Uuid (required);
+  tmdb_id:       uint64;
+  title:         string (required);
+  details:       ferrex.details.EnhancedSeriesDetails;
+  endpoint:      string;
+  discovered_at: ferrex.common.Timestamp;
+  created_at:    ferrex.common.Timestamp;
+  theme_color:   string;
+}
+
+/// Lightweight season reference.
+/// Mirrors ferrex-model::SeasonReference.
+table SeasonReference {
+  id:              ferrex.ids.Uuid (required);
+  library_id:      ferrex.ids.Uuid (required);
+  season_number:   uint16;
+  series_id:       ferrex.ids.Uuid (required);
+  tmdb_series_id:  uint64;
+  details:         ferrex.details.SeasonDetails;
+  endpoint:        string;
+  discovered_at:   ferrex.common.Timestamp;
+  created_at:      ferrex.common.Timestamp;
+  theme_color:     string;
+}
+
+/// Lightweight episode reference.
+/// Mirrors ferrex-model::EpisodeReference.
+table EpisodeReference {
+  id:              ferrex.ids.Uuid (required);
+  library_id:      ferrex.ids.Uuid (required);
+  episode_number:  uint16;
+  season_number:   uint16;
+  season_id:       ferrex.ids.Uuid (required);
+  series_id:       ferrex.ids.Uuid (required);
+  tmdb_series_id:  uint64;
+  details:         ferrex.details.EpisodeDetails;
+  endpoint:        string;
+  file:            ferrex.files.MediaFile;
+  discovered_at:   ferrex.common.Timestamp;
+  created_at:      ferrex.common.Timestamp;
+}
+
+/// A vector of Media suitable as a root_type for batch responses.
+table MediaBatch {
+  items: [Media];
+}
+
+root_type MediaBatch;

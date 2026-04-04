@@ -1,0 +1,69 @@
+name: Mobile Schemas CI
+
+on:
+  push:
+    paths:
+      - 'mobile/shared/schemas/**'
+      - 'ferrex-flatbuffers/**'
+      - '.github/workflows/mobile-schemas.yml'
+  pull_request:
+    paths:
+      - 'mobile/shared/schemas/**'
+      - 'ferrex-flatbuffers/**'
+      - '.github/workflows/mobile-schemas.yml'
+
+jobs:
+  validate-schemas:
+    name: Validate FlatBuffers Schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flatc
+        run: |
+          FLATC_VERSION="25.12.19"
+          curl -fsSL "https://github.com/google/flatbuffers/releases/download/v${FLATC_VERSION}/Linux.flatc.binary.g++-13.zip" -o flatc.zip
+          unzip flatc.zip -d /usr/local/bin/
+          chmod +x /usr/local/bin/flatc
+          flatc --version
+
+      - name: Validate .fbs schemas compile
+        run: |
+          SCHEMA_DIR=mobile/shared/schemas
+          flatc --binary \
+            -I "$SCHEMA_DIR" \
+            --schema \
+            "$SCHEMA_DIR"/ids.fbs \
+            "$SCHEMA_DIR"/common.fbs \
+            "$SCHEMA_DIR"/files.fbs \
+            "$SCHEMA_DIR"/details.fbs \
+            "$SCHEMA_DIR"/media.fbs \
+            "$SCHEMA_DIR"/library.fbs \
+            "$SCHEMA_DIR"/watch.fbs \
+            "$SCHEMA_DIR"/auth.fbs \
+            "$SCHEMA_DIR"/image.fbs
+          echo "✓ All schemas valid"
+
+  build-rust:
+    name: Build ferrex-flatbuffers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-flatbuffers-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check ferrex-flatbuffers compiles
+        run: cargo check -p ferrex-flatbuffers
+
+      - name: Run round-trip tests
+        run: cargo test -p ferrex-flatbuffers

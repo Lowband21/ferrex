@@ -543,3 +543,44 @@ release-workspace version:
 [no-cd]
 release-init version:
     ferrexctl package release-init {{ version }}
+
+# ─── Mobile / FlatBuffers ────────────────────────────────────────────
+
+# Run all mobile codegen (Rust + Swift + Kotlin)
+mobile-codegen: mobile-codegen-rust mobile-codegen-swift mobile-codegen-kotlin
+    @echo "✓ All mobile codegen complete"
+
+# Generate Rust FlatBuffers types → ferrex-flatbuffers/src/generated/
+mobile-codegen-rust:
+    ./mobile/shared/codegen/generate-rust.sh
+
+# Generate Swift FlatBuffers types → mobile/ios/FerrexAPI/Generated/
+mobile-codegen-swift:
+    ./mobile/shared/codegen/generate-swift.sh
+
+# Generate Kotlin FlatBuffers types → mobile/android/app/.../generated/
+mobile-codegen-kotlin:
+    ./mobile/shared/codegen/generate-kotlin.sh
+
+# Validate that all .fbs schemas compile (CI check)
+mobile-validate-schemas:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v flatc &>/dev/null; then
+      echo "ERROR: flatc not found in PATH"; exit 1
+    fi
+    echo "Validating schemas with flatc $(flatc --version)..."
+    SCHEMA_DIR=mobile/shared/schemas
+    flatc --binary \
+      -I "$SCHEMA_DIR" \
+      --schema \
+      "$SCHEMA_DIR"/ids.fbs \
+      "$SCHEMA_DIR"/common.fbs \
+      "$SCHEMA_DIR"/files.fbs \
+      "$SCHEMA_DIR"/details.fbs \
+      "$SCHEMA_DIR"/media.fbs \
+      "$SCHEMA_DIR"/library.fbs \
+      "$SCHEMA_DIR"/watch.fbs \
+      "$SCHEMA_DIR"/auth.fbs \
+      "$SCHEMA_DIR"/image.fbs
+    echo "✓ All schemas valid"

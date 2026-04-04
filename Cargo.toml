@@ -6,6 +6,7 @@ members = [
   "ferrex-model",
   "ferrex-contracts",
   "ferrexctl",
+  "ferrex-flatbuffers",
 ]
 default-members = ["ferrex-server", "ferrex-core"]
 resolver = "3"

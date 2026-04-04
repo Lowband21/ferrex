@@ -1,0 +1,109 @@
+// FlatBuffers schema: Watch progress & status types
+// Mirrors ferrex-model/src/watch.rs
+
+include "ids.fbs";
+include "common.fbs";
+
+namespace ferrex.watch;
+
+/// Per-episode watch state.
+enum EpisodeWatchState : byte {
+  Unwatched   = 0,
+  InProgress  = 1,
+  Completed   = 2,
+}
+
+/// Episode key — identifies an episode by its series + season + episode number
+/// (independent of file/UUID).
+table EpisodeKey {
+  tmdb_series_id: uint64;
+  season_number:  uint16;
+  episode_number: uint16;
+}
+
+/// Season key.
+table SeasonKey {
+  tmdb_series_id: uint64;
+  season_number:  uint16;
+}
+
+/// Why the next episode was chosen.
+enum NextReason : byte {
+  ResumeInProgress = 0,
+  FirstUnwatched   = 1,
+}
+
+/// Hint for the next episode to play in a series.
+table NextEpisode {
+  key:               EpisodeKey (required);
+  playable_media_id: ferrex.ids.Uuid;
+  reason:            NextReason;
+}
+
+/// Individual episode status entry.
+table EpisodeStatusEntry {
+  episode_number: uint16;
+  state:          EpisodeWatchState;
+  progress:       float;   // 0.0–1.0; meaningful only when state == InProgress
+}
+
+/// Aggregated season watch status.
+table SeasonWatchStatus {
+  key:          SeasonKey (required);
+  total:        uint32;
+  watched:      uint32;
+  in_progress:  uint32;
+  is_completed: bool;
+  episodes:     [EpisodeStatusEntry];
+}
+
+/// Aggregated series watch status with next-episode hint.
+table SeriesWatchStatus {
+  tmdb_series_id: uint64;
+  total_episodes: uint32;
+  watched:        uint32;
+  in_progress:    uint32;
+  seasons:        [SeasonWatchStatus];
+  next_episode:   NextEpisode;
+}
+
+// ─── Request / response types for watch endpoints ────────────────────
+
+/// POST /api/v1/watch/progress request body.
+table WatchProgressUpdate {
+  media_id:  ferrex.ids.Uuid (required);
+  position:  double;    // seconds
+  duration:  double;    // seconds
+  timestamp: ferrex.common.Timestamp;
+}
+
+/// GET /api/v1/watch/state response.
+table WatchState {
+  items: [WatchStateEntry];
+}
+
+table WatchStateEntry {
+  media_id:  ferrex.ids.Uuid (required);
+  position:  double;
+  duration:  double;
+  completed: bool;
+  updated_at: ferrex.common.Timestamp;
+}
+
+/// GET /api/v1/watch/continue response.
+table ContinueWatchingList {
+  items: [ContinueWatchingEntry];
+}
+
+table ContinueWatchingEntry {
+  media_id:   ferrex.ids.Uuid (required);
+  media_type: ferrex.common.VideoMediaType;
+  position:   double;
+  duration:   double;
+  updated_at: ferrex.common.Timestamp;
+  // Denormalized display info so the client doesn't need a join
+  title:      string;
+  poster_iid: ferrex.ids.Uuid;
+}
+
+root_type WatchState;

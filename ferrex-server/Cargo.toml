@@ -128,6 +128,8 @@ rand.workspace = true
 ferrex-core = { path = "../ferrex-core" }
 ferrexctl = { path = "../ferrexctl" }
 ferrex-model = { path = "../ferrex-model", features = ["serde"] }
+ferrex-flatbuffers = { path = "../ferrex-flatbuffers" }
+flatbuffers = "25.2.10"
 
 [dev-dependencies]
 tempfile.workspace = true

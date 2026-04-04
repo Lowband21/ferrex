@@ -1,0 +1,48 @@
+// FlatBuffers schema: Shared enums, timestamps, and pagination primitives
+// Used by most other .fbs files.
+
+namespace ferrex.common;
+
+/// UTC timestamp as milliseconds since Unix epoch.
+/// FlatBuffers has no native datetime; i64 millis is compact and unambiguous.
+struct Timestamp {
+  millis: long;
+}
+
+/// Library content type.
+enum LibraryType : byte {
+  Movies = 0,
+  Series = 1,
+}
+
+/// Video media type discriminator (for endpoints that need a type tag).
+enum VideoMediaType : byte {
+  Movie   = 0,
+  Series  = 1,
+  Season  = 2,
+  Episode = 3,
+}
+
+/// Image size category (mirrors ferrex-model ImageSize enum at the top level).
+enum ImageCategory : byte {
+  Poster   = 0,
+  Backdrop = 1,
+  Profile  = 2,
+  Episode  = 3,
+}
+
+/// Standard API response wrapper — used for single-object responses.
+/// Vectors are returned directly as root types without this wrapper.
+table ApiResponse {
+  success: bool = true;
+  message: string;
+  /// Payload is schema-specific; callers cast via the endpoint contract.
+}
+
+/// Pagination metadata returned alongside collection responses.
+table PaginationMeta {
+  total:     uint32;
+  page:      uint32;
+  page_size: uint32;
+  has_more:  bool;
+}
