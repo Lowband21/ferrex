@@ -46,7 +46,7 @@ class SearchService @Inject constructor(
                         "fields": ["all"],
                         "fuzzy": true
                     },
-                    "filters": {},
+                    "filters": {"genres": [], "library_ids": []},
                     "sort": {"primary": "title", "order": "ascending"},
                     "pagination": {"offset": 0, "limit": 50}
                 }

@@ -19,6 +19,7 @@ pub struct MediaQuery {
 
 /// Media filtering options
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct MediaFilters {
     pub media_type: Option<MediaTypeFilter>,
     pub watch_status: Option<WatchStatusFilter>,
