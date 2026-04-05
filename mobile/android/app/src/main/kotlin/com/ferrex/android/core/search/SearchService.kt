@@ -43,11 +43,11 @@ class SearchService @Inject constructor(
                 {
                     "search": {
                         "text": ${escapeJson(query)},
-                        "fields": ["All"],
+                        "fields": ["all"],
                         "fuzzy": true
                     },
                     "filters": {},
-                    "sort": {"primary": "Title", "order": "Ascending"},
+                    "sort": {"primary": "title", "order": "ascending"},
                     "pagination": {"offset": 0, "limit": 50}
                 }
             """.trimIndent()
