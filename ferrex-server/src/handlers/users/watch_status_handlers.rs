@@ -9,13 +9,16 @@ use ferrex_core::types::watch::{
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::user::User,
-    domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
+    domain::watch::UpdateProgressRequest,
 };
 use ferrex_model::VideoMediaType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::infra::app_state::AppState;
+use crate::infra::{
+    app_state::AppState,
+    content_negotiation::{self as cn, AcceptFormat, NegotiatedResponse},
+};
 
 #[derive(Debug, Deserialize)]
 pub struct ContinueWatchingQuery {
@@ -101,31 +104,11 @@ pub async fn update_progress_handler(
 ///
 /// Retrieves the user's complete watch state including all in-progress
 /// items and the count of completed items.
-///
-/// # Response
-///
-/// ```json
-/// {
-///   "in_progress": [
-///     {
-///       "media_id": "movie:550e8400-e29b-41d4-a716-446655440000",
-///       "position": 3600.0,
-///       "duration": 7200.0,
-///       "last_watched": 1704067200
-///     }
-///   ],
-///   "completed": ["movie:123e4567-e89b-12d3-a456-426614174000"]
-/// }
-/// ```
-///
-/// # Notes
-///
-/// - In-progress items are sorted by last_watched (most recent first)
-/// - Completed items are returned as a set for efficient lookup
 pub async fn get_watch_state_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Extension(user): Extension<User>,
-) -> Result<Json<ApiResponse<UserWatchState>>, (StatusCode, String)> {
+) -> Result<NegotiatedResponse, (StatusCode, String)> {
     let watch_state = state
         .unit_of_work()
         .watch_status
@@ -138,15 +121,44 @@ pub async fn get_watch_state_handler(
             )
         })?;
 
-    Ok(Json(ApiResponse::success(watch_state)))
+    Ok(cn::respond(
+        accept,
+        &ApiResponse::success(&watch_state),
+        || {
+            use ferrex_flatbuffers::conversions::watch::InProgressItemRef;
+
+            let in_progress: std::collections::HashMap<uuid::Uuid, InProgressItemRef<'_>> =
+                watch_state
+                    .in_progress
+                    .iter()
+                    .map(|(id, item)| {
+                        (
+                            *id,
+                            InProgressItemRef {
+                                media_id: id,
+                                position: item.position,
+                                duration: item.duration,
+                                last_watched: item.last_watched,
+                            },
+                        )
+                    })
+                    .collect();
+
+            ferrex_flatbuffers::conversions::watch::serialize_watch_state(
+                &in_progress,
+                &watch_state.completed,
+            )
+        },
+    ))
 }
 
 /// Get continue watching list for the current user
 pub async fn get_continue_watching_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Extension(user): Extension<User>,
     Query(params): Query<ContinueWatchingQuery>,
-) -> Result<Json<ApiResponse<Vec<InProgressItem>>>, (StatusCode, String)> {
+) -> Result<NegotiatedResponse, (StatusCode, String)> {
     let items = state
         .unit_of_work()
         .watch_status
@@ -159,7 +171,19 @@ pub async fn get_continue_watching_handler(
             )
         })?;
 
-    Ok(Json(ApiResponse::success(items)))
+    Ok(cn::respond(
+        accept,
+        &ApiResponse::success(&items),
+        || {
+            let tuples: Vec<(uuid::Uuid, f32, f32, i64)> = items
+                .iter()
+                .map(|item| {
+                    (item.media_id, item.position, item.duration, item.last_watched)
+                })
+                .collect();
+            ferrex_flatbuffers::conversions::watch::serialize_continue_watching_list(&tuples)
+        },
+    ))
 }
 
 /// Clear watch progress for a specific media item

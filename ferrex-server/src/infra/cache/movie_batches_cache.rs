@@ -35,18 +35,43 @@ impl ManifestSignature {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Wire format selector for cache consumers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireFormat {
+    /// rkyv zero-copy — existing desktop/web player path.
+    Rkyv,
+    /// FlatBuffers — mobile client path.
+    FlatBuffers,
+}
+
+#[derive(Clone)]
 struct CachedMovieBatch {
     version: u64,
     #[allow(dead_code)]
     hash: u64,
-    bytes: Bytes,
+    /// Pre-serialized rkyv bytes for this batch.
+    rkyv_bytes: Bytes,
+    /// Source movie references — kept in memory so FlatBuffers responses
+    /// can be assembled without re-querying the database.
+    movies: Arc<Vec<ferrex_model::MovieReference>>,
+}
+
+impl std::fmt::Debug for CachedMovieBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedMovieBatch")
+            .field("version", &self.version)
+            .field("hash", &self.hash)
+            .field("rkyv_bytes_len", &self.rkyv_bytes.len())
+            .field("movies_count", &self.movies.len())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
 struct CachedFullBundle {
     signature: ManifestSignature,
-    bytes: Bytes,
+    rkyv_bytes: Bytes,
+    fb_bytes: Bytes,
 }
 
 #[derive(Debug, Default)]
@@ -55,12 +80,17 @@ struct LibraryCacheState {
     full_bundle: Option<CachedFullBundle>,
 }
 
-/// Caches rkyv-serialized movie batch payloads to avoid rebuilding expensive
-/// library bootstrap responses on every player startup.
+/// Caches movie-batch payloads in both rkyv and FlatBuffers wire formats.
 ///
-/// This is an in-memory cache keyed by `(library_id, batch_id, version)` and
-/// invalidated by comparing the server-side version manifest from
-/// `list_movie_batch_versions_with_movies(library_id)`.
+/// Per-batch data is cached as:
+/// - **rkyv bytes** — pre-serialized, used directly for rkyv responses.
+/// - **source `MovieReference` structs** — used to build FlatBuffers responses
+///   on demand without re-querying the database.
+///
+/// Full-library bundles are cached as assembled bytes in **both** formats.
+///
+/// Keyed by `(library_id, batch_id, version)` and invalidated by comparing
+/// the server-side version manifest.
 #[derive(Debug, Default)]
 pub struct MovieBatchesCache {
     libraries: DashMap<LibraryId, Arc<Mutex<LibraryCacheState>>>,
@@ -75,6 +105,7 @@ impl MovieBatchesCache {
         &self,
         uow: Arc<AppUnitOfWork>,
         library_id: LibraryId,
+        format: WireFormat,
     ) -> Result<Bytes, StatusCode> {
         let request_started = Instant::now();
 
@@ -95,32 +126,35 @@ impl MovieBatchesCache {
         let mut guard = entry.lock().await;
 
         if versions.is_empty() {
-            let response = MovieReferenceBatchBundleResponse {
-                library_id,
-                batches: Vec::new(),
-            };
-            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
-                .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let bytes = Bytes::from(bytes.into_vec());
+            let (rkyv_bytes, fb_bytes) = serialize_empty_bundle(library_id)?;
             guard.batches.clear();
             guard.full_bundle = Some(CachedFullBundle {
                 signature: ManifestSignature([0u8; 32]),
-                bytes: bytes.clone(),
+                rkyv_bytes: Bytes::from(rkyv_bytes.clone()),
+                fb_bytes: Bytes::from(fb_bytes.clone()),
             });
-            return Ok(bytes);
+            return Ok(match format {
+                WireFormat::Rkyv => Bytes::from(rkyv_bytes),
+                WireFormat::FlatBuffers => Bytes::from(fb_bytes),
+            });
         }
 
         let signature = ManifestSignature::from_versions(&versions);
         if let Some(cached) = guard.full_bundle.as_ref()
             && cached.signature == signature
         {
+            let bytes = match format {
+                WireFormat::Rkyv => &cached.rkyv_bytes,
+                WireFormat::FlatBuffers => &cached.fb_bytes,
+            };
             debug!(
-                "movie batch bundle cache hit: library={} bytes={} elapsed={:?}",
+                "movie batch bundle cache hit: library={} format={:?} bytes={} elapsed={:?}",
                 library_id,
-                cached.bytes.len(),
+                format,
+                bytes.len(),
                 request_started.elapsed()
             );
-            return Ok(cached.bytes.clone());
+            return Ok(bytes.clone());
         }
 
         let mut rebuild_ids = Vec::new();
@@ -160,50 +194,45 @@ impl MovieBatchesCache {
                     CachedMovieBatch {
                         version,
                         hash: rebuilt.hash,
-                        bytes: rebuilt.bytes,
+                        rkyv_bytes: rebuilt.rkyv_bytes,
+                        movies: rebuilt.movies,
                     },
                 );
             }
         }
 
         let serialize_started = Instant::now();
-        let mut batches = Vec::with_capacity(versions.len());
-        for record in &versions {
-            let Some(cached) = guard.batches.get(&record.batch_id) else {
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            };
-            batches.push(MovieReferenceBatchBlob {
-                batch_id: record.batch_id,
-                bytes: cached.bytes.as_ref().to_vec(),
-            });
-        }
 
-        let response = MovieReferenceBatchBundleResponse {
-            library_id,
-            batches,
+        // Build rkyv bundle from cached per-batch rkyv bytes.
+        let rkyv_bytes = assemble_rkyv_bundle(library_id, &versions, &guard.batches)?;
+
+        // Build FlatBuffers bundle from cached source movie references.
+        let fb_bytes = assemble_fb_bundle(&versions, &guard.batches);
+
+        let result = match format {
+            WireFormat::Rkyv => rkyv_bytes.clone(),
+            WireFormat::FlatBuffers => fb_bytes.clone(),
         };
-
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
-            .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let bytes = Bytes::from(bytes.into_vec());
 
         guard.full_bundle = Some(CachedFullBundle {
             signature,
-            bytes: bytes.clone(),
+            rkyv_bytes,
+            fb_bytes,
         });
 
         info!(
-            "Movie batches bundle cached: library={} batches={} bytes={} rebuilds={} rebuild_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
+            "Movie batches bundle cached: library={} batches={} rkyv={} fb={} rebuilds={} rebuild_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
             library_id,
             versions.len(),
-            bytes.len(),
+            guard.full_bundle.as_ref().unwrap().rkyv_bytes.len(),
+            guard.full_bundle.as_ref().unwrap().fb_bytes.len(),
             rebuild_ids.len(),
             rebuild_started.elapsed(),
             serialize_started.elapsed(),
             request_started.elapsed()
         );
 
-        Ok(bytes)
+        Ok(result)
     }
 
     pub async fn get_batch(
@@ -211,6 +240,7 @@ impl MovieBatchesCache {
         uow: Arc<AppUnitOfWork>,
         library_id: LibraryId,
         batch_id: MovieBatchId,
+        format: WireFormat,
     ) -> Result<Bytes, StatusCode> {
         let versions = uow
             .media_refs
@@ -236,7 +266,19 @@ impl MovieBatchesCache {
         if let Some(cached) = guard.batches.get(&batch_id)
             && cached.version == expected_version
         {
-            return Ok(cached.bytes.clone());
+            return Ok(match format {
+                WireFormat::Rkyv => cached.rkyv_bytes.clone(),
+                WireFormat::FlatBuffers => {
+                    let fb = ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(
+                        &[ferrex_flatbuffers::conversions::batch_data::BatchInput {
+                            batch_id: batch_id.as_u32(),
+                            version: cached.version,
+                            movies: &cached.movies,
+                        }],
+                    );
+                    Bytes::from(fb)
+                }
+            });
         }
 
         let rebuilt =
@@ -247,17 +289,32 @@ impl MovieBatchesCache {
             .next()
             .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
+        let result = match format {
+            WireFormat::Rkyv => rebuilt.rkyv_bytes.clone(),
+            WireFormat::FlatBuffers => {
+                let fb = ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(
+                    &[ferrex_flatbuffers::conversions::batch_data::BatchInput {
+                        batch_id: batch_id.as_u32(),
+                        version: expected_version,
+                        movies: &rebuilt.movies,
+                    }],
+                );
+                Bytes::from(fb)
+            }
+        };
+
         guard.batches.insert(
             batch_id,
             CachedMovieBatch {
                 version: expected_version,
                 hash: rebuilt.hash,
-                bytes: rebuilt.bytes.clone(),
+                rkyv_bytes: rebuilt.rkyv_bytes,
+                movies: rebuilt.movies,
             },
         );
         guard.full_bundle = None;
 
-        Ok(rebuilt.bytes)
+        Ok(result)
     }
 
     pub async fn get_batch_subset(
@@ -265,6 +322,7 @@ impl MovieBatchesCache {
         uow: Arc<AppUnitOfWork>,
         library_id: LibraryId,
         mut batch_ids: Vec<MovieBatchId>,
+        format: WireFormat,
     ) -> Result<Bytes, StatusCode> {
         if batch_ids.is_empty() {
             return Err(StatusCode::BAD_REQUEST);
@@ -328,39 +386,70 @@ impl MovieBatchesCache {
                     CachedMovieBatch {
                         version,
                         hash: rebuilt.hash,
-                        bytes: rebuilt.bytes,
+                        rkyv_bytes: rebuilt.rkyv_bytes,
+                        movies: rebuilt.movies,
                     },
                 );
             }
             guard.full_bundle = None;
         }
 
-        let mut batches = Vec::with_capacity(batch_ids.len());
-        for batch_id in batch_ids {
-            let Some(cached) = guard.batches.get(&batch_id) else {
-                return Err(StatusCode::NOT_FOUND);
-            };
-            batches.push(MovieReferenceBatchBlob {
-                batch_id,
-                bytes: cached.bytes.as_ref().to_vec(),
-            });
+        match format {
+            WireFormat::Rkyv => {
+                let mut batches = Vec::with_capacity(batch_ids.len());
+                for batch_id in batch_ids {
+                    let Some(cached) = guard.batches.get(&batch_id) else {
+                        return Err(StatusCode::NOT_FOUND);
+                    };
+                    batches.push(MovieReferenceBatchBlob {
+                        batch_id,
+                        bytes: cached.rkyv_bytes.as_ref().to_vec(),
+                    });
+                }
+
+                let response = MovieReferenceBatchBundleResponse {
+                    library_id,
+                    batches,
+                };
+
+                let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
+                    .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
+                Ok(Bytes::from(bytes.into_vec()))
+            }
+            WireFormat::FlatBuffers => {
+                let fb_batches: Vec<_> = batch_ids
+                    .iter()
+                    .filter_map(|batch_id| {
+                        let cached = guard.batches.get(batch_id)?;
+                        Some(ferrex_flatbuffers::conversions::batch_data::BatchInput {
+                            batch_id: batch_id.as_u32(),
+                            version: cached.version,
+                            movies: &cached.movies,
+                        })
+                    })
+                    .collect();
+
+                if fb_batches.len() != batch_ids.len() {
+                    return Err(StatusCode::NOT_FOUND);
+                }
+
+                let bytes = ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(
+                    &fb_batches,
+                );
+                Ok(Bytes::from(bytes))
+            }
         }
-
-        let response = MovieReferenceBatchBundleResponse {
-            library_id,
-            batches,
-        };
-
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
-            .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(Bytes::from(bytes.into_vec()))
     }
 }
 
-#[derive(Debug)]
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 struct BuiltMovieBatch {
     batch_id: MovieBatchId,
-    bytes: Bytes,
+    rkyv_bytes: Bytes,
+    movies: Arc<Vec<ferrex_model::MovieReference>>,
     hash: u64,
 }
 
@@ -371,6 +460,71 @@ fn stable_hash_u64(bytes: &[u8]) -> u64 {
             .try_into()
             .expect("sha256 digest must be at least 8 bytes"),
     )
+}
+
+/// Serialize an empty bundle in both wire formats.
+fn serialize_empty_bundle(library_id: LibraryId) -> Result<(Vec<u8>, Vec<u8>), StatusCode> {
+    let response = MovieReferenceBatchBundleResponse {
+        library_id,
+        batches: Vec::new(),
+    };
+    let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
+        .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_vec();
+
+    let fb_bytes =
+        ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(&[]);
+
+    Ok((rkyv_bytes, fb_bytes))
+}
+
+/// Assemble a full rkyv bundle from per-batch cached rkyv bytes.
+fn assemble_rkyv_bundle(
+    library_id: LibraryId,
+    versions: &[MovieBatchVersionRecord],
+    batches: &HashMap<MovieBatchId, CachedMovieBatch>,
+) -> Result<Bytes, StatusCode> {
+    let mut blobs = Vec::with_capacity(versions.len());
+    for record in versions {
+        let Some(cached) = batches.get(&record.batch_id) else {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        blobs.push(MovieReferenceBatchBlob {
+            batch_id: record.batch_id,
+            bytes: cached.rkyv_bytes.as_ref().to_vec(),
+        });
+    }
+
+    let response = MovieReferenceBatchBundleResponse {
+        library_id,
+        batches: blobs,
+    };
+
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
+        .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Bytes::from(bytes.into_vec()))
+}
+
+/// Assemble a full FlatBuffers bundle from per-batch cached source structs.
+fn assemble_fb_bundle(
+    versions: &[MovieBatchVersionRecord],
+    batches: &HashMap<MovieBatchId, CachedMovieBatch>,
+) -> Bytes {
+    use ferrex_flatbuffers::conversions::batch_data::{BatchInput, serialize_batch_fetch_response};
+
+    let inputs: Vec<BatchInput<'_>> = versions
+        .iter()
+        .filter_map(|record| {
+            let cached = batches.get(&record.batch_id)?;
+            Some(BatchInput {
+                batch_id: record.batch_id.as_u32(),
+                version: record.version,
+                movies: &cached.movies,
+            })
+        })
+        .collect();
+
+    Bytes::from(serialize_batch_fetch_response(&inputs))
 }
 
 async fn build_movie_batches(
@@ -406,7 +560,8 @@ async fn build_movie_batches(
         movies_by_batch.entry(batch_id).or_default().push(movie);
     }
 
-    let mut build_inputs = Vec::with_capacity(rebuild_ids.len());
+    let mut build_inputs: Vec<(MovieBatchId, Vec<ferrex_model::MovieReference>)> =
+        Vec::with_capacity(rebuild_ids.len());
     for batch_id in rebuild_ids {
         build_inputs.push((
             *batch_id,
@@ -418,35 +573,32 @@ async fn build_movie_batches(
         build_inputs
             .into_par_iter()
             .map(|(batch_id, movies)| {
+                // Serialize to rkyv for the existing path.
                 let response = MovieReferenceBatchResponse {
                     library_id,
                     batch_id,
-                    movies,
+                    movies: movies.clone(),
                 };
 
-                let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
+                let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
                     .map_err(|_err| {
                         "movie batch serialize failed".to_string()
                     })?;
-                let hash = stable_hash_u64(bytes.as_slice());
-                Ok::<_, String>((batch_id, bytes.into_vec(), hash))
+                let hash = stable_hash_u64(rkyv_bytes.as_slice());
+
+                Ok::<_, String>(BuiltMovieBatch {
+                    batch_id,
+                    rkyv_bytes: Bytes::from(rkyv_bytes.into_vec()),
+                    movies: Arc::new(movies),
+                    hash,
+                })
             })
             .collect::<Result<Vec<_>, String>>()
     })
     .await
     .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let built = built.map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let mut out = Vec::with_capacity(built.len());
-    for (batch_id, bytes, hash) in built {
-        out.push(BuiltMovieBatch {
-            batch_id,
-            bytes: Bytes::from(bytes),
-            hash,
-        });
-    }
-
+    let mut out = built.map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?;
     out.sort_by_key(|b| b.batch_id.as_u32());
     Ok(out)
 }

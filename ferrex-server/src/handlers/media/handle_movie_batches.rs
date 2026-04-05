@@ -15,7 +15,12 @@ use sha2::Digest;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::infra::{app_state::AppState, demo_mode};
+use crate::infra::{
+    app_state::AppState,
+    cache::movie_batches_cache::WireFormat,
+    content_negotiation::{self as cn, AcceptFormat, NegotiatedResponse},
+    demo_mode,
+};
 
 async fn refresh_unfinalized_movie_batch_hash(
     uow: &AppUnitOfWork,
@@ -109,6 +114,7 @@ async fn refresh_unfinalized_movie_batch_hash(
 
 pub async fn get_movie_reference_batch_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Path((library_id, batch_id)): Path<(Uuid, u32)>,
 ) -> impl IntoResponse {
     if demo_mode::is_demo_mode(&state)
@@ -124,25 +130,27 @@ pub async fn get_movie_reference_batch_handler(
 
     let library_id = LibraryId(library_id);
     let uow = state.unit_of_work();
+    let format = accept_to_wire_format(accept);
 
     info!(
-        "Fetching movie reference batch {} for library {}",
-        batch_id, library_id
+        "Fetching movie reference batch {} for library {} (format: {:?})",
+        batch_id, library_id, format
     );
 
     let bytes = state
         .movie_batches_cache
-        .get_batch(uow, library_id, batch_id)
+        .get_batch(uow, library_id, batch_id, format)
         .await?;
 
     Ok::<_, StatusCode>((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
+        [(header::CONTENT_TYPE, wire_format_content_type(format))],
         bytes,
     ))
 }
 
 pub async fn get_movie_reference_batch_bundle_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
 ) -> impl IntoResponse {
     if demo_mode::is_demo_mode(&state)
@@ -153,25 +161,27 @@ pub async fn get_movie_reference_batch_bundle_handler(
 
     let library_id = LibraryId(library_id);
     let uow = state.unit_of_work();
+    let format = accept_to_wire_format(accept);
 
-    info!("Fetching movie batch bundle for library {}", library_id);
+    info!("Fetching movie batch bundle for library {} (format: {:?})", library_id, format);
 
     let bytes = state
         .movie_batches_cache
-        .get_library_bundle(uow, library_id)
+        .get_library_bundle(uow, library_id, format)
         .await?;
 
     Ok::<_, StatusCode>((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
+        [(header::CONTENT_TYPE, wire_format_content_type(format))],
         bytes,
     ))
 }
 
 pub async fn post_movie_reference_batch_sync_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
     Json(request): Json<MovieBatchSyncRequest>,
-) -> Result<Json<ApiResponse<MovieBatchSyncResponse>>, StatusCode> {
+) -> Result<NegotiatedResponse, StatusCode> {
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
     {
@@ -224,15 +234,51 @@ pub async fn post_movie_reference_batch_sync_handler(
     }
     removals.sort_by_key(|id| id.as_u32());
 
-    Ok(Json(ApiResponse::success(MovieBatchSyncResponse {
+    let json_data = ApiResponse::success(MovieBatchSyncResponse {
         library_id,
-        updates,
-        removals,
-    })))
+        updates: updates.clone(),
+        removals: removals.clone(),
+    });
+
+    Ok(cn::respond(
+        accept,
+        &json_data,
+        || {
+            let fb_updates: Vec<_> = updates
+                .iter()
+                .map(|e| ferrex_flatbuffers::conversions::batch_sync::BatchUpdateEntry {
+                    batch_id: e.batch_id.as_u32(),
+                    version: e.version,
+                })
+                .collect();
+            let fb_removals: Vec<u32> = removals.iter().map(|id| id.as_u32()).collect();
+            ferrex_flatbuffers::conversions::batch_sync::serialize_batch_sync_response(
+                &fb_updates,
+                &fb_removals,
+            )
+        },
+    ))
+}
+
+/// Map `AcceptFormat` to cache `WireFormat`.
+fn accept_to_wire_format(accept: AcceptFormat) -> WireFormat {
+    match accept {
+        AcceptFormat::FlatBuffers => WireFormat::FlatBuffers,
+        _ => WireFormat::Rkyv,
+    }
+}
+
+/// Content-Type header for raw binary responses.
+fn wire_format_content_type(format: WireFormat) -> &'static str {
+    match format {
+        WireFormat::Rkyv => "application/octet-stream",
+        WireFormat::FlatBuffers => cn::mime::FLATBUFFERS,
+    }
 }
 
 pub async fn post_movie_reference_batch_fetch_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
     Json(request): Json<MovieBatchFetchRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -244,13 +290,14 @@ pub async fn post_movie_reference_batch_fetch_handler(
 
     let library_id = LibraryId(library_id);
     let uow = state.unit_of_work();
+    let format = accept_to_wire_format(accept);
 
     let batch_ids = request.batch_ids;
 
     let bytes = state
         .movie_batches_cache
-        .get_batch_subset(uow, library_id, batch_ids)
+        .get_batch_subset(uow, library_id, batch_ids, format)
         .await?;
 
-    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes))
+    Ok(([(header::CONTENT_TYPE, wire_format_content_type(format))], bytes))
 }

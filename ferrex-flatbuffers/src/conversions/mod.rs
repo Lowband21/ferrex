@@ -9,6 +9,11 @@ pub mod details;
 pub mod media;
 pub mod common;
 pub mod files;
+pub mod auth;
+pub mod watch;
+pub mod batch_sync;
+pub mod batch_data;
+pub mod media_query;
 
 // Re-export the timestamp helper since it's used everywhere.
 pub use common::timestamp_to_fb;

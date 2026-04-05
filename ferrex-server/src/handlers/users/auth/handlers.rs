@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use crate::infra::{
     app_state::AppState,
+    content_negotiation::{self as cn, AcceptFormat, NegotiatedResponse},
     errors::{AppError, AppResult},
 };
 
@@ -127,32 +128,48 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Json(request): Json<LoginRequest>,
-) -> AppResult<Json<ApiResponse<AuthToken>>> {
+) -> Result<NegotiatedResponse, AppError> {
     let token_bundle = state
         .auth_service()
         .authenticate_with_password(&request.username, &request.password)
         .await
         .map_err(map_auth_error)?;
 
-    Ok(Json(ApiResponse::success(bundle_to_auth_token(
-        token_bundle,
-    ))))
+    let token = bundle_to_auth_token(token_bundle);
+    Ok(respond_auth_token(accept, &token))
 }
 
 pub async fn refresh(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Json(request): Json<RefreshRequest>,
-) -> AppResult<Json<ApiResponse<AuthToken>>> {
+) -> Result<NegotiatedResponse, AppError> {
     let token_bundle = state
         .auth_service()
         .refresh_session(&request.refresh_token)
         .await
         .map_err(map_auth_error)?;
 
-    Ok(Json(ApiResponse::success(bundle_to_auth_token(
-        token_bundle,
-    ))))
+    let token = bundle_to_auth_token(token_bundle);
+    Ok(respond_auth_token(accept, &token))
+}
+
+/// Build a `NegotiatedResponse` for an `AuthToken`.
+fn respond_auth_token(accept: AcceptFormat, token: &AuthToken) -> NegotiatedResponse {
+    cn::respond(
+        accept,
+        &ApiResponse::success(token),
+        || {
+            ferrex_flatbuffers::conversions::auth::serialize_auth_token(
+                &token.access_token,
+                &token.refresh_token,
+                token.expires_in,
+                token.session_id.as_ref(),
+            )
+        },
+    )
 }
 
 pub async fn logout(

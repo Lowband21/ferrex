@@ -221,7 +221,33 @@ impl CreateAdminRequest {
 /// It returns information about whether the server has been set up.
 pub async fn check_setup_status(
     State(state): State<AppState>,
-) -> AppResult<Json<ApiResponse<SetupStatus>>> {
+    accept: crate::infra::content_negotiation::AcceptFormat,
+) -> crate::infra::content_negotiation::NegotiatedResponse {
+    use crate::infra::content_negotiation as cn;
+
+    match check_setup_status_inner(state).await {
+        Ok((status, needs_setup, registration_open)) => cn::respond(
+            accept,
+            &ApiResponse::success(status),
+            || {
+                ferrex_flatbuffers::conversions::auth::serialize_setup_status(
+                    needs_setup,
+                    registration_open,
+                )
+            },
+        ),
+        Err(e) => cn::NegotiatedResponse::error(
+            e.status,
+            &e.to_string(),
+        ),
+    }
+}
+
+/// Inner logic for setup status, returning the status struct and the two
+/// booleans needed for the FlatBuffers path.
+async fn check_setup_status_inner(
+    state: AppState,
+) -> AppResult<(SetupStatus, bool, bool)> {
     let user_service = UserService::new(&state);
     let needs_setup = user_service.needs_setup().await?;
 
@@ -263,6 +289,11 @@ pub async fn check_setup_status(
         .or_else(|| std::env::var("FERREX_SETUP_TOKEN").ok())
         .is_some_and(|value| !value.trim().is_empty());
 
+    // registration_open: true when initial setup is complete (an admin exists),
+    // meaning the /auth/register endpoint is reachable.  Per-user invite
+    // policies are enforced server-side independently.
+    let registration_open = !needs_setup;
+
     let status = SetupStatus {
         needs_setup,
         has_admin: !needs_setup,
@@ -277,7 +308,7 @@ pub async fn check_setup_status(
         ),
     };
 
-    Ok(Json(ApiResponse::success(status)))
+    Ok((status, needs_setup, registration_open))
 }
 
 /// Create the initial admin user
