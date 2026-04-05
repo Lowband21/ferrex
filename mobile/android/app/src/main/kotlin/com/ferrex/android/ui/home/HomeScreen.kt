@@ -67,13 +67,15 @@ fun HomeScreen(
                 .padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val onSurface = MaterialTheme.colorScheme.onSurface
             Text(
                 text = "Ferrex",
                 style = MaterialTheme.typography.titleLarge,
+                color = onSurface,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onSearchClick) {
-                Icon(Icons.Default.Search, contentDescription = "Search")
+                Icon(Icons.Default.Search, contentDescription = "Search", tint = onSurface)
             }
         }
 
