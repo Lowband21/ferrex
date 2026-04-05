@@ -154,6 +154,8 @@ pub mod v1 {
         pub const MANIFEST: &str = v1_path!("/images/manifest");
         /// Immutable, content-addressed image blob (token is hex).
         pub const BLOB_ITEM: &str = v1_path!("/images/blob/{token}");
+        /// Resolve an image by its instance ID (UUID) → redirects to the blob URL or serves inline.
+        pub const IID_ITEM: &str = v1_path!("/images/iid/{iid}");
         /// SSE stream for image readiness notifications.
         pub const EVENTS: &str = v1_path!("/images/events");
     }

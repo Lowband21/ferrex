@@ -173,6 +173,82 @@ pub async fn post_image_manifest_handler(
         .into_response()
 }
 
+/// GET /api/v1/images/iid/{iid} - Resolve image by instance ID.
+///
+/// Looks up the cached poster image for the given IID using the default poster
+/// size (W342). If found and the immutable blob exists, issues a 302 redirect
+/// to the content-addressed `/images/blob/{token}` URL. If the blob is not yet
+/// materialized, enqueues a cache-fill job and returns 202 with a Retry-After hint.
+pub async fn get_image_by_iid_handler(
+    State(state): State<AppState>,
+    Path(iid): Path<Uuid>,
+) -> impl IntoResponse {
+    use ferrex_model::image::ImageSize;
+
+    // Default to the standard poster size — this is the primary use case
+    // (mobile clients referencing `primary_poster_iid` from batch data).
+    let imz = ImageSize::poster();
+
+    let meta = match state
+        .image_service()
+        .read_cached_meta_by_key(iid, imz)
+        .await
+    {
+        Ok(Some(meta)) => meta,
+        Ok(None) => {
+            // Not cached yet — kick off a background fill and tell the client to retry.
+            state
+                .image_service()
+                .enqueue_cache(iid, imz, CachePolicy::Ensure);
+            return Response::builder()
+                .status(StatusCode::ACCEPTED)
+                .header("Retry-After", "1")
+                .body(Body::empty())
+                .unwrap();
+        }
+        Err(err) => {
+            error!("image iid lookup failed: iid={iid}, err={err}");
+            state
+                .image_service()
+                .enqueue_cache(iid, imz, CachePolicy::Ensure);
+            return Response::builder()
+                .status(StatusCode::ACCEPTED)
+                .header("Retry-After", "1")
+                .body(Body::empty())
+                .unwrap();
+        }
+    };
+
+    let token =
+        ImageFileStore::token_from_integrity(&meta.integrity.to_string());
+
+    let blob_exists = match state.image_service().image_blob_path(&token) {
+        Ok(path) => tokio::fs::try_exists(path).await.unwrap_or(false),
+        Err(_) => false,
+    };
+
+    if !blob_exists {
+        // Metadata exists but the blob file hasn't been materialized yet.
+        state
+            .image_service()
+            .enqueue_cache(iid, imz, CachePolicy::Ensure);
+        return Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .header("Retry-After", "1")
+            .body(Body::empty())
+            .unwrap();
+    }
+
+    // Redirect to the immutable, content-addressed blob URL.
+    let blob_url = format!("/api/v1/images/blob/{token}");
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, blob_url)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .body(Body::empty())
+        .unwrap()
+}
+
 /// GET /api/v1/images/blob/{token} - Content-addressed immutable image blob.
 pub async fn get_image_blob_handler(
     headers: HeaderMap,

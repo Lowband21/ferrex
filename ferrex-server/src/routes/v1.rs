@@ -24,8 +24,8 @@ use crate::{
         handle_websocket::websocket_handler,
         media::{
             handle_image::{
-                get_image_blob_handler, image_events_sse_handler,
-                post_image_manifest_handler,
+                get_image_blob_handler, get_image_by_iid_handler,
+                image_events_sse_handler, post_image_manifest_handler,
             },
             handle_library::{
                 create_library_handler, delete_library_handler,
@@ -371,6 +371,7 @@ fn create_image_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route(v1::images::MANIFEST, post(post_image_manifest_handler))
         .route(v1::images::BLOB_ITEM, get(get_image_blob_handler))
+        .route(v1::images::IID_ITEM, get(get_image_by_iid_handler))
         .route(v1::images::EVENTS, get(image_events_sse_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
