@@ -176,39 +176,59 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// FlexJson — Content-Type-lenient JSON body extractor
+// NegotiatedBody — dual-format (JSON / FlatBuffers) request body extractor
 // ---------------------------------------------------------------------------
 
-/// Like `axum::Json<T>` but does **not** require `Content-Type: application/json`.
+/// Trait for types that can be deserialized from a FlatBuffers request body.
 ///
-/// Mobile clients configured for FlatBuffers may send POST bodies as JSON but
-/// with `Content-Type: application/x-flatbuffers` (or omit the header). Axum's
-/// built-in `Json` extractor rejects these with 415 Unsupported Media Type.
-///
-/// `FlexJson` reads the raw body bytes and deserializes with serde_json
-/// regardless of Content-Type, returning a 400 only if the body isn't valid JSON.
-#[derive(Debug)]
-pub struct FlexJson<T>(pub T);
+/// Implement this on each request struct that mobile clients may send as
+/// FlatBuffers. The implementation receives raw bytes and must verify + parse
+/// the FlatBuffers table, extracting fields into the target Rust struct.
+pub trait FromFlatbuffers: Sized {
+    fn from_flatbuffers(bytes: &[u8]) -> Result<Self, String>;
+}
 
-impl<T, S> FromRequest<S> for FlexJson<T>
+/// Extracts a request body as either JSON or FlatBuffers depending on
+/// the request's `Content-Type` header.
+///
+/// - `application/json` (or missing) → parsed with serde_json
+/// - `application/x-flatbuffers`     → parsed via [`FromFlatbuffers`] trait
+///
+/// This allows the same handler to serve both desktop clients (JSON) and
+/// mobile clients (FlatBuffers) without separate endpoints.
+#[derive(Debug)]
+pub struct NegotiatedBody<T>(pub T);
+
+impl<T, S> FromRequest<S> for NegotiatedBody<T>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + FromFlatbuffers,
     S: Send + Sync,
 {
     type Rejection = Response;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let is_flatbuffers = req
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|ct| ct.contains(mime::FLATBUFFERS));
+
         let bytes = Bytes::from_request(req, state)
             .await
             .map_err(|e| e.into_response())?;
 
-        let value: T = serde_json::from_slice(&bytes).map_err(|e| {
-            let body = serde_json::json!({
-                "error": format!("Invalid JSON: {e}"),
-            });
-            (StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
-        })?;
-
-        Ok(FlexJson(value))
+        if is_flatbuffers {
+            let value = T::from_flatbuffers(&bytes).map_err(|e| {
+                let body = serde_json::json!({ "error": format!("Invalid FlatBuffers body: {e}") });
+                (StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+            })?;
+            Ok(NegotiatedBody(value))
+        } else {
+            let value: T = serde_json::from_slice(&bytes).map_err(|e| {
+                let body = serde_json::json!({ "error": format!("Invalid JSON: {e}") });
+                (StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+            })?;
+            Ok(NegotiatedBody(value))
+        }
     }
 }

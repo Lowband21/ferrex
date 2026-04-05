@@ -1,4 +1,4 @@
-use axum::{Extension, Json, extract::State};
+use axum::{Extension, extract::State};
 use ferrex_core::{
     api::ApiResponse,
     domain::watch::ItemWatchStatus,
@@ -19,7 +19,7 @@ pub async fn query_media_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Extension(user): Extension<User>,
-    cn::FlexJson(mut query): cn::FlexJson<MediaQuery>,
+    cn::NegotiatedBody(mut query): cn::NegotiatedBody<MediaQuery>,
 ) -> Result<NegotiatedResponse, AppError> {
     // Add user context to the query
     query.user_context = Some(user.id);
@@ -36,7 +36,7 @@ pub async fn query_media_handler(
 pub async fn query_media_public_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
-    cn::FlexJson(mut query): cn::FlexJson<MediaQuery>,
+    cn::NegotiatedBody(mut query): cn::NegotiatedBody<MediaQuery>,
 ) -> Result<NegotiatedResponse, AppError> {
     // Execute the query without user context
     clamp_query_limit(&mut query);

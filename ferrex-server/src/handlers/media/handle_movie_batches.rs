@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Path, State},
     http::{StatusCode, header},
     response::IntoResponse,
 };
@@ -180,7 +180,7 @@ pub async fn post_movie_reference_batch_sync_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
-    cn::FlexJson(request): cn::FlexJson<MovieBatchSyncRequest>,
+    cn::NegotiatedBody(request): cn::NegotiatedBody<MovieBatchSyncRequest>,
 ) -> Result<NegotiatedResponse, StatusCode> {
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
@@ -280,7 +280,7 @@ pub async fn post_movie_reference_batch_fetch_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
-    cn::FlexJson(request): cn::FlexJson<MovieBatchFetchRequest>,
+    cn::NegotiatedBody(request): cn::NegotiatedBody<MovieBatchFetchRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
