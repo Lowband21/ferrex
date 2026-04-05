@@ -49,11 +49,15 @@ class LibraryViewModel @Inject constructor(
 
     /**
      * Build a poster URL from a movie reference.
-     * Uses the primary_poster_iid from the movie's details.
-     * The /images/iid/ endpoint resolves the IID to the blob token server-side.
+     * Fallback chain: primary_poster_iid (server-cached) → poster_path (TMDB CDN).
      */
     fun posterUrlForMovie(movie: MovieReference): String? {
-        val iid = movie.details?.primaryPosterIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        movie.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        movie.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
     }
 }

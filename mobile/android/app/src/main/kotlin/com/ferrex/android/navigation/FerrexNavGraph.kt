@@ -20,10 +20,8 @@ import com.ferrex.android.ui.player.PlayerScreen
 import com.ferrex.android.ui.player.PlayerViewModel
 import com.ferrex.android.ui.search.SearchScreen
 import com.ferrex.android.ui.search.SearchViewModel
-import okhttp3.OkHttpClient
-
 @Composable
-fun FerrexNavGraph(okHttpClient: OkHttpClient) {
+fun FerrexNavGraph() {
     val navController = rememberNavController()
     val authViewModel: AuthViewModel = hiltViewModel()
     val sessionState by authViewModel.sessionState.collectAsState()
@@ -124,7 +122,7 @@ fun FerrexNavGraph(okHttpClient: OkHttpClient) {
             val playerViewModel: PlayerViewModel = hiltViewModel()
             PlayerScreen(
                 viewModel = playerViewModel,
-                okHttpClient = okHttpClient,
+                okHttpClient = playerViewModel.streamingClient,
             )
         }
 

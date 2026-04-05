@@ -72,13 +72,23 @@ class SearchViewModel @Inject constructor(
     }
 
     fun posterUrlForMovie(movie: MovieReference): String? {
-        val iid = movie.details?.primaryPosterIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        movie.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        movie.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
     }
 
     fun posterUrlForSeries(series: SeriesReference): String? {
-        val iid = series.details?.primaryPosterIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        series.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        series.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
     }
 }
 

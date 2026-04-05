@@ -64,29 +64,56 @@ class DetailViewModel @Inject constructor(
     }
 
     // ── Image URL helpers ───────────────────────────────────────────
+    // Fallback chain: primary_poster_iid → poster_path (TMDB CDN)
 
     fun backdropUrl(movie: MovieReference): String? {
-        val iid = movie.details?.primaryBackdropIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        movie.details?.primaryBackdropIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        movie.details?.backdropPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w780$path"
+        }
+        return null
     }
 
     fun posterUrl(movie: MovieReference): String? {
-        val iid = movie.details?.primaryPosterIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        movie.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        movie.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
     }
 
     fun seriesPosterUrl(series: SeriesReference): String? {
-        val iid = series.details?.primaryPosterIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        series.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        series.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
     }
 
     fun seriesBackdropUrl(series: SeriesReference): String? {
-        val iid = series.details?.primaryBackdropIid ?: return null
-        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        series.details?.primaryBackdropIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        series.details?.backdropPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w780$path"
+        }
+        return null
     }
 
-    fun streamUrl(): String =
-        "${serverConfig.serverUrl}/api/v1/stream/$mediaId"
+    /**
+     * Build the stream URL using the media FILE's ID (not the movie's ID).
+     * The stream endpoint looks up by media_file.id, not movie.id.
+     */
+    fun streamUrl(movie: MovieReference): String? {
+        val fileId = movie.file?.id?.toUuidString() ?: return null
+        return "${serverConfig.serverUrl}/api/v1/stream/$fileId"
+    }
 }
 
 sealed interface DetailUiState {

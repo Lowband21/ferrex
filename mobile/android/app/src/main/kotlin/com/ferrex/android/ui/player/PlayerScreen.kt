@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -82,6 +83,7 @@ private fun PlayerContent(
     okHttpClient: OkHttpClient,
     onProgressUpdate: (positionMs: Long, durationMs: Long) -> Unit,
     onPlaybackEnded: () -> Unit,
+    onError: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
 
@@ -135,6 +137,12 @@ private fun PlayerContent(
                         exoPlayer.duration.coerceAtLeast(0),
                     )
                 }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                val cause = error.cause?.message ?: error.message ?: "Unknown playback error"
+                android.util.Log.e("PlayerContent", "Playback error: $cause", error)
+                onError?.invoke(cause)
             }
         }
         exoPlayer.addListener(listener)

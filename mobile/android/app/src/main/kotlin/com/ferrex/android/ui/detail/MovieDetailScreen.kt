@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.ui.components.ErrorScreen
 import com.ferrex.android.ui.components.LoadingScreen
 import ferrex.media.MovieReference
@@ -73,7 +74,14 @@ fun MovieDetailScreen(
                 backdropUrl = viewModel.backdropUrl(state.movie),
                 posterUrl = viewModel.posterUrl(state.movie),
                 onBack = onBack,
-                onPlay = { onPlay(viewModel.mediaId) },
+                onPlay = {
+                    // Use media file ID for streaming, not movie ID
+                    val url = viewModel.streamUrl(state.movie)
+                    if (url != null) {
+                        val fileId = state.movie.file?.id?.toUuidString()
+                        if (fileId != null) onPlay(fileId)
+                    }
+                },
             )
         }
     }

@@ -78,8 +78,8 @@ fun LibraryGridScreen(
                         items(
                             count = accessor.movieCount,
                             key = { index ->
-                                // Use FlatBuffer accessor for stable key
-                                accessor.movieAt(index)?.title ?: index
+                                // Stable key from UUID — survives recomposition
+                                accessor.movieAt(index)?.id?.toUuidString() ?: index
                             },
                         ) { index ->
                             val movie = accessor.movieAt(index)
@@ -88,10 +88,7 @@ fun LibraryGridScreen(
                                     title = movie.title,
                                     posterUrl = viewModel.posterUrlForMovie(movie),
                                     onClick = {
-                                        val id = movie.id
-                                        if (id != null) {
-                                            onMovieClick(id.toUuidString())
-                                        }
+                                        onMovieClick(movie.id.toUuidString())
                                     },
                                 )
                             }

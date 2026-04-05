@@ -58,10 +58,10 @@ class LibraryRepository @Inject constructor(
         return when (val result = apiClient.getLibraries()) {
             is ApiResult.Success -> {
                 val list = result.data
-                val infos = (0 until list.itemsLength).map { i ->
-                    val lib = list.items(i)!!
+                val infos = (0 until list.itemsLength).mapNotNull { i ->
+                    val lib = list.items(i) ?: return@mapNotNull null
                     LibraryInfo(
-                        id = lib.id!!.toUuidString(),
+                        id = lib.id.toUuidString(),
                         name = lib.name,
                         libraryType = lib.libraryType,
                     )

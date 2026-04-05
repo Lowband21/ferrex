@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ferrex.android.core.api.ServerConfig
+import com.ferrex.android.core.api.StreamingClient
 import com.ferrex.android.core.media.WatchProgressTracker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,14 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import javax.inject.Inject
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val serverConfig: ServerConfig,
-    private val httpClient: OkHttpClient,
+    @StreamingClient val streamingClient: OkHttpClient,
     private val progressTracker: WatchProgressTracker,
 ) : ViewModel() {
 
