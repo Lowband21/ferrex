@@ -129,7 +129,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     accept: AcceptFormat,
-    Json(request): Json<LoginRequest>,
+    cn::FlexJson(request): cn::FlexJson<LoginRequest>,
 ) -> Result<NegotiatedResponse, AppError> {
     let token_bundle = state
         .auth_service()
@@ -144,7 +144,7 @@ pub async fn login(
 pub async fn refresh(
     State(state): State<AppState>,
     accept: AcceptFormat,
-    Json(request): Json<RefreshRequest>,
+    cn::FlexJson(request): cn::FlexJson<RefreshRequest>,
 ) -> Result<NegotiatedResponse, AppError> {
     let token_bundle = state
         .auth_service()

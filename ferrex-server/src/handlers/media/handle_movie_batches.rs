@@ -180,7 +180,7 @@ pub async fn post_movie_reference_batch_sync_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
-    Json(request): Json<MovieBatchSyncRequest>,
+    cn::FlexJson(request): cn::FlexJson<MovieBatchSyncRequest>,
 ) -> Result<NegotiatedResponse, StatusCode> {
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
@@ -280,7 +280,7 @@ pub async fn post_movie_reference_batch_fetch_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Path(library_id): Path<Uuid>,
-    Json(request): Json<MovieBatchFetchRequest>,
+    cn::FlexJson(request): cn::FlexJson<MovieBatchFetchRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))

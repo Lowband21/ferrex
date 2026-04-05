@@ -18,7 +18,8 @@
 //! ```
 
 use axum::{
-    extract::FromRequestParts,
+    body::Bytes,
+    extract::{FromRequest, FromRequestParts, Request},
     http::{
         StatusCode,
         header::{ACCEPT, CONTENT_TYPE},
@@ -26,6 +27,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 /// Recognized wire formats, ordered by preference.
@@ -170,5 +172,43 @@ where
             NegotiatedResponse::json(json_data)
         }
         AcceptFormat::Json => NegotiatedResponse::json(json_data),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FlexJson — Content-Type-lenient JSON body extractor
+// ---------------------------------------------------------------------------
+
+/// Like `axum::Json<T>` but does **not** require `Content-Type: application/json`.
+///
+/// Mobile clients configured for FlatBuffers may send POST bodies as JSON but
+/// with `Content-Type: application/x-flatbuffers` (or omit the header). Axum's
+/// built-in `Json` extractor rejects these with 415 Unsupported Media Type.
+///
+/// `FlexJson` reads the raw body bytes and deserializes with serde_json
+/// regardless of Content-Type, returning a 400 only if the body isn't valid JSON.
+#[derive(Debug)]
+pub struct FlexJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for FlexJson<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = Bytes::from_request(req, state)
+            .await
+            .map_err(|e| e.into_response())?;
+
+        let value: T = serde_json::from_slice(&bytes).map_err(|e| {
+            let body = serde_json::json!({
+                "error": format!("Invalid JSON: {e}"),
+            });
+            (StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+        })?;
+
+        Ok(FlexJson(value))
     }
 }

@@ -19,7 +19,7 @@ pub async fn query_media_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
     Extension(user): Extension<User>,
-    Json(mut query): Json<MediaQuery>,
+    cn::FlexJson(mut query): cn::FlexJson<MediaQuery>,
 ) -> Result<NegotiatedResponse, AppError> {
     // Add user context to the query
     query.user_context = Some(user.id);
@@ -36,7 +36,7 @@ pub async fn query_media_handler(
 pub async fn query_media_public_handler(
     State(state): State<AppState>,
     accept: AcceptFormat,
-    Json(mut query): Json<MediaQuery>,
+    cn::FlexJson(mut query): cn::FlexJson<MediaQuery>,
 ) -> Result<NegotiatedResponse, AppError> {
     // Execute the query without user context
     clamp_query_limit(&mut query);

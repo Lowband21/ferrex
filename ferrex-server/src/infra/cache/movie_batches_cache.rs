@@ -70,8 +70,8 @@ impl std::fmt::Debug for CachedMovieBatch {
 #[derive(Debug, Clone)]
 struct CachedFullBundle {
     signature: ManifestSignature,
-    rkyv_bytes: Bytes,
-    fb_bytes: Bytes,
+    rkyv_bytes: Option<Bytes>,
+    fb_bytes: Option<Bytes>,
 }
 
 #[derive(Debug, Default)]
@@ -126,35 +126,51 @@ impl MovieBatchesCache {
         let mut guard = entry.lock().await;
 
         if versions.is_empty() {
-            let (rkyv_bytes, fb_bytes) = serialize_empty_bundle(library_id)?;
+            let bytes = match format {
+                WireFormat::Rkyv => {
+                    let b = serialize_empty_rkyv_bundle(library_id)?;
+                    Bytes::from(b)
+                }
+                WireFormat::FlatBuffers => {
+                    let b = ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(&[]);
+                    Bytes::from(b)
+                }
+            };
             guard.batches.clear();
             guard.full_bundle = Some(CachedFullBundle {
                 signature: ManifestSignature([0u8; 32]),
-                rkyv_bytes: Bytes::from(rkyv_bytes.clone()),
-                fb_bytes: Bytes::from(fb_bytes.clone()),
+                rkyv_bytes: match format {
+                    WireFormat::Rkyv => Some(bytes.clone()),
+                    _ => None,
+                },
+                fb_bytes: match format {
+                    WireFormat::FlatBuffers => Some(bytes.clone()),
+                    _ => None,
+                },
             });
-            return Ok(match format {
-                WireFormat::Rkyv => Bytes::from(rkyv_bytes),
-                WireFormat::FlatBuffers => Bytes::from(fb_bytes),
-            });
+            return Ok(bytes);
         }
 
         let signature = ManifestSignature::from_versions(&versions);
         if let Some(cached) = guard.full_bundle.as_ref()
             && cached.signature == signature
         {
-            let bytes = match format {
-                WireFormat::Rkyv => &cached.rkyv_bytes,
-                WireFormat::FlatBuffers => &cached.fb_bytes,
+            let hit = match format {
+                WireFormat::Rkyv => cached.rkyv_bytes.as_ref(),
+                WireFormat::FlatBuffers => cached.fb_bytes.as_ref(),
             };
-            debug!(
-                "movie batch bundle cache hit: library={} format={:?} bytes={} elapsed={:?}",
-                library_id,
-                format,
-                bytes.len(),
-                request_started.elapsed()
-            );
-            return Ok(bytes.clone());
+            if let Some(bytes) = hit {
+                debug!(
+                    "movie batch bundle cache hit: library={} format={:?} bytes={} elapsed={:?}",
+                    library_id,
+                    format,
+                    bytes.len(),
+                    request_started.elapsed()
+                );
+                return Ok(bytes.clone());
+            }
+            // Signature matches but this format slot hasn't been built yet.
+            // Fall through to build it.
         }
 
         let mut rebuild_ids = Vec::new();
@@ -203,29 +219,42 @@ impl MovieBatchesCache {
 
         let serialize_started = Instant::now();
 
-        // Build rkyv bundle from cached per-batch rkyv bytes.
-        let rkyv_bytes = assemble_rkyv_bundle(library_id, &versions, &guard.batches)?;
-
-        // Build FlatBuffers bundle from cached source movie references.
-        let fb_bytes = assemble_fb_bundle(&versions, &guard.batches);
-
+        // Build only the requested format.
         let result = match format {
-            WireFormat::Rkyv => rkyv_bytes.clone(),
-            WireFormat::FlatBuffers => fb_bytes.clone(),
+            WireFormat::Rkyv => {
+                assemble_rkyv_bundle(library_id, &versions, &guard.batches)?
+            }
+            WireFormat::FlatBuffers => {
+                assemble_fb_bundle(&versions, &guard.batches)
+            }
         };
+
+        // Update the bundle cache — preserve the other format if it was
+        // already cached under the same signature.
+        let existing = guard.full_bundle.take();
+        let (prev_rkyv, prev_fb) = existing
+            .filter(|c| c.signature == signature)
+            .map(|c| (c.rkyv_bytes, c.fb_bytes))
+            .unwrap_or((None, None));
 
         guard.full_bundle = Some(CachedFullBundle {
             signature,
-            rkyv_bytes,
-            fb_bytes,
+            rkyv_bytes: match format {
+                WireFormat::Rkyv => Some(result.clone()),
+                _ => prev_rkyv,
+            },
+            fb_bytes: match format {
+                WireFormat::FlatBuffers => Some(result.clone()),
+                _ => prev_fb,
+            },
         });
 
         info!(
-            "Movie batches bundle cached: library={} batches={} rkyv={} fb={} rebuilds={} rebuild_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
+            "Movie batches bundle cached: library={} format={:?} batches={} bytes={} rebuilds={} rebuild_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
             library_id,
+            format,
             versions.len(),
-            guard.full_bundle.as_ref().unwrap().rkyv_bytes.len(),
-            guard.full_bundle.as_ref().unwrap().fb_bytes.len(),
+            result.len(),
             rebuild_ids.len(),
             rebuild_started.elapsed(),
             serialize_started.elapsed(),
@@ -462,20 +491,16 @@ fn stable_hash_u64(bytes: &[u8]) -> u64 {
     )
 }
 
-/// Serialize an empty bundle in both wire formats.
-fn serialize_empty_bundle(library_id: LibraryId) -> Result<(Vec<u8>, Vec<u8>), StatusCode> {
+/// Serialize an empty rkyv bundle.
+fn serialize_empty_rkyv_bundle(library_id: LibraryId) -> Result<Vec<u8>, StatusCode> {
     let response = MovieReferenceBatchBundleResponse {
         library_id,
         batches: Vec::new(),
     };
-    let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
         .map_err(|_err| StatusCode::INTERNAL_SERVER_ERROR)?
         .into_vec();
-
-    let fb_bytes =
-        ferrex_flatbuffers::conversions::batch_data::serialize_batch_fetch_response(&[]);
-
-    Ok((rkyv_bytes, fb_bytes))
+    Ok(bytes)
 }
 
 /// Assemble a full rkyv bundle from per-batch cached rkyv bytes.
