@@ -1,20 +1,32 @@
 package com.ferrex.android.ui.player
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -24,7 +36,9 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.ferrex.android.core.diagnostics.DiagnosticLog
 import com.ferrex.android.core.diagnostics.PlaybackDiagnostics
@@ -36,6 +50,24 @@ import okhttp3.OkHttpClient
 private const val TAG = "PlayerScreen"
 
 /**
+ * Aspect ratio / zoom modes the user can cycle through.
+ */
+private enum class AspectRatioMode(
+    val label: String,
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val resizeMode: Int,
+) {
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    FIT("Fit", AspectRatioFrameLayout.RESIZE_MODE_FIT),
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    FILL("Fill", AspectRatioFrameLayout.RESIZE_MODE_FILL),
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    ZOOM("Zoom", AspectRatioFrameLayout.RESIZE_MODE_ZOOM),
+}
+
+/**
  * Video player screen using Media3 ExoPlayer.
  *
  * Uses OkHttpDataSource.Factory so that ExoPlayer inherits the app's
@@ -43,9 +75,11 @@ private const val TAG = "PlayerScreen"
  * include the Bearer token. This is required because the stream endpoint
  * (`GET /api/v1/stream/{id}`) validates auth.
  *
- * Progress tracking: a LaunchedEffect coroutine loop reports position
- * every 10 seconds via the WatchProgressTracker. Immediate report on
- * pause/stop via Player.Listener.
+ * Features:
+ * - Aspect ratio cycling (Fit → Fill → Zoom) via overlay button
+ * - Subtitle / closed-caption track selection via built-in CC button
+ * - Progress tracking: reports position every 10s + on pause/stop
+ * - Auto-retry with exponential backoff on transient errors
  */
 @Composable
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -117,6 +151,17 @@ fun PlayerScreen(
  * - [PlaybackDiagnostics] analytics listener logs every load, decode,
  *   and state event into [DiagnosticLog] so crash files have a
  *   complete trail of what ExoPlayer was doing.
+ *
+ * Subtitle support:
+ * - [DefaultTrackSelector] is used explicitly so text tracks in the
+ *   container (MKV SRT/ASS, MP4 tx3g, HLS WebVTT) are available for
+ *   selection.
+ * - The PlayerView's built-in CC button (`setShowSubtitleButton(true)`)
+ *   lets the user toggle subtitle tracks without a custom UI.
+ *
+ * Aspect ratio:
+ * - A small overlay button (visible when the controller is visible)
+ *   cycles through Fit → Fill → Zoom resize modes on the PlayerView.
  */
 @Composable
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -130,11 +175,20 @@ private fun PlayerContent(
 ) {
     val context = LocalContext.current
 
+    // ── UI state for overlay controls ───────────────────────────
+    var aspectRatioMode by remember { mutableStateOf(AspectRatioMode.FIT) }
+    var controlsVisible by remember { mutableStateOf(true) }
+
     // rememberUpdatedState: callbacks captured in DisposableEffect/LaunchedEffect
     // always point to the latest lambda instance after recomposition.
     val currentOnProgressUpdate by rememberUpdatedState(onProgressUpdate)
     val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
     val currentOnError by rememberUpdatedState(onError)
+
+    // ── Track selector (enables subtitle track discovery) ───────
+    val trackSelector = remember {
+        DefaultTrackSelector(context)
+    }
 
     // Use OkHttp as ExoPlayer's HTTP backend so the AuthInterceptor
     // injects the Bearer token into stream requests.
@@ -171,6 +225,7 @@ private fun PlayerContent(
             .build()
 
         ExoPlayer.Builder(context)
+            .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()
@@ -277,14 +332,80 @@ private fun PlayerContent(
         }
     }
 
-    // ── ExoPlayer view ──────────────────────────────────────────
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = true
+    // ── ExoPlayer view + overlay controls ───────────────────────
+    //
+    // PlayerView defaults to SurfaceView which is required for HDR passthrough —
+    // TextureView cannot output HDR.  We verify at creation time so a future
+    // library or theme change doesn't silently break HDR.
+    //
+    // The aspect ratio button is a Compose overlay that fades in/out with
+    // the built-in controller (tracked via ControllerVisibilityListener).
+    // It sits in the top-end corner above the controller chrome, so it
+    // doesn't occlude transport controls.
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+
+                    // Show the CC button in the controller for subtitle
+                    // track selection.  ExoPlayer's default controller
+                    // renders it as a standard closed-caption icon that
+                    // opens a track-picker bottom sheet.
+                    setShowSubtitleButton(true)
+
+                    // Sync our Compose overlay visibility with the
+                    // controller's show/hide animation.
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { visibility ->
+                            controlsVisible = visibility == android.view.View.VISIBLE
+                        }
+                    )
+
+                    val surface = videoSurfaceView
+                    if (surface is android.view.SurfaceView) {
+                        DiagnosticLog.i(TAG, "PlayerView surface: SurfaceView ✓ (HDR-capable)")
+                    } else {
+                        DiagnosticLog.e(TAG, "PlayerView surface: ${surface?.javaClass?.simpleName} — HDR will NOT work!")
+                    }
+                }
+            },
+            update = { view ->
+                // Apply the current resize mode whenever the Compose
+                // state changes (user cycles Fit → Fill → Zoom).
+                view.resizeMode = aspectRatioMode.resizeMode
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // ── Aspect ratio overlay button ─────────────────────────
+        // Appears/disappears with the controller so it doesn't
+        // permanently obstruct the video.
+        AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            Surface(
+                onClick = {
+                    val modes = AspectRatioMode.entries
+                    aspectRatioMode = modes[(aspectRatioMode.ordinal + 1) % modes.size]
+                    DiagnosticLog.i(TAG, "Aspect ratio → ${aspectRatioMode.label}")
+                },
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                contentColor = Color.White,
+            ) {
+                Text(
+                    text = aspectRatioMode.label.uppercase(),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
-        },
-        modifier = Modifier.fillMaxSize(),
-    )
+        }
+    }
 }
