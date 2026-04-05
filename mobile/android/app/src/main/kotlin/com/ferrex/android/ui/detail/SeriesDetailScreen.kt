@@ -44,6 +44,8 @@ import ferrex.media.SeriesReference
 
 /**
  * Series detail screen — overview, season tabs, episode list.
+ *
+ * Data comes from the locally cached batch data (zero-copy FlatBuffers).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,11 +58,15 @@ fun SeriesDetailScreen(
 
     when (val state = uiState) {
         is DetailUiState.Loading -> LoadingScreen()
-        is DetailUiState.Error -> ErrorScreen(message = state.message)
+        is DetailUiState.Error -> ErrorScreen(
+            message = state.message,
+            onRetry = onBack,
+        )
         is DetailUiState.MovieDetail -> ErrorScreen(message = "Expected series, got movie")
         is DetailUiState.SeriesDetail -> {
             SeriesDetailContent(
                 series = state.series,
+                backdropUrl = viewModel.seriesBackdropUrl(state.series),
                 posterUrl = viewModel.seriesPosterUrl(state.series),
                 onBack = onBack,
             )
@@ -72,6 +78,7 @@ fun SeriesDetailScreen(
 @Composable
 private fun SeriesDetailContent(
     series: SeriesReference,
+    backdropUrl: String?,
     posterUrl: String?,
     onBack: () -> Unit,
 ) {
@@ -98,15 +105,16 @@ private fun SeriesDetailContent(
                 .fillMaxSize()
                 .verticalScroll(scrollState),
         ) {
-            // Backdrop area
+            // Backdrop area (prefer backdrop, fall back to poster)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f),
             ) {
-                if (posterUrl != null) {
+                val heroUrl = backdropUrl ?: posterUrl
+                if (heroUrl != null) {
                     AsyncImage(
-                        model = posterUrl,
+                        model = heroUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),

@@ -61,6 +61,7 @@ class FerrexApiClient @Inject constructor(
             const val MEDIA_QUERY = "/api/v1/media/query"
             const val IMAGES_MANIFEST = "/api/v1/images/manifest"
             fun imageBlob(token: String) = "/api/v1/images/blob/$token"
+            fun imageByIid(uuid: String) = "/api/v1/images/iid/$uuid"
             const val IMAGES_EVENTS = "/api/v1/images/events"
 
             const val WATCH_PROGRESS = "/api/v1/watch/progress"
@@ -134,11 +135,18 @@ class FerrexApiClient @Inject constructor(
     // ── Image URLs ──────────────────────────────────────────────────
 
     /**
-     * Build the full URL for a content-addressed image blob.
+     * Build the full URL for a content-addressed image blob by token.
      * These URLs are immutable — Coil can cache them forever.
      */
     fun imageBlobUrl(token: String): String =
         "${serverConfig.serverUrl}${Routes.imageBlob(token)}"
+
+    /**
+     * Build the URL to serve an image by its IID (image instance UUID).
+     * The server resolves the IID → blob token internally.
+     */
+    fun imageIidUrl(uuid: String): String =
+        "${serverConfig.serverUrl}${Routes.imageByIid(uuid)}"
 
     // ── HTTP primitives ─────────────────────────────────────────────
 

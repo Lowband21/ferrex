@@ -133,6 +133,22 @@ class LibraryRepository @Inject constructor(
         }
     }
 
+    /**
+     * Look up a movie by UUID from the currently cached media.
+     * Returns null if not found or no media is cached.
+     */
+    fun findMovieByUuid(uuidString: String): ferrex.media.MovieReference? {
+        return _currentMedia.value?.findMovieByUuid(uuidString)
+    }
+
+    /**
+     * Look up a series by UUID from the currently cached media.
+     * Returns null if not found or no media is cached.
+     */
+    fun findSeriesByUuid(uuidString: String): ferrex.media.SeriesReference? {
+        return _currentMedia.value?.findSeriesByUuid(uuidString)
+    }
+
     private suspend fun loadFromCache(libraryId: String) {
         val versions = cache.getCachedMovieBatchVersions(libraryId)
         if (versions.isEmpty()) {

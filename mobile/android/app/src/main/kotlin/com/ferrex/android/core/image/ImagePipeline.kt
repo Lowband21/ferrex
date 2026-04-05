@@ -55,16 +55,23 @@ object ImagePipelineModule {
 /**
  * Builds image URLs from FlatBuffer media data.
  *
- * V1 simplification: constructs blob URLs directly from poster IID tokens
- * embedded in media references, bypassing the image manifest endpoint.
- * The manifest-aware prefetch layer is added later.
+ * Image IIDs (instance UUIDs) from FlatBuffer details fields like
+ * `primary_poster_iid` are passed to the server's `/images/iid/{uuid}`
+ * endpoint, which resolves the IID to the content-addressed blob and
+ * serves the image. Coil caches responses permanently (immutable blobs).
  */
-object BlobUrlBuilder {
+object ImageUrlBuilder {
 
     /**
-     * Build the full URL for a content-addressed image blob.
-     * These URLs are immutable — Coil caches them permanently.
+     * Build a URL for a content-addressed image blob by its token (64-char hex).
      */
-    fun posterUrl(serverConfig: ServerConfig, imageToken: String): String =
-        "${serverConfig.serverUrl}/api/v1/images/blob/$imageToken"
+    fun blobUrl(serverConfig: ServerConfig, token: String): String =
+        "${serverConfig.serverUrl}/api/v1/images/blob/$token"
+
+    /**
+     * Build a URL to serve an image by its IID (image instance UUID).
+     * The server resolves the IID → blob token internally.
+     */
+    fun iidUrl(serverConfig: ServerConfig, iid: String): String =
+        "${serverConfig.serverUrl}/api/v1/images/iid/$iid"
 }

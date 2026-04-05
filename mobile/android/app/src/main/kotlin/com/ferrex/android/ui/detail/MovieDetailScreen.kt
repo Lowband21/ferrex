@@ -47,6 +47,9 @@ import ferrex.media.MovieReference
 
 /**
  * Movie detail screen — backdrop, metadata, cast, play button.
+ *
+ * Data comes from the locally cached batch data (zero-copy FlatBuffers),
+ * so this screen loads instantly without a network call.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +62,10 @@ fun MovieDetailScreen(
 
     when (val state = uiState) {
         is DetailUiState.Loading -> LoadingScreen()
-        is DetailUiState.Error -> ErrorScreen(message = state.message)
+        is DetailUiState.Error -> ErrorScreen(
+            message = state.message,
+            onRetry = onBack,
+        )
         is DetailUiState.SeriesDetail -> ErrorScreen(message = "Expected movie, got series")
         is DetailUiState.MovieDetail -> {
             MovieDetailContent(

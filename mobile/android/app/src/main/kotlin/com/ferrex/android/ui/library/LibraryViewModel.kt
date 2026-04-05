@@ -2,7 +2,6 @@ package com.ferrex.android.ui.library
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryRepository
@@ -12,12 +11,8 @@ import com.ferrex.android.core.library.toUuidString
 import dagger.hilt.android.lifecycle.HiltViewModel
 import ferrex.media.MovieReference
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -54,15 +49,11 @@ class LibraryViewModel @Inject constructor(
 
     /**
      * Build a poster URL from a movie reference.
-     * Uses the primary_poster_iid from the movie's details,
-     * falling back to the TMDB poster_path if available.
+     * Uses the primary_poster_iid from the movie's details.
+     * The /images/iid/ endpoint resolves the IID to the blob token server-side.
      */
     fun posterUrlForMovie(movie: MovieReference): String? {
-        val details = movie.details ?: return null
-        val posterIid = details.primaryPosterIid
-        if (posterIid != null) {
-            return "${serverConfig.serverUrl}/api/v1/images/blob/${posterIid.toUuidString()}"
-        }
-        return null
+        val iid = movie.details?.primaryPosterIid ?: return null
+        return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
     }
 }

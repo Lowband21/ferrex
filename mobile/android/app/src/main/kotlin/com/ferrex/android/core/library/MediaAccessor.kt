@@ -99,6 +99,42 @@ class MediaAccessor(buffer: ByteBuffer) {
     fun mediaAt(batchIndex: Int, itemIndex: Int): Media? {
         return response.batches(batchIndex)?.items(itemIndex)
     }
+
+    /**
+     * Find a movie by its UUID string (linear scan across all batches).
+     * Returns null if not found.
+     */
+    fun findMovieByUuid(uuidString: String): MovieReference? {
+        for (b in 0 until response.batchesLength) {
+            val batch = response.batches(b) ?: continue
+            for (i in 0 until batch.itemsLength) {
+                val item = batch.items(i) ?: continue
+                if (item.variantType != MediaVariant.MovieReference) continue
+                val movie = item.variant(MovieReference()) as? MovieReference ?: continue
+                val id = movie.id ?: continue
+                if (id.toUuidString() == uuidString) return movie
+            }
+        }
+        return null
+    }
+
+    /**
+     * Find a series by its UUID string (linear scan across all batches).
+     * Returns null if not found.
+     */
+    fun findSeriesByUuid(uuidString: String): SeriesReference? {
+        for (b in 0 until response.batchesLength) {
+            val batch = response.batches(b) ?: continue
+            for (i in 0 until batch.itemsLength) {
+                val item = batch.items(i) ?: continue
+                if (item.variantType != MediaVariant.SeriesReference) continue
+                val series = item.variant(SeriesReference()) as? SeriesReference ?: continue
+                val id = series.id ?: continue
+                if (id.toUuidString() == uuidString) return series
+            }
+        }
+        return null
+    }
 }
 
 /**

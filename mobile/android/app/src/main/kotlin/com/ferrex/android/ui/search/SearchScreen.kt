@@ -25,19 +25,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.ferrex.android.core.search.SearchHit
 import com.ferrex.android.ui.components.LoadingScreen
-import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.ui.library.PosterCard
-import ferrex.library.BatchFetchResponse
-import ferrex.media.Media
-import ferrex.media.MediaVariant
-import ferrex.media.MovieReference
 
 /**
  * Search screen with debounced query input and results grid.
  *
- * Uses Material3 SearchBar with results displayed as poster cards
- * (reusing the same PosterCard composable from the library grid).
+ * The server returns media UUIDs via /media/query, which are resolved
+ * against the local batch cache to get full details + poster URLs.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +81,6 @@ fun SearchScreen(
 
             when (val state = uiState) {
                 is SearchUiState.Idle -> {
-                    // Empty state
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -114,15 +109,7 @@ fun SearchScreen(
                     }
                 }
                 is SearchUiState.Results -> {
-                    // Parse results from the buffer
-                    // The search response format matches BatchFetchResponse
-                    val response = try {
-                        BatchFetchResponse.getRootAsBatchFetchResponse(state.buffer)
-                    } catch (_: Exception) {
-                        null
-                    }
-
-                    if (response == null || response.batchesLength == 0) {
+                    if (state.hits.isEmpty()) {
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -131,37 +118,30 @@ fun SearchScreen(
                             Text("No results found")
                         }
                     } else {
-                        // Collect all movie results
-                        val movies = buildList {
-                            for (b in 0 until response.batchesLength) {
-                                val batch = response.batches(b) ?: continue
-                                for (i in 0 until batch.itemsLength) {
-                                    val item = batch.items(i) ?: continue
-                                    if (item.variantType == MediaVariant.MovieReference) {
-                                        val movie = item.variant(MovieReference()) as? MovieReference
-                                        if (movie != null) add(movie)
-                                    }
-                                }
-                            }
-                        }
-
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 120.dp),
                             contentPadding = PaddingValues(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            items(movies.size) { index ->
-                                val movie = movies[index]
-                                PosterCard(
-                                    title = movie.title,
-                                    posterUrl = viewModel.posterUrlForMovie(movie),
-                                    onClick = {
-                                        movie.id?.let { uuid ->
-                                            onMovieClick(uuid.toUuidString())
-                                        }
-                                    },
-                                )
+                            items(state.hits.size) { index ->
+                                val hit = state.hits[index]
+                                when (hit) {
+                                    is SearchHit.Movie -> {
+                                        PosterCard(
+                                            title = hit.movie.title,
+                                            posterUrl = viewModel.posterUrlForMovie(hit.movie),
+                                            onClick = { onMovieClick(hit.mediaId) },
+                                        )
+                                    }
+                                    is SearchHit.Series -> {
+                                        PosterCard(
+                                            title = hit.series.title,
+                                            posterUrl = viewModel.posterUrlForSeries(hit.series),
+                                            onClick = { onMovieClick(hit.mediaId) },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

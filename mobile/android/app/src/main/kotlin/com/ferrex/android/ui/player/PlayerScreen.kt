@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,18 +17,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.ferrex.android.ui.components.ErrorScreen
 import com.ferrex.android.ui.components.LoadingScreen
 import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
 
 /**
  * Video player screen using Media3 ExoPlayer.
  *
- * Wraps ExoPlayer in an AndroidView for Compose integration. Uses
- * ExoPlayer's built-in PlayerView controls (play/pause, seek, etc.)
- * for v1. Custom Compose overlay controls are deferred.
+ * Uses OkHttpDataSource.Factory so that ExoPlayer inherits the app's
+ * OkHttpClient with its AuthInterceptor — stream requests automatically
+ * include the Bearer token. This is required because the stream endpoint
+ * (`GET /api/v1/stream/{id}`) validates auth.
  *
  * Progress tracking: a LaunchedEffect coroutine loop reports position
  * every 10 seconds via the WatchProgressTracker. Immediate report on
@@ -39,6 +42,7 @@ import kotlinx.coroutines.delay
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 fun PlayerScreen(
     viewModel: PlayerViewModel,
+    okHttpClient: OkHttpClient,
 ) {
     val playerState by viewModel.playerState.collectAsState()
 
@@ -59,6 +63,7 @@ fun PlayerScreen(
                 PlayerContent(
                     streamUrl = state.streamUrl,
                     startPositionMs = state.startPositionMs,
+                    okHttpClient = okHttpClient,
                     onProgressUpdate = { positionMs, durationMs ->
                         viewModel.reportProgress(positionMs, durationMs)
                     },
@@ -74,13 +79,20 @@ fun PlayerScreen(
 private fun PlayerContent(
     streamUrl: String,
     startPositionMs: Long,
+    okHttpClient: OkHttpClient,
     onProgressUpdate: (positionMs: Long, durationMs: Long) -> Unit,
     onPlaybackEnded: () -> Unit,
 ) {
     val context = LocalContext.current
 
+    // Use OkHttp as ExoPlayer's HTTP backend so the AuthInterceptor
+    // injects the Bearer token into stream requests.
     val exoPlayer = remember {
+        val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+
         ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
             .build()
             .apply {
                 setMediaItem(MediaItem.fromUri(Uri.parse(streamUrl)))
