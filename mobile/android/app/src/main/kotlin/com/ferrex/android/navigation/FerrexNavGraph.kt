@@ -1,5 +1,9 @@
 package com.ferrex.android.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -15,11 +19,15 @@ import com.ferrex.android.ui.detail.DetailViewModel
 import com.ferrex.android.ui.detail.MovieDetailScreen
 import com.ferrex.android.ui.detail.SeriesDetailScreen
 import com.ferrex.android.ui.home.HomeScreen
+import com.ferrex.android.ui.home.HomeViewModel
 import com.ferrex.android.ui.library.LibraryViewModel
 import com.ferrex.android.ui.player.PlayerScreen
 import com.ferrex.android.ui.player.PlayerViewModel
 import com.ferrex.android.ui.search.SearchScreen
 import com.ferrex.android.ui.search.SearchViewModel
+
+private const val TRANSITION_DURATION = 300
+
 @Composable
 fun FerrexNavGraph() {
     val navController = rememberNavController()
@@ -36,10 +44,37 @@ fun FerrexNavGraph() {
     NavHost(
         navController = navController,
         startDestination = startDestination,
+        enterTransition = {
+            fadeIn(tween(TRANSITION_DURATION)) + slideIntoContainer(
+                AnimatedContentTransitionScope.SlideDirection.Start,
+                tween(TRANSITION_DURATION),
+            )
+        },
+        exitTransition = {
+            fadeOut(tween(TRANSITION_DURATION)) + slideOutOfContainer(
+                AnimatedContentTransitionScope.SlideDirection.Start,
+                tween(TRANSITION_DURATION),
+            )
+        },
+        popEnterTransition = {
+            fadeIn(tween(TRANSITION_DURATION)) + slideIntoContainer(
+                AnimatedContentTransitionScope.SlideDirection.End,
+                tween(TRANSITION_DURATION),
+            )
+        },
+        popExitTransition = {
+            fadeOut(tween(TRANSITION_DURATION)) + slideOutOfContainer(
+                AnimatedContentTransitionScope.SlideDirection.End,
+                tween(TRANSITION_DURATION),
+            )
+        },
     ) {
         // ── Auth flow ───────────────────────────────────────────
 
-        composable<Route.ServerConnect> {
+        composable<Route.ServerConnect>(
+            enterTransition = { fadeIn(tween(TRANSITION_DURATION)) },
+            exitTransition = { fadeOut(tween(TRANSITION_DURATION)) },
+        ) {
             ServerConnectScreen(
                 viewModel = authViewModel,
                 onConnected = {
@@ -50,7 +85,10 @@ fun FerrexNavGraph() {
             )
         }
 
-        composable<Route.Login> {
+        composable<Route.Login>(
+            enterTransition = { fadeIn(tween(TRANSITION_DURATION)) },
+            exitTransition = { fadeOut(tween(TRANSITION_DURATION)) },
+        ) {
             LoginScreen(
                 viewModel = authViewModel,
                 onLoginSuccess = {
@@ -65,7 +103,6 @@ fun FerrexNavGraph() {
         }
 
         composable<Route.Register> {
-            // Registration screen — deferred, use login for now
             LoginScreen(
                 viewModel = authViewModel,
                 onLoginSuccess = {
@@ -79,10 +116,26 @@ fun FerrexNavGraph() {
 
         // ── Main flow ───────────────────────────────────────────
 
-        composable<Route.Home> {
+        composable<Route.Home>(
+            enterTransition = { fadeIn(tween(TRANSITION_DURATION)) },
+            exitTransition = {
+                fadeOut(tween(TRANSITION_DURATION)) + slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    tween(TRANSITION_DURATION),
+                )
+            },
+            popEnterTransition = {
+                fadeIn(tween(TRANSITION_DURATION)) + slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    tween(TRANSITION_DURATION),
+                )
+            },
+        ) {
             val libraryViewModel: LibraryViewModel = hiltViewModel()
+            val homeViewModel: HomeViewModel = hiltViewModel()
             HomeScreen(
                 libraryViewModel = libraryViewModel,
+                homeViewModel = homeViewModel,
                 onMovieClick = { movieId ->
                     navController.navigate(Route.MovieDetail(movieId))
                 },
@@ -91,6 +144,9 @@ fun FerrexNavGraph() {
                 },
                 onSearchClick = {
                     navController.navigate(Route.Search)
+                },
+                onContinueWatchingClick = { mediaId ->
+                    navController.navigate(Route.Player(mediaId))
                 },
             )
         }
@@ -121,7 +177,12 @@ fun FerrexNavGraph() {
 
         // ── Player ──────────────────────────────────────────────
 
-        composable<Route.Player> {
+        composable<Route.Player>(
+            enterTransition = { fadeIn(tween(200)) },
+            exitTransition = { fadeOut(tween(200)) },
+            popEnterTransition = { fadeIn(tween(200)) },
+            popExitTransition = { fadeOut(tween(200)) },
+        ) {
             val playerViewModel: PlayerViewModel = hiltViewModel()
             PlayerScreen(
                 viewModel = playerViewModel,
@@ -138,6 +199,9 @@ fun FerrexNavGraph() {
                 onBack = { navController.popBackStack() },
                 onMovieClick = { movieId ->
                     navController.navigate(Route.MovieDetail(movieId))
+                },
+                onSeriesClick = { seriesId ->
+                    navController.navigate(Route.SeriesDetail(seriesId))
                 },
             )
         }

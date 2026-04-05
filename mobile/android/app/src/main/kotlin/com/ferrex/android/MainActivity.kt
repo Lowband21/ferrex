@@ -11,6 +11,8 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Switch from splash theme to the normal theme before setContentView
+        setTheme(R.style.Theme_Ferrex)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {

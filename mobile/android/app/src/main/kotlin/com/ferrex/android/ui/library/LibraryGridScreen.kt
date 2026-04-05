@@ -15,6 +15,7 @@ import com.ferrex.android.core.library.SyncState
 import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.ui.components.ErrorScreen
 import com.ferrex.android.ui.components.LoadingScreen
+import com.ferrex.android.ui.components.PosterGridSkeleton
 import ferrex.common.LibraryType
 
 /**
@@ -44,7 +45,7 @@ fun LibraryGridScreen(
     Box(modifier = modifier.fillMaxSize()) {
         when (syncState) {
             is SyncState.Idle, is SyncState.Syncing -> {
-                LoadingScreen(message = "Loading library…")
+                PosterGridSkeleton(modifier = modifier)
             }
             is SyncState.Error -> {
                 ErrorScreen(

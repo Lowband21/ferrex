@@ -4,4 +4,9 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+
+    <!-- Splash screen theme applied during cold start -->
+    <style name="Theme.Ferrex.Splash" parent="Theme.Ferrex">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
 </resources>

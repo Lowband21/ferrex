@@ -1,9 +1,11 @@
 package com.ferrex.android.core.library
 
 import ferrex.library.BatchFetchResponse
+import ferrex.media.EpisodeReference
 import ferrex.media.Media
 import ferrex.media.MediaVariant
 import ferrex.media.MovieReference
+import ferrex.media.SeasonReference
 import ferrex.media.SeriesReference
 import java.nio.ByteBuffer
 
@@ -70,8 +72,42 @@ class MediaAccessor(buffer: ByteBuffer) {
     /** Number of movies across all batches. */
     val movieCount: Int get() = movieIndices.size
 
+    private val seasonIndices: List<Pair<Int, Int>> by lazy {
+        buildList {
+            for (b in 0 until response.batchesLength) {
+                val batch = response.batches(b) ?: continue
+                for (i in 0 until batch.itemsLength) {
+                    val item = batch.items(i) ?: continue
+                    if (item.variantType == MediaVariant.SeasonReference) {
+                        add(b to i)
+                    }
+                }
+            }
+        }
+    }
+
+    private val episodeIndices: List<Pair<Int, Int>> by lazy {
+        buildList {
+            for (b in 0 until response.batchesLength) {
+                val batch = response.batches(b) ?: continue
+                for (i in 0 until batch.itemsLength) {
+                    val item = batch.items(i) ?: continue
+                    if (item.variantType == MediaVariant.EpisodeReference) {
+                        add(b to i)
+                    }
+                }
+            }
+        }
+    }
+
     /** Number of series across all batches. */
     val seriesCount: Int get() = seriesIndices.size
+
+    /** Number of seasons across all batches. */
+    val seasonCount: Int get() = seasonIndices.size
+
+    /** Number of episodes across all batches. */
+    val episodeCount: Int get() = episodeIndices.size
 
     /**
      * Access movie at the given index (across all batches).
@@ -91,6 +127,48 @@ class MediaAccessor(buffer: ByteBuffer) {
         val (batchIdx, itemIdx) = seriesIndices[index]
         val item = response.batches(batchIdx)?.items(itemIdx) ?: return null
         return item.variant(SeriesReference()) as? SeriesReference
+    }
+
+    /**
+     * Access season at the given index.
+     */
+    fun seasonAt(index: Int): SeasonReference? {
+        val (batchIdx, itemIdx) = seasonIndices[index]
+        val item = response.batches(batchIdx)?.items(itemIdx) ?: return null
+        return item.variant(SeasonReference()) as? SeasonReference
+    }
+
+    /**
+     * Access episode at the given index.
+     */
+    fun episodeAt(index: Int): EpisodeReference? {
+        val (batchIdx, itemIdx) = episodeIndices[index]
+        val item = response.batches(batchIdx)?.items(itemIdx) ?: return null
+        return item.variant(EpisodeReference()) as? EpisodeReference
+    }
+
+    /**
+     * Find all seasons belonging to a series (by series UUID string).
+     * Returns seasons sorted by season number.
+     */
+    fun seasonsForSeries(seriesUuid: String): List<SeasonReference> {
+        return (0 until seasonCount).mapNotNull { i ->
+            val season = seasonAt(i) ?: return@mapNotNull null
+            if (season.seriesId?.toUuidString() == seriesUuid) season else null
+        }.sortedBy { it.seasonNumber.toInt() }
+    }
+
+    /**
+     * Find all episodes belonging to a specific season of a series.
+     * Returns episodes sorted by episode number.
+     */
+    fun episodesForSeason(seriesUuid: String, seasonNumber: Int): List<EpisodeReference> {
+        return (0 until episodeCount).mapNotNull { i ->
+            val episode = episodeAt(i) ?: return@mapNotNull null
+            if (episode.seriesId?.toUuidString() == seriesUuid &&
+                episode.seasonNumber.toInt() == seasonNumber
+            ) episode else null
+        }.sortedBy { it.episodeNumber.toInt() }
     }
 
     /**

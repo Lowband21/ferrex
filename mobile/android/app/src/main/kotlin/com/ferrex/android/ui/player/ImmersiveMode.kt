@@ -3,6 +3,7 @@ package com.ferrex.android.ui.player
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
+import com.ferrex.android.core.diagnostics.HdrDiagnostics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
@@ -83,7 +84,17 @@ fun ImmersiveMode() {
         //    180° and the player follows).
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
-        DiagnosticLog.i(TAG, "Entered immersive fullscreen (landscape, screen-on)")
+        // 7. Request HDR color mode for the Activity window.
+        //    SurfaceView has its own surface that *should* get HDR automatically,
+        //    but Samsung OneUI checks the Activity color mode as well.
+        val originalColorMode = window.colorMode
+        window.colorMode = ActivityInfo.COLOR_MODE_HDR
+        DiagnosticLog.i(TAG, "Window colorMode: $originalColorMode → ${window.colorMode} (requested HDR=${ActivityInfo.COLOR_MODE_HDR})")
+
+        // Log display HDR capabilities for diagnostics.
+        HdrDiagnostics.logDisplayCapabilities(activity, window)
+
+        DiagnosticLog.i(TAG, "Entered immersive fullscreen (landscape, screen-on, HDR)")
 
         // ── Restore on exit ─────────────────────────────────────
         onDispose {
@@ -97,6 +108,9 @@ fun ImmersiveMode() {
 
             // Remove keep-screen-on.
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+            // Restore color mode.
+            window.colorMode = originalColorMode
 
             // Restore original orientation (typically SCREEN_ORIENTATION_UNSPECIFIED
             // which follows the sensor).

@@ -6,10 +6,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,7 +33,7 @@ import coil.compose.AsyncImage
  * Individual poster card for the library grid.
  *
  * Design: poster image fills the card with a gradient overlay at the bottom
- * for the title text. Tapping navigates to the detail view.
+ * for the title text. Optional progress bar and completion indicator.
  *
  * Performance: this composable should not allocate on each recomposition.
  * The [title] and [posterUrl] parameters are read directly from FlatBuffer
@@ -39,6 +45,8 @@ fun PosterCard(
     posterUrl: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    progress: Float? = null,
+    isCompleted: Boolean = false,
 ) {
     Card(
         modifier = modifier
@@ -71,6 +79,32 @@ fun PosterCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            // Completed overlay
+            if (isCompleted) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Watched",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(20.dp),
+                )
+            }
+
+            // Progress bar overlay
+            if (progress != null && progress > 0f && !isCompleted) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .align(Alignment.BottomCenter),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.Black.copy(alpha = 0.5f),
+                )
             }
 
             // Title overlay with gradient

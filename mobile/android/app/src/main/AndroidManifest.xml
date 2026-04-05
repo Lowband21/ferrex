@@ -16,8 +16,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Ferrex"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            android:theme="@style/Theme.Ferrex.Splash"
+            android:colorMode="hdr"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|colorMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

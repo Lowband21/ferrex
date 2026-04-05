@@ -41,6 +41,7 @@ fun SearchScreen(
     viewModel: SearchViewModel,
     onBack: () -> Unit,
     onMovieClick: (movieId: String) -> Unit,
+    onSeriesClick: (seriesId: String) -> Unit = onMovieClick,
 ) {
     val query by viewModel.query.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
@@ -138,7 +139,7 @@ fun SearchScreen(
                                         PosterCard(
                                             title = hit.series.title,
                                             posterUrl = viewModel.posterUrlForSeries(hit.series),
-                                            onClick = { onMovieClick(hit.mediaId) },
+                                            onClick = { onSeriesClick(hit.mediaId) },
                                         )
                                     }
                                 }

@@ -141,6 +141,27 @@ class PlaybackDiagnostics : AnalyticsListener {
         DiagnosticLog.i(tag,
             "Video format: ${format.sampleMimeType} ${format.width}x${format.height} " +
                 "bitrate=${format.bitrate} codecs=${format.codecs}")
+
+        // Log HDR / color info — this is the key to diagnosing tone-mapping.
+        val ci = format.colorInfo
+        if (ci != null) {
+            DiagnosticLog.i(tag, buildString {
+                append("ColorInfo:")
+                append(" colorSpace=${ci.colorSpace}")      // e.g. BT2020 for HDR
+                append(" colorTransfer=${ci.colorTransfer}") // PQ=6, HLG=7, SDR=3
+                append(" colorRange=${ci.colorRange}")       // FULL=1, LIMITED=2
+                append(" hdrStaticInfo=${if (ci.hdrStaticInfo != null) "${ci.hdrStaticInfo!!.size}bytes" else "null"}")
+                append(" lumBitdepth=${ci.lumaBitdepth}")
+                append(" chromaBitdepth=${ci.chromaBitdepth}")
+            })
+
+            val isHdr = ci.colorTransfer == androidx.media3.common.C.COLOR_TRANSFER_ST2084 // PQ
+                || ci.colorTransfer == androidx.media3.common.C.COLOR_TRANSFER_HLG
+            DiagnosticLog.i(tag, if (isHdr) "→ HDR content detected ✓" else "→ SDR content (transfer=${ci.colorTransfer})")
+        } else {
+            DiagnosticLog.w(tag, "ColorInfo: null — ExoPlayer did not detect color metadata. " +
+                "HDR passthrough will NOT work without this.")
+        }
     }
 
     override fun onAudioInputFormatChanged(
