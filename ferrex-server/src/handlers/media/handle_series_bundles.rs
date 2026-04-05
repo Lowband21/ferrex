@@ -19,7 +19,11 @@ use sha2::Digest;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::infra::{app_state::AppState, demo_mode};
+use crate::infra::{
+    app_state::AppState,
+    content_negotiation::{self as cn, AcceptFormat},
+    demo_mode,
+};
 
 fn stable_hash_u64(bytes: &[u8]) -> u64 {
     let digest = sha2::Sha256::digest(bytes);
@@ -32,6 +36,7 @@ fn stable_hash_u64(bytes: &[u8]) -> u64 {
 
 pub async fn get_series_bundle_handler(
     State(state): State<AppState>,
+    accept: AcceptFormat,
     Path((library_id, series_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
     if demo_mode::is_demo_mode(&state)
@@ -98,24 +103,35 @@ pub async fn get_series_bundle_handler(
     series.details.available_seasons = Some(seasons.len() as u16);
     series.details.available_episodes = Some(episodes.len() as u16);
 
-    let response = SeriesBundleResponse {
-        library_id,
-        series_id,
-        series,
-        seasons,
-        episodes,
+    let (bytes, content_type) = match accept {
+        AcceptFormat::FlatBuffers => {
+            let fb_bytes =
+                ferrex_flatbuffers::conversions::batch_data::serialize_series_bundle(
+                    &series, &seasons, &episodes,
+                );
+            (fb_bytes, cn::mime::FLATBUFFERS)
+        }
+        _ => {
+            let response = SeriesBundleResponse {
+                library_id,
+                series_id,
+                series,
+                seasons,
+                episodes,
+            };
+            let rkyv_bytes =
+                rkyv::to_bytes::<rkyv::rancor::Error>(&response).map_err(|err| {
+                    error!(
+                        "failed to serialize SeriesBundleResponse for library {} series {}: {:?}",
+                        library_id, series_id, err
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            (rkyv_bytes.into_vec(), "application/octet-stream")
+        }
     };
 
-    let bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&response).map_err(|err| {
-            error!(
-                "failed to serialize SeriesBundleResponse for library {} series {}: {:?}",
-                library_id, series_id, err
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let hash = stable_hash_u64(bytes.as_slice());
+    let hash = stable_hash_u64(&bytes);
     if let Err(err) = uow
         .media_refs
         .upsert_series_bundle_hash(&library_id, &series_id, hash)
@@ -129,16 +145,17 @@ pub async fn get_series_bundle_handler(
 
     let total_elapsed = request_started.elapsed();
     info!(
-        "Series bundle built: library={} series={} bytes={} total_elapsed={:?}",
+        "Series bundle built: library={} series={} format={} bytes={} total_elapsed={:?}",
         library_id,
         series_id,
+        content_type,
         bytes.len(),
         total_elapsed
     );
 
     Ok::<_, StatusCode>((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        Bytes::from(bytes.into_vec()),
+        [(header::CONTENT_TYPE, content_type)],
+        Bytes::from(bytes),
     ))
 }
 

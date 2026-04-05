@@ -365,3 +365,75 @@ pub fn build_enhanced_series_details<'a>(
         similar: None,
     })
 }
+
+/// Build a `SeasonDetails` table.
+pub fn build_season_details<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    d: &ferrex_model::SeasonDetails,
+) -> WIPOffset<fb::SeasonDetails<'a>> {
+    let name = builder.create_string(&d.name);
+    let overview = d.overview.as_deref().map(|s| builder.create_string(s));
+    let air_date = d.air_date.as_deref().map(|s| builder.create_string(s));
+    let poster_path = d.poster_path.as_deref().map(|s| builder.create_string(s));
+    let primary_poster_iid = d.primary_poster_iid.as_ref().map(|id| uuid_to_fb(id));
+    let external_ids = build_external_ids(builder, &d.external_ids);
+    let images = build_media_images(builder, &d.images);
+
+    fb::SeasonDetails::create(builder, &fb::SeasonDetailsArgs {
+        id: d.id,
+        season_number: d.season_number,
+        name: Some(name),
+        overview,
+        air_date,
+        episode_count: d.episode_count,
+        poster_path,
+        primary_poster_iid: primary_poster_iid.as_ref(),
+        runtime: d.runtime.unwrap_or(0),
+        external_ids: Some(external_ids),
+        images: Some(images),
+        videos: None,
+        keywords: None,
+        translations: None,
+    })
+}
+
+/// Build an `EpisodeDetails` table.
+pub fn build_episode_details<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    d: &ferrex_model::EpisodeDetails,
+) -> WIPOffset<fb::EpisodeDetails<'a>> {
+    let name = builder.create_string(&d.name);
+    let overview = d.overview.as_deref().map(|s| builder.create_string(s));
+    let air_date = d.air_date.as_deref().map(|s| builder.create_string(s));
+    let still_path = d.still_path.as_deref().map(|s| builder.create_string(s));
+    let primary_still_iid = d.primary_still_iid.as_ref().map(|id| uuid_to_fb(id));
+    let production_code = d.production_code.as_deref().map(|s| builder.create_string(s));
+    let external_ids = build_external_ids(builder, &d.external_ids);
+    let images = build_media_images(builder, &d.images);
+
+    let guest_stars: Vec<_> = d.guest_stars.iter().map(|c| build_cast_member(builder, c)).collect();
+    let guest_stars = if guest_stars.is_empty() { None } else { Some(builder.create_vector(&guest_stars)) };
+
+    fb::EpisodeDetails::create(builder, &fb::EpisodeDetailsArgs {
+        id: d.id,
+        episode_number: d.episode_number,
+        season_number: d.season_number,
+        name: Some(name),
+        overview,
+        air_date,
+        runtime: d.runtime.unwrap_or(0),
+        still_path,
+        primary_still_iid: primary_still_iid.as_ref(),
+        vote_average: d.vote_average.unwrap_or(0.0),
+        vote_count: d.vote_count.unwrap_or(0),
+        production_code,
+        external_ids: Some(external_ids),
+        images: Some(images),
+        videos: None,
+        keywords: None,
+        translations: None,
+        guest_stars,
+        crew: None,
+        content_ratings: None,
+    })
+}

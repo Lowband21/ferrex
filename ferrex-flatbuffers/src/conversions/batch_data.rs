@@ -7,7 +7,10 @@
 
 use flatbuffers::FlatBufferBuilder;
 
-use crate::conversions::media::build_movie_reference;
+use crate::conversions::media::{
+    build_movie_reference, build_series_reference, build_season_reference,
+    build_episode_reference,
+};
 use crate::fb::library as fb_lib;
 use crate::fb::media as fb_media;
 
@@ -84,4 +87,78 @@ pub fn serialize_single_batch(batch: &BatchInput<'_>) -> Vec<u8> {
         version: batch.version,
         movies: batch.movies,
     }])
+}
+
+/// Serialize a series bundle (series + seasons + episodes) as a FlatBuffers
+/// `BatchFetchResponse`.
+///
+/// All items are packed into a single `MediaBatchData` with `batch_id = 0`
+/// and `version = 0`. The series is first, then seasons, then episodes —
+/// each wrapped in a `Media` union with the appropriate `MediaVariant`.
+pub fn serialize_series_bundle(
+    series: &ferrex_model::Series,
+    seasons: &[ferrex_model::SeasonReference],
+    episodes: &[ferrex_model::EpisodeReference],
+) -> Vec<u8> {
+    let item_count = 1 + seasons.len() + episodes.len();
+    let mut builder = FlatBufferBuilder::with_capacity(1024 * item_count.max(1));
+
+    let mut media_offsets = Vec::with_capacity(item_count);
+
+    // Series reference (always exactly one)
+    let series_off = build_series_reference(&mut builder, series);
+    media_offsets.push(fb_media::Media::create(
+        &mut builder,
+        &fb_media::MediaArgs {
+            variant_type: fb_media::MediaVariant::SeriesReference,
+            variant: Some(series_off.as_union_value()),
+        },
+    ));
+
+    // Season references
+    for season in seasons {
+        let season_off = build_season_reference(&mut builder, season);
+        media_offsets.push(fb_media::Media::create(
+            &mut builder,
+            &fb_media::MediaArgs {
+                variant_type: fb_media::MediaVariant::SeasonReference,
+                variant: Some(season_off.as_union_value()),
+            },
+        ));
+    }
+
+    // Episode references
+    for episode in episodes {
+        let episode_off = build_episode_reference(&mut builder, episode);
+        media_offsets.push(fb_media::Media::create(
+            &mut builder,
+            &fb_media::MediaArgs {
+                variant_type: fb_media::MediaVariant::EpisodeReference,
+                variant: Some(episode_off.as_union_value()),
+            },
+        ));
+    }
+
+    let items = builder.create_vector(&media_offsets);
+
+    let batch = fb_lib::MediaBatchData::create(
+        &mut builder,
+        &fb_lib::MediaBatchDataArgs {
+            batch_id: 0,
+            version: 0,
+            items: Some(items),
+        },
+    );
+
+    let batches_vec = builder.create_vector(&[batch]);
+
+    let response = fb_lib::BatchFetchResponse::create(
+        &mut builder,
+        &fb_lib::BatchFetchResponseArgs {
+            batches: Some(batches_vec),
+        },
+    );
+
+    builder.finish(response, None);
+    builder.finished_data().to_vec()
 }
