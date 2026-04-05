@@ -51,6 +51,8 @@ class FerrexApiClient @Inject constructor(
                 "/api/v1/libraries/$libraryId/movie-batches:sync"
             fun movieBatchesFetch(libraryId: String) =
                 "/api/v1/libraries/$libraryId/movie-batches:fetch"
+            fun seriesBundle(libraryId: String, seriesId: String) =
+                "/api/v1/libraries/$libraryId/series-bundles/$seriesId"
             fun seriesBundlesSync(libraryId: String) =
                 "/api/v1/libraries/$libraryId/series-bundles:sync"
             fun seriesBundlesFetch(libraryId: String) =

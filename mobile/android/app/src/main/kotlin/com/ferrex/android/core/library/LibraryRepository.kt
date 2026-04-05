@@ -149,6 +149,38 @@ class LibraryRepository @Inject constructor(
         }
     }
 
+    // ── Per-series bundle (seasons + episodes) ────────────────────
+
+    /**
+     * Fetch the per-series bundle containing seasons and episodes.
+     *
+     * Calls GET /libraries/{libraryId}/series-bundles/{seriesId} with
+     * Accept: application/x-flatbuffers. The server returns a
+     * BatchFetchResponse with the series, its seasons, and episodes
+     * packed as Media union items.
+     *
+     * Returns a [MediaAccessor] over the response, or null on failure.
+     */
+    suspend fun fetchSeriesBundle(libraryId: String, seriesId: String): MediaAccessor? =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "${serverConfig.serverUrl}${FerrexApiClient.Companion.Routes.seriesBundle(libraryId, seriesId)}"
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("Accept", "application/x-flatbuffers")
+                    .get()
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext null
+
+                val bytes = response.body?.bytes() ?: return@withContext null
+                MediaAccessor(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN))
+            } catch (_: Exception) {
+                null
+            }
+        }
+
     /**
      * Look up a movie by UUID from the currently cached media.
      * Returns null if not found or no media is cached.

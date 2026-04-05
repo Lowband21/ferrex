@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.library.MediaAccessor
 import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.core.watch.WatchProgress
 import com.ferrex.android.core.watch.WatchService
@@ -97,38 +98,40 @@ class DetailViewModel @Inject constructor(
         }
     }
 
+    /** MediaAccessor for the per-series bundle (seasons + episodes). */
+    private var seriesBundleAccessor: MediaAccessor? = null
+
     private fun loadSeriesEpisodes(series: SeriesReference) {
-        val accessor = repository.currentMedia.value
-        val seriesUuid = series.id?.toUuidString()
+        val seriesUuid = series.id?.toUuidString() ?: return
+        val libraryUuid = series.libraryId?.toUuidString() ?: return
 
-        // Try to load seasons/episodes from batch cache.
-        // The series library grid bundle currently only contains SeriesReference
-        // items. Season/episode data will be available once the server's
-        // per-series bundle endpoint (GET /libraries/{id}/series-bundles/{series_id})
-        // adds FlatBuffers support.
-        if (accessor != null && seriesUuid != null) {
-            val seasonList = accessor.seasonsForSeries(seriesUuid)
-            _seasons.value = seasonList
+        // Default season tab to 1
+        _selectedSeason.value = 1
 
-            if (seasonList.isNotEmpty()) {
-                val firstSeason = seasonList.first().seasonNumber.toInt()
-                _selectedSeason.value = firstSeason
-                _episodes.value = accessor.episodesForSeason(seriesUuid, firstSeason)
+        // Fetch the per-series bundle from the server — this contains
+        // the full season and episode data that the library grid bundle
+        // doesn't include.
+        viewModelScope.launch {
+            val accessor = repository.fetchSeriesBundle(libraryUuid, seriesUuid)
+            if (accessor != null) {
+                seriesBundleAccessor = accessor
+
+                val seasonList = accessor.seasonsForSeries(seriesUuid)
+                _seasons.value = seasonList
+
+                if (seasonList.isNotEmpty()) {
+                    val firstSeason = seasonList.first().seasonNumber.toInt()
+                    _selectedSeason.value = firstSeason
+                    _episodes.value = accessor.episodesForSeason(seriesUuid, firstSeason)
+                }
             }
-        }
 
-        // Default season tab to 1 (from metadata) if batch had no season items
-        if (_seasons.value.isEmpty()) {
-            _selectedSeason.value = 1
-        }
-
-        // Fetch series watch status from server
-        val tmdbId = series.tmdbId.toLong()
-        if (tmdbId > 0) {
-            viewModelScope.launch {
+            // Fetch series watch status (can run after bundle loads)
+            val tmdbId = series.tmdbId.toLong()
+            if (tmdbId > 0) {
                 when (val result = watchService.getSeriesWatchStatus(tmdbId)) {
                     is ApiResult.Success -> parseSeriesWatchStatus(result.data)
-                    else -> {} // Watch state is optional — don't block the UI
+                    else -> {}
                 }
             }
         }
@@ -139,7 +142,7 @@ class DetailViewModel @Inject constructor(
         val state = _uiState.value
         if (state is DetailUiState.SeriesDetail) {
             val seriesUuid = state.series.id?.toUuidString() ?: return
-            val accessor = repository.currentMedia.value ?: return
+            val accessor = seriesBundleAccessor ?: return
             _episodes.value = accessor.episodesForSeason(seriesUuid, seasonNumber)
         }
     }
