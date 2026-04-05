@@ -242,6 +242,14 @@ private fun MovieDetailContent(
                 // Cast
                 val castCount = details?.castLength ?: 0
                 if (castCount > 0) {
+                    // Sort cast: members with photos first, then those without,
+                    // preserving original order within each group.
+                    val sortedCastIndices = (0 until castCount.coerceAtMost(20))
+                        .sortedBy { i ->
+                            val m = details?.cast(i)
+                            if (m != null && castPhotoUrl(m) != null) 0 else 1
+                        }
+
                     Text(
                         text = "Cast",
                         style = MaterialTheme.typography.titleSmall,
@@ -251,8 +259,8 @@ private fun MovieDetailContent(
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(castCount.coerceAtMost(20)) { index ->
-                            val member = details?.cast(index)
+                        items(sortedCastIndices.size) { i ->
+                            val member = details?.cast(sortedCastIndices[i])
                             if (member != null) {
                                 val photoUrl = castPhotoUrl(member)
                                 Column(
