@@ -53,6 +53,11 @@ fun PlayerScreen(
     viewModel: PlayerViewModel,
     okHttpClient: OkHttpClient,
 ) {
+    // Enter immersive fullscreen: hides status bar + nav bar, locks landscape,
+    // keeps screen on.  Automatically restored when this composable leaves
+    // composition (i.e. user navigates away from the player).
+    ImmersiveMode()
+
     val playerState by viewModel.playerState.collectAsState()
 
     Box(
