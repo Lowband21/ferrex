@@ -73,6 +73,7 @@ fun MovieDetailScreen(
                 movie = state.movie,
                 backdropUrl = viewModel.backdropUrl(state.movie),
                 posterUrl = viewModel.posterUrl(state.movie),
+                castPhotoUrl = { member -> viewModel.castPhotoUrl(member) },
                 onBack = onBack,
                 onPlay = {
                     // Use media file ID for streaming, not movie ID
@@ -93,6 +94,7 @@ private fun MovieDetailContent(
     movie: MovieReference,
     backdropUrl: String?,
     posterUrl: String?,
+    castPhotoUrl: (ferrex.details.CastMember) -> String?,
     onBack: () -> Unit,
     onPlay: () -> Unit,
 ) {
@@ -252,11 +254,11 @@ private fun MovieDetailContent(
                         items(castCount.coerceAtMost(20)) { index ->
                             val member = details?.cast(index)
                             if (member != null) {
+                                val photoUrl = castPhotoUrl(member)
                                 Column(
                                     modifier = Modifier.width(80.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    // Placeholder avatar
                                     Box(
                                         modifier = Modifier
                                             .width(60.dp)
@@ -265,10 +267,20 @@ private fun MovieDetailContent(
                                             .background(MaterialTheme.colorScheme.surfaceVariant),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Text(
-                                            text = member.name.take(1).uppercase(),
-                                            style = MaterialTheme.typography.titleMedium,
-                                        )
+                                        if (photoUrl != null) {
+                                            AsyncImage(
+                                                model = photoUrl,
+                                                contentDescription = member.name,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize(),
+                                            )
+                                        } else {
+                                            // Fallback initial when no photo available
+                                            Text(
+                                                text = member.name.take(1).uppercase(),
+                                                style = MaterialTheme.typography.titleMedium,
+                                            )
+                                        }
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Text(

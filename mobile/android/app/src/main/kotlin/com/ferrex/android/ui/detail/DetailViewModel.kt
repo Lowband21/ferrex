@@ -6,6 +6,7 @@ import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.toUuidString
 import dagger.hilt.android.lifecycle.HiltViewModel
+import ferrex.details.CastMember
 import ferrex.media.MovieReference
 import ferrex.media.SeriesReference
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,6 +103,20 @@ class DetailViewModel @Inject constructor(
         }
         series.details?.backdropPath?.let { path ->
             return "https://image.tmdb.org/t/p/w780$path"
+        }
+        return null
+    }
+
+    /**
+     * Build a cast member's profile photo URL.
+     * Fallback chain: imageId (server IID) → profilePath (TMDB CDN w185).
+     */
+    fun castPhotoUrl(member: CastMember): String? {
+        member.imageId?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        member.profilePath?.let { path ->
+            return "https://image.tmdb.org/t/p/w185$path"
         }
         return null
     }
