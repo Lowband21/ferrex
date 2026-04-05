@@ -45,6 +45,8 @@ class FerrexApiClient @Inject constructor(
             const val USERS_ME = "/api/v1/users/me"
             const val LIBRARIES = "/api/v1/libraries"
 
+            fun movieBatchesBundle(libraryId: String) =
+                "/api/v1/libraries/$libraryId/movie-batches"
             fun movieBatchesSync(libraryId: String) =
                 "/api/v1/libraries/$libraryId/movie-batches:sync"
             fun movieBatchesFetch(libraryId: String) =

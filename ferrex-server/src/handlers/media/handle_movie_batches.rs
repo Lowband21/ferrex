@@ -21,6 +21,7 @@ use crate::infra::{
     content_negotiation::{self as cn, AcceptFormat, NegotiatedResponse},
     demo_mode,
 };
+use ferrex_core::types::LibraryType;
 
 async fn refresh_unfinalized_movie_batch_hash(
     uow: &AppUnitOfWork,
@@ -164,6 +165,48 @@ pub async fn get_movie_reference_batch_bundle_handler(
     let format = accept_to_wire_format(accept);
 
     info!("Fetching movie batch bundle for library {} (format: {:?})", library_id, format);
+
+    // For FlatBuffers requests: if this is a series library, return series
+    // references wrapped in the same BatchFetchResponse envelope.  The desktop
+    // player uses dedicated series-bundles endpoints so the rkyv path is
+    // unchanged.
+    if format == WireFormat::FlatBuffers {
+        let lib_type = uow
+            .libraries
+            .get_library_reference(library_id.0)
+            .await
+            .map(|r| r.library_type)
+            .unwrap_or(LibraryType::Movies);
+
+        if lib_type == LibraryType::Series {
+            let series = uow
+                .media_refs
+                .get_library_series(&library_id)
+                .await
+                .map_err(|err| {
+                    error!(
+                        "Failed to get series for library {}: {}",
+                        library_id, err
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+            info!(
+                "Series library {} (FlatBuffers): {} series",
+                library_id,
+                series.len()
+            );
+
+            let fb_bytes =
+                ferrex_flatbuffers::conversions::batch_data::serialize_series_batch_fetch_response(
+                    &series,
+                );
+            return Ok((
+                [(header::CONTENT_TYPE, cn::mime::FLATBUFFERS)],
+                axum::body::Bytes::from(fb_bytes),
+            ));
+        }
+    }
 
     let bytes = state
         .movie_batches_cache

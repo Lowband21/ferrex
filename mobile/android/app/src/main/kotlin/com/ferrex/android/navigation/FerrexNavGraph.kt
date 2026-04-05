@@ -86,6 +86,9 @@ fun FerrexNavGraph() {
                 onMovieClick = { movieId ->
                     navController.navigate(Route.MovieDetail(movieId))
                 },
+                onSeriesClick = { seriesId ->
+                    navController.navigate(Route.SeriesDetail(seriesId))
+                },
                 onSearchClick = {
                     navController.navigate(Route.Search)
                 },

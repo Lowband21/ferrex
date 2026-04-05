@@ -44,6 +44,7 @@ import com.ferrex.android.ui.library.LibraryViewModel
 fun HomeScreen(
     libraryViewModel: LibraryViewModel,
     onMovieClick: (movieId: String) -> Unit,
+    onSeriesClick: (seriesId: String) -> Unit,
     onSearchClick: () -> Unit,
 ) {
     val libraries by libraryViewModel.libraries.collectAsState()
@@ -52,7 +53,7 @@ fun HomeScreen(
     // Auto-select first library on load
     LaunchedEffect(libraries) {
         if (libraries.isNotEmpty() && libraryViewModel.selectedLibraryId.value == null) {
-            libraryViewModel.selectLibrary(libraries[0].id)
+            libraryViewModel.selectLibrary(libraries[0].id, libraries[0].libraryType)
         }
     }
 
@@ -89,7 +90,7 @@ fun HomeScreen(
                         selected = index == selectedTabIndex,
                         onClick = {
                             selectedTabIndex = index
-                            libraryViewModel.selectLibrary(library.id)
+                            libraryViewModel.selectLibrary(library.id, library.libraryType)
                         },
                         text = { Text(library.name) },
                     )
@@ -102,6 +103,7 @@ fun HomeScreen(
             LibraryGridScreen(
                 viewModel = libraryViewModel,
                 onMovieClick = onMovieClick,
+                onSeriesClick = onSeriesClick,
                 modifier = Modifier.weight(1f),
             )
         }

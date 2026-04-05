@@ -3,6 +3,7 @@ package com.ferrex.android.core.library
 import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.FerrexApiClient
 import com.google.flatbuffers.FlatBufferBuilder
+import ferrex.common.LibraryType
 import ferrex.library.BatchFetchRequest
 import ferrex.library.BatchFetchResponse
 import ferrex.library.BatchSyncRequest
@@ -79,10 +80,25 @@ class LibraryRepository @Inject constructor(
     /**
      * Full sync for a library: compare versions, fetch stale batches, update cache.
      */
-    suspend fun syncAndFetch(libraryId: String) {
+    suspend fun syncAndFetch(libraryId: String, libraryType: Byte = LibraryType.Movies) {
         _syncState.value = SyncState.Syncing
 
         try {
+            // Series libraries: the bundle endpoint returns series references
+            // wrapped in the same BatchFetchResponse format.  Skip the
+            // incremental sync protocol and fetch the full bundle directly.
+            if (libraryType == LibraryType.Series) {
+                val bundleBytes = fetchLibraryBundle(libraryId)
+                if (bundleBytes != null) {
+                    cache.writeMovieBatchVersioned(libraryId, 0, 1, bundleBytes)
+                    loadFromCache(libraryId)
+                    _syncState.value = SyncState.Ready
+                } else {
+                    _syncState.value = SyncState.Error("Failed to fetch series library")
+                }
+                return
+            }
+
             // Step 1: Get cached batch versions
             val cachedVersions = cache.getCachedMovieBatchVersions(libraryId)
 
@@ -163,6 +179,31 @@ class LibraryRepository @Inject constructor(
             _currentMedia.value = MediaAccessor(buffer)
         }
     }
+
+    // ── Bundle fetch (series libraries) ───────────────────────────
+
+    /**
+     * Fetch the full library media bundle as raw FlatBuffer bytes.
+     *
+     * For series libraries the server wraps series references into a
+     * [BatchFetchResponse] so the same [MediaAccessor] can read them.
+     */
+    private suspend fun fetchLibraryBundle(libraryId: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("${serverConfig.serverUrl}${FerrexApiClient.Companion.Routes.movieBatchesBundle(libraryId)}")
+                    .addHeader("Accept", "application/x-flatbuffers")
+                    .get()
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext null
+                response.body?.bytes()
+            } catch (_: Exception) {
+                null
+            }
+        }
 
     // ── HTTP helpers for batch protocol ─────────────────────────────
 

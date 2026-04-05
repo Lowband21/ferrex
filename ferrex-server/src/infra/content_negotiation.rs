@@ -44,7 +44,9 @@ pub enum AcceptFormat {
 /// MIME type constants.
 pub mod mime {
     pub const FLATBUFFERS: &str = "application/x-flatbuffers";
-    pub const RKYV: &str = "application/x-rkyv";
+    /// The canonical rkyv MIME type. Desktop player historically uses
+    /// `application/octet-stream` — both are accepted in content negotiation.
+    pub const RKYV: &str = "application/octet-stream";
     pub const JSON: &str = "application/json";
 }
 
@@ -66,7 +68,9 @@ where
         // are unambiguous and the full quality-value parsing isn't needed.
         let format = if accept.contains(mime::FLATBUFFERS) {
             AcceptFormat::FlatBuffers
-        } else if accept.contains(mime::RKYV) {
+        } else if accept.contains("octet-stream") || accept.contains("x-rkyv") {
+            // Match both `application/octet-stream` (desktop player) and
+            // `application/x-rkyv` (explicit rkyv MIME) as rkyv format.
             AcceptFormat::Rkyv
         } else {
             // Default to JSON for browser, curl, and unknown clients

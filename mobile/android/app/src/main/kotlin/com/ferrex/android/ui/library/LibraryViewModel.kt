@@ -9,7 +9,9 @@ import com.ferrex.android.core.library.MediaAccessor
 import com.ferrex.android.core.library.SyncState
 import com.ferrex.android.core.library.toUuidString
 import dagger.hilt.android.lifecycle.HiltViewModel
+import ferrex.common.LibraryType
 import ferrex.media.MovieReference
+import ferrex.media.SeriesReference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,10 +42,14 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    fun selectLibrary(libraryId: String) {
+    private val _selectedLibraryType = MutableStateFlow<Byte>(LibraryType.Movies)
+    val selectedLibraryType: StateFlow<Byte> = _selectedLibraryType.asStateFlow()
+
+    fun selectLibrary(libraryId: String, libraryType: Byte = LibraryType.Movies) {
         _selectedLibraryId.value = libraryId
+        _selectedLibraryType.value = libraryType
         viewModelScope.launch {
-            repository.syncAndFetch(libraryId)
+            repository.syncAndFetch(libraryId, libraryType)
         }
     }
 
@@ -56,6 +62,20 @@ class LibraryViewModel @Inject constructor(
             return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
         }
         movie.details?.posterPath?.let { path ->
+            return "https://image.tmdb.org/t/p/w342$path"
+        }
+        return null
+    }
+
+    /**
+     * Build a poster URL from a series reference.
+     * Same fallback chain as movies: IID → TMDB CDN.
+     */
+    fun posterUrlForSeries(series: SeriesReference): String? {
+        series.details?.primaryPosterIid?.let { iid ->
+            return "${serverConfig.serverUrl}/api/v1/images/iid/${iid.toUuidString()}"
+        }
+        series.details?.posterPath?.let { path ->
             return "https://image.tmdb.org/t/p/w342$path"
         }
         return null

@@ -1,15 +1,22 @@
-//! FlatBuffers serialization for movie-batch fetch responses.
+//! FlatBuffers serialization for batch fetch responses.
 //!
 //! These functions produce the wire format consumed by mobile clients for the
 //! `POST /movie-batches:fetch` and `GET /movie-batches/bundle` endpoints.
 //! The server cache stores source `MovieReference` structs per batch so that
 //! FlatBuffers can be built without re-querying the database.
+//!
+//! Series libraries use the same `BatchFetchResponse` envelope with
+//! `SeriesReference` items inside the `Media` union, via
+//! [`serialize_series_batch_fetch_response`].
+//!
+//! Per-series bundles (series + seasons + episodes) use
+//! [`serialize_series_bundle`].
 
 use flatbuffers::FlatBufferBuilder;
 
 use crate::conversions::media::{
-    build_movie_reference, build_series_reference, build_season_reference,
-    build_episode_reference,
+    build_episode_reference, build_movie_reference, build_season_reference,
+    build_series_reference,
 };
 use crate::fb::library as fb_lib;
 use crate::fb::media as fb_media;
@@ -89,12 +96,19 @@ pub fn serialize_single_batch(batch: &BatchInput<'_>) -> Vec<u8> {
     }])
 }
 
+// ---------------------------------------------------------------------------
+// Series support
+// ---------------------------------------------------------------------------
+
 /// Serialize a series bundle (series + seasons + episodes) as a FlatBuffers
 /// `BatchFetchResponse`.
 ///
 /// All items are packed into a single `MediaBatchData` with `batch_id = 0`
 /// and `version = 0`. The series is first, then seasons, then episodes —
 /// each wrapped in a `Media` union with the appropriate `MediaVariant`.
+///
+/// Used by the per-series bundle endpoint
+/// `GET /libraries/{id}/series-bundles/{series_id}`.
 pub fn serialize_series_bundle(
     series: &ferrex_model::Series,
     seasons: &[ferrex_model::SeasonReference],
@@ -149,6 +163,48 @@ pub fn serialize_series_bundle(
             items: Some(items),
         },
     );
+
+    let batches_vec = builder.create_vector(&[batch]);
+
+    let response = fb_lib::BatchFetchResponse::create(
+        &mut builder,
+        &fb_lib::BatchFetchResponseArgs {
+            batches: Some(batches_vec),
+        },
+    );
+
+    builder.finish(response, None);
+    builder.finished_data().to_vec()
+}
+
+/// Serialize a list of series references into a `BatchFetchResponse`.
+///
+/// All series are placed into a single synthetic batch (batch_id=0, version=1).
+/// This allows mobile clients to use the same `MediaAccessor` / grid logic
+/// for both movie and series libraries.
+///
+/// Used by the series library grid bundle endpoint.
+pub fn serialize_series_batch_fetch_response(series: &[ferrex_model::Series]) -> Vec<u8> {
+    let mut builder = FlatBufferBuilder::with_capacity(1024 * series.len().max(1));
+
+    let media_offsets: Vec<_> = series
+        .iter()
+        .map(|s| {
+            let series_off = build_series_reference(&mut builder, s);
+            fb_media::Media::create(&mut builder, &fb_media::MediaArgs {
+                variant_type: fb_media::MediaVariant::SeriesReference,
+                variant: Some(series_off.as_union_value()),
+            })
+        })
+        .collect();
+
+    let items = builder.create_vector(&media_offsets);
+
+    let batch = fb_lib::MediaBatchData::create(&mut builder, &fb_lib::MediaBatchDataArgs {
+        batch_id: 0,
+        version: 1,
+        items: Some(items),
+    });
 
     let batches_vec = builder.create_vector(&[batch]);
 
