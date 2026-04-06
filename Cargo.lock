@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-contracts"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "ferrex-model",
  "log",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-core"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-model"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "chrono",
  "rkyv 0.8.15",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-player"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-server"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "ferrexctl"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4181,9 +4181,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "libc"
-version = "0.2.183"
+version = "0.2.184"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -9640,9 +9640,9 @@ checksum = "e01738255b5a16e78bbb83e7fbba0a1e7dd506905cfc53f4622d89015a03fbb5"
 
 [[package]]
 name = "yoke"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72d6e5c6afb84d73944e5cedb052c4680d5657337201555f9f2a16b7406d4954"
+checksum = "abe8c5fda708d9ca3df187cae8bfb9ceda00dd96231bed36e445a1a48e66f9ca"
 dependencies = [
  "stable_deref_trait",
  "yoke-derive",
@@ -9651,9 +9651,9 @@ dependencies = [
 
 [[package]]
 name = "yoke-derive"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b659052874eb698efe5b9e8cf382204678a0086ebf46982b79d6ca3182927e5d"
+checksum = "de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e"
 dependencies = [
  "proc-macro2",
  "quote",
