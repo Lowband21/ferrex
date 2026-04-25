@@ -21,6 +21,28 @@
 - **JDK 17+** (bundled with Android Studio)
 - **Android Emulator** (ARM64 images on Apple Silicon, x86_64 on Intel)
 - Physical Android device recommended but not required for v1 development
+- **FlatBuffers compiler** (`flatc` 25.12.19) for regenerating Kotlin wire types
+
+### Clean checkout build
+
+Generated Kotlin FlatBuffers sources live in
+`mobile/android/app/src/main/java/ferrex/` and are intentionally ignored by git.
+Regenerate them before any Android Gradle build from a clean checkout:
+
+```bash
+./mobile/shared/codegen/generate-kotlin.sh
+cd mobile/android
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+```
+
+If `flatc` is not installed locally and Nix is available:
+
+```bash
+nix shell nixpkgs#flatbuffers -c ./mobile/shared/codegen/generate-kotlin.sh
+```
+
+Machine-specific Gradle properties, such as NixOS `aapt2` overrides, should live
+in `~/.gradle/gradle.properties` rather than `mobile/android/gradle.properties`.
 
 ### Emulator Notes
 - On Apple Silicon (M4 MacBook Pro): use ARM64 system images. Performance is
@@ -34,80 +56,29 @@
 
 ```
 mobile/android/
-├── build.gradle.kts                    # Root build file
-├── settings.gradle.kts                 # Module declarations, version catalog
+├── README.md                            # Build, codegen, lint, and CI notes
+├── build.gradle.kts                     # Root build file
+├── settings.gradle.kts                  # Module declarations, version catalog
 ├── gradle/
-│   └── libs.versions.toml              # Version catalog
-├── app/                                 # Main application module
+│   └── libs.versions.toml               # Version catalog
+├── app/                                  # Main application module
 │   ├── build.gradle.kts
+│   ├── lint.xml                          # Generated-source lint suppression scope
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml
+│       │   ├── java/ferrex/              # flatc-generated Kotlin types (ignored)
 │       │   ├── kotlin/com/ferrex/android/
-│       │   │   ├── FerrexApplication.kt         # Application subclass, DI setup
-│       │   │   ├── MainActivity.kt              # Single-activity Compose host
-│       │   │   ├── navigation/
-│       │   │   │   ├── FerrexNavGraph.kt        # Navigation graph definition
-│       │   │   │   └── Routes.kt                # Sealed class route definitions
-│       │   │   ├── core/
-│       │   │   │   ├── api/
-│       │   │   │   │   ├── FerrexApiClient.kt         # OkHttp + FlatBuffers
-│       │   │   │   │   ├── ContentNegotiation.kt      # Accept header handling
-│       │   │   │   │   ├── AuthInterceptor.kt         # Token injection interceptor
-│       │   │   │   │   └── generated/                  # flatc-generated Kotlin types
-│       │   │   │   ├── auth/
-│       │   │   │   │   ├── AuthManager.kt             # Token lifecycle, refresh
-│       │   │   │   │   ├── EncryptedStorage.kt        # EncryptedSharedPreferences
-│       │   │   │   │   └── SessionState.kt            # StateFlow-based auth state
-│       │   │   │   ├── library/
-│       │   │   │   │   ├── LibraryRepository.kt       # Batch sync, caching
-│       │   │   │   │   ├── LibraryCache.kt            # Disk-backed FlatBuffer cache
-│       │   │   │   │   └── MediaAccessor.kt           # Zero-copy field access
-│       │   │   │   ├── media/
-│       │   │   │   │   └── WatchProgressTracker.kt    # Background progress reporting
-│       │   │   │   ├── search/
-│       │   │   │   │   └── SearchService.kt           # Debounced search
-│       │   │   │   └── image/
-│       │   │   │       ├── ImagePipeline.kt           # Coil integration
-│       │   │   │       └── BlobUrlBuilder.kt          # /images/blob/{token} URLs
-│       │   │   └── ui/
-│       │   │       ├── library/
-│       │   │       │   ├── LibraryGridScreen.kt       # Poster grid (LazyVerticalGrid)
-│       │   │       │   ├── PosterCard.kt              # Individual poster composable
-│       │   │       │   ├── SortFilterBar.kt
-│       │   │       │   └── LibraryViewModel.kt
-│       │   │       ├── detail/
-│       │   │       │   ├── MovieDetailScreen.kt
-│       │   │       │   ├── SeriesDetailScreen.kt
-│       │   │       │   ├── SeasonScreen.kt
-│       │   │       │   └── DetailViewModel.kt
-│       │   │       ├── player/
-│       │   │       │   ├── PlayerScreen.kt            # ExoPlayer Compose wrapper
-│       │   │       │   ├── PlayerControls.kt          # Custom overlay
-│       │   │       │   └── PlayerViewModel.kt
-│       │   │       ├── search/
-│       │   │       │   ├── SearchScreen.kt
-│       │   │       │   └── SearchViewModel.kt
-│       │   │       ├── auth/
-│       │   │       │   ├── ServerConnectScreen.kt
-│       │   │       │   ├── LoginScreen.kt
-│       │   │       │   └── AuthViewModel.kt
-│       │   │       ├── home/
-│       │   │       │   ├── HomeScreen.kt
-│       │   │       │   └── HomeViewModel.kt
-│       │   │       └── components/
-│       │   │           ├── AsyncPosterImage.kt
-│       │   │           └── LoadingState.kt
+│       │   │   ├── FerrexApplication.kt  # Application subclass, DI setup
+│       │   │   ├── MainActivity.kt       # Single-activity Compose host
+│       │   │   ├── core/                 # API, auth, cache, playback helpers
+│       │   │   ├── navigation/           # Navigation graph and route definitions
+│       │   │   └── ui/                   # Compose screens and components
 │       │   └── res/
 │       │       ├── values/
 │       │       └── drawable/
 │       └── test/                         # Unit tests
 │           └── kotlin/com/ferrex/android/
-│               ├── core/
-│               │   ├── ApiClientTest.kt
-│               │   ├── AuthManagerTest.kt
-│               │   └── LibraryRepositoryTest.kt
-│               └── ui/
 └── tv/                                   # Android TV module (DEFERRED)
     └── ... (future)
 ```
@@ -262,6 +233,24 @@ fun PosterCard(movie: MovieAccessor, apiClient: FerrexApiClient) {
 
 Coil's disk cache respects HTTP cache headers. Content-addressed blob URLs
 with `Cache-Control: immutable` are cached permanently.
+
+---
+
+## CI and Lint
+
+Android CI lives in `.github/workflows/android.yml`. It is designed to validate a
+clean checkout by installing `flatc` 25.12.19, regenerating Kotlin FlatBuffers
+sources, then running:
+
+```bash
+cd mobile/android
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace
+```
+
+Generated Kotlin remains untracked. Android lint should stay enabled for app
+code; `app/lint.xml` scopes `SuspiciousIndentation` suppression to
+`src/main/java/ferrex` because `flatc --kotlin` emits generated accessors that
+trigger false positives.
 
 ---
 
