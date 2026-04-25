@@ -21,6 +21,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "device"
+
+    productFlavors {
+        create("mobile") {
+            dimension = "device"
+            isDefault = true
+        }
+        create("tv") {
+            dimension = "device"
+            applicationIdSuffix = ".tv"
+            versionNameSuffix = "-tv"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -60,10 +74,14 @@ android {
         lintConfig = file("lint.xml")
     }
 
-    // Include generated FlatBuffers Kotlin types from codegen
+    // Kotlin source roots for shared and TV flavor code.
+    // Include generated FlatBuffers Kotlin types from codegen.
     sourceSets {
         getByName("main") {
             java.srcDirs("src/main/java", "src/main/kotlin")
+        }
+        getByName("tv") {
+            java.srcDirs("src/tv/kotlin")
         }
     }
 }
