@@ -86,6 +86,8 @@ private enum class AspectRatioMode(
 fun PlayerScreen(
     viewModel: PlayerViewModel,
     okHttpClient: OkHttpClient,
+    useBuiltInController: Boolean = true,
+    onPlayerReady: (Player) -> Unit = {},
 ) {
     // Enter immersive fullscreen: hides status bar + nav bar, locks landscape,
     // keeps screen on.  Automatically restored when this composable leaves
@@ -127,6 +129,8 @@ fun PlayerScreen(
                     onError = { message, positionMs ->
                         viewModel.onPlayerError(message, positionMs)
                     },
+                    useBuiltInController = useBuiltInController,
+                    onPlayerReady = onPlayerReady,
                 )
             }
         }
@@ -178,6 +182,8 @@ private fun PlayerContent(
     onPlaybackExit: (positionMs: Long, durationMs: Long) -> Unit,
     onPlaybackEnded: (durationMs: Long) -> Unit,
     onError: (message: String, lastPositionMs: Long) -> Unit,
+    useBuiltInController: Boolean = true,
+    onPlayerReady: (Player) -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -239,6 +245,7 @@ private fun PlayerContent(
             .build()
             .also { player ->
                 player.addAnalyticsListener(PlaybackDiagnostics())
+                onPlayerReady(player)
             }
     }
 
@@ -361,13 +368,13 @@ private fun PlayerContent(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = true
+                    useController = useBuiltInController
 
                     // Show the CC button in the controller for subtitle
                     // track selection.  ExoPlayer's default controller
                     // renders it as a standard closed-caption icon that
                     // opens a track-picker bottom sheet.
-                    setShowSubtitleButton(true)
+                    setShowSubtitleButton(useBuiltInController)
 
                     // Sync our Compose overlay visibility with the
                     // controller's show/hide animation.
