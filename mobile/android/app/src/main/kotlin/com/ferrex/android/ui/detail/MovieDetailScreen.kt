@@ -235,7 +235,7 @@ private fun MovieDetailContent(
                 ),
             )
         },
-    ) { _ ->
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
