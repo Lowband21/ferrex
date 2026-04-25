@@ -217,8 +217,17 @@ private fun MovieDetailContent(
             TopAppBar(
                 title = {},
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color.Black.copy(alpha = 0.36f)),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -226,53 +235,22 @@ private fun MovieDetailContent(
                 ),
             )
         },
-    ) { padding ->
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState),
         ) {
-            // Backdrop image
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            ) {
-                if (backdropUrl != null) {
-                    AsyncImage(
-                        model = backdropUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                // Gradient overlay
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    MaterialTheme.colorScheme.background,
-                                ),
-                                startY = 200f,
-                            ),
-                        ),
-                )
-            }
+            MovieHero(
+                title = movie.title,
+                tagline = details?.tagline,
+                backdropUrl = backdropUrl,
+                posterUrl = posterUrl,
+            )
 
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                // Title
-                Text(
-                    text = movie.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
+                Spacer(Modifier.height(14.dp))
 
-                Spacer(Modifier.height(4.dp))
-
-                // Metadata row: year, runtime, rating
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -301,7 +279,6 @@ private fun MovieDetailContent(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Watch status + play button
                 WatchStatusSection(
                     watchProgress = watchProgress,
                     isSubmittingWatchAction = isSubmittingWatchAction,
@@ -312,20 +289,6 @@ private fun MovieDetailContent(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Tagline
-                details?.tagline?.let { tagline ->
-                    if (tagline.isNotBlank()) {
-                        Text(
-                            text = tagline,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
-
-                // Overview
                 details?.overview?.let { overview ->
                     if (overview.isNotBlank()) {
                         Text(
@@ -336,7 +299,6 @@ private fun MovieDetailContent(
                     }
                 }
 
-                // Genres
                 val genreCount = details?.genresLength ?: 0
                 if (genreCount > 0) {
                     SectionHeader("Genres")
@@ -351,7 +313,6 @@ private fun MovieDetailContent(
                     Spacer(Modifier.height(16.dp))
                 }
 
-                // Cast
                 val castCount = details?.castLength ?: 0
                 if (castCount > 0) {
                     CastSection(
@@ -362,11 +323,102 @@ private fun MovieDetailContent(
                     Spacer(Modifier.height(16.dp))
                 }
 
-                // Technical metadata
                 TechnicalMetadataSection(movie = movie)
 
-                // Bottom spacing
                 Spacer(Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MovieHero(
+    title: String,
+    tagline: String?,
+    backdropUrl: String?,
+    posterUrl: String?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 10f)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        if (backdropUrl != null) {
+            AsyncImage(
+                model = backdropUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.12f),
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.background,
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.62f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, end = 16.dp, bottom = 18.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (posterUrl != null) {
+                AsyncImage(
+                    model = posterUrl,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(86.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!tagline.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = tagline,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.86f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -380,21 +432,25 @@ private fun WatchStatusSection(
     onToggleWatched: () -> Unit,
     onPlay: (Long?) -> Unit,
 ) {
-    val shouldResume = watchProgress?.let {
+    val isInProgress = watchProgress?.let {
         !it.completed && it.progress > 0f && it.duration > 0.0
     } == true
     val showStartFromBeginning = watchProgress?.let {
         it.completed || (it.progress > 0f && it.duration > 0.0)
     } == true
 
-    Column {
-        if (watchProgress != null) {
-            if (watchProgress.completed) {
-                // Completed indicator
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        when {
+            watchProgress?.completed == true -> {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Icon(
                         Icons.Default.CheckCircle,
@@ -405,25 +461,44 @@ private fun WatchStatusSection(
                     Text(
                         text = "Watched",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
-            } else if (watchProgress.progress > 0f) {
-                // In-progress indicator
-                Column(modifier = Modifier.padding(bottom = 8.dp)) {
+            }
+            isInProgress -> {
+                val progress = checkNotNull(watchProgress)
+                val remaining = formatTime(
+                    (progress.duration - progress.position).coerceAtLeast(0.0),
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        )
+                        .padding(12.dp),
+                ) {
                     Text(
-                        text = "${formatTime(watchProgress.position)} / ${formatTime(watchProgress.duration)}",
+                        text = "Resume from ${formatTime(progress.position)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "$remaining remaining",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
-                        progress = { watchProgress.progress },
+                        progress = { progress.progress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(3.dp)
+                            .height(4.dp)
                             .clip(RoundedCornerShape(2.dp)),
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        trackColor = MaterialTheme.colorScheme.surface,
                     )
                 }
             }
@@ -431,30 +506,38 @@ private fun WatchStatusSection(
 
         Button(
             onClick = { onPlay(null) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text(
-                if (shouldResume) "Resume" else "Play",
+                text = if (isInProgress) "Resume playback" else "Play movie",
+                style = MaterialTheme.typography.labelLarge,
             )
         }
 
         if (showStartFromBeginning) {
-            Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { onPlay(0L) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
             ) {
                 Text("Start from beginning")
             }
         }
 
-        Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = onToggleWatched,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
             enabled = !isSubmittingWatchAction,
+            shape = RoundedCornerShape(14.dp),
         ) {
             Text(
                 if (isSubmittingWatchAction) {
@@ -463,7 +546,7 @@ private fun WatchStatusSection(
                     "Mark unwatched"
                 } else {
                     "Mark watched"
-                }
+                },
             )
         }
     }
@@ -475,7 +558,6 @@ private fun CastSection(
     castCount: Int,
     castPhotoUrl: (CastMember) -> String?,
 ) {
-    // Sort cast: members with photos first, preserving original order within each group
     val sortedCastIndices = (0 until castCount)
         .sortedBy { i ->
             val m = details?.cast(i)
@@ -555,7 +637,6 @@ private fun TechnicalMetadataSection(movie: MovieReference) {
 
     val items = buildList {
         metadata?.let { meta ->
-            // Video resolution
             val width = meta.width.toInt()
             val height = meta.height.toInt()
             if (width > 0 && height > 0) {
@@ -569,20 +650,15 @@ private fun TechnicalMetadataSection(movie: MovieReference) {
                 add("Resolution" to "${width}×${height} ($label)")
             }
 
-            // Video codec
             meta.videoCodec?.let { if (it.isNotBlank()) add("Video" to it) }
-
-            // Audio codec
             meta.audioCodec?.let { if (it.isNotBlank()) add("Audio" to it) }
         }
 
-        // Container format from filename
         file.path?.let { path ->
             val ext = path.substringAfterLast('.', "").uppercase()
             if (ext.isNotBlank()) add("Container" to ext)
         }
 
-        // File size
         val sizeBytes = file.size.toLong()
         if (sizeBytes > 0) {
             add("Size" to formatFileSize(sizeBytes))
@@ -627,8 +703,12 @@ internal fun SectionHeader(text: String) {
 internal fun MetadataChip(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.bodyMedium,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
     )
 }
 

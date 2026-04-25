@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -52,10 +53,10 @@ fun PosterCard(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(2f / 3f)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (posterUrl != null) {
@@ -66,48 +67,43 @@ fun PosterCard(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                // Placeholder background
+                PosterPlaceholder(title = title)
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.28f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+
+            if (isCompleted) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(Color.Black.copy(alpha = 0.62f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = title.take(1).uppercase(),
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Watched",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
 
-            // Completed overlay
-            if (isCompleted) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = "Watched",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(20.dp),
-                )
-            }
-
-            // Progress bar overlay
-            if (progress != null && progress > 0f && !isCompleted) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .align(Alignment.BottomCenter),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = Color.Black.copy(alpha = 0.5f),
-                )
-            }
-
-            // Title overlay with gradient
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,20 +112,71 @@ fun PosterCard(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.7f),
+                                Color.Black.copy(alpha = 0.50f),
+                                Color.Black.copy(alpha = 0.86f),
                             ),
                         ),
                     )
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(
+                        start = 10.dp,
+                        top = 34.dp,
+                        end = 10.dp,
+                        bottom = 12.dp,
+                    ),
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+
+            if (progress != null && progress > 0f && !isCompleted) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .align(Alignment.BottomCenter),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.White.copy(alpha = 0.24f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PosterPlaceholder(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = title.take(1).uppercase(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
