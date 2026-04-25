@@ -164,7 +164,10 @@ pub async fn get_movie_reference_batch_bundle_handler(
     let uow = state.unit_of_work();
     let format = accept_to_wire_format(accept);
 
-    info!("Fetching movie batch bundle for library {} (format: {:?})", library_id, format);
+    info!(
+        "Fetching movie batch bundle for library {} (format: {:?})",
+        library_id, format
+    );
 
     // For FlatBuffers requests: if this is a series library, return series
     // references wrapped in the same BatchFetchResponse envelope.  The desktop
@@ -184,12 +187,12 @@ pub async fn get_movie_reference_batch_bundle_handler(
                 .get_library_series(&library_id)
                 .await
                 .map_err(|err| {
-                    error!(
-                        "Failed to get series for library {}: {}",
-                        library_id, err
-                    );
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+                error!(
+                    "Failed to get series for library {}: {}",
+                    library_id, err
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
             info!(
                 "Series library {} (FlatBuffers): {} series",
@@ -283,24 +286,23 @@ pub async fn post_movie_reference_batch_sync_handler(
         removals: removals.clone(),
     });
 
-    Ok(cn::respond(
-        accept,
-        &json_data,
-        || {
-            let fb_updates: Vec<_> = updates
-                .iter()
-                .map(|e| ferrex_flatbuffers::conversions::batch_sync::BatchUpdateEntry {
+    Ok(cn::respond(accept, &json_data, || {
+        let fb_updates: Vec<_> = updates
+            .iter()
+            .map(|e| {
+                ferrex_flatbuffers::conversions::batch_sync::BatchUpdateEntry {
                     batch_id: e.batch_id.as_u32(),
                     version: e.version,
-                })
-                .collect();
-            let fb_removals: Vec<u32> = removals.iter().map(|id| id.as_u32()).collect();
-            ferrex_flatbuffers::conversions::batch_sync::serialize_batch_sync_response(
+                }
+            })
+            .collect();
+        let fb_removals: Vec<u32> =
+            removals.iter().map(|id| id.as_u32()).collect();
+        ferrex_flatbuffers::conversions::batch_sync::serialize_batch_sync_response(
                 &fb_updates,
                 &fb_removals,
             )
-        },
-    ))
+    }))
 }
 
 /// Map `AcceptFormat` to cache `WireFormat`.
@@ -342,5 +344,8 @@ pub async fn post_movie_reference_batch_fetch_handler(
         .get_batch_subset(uow, library_id, batch_ids, format)
         .await?;
 
-    Ok(([(header::CONTENT_TYPE, wire_format_content_type(format))], bytes))
+    Ok((
+        [(header::CONTENT_TYPE, wire_format_content_type(format))],
+        bytes,
+    ))
 }

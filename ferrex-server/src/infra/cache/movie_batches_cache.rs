@@ -492,7 +492,9 @@ fn stable_hash_u64(bytes: &[u8]) -> u64 {
 }
 
 /// Serialize an empty rkyv bundle.
-fn serialize_empty_rkyv_bundle(library_id: LibraryId) -> Result<Vec<u8>, StatusCode> {
+fn serialize_empty_rkyv_bundle(
+    library_id: LibraryId,
+) -> Result<Vec<u8>, StatusCode> {
     let response = MovieReferenceBatchBundleResponse {
         library_id,
         batches: Vec::new(),
@@ -535,7 +537,9 @@ fn assemble_fb_bundle(
     versions: &[MovieBatchVersionRecord],
     batches: &HashMap<MovieBatchId, CachedMovieBatch>,
 ) -> Bytes {
-    use ferrex_flatbuffers::conversions::batch_data::{BatchInput, serialize_batch_fetch_response};
+    use ferrex_flatbuffers::conversions::batch_data::{
+        BatchInput, serialize_batch_fetch_response,
+    };
 
     let inputs: Vec<BatchInput<'_>> = versions
         .iter()
@@ -585,8 +589,10 @@ async fn build_movie_batches(
         movies_by_batch.entry(batch_id).or_default().push(movie);
     }
 
-    let mut build_inputs: Vec<(MovieBatchId, Vec<ferrex_model::MovieReference>)> =
-        Vec::with_capacity(rebuild_ids.len());
+    let mut build_inputs: Vec<(
+        MovieBatchId,
+        Vec<ferrex_model::MovieReference>,
+    )> = Vec::with_capacity(rebuild_ids.len());
     for batch_id in rebuild_ids {
         build_inputs.push((
             *batch_id,
@@ -605,10 +611,10 @@ async fn build_movie_batches(
                     movies: movies.clone(),
                 };
 
-                let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&response)
-                    .map_err(|_err| {
-                        "movie batch serialize failed".to_string()
-                    })?;
+                let rkyv_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(
+                    &response,
+                )
+                .map_err(|_err| "movie batch serialize failed".to_string())?;
                 let hash = stable_hash_u64(rkyv_bytes.as_slice());
 
                 Ok::<_, String>(BuiltMovieBatch {

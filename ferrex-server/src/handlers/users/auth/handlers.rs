@@ -157,19 +157,18 @@ pub async fn refresh(
 }
 
 /// Build a `NegotiatedResponse` for an `AuthToken`.
-fn respond_auth_token(accept: AcceptFormat, token: &AuthToken) -> NegotiatedResponse {
-    cn::respond(
-        accept,
-        &ApiResponse::success(token),
-        || {
-            ferrex_flatbuffers::conversions::auth::serialize_auth_token(
-                &token.access_token,
-                &token.refresh_token,
-                token.expires_in,
-                token.session_id.as_ref(),
-            )
-        },
-    )
+fn respond_auth_token(
+    accept: AcceptFormat,
+    token: &AuthToken,
+) -> NegotiatedResponse {
+    cn::respond(accept, &ApiResponse::success(token), || {
+        ferrex_flatbuffers::conversions::auth::serialize_auth_token(
+            &token.access_token,
+            &token.refresh_token,
+            token.expires_in,
+            token.session_id.as_ref(),
+        )
+    })
 }
 
 pub async fn logout(

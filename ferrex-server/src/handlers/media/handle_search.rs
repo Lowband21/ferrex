@@ -46,40 +46,41 @@ pub async fn query_media_public_handler(
     Ok(respond_media_query(accept, &results))
 }
 
-fn respond_media_query(accept: AcceptFormat, results: &[MediaWithStatus]) -> NegotiatedResponse {
-    cn::respond(
-        accept,
-        &ApiResponse::success(results),
-        || {
-            use ferrex_flatbuffers::conversions::media_query::MediaQueryHit;
+fn respond_media_query(
+    accept: AcceptFormat,
+    results: &[MediaWithStatus],
+) -> NegotiatedResponse {
+    cn::respond(accept, &ApiResponse::success(results), || {
+        use ferrex_flatbuffers::conversions::media_query::MediaQueryHit;
 
-            let hits: Vec<MediaQueryHit> = results
-                .iter()
-                .map(|item| {
-                    let media_uuid = *item.id.as_uuid();
-                    let (position, duration, completed, last_watched) =
-                        match &item.watch_status {
-                            Some(ItemWatchStatus::InProgress(ip)) => {
-                                (ip.position as f64, ip.duration as f64, false, ip.last_watched)
-                            }
-                            Some(ItemWatchStatus::Completed(_)) => {
-                                (0.0, 0.0, true, 0)
-                            }
-                            None => (0.0, 0.0, false, 0),
-                        };
-                    MediaQueryHit {
-                        media_uuid,
-                        position,
-                        duration,
-                        completed,
-                        last_watched_secs: last_watched,
-                    }
-                })
-                .collect();
+        let hits: Vec<MediaQueryHit> = results
+            .iter()
+            .map(|item| {
+                let media_uuid = *item.id.as_uuid();
+                let (position, duration, completed, last_watched) = match &item
+                    .watch_status
+                {
+                    Some(ItemWatchStatus::InProgress(ip)) => (
+                        ip.position as f64,
+                        ip.duration as f64,
+                        false,
+                        ip.last_watched,
+                    ),
+                    Some(ItemWatchStatus::Completed(_)) => (0.0, 0.0, true, 0),
+                    None => (0.0, 0.0, false, 0),
+                };
+                MediaQueryHit {
+                    media_uuid,
+                    position,
+                    duration,
+                    completed,
+                    last_watched_secs: last_watched,
+                }
+            })
+            .collect();
 
-            ferrex_flatbuffers::conversions::media_query::serialize_media_query_results(&hits)
-        },
-    )
+        ferrex_flatbuffers::conversions::media_query::serialize_media_query_results(&hits)
+    })
 }
 
 fn clamp_query_limit(query: &mut MediaQuery) {

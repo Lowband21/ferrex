@@ -147,7 +147,9 @@ pub async fn get_libraries_with_media_handler(
         let elapsed = request_started.elapsed();
         info!(
             "Libraries (FlatBuffers): {} libraries, {} bytes, {:?}",
-            libraries.len(), fb_bytes.len(), elapsed
+            libraries.len(),
+            fb_bytes.len(),
+            elapsed
         );
         return Ok(NegotiatedResponse::flatbuffers(fb_bytes).into_response());
     }
@@ -158,7 +160,8 @@ pub async fn get_libraries_with_media_handler(
         let elapsed = request_started.elapsed();
         info!(
             "Libraries (JSON): {} libraries, {:?}",
-            libraries.len(), elapsed
+            libraries.len(),
+            elapsed
         );
         return Ok(NegotiatedResponse::json(&json).into_response());
     }
@@ -267,7 +270,9 @@ pub async fn get_libraries_with_media_handler(
         total_elapsed
     );
 
-    Ok::<_, StatusCode>(NegotiatedResponse::rkyv(bytes.into_vec()).into_response())
+    Ok::<_, StatusCode>(
+        NegotiatedResponse::rkyv(bytes.into_vec()).into_response(),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -650,9 +655,9 @@ pub async fn list_libraries_handler(
     State(state): State<AppState>,
     accept: crate::infra::content_negotiation::AcceptFormat,
 ) -> crate::infra::content_negotiation::NegotiatedResponse {
-    use crate::infra::content_negotiation::NegotiatedResponse;
     #[allow(unused_imports)]
     use crate::infra::content_negotiation as cn;
+    use crate::infra::content_negotiation::NegotiatedResponse;
 
     info!("Listing all libraries (format: {:?})", accept);
 
@@ -667,11 +672,9 @@ pub async fn list_libraries_handler(
                 demo_mode::filter_library_references(&state, libraries);
             info!("Found {} libraries", libraries.len());
 
-            cn::respond(
-                accept,
-                &ApiResponse::success(&libraries),
-                || ferrex_flatbuffers::conversions::library::serialize_library_reference_list(&libraries),
-            )
+            cn::respond(accept, &ApiResponse::success(&libraries), || {
+                ferrex_flatbuffers::conversions::library::serialize_library_reference_list(&libraries)
+            })
         }
         Err(e) => {
             error!("Failed to list libraries: {}", e);

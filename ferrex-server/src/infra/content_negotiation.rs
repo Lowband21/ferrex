@@ -27,8 +27,8 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 /// Recognized wire formats, ordered by preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,10 @@ where
 {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
         let accept = parts
             .headers
             .get(ACCEPT)
@@ -147,11 +150,7 @@ impl NegotiatedResponse {
 
 impl IntoResponse for NegotiatedResponse {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            [(CONTENT_TYPE, self.content_type)],
-            self.body,
-        )
+        (self.status, [(CONTENT_TYPE, self.content_type)], self.body)
             .into_response()
     }
 }
@@ -169,7 +168,9 @@ where
     F: FnOnce() -> Vec<u8>,
 {
     match accept {
-        AcceptFormat::FlatBuffers => NegotiatedResponse::flatbuffers(fb_serializer()),
+        AcceptFormat::FlatBuffers => {
+            NegotiatedResponse::flatbuffers(fb_serializer())
+        }
         AcceptFormat::Rkyv => {
             // rkyv path is handled by existing handlers — this fallback
             // produces JSON so callers that use this helper get a safe default.
@@ -210,7 +211,10 @@ where
 {
     type Rejection = Response;
 
-    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(
+        req: Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
         let is_flatbuffers = req
             .headers()
             .get(CONTENT_TYPE)

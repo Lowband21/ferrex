@@ -226,20 +226,15 @@ pub async fn check_setup_status(
     use crate::infra::content_negotiation as cn;
 
     match check_setup_status_inner(state).await {
-        Ok((status, needs_setup, registration_open)) => cn::respond(
-            accept,
-            &ApiResponse::success(status),
-            || {
+        Ok((status, needs_setup, registration_open)) => {
+            cn::respond(accept, &ApiResponse::success(status), || {
                 ferrex_flatbuffers::conversions::auth::serialize_setup_status(
                     needs_setup,
                     registration_open,
                 )
-            },
-        ),
-        Err(e) => cn::NegotiatedResponse::error(
-            e.status,
-            &e.to_string(),
-        ),
+            })
+        }
+        Err(e) => cn::NegotiatedResponse::error(e.status, &e.to_string()),
     }
 }
 
