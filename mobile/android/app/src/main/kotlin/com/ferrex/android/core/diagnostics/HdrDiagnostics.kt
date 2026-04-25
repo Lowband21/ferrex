@@ -13,7 +13,7 @@ import android.view.Window
  * Uses [DisplayManager] (API 17+) for display access — avoids the
  * deprecated Activity.getWindowManager().getDefaultDisplay() path.
  *
- * HDR type queries use the per-[Display.Mode] API on API 33+ and fall
+ * HDR type queries use the per-[Display.Mode] API on API 34+ and fall
  * back to [Display.HdrCapabilities] on older levels.
  */
 object HdrDiagnostics {
@@ -29,10 +29,10 @@ object HdrDiagnostics {
         }
 
         // ── HDR type support ────────────────────────────────────
-        // API 33+ exposes per-mode HDR types; older levels use the
-        // display-wide HdrCapabilities (deprecated in 34 but needed for 28–32).
+        // API 34+ exposes per-mode HDR types; older levels use the
+        // display-wide HdrCapabilities fallback.
         val hdrTypeNames: List<String> = when {
-            Build.VERSION.SDK_INT >= 33 ->
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
                 display.mode.supportedHdrTypes.map(::hdrTypeName)
             else -> {
                 @Suppress("DEPRECATION")

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!--
+        flatc --kotlin 25.12.19 emits multiline generated accessors that Android
+        lint reports as SuspiciousIndentation false positives. Keep this scoped
+        to reproducible generated FlatBuffers sources; do not hand-edit them.
+    -->
+    <issue id="SuspiciousIndentation">
+        <ignore path="src/main/java/ferrex" />
+    </issue>
+</lint>

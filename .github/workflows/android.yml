@@ -1,0 +1,56 @@
+name: Android CI
+
+on:
+  push:
+    paths:
+      - 'mobile/android/**'
+      - 'mobile/shared/codegen/**'
+      - 'mobile/shared/schemas/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'mobile/android/**'
+      - 'mobile/shared/codegen/**'
+      - 'mobile/shared/schemas/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build, test, and lint Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install flatc
+        run: |
+          FLATC_VERSION="25.12.19"
+          curl -fsSL "https://github.com/google/flatbuffers/releases/download/v${FLATC_VERSION}/Linux.flatc.binary.g++-13.zip" -o flatc.zip
+          sudo unzip -o flatc.zip -d /usr/local/bin/
+          sudo chmod +x /usr/local/bin/flatc
+          flatc --version
+
+      - name: Generate Kotlin FlatBuffers sources
+        run: ./mobile/shared/codegen/generate-kotlin.sh
+
+      - name: Build, unit test, and lint
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon --stacktrace

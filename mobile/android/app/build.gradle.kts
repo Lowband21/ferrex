@@ -50,6 +50,16 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.all {
+            it.useJUnitPlatform()
+        }
+    }
+
+    lint {
+        lintConfig = file("lint.xml")
+    }
+
     // Include generated FlatBuffers Kotlin types from codegen
     sourceSets {
         getByName("main") {
