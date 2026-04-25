@@ -13,17 +13,21 @@ import androidx.navigation.compose.rememberNavController
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.navigation.Route
 import com.ferrex.android.ui.auth.AuthViewModel
-import com.ferrex.android.ui.auth.LoginScreen
-import com.ferrex.android.ui.auth.ServerConnectScreen
+import com.ferrex.android.ui.detail.DetailViewModel
 import com.ferrex.android.ui.home.HomeViewModel
 import com.ferrex.android.ui.library.LibraryViewModel
 import com.ferrex.android.ui.player.PlayerViewModel
+import com.ferrex.android.ui.search.SearchViewModel
 import com.ferrex.android.ui.tv.TvHomeScreen
+import com.ferrex.android.ui.tv.TvLoginScreen
+import com.ferrex.android.ui.tv.TvMovieDetailScreen
 import com.ferrex.android.ui.tv.TvPlayerScreen
+import com.ferrex.android.ui.tv.TvSearchScreen
+import com.ferrex.android.ui.tv.TvSeriesDetailScreen
+import com.ferrex.android.ui.tv.TvServerConnectScreen
 
 private const val TV_TRANSITION_MS = 180
 
-/** Navigation graph for the TV flavor. Auth screens are reused until TV-specific auth exists. */
 @Composable
 fun TvFerrexNavGraph() {
     val navController = rememberNavController()
@@ -46,7 +50,7 @@ fun TvFerrexNavGraph() {
         popExitTransition = { fadeOut(tween(TV_TRANSITION_MS)) },
     ) {
         composable<Route.ServerConnect> {
-            ServerConnectScreen(
+            TvServerConnectScreen(
                 viewModel = authViewModel,
                 onConnected = {
                     navController.navigate(Route.Login) {
@@ -57,7 +61,7 @@ fun TvFerrexNavGraph() {
         }
 
         composable<Route.Login> {
-            LoginScreen(
+            TvLoginScreen(
                 viewModel = authViewModel,
                 onLoginSuccess = {
                     navController.navigate(Route.Home) {
@@ -71,7 +75,7 @@ fun TvFerrexNavGraph() {
         }
 
         composable<Route.Register> {
-            LoginScreen(
+            TvLoginScreen(
                 viewModel = authViewModel,
                 onLoginSuccess = {
                     navController.navigate(Route.Home) {
@@ -89,18 +93,45 @@ fun TvFerrexNavGraph() {
                 libraryViewModel = libraryViewModel,
                 homeViewModel = homeViewModel,
                 onSearchClick = {
-                    // TODO(tv): add TV search.
+                    navController.navigate(Route.Search)
                 },
                 onMovieClick = { movieId ->
-                    // TODO(tv): route through a TV detail screen.
-                    navController.navigate(Route.Player(movieId))
+                    navController.navigate(Route.MovieDetail(movieId))
                 },
-                onSeriesClick = {
-                    // TODO(tv): add TV series detail and episode picker.
+                onSeriesClick = { seriesId ->
+                    navController.navigate(Route.SeriesDetail(seriesId))
                 },
                 onContinueWatchingClick = { mediaId ->
                     navController.navigate(Route.Player(mediaId))
                 },
+            )
+        }
+
+        composable<Route.MovieDetail> {
+            val detailViewModel: DetailViewModel = hiltViewModel()
+            TvMovieDetailScreen(
+                viewModel = detailViewModel,
+                onBack = { navController.popBackStack() },
+                onPlay = { mediaId -> navController.navigate(Route.Player(mediaId)) },
+            )
+        }
+
+        composable<Route.SeriesDetail> {
+            val detailViewModel: DetailViewModel = hiltViewModel()
+            TvSeriesDetailScreen(
+                viewModel = detailViewModel,
+                onBack = { navController.popBackStack() },
+                onEpisodeClick = { mediaId -> navController.navigate(Route.Player(mediaId)) },
+            )
+        }
+
+        composable<Route.Search> {
+            val searchViewModel: SearchViewModel = hiltViewModel()
+            TvSearchScreen(
+                viewModel = searchViewModel,
+                onBack = { navController.popBackStack() },
+                onMovieClick = { movieId -> navController.navigate(Route.MovieDetail(movieId)) },
+                onSeriesClick = { seriesId -> navController.navigate(Route.SeriesDetail(seriesId)) },
             )
         }
 

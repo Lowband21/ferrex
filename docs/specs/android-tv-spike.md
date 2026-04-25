@@ -12,8 +12,8 @@ The current Android app keeps reusable auth, API, library/cache, image loading, 
 
 - `mobile` is the default flavor and keeps the phone launcher `MainActivity`.
 - `tv` adds `applicationIdSuffix = ".tv"` and `versionNameSuffix = "-tv"`.
-- `src/tv` contains the Leanback manifest overlay, `TvMainActivity`, TV navigation, TV home rows, and the TV player overlay hook.
-- `src/main` remains shared by both flavors; TV reuses shared ViewModels/services but does not route into the phone home screen.
+- `src/tv` contains the Leanback manifest overlay, `TvMainActivity`, TV navigation, TV auth, TV home rows, TV detail/search screens, and the TV player overlay hook.
+- `src/main` remains shared by both flavors; TV reuses shared ViewModels/services but does not route into phone home/detail/search screens.
 
 ## Build and review notes
 
