@@ -278,8 +278,17 @@ private fun SeriesDetailContent(
             TopAppBar(
                 title = {},
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color.Black.copy(alpha = 0.36f)),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -293,45 +302,15 @@ private fun SeriesDetailContent(
                 .fillMaxSize()
                 .verticalScroll(scrollState),
         ) {
-            // Backdrop area
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f),
-            ) {
-                val heroUrl = backdropUrl ?: posterUrl
-                if (heroUrl != null) {
-                    AsyncImage(
-                        model = heroUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    MaterialTheme.colorScheme.background,
-                                ),
-                                startY = 200f,
-                            ),
-                        ),
-                )
-            }
+            SeriesHero(
+                title = series.title,
+                tagline = details?.tagline,
+                backdropUrl = backdropUrl,
+                posterUrl = posterUrl,
+            )
 
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                // Title
-                Text(
-                    text = series.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(14.dp))
 
                 // Metadata row
                 Row(
@@ -590,6 +569,103 @@ private fun SeriesWatchActionsSection(
                     "Mark watched"
                 }
             )
+        }
+    }
+}
+
+/**
+ * Series hero — backdrop, poster, title overlay. Mirrors MovieHero layout.
+ */
+@Composable
+private fun SeriesHero(
+    title: String,
+    tagline: String?,
+    backdropUrl: String?,
+    posterUrl: String?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 10f)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        val heroUrl = backdropUrl ?: posterUrl
+        if (heroUrl != null) {
+            AsyncImage(
+                model = heroUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.12f),
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.background,
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.62f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, end = 16.dp, bottom = 18.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            if (posterUrl != null) {
+                AsyncImage(
+                    model = posterUrl,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(86.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!tagline.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = tagline,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.86f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }

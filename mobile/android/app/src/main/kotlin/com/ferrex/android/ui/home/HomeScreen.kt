@@ -186,14 +186,18 @@ private fun ContinueWatchingSection(
     posterUrl: (ContinueWatchingItem) -> String?,
     onClick: (ContinueWatchingItem) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+    Column(
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .padding(vertical = 12.dp),
+    ) {
         Text(
             text = "Continue Watching",
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -286,7 +290,7 @@ private fun ContinueWatchingCard(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            text = "${formatTime(remaining)} left",
+                            text = "${formatTime(remaining)} remaining",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White,
                         )
@@ -312,7 +316,7 @@ private fun ContinueWatchingCard(
             ) {
                 Text(
                     text = item.title,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
