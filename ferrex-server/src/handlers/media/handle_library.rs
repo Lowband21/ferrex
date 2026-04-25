@@ -2,7 +2,6 @@ use axum::{
     body::Bytes,
     extract::{Extension, Path, Query, State},
     http::StatusCode,
-    http::header,
     response::{IntoResponse, Json},
 };
 use ferrex_core::domain::users::user::User;
