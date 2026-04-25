@@ -8,6 +8,7 @@ use chrono::Utc;
 use ferrex_core::api::types::ApiResponse;
 use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
 use ferrex_core::domain::{users::user::User, watch::UpdateProgressRequest};
+use ferrex_core::types::files::MediaFile;
 use ferrex_model::VideoMediaType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -28,6 +29,95 @@ pub struct ProgressReport {
 pub struct StreamAuthQuery {
     #[serde(default)]
     access_token: Option<String>,
+}
+
+async fn resolve_stream_media_file(
+    state: &AppState,
+    media_id: Uuid,
+) -> Result<MediaFile, (StatusCode, String)> {
+    if let Some(media_file) = state
+        .unit_of_work()
+        .media_files_read
+        .get_by_id(&media_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error retrieving media {}: {}", media_id, e),
+            )
+        })?
+    {
+        return Ok(media_file);
+    }
+
+    let Some(file_id) = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM media_files
+        WHERE media_id = $1
+        ORDER BY discovered_at ASC, id ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(media_id)
+    .fetch_optional(state.postgres().pool())
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "Database error resolving logical media {}: {}",
+                media_id, e
+            ),
+        )
+    })?
+    else {
+        return Err((StatusCode::NOT_FOUND, "Media not found".to_string()));
+    };
+
+    state
+        .unit_of_work()
+        .media_files_read
+        .get_by_id(&file_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error retrieving media {}: {}", file_id, e),
+            )
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Media not found".to_string()))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StreamProgressTarget {
+    logical_media_id: Uuid,
+    media_type: VideoMediaType,
+    last_media_uuid: Uuid,
+}
+
+async fn resolve_stream_progress_target(
+    state: &AppState,
+    requested_media_type: VideoMediaType,
+    media_id: Uuid,
+) -> Result<StreamProgressTarget, (StatusCode, String)> {
+    let media_file = resolve_stream_media_file(state, media_id).await?;
+    let media_type = VideoMediaType::from(media_file.media_id);
+
+    if media_type != requested_media_type {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Progress media type mismatch: route requested {requested_media_type:?}, resolved {media_type:?}"
+            ),
+        ));
+    }
+
+    Ok(StreamProgressTarget {
+        logical_media_id: *media_file.media_id.as_uuid(),
+        media_type,
+        last_media_uuid: media_file.id,
+    })
 }
 
 pub async fn stream_with_progress_handler(
@@ -63,21 +153,10 @@ pub async fn stream_with_progress_handler(
         return Err((StatusCode::UNAUTHORIZED, "Missing token".into()));
     }
 
-    // Fetch media metadata
-    let media_file = state
-        .unit_of_work()
-        .media_files_read
-        .get_by_id(&media_id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error retrieving media {}: {}", media_id, e),
-            )
-        })?
-        .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, "Media not found".to_string())
-        })?;
+    // Fetch media metadata. The public playback contract accepts either the
+    // playable file id or the logical movie/episode id used by watch-state
+    // read models; logical ids are resolved to the first known playable file.
+    let media_file = resolve_stream_media_file(&state, media_id).await?;
 
     debug!(
         "Found media file: {:?} (path: {:?})",
@@ -204,17 +283,10 @@ pub async fn playback_ticket_handler(
     Path(media_id): Path<Uuid>,
 ) -> Result<axum::Json<ApiResponse<PlaybackTicketResponse>>, (StatusCode, String)>
 {
-    // Optionally ensure the requested media exists to avoid issuing tokens for unknown items
-    if state
-        .unit_of_work()
-        .media_files_read
-        .get_by_id(&media_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .is_none()
-    {
-        return Err((StatusCode::NOT_FOUND, "Media not found".into()));
-    }
+    // Optionally ensure the requested media exists to avoid issuing tokens for unknown items.
+    // Keep this aligned with streaming: callers may pass either a playable file
+    // id or a logical movie/episode id from watch-state read models.
+    resolve_stream_media_file(&state, media_id).await?;
     // Lifetime: 6 hours — long enough for extended playback/seeks
     let lifetime = chrono::Duration::hours(6);
     let token = state
@@ -239,17 +311,31 @@ pub async fn report_progress_handler(
     Path((media_type, media_id)): Path<(VideoMediaType, Uuid)>,
     Json(progress): Json<ProgressReport>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Create update request
+    if progress.position < 0.0 || progress.duration <= 0.0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid position or duration".to_string(),
+        ));
+    }
+
+    if progress.position > progress.duration {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Position cannot exceed duration".to_string(),
+        ));
+    }
+
+    let target =
+        resolve_stream_progress_target(&state, media_type, media_id).await?;
     let request = UpdateProgressRequest {
-        media_id,
-        media_type,
+        media_id: target.logical_media_id,
+        media_type: target.media_type,
         position: progress.position,
         duration: progress.duration,
         episode: None,
-        last_media_uuid: Some(media_id),
+        last_media_uuid: Some(target.last_media_uuid),
     };
 
-    // Update progress
     state
         .unit_of_work()
         .watch_status

@@ -194,6 +194,21 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
                 watch_status_handlers::clear_progress_handler,
             ),
         )
+        .route(
+            v1::watch::MOVIE_WATCHED,
+            post(watch_status_handlers::mark_movie_watched_handler)
+                .delete(watch_status_handlers::mark_movie_unwatched_handler),
+        )
+        .route(
+            v1::watch::EPISODE_WATCHED,
+            post(watch_status_handlers::mark_episode_watched_handler)
+                .delete(watch_status_handlers::mark_episode_unwatched_handler),
+        )
+        .route(
+            v1::watch::SERIES_WATCHED,
+            post(watch_status_handlers::mark_series_watched_handler)
+                .delete(watch_status_handlers::mark_series_unwatched_handler),
+        )
         // TV identity-based watch helpers
         .route(
             v1::watch::SERIES_STATE,

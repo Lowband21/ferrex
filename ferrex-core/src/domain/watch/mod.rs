@@ -17,6 +17,12 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Default completion threshold used by shared client-side watch helpers.
+///
+/// Server-side repositories may override this through server configuration,
+/// but client/local cache behavior should still treat exactly 95% as watched.
+pub const DEFAULT_COMPLETION_THRESHOLD: f32 = 0.95;
+
 /// User's complete watch state across all media
 ///
 /// Maintains two collections:
@@ -24,7 +30,7 @@ use uuid::Uuid;
 /// - `completed`: Set of completed media for efficient lookup
 ///
 /// The system automatically moves items between states based on
-/// viewing progress (95% threshold for completion).
+/// viewing progress (default 95% threshold for completion).
 #[derive(Debug, Clone)]
 pub struct UserWatchState {
     /// List of actively watching items (typically 10-50 items)
@@ -120,7 +126,7 @@ impl ItemWatchStatus {
 /// Item currently being watched
 ///
 /// Represents a single media item with viewing progress.
-/// Automatically removed when progress reaches 95%.
+/// Automatically removed when progress reaches the default 95% completion threshold.
 ///
 /// # Example
 ///
@@ -162,6 +168,45 @@ impl InProgressItem {
     pub fn to_watch_progress(&self) -> WatchProgress {
         WatchProgress::from(self)
     }
+}
+
+/// Hint describing the primary action for a continue-watching card.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinueWatchingActionHint {
+    Resume,
+    NextEpisode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinueWatchingItem {
+    /// Primary playback target for this card.
+    ///
+    /// This remains the compatibility field current clients use to start
+    /// playback directly. For series cards it points at the episode that should
+    /// be resumed/played next.
+    pub media_id: Uuid,
+    /// Logical movie/series item represented by the card.
+    #[serde(default)]
+    pub card_media_id: Option<Uuid>,
+    /// Media type of the card itself.
+    pub media_type: VideoMediaType,
+    /// Current playback position in seconds for the action target.
+    pub position: f32,
+    /// Total media duration in seconds for the action target.
+    pub duration: f32,
+    /// Unix timestamp of the last meaningful watch activity.
+    pub last_watched: i64,
+    /// Denormalized display title for the card.
+    pub title: Option<String>,
+    /// Optional subtitle / episode label for rendering resume intent.
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    /// Optional hint describing the primary card action.
+    #[serde(default)]
+    pub action_hint: Option<ContinueWatchingActionHint>,
+    /// Optional poster image iid for the card.
+    pub poster_iid: Option<Uuid>,
 }
 
 /// Watched item
@@ -264,9 +309,9 @@ impl WatchProgress {
         self.0
     }
 
-    /// Check if this item is considered completed (>95%)
+    /// Check if this item is considered completed (>=95%).
     pub fn is_completed(&self) -> bool {
-        self.0 > 0.95
+        self.0 >= DEFAULT_COMPLETION_THRESHOLD
     }
 
     /// Check if this item has been started
@@ -361,5 +406,49 @@ impl UserWatchState {
 impl Default for UserWatchState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watch_progress_below_threshold_is_not_completed() {
+        assert!(!WatchProgress::new(0.949).is_completed());
+    }
+
+    #[test]
+    fn watch_progress_marks_exact_threshold_as_completed() {
+        assert!(
+            WatchProgress::new(DEFAULT_COMPLETION_THRESHOLD).is_completed()
+        );
+    }
+
+    #[test]
+    fn watch_progress_negative_sentinel_is_not_completed() {
+        assert!(!WatchProgress::new(-1.0).is_completed());
+    }
+
+    #[test]
+    fn update_watch_progress_keeps_below_threshold_item_in_progress() {
+        let media_id = Uuid::new_v4();
+        let mut state = UserWatchState::new();
+
+        state.update_progress(media_id, 94.0, 100.0);
+
+        assert!(!state.completed.contains(&media_id));
+        assert!(state.in_progress.contains_key(&media_id));
+    }
+
+    #[test]
+    fn update_watch_progress_moves_exact_threshold_item_to_completed() {
+        let media_id = Uuid::new_v4();
+        let mut state = UserWatchState::new();
+
+        state.update_progress(media_id, 95.0, 100.0);
+
+        assert!(state.completed.contains(&media_id));
+        assert!(!state.in_progress.contains_key(&media_id));
     }
 }

@@ -1,8 +1,9 @@
 use async_trait::async_trait;
+use ferrex_model::VideoMediaType;
 use uuid::Uuid;
 
 use crate::domain::watch::{
-    EpisodeKey, InProgressItem, NextEpisode, SeasonWatchStatus,
+    ContinueWatchingItem, EpisodeKey, NextEpisode, SeasonWatchStatus,
     SeriesWatchStatus, UpdateProgressRequest, UserWatchState,
 };
 use crate::error::Result;
@@ -22,7 +23,7 @@ pub trait WatchStatusRepository: Send + Sync {
         &self,
         user_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<InProgressItem>>;
+    ) -> Result<Vec<ContinueWatchingItem>>;
     async fn clear_watch_progress(
         &self,
         user_id: Uuid,
@@ -33,6 +34,29 @@ pub trait WatchStatusRepository: Send + Sync {
         user_id: Uuid,
         media_id: &Uuid,
     ) -> Result<bool>;
+    async fn mark_media_watched(
+        &self,
+        user_id: Uuid,
+        media_id: Uuid,
+        media_type: VideoMediaType,
+        last_media_uuid: Option<Uuid>,
+    ) -> Result<()>;
+    async fn mark_media_unwatched(
+        &self,
+        user_id: Uuid,
+        media_id: Uuid,
+        media_type: VideoMediaType,
+    ) -> Result<()>;
+    async fn mark_series_watched(
+        &self,
+        user_id: Uuid,
+        tmdb_series_id: u64,
+    ) -> Result<()>;
+    async fn mark_series_unwatched(
+        &self,
+        user_id: Uuid,
+        tmdb_series_id: u64,
+    ) -> Result<()>;
 
     // Identity-based episode progress (Option B)
     async fn upsert_episode_identity_progress(
