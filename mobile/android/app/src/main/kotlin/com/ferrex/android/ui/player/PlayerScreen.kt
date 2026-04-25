@@ -107,7 +107,7 @@ fun PlayerScreen(
             is PlayerState.Error -> {
                 ErrorScreen(
                     message = state.message,
-                    onRetry = if (state.canRetry) {{ viewModel.retry() }} else null,
+                    onRetry = if (state.canRetry) { { viewModel.retry() } } else null,
                 )
             }
             is PlayerState.Ready -> {
