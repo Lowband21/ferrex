@@ -13,8 +13,8 @@
 
 #![allow(unused_imports, dead_code, clippy::all, missing_docs)]
 
-pub mod generated;
 pub mod conversions;
+pub mod generated;
 pub mod uuid_helpers;
 
 // Re-export the generated namespace tree for ergonomic access.

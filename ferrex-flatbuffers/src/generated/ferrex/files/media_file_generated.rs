@@ -8,144 +8,242 @@ pub enum MediaFileOffset {}
 /// Physical media file on disk.
 /// Mobile clients use this primarily for codec info, resolution, and duration.
 pub struct MediaFile<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for MediaFile<'a> {
-  type Inner = MediaFile<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = MediaFile<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> MediaFile<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_MEDIA_ID_TYPE: ::flatbuffers::VOffsetT = 6;
-  pub const VT_MEDIA_ID_UUID: ::flatbuffers::VOffsetT = 8;
-  pub const VT_PATH: ::flatbuffers::VOffsetT = 10;
-  pub const VT_FILENAME: ::flatbuffers::VOffsetT = 12;
-  pub const VT_SIZE: ::flatbuffers::VOffsetT = 14;
-  pub const VT_DISCOVERED_AT: ::flatbuffers::VOffsetT = 16;
-  pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 18;
-  pub const VT_METADATA: ::flatbuffers::VOffsetT = 20;
-  pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 22;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_MEDIA_ID_TYPE: ::flatbuffers::VOffsetT = 6;
+    pub const VT_MEDIA_ID_UUID: ::flatbuffers::VOffsetT = 8;
+    pub const VT_PATH: ::flatbuffers::VOffsetT = 10;
+    pub const VT_FILENAME: ::flatbuffers::VOffsetT = 12;
+    pub const VT_SIZE: ::flatbuffers::VOffsetT = 14;
+    pub const VT_DISCOVERED_AT: ::flatbuffers::VOffsetT = 16;
+    pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 18;
+    pub const VT_METADATA: ::flatbuffers::VOffsetT = 20;
+    pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 22;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    MediaFile { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args MediaFileArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<MediaFile<'bldr>> {
-    let mut builder = MediaFileBuilder::new(_fbb);
-    builder.add_size(args.size);
-    if let Some(x) = args.library_id { builder.add_library_id(x); }
-    if let Some(x) = args.metadata { builder.add_metadata(x); }
-    if let Some(x) = args.created_at { builder.add_created_at(x); }
-    if let Some(x) = args.discovered_at { builder.add_discovered_at(x); }
-    if let Some(x) = args.filename { builder.add_filename(x); }
-    if let Some(x) = args.path { builder.add_path(x); }
-    if let Some(x) = args.media_id_uuid { builder.add_media_id_uuid(x); }
-    if let Some(x) = args.id { builder.add_id(x); }
-    builder.add_media_id_type(args.media_id_type);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        MediaFile { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args MediaFileArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<MediaFile<'bldr>> {
+        let mut builder = MediaFileBuilder::new(_fbb);
+        builder.add_size(args.size);
+        if let Some(x) = args.library_id {
+            builder.add_library_id(x);
+        }
+        if let Some(x) = args.metadata {
+            builder.add_metadata(x);
+        }
+        if let Some(x) = args.created_at {
+            builder.add_created_at(x);
+        }
+        if let Some(x) = args.discovered_at {
+            builder.add_discovered_at(x);
+        }
+        if let Some(x) = args.filename {
+            builder.add_filename(x);
+        }
+        if let Some(x) = args.path {
+            builder.add_path(x);
+        }
+        if let Some(x) = args.media_id_uuid {
+            builder.add_media_id_uuid(x);
+        }
+        if let Some(x) = args.id {
+            builder.add_id(x);
+        }
+        builder.add_media_id_type(args.media_id_type);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(MediaFile::VT_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn media_id_type(&self) -> super::common::VideoMediaType {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::VideoMediaType>(MediaFile::VT_MEDIA_ID_TYPE, Some(super::common::VideoMediaType::Movie)).unwrap()}
-  }
-  #[inline]
-  pub fn media_id_uuid(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(MediaFile::VT_MEDIA_ID_UUID, None)}
-  }
-  #[inline]
-  pub fn path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(MediaFile::VT_PATH, None)}
-  }
-  #[inline]
-  pub fn filename(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(MediaFile::VT_FILENAME, None).unwrap()}
-  }
-  #[inline]
-  pub fn size(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(MediaFile::VT_SIZE, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn discovered_at(&self) -> Option<&'a super::common::Timestamp> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::Timestamp>(MediaFile::VT_DISCOVERED_AT, None)}
-  }
-  #[inline]
-  pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::Timestamp>(MediaFile::VT_CREATED_AT, None)}
-  }
-  #[inline]
-  pub fn metadata(&self) -> Option<MediaFileMetadata<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<MediaFileMetadata>>(MediaFile::VT_METADATA, None)}
-  }
-  #[inline]
-  pub fn library_id(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(MediaFile::VT_LIBRARY_ID, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(MediaFile::VT_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn media_id_type(&self) -> super::common::VideoMediaType {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::common::VideoMediaType>(
+                    MediaFile::VT_MEDIA_ID_TYPE,
+                    Some(super::common::VideoMediaType::Movie),
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn media_id_uuid(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(MediaFile::VT_MEDIA_ID_UUID, None)
+        }
+    }
+    #[inline]
+    pub fn path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                MediaFile::VT_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn filename(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    MediaFile::VT_FILENAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn size(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u64>(MediaFile::VT_SIZE, Some(0)).unwrap() }
+    }
+    #[inline]
+    pub fn discovered_at(&self) -> Option<&'a super::common::Timestamp> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::common::Timestamp>(
+                MediaFile::VT_DISCOVERED_AT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::common::Timestamp>(MediaFile::VT_CREATED_AT, None)
+        }
+    }
+    #[inline]
+    pub fn metadata(&self) -> Option<MediaFileMetadata<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<MediaFileMetadata>>(
+                    MediaFile::VT_METADATA,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn library_id(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(MediaFile::VT_LIBRARY_ID, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for MediaFile<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
-     .visit_field::<super::common::VideoMediaType>("media_id_type", Self::VT_MEDIA_ID_TYPE, false)?
-     .visit_field::<super::ids::Uuid>("media_id_uuid", Self::VT_MEDIA_ID_UUID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("path", Self::VT_PATH, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("filename", Self::VT_FILENAME, true)?
-     .visit_field::<u64>("size", Self::VT_SIZE, false)?
-     .visit_field::<super::common::Timestamp>("discovered_at", Self::VT_DISCOVERED_AT, false)?
-     .visit_field::<super::common::Timestamp>("created_at", Self::VT_CREATED_AT, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<MediaFileMetadata>>("metadata", Self::VT_METADATA, false)?
-     .visit_field::<super::ids::Uuid>("library_id", Self::VT_LIBRARY_ID, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
+            .visit_field::<super::common::VideoMediaType>(
+                "media_id_type",
+                Self::VT_MEDIA_ID_TYPE,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "media_id_uuid",
+                Self::VT_MEDIA_ID_UUID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "path",
+                Self::VT_PATH,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "filename",
+                Self::VT_FILENAME,
+                true,
+            )?
+            .visit_field::<u64>("size", Self::VT_SIZE, false)?
+            .visit_field::<super::common::Timestamp>(
+                "discovered_at",
+                Self::VT_DISCOVERED_AT,
+                false,
+            )?
+            .visit_field::<super::common::Timestamp>(
+                "created_at",
+                Self::VT_CREATED_AT,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<MediaFileMetadata>>(
+                "metadata",
+                Self::VT_METADATA,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "library_id",
+                Self::VT_LIBRARY_ID,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct MediaFileArgs<'a> {
     pub id: Option<&'a super::ids::Uuid>,
@@ -160,98 +258,139 @@ pub struct MediaFileArgs<'a> {
     pub library_id: Option<&'a super::ids::Uuid>,
 }
 impl<'a> Default for MediaFileArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    MediaFileArgs {
-      id: None, // required field
-      media_id_type: super::common::VideoMediaType::Movie,
-      media_id_uuid: None,
-      path: None,
-      filename: None, // required field
-      size: 0,
-      discovered_at: None,
-      created_at: None,
-      metadata: None,
-      library_id: None,
+    #[inline]
+    fn default() -> Self {
+        MediaFileArgs {
+            id: None, // required field
+            media_id_type: super::common::VideoMediaType::Movie,
+            media_id_uuid: None,
+            path: None,
+            filename: None, // required field
+            size: 0,
+            discovered_at: None,
+            created_at: None,
+            metadata: None,
+            library_id: None,
+        }
     }
-  }
 }
 
 pub struct MediaFileBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MediaFileBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(MediaFile::VT_ID, id);
-  }
-  #[inline]
-  pub fn add_media_id_type(&mut self, media_id_type: super::common::VideoMediaType) {
-    self.fbb_.push_slot::<super::common::VideoMediaType>(MediaFile::VT_MEDIA_ID_TYPE, media_id_type, super::common::VideoMediaType::Movie);
-  }
-  #[inline]
-  pub fn add_media_id_uuid(&mut self, media_id_uuid: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(MediaFile::VT_MEDIA_ID_UUID, media_id_uuid);
-  }
-  #[inline]
-  pub fn add_path(&mut self, path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MediaFile::VT_PATH, path);
-  }
-  #[inline]
-  pub fn add_filename(&mut self, filename: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MediaFile::VT_FILENAME, filename);
-  }
-  #[inline]
-  pub fn add_size(&mut self, size: u64) {
-    self.fbb_.push_slot::<u64>(MediaFile::VT_SIZE, size, 0);
-  }
-  #[inline]
-  pub fn add_discovered_at(&mut self, discovered_at: &super::common::Timestamp) {
-    self.fbb_.push_slot_always::<&super::common::Timestamp>(MediaFile::VT_DISCOVERED_AT, discovered_at);
-  }
-  #[inline]
-  pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
-    self.fbb_.push_slot_always::<&super::common::Timestamp>(MediaFile::VT_CREATED_AT, created_at);
-  }
-  #[inline]
-  pub fn add_metadata(&mut self, metadata: ::flatbuffers::WIPOffset<MediaFileMetadata<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<MediaFileMetadata>>(MediaFile::VT_METADATA, metadata);
-  }
-  #[inline]
-  pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(MediaFile::VT_LIBRARY_ID, library_id);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> MediaFileBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    MediaFileBuilder {
-      fbb_: _fbb,
-      start_: start,
+    #[inline]
+    pub fn add_id(&mut self, id: &super::ids::Uuid) {
+        self.fbb_
+            .push_slot_always::<&super::ids::Uuid>(MediaFile::VT_ID, id);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<MediaFile<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, MediaFile::VT_ID,"id");
-    self.fbb_.required(o, MediaFile::VT_FILENAME,"filename");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_media_id_type(
+        &mut self,
+        media_id_type: super::common::VideoMediaType,
+    ) {
+        self.fbb_.push_slot::<super::common::VideoMediaType>(
+            MediaFile::VT_MEDIA_ID_TYPE,
+            media_id_type,
+            super::common::VideoMediaType::Movie,
+        );
+    }
+    #[inline]
+    pub fn add_media_id_uuid(&mut self, media_id_uuid: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            MediaFile::VT_MEDIA_ID_UUID,
+            media_id_uuid,
+        );
+    }
+    #[inline]
+    pub fn add_path(&mut self, path: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            MediaFile::VT_PATH,
+            path,
+        );
+    }
+    #[inline]
+    pub fn add_filename(
+        &mut self,
+        filename: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            MediaFile::VT_FILENAME,
+            filename,
+        );
+    }
+    #[inline]
+    pub fn add_size(&mut self, size: u64) {
+        self.fbb_.push_slot::<u64>(MediaFile::VT_SIZE, size, 0);
+    }
+    #[inline]
+    pub fn add_discovered_at(
+        &mut self,
+        discovered_at: &super::common::Timestamp,
+    ) {
+        self.fbb_.push_slot_always::<&super::common::Timestamp>(
+            MediaFile::VT_DISCOVERED_AT,
+            discovered_at,
+        );
+    }
+    #[inline]
+    pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
+        self.fbb_.push_slot_always::<&super::common::Timestamp>(
+            MediaFile::VT_CREATED_AT,
+            created_at,
+        );
+    }
+    #[inline]
+    pub fn add_metadata(
+        &mut self,
+        metadata: ::flatbuffers::WIPOffset<MediaFileMetadata<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<MediaFileMetadata>>(
+                MediaFile::VT_METADATA,
+                metadata,
+            );
+    }
+    #[inline]
+    pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            MediaFile::VT_LIBRARY_ID,
+            library_id,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> MediaFileBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        MediaFileBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<MediaFile<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, MediaFile::VT_ID, "id");
+        self.fbb_.required(o, MediaFile::VT_FILENAME, "filename");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for MediaFile<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("MediaFile");
-      ds.field("id", &self.id());
-      ds.field("media_id_type", &self.media_id_type());
-      ds.field("media_id_uuid", &self.media_id_uuid());
-      ds.field("path", &self.path());
-      ds.field("filename", &self.filename());
-      ds.field("size", &self.size());
-      ds.field("discovered_at", &self.discovered_at());
-      ds.field("created_at", &self.created_at());
-      ds.field("metadata", &self.metadata());
-      ds.field("library_id", &self.library_id());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("MediaFile");
+        ds.field("id", &self.id());
+        ds.field("media_id_type", &self.media_id_type());
+        ds.field("media_id_uuid", &self.media_id_uuid());
+        ds.field("path", &self.path());
+        ds.field("filename", &self.filename());
+        ds.field("size", &self.size());
+        ds.field("discovered_at", &self.discovered_at());
+        ds.field("created_at", &self.created_at());
+        ds.field("metadata", &self.metadata());
+        ds.field("library_id", &self.library_id());
+        ds.finish()
+    }
 }

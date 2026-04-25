@@ -7,184 +7,339 @@ pub enum SeasonDetailsOffset {}
 
 /// TMDB season details. Mirrors ferrex-model::SeasonDetails.
 pub struct SeasonDetails<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for SeasonDetails<'a> {
-  type Inner = SeasonDetails<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = SeasonDetails<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> SeasonDetails<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 6;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 8;
-  pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 10;
-  pub const VT_AIR_DATE: ::flatbuffers::VOffsetT = 12;
-  pub const VT_EPISODE_COUNT: ::flatbuffers::VOffsetT = 14;
-  pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 16;
-  pub const VT_PRIMARY_POSTER_IID: ::flatbuffers::VOffsetT = 18;
-  pub const VT_RUNTIME: ::flatbuffers::VOffsetT = 20;
-  pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 22;
-  pub const VT_IMAGES: ::flatbuffers::VOffsetT = 24;
-  pub const VT_VIDEOS: ::flatbuffers::VOffsetT = 26;
-  pub const VT_KEYWORDS: ::flatbuffers::VOffsetT = 28;
-  pub const VT_TRANSLATIONS: ::flatbuffers::VOffsetT = 30;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 6;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 8;
+    pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 10;
+    pub const VT_AIR_DATE: ::flatbuffers::VOffsetT = 12;
+    pub const VT_EPISODE_COUNT: ::flatbuffers::VOffsetT = 14;
+    pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 16;
+    pub const VT_PRIMARY_POSTER_IID: ::flatbuffers::VOffsetT = 18;
+    pub const VT_RUNTIME: ::flatbuffers::VOffsetT = 20;
+    pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 22;
+    pub const VT_IMAGES: ::flatbuffers::VOffsetT = 24;
+    pub const VT_VIDEOS: ::flatbuffers::VOffsetT = 26;
+    pub const VT_KEYWORDS: ::flatbuffers::VOffsetT = 28;
+    pub const VT_TRANSLATIONS: ::flatbuffers::VOffsetT = 30;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    SeasonDetails { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args SeasonDetailsArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<SeasonDetails<'bldr>> {
-    let mut builder = SeasonDetailsBuilder::new(_fbb);
-    builder.add_id(args.id);
-    if let Some(x) = args.translations { builder.add_translations(x); }
-    if let Some(x) = args.keywords { builder.add_keywords(x); }
-    if let Some(x) = args.videos { builder.add_videos(x); }
-    if let Some(x) = args.images { builder.add_images(x); }
-    if let Some(x) = args.external_ids { builder.add_external_ids(x); }
-    builder.add_runtime(args.runtime);
-    if let Some(x) = args.primary_poster_iid { builder.add_primary_poster_iid(x); }
-    if let Some(x) = args.poster_path { builder.add_poster_path(x); }
-    if let Some(x) = args.air_date { builder.add_air_date(x); }
-    if let Some(x) = args.overview { builder.add_overview(x); }
-    if let Some(x) = args.name { builder.add_name(x); }
-    builder.add_episode_count(args.episode_count);
-    builder.add_season_number(args.season_number);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        SeasonDetails { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args SeasonDetailsArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<SeasonDetails<'bldr>> {
+        let mut builder = SeasonDetailsBuilder::new(_fbb);
+        builder.add_id(args.id);
+        if let Some(x) = args.translations {
+            builder.add_translations(x);
+        }
+        if let Some(x) = args.keywords {
+            builder.add_keywords(x);
+        }
+        if let Some(x) = args.videos {
+            builder.add_videos(x);
+        }
+        if let Some(x) = args.images {
+            builder.add_images(x);
+        }
+        if let Some(x) = args.external_ids {
+            builder.add_external_ids(x);
+        }
+        builder.add_runtime(args.runtime);
+        if let Some(x) = args.primary_poster_iid {
+            builder.add_primary_poster_iid(x);
+        }
+        if let Some(x) = args.poster_path {
+            builder.add_poster_path(x);
+        }
+        if let Some(x) = args.air_date {
+            builder.add_air_date(x);
+        }
+        if let Some(x) = args.overview {
+            builder.add_overview(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        builder.add_episode_count(args.episode_count);
+        builder.add_season_number(args.season_number);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(SeasonDetails::VT_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn season_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(SeasonDetails::VT_SEASON_NUMBER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SeasonDetails::VT_NAME, None)}
-  }
-  #[inline]
-  pub fn overview(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SeasonDetails::VT_OVERVIEW, None)}
-  }
-  #[inline]
-  pub fn air_date(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SeasonDetails::VT_AIR_DATE, None)}
-  }
-  #[inline]
-  pub fn episode_count(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(SeasonDetails::VT_EPISODE_COUNT, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn poster_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SeasonDetails::VT_POSTER_PATH, None)}
-  }
-  #[inline]
-  pub fn primary_poster_iid(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(SeasonDetails::VT_PRIMARY_POSTER_IID, None)}
-  }
-  #[inline]
-  pub fn runtime(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(SeasonDetails::VT_RUNTIME, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn external_ids(&self) -> Option<ExternalIds<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<ExternalIds>>(SeasonDetails::VT_EXTERNAL_IDS, None)}
-  }
-  #[inline]
-  pub fn images(&self) -> Option<MediaImages<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<MediaImages>>(SeasonDetails::VT_IMAGES, None)}
-  }
-  #[inline]
-  pub fn videos(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video>>>>(SeasonDetails::VT_VIDEOS, None)}
-  }
-  #[inline]
-  pub fn keywords(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword>>>>(SeasonDetails::VT_KEYWORDS, None)}
-  }
-  #[inline]
-  pub fn translations(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation>>>>(SeasonDetails::VT_TRANSLATIONS, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u64>(SeasonDetails::VT_ID, Some(0)).unwrap() }
+    }
+    #[inline]
+    pub fn season_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(SeasonDetails::VT_SEASON_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                SeasonDetails::VT_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn overview(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                SeasonDetails::VT_OVERVIEW,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn air_date(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                SeasonDetails::VT_AIR_DATE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn episode_count(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(SeasonDetails::VT_EPISODE_COUNT, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn poster_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                SeasonDetails::VT_POSTER_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn primary_poster_iid(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::ids::Uuid>(
+                SeasonDetails::VT_PRIMARY_POSTER_IID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn runtime(&self) -> u32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u32>(SeasonDetails::VT_RUNTIME, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn external_ids(&self) -> Option<ExternalIds<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<ExternalIds>>(
+                    SeasonDetails::VT_EXTERNAL_IDS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn images(&self) -> Option<MediaImages<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<MediaImages>>(
+                    SeasonDetails::VT_IMAGES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn videos(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Video>,
+                >,
+            >>(SeasonDetails::VT_VIDEOS, None)
+        }
+    }
+    #[inline]
+    pub fn keywords(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Keyword>,
+                >,
+            >>(SeasonDetails::VT_KEYWORDS, None)
+        }
+    }
+    #[inline]
+    pub fn translations(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<Translation<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Translation>,
+                >,
+            >>(SeasonDetails::VT_TRANSLATIONS, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for SeasonDetails<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<u16>("season_number", Self::VT_SEASON_NUMBER, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("overview", Self::VT_OVERVIEW, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("air_date", Self::VT_AIR_DATE, false)?
-     .visit_field::<u16>("episode_count", Self::VT_EPISODE_COUNT, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("poster_path", Self::VT_POSTER_PATH, false)?
-     .visit_field::<super::ids::Uuid>("primary_poster_iid", Self::VT_PRIMARY_POSTER_IID, false)?
-     .visit_field::<u32>("runtime", Self::VT_RUNTIME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<ExternalIds>>("external_ids", Self::VT_EXTERNAL_IDS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<MediaImages>>("images", Self::VT_IMAGES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Video>>>>("videos", Self::VT_VIDEOS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Keyword>>>>("keywords", Self::VT_KEYWORDS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Translation>>>>("translations", Self::VT_TRANSLATIONS, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("id", Self::VT_ID, false)?
+            .visit_field::<u16>("season_number", Self::VT_SEASON_NUMBER, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "overview",
+                Self::VT_OVERVIEW,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "air_date",
+                Self::VT_AIR_DATE,
+                false,
+            )?
+            .visit_field::<u16>("episode_count", Self::VT_EPISODE_COUNT, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "poster_path",
+                Self::VT_POSTER_PATH,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "primary_poster_iid",
+                Self::VT_PRIMARY_POSTER_IID,
+                false,
+            )?
+            .visit_field::<u32>("runtime", Self::VT_RUNTIME, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<ExternalIds>>(
+                "external_ids",
+                Self::VT_EXTERNAL_IDS,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<MediaImages>>(
+                "images",
+                Self::VT_IMAGES,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Video>,
+                >,
+            >>("videos", Self::VT_VIDEOS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Keyword>,
+                >,
+            >>("keywords", Self::VT_KEYWORDS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Translation>,
+                >,
+            >>("translations", Self::VT_TRANSLATIONS, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct SeasonDetailsArgs<'a> {
     pub id: u64,
@@ -198,125 +353,233 @@ pub struct SeasonDetailsArgs<'a> {
     pub runtime: u32,
     pub external_ids: Option<::flatbuffers::WIPOffset<ExternalIds<'a>>>,
     pub images: Option<::flatbuffers::WIPOffset<MediaImages<'a>>>,
-    pub videos: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>>>,
-    pub keywords: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>>>,
-    pub translations: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation<'a>>>>>,
+    pub videos: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Video<'a>>,
+            >,
+        >,
+    >,
+    pub keywords: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Keyword<'a>>,
+            >,
+        >,
+    >,
+    pub translations: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Translation<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for SeasonDetailsArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    SeasonDetailsArgs {
-      id: 0,
-      season_number: 0,
-      name: None,
-      overview: None,
-      air_date: None,
-      episode_count: 0,
-      poster_path: None,
-      primary_poster_iid: None,
-      runtime: 0,
-      external_ids: None,
-      images: None,
-      videos: None,
-      keywords: None,
-      translations: None,
+    #[inline]
+    fn default() -> Self {
+        SeasonDetailsArgs {
+            id: 0,
+            season_number: 0,
+            name: None,
+            overview: None,
+            air_date: None,
+            episode_count: 0,
+            poster_path: None,
+            primary_poster_iid: None,
+            runtime: 0,
+            external_ids: None,
+            images: None,
+            videos: None,
+            keywords: None,
+            translations: None,
+        }
     }
-  }
 }
 
 pub struct SeasonDetailsBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SeasonDetailsBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(SeasonDetails::VT_ID, id, 0);
-  }
-  #[inline]
-  pub fn add_season_number(&mut self, season_number: u16) {
-    self.fbb_.push_slot::<u16>(SeasonDetails::VT_SEASON_NUMBER, season_number, 0);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_NAME, name);
-  }
-  #[inline]
-  pub fn add_overview(&mut self, overview: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_OVERVIEW, overview);
-  }
-  #[inline]
-  pub fn add_air_date(&mut self, air_date: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_AIR_DATE, air_date);
-  }
-  #[inline]
-  pub fn add_episode_count(&mut self, episode_count: u16) {
-    self.fbb_.push_slot::<u16>(SeasonDetails::VT_EPISODE_COUNT, episode_count, 0);
-  }
-  #[inline]
-  pub fn add_poster_path(&mut self, poster_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_POSTER_PATH, poster_path);
-  }
-  #[inline]
-  pub fn add_primary_poster_iid(&mut self, primary_poster_iid: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(SeasonDetails::VT_PRIMARY_POSTER_IID, primary_poster_iid);
-  }
-  #[inline]
-  pub fn add_runtime(&mut self, runtime: u32) {
-    self.fbb_.push_slot::<u32>(SeasonDetails::VT_RUNTIME, runtime, 0);
-  }
-  #[inline]
-  pub fn add_external_ids(&mut self, external_ids: ::flatbuffers::WIPOffset<ExternalIds<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<ExternalIds>>(SeasonDetails::VT_EXTERNAL_IDS, external_ids);
-  }
-  #[inline]
-  pub fn add_images(&mut self, images: ::flatbuffers::WIPOffset<MediaImages<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<MediaImages>>(SeasonDetails::VT_IMAGES, images);
-  }
-  #[inline]
-  pub fn add_videos(&mut self, videos: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Video<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_VIDEOS, videos);
-  }
-  #[inline]
-  pub fn add_keywords(&mut self, keywords: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Keyword<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_KEYWORDS, keywords);
-  }
-  #[inline]
-  pub fn add_translations(&mut self, translations: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Translation<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SeasonDetails::VT_TRANSLATIONS, translations);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> SeasonDetailsBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    SeasonDetailsBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    SeasonDetailsBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: u64) {
+        self.fbb_.push_slot::<u64>(SeasonDetails::VT_ID, id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<SeasonDetails<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_season_number(&mut self, season_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            SeasonDetails::VT_SEASON_NUMBER,
+            season_number,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn add_overview(
+        &mut self,
+        overview: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_OVERVIEW,
+            overview,
+        );
+    }
+    #[inline]
+    pub fn add_air_date(
+        &mut self,
+        air_date: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_AIR_DATE,
+            air_date,
+        );
+    }
+    #[inline]
+    pub fn add_episode_count(&mut self, episode_count: u16) {
+        self.fbb_.push_slot::<u16>(
+            SeasonDetails::VT_EPISODE_COUNT,
+            episode_count,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_poster_path(
+        &mut self,
+        poster_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_POSTER_PATH,
+            poster_path,
+        );
+    }
+    #[inline]
+    pub fn add_primary_poster_iid(
+        &mut self,
+        primary_poster_iid: &super::ids::Uuid,
+    ) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            SeasonDetails::VT_PRIMARY_POSTER_IID,
+            primary_poster_iid,
+        );
+    }
+    #[inline]
+    pub fn add_runtime(&mut self, runtime: u32) {
+        self.fbb_
+            .push_slot::<u32>(SeasonDetails::VT_RUNTIME, runtime, 0);
+    }
+    #[inline]
+    pub fn add_external_ids(
+        &mut self,
+        external_ids: ::flatbuffers::WIPOffset<ExternalIds<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<ExternalIds>>(
+                SeasonDetails::VT_EXTERNAL_IDS,
+                external_ids,
+            );
+    }
+    #[inline]
+    pub fn add_images(
+        &mut self,
+        images: ::flatbuffers::WIPOffset<MediaImages<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<MediaImages>>(
+                SeasonDetails::VT_IMAGES,
+                images,
+            );
+    }
+    #[inline]
+    pub fn add_videos(
+        &mut self,
+        videos: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Video<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_VIDEOS,
+            videos,
+        );
+    }
+    #[inline]
+    pub fn add_keywords(
+        &mut self,
+        keywords: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Keyword<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_KEYWORDS,
+            keywords,
+        );
+    }
+    #[inline]
+    pub fn add_translations(
+        &mut self,
+        translations: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Translation<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SeasonDetails::VT_TRANSLATIONS,
+            translations,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> SeasonDetailsBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        SeasonDetailsBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<SeasonDetails<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for SeasonDetails<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("SeasonDetails");
-      ds.field("id", &self.id());
-      ds.field("season_number", &self.season_number());
-      ds.field("name", &self.name());
-      ds.field("overview", &self.overview());
-      ds.field("air_date", &self.air_date());
-      ds.field("episode_count", &self.episode_count());
-      ds.field("poster_path", &self.poster_path());
-      ds.field("primary_poster_iid", &self.primary_poster_iid());
-      ds.field("runtime", &self.runtime());
-      ds.field("external_ids", &self.external_ids());
-      ds.field("images", &self.images());
-      ds.field("videos", &self.videos());
-      ds.field("keywords", &self.keywords());
-      ds.field("translations", &self.translations());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("SeasonDetails");
+        ds.field("id", &self.id());
+        ds.field("season_number", &self.season_number());
+        ds.field("name", &self.name());
+        ds.field("overview", &self.overview());
+        ds.field("air_date", &self.air_date());
+        ds.field("episode_count", &self.episode_count());
+        ds.field("poster_path", &self.poster_path());
+        ds.field("primary_poster_iid", &self.primary_poster_iid());
+        ds.field("runtime", &self.runtime());
+        ds.field("external_ids", &self.external_ids());
+        ds.field("images", &self.images());
+        ds.field("videos", &self.videos());
+        ds.field("keywords", &self.keywords());
+        ds.field("translations", &self.translations());
+        ds.finish()
+    }
 }

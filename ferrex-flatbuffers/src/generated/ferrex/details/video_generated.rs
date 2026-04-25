@@ -6,134 +6,224 @@ pub enum VideoOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct Video<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for Video<'a> {
-  type Inner = Video<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = Video<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> Video<'a> {
-  pub const VT_KEY: ::flatbuffers::VOffsetT = 4;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
-  pub const VT_SITE: ::flatbuffers::VOffsetT = 8;
-  pub const VT_VIDEO_TYPE: ::flatbuffers::VOffsetT = 10;
-  pub const VT_OFFICIAL: ::flatbuffers::VOffsetT = 12;
-  pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 14;
-  pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 16;
-  pub const VT_PUBLISHED_AT: ::flatbuffers::VOffsetT = 18;
-  pub const VT_SIZE: ::flatbuffers::VOffsetT = 20;
+    pub const VT_KEY: ::flatbuffers::VOffsetT = 4;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
+    pub const VT_SITE: ::flatbuffers::VOffsetT = 8;
+    pub const VT_VIDEO_TYPE: ::flatbuffers::VOffsetT = 10;
+    pub const VT_OFFICIAL: ::flatbuffers::VOffsetT = 12;
+    pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 14;
+    pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 16;
+    pub const VT_PUBLISHED_AT: ::flatbuffers::VOffsetT = 18;
+    pub const VT_SIZE: ::flatbuffers::VOffsetT = 20;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    Video { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args VideoArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<Video<'bldr>> {
-    let mut builder = VideoBuilder::new(_fbb);
-    builder.add_size(args.size);
-    if let Some(x) = args.published_at { builder.add_published_at(x); }
-    if let Some(x) = args.iso_3166_1 { builder.add_iso_3166_1(x); }
-    if let Some(x) = args.iso_639_1 { builder.add_iso_639_1(x); }
-    if let Some(x) = args.video_type { builder.add_video_type(x); }
-    if let Some(x) = args.site { builder.add_site(x); }
-    if let Some(x) = args.name { builder.add_name(x); }
-    if let Some(x) = args.key { builder.add_key(x); }
-    builder.add_official(args.official);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        Video { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args VideoArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<Video<'bldr>> {
+        let mut builder = VideoBuilder::new(_fbb);
+        builder.add_size(args.size);
+        if let Some(x) = args.published_at {
+            builder.add_published_at(x);
+        }
+        if let Some(x) = args.iso_3166_1 {
+            builder.add_iso_3166_1(x);
+        }
+        if let Some(x) = args.iso_639_1 {
+            builder.add_iso_639_1(x);
+        }
+        if let Some(x) = args.video_type {
+            builder.add_video_type(x);
+        }
+        if let Some(x) = args.site {
+            builder.add_site(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        if let Some(x) = args.key {
+            builder.add_key(x);
+        }
+        builder.add_official(args.official);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn key(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_KEY, None).unwrap()}
-  }
-  #[inline]
-  pub fn name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_NAME, None)}
-  }
-  #[inline]
-  pub fn site(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_SITE, None)}
-  }
-  #[inline]
-  pub fn video_type(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_VIDEO_TYPE, None)}
-  }
-  #[inline]
-  pub fn official(&self) -> bool {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(Video::VT_OFFICIAL, Some(false)).unwrap()}
-  }
-  #[inline]
-  pub fn iso_639_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_ISO_639_1, None)}
-  }
-  #[inline]
-  pub fn iso_3166_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_ISO_3166_1, None)}
-  }
-  #[inline]
-  pub fn published_at(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Video::VT_PUBLISHED_AT, None)}
-  }
-  #[inline]
-  pub fn size(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(Video::VT_SIZE, Some(0)).unwrap()}
-  }
+    #[inline]
+    pub fn key(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    Video::VT_KEY,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn site(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_SITE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn video_type(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_VIDEO_TYPE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn official(&self) -> bool {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<bool>(Video::VT_OFFICIAL, Some(false))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn iso_639_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_ISO_639_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn iso_3166_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_ISO_3166_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn published_at(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Video::VT_PUBLISHED_AT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn size(&self) -> u32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u32>(Video::VT_SIZE, Some(0)).unwrap() }
+    }
 }
 
 impl ::flatbuffers::Verifiable for Video<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("key", Self::VT_KEY, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("site", Self::VT_SITE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("video_type", Self::VT_VIDEO_TYPE, false)?
-     .visit_field::<bool>("official", Self::VT_OFFICIAL, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_639_1", Self::VT_ISO_639_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_3166_1", Self::VT_ISO_3166_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("published_at", Self::VT_PUBLISHED_AT, false)?
-     .visit_field::<u32>("size", Self::VT_SIZE, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "key",
+                Self::VT_KEY,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "site",
+                Self::VT_SITE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "video_type",
+                Self::VT_VIDEO_TYPE,
+                false,
+            )?
+            .visit_field::<bool>("official", Self::VT_OFFICIAL, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_639_1",
+                Self::VT_ISO_639_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_3166_1",
+                Self::VT_ISO_3166_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "published_at",
+                Self::VT_PUBLISHED_AT,
+                false,
+            )?
+            .visit_field::<u32>("size", Self::VT_SIZE, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct VideoArgs<'a> {
     pub key: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -147,91 +237,127 @@ pub struct VideoArgs<'a> {
     pub size: u32,
 }
 impl<'a> Default for VideoArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    VideoArgs {
-      key: None, // required field
-      name: None,
-      site: None,
-      video_type: None,
-      official: false,
-      iso_639_1: None,
-      iso_3166_1: None,
-      published_at: None,
-      size: 0,
+    #[inline]
+    fn default() -> Self {
+        VideoArgs {
+            key: None, // required field
+            name: None,
+            site: None,
+            video_type: None,
+            official: false,
+            iso_639_1: None,
+            iso_3166_1: None,
+            published_at: None,
+            size: 0,
+        }
     }
-  }
 }
 
 pub struct VideoBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> VideoBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_key(&mut self, key: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_KEY, key);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_NAME, name);
-  }
-  #[inline]
-  pub fn add_site(&mut self, site: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_SITE, site);
-  }
-  #[inline]
-  pub fn add_video_type(&mut self, video_type: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_VIDEO_TYPE, video_type);
-  }
-  #[inline]
-  pub fn add_official(&mut self, official: bool) {
-    self.fbb_.push_slot::<bool>(Video::VT_OFFICIAL, official, false);
-  }
-  #[inline]
-  pub fn add_iso_639_1(&mut self, iso_639_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_ISO_639_1, iso_639_1);
-  }
-  #[inline]
-  pub fn add_iso_3166_1(&mut self, iso_3166_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_ISO_3166_1, iso_3166_1);
-  }
-  #[inline]
-  pub fn add_published_at(&mut self, published_at: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Video::VT_PUBLISHED_AT, published_at);
-  }
-  #[inline]
-  pub fn add_size(&mut self, size: u32) {
-    self.fbb_.push_slot::<u32>(Video::VT_SIZE, size, 0);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> VideoBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    VideoBuilder {
-      fbb_: _fbb,
-      start_: start,
+    #[inline]
+    pub fn add_key(&mut self, key: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_KEY,
+            key,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<Video<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, Video::VT_KEY,"key");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn add_site(&mut self, site: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_SITE,
+            site,
+        );
+    }
+    #[inline]
+    pub fn add_video_type(
+        &mut self,
+        video_type: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_VIDEO_TYPE,
+            video_type,
+        );
+    }
+    #[inline]
+    pub fn add_official(&mut self, official: bool) {
+        self.fbb_
+            .push_slot::<bool>(Video::VT_OFFICIAL, official, false);
+    }
+    #[inline]
+    pub fn add_iso_639_1(
+        &mut self,
+        iso_639_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_ISO_639_1,
+            iso_639_1,
+        );
+    }
+    #[inline]
+    pub fn add_iso_3166_1(
+        &mut self,
+        iso_3166_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_ISO_3166_1,
+            iso_3166_1,
+        );
+    }
+    #[inline]
+    pub fn add_published_at(
+        &mut self,
+        published_at: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Video::VT_PUBLISHED_AT,
+            published_at,
+        );
+    }
+    #[inline]
+    pub fn add_size(&mut self, size: u32) {
+        self.fbb_.push_slot::<u32>(Video::VT_SIZE, size, 0);
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> VideoBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        VideoBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<Video<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, Video::VT_KEY, "key");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for Video<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("Video");
-      ds.field("key", &self.key());
-      ds.field("name", &self.name());
-      ds.field("site", &self.site());
-      ds.field("video_type", &self.video_type());
-      ds.field("official", &self.official());
-      ds.field("iso_639_1", &self.iso_639_1());
-      ds.field("iso_3166_1", &self.iso_3166_1());
-      ds.field("published_at", &self.published_at());
-      ds.field("size", &self.size());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("Video");
+        ds.field("key", &self.key());
+        ds.field("name", &self.name());
+        ds.field("site", &self.site());
+        ds.field("video_type", &self.video_type());
+        ds.field("official", &self.official());
+        ds.field("iso_639_1", &self.iso_639_1());
+        ds.field("iso_3166_1", &self.iso_3166_1());
+        ds.field("published_at", &self.published_at());
+        ds.field("size", &self.size());
+        ds.finish()
+    }
 }

@@ -7,95 +7,147 @@ pub enum ContinueWatchingListOffset {}
 
 /// GET /api/v1/watch/continue response.
 pub struct ContinueWatchingList<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ContinueWatchingList<'a> {
-  type Inner = ContinueWatchingList<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ContinueWatchingList<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ContinueWatchingList<'a> {
-  pub const VT_ITEMS: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ITEMS: ::flatbuffers::VOffsetT = 4;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ContinueWatchingList { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ContinueWatchingListArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<ContinueWatchingList<'bldr>> {
-    let mut builder = ContinueWatchingListBuilder::new(_fbb);
-    if let Some(x) = args.items { builder.add_items(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ContinueWatchingList { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ContinueWatchingListArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<ContinueWatchingList<'bldr>> {
+        let mut builder = ContinueWatchingListBuilder::new(_fbb);
+        if let Some(x) = args.items {
+            builder.add_items(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn items(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry>>>>(ContinueWatchingList::VT_ITEMS, None)}
-  }
+    #[inline]
+    pub fn items(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry>,
+                >,
+            >>(ContinueWatchingList::VT_ITEMS, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ContinueWatchingList<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry>>>>("items", Self::VT_ITEMS, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry>,
+                >,
+            >>("items", Self::VT_ITEMS, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct ContinueWatchingListArgs<'a> {
-    pub items: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'a>>>>>,
+    pub items: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for ContinueWatchingListArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    ContinueWatchingListArgs {
-      items: None,
+    #[inline]
+    fn default() -> Self {
+        ContinueWatchingListArgs { items: None }
     }
-  }
 }
 
-pub struct ContinueWatchingListBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct ContinueWatchingListBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ContinueWatchingListBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_items(&mut self, items: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ContinueWatchingList::VT_ITEMS, items);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ContinueWatchingListBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ContinueWatchingListBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ContinueWatchingListBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_items(
+        &mut self,
+        items: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ContinueWatchingEntry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ContinueWatchingList::VT_ITEMS,
+            items,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ContinueWatchingList<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ContinueWatchingListBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ContinueWatchingListBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ContinueWatchingList<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ContinueWatchingList<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ContinueWatchingList");
-      ds.field("items", &self.items());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ContinueWatchingList");
+        ds.field("items", &self.items());
+        ds.finish()
+    }
 }

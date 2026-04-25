@@ -2,18 +2,27 @@
 // @generated
 extern crate alloc;
 use super::*;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 pub const ENUM_MIN_MEDIA_VARIANT: u8 = 0;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 pub const ENUM_MAX_MEDIA_VARIANT: u8 = 4;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 #[allow(non_camel_case_types)]
 pub const ENUM_VALUES_MEDIA_VARIANT: [MediaVariant; 5] = [
-  MediaVariant::NONE,
-  MediaVariant::MovieReference,
-  MediaVariant::SeriesReference,
-  MediaVariant::SeasonReference,
-  MediaVariant::EpisodeReference,
+    MediaVariant::NONE,
+    MediaVariant::MovieReference,
+    MediaVariant::SeriesReference,
+    MediaVariant::SeasonReference,
+    MediaVariant::EpisodeReference,
 ];
 
 /// Top-level media discriminator matching ferrex-model::Media.
@@ -22,49 +31,49 @@ pub const ENUM_VALUES_MEDIA_VARIANT: [MediaVariant; 5] = [
 pub struct MediaVariant(pub u8);
 #[allow(non_upper_case_globals)]
 impl MediaVariant {
-  pub const NONE: Self = Self(0);
-  pub const MovieReference: Self = Self(1);
-  pub const SeriesReference: Self = Self(2);
-  pub const SeasonReference: Self = Self(3);
-  pub const EpisodeReference: Self = Self(4);
+    pub const NONE: Self = Self(0);
+    pub const MovieReference: Self = Self(1);
+    pub const SeriesReference: Self = Self(2);
+    pub const SeasonReference: Self = Self(3);
+    pub const EpisodeReference: Self = Self(4);
 
-  pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 4;
-  pub const ENUM_VALUES: &'static [Self] = &[
-    Self::NONE,
-    Self::MovieReference,
-    Self::SeriesReference,
-    Self::SeasonReference,
-    Self::EpisodeReference,
-  ];
-  /// Returns the variant's name or "" if unknown.
-  pub fn variant_name(self) -> Option<&'static str> {
-    match self {
-      Self::NONE => Some("NONE"),
-      Self::MovieReference => Some("MovieReference"),
-      Self::SeriesReference => Some("SeriesReference"),
-      Self::SeasonReference => Some("SeasonReference"),
-      Self::EpisodeReference => Some("EpisodeReference"),
-      _ => None,
+    pub const ENUM_MIN: u8 = 0;
+    pub const ENUM_MAX: u8 = 4;
+    pub const ENUM_VALUES: &'static [Self] = &[
+        Self::NONE,
+        Self::MovieReference,
+        Self::SeriesReference,
+        Self::SeasonReference,
+        Self::EpisodeReference,
+    ];
+    /// Returns the variant's name or "" if unknown.
+    pub fn variant_name(self) -> Option<&'static str> {
+        match self {
+            Self::NONE => Some("NONE"),
+            Self::MovieReference => Some("MovieReference"),
+            Self::SeriesReference => Some("SeriesReference"),
+            Self::SeasonReference => Some("SeasonReference"),
+            Self::EpisodeReference => Some("EpisodeReference"),
+            _ => None,
+        }
     }
-  }
 }
 impl ::core::fmt::Debug for MediaVariant {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-    if let Some(name) = self.variant_name() {
-      f.write_str(name)
-    } else {
-      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+        if let Some(name) = self.variant_name() {
+            f.write_str(name)
+        } else {
+            f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+        }
     }
-  }
 }
 impl<'a> ::flatbuffers::Follow<'a> for MediaVariant {
-  type Inner = Self;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    let b = unsafe { ::flatbuffers::read_scalar_at::<u8>(buf, loc) };
-    Self(b)
-  }
+    type Inner = Self;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        let b = unsafe { ::flatbuffers::read_scalar_at::<u8>(buf, loc) };
+        Self(b)
+    }
 }
 
 impl ::flatbuffers::Push for MediaVariant {
@@ -76,28 +85,28 @@ impl ::flatbuffers::Push for MediaVariant {
 }
 
 impl ::flatbuffers::EndianScalar for MediaVariant {
-  type Scalar = u8;
-  #[inline]
-  fn to_little_endian(self) -> u8 {
-    self.0.to_le()
-  }
-  #[inline]
-  #[allow(clippy::wrong_self_convention)]
-  fn from_little_endian(v: u8) -> Self {
-    let b = u8::from_le(v);
-    Self(b)
-  }
+    type Scalar = u8;
+    #[inline]
+    fn to_little_endian(self) -> u8 {
+        self.0.to_le()
+    }
+    #[inline]
+    #[allow(clippy::wrong_self_convention)]
+    fn from_little_endian(v: u8) -> Self {
+        let b = u8::from_le(v);
+        Self(b)
+    }
 }
 
 impl<'a> ::flatbuffers::Verifiable for MediaVariant {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    u8::run_verifier(v, pos)
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        u8::run_verifier(v, pos)
+    }
 }
 
 impl ::flatbuffers::SimpleToVerifyInSlice for MediaVariant {}
 pub struct MediaVariantUnionTableOffset {}
-

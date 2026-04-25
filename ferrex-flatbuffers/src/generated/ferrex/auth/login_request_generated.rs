@@ -7,74 +7,118 @@ pub enum LoginRequestOffset {}
 
 /// POST /api/v1/auth/login request.
 pub struct LoginRequest<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for LoginRequest<'a> {
-  type Inner = LoginRequest<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = LoginRequest<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> LoginRequest<'a> {
-  pub const VT_USERNAME: ::flatbuffers::VOffsetT = 4;
-  pub const VT_PASSWORD: ::flatbuffers::VOffsetT = 6;
-  pub const VT_DEVICE_NAME: ::flatbuffers::VOffsetT = 8;
+    pub const VT_USERNAME: ::flatbuffers::VOffsetT = 4;
+    pub const VT_PASSWORD: ::flatbuffers::VOffsetT = 6;
+    pub const VT_DEVICE_NAME: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    LoginRequest { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args LoginRequestArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<LoginRequest<'bldr>> {
-    let mut builder = LoginRequestBuilder::new(_fbb);
-    if let Some(x) = args.device_name { builder.add_device_name(x); }
-    if let Some(x) = args.password { builder.add_password(x); }
-    if let Some(x) = args.username { builder.add_username(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        LoginRequest { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args LoginRequestArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<LoginRequest<'bldr>> {
+        let mut builder = LoginRequestBuilder::new(_fbb);
+        if let Some(x) = args.device_name {
+            builder.add_device_name(x);
+        }
+        if let Some(x) = args.password {
+            builder.add_password(x);
+        }
+        if let Some(x) = args.username {
+            builder.add_username(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn username(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(LoginRequest::VT_USERNAME, None).unwrap()}
-  }
-  #[inline]
-  pub fn password(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(LoginRequest::VT_PASSWORD, None).unwrap()}
-  }
-  #[inline]
-  pub fn device_name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(LoginRequest::VT_DEVICE_NAME, None)}
-  }
+    #[inline]
+    pub fn username(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    LoginRequest::VT_USERNAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn password(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    LoginRequest::VT_PASSWORD,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn device_name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                LoginRequest::VT_DEVICE_NAME,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for LoginRequest<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("username", Self::VT_USERNAME, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("password", Self::VT_PASSWORD, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("device_name", Self::VT_DEVICE_NAME, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "username",
+                Self::VT_USERNAME,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "password",
+                Self::VT_PASSWORD,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "device_name",
+                Self::VT_DEVICE_NAME,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct LoginRequestArgs<'a> {
     pub username: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -82,56 +126,78 @@ pub struct LoginRequestArgs<'a> {
     pub device_name: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for LoginRequestArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    LoginRequestArgs {
-      username: None, // required field
-      password: None, // required field
-      device_name: None,
+    #[inline]
+    fn default() -> Self {
+        LoginRequestArgs {
+            username: None, // required field
+            password: None, // required field
+            device_name: None,
+        }
     }
-  }
 }
 
 pub struct LoginRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> LoginRequestBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_username(&mut self, username: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(LoginRequest::VT_USERNAME, username);
-  }
-  #[inline]
-  pub fn add_password(&mut self, password: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(LoginRequest::VT_PASSWORD, password);
-  }
-  #[inline]
-  pub fn add_device_name(&mut self, device_name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(LoginRequest::VT_DEVICE_NAME, device_name);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> LoginRequestBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    LoginRequestBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    LoginRequestBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_username(
+        &mut self,
+        username: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            LoginRequest::VT_USERNAME,
+            username,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<LoginRequest<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, LoginRequest::VT_USERNAME,"username");
-    self.fbb_.required(o, LoginRequest::VT_PASSWORD,"password");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_password(
+        &mut self,
+        password: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            LoginRequest::VT_PASSWORD,
+            password,
+        );
+    }
+    #[inline]
+    pub fn add_device_name(
+        &mut self,
+        device_name: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            LoginRequest::VT_DEVICE_NAME,
+            device_name,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> LoginRequestBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        LoginRequestBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<LoginRequest<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, LoginRequest::VT_USERNAME, "username");
+        self.fbb_.required(o, LoginRequest::VT_PASSWORD, "password");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for LoginRequest<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("LoginRequest");
-      ds.field("username", &self.username());
-      ds.field("password", &self.password());
-      ds.field("device_name", &self.device_name());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("LoginRequest");
+        ds.field("username", &self.username());
+        ds.field("password", &self.password());
+        ds.field("device_name", &self.device_name());
+        ds.finish()
+    }
 }

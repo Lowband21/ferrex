@@ -10,13 +10,19 @@ use crate::uuid_helpers::option_uuid_to_fb;
 /// The FlatBuffers `SetupStatus` schema is minimal (needs_setup, registration_open)
 /// compared to the server's richer JSON `SetupStatus`. This is intentional —
 /// mobile clients only need to know whether to show the setup flow.
-pub fn serialize_setup_status(needs_setup: bool, registration_open: bool) -> Vec<u8> {
+pub fn serialize_setup_status(
+    needs_setup: bool,
+    registration_open: bool,
+) -> Vec<u8> {
     let mut builder = FlatBufferBuilder::with_capacity(64);
 
-    let status = fb::SetupStatus::create(&mut builder, &fb::SetupStatusArgs {
-        needs_setup,
-        registration_open,
-    });
+    let status = fb::SetupStatus::create(
+        &mut builder,
+        &fb::SetupStatusArgs {
+            needs_setup,
+            registration_open,
+        },
+    );
 
     builder.finish(status, None);
     builder.finished_data().to_vec()
@@ -39,12 +45,15 @@ pub fn serialize_auth_token(
     let refresh = builder.create_string(refresh_token);
     let sid = session_id.map(|id| option_uuid_to_fb(Some(id)));
 
-    let token = fb::AuthToken::create(&mut builder, &fb::AuthTokenArgs {
-        access_token: Some(access),
-        refresh_token: Some(refresh),
-        expires_in,
-        session_id: sid.as_ref(),
-    });
+    let token = fb::AuthToken::create(
+        &mut builder,
+        &fb::AuthTokenArgs {
+            access_token: Some(access),
+            refresh_token: Some(refresh),
+            expires_in,
+            session_id: sid.as_ref(),
+        },
+    );
 
     builder.finish(token, None);
     builder.finished_data().to_vec()

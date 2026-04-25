@@ -6,112 +6,143 @@ pub enum RelatedMediaRefOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct RelatedMediaRef<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for RelatedMediaRef<'a> {
-  type Inner = RelatedMediaRef<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = RelatedMediaRef<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> RelatedMediaRef<'a> {
-  pub const VT_TMDB_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_TITLE: ::flatbuffers::VOffsetT = 6;
+    pub const VT_TMDB_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_TITLE: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    RelatedMediaRef { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args RelatedMediaRefArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<RelatedMediaRef<'bldr>> {
-    let mut builder = RelatedMediaRefBuilder::new(_fbb);
-    builder.add_tmdb_id(args.tmdb_id);
-    if let Some(x) = args.title { builder.add_title(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        RelatedMediaRef { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args RelatedMediaRefArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<RelatedMediaRef<'bldr>> {
+        let mut builder = RelatedMediaRefBuilder::new(_fbb);
+        builder.add_tmdb_id(args.tmdb_id);
+        if let Some(x) = args.title {
+            builder.add_title(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn tmdb_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(RelatedMediaRef::VT_TMDB_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn title(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(RelatedMediaRef::VT_TITLE, None)}
-  }
+    #[inline]
+    pub fn tmdb_id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(RelatedMediaRef::VT_TMDB_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn title(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                RelatedMediaRef::VT_TITLE,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for RelatedMediaRef<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("tmdb_id", Self::VT_TMDB_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("tmdb_id", Self::VT_TMDB_ID, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "title",
+                Self::VT_TITLE,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct RelatedMediaRefArgs<'a> {
     pub tmdb_id: u64,
     pub title: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for RelatedMediaRefArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    RelatedMediaRefArgs {
-      tmdb_id: 0,
-      title: None,
+    #[inline]
+    fn default() -> Self {
+        RelatedMediaRefArgs {
+            tmdb_id: 0,
+            title: None,
+        }
     }
-  }
 }
 
-pub struct RelatedMediaRefBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct RelatedMediaRefBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> RelatedMediaRefBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_tmdb_id(&mut self, tmdb_id: u64) {
-    self.fbb_.push_slot::<u64>(RelatedMediaRef::VT_TMDB_ID, tmdb_id, 0);
-  }
-  #[inline]
-  pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(RelatedMediaRef::VT_TITLE, title);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> RelatedMediaRefBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    RelatedMediaRefBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    RelatedMediaRefBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_tmdb_id(&mut self, tmdb_id: u64) {
+        self.fbb_
+            .push_slot::<u64>(RelatedMediaRef::VT_TMDB_ID, tmdb_id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<RelatedMediaRef<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            RelatedMediaRef::VT_TITLE,
+            title,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> RelatedMediaRefBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        RelatedMediaRefBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<RelatedMediaRef<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for RelatedMediaRef<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("RelatedMediaRef");
-      ds.field("tmdb_id", &self.tmdb_id());
-      ds.field("title", &self.title());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("RelatedMediaRef");
+        ds.field("tmdb_id", &self.tmdb_id());
+        ds.field("title", &self.title());
+        ds.finish()
+    }
 }

@@ -7,74 +7,112 @@ pub enum NextEpisodeOffset {}
 
 /// Hint for the next episode to play in a series.
 pub struct NextEpisode<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for NextEpisode<'a> {
-  type Inner = NextEpisode<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = NextEpisode<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> NextEpisode<'a> {
-  pub const VT_KEY: ::flatbuffers::VOffsetT = 4;
-  pub const VT_PLAYABLE_MEDIA_ID: ::flatbuffers::VOffsetT = 6;
-  pub const VT_REASON: ::flatbuffers::VOffsetT = 8;
+    pub const VT_KEY: ::flatbuffers::VOffsetT = 4;
+    pub const VT_PLAYABLE_MEDIA_ID: ::flatbuffers::VOffsetT = 6;
+    pub const VT_REASON: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    NextEpisode { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args NextEpisodeArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<NextEpisode<'bldr>> {
-    let mut builder = NextEpisodeBuilder::new(_fbb);
-    if let Some(x) = args.playable_media_id { builder.add_playable_media_id(x); }
-    if let Some(x) = args.key { builder.add_key(x); }
-    builder.add_reason(args.reason);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        NextEpisode { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args NextEpisodeArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<NextEpisode<'bldr>> {
+        let mut builder = NextEpisodeBuilder::new(_fbb);
+        if let Some(x) = args.playable_media_id {
+            builder.add_playable_media_id(x);
+        }
+        if let Some(x) = args.key {
+            builder.add_key(x);
+        }
+        builder.add_reason(args.reason);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn key(&self) -> EpisodeKey<'a> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<EpisodeKey>>(NextEpisode::VT_KEY, None).unwrap()}
-  }
-  #[inline]
-  pub fn playable_media_id(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(NextEpisode::VT_PLAYABLE_MEDIA_ID, None)}
-  }
-  #[inline]
-  pub fn reason(&self) -> NextReason {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<NextReason>(NextEpisode::VT_REASON, Some(NextReason::ResumeInProgress)).unwrap()}
-  }
+    #[inline]
+    pub fn key(&self) -> EpisodeKey<'a> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<EpisodeKey>>(
+                    NextEpisode::VT_KEY,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn playable_media_id(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::ids::Uuid>(
+                NextEpisode::VT_PLAYABLE_MEDIA_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn reason(&self) -> NextReason {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<NextReason>(
+                    NextEpisode::VT_REASON,
+                    Some(NextReason::ResumeInProgress),
+                )
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for NextEpisode<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<EpisodeKey>>("key", Self::VT_KEY, true)?
-     .visit_field::<super::ids::Uuid>("playable_media_id", Self::VT_PLAYABLE_MEDIA_ID, false)?
-     .visit_field::<NextReason>("reason", Self::VT_REASON, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<EpisodeKey>>(
+                "key",
+                Self::VT_KEY,
+                true,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "playable_media_id",
+                Self::VT_PLAYABLE_MEDIA_ID,
+                false,
+            )?
+            .visit_field::<NextReason>("reason", Self::VT_REASON, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct NextEpisodeArgs<'a> {
     pub key: Option<::flatbuffers::WIPOffset<EpisodeKey<'a>>>,
@@ -82,55 +120,73 @@ pub struct NextEpisodeArgs<'a> {
     pub reason: NextReason,
 }
 impl<'a> Default for NextEpisodeArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    NextEpisodeArgs {
-      key: None, // required field
-      playable_media_id: None,
-      reason: NextReason::ResumeInProgress,
+    #[inline]
+    fn default() -> Self {
+        NextEpisodeArgs {
+            key: None, // required field
+            playable_media_id: None,
+            reason: NextReason::ResumeInProgress,
+        }
     }
-  }
 }
 
 pub struct NextEpisodeBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> NextEpisodeBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_key(&mut self, key: ::flatbuffers::WIPOffset<EpisodeKey<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<EpisodeKey>>(NextEpisode::VT_KEY, key);
-  }
-  #[inline]
-  pub fn add_playable_media_id(&mut self, playable_media_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(NextEpisode::VT_PLAYABLE_MEDIA_ID, playable_media_id);
-  }
-  #[inline]
-  pub fn add_reason(&mut self, reason: NextReason) {
-    self.fbb_.push_slot::<NextReason>(NextEpisode::VT_REASON, reason, NextReason::ResumeInProgress);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> NextEpisodeBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    NextEpisodeBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    NextEpisodeBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_key(&mut self, key: ::flatbuffers::WIPOffset<EpisodeKey<'b>>) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<EpisodeKey>>(
+                NextEpisode::VT_KEY,
+                key,
+            );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<NextEpisode<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, NextEpisode::VT_KEY,"key");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_playable_media_id(
+        &mut self,
+        playable_media_id: &super::ids::Uuid,
+    ) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            NextEpisode::VT_PLAYABLE_MEDIA_ID,
+            playable_media_id,
+        );
+    }
+    #[inline]
+    pub fn add_reason(&mut self, reason: NextReason) {
+        self.fbb_.push_slot::<NextReason>(
+            NextEpisode::VT_REASON,
+            reason,
+            NextReason::ResumeInProgress,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> NextEpisodeBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        NextEpisodeBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<NextEpisode<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, NextEpisode::VT_KEY, "key");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for NextEpisode<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("NextEpisode");
-      ds.field("key", &self.key());
-      ds.field("playable_media_id", &self.playable_media_id());
-      ds.field("reason", &self.reason());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("NextEpisode");
+        ds.field("key", &self.key());
+        ds.field("playable_media_id", &self.playable_media_id());
+        ds.field("reason", &self.reason());
+        ds.finish()
+    }
 }

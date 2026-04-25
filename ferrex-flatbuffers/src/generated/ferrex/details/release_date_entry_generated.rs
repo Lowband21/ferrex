@@ -6,104 +6,177 @@ pub enum ReleaseDateEntryOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct ReleaseDateEntry<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ReleaseDateEntry<'a> {
-  type Inner = ReleaseDateEntry<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ReleaseDateEntry<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ReleaseDateEntry<'a> {
-  pub const VT_CERTIFICATION: ::flatbuffers::VOffsetT = 4;
-  pub const VT_RELEASE_DATE: ::flatbuffers::VOffsetT = 6;
-  pub const VT_RELEASE_TYPE: ::flatbuffers::VOffsetT = 8;
-  pub const VT_NOTE: ::flatbuffers::VOffsetT = 10;
-  pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 12;
-  pub const VT_DESCRIPTORS: ::flatbuffers::VOffsetT = 14;
+    pub const VT_CERTIFICATION: ::flatbuffers::VOffsetT = 4;
+    pub const VT_RELEASE_DATE: ::flatbuffers::VOffsetT = 6;
+    pub const VT_RELEASE_TYPE: ::flatbuffers::VOffsetT = 8;
+    pub const VT_NOTE: ::flatbuffers::VOffsetT = 10;
+    pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 12;
+    pub const VT_DESCRIPTORS: ::flatbuffers::VOffsetT = 14;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ReleaseDateEntry { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ReleaseDateEntryArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<ReleaseDateEntry<'bldr>> {
-    let mut builder = ReleaseDateEntryBuilder::new(_fbb);
-    if let Some(x) = args.descriptors { builder.add_descriptors(x); }
-    if let Some(x) = args.iso_639_1 { builder.add_iso_639_1(x); }
-    if let Some(x) = args.note { builder.add_note(x); }
-    builder.add_release_type(args.release_type);
-    if let Some(x) = args.release_date { builder.add_release_date(x); }
-    if let Some(x) = args.certification { builder.add_certification(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ReleaseDateEntry { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ReleaseDateEntryArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<ReleaseDateEntry<'bldr>> {
+        let mut builder = ReleaseDateEntryBuilder::new(_fbb);
+        if let Some(x) = args.descriptors {
+            builder.add_descriptors(x);
+        }
+        if let Some(x) = args.iso_639_1 {
+            builder.add_iso_639_1(x);
+        }
+        if let Some(x) = args.note {
+            builder.add_note(x);
+        }
+        builder.add_release_type(args.release_type);
+        if let Some(x) = args.release_date {
+            builder.add_release_date(x);
+        }
+        if let Some(x) = args.certification {
+            builder.add_certification(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn certification(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ReleaseDateEntry::VT_CERTIFICATION, None)}
-  }
-  #[inline]
-  pub fn release_date(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ReleaseDateEntry::VT_RELEASE_DATE, None)}
-  }
-  #[inline]
-  pub fn release_type(&self) -> i32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<i32>(ReleaseDateEntry::VT_RELEASE_TYPE, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn note(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ReleaseDateEntry::VT_NOTE, None)}
-  }
-  #[inline]
-  pub fn iso_639_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ReleaseDateEntry::VT_ISO_639_1, None)}
-  }
-  #[inline]
-  pub fn descriptors(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>>>(ReleaseDateEntry::VT_DESCRIPTORS, None)}
-  }
+    #[inline]
+    pub fn certification(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ReleaseDateEntry::VT_CERTIFICATION,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn release_date(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ReleaseDateEntry::VT_RELEASE_DATE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn release_type(&self) -> i32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<i32>(ReleaseDateEntry::VT_RELEASE_TYPE, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn note(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ReleaseDateEntry::VT_NOTE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn iso_639_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ReleaseDateEntry::VT_ISO_639_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn descriptors(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<&'a str>,
+                >,
+            >>(ReleaseDateEntry::VT_DESCRIPTORS, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ReleaseDateEntry<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("certification", Self::VT_CERTIFICATION, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("release_date", Self::VT_RELEASE_DATE, false)?
-     .visit_field::<i32>("release_type", Self::VT_RELEASE_TYPE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("note", Self::VT_NOTE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_639_1", Self::VT_ISO_639_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<&'_ str>>>>("descriptors", Self::VT_DESCRIPTORS, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "certification",
+                Self::VT_CERTIFICATION,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "release_date",
+                Self::VT_RELEASE_DATE,
+                false,
+            )?
+            .visit_field::<i32>("release_type", Self::VT_RELEASE_TYPE, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "note",
+                Self::VT_NOTE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_639_1",
+                Self::VT_ISO_639_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<&'_ str>,
+                >,
+            >>("descriptors", Self::VT_DESCRIPTORS, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct ReleaseDateEntryArgs<'a> {
     pub certification: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -111,75 +184,117 @@ pub struct ReleaseDateEntryArgs<'a> {
     pub release_type: i32,
     pub note: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub iso_639_1: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub descriptors: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>>>,
+    pub descriptors: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+        >,
+    >,
 }
 impl<'a> Default for ReleaseDateEntryArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    ReleaseDateEntryArgs {
-      certification: None,
-      release_date: None,
-      release_type: 0,
-      note: None,
-      iso_639_1: None,
-      descriptors: None,
+    #[inline]
+    fn default() -> Self {
+        ReleaseDateEntryArgs {
+            certification: None,
+            release_date: None,
+            release_type: 0,
+            note: None,
+            iso_639_1: None,
+            descriptors: None,
+        }
     }
-  }
 }
 
-pub struct ReleaseDateEntryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct ReleaseDateEntryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ReleaseDateEntryBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_certification(&mut self, certification: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDateEntry::VT_CERTIFICATION, certification);
-  }
-  #[inline]
-  pub fn add_release_date(&mut self, release_date: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDateEntry::VT_RELEASE_DATE, release_date);
-  }
-  #[inline]
-  pub fn add_release_type(&mut self, release_type: i32) {
-    self.fbb_.push_slot::<i32>(ReleaseDateEntry::VT_RELEASE_TYPE, release_type, 0);
-  }
-  #[inline]
-  pub fn add_note(&mut self, note: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDateEntry::VT_NOTE, note);
-  }
-  #[inline]
-  pub fn add_iso_639_1(&mut self, iso_639_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDateEntry::VT_ISO_639_1, iso_639_1);
-  }
-  #[inline]
-  pub fn add_descriptors(&mut self, descriptors: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<&'b  str>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDateEntry::VT_DESCRIPTORS, descriptors);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ReleaseDateEntryBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ReleaseDateEntryBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ReleaseDateEntryBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_certification(
+        &mut self,
+        certification: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDateEntry::VT_CERTIFICATION,
+            certification,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ReleaseDateEntry<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_release_date(
+        &mut self,
+        release_date: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDateEntry::VT_RELEASE_DATE,
+            release_date,
+        );
+    }
+    #[inline]
+    pub fn add_release_type(&mut self, release_type: i32) {
+        self.fbb_.push_slot::<i32>(
+            ReleaseDateEntry::VT_RELEASE_TYPE,
+            release_type,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_note(&mut self, note: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDateEntry::VT_NOTE,
+            note,
+        );
+    }
+    #[inline]
+    pub fn add_iso_639_1(
+        &mut self,
+        iso_639_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDateEntry::VT_ISO_639_1,
+            iso_639_1,
+        );
+    }
+    #[inline]
+    pub fn add_descriptors(
+        &mut self,
+        descriptors: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<'b, ::flatbuffers::ForwardsUOffset<&'b str>>,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDateEntry::VT_DESCRIPTORS,
+            descriptors,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ReleaseDateEntryBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ReleaseDateEntryBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ReleaseDateEntry<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ReleaseDateEntry<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ReleaseDateEntry");
-      ds.field("certification", &self.certification());
-      ds.field("release_date", &self.release_date());
-      ds.field("release_type", &self.release_type());
-      ds.field("note", &self.note());
-      ds.field("iso_639_1", &self.iso_639_1());
-      ds.field("descriptors", &self.descriptors());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ReleaseDateEntry");
+        ds.field("certification", &self.certification());
+        ds.field("release_date", &self.release_date());
+        ds.field("release_type", &self.release_type());
+        ds.field("note", &self.note());
+        ds.field("iso_639_1", &self.iso_639_1());
+        ds.field("descriptors", &self.descriptors());
+        ds.finish()
+    }
 }

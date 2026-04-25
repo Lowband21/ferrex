@@ -8,74 +8,101 @@ pub enum EpisodeKeyOffset {}
 /// Episode key — identifies an episode by its series + season + episode number
 /// (independent of file/UUID).
 pub struct EpisodeKey<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for EpisodeKey<'a> {
-  type Inner = EpisodeKey<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = EpisodeKey<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> EpisodeKey<'a> {
-  pub const VT_TMDB_SERIES_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 6;
-  pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 8;
+    pub const VT_TMDB_SERIES_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 6;
+    pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EpisodeKey { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EpisodeKeyArgs
-  ) -> ::flatbuffers::WIPOffset<EpisodeKey<'bldr>> {
-    let mut builder = EpisodeKeyBuilder::new(_fbb);
-    builder.add_tmdb_series_id(args.tmdb_series_id);
-    builder.add_episode_number(args.episode_number);
-    builder.add_season_number(args.season_number);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        EpisodeKey { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args EpisodeKeyArgs,
+    ) -> ::flatbuffers::WIPOffset<EpisodeKey<'bldr>> {
+        let mut builder = EpisodeKeyBuilder::new(_fbb);
+        builder.add_tmdb_series_id(args.tmdb_series_id);
+        builder.add_episode_number(args.episode_number);
+        builder.add_season_number(args.season_number);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn tmdb_series_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(EpisodeKey::VT_TMDB_SERIES_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn season_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EpisodeKey::VT_SEASON_NUMBER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn episode_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EpisodeKey::VT_EPISODE_NUMBER, Some(0)).unwrap()}
-  }
+    #[inline]
+    pub fn tmdb_series_id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(EpisodeKey::VT_TMDB_SERIES_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn season_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(EpisodeKey::VT_SEASON_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn episode_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(EpisodeKey::VT_EPISODE_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EpisodeKey<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("tmdb_series_id", Self::VT_TMDB_SERIES_ID, false)?
-     .visit_field::<u16>("season_number", Self::VT_SEASON_NUMBER, false)?
-     .visit_field::<u16>("episode_number", Self::VT_EPISODE_NUMBER, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>(
+                "tmdb_series_id",
+                Self::VT_TMDB_SERIES_ID,
+                false,
+            )?
+            .visit_field::<u16>("season_number", Self::VT_SEASON_NUMBER, false)?
+            .visit_field::<u16>(
+                "episode_number",
+                Self::VT_EPISODE_NUMBER,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct EpisodeKeyArgs {
     pub tmdb_series_id: u64,
@@ -83,54 +110,70 @@ pub struct EpisodeKeyArgs {
     pub episode_number: u16,
 }
 impl<'a> Default for EpisodeKeyArgs {
-  #[inline]
-  fn default() -> Self {
-    EpisodeKeyArgs {
-      tmdb_series_id: 0,
-      season_number: 0,
-      episode_number: 0,
+    #[inline]
+    fn default() -> Self {
+        EpisodeKeyArgs {
+            tmdb_series_id: 0,
+            season_number: 0,
+            episode_number: 0,
+        }
     }
-  }
 }
 
 pub struct EpisodeKeyBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EpisodeKeyBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_tmdb_series_id(&mut self, tmdb_series_id: u64) {
-    self.fbb_.push_slot::<u64>(EpisodeKey::VT_TMDB_SERIES_ID, tmdb_series_id, 0);
-  }
-  #[inline]
-  pub fn add_season_number(&mut self, season_number: u16) {
-    self.fbb_.push_slot::<u16>(EpisodeKey::VT_SEASON_NUMBER, season_number, 0);
-  }
-  #[inline]
-  pub fn add_episode_number(&mut self, episode_number: u16) {
-    self.fbb_.push_slot::<u16>(EpisodeKey::VT_EPISODE_NUMBER, episode_number, 0);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EpisodeKeyBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EpisodeKeyBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    EpisodeKeyBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_tmdb_series_id(&mut self, tmdb_series_id: u64) {
+        self.fbb_.push_slot::<u64>(
+            EpisodeKey::VT_TMDB_SERIES_ID,
+            tmdb_series_id,
+            0,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeKey<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_season_number(&mut self, season_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            EpisodeKey::VT_SEASON_NUMBER,
+            season_number,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_episode_number(&mut self, episode_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            EpisodeKey::VT_EPISODE_NUMBER,
+            episode_number,
+            0,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> EpisodeKeyBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        EpisodeKeyBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeKey<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for EpisodeKey<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EpisodeKey");
-      ds.field("tmdb_series_id", &self.tmdb_series_id());
-      ds.field("season_number", &self.season_number());
-      ds.field("episode_number", &self.episode_number());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("EpisodeKey");
+        ds.field("tmdb_series_id", &self.tmdb_series_id());
+        ds.field("season_number", &self.season_number());
+        ds.field("episode_number", &self.episode_number());
+        ds.finish()
+    }
 }

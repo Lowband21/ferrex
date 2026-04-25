@@ -6,114 +6,198 @@ pub enum PersonExternalIdsOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct PersonExternalIds<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for PersonExternalIds<'a> {
-  type Inner = PersonExternalIds<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = PersonExternalIds<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> PersonExternalIds<'a> {
-  pub const VT_IMDB_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_FACEBOOK_ID: ::flatbuffers::VOffsetT = 6;
-  pub const VT_INSTAGRAM_ID: ::flatbuffers::VOffsetT = 8;
-  pub const VT_TWITTER_ID: ::flatbuffers::VOffsetT = 10;
-  pub const VT_WIKIDATA_ID: ::flatbuffers::VOffsetT = 12;
-  pub const VT_TIKTOK_ID: ::flatbuffers::VOffsetT = 14;
-  pub const VT_YOUTUBE_ID: ::flatbuffers::VOffsetT = 16;
+    pub const VT_IMDB_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_FACEBOOK_ID: ::flatbuffers::VOffsetT = 6;
+    pub const VT_INSTAGRAM_ID: ::flatbuffers::VOffsetT = 8;
+    pub const VT_TWITTER_ID: ::flatbuffers::VOffsetT = 10;
+    pub const VT_WIKIDATA_ID: ::flatbuffers::VOffsetT = 12;
+    pub const VT_TIKTOK_ID: ::flatbuffers::VOffsetT = 14;
+    pub const VT_YOUTUBE_ID: ::flatbuffers::VOffsetT = 16;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    PersonExternalIds { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args PersonExternalIdsArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<PersonExternalIds<'bldr>> {
-    let mut builder = PersonExternalIdsBuilder::new(_fbb);
-    if let Some(x) = args.youtube_id { builder.add_youtube_id(x); }
-    if let Some(x) = args.tiktok_id { builder.add_tiktok_id(x); }
-    if let Some(x) = args.wikidata_id { builder.add_wikidata_id(x); }
-    if let Some(x) = args.twitter_id { builder.add_twitter_id(x); }
-    if let Some(x) = args.instagram_id { builder.add_instagram_id(x); }
-    if let Some(x) = args.facebook_id { builder.add_facebook_id(x); }
-    if let Some(x) = args.imdb_id { builder.add_imdb_id(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        PersonExternalIds { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args PersonExternalIdsArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<PersonExternalIds<'bldr>> {
+        let mut builder = PersonExternalIdsBuilder::new(_fbb);
+        if let Some(x) = args.youtube_id {
+            builder.add_youtube_id(x);
+        }
+        if let Some(x) = args.tiktok_id {
+            builder.add_tiktok_id(x);
+        }
+        if let Some(x) = args.wikidata_id {
+            builder.add_wikidata_id(x);
+        }
+        if let Some(x) = args.twitter_id {
+            builder.add_twitter_id(x);
+        }
+        if let Some(x) = args.instagram_id {
+            builder.add_instagram_id(x);
+        }
+        if let Some(x) = args.facebook_id {
+            builder.add_facebook_id(x);
+        }
+        if let Some(x) = args.imdb_id {
+            builder.add_imdb_id(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn imdb_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_IMDB_ID, None)}
-  }
-  #[inline]
-  pub fn facebook_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_FACEBOOK_ID, None)}
-  }
-  #[inline]
-  pub fn instagram_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_INSTAGRAM_ID, None)}
-  }
-  #[inline]
-  pub fn twitter_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_TWITTER_ID, None)}
-  }
-  #[inline]
-  pub fn wikidata_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_WIKIDATA_ID, None)}
-  }
-  #[inline]
-  pub fn tiktok_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_TIKTOK_ID, None)}
-  }
-  #[inline]
-  pub fn youtube_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PersonExternalIds::VT_YOUTUBE_ID, None)}
-  }
+    #[inline]
+    pub fn imdb_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_IMDB_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn facebook_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_FACEBOOK_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn instagram_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_INSTAGRAM_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn twitter_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_TWITTER_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn wikidata_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_WIKIDATA_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn tiktok_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_TIKTOK_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn youtube_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                PersonExternalIds::VT_YOUTUBE_ID,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for PersonExternalIds<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("imdb_id", Self::VT_IMDB_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("facebook_id", Self::VT_FACEBOOK_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("instagram_id", Self::VT_INSTAGRAM_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("twitter_id", Self::VT_TWITTER_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("wikidata_id", Self::VT_WIKIDATA_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("tiktok_id", Self::VT_TIKTOK_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("youtube_id", Self::VT_YOUTUBE_ID, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "imdb_id",
+                Self::VT_IMDB_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "facebook_id",
+                Self::VT_FACEBOOK_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "instagram_id",
+                Self::VT_INSTAGRAM_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "twitter_id",
+                Self::VT_TWITTER_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "wikidata_id",
+                Self::VT_WIKIDATA_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "tiktok_id",
+                Self::VT_TIKTOK_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "youtube_id",
+                Self::VT_YOUTUBE_ID,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct PersonExternalIdsArgs<'a> {
     pub imdb_id: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -125,78 +209,125 @@ pub struct PersonExternalIdsArgs<'a> {
     pub youtube_id: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for PersonExternalIdsArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    PersonExternalIdsArgs {
-      imdb_id: None,
-      facebook_id: None,
-      instagram_id: None,
-      twitter_id: None,
-      wikidata_id: None,
-      tiktok_id: None,
-      youtube_id: None,
+    #[inline]
+    fn default() -> Self {
+        PersonExternalIdsArgs {
+            imdb_id: None,
+            facebook_id: None,
+            instagram_id: None,
+            twitter_id: None,
+            wikidata_id: None,
+            tiktok_id: None,
+            youtube_id: None,
+        }
     }
-  }
 }
 
-pub struct PersonExternalIdsBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct PersonExternalIdsBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PersonExternalIdsBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_imdb_id(&mut self, imdb_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_IMDB_ID, imdb_id);
-  }
-  #[inline]
-  pub fn add_facebook_id(&mut self, facebook_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_FACEBOOK_ID, facebook_id);
-  }
-  #[inline]
-  pub fn add_instagram_id(&mut self, instagram_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_INSTAGRAM_ID, instagram_id);
-  }
-  #[inline]
-  pub fn add_twitter_id(&mut self, twitter_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_TWITTER_ID, twitter_id);
-  }
-  #[inline]
-  pub fn add_wikidata_id(&mut self, wikidata_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_WIKIDATA_ID, wikidata_id);
-  }
-  #[inline]
-  pub fn add_tiktok_id(&mut self, tiktok_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_TIKTOK_ID, tiktok_id);
-  }
-  #[inline]
-  pub fn add_youtube_id(&mut self, youtube_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PersonExternalIds::VT_YOUTUBE_ID, youtube_id);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> PersonExternalIdsBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    PersonExternalIdsBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    PersonExternalIdsBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_imdb_id(&mut self, imdb_id: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_IMDB_ID,
+            imdb_id,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<PersonExternalIds<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_facebook_id(
+        &mut self,
+        facebook_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_FACEBOOK_ID,
+            facebook_id,
+        );
+    }
+    #[inline]
+    pub fn add_instagram_id(
+        &mut self,
+        instagram_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_INSTAGRAM_ID,
+            instagram_id,
+        );
+    }
+    #[inline]
+    pub fn add_twitter_id(
+        &mut self,
+        twitter_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_TWITTER_ID,
+            twitter_id,
+        );
+    }
+    #[inline]
+    pub fn add_wikidata_id(
+        &mut self,
+        wikidata_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_WIKIDATA_ID,
+            wikidata_id,
+        );
+    }
+    #[inline]
+    pub fn add_tiktok_id(
+        &mut self,
+        tiktok_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_TIKTOK_ID,
+            tiktok_id,
+        );
+    }
+    #[inline]
+    pub fn add_youtube_id(
+        &mut self,
+        youtube_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PersonExternalIds::VT_YOUTUBE_ID,
+            youtube_id,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> PersonExternalIdsBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        PersonExternalIdsBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<PersonExternalIds<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for PersonExternalIds<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("PersonExternalIds");
-      ds.field("imdb_id", &self.imdb_id());
-      ds.field("facebook_id", &self.facebook_id());
-      ds.field("instagram_id", &self.instagram_id());
-      ds.field("twitter_id", &self.twitter_id());
-      ds.field("wikidata_id", &self.wikidata_id());
-      ds.field("tiktok_id", &self.tiktok_id());
-      ds.field("youtube_id", &self.youtube_id());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("PersonExternalIds");
+        ds.field("imdb_id", &self.imdb_id());
+        ds.field("facebook_id", &self.facebook_id());
+        ds.field("instagram_id", &self.instagram_id());
+        ds.field("twitter_id", &self.twitter_id());
+        ds.field("wikidata_id", &self.wikidata_id());
+        ds.field("tiktok_id", &self.tiktok_id());
+        ds.field("youtube_id", &self.youtube_id());
+        ds.finish()
+    }
 }

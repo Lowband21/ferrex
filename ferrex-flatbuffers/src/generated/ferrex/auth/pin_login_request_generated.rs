@@ -7,84 +7,137 @@ pub enum PinLoginRequestOffset {}
 
 /// POST /api/v1/auth/device/pin request.
 pub struct PinLoginRequest<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for PinLoginRequest<'a> {
-  type Inner = PinLoginRequest<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = PinLoginRequest<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> PinLoginRequest<'a> {
-  pub const VT_DEVICE_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_CLIENT_PROOF: ::flatbuffers::VOffsetT = 6;
-  pub const VT_CHALLENGE_ID: ::flatbuffers::VOffsetT = 8;
-  pub const VT_DEVICE_SIGNATURE: ::flatbuffers::VOffsetT = 10;
+    pub const VT_DEVICE_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_CLIENT_PROOF: ::flatbuffers::VOffsetT = 6;
+    pub const VT_CHALLENGE_ID: ::flatbuffers::VOffsetT = 8;
+    pub const VT_DEVICE_SIGNATURE: ::flatbuffers::VOffsetT = 10;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    PinLoginRequest { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args PinLoginRequestArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<PinLoginRequest<'bldr>> {
-    let mut builder = PinLoginRequestBuilder::new(_fbb);
-    if let Some(x) = args.device_signature { builder.add_device_signature(x); }
-    if let Some(x) = args.challenge_id { builder.add_challenge_id(x); }
-    if let Some(x) = args.client_proof { builder.add_client_proof(x); }
-    if let Some(x) = args.device_id { builder.add_device_id(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        PinLoginRequest { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args PinLoginRequestArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<PinLoginRequest<'bldr>> {
+        let mut builder = PinLoginRequestBuilder::new(_fbb);
+        if let Some(x) = args.device_signature {
+            builder.add_device_signature(x);
+        }
+        if let Some(x) = args.challenge_id {
+            builder.add_challenge_id(x);
+        }
+        if let Some(x) = args.client_proof {
+            builder.add_client_proof(x);
+        }
+        if let Some(x) = args.device_id {
+            builder.add_device_id(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn device_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(PinLoginRequest::VT_DEVICE_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn client_proof(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PinLoginRequest::VT_CLIENT_PROOF, None).unwrap()}
-  }
-  #[inline]
-  pub fn challenge_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(PinLoginRequest::VT_CHALLENGE_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn device_signature(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PinLoginRequest::VT_DEVICE_SIGNATURE, None).unwrap()}
-  }
+    #[inline]
+    pub fn device_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(PinLoginRequest::VT_DEVICE_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn client_proof(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    PinLoginRequest::VT_CLIENT_PROOF,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn challenge_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(PinLoginRequest::VT_CHALLENGE_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn device_signature(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    PinLoginRequest::VT_DEVICE_SIGNATURE,
+                    None,
+                )
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for PinLoginRequest<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<super::ids::Uuid>("device_id", Self::VT_DEVICE_ID, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("client_proof", Self::VT_CLIENT_PROOF, true)?
-     .visit_field::<super::ids::Uuid>("challenge_id", Self::VT_CHALLENGE_ID, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("device_signature", Self::VT_DEVICE_SIGNATURE, true)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<super::ids::Uuid>(
+                "device_id",
+                Self::VT_DEVICE_ID,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "client_proof",
+                Self::VT_CLIENT_PROOF,
+                true,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "challenge_id",
+                Self::VT_CHALLENGE_ID,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "device_signature",
+                Self::VT_DEVICE_SIGNATURE,
+                true,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct PinLoginRequestArgs<'a> {
     pub device_id: Option<&'a super::ids::Uuid>,
@@ -93,64 +146,94 @@ pub struct PinLoginRequestArgs<'a> {
     pub device_signature: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for PinLoginRequestArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    PinLoginRequestArgs {
-      device_id: None, // required field
-      client_proof: None, // required field
-      challenge_id: None, // required field
-      device_signature: None, // required field
+    #[inline]
+    fn default() -> Self {
+        PinLoginRequestArgs {
+            device_id: None,        // required field
+            client_proof: None,     // required field
+            challenge_id: None,     // required field
+            device_signature: None, // required field
+        }
     }
-  }
 }
 
-pub struct PinLoginRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct PinLoginRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PinLoginRequestBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_device_id(&mut self, device_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(PinLoginRequest::VT_DEVICE_ID, device_id);
-  }
-  #[inline]
-  pub fn add_client_proof(&mut self, client_proof: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PinLoginRequest::VT_CLIENT_PROOF, client_proof);
-  }
-  #[inline]
-  pub fn add_challenge_id(&mut self, challenge_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(PinLoginRequest::VT_CHALLENGE_ID, challenge_id);
-  }
-  #[inline]
-  pub fn add_device_signature(&mut self, device_signature: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PinLoginRequest::VT_DEVICE_SIGNATURE, device_signature);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> PinLoginRequestBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    PinLoginRequestBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    PinLoginRequestBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_device_id(&mut self, device_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            PinLoginRequest::VT_DEVICE_ID,
+            device_id,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<PinLoginRequest<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, PinLoginRequest::VT_DEVICE_ID,"device_id");
-    self.fbb_.required(o, PinLoginRequest::VT_CLIENT_PROOF,"client_proof");
-    self.fbb_.required(o, PinLoginRequest::VT_CHALLENGE_ID,"challenge_id");
-    self.fbb_.required(o, PinLoginRequest::VT_DEVICE_SIGNATURE,"device_signature");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_client_proof(
+        &mut self,
+        client_proof: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PinLoginRequest::VT_CLIENT_PROOF,
+            client_proof,
+        );
+    }
+    #[inline]
+    pub fn add_challenge_id(&mut self, challenge_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            PinLoginRequest::VT_CHALLENGE_ID,
+            challenge_id,
+        );
+    }
+    #[inline]
+    pub fn add_device_signature(
+        &mut self,
+        device_signature: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            PinLoginRequest::VT_DEVICE_SIGNATURE,
+            device_signature,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> PinLoginRequestBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        PinLoginRequestBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<PinLoginRequest<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_
+            .required(o, PinLoginRequest::VT_DEVICE_ID, "device_id");
+        self.fbb_
+            .required(o, PinLoginRequest::VT_CLIENT_PROOF, "client_proof");
+        self.fbb_
+            .required(o, PinLoginRequest::VT_CHALLENGE_ID, "challenge_id");
+        self.fbb_.required(
+            o,
+            PinLoginRequest::VT_DEVICE_SIGNATURE,
+            "device_signature",
+        );
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for PinLoginRequest<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("PinLoginRequest");
-      ds.field("device_id", &self.device_id());
-      ds.field("client_proof", &self.client_proof());
-      ds.field("challenge_id", &self.challenge_id());
-      ds.field("device_signature", &self.device_signature());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("PinLoginRequest");
+        ds.field("device_id", &self.device_id());
+        ds.field("client_proof", &self.client_proof());
+        ds.field("challenge_id", &self.challenge_id());
+        ds.field("device_signature", &self.device_signature());
+        ds.finish()
+    }
 }

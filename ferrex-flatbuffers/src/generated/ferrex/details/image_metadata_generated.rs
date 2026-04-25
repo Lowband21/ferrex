@@ -6,114 +6,163 @@ pub enum ImageMetadataOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct ImageMetadata<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ImageMetadata<'a> {
-  type Inner = ImageMetadata<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ImageMetadata<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ImageMetadata<'a> {
-  pub const VT_FILE_PATH: ::flatbuffers::VOffsetT = 4;
-  pub const VT_WIDTH: ::flatbuffers::VOffsetT = 6;
-  pub const VT_HEIGHT: ::flatbuffers::VOffsetT = 8;
-  pub const VT_ASPECT_RATIO: ::flatbuffers::VOffsetT = 10;
-  pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 12;
-  pub const VT_VOTE_AVERAGE: ::flatbuffers::VOffsetT = 14;
-  pub const VT_VOTE_COUNT: ::flatbuffers::VOffsetT = 16;
+    pub const VT_FILE_PATH: ::flatbuffers::VOffsetT = 4;
+    pub const VT_WIDTH: ::flatbuffers::VOffsetT = 6;
+    pub const VT_HEIGHT: ::flatbuffers::VOffsetT = 8;
+    pub const VT_ASPECT_RATIO: ::flatbuffers::VOffsetT = 10;
+    pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 12;
+    pub const VT_VOTE_AVERAGE: ::flatbuffers::VOffsetT = 14;
+    pub const VT_VOTE_COUNT: ::flatbuffers::VOffsetT = 16;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ImageMetadata { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ImageMetadataArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<ImageMetadata<'bldr>> {
-    let mut builder = ImageMetadataBuilder::new(_fbb);
-    builder.add_vote_count(args.vote_count);
-    builder.add_vote_average(args.vote_average);
-    builder.add_aspect_ratio(args.aspect_ratio);
-    builder.add_height(args.height);
-    builder.add_width(args.width);
-    if let Some(x) = args.iso_639_1 { builder.add_iso_639_1(x); }
-    if let Some(x) = args.file_path { builder.add_file_path(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ImageMetadata { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ImageMetadataArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<ImageMetadata<'bldr>> {
+        let mut builder = ImageMetadataBuilder::new(_fbb);
+        builder.add_vote_count(args.vote_count);
+        builder.add_vote_average(args.vote_average);
+        builder.add_aspect_ratio(args.aspect_ratio);
+        builder.add_height(args.height);
+        builder.add_width(args.width);
+        if let Some(x) = args.iso_639_1 {
+            builder.add_iso_639_1(x);
+        }
+        if let Some(x) = args.file_path {
+            builder.add_file_path(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn file_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ImageMetadata::VT_FILE_PATH, None)}
-  }
-  #[inline]
-  pub fn width(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(ImageMetadata::VT_WIDTH, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn height(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(ImageMetadata::VT_HEIGHT, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn aspect_ratio(&self) -> f64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f64>(ImageMetadata::VT_ASPECT_RATIO, Some(0.0)).unwrap()}
-  }
-  #[inline]
-  pub fn iso_639_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ImageMetadata::VT_ISO_639_1, None)}
-  }
-  #[inline]
-  pub fn vote_average(&self) -> f64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f64>(ImageMetadata::VT_VOTE_AVERAGE, Some(0.0)).unwrap()}
-  }
-  #[inline]
-  pub fn vote_count(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(ImageMetadata::VT_VOTE_COUNT, Some(0)).unwrap()}
-  }
+    #[inline]
+    pub fn file_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ImageMetadata::VT_FILE_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn width(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(ImageMetadata::VT_WIDTH, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn height(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(ImageMetadata::VT_HEIGHT, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn aspect_ratio(&self) -> f64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f64>(ImageMetadata::VT_ASPECT_RATIO, Some(0.0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn iso_639_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ImageMetadata::VT_ISO_639_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn vote_average(&self) -> f64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f64>(ImageMetadata::VT_VOTE_AVERAGE, Some(0.0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn vote_count(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(ImageMetadata::VT_VOTE_COUNT, Some(0))
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ImageMetadata<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("file_path", Self::VT_FILE_PATH, false)?
-     .visit_field::<u64>("width", Self::VT_WIDTH, false)?
-     .visit_field::<u64>("height", Self::VT_HEIGHT, false)?
-     .visit_field::<f64>("aspect_ratio", Self::VT_ASPECT_RATIO, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_639_1", Self::VT_ISO_639_1, false)?
-     .visit_field::<f64>("vote_average", Self::VT_VOTE_AVERAGE, false)?
-     .visit_field::<u64>("vote_count", Self::VT_VOTE_COUNT, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "file_path",
+                Self::VT_FILE_PATH,
+                false,
+            )?
+            .visit_field::<u64>("width", Self::VT_WIDTH, false)?
+            .visit_field::<u64>("height", Self::VT_HEIGHT, false)?
+            .visit_field::<f64>("aspect_ratio", Self::VT_ASPECT_RATIO, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_639_1",
+                Self::VT_ISO_639_1,
+                false,
+            )?
+            .visit_field::<f64>("vote_average", Self::VT_VOTE_AVERAGE, false)?
+            .visit_field::<u64>("vote_count", Self::VT_VOTE_COUNT, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct ImageMetadataArgs<'a> {
     pub file_path: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -125,78 +174,105 @@ pub struct ImageMetadataArgs<'a> {
     pub vote_count: u64,
 }
 impl<'a> Default for ImageMetadataArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    ImageMetadataArgs {
-      file_path: None,
-      width: 0,
-      height: 0,
-      aspect_ratio: 0.0,
-      iso_639_1: None,
-      vote_average: 0.0,
-      vote_count: 0,
+    #[inline]
+    fn default() -> Self {
+        ImageMetadataArgs {
+            file_path: None,
+            width: 0,
+            height: 0,
+            aspect_ratio: 0.0,
+            iso_639_1: None,
+            vote_average: 0.0,
+            vote_count: 0,
+        }
     }
-  }
 }
 
 pub struct ImageMetadataBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ImageMetadataBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_file_path(&mut self, file_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ImageMetadata::VT_FILE_PATH, file_path);
-  }
-  #[inline]
-  pub fn add_width(&mut self, width: u64) {
-    self.fbb_.push_slot::<u64>(ImageMetadata::VT_WIDTH, width, 0);
-  }
-  #[inline]
-  pub fn add_height(&mut self, height: u64) {
-    self.fbb_.push_slot::<u64>(ImageMetadata::VT_HEIGHT, height, 0);
-  }
-  #[inline]
-  pub fn add_aspect_ratio(&mut self, aspect_ratio: f64) {
-    self.fbb_.push_slot::<f64>(ImageMetadata::VT_ASPECT_RATIO, aspect_ratio, 0.0);
-  }
-  #[inline]
-  pub fn add_iso_639_1(&mut self, iso_639_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ImageMetadata::VT_ISO_639_1, iso_639_1);
-  }
-  #[inline]
-  pub fn add_vote_average(&mut self, vote_average: f64) {
-    self.fbb_.push_slot::<f64>(ImageMetadata::VT_VOTE_AVERAGE, vote_average, 0.0);
-  }
-  #[inline]
-  pub fn add_vote_count(&mut self, vote_count: u64) {
-    self.fbb_.push_slot::<u64>(ImageMetadata::VT_VOTE_COUNT, vote_count, 0);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ImageMetadataBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ImageMetadataBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ImageMetadataBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_file_path(
+        &mut self,
+        file_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ImageMetadata::VT_FILE_PATH,
+            file_path,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ImageMetadata<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_width(&mut self, width: u64) {
+        self.fbb_
+            .push_slot::<u64>(ImageMetadata::VT_WIDTH, width, 0);
+    }
+    #[inline]
+    pub fn add_height(&mut self, height: u64) {
+        self.fbb_
+            .push_slot::<u64>(ImageMetadata::VT_HEIGHT, height, 0);
+    }
+    #[inline]
+    pub fn add_aspect_ratio(&mut self, aspect_ratio: f64) {
+        self.fbb_.push_slot::<f64>(
+            ImageMetadata::VT_ASPECT_RATIO,
+            aspect_ratio,
+            0.0,
+        );
+    }
+    #[inline]
+    pub fn add_iso_639_1(
+        &mut self,
+        iso_639_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ImageMetadata::VT_ISO_639_1,
+            iso_639_1,
+        );
+    }
+    #[inline]
+    pub fn add_vote_average(&mut self, vote_average: f64) {
+        self.fbb_.push_slot::<f64>(
+            ImageMetadata::VT_VOTE_AVERAGE,
+            vote_average,
+            0.0,
+        );
+    }
+    #[inline]
+    pub fn add_vote_count(&mut self, vote_count: u64) {
+        self.fbb_
+            .push_slot::<u64>(ImageMetadata::VT_VOTE_COUNT, vote_count, 0);
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ImageMetadataBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ImageMetadataBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ImageMetadata<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ImageMetadata<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ImageMetadata");
-      ds.field("file_path", &self.file_path());
-      ds.field("width", &self.width());
-      ds.field("height", &self.height());
-      ds.field("aspect_ratio", &self.aspect_ratio());
-      ds.field("iso_639_1", &self.iso_639_1());
-      ds.field("vote_average", &self.vote_average());
-      ds.field("vote_count", &self.vote_count());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ImageMetadata");
+        ds.field("file_path", &self.file_path());
+        ds.field("width", &self.width());
+        ds.field("height", &self.height());
+        ds.field("aspect_ratio", &self.aspect_ratio());
+        ds.field("iso_639_1", &self.iso_639_1());
+        ds.field("vote_average", &self.vote_average());
+        ds.field("vote_count", &self.vote_count());
+        ds.finish()
+    }
 }

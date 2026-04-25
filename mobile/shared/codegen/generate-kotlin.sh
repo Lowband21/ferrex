@@ -8,6 +8,11 @@ SCHEMA_DIR="$SCRIPT_DIR/../schemas"
 OUT_DIR="$SCRIPT_DIR/../../android/app/src/main/java"
 
 if ! command -v flatc &>/dev/null; then
+  if [[ -z "${FERREX_USE_NIX_FLATC:-}" ]] && command -v nix &>/dev/null; then
+    echo "flatc not found in PATH; retrying via 'nix shell nixpkgs#flatbuffers'..."
+    exec nix shell nixpkgs#flatbuffers -c env FERREX_USE_NIX_FLATC=1 bash "$0" "$@"
+  fi
+
   echo "ERROR: flatc not found in PATH."
   exit 1
 fi

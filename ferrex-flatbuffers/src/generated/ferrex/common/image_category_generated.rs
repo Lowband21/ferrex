@@ -2,17 +2,26 @@
 // @generated
 extern crate alloc;
 use super::*;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 pub const ENUM_MIN_IMAGE_CATEGORY: i8 = 0;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 pub const ENUM_MAX_IMAGE_CATEGORY: i8 = 3;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use associated constants instead. This will no longer be generated in 2021."
+)]
 #[allow(non_camel_case_types)]
 pub const ENUM_VALUES_IMAGE_CATEGORY: [ImageCategory; 4] = [
-  ImageCategory::Poster,
-  ImageCategory::Backdrop,
-  ImageCategory::Profile,
-  ImageCategory::Episode,
+    ImageCategory::Poster,
+    ImageCategory::Backdrop,
+    ImageCategory::Profile,
+    ImageCategory::Episode,
 ];
 
 /// Image size category (mirrors ferrex-model ImageSize enum at the top level).
@@ -21,46 +30,42 @@ pub const ENUM_VALUES_IMAGE_CATEGORY: [ImageCategory; 4] = [
 pub struct ImageCategory(pub i8);
 #[allow(non_upper_case_globals)]
 impl ImageCategory {
-  pub const Poster: Self = Self(0);
-  pub const Backdrop: Self = Self(1);
-  pub const Profile: Self = Self(2);
-  pub const Episode: Self = Self(3);
+    pub const Poster: Self = Self(0);
+    pub const Backdrop: Self = Self(1);
+    pub const Profile: Self = Self(2);
+    pub const Episode: Self = Self(3);
 
-  pub const ENUM_MIN: i8 = 0;
-  pub const ENUM_MAX: i8 = 3;
-  pub const ENUM_VALUES: &'static [Self] = &[
-    Self::Poster,
-    Self::Backdrop,
-    Self::Profile,
-    Self::Episode,
-  ];
-  /// Returns the variant's name or "" if unknown.
-  pub fn variant_name(self) -> Option<&'static str> {
-    match self {
-      Self::Poster => Some("Poster"),
-      Self::Backdrop => Some("Backdrop"),
-      Self::Profile => Some("Profile"),
-      Self::Episode => Some("Episode"),
-      _ => None,
+    pub const ENUM_MIN: i8 = 0;
+    pub const ENUM_MAX: i8 = 3;
+    pub const ENUM_VALUES: &'static [Self] =
+        &[Self::Poster, Self::Backdrop, Self::Profile, Self::Episode];
+    /// Returns the variant's name or "" if unknown.
+    pub fn variant_name(self) -> Option<&'static str> {
+        match self {
+            Self::Poster => Some("Poster"),
+            Self::Backdrop => Some("Backdrop"),
+            Self::Profile => Some("Profile"),
+            Self::Episode => Some("Episode"),
+            _ => None,
+        }
     }
-  }
 }
 impl ::core::fmt::Debug for ImageCategory {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-    if let Some(name) = self.variant_name() {
-      f.write_str(name)
-    } else {
-      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+        if let Some(name) = self.variant_name() {
+            f.write_str(name)
+        } else {
+            f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+        }
     }
-  }
 }
 impl<'a> ::flatbuffers::Follow<'a> for ImageCategory {
-  type Inner = Self;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    let b = unsafe { ::flatbuffers::read_scalar_at::<i8>(buf, loc) };
-    Self(b)
-  }
+    type Inner = Self;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        let b = unsafe { ::flatbuffers::read_scalar_at::<i8>(buf, loc) };
+        Self(b)
+    }
 }
 
 impl ::flatbuffers::Push for ImageCategory {
@@ -72,26 +77,27 @@ impl ::flatbuffers::Push for ImageCategory {
 }
 
 impl ::flatbuffers::EndianScalar for ImageCategory {
-  type Scalar = i8;
-  #[inline]
-  fn to_little_endian(self) -> i8 {
-    self.0.to_le()
-  }
-  #[inline]
-  #[allow(clippy::wrong_self_convention)]
-  fn from_little_endian(v: i8) -> Self {
-    let b = i8::from_le(v);
-    Self(b)
-  }
+    type Scalar = i8;
+    #[inline]
+    fn to_little_endian(self) -> i8 {
+        self.0.to_le()
+    }
+    #[inline]
+    #[allow(clippy::wrong_self_convention)]
+    fn from_little_endian(v: i8) -> Self {
+        let b = i8::from_le(v);
+        Self(b)
+    }
 }
 
 impl<'a> ::flatbuffers::Verifiable for ImageCategory {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    i8::run_verifier(v, pos)
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        i8::run_verifier(v, pos)
+    }
 }
 
 impl ::flatbuffers::SimpleToVerifyInSlice for ImageCategory {}

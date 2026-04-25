@@ -6,96 +6,107 @@ pub enum EpisodeIdOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct EpisodeId<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for EpisodeId<'a> {
-  type Inner = EpisodeId<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = EpisodeId<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> EpisodeId<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EpisodeId { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EpisodeIdArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<EpisodeId<'bldr>> {
-    let mut builder = EpisodeIdBuilder::new(_fbb);
-    if let Some(x) = args.id { builder.add_id(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        EpisodeId { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args EpisodeIdArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<EpisodeId<'bldr>> {
+        let mut builder = EpisodeIdBuilder::new(_fbb);
+        if let Some(x) = args.id {
+            builder.add_id(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> &'a Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<Uuid>(EpisodeId::VT_ID, None).unwrap()}
-  }
+    #[inline]
+    pub fn id(&self) -> &'a Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<Uuid>(EpisodeId::VT_ID, None).unwrap() }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EpisodeId<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<Uuid>("id", Self::VT_ID, true)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<Uuid>("id", Self::VT_ID, true)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct EpisodeIdArgs<'a> {
     pub id: Option<&'a Uuid>,
 }
 impl<'a> Default for EpisodeIdArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    EpisodeIdArgs {
-      id: None, // required field
+    #[inline]
+    fn default() -> Self {
+        EpisodeIdArgs {
+            id: None, // required field
+        }
     }
-  }
 }
 
 pub struct EpisodeIdBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EpisodeIdBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: &Uuid) {
-    self.fbb_.push_slot_always::<&Uuid>(EpisodeId::VT_ID, id);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EpisodeIdBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EpisodeIdBuilder {
-      fbb_: _fbb,
-      start_: start,
+    #[inline]
+    pub fn add_id(&mut self, id: &Uuid) {
+        self.fbb_.push_slot_always::<&Uuid>(EpisodeId::VT_ID, id);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeId<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, EpisodeId::VT_ID,"id");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> EpisodeIdBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        EpisodeIdBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeId<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, EpisodeId::VT_ID, "id");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for EpisodeId<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EpisodeId");
-      ds.field("id", &self.id());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("EpisodeId");
+        ds.field("id", &self.id());
+        ds.finish()
+    }
 }

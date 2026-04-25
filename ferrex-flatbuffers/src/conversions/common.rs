@@ -1,6 +1,8 @@
 //! Common type conversions (timestamps, enums).
 
-use crate::fb::common::{LibraryType as FbLibraryType, Timestamp as FbTimestamp};
+use crate::fb::common::{
+    LibraryType as FbLibraryType, Timestamp as FbTimestamp,
+};
 use chrono::{DateTime, Utc};
 use ferrex_model::LibraryType;
 

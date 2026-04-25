@@ -6,113 +6,138 @@ pub enum KeywordOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct Keyword<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for Keyword<'a> {
-  type Inner = Keyword<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = Keyword<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> Keyword<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    Keyword { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args KeywordArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<Keyword<'bldr>> {
-    let mut builder = KeywordBuilder::new(_fbb);
-    builder.add_id(args.id);
-    if let Some(x) = args.name { builder.add_name(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        Keyword { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args KeywordArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<Keyword<'bldr>> {
+        let mut builder = KeywordBuilder::new(_fbb);
+        builder.add_id(args.id);
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Keyword::VT_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn name(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Keyword::VT_NAME, None).unwrap()}
-  }
+    #[inline]
+    pub fn id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u64>(Keyword::VT_ID, Some(0)).unwrap() }
+    }
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    Keyword::VT_NAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for Keyword<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("id", Self::VT_ID, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                true,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct KeywordArgs<'a> {
     pub id: u64,
     pub name: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for KeywordArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    KeywordArgs {
-      id: 0,
-      name: None, // required field
+    #[inline]
+    fn default() -> Self {
+        KeywordArgs {
+            id: 0,
+            name: None, // required field
+        }
     }
-  }
 }
 
 pub struct KeywordBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> KeywordBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(Keyword::VT_ID, id, 0);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Keyword::VT_NAME, name);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> KeywordBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    KeywordBuilder {
-      fbb_: _fbb,
-      start_: start,
+    #[inline]
+    pub fn add_id(&mut self, id: u64) {
+        self.fbb_.push_slot::<u64>(Keyword::VT_ID, id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<Keyword<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, Keyword::VT_NAME,"name");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Keyword::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> KeywordBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        KeywordBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<Keyword<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, Keyword::VT_NAME, "name");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for Keyword<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("Keyword");
-      ds.field("id", &self.id());
-      ds.field("name", &self.name());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("Keyword");
+        ds.field("id", &self.id());
+        ds.field("name", &self.name());
+        ds.finish()
+    }
 }

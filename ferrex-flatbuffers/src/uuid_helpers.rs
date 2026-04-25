@@ -55,11 +55,7 @@ pub fn option_uuid_to_fb(id: Option<&uuid::Uuid>) -> FbUuid {
 #[inline]
 pub fn fb_to_option_uuid(fb: &FbUuid) -> Option<uuid::Uuid> {
     let id = fb_to_uuid(fb);
-    if id.is_nil() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_nil() { None } else { Some(id) }
 }
 
 #[cfg(test)]

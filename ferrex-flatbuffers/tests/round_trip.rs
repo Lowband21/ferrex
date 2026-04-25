@@ -1,10 +1,10 @@
 //! Round-trip tests: ferrex-model → FlatBuffers bytes → read back correct values.
 
-use ferrex_flatbuffers::fb;
-use ferrex_flatbuffers::conversions::library::serialize_library_list;
-use ferrex_flatbuffers::uuid_helpers::{uuid_to_fb, fb_to_uuid};
-use ferrex_model::{Library, LibraryType, MovieReferenceBatchSize};
 use chrono::Utc;
+use ferrex_flatbuffers::conversions::library::serialize_library_list;
+use ferrex_flatbuffers::fb;
+use ferrex_flatbuffers::uuid_helpers::{fb_to_uuid, uuid_to_fb};
+use ferrex_model::{Library, LibraryType, MovieReferenceBatchSize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -68,7 +68,11 @@ fn library_list_round_trip() {
     let original_id = libraries[0].id;
     let fb_id = lib0.id();
     let recovered_id = fb_to_uuid(fb_id);
-    assert_eq!(*original_id.as_uuid(), recovered_id, "Library ID round-trip failed");
+    assert_eq!(
+        *original_id.as_uuid(),
+        recovered_id,
+        "Library ID round-trip failed"
+    );
 
     // Verify paths
     if let Some(paths) = lib0.paths() {

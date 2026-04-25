@@ -28,10 +28,13 @@ pub fn serialize_batch_sync_response(
     let versions: Vec<_> = updates
         .iter()
         .map(|entry| {
-            fb::BatchVersion::create(&mut builder, &fb::BatchVersionArgs {
-                batch_id: entry.batch_id,
-                version: entry.version,
-            })
+            fb::BatchVersion::create(
+                &mut builder,
+                &fb::BatchVersionArgs {
+                    batch_id: entry.batch_id,
+                    version: entry.version,
+                },
+            )
         })
         .collect();
     let server_versions = builder.create_vector(&versions);
@@ -43,11 +46,14 @@ pub fn serialize_batch_sync_response(
     // Build deleted_batch_ids
     let deleted_batch_ids = builder.create_vector(removals);
 
-    let response = fb::BatchSyncResponse::create(&mut builder, &fb::BatchSyncResponseArgs {
-        stale_batch_ids: Some(stale_batch_ids),
-        deleted_batch_ids: Some(deleted_batch_ids),
-        server_versions: Some(server_versions),
-    });
+    let response = fb::BatchSyncResponse::create(
+        &mut builder,
+        &fb::BatchSyncResponseArgs {
+            stale_batch_ids: Some(stale_batch_ids),
+            deleted_batch_ids: Some(deleted_batch_ids),
+            server_versions: Some(server_versions),
+        },
+    );
 
     builder.finish(response, None);
     builder.finished_data().to_vec()

@@ -7,95 +7,147 @@ pub enum BatchFetchResponseOffset {}
 
 /// Response for batch fetch — full batch data.
 pub struct BatchFetchResponse<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for BatchFetchResponse<'a> {
-  type Inner = BatchFetchResponse<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = BatchFetchResponse<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> BatchFetchResponse<'a> {
-  pub const VT_BATCHES: ::flatbuffers::VOffsetT = 4;
+    pub const VT_BATCHES: ::flatbuffers::VOffsetT = 4;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    BatchFetchResponse { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args BatchFetchResponseArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<BatchFetchResponse<'bldr>> {
-    let mut builder = BatchFetchResponseBuilder::new(_fbb);
-    if let Some(x) = args.batches { builder.add_batches(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        BatchFetchResponse { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args BatchFetchResponseArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<BatchFetchResponse<'bldr>> {
+        let mut builder = BatchFetchResponseBuilder::new(_fbb);
+        if let Some(x) = args.batches {
+            builder.add_batches(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn batches(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<MediaBatchData<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<MediaBatchData>>>>(BatchFetchResponse::VT_BATCHES, None)}
-  }
+    #[inline]
+    pub fn batches(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<MediaBatchData<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<MediaBatchData>,
+                >,
+            >>(BatchFetchResponse::VT_BATCHES, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for BatchFetchResponse<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<MediaBatchData>>>>("batches", Self::VT_BATCHES, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<MediaBatchData>,
+                >,
+            >>("batches", Self::VT_BATCHES, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct BatchFetchResponseArgs<'a> {
-    pub batches: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<MediaBatchData<'a>>>>>,
+    pub batches: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<MediaBatchData<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for BatchFetchResponseArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    BatchFetchResponseArgs {
-      batches: None,
+    #[inline]
+    fn default() -> Self {
+        BatchFetchResponseArgs { batches: None }
     }
-  }
 }
 
-pub struct BatchFetchResponseBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct BatchFetchResponseBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> BatchFetchResponseBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_batches(&mut self, batches: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<MediaBatchData<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(BatchFetchResponse::VT_BATCHES, batches);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> BatchFetchResponseBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    BatchFetchResponseBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    BatchFetchResponseBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_batches(
+        &mut self,
+        batches: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<MediaBatchData<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            BatchFetchResponse::VT_BATCHES,
+            batches,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<BatchFetchResponse<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> BatchFetchResponseBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        BatchFetchResponseBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<BatchFetchResponse<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for BatchFetchResponse<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("BatchFetchResponse");
-      ds.field("batches", &self.batches());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("BatchFetchResponse");
+        ds.field("batches", &self.batches());
+        ds.finish()
+    }
 }

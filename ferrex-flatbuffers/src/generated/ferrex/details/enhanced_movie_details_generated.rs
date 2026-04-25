@@ -7,414 +7,934 @@ pub enum EnhancedMovieDetailsOffset {}
 
 /// Full TMDB movie details. Mirrors ferrex-model::EnhancedMovieDetails.
 pub struct EnhancedMovieDetails<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for EnhancedMovieDetails<'a> {
-  type Inner = EnhancedMovieDetails<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = EnhancedMovieDetails<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> EnhancedMovieDetails<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_TITLE: ::flatbuffers::VOffsetT = 6;
-  pub const VT_ORIGINAL_TITLE: ::flatbuffers::VOffsetT = 8;
-  pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 10;
-  pub const VT_RELEASE_DATE: ::flatbuffers::VOffsetT = 12;
-  pub const VT_RUNTIME: ::flatbuffers::VOffsetT = 14;
-  pub const VT_VOTE_AVERAGE: ::flatbuffers::VOffsetT = 16;
-  pub const VT_VOTE_COUNT: ::flatbuffers::VOffsetT = 18;
-  pub const VT_POPULARITY: ::flatbuffers::VOffsetT = 20;
-  pub const VT_CONTENT_RATING: ::flatbuffers::VOffsetT = 22;
-  pub const VT_CONTENT_RATINGS: ::flatbuffers::VOffsetT = 24;
-  pub const VT_RELEASE_DATES: ::flatbuffers::VOffsetT = 26;
-  pub const VT_GENRES: ::flatbuffers::VOffsetT = 28;
-  pub const VT_SPOKEN_LANGUAGES: ::flatbuffers::VOffsetT = 30;
-  pub const VT_PRODUCTION_COMPANIES: ::flatbuffers::VOffsetT = 32;
-  pub const VT_PRODUCTION_COUNTRIES: ::flatbuffers::VOffsetT = 34;
-  pub const VT_HOMEPAGE: ::flatbuffers::VOffsetT = 36;
-  pub const VT_STATUS: ::flatbuffers::VOffsetT = 38;
-  pub const VT_TAGLINE: ::flatbuffers::VOffsetT = 40;
-  pub const VT_BUDGET: ::flatbuffers::VOffsetT = 42;
-  pub const VT_REVENUE: ::flatbuffers::VOffsetT = 44;
-  pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 46;
-  pub const VT_BACKDROP_PATH: ::flatbuffers::VOffsetT = 48;
-  pub const VT_LOGO_PATH: ::flatbuffers::VOffsetT = 50;
-  pub const VT_PRIMARY_POSTER_IID: ::flatbuffers::VOffsetT = 52;
-  pub const VT_PRIMARY_BACKDROP_IID: ::flatbuffers::VOffsetT = 54;
-  pub const VT_IMAGES: ::flatbuffers::VOffsetT = 56;
-  pub const VT_CAST: ::flatbuffers::VOffsetT = 58;
-  pub const VT_CREW: ::flatbuffers::VOffsetT = 60;
-  pub const VT_VIDEOS: ::flatbuffers::VOffsetT = 62;
-  pub const VT_KEYWORDS: ::flatbuffers::VOffsetT = 64;
-  pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 66;
-  pub const VT_ALTERNATIVE_TITLES: ::flatbuffers::VOffsetT = 68;
-  pub const VT_TRANSLATIONS: ::flatbuffers::VOffsetT = 70;
-  pub const VT_COLLECTION: ::flatbuffers::VOffsetT = 72;
-  pub const VT_RECOMMENDATIONS: ::flatbuffers::VOffsetT = 74;
-  pub const VT_SIMILAR: ::flatbuffers::VOffsetT = 76;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_TITLE: ::flatbuffers::VOffsetT = 6;
+    pub const VT_ORIGINAL_TITLE: ::flatbuffers::VOffsetT = 8;
+    pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 10;
+    pub const VT_RELEASE_DATE: ::flatbuffers::VOffsetT = 12;
+    pub const VT_RUNTIME: ::flatbuffers::VOffsetT = 14;
+    pub const VT_VOTE_AVERAGE: ::flatbuffers::VOffsetT = 16;
+    pub const VT_VOTE_COUNT: ::flatbuffers::VOffsetT = 18;
+    pub const VT_POPULARITY: ::flatbuffers::VOffsetT = 20;
+    pub const VT_CONTENT_RATING: ::flatbuffers::VOffsetT = 22;
+    pub const VT_CONTENT_RATINGS: ::flatbuffers::VOffsetT = 24;
+    pub const VT_RELEASE_DATES: ::flatbuffers::VOffsetT = 26;
+    pub const VT_GENRES: ::flatbuffers::VOffsetT = 28;
+    pub const VT_SPOKEN_LANGUAGES: ::flatbuffers::VOffsetT = 30;
+    pub const VT_PRODUCTION_COMPANIES: ::flatbuffers::VOffsetT = 32;
+    pub const VT_PRODUCTION_COUNTRIES: ::flatbuffers::VOffsetT = 34;
+    pub const VT_HOMEPAGE: ::flatbuffers::VOffsetT = 36;
+    pub const VT_STATUS: ::flatbuffers::VOffsetT = 38;
+    pub const VT_TAGLINE: ::flatbuffers::VOffsetT = 40;
+    pub const VT_BUDGET: ::flatbuffers::VOffsetT = 42;
+    pub const VT_REVENUE: ::flatbuffers::VOffsetT = 44;
+    pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 46;
+    pub const VT_BACKDROP_PATH: ::flatbuffers::VOffsetT = 48;
+    pub const VT_LOGO_PATH: ::flatbuffers::VOffsetT = 50;
+    pub const VT_PRIMARY_POSTER_IID: ::flatbuffers::VOffsetT = 52;
+    pub const VT_PRIMARY_BACKDROP_IID: ::flatbuffers::VOffsetT = 54;
+    pub const VT_IMAGES: ::flatbuffers::VOffsetT = 56;
+    pub const VT_CAST: ::flatbuffers::VOffsetT = 58;
+    pub const VT_CREW: ::flatbuffers::VOffsetT = 60;
+    pub const VT_VIDEOS: ::flatbuffers::VOffsetT = 62;
+    pub const VT_KEYWORDS: ::flatbuffers::VOffsetT = 64;
+    pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 66;
+    pub const VT_ALTERNATIVE_TITLES: ::flatbuffers::VOffsetT = 68;
+    pub const VT_TRANSLATIONS: ::flatbuffers::VOffsetT = 70;
+    pub const VT_COLLECTION: ::flatbuffers::VOffsetT = 72;
+    pub const VT_RECOMMENDATIONS: ::flatbuffers::VOffsetT = 74;
+    pub const VT_SIMILAR: ::flatbuffers::VOffsetT = 76;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EnhancedMovieDetails { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EnhancedMovieDetailsArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<EnhancedMovieDetails<'bldr>> {
-    let mut builder = EnhancedMovieDetailsBuilder::new(_fbb);
-    builder.add_revenue(args.revenue);
-    builder.add_budget(args.budget);
-    builder.add_id(args.id);
-    if let Some(x) = args.similar { builder.add_similar(x); }
-    if let Some(x) = args.recommendations { builder.add_recommendations(x); }
-    if let Some(x) = args.collection { builder.add_collection(x); }
-    if let Some(x) = args.translations { builder.add_translations(x); }
-    if let Some(x) = args.alternative_titles { builder.add_alternative_titles(x); }
-    if let Some(x) = args.external_ids { builder.add_external_ids(x); }
-    if let Some(x) = args.keywords { builder.add_keywords(x); }
-    if let Some(x) = args.videos { builder.add_videos(x); }
-    if let Some(x) = args.crew { builder.add_crew(x); }
-    if let Some(x) = args.cast { builder.add_cast(x); }
-    if let Some(x) = args.images { builder.add_images(x); }
-    if let Some(x) = args.primary_backdrop_iid { builder.add_primary_backdrop_iid(x); }
-    if let Some(x) = args.primary_poster_iid { builder.add_primary_poster_iid(x); }
-    if let Some(x) = args.logo_path { builder.add_logo_path(x); }
-    if let Some(x) = args.backdrop_path { builder.add_backdrop_path(x); }
-    if let Some(x) = args.poster_path { builder.add_poster_path(x); }
-    if let Some(x) = args.tagline { builder.add_tagline(x); }
-    if let Some(x) = args.status { builder.add_status(x); }
-    if let Some(x) = args.homepage { builder.add_homepage(x); }
-    if let Some(x) = args.production_countries { builder.add_production_countries(x); }
-    if let Some(x) = args.production_companies { builder.add_production_companies(x); }
-    if let Some(x) = args.spoken_languages { builder.add_spoken_languages(x); }
-    if let Some(x) = args.genres { builder.add_genres(x); }
-    if let Some(x) = args.release_dates { builder.add_release_dates(x); }
-    if let Some(x) = args.content_ratings { builder.add_content_ratings(x); }
-    if let Some(x) = args.content_rating { builder.add_content_rating(x); }
-    builder.add_popularity(args.popularity);
-    builder.add_vote_count(args.vote_count);
-    builder.add_vote_average(args.vote_average);
-    builder.add_runtime(args.runtime);
-    if let Some(x) = args.release_date { builder.add_release_date(x); }
-    if let Some(x) = args.overview { builder.add_overview(x); }
-    if let Some(x) = args.original_title { builder.add_original_title(x); }
-    if let Some(x) = args.title { builder.add_title(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        EnhancedMovieDetails { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args EnhancedMovieDetailsArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<EnhancedMovieDetails<'bldr>> {
+        let mut builder = EnhancedMovieDetailsBuilder::new(_fbb);
+        builder.add_revenue(args.revenue);
+        builder.add_budget(args.budget);
+        builder.add_id(args.id);
+        if let Some(x) = args.similar {
+            builder.add_similar(x);
+        }
+        if let Some(x) = args.recommendations {
+            builder.add_recommendations(x);
+        }
+        if let Some(x) = args.collection {
+            builder.add_collection(x);
+        }
+        if let Some(x) = args.translations {
+            builder.add_translations(x);
+        }
+        if let Some(x) = args.alternative_titles {
+            builder.add_alternative_titles(x);
+        }
+        if let Some(x) = args.external_ids {
+            builder.add_external_ids(x);
+        }
+        if let Some(x) = args.keywords {
+            builder.add_keywords(x);
+        }
+        if let Some(x) = args.videos {
+            builder.add_videos(x);
+        }
+        if let Some(x) = args.crew {
+            builder.add_crew(x);
+        }
+        if let Some(x) = args.cast {
+            builder.add_cast(x);
+        }
+        if let Some(x) = args.images {
+            builder.add_images(x);
+        }
+        if let Some(x) = args.primary_backdrop_iid {
+            builder.add_primary_backdrop_iid(x);
+        }
+        if let Some(x) = args.primary_poster_iid {
+            builder.add_primary_poster_iid(x);
+        }
+        if let Some(x) = args.logo_path {
+            builder.add_logo_path(x);
+        }
+        if let Some(x) = args.backdrop_path {
+            builder.add_backdrop_path(x);
+        }
+        if let Some(x) = args.poster_path {
+            builder.add_poster_path(x);
+        }
+        if let Some(x) = args.tagline {
+            builder.add_tagline(x);
+        }
+        if let Some(x) = args.status {
+            builder.add_status(x);
+        }
+        if let Some(x) = args.homepage {
+            builder.add_homepage(x);
+        }
+        if let Some(x) = args.production_countries {
+            builder.add_production_countries(x);
+        }
+        if let Some(x) = args.production_companies {
+            builder.add_production_companies(x);
+        }
+        if let Some(x) = args.spoken_languages {
+            builder.add_spoken_languages(x);
+        }
+        if let Some(x) = args.genres {
+            builder.add_genres(x);
+        }
+        if let Some(x) = args.release_dates {
+            builder.add_release_dates(x);
+        }
+        if let Some(x) = args.content_ratings {
+            builder.add_content_ratings(x);
+        }
+        if let Some(x) = args.content_rating {
+            builder.add_content_rating(x);
+        }
+        builder.add_popularity(args.popularity);
+        builder.add_vote_count(args.vote_count);
+        builder.add_vote_average(args.vote_average);
+        builder.add_runtime(args.runtime);
+        if let Some(x) = args.release_date {
+            builder.add_release_date(x);
+        }
+        if let Some(x) = args.overview {
+            builder.add_overview(x);
+        }
+        if let Some(x) = args.original_title {
+            builder.add_original_title(x);
+        }
+        if let Some(x) = args.title {
+            builder.add_title(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(EnhancedMovieDetails::VT_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn title(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_TITLE, None)}
-  }
-  #[inline]
-  pub fn original_title(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_ORIGINAL_TITLE, None)}
-  }
-  #[inline]
-  pub fn overview(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_OVERVIEW, None)}
-  }
-  #[inline]
-  pub fn release_date(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_RELEASE_DATE, None)}
-  }
-  #[inline]
-  pub fn runtime(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(EnhancedMovieDetails::VT_RUNTIME, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn vote_average(&self) -> f32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(EnhancedMovieDetails::VT_VOTE_AVERAGE, Some(0.0)).unwrap()}
-  }
-  #[inline]
-  pub fn vote_count(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(EnhancedMovieDetails::VT_VOTE_COUNT, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn popularity(&self) -> f32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(EnhancedMovieDetails::VT_POPULARITY, Some(0.0)).unwrap()}
-  }
-  #[inline]
-  pub fn content_rating(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_CONTENT_RATING, None)}
-  }
-  #[inline]
-  pub fn content_ratings(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContentRating<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContentRating>>>>(EnhancedMovieDetails::VT_CONTENT_RATINGS, None)}
-  }
-  #[inline]
-  pub fn release_dates(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry>>>>(EnhancedMovieDetails::VT_RELEASE_DATES, None)}
-  }
-  #[inline]
-  pub fn genres(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GenreInfo<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GenreInfo>>>>(EnhancedMovieDetails::VT_GENRES, None)}
-  }
-  #[inline]
-  pub fn spoken_languages(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<SpokenLanguage<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<SpokenLanguage>>>>(EnhancedMovieDetails::VT_SPOKEN_LANGUAGES, None)}
-  }
-  #[inline]
-  pub fn production_companies(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCompany<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCompany>>>>(EnhancedMovieDetails::VT_PRODUCTION_COMPANIES, None)}
-  }
-  #[inline]
-  pub fn production_countries(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCountry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCountry>>>>(EnhancedMovieDetails::VT_PRODUCTION_COUNTRIES, None)}
-  }
-  #[inline]
-  pub fn homepage(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_HOMEPAGE, None)}
-  }
-  #[inline]
-  pub fn status(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_STATUS, None)}
-  }
-  #[inline]
-  pub fn tagline(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_TAGLINE, None)}
-  }
-  #[inline]
-  pub fn budget(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(EnhancedMovieDetails::VT_BUDGET, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn revenue(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(EnhancedMovieDetails::VT_REVENUE, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn poster_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_POSTER_PATH, None)}
-  }
-  #[inline]
-  pub fn backdrop_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_BACKDROP_PATH, None)}
-  }
-  #[inline]
-  pub fn logo_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EnhancedMovieDetails::VT_LOGO_PATH, None)}
-  }
-  #[inline]
-  pub fn primary_poster_iid(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EnhancedMovieDetails::VT_PRIMARY_POSTER_IID, None)}
-  }
-  #[inline]
-  pub fn primary_backdrop_iid(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EnhancedMovieDetails::VT_PRIMARY_BACKDROP_IID, None)}
-  }
-  #[inline]
-  pub fn images(&self) -> Option<MediaImages<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<MediaImages>>(EnhancedMovieDetails::VT_IMAGES, None)}
-  }
-  #[inline]
-  pub fn cast(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CastMember<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CastMember>>>>(EnhancedMovieDetails::VT_CAST, None)}
-  }
-  #[inline]
-  pub fn crew(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CrewMember<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CrewMember>>>>(EnhancedMovieDetails::VT_CREW, None)}
-  }
-  #[inline]
-  pub fn videos(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video>>>>(EnhancedMovieDetails::VT_VIDEOS, None)}
-  }
-  #[inline]
-  pub fn keywords(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword>>>>(EnhancedMovieDetails::VT_KEYWORDS, None)}
-  }
-  #[inline]
-  pub fn external_ids(&self) -> Option<ExternalIds<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<ExternalIds>>(EnhancedMovieDetails::VT_EXTERNAL_IDS, None)}
-  }
-  #[inline]
-  pub fn alternative_titles(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<AlternativeTitle<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<AlternativeTitle>>>>(EnhancedMovieDetails::VT_ALTERNATIVE_TITLES, None)}
-  }
-  #[inline]
-  pub fn translations(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation>>>>(EnhancedMovieDetails::VT_TRANSLATIONS, None)}
-  }
-  #[inline]
-  pub fn collection(&self) -> Option<CollectionInfo<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<CollectionInfo>>(EnhancedMovieDetails::VT_COLLECTION, None)}
-  }
-  #[inline]
-  pub fn recommendations(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef>>>>(EnhancedMovieDetails::VT_RECOMMENDATIONS, None)}
-  }
-  #[inline]
-  pub fn similar(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef>>>>(EnhancedMovieDetails::VT_SIMILAR, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(EnhancedMovieDetails::VT_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn title(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_TITLE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn original_title(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_ORIGINAL_TITLE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn overview(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_OVERVIEW,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn release_date(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_RELEASE_DATE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn runtime(&self) -> u32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u32>(EnhancedMovieDetails::VT_RUNTIME, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn vote_average(&self) -> f32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f32>(EnhancedMovieDetails::VT_VOTE_AVERAGE, Some(0.0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn vote_count(&self) -> u32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u32>(EnhancedMovieDetails::VT_VOTE_COUNT, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn popularity(&self) -> f32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f32>(EnhancedMovieDetails::VT_POPULARITY, Some(0.0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn content_rating(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_CONTENT_RATING,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn content_ratings(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ContentRating<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ContentRating>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_CONTENT_RATINGS, None
+            )
+        }
+    }
+    #[inline]
+    pub fn release_dates(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry>,
+                >,
+            >>(EnhancedMovieDetails::VT_RELEASE_DATES, None)
+        }
+    }
+    #[inline]
+    pub fn genres(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<GenreInfo<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<GenreInfo>,
+                >,
+            >>(EnhancedMovieDetails::VT_GENRES, None)
+        }
+    }
+    #[inline]
+    pub fn spoken_languages(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<SpokenLanguage<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<SpokenLanguage>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_SPOKEN_LANGUAGES, None
+            )
+        }
+    }
+    #[inline]
+    pub fn production_companies(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ProductionCompany<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ProductionCompany>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_PRODUCTION_COMPANIES, None
+            )
+        }
+    }
+    #[inline]
+    pub fn production_countries(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ProductionCountry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ProductionCountry>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_PRODUCTION_COUNTRIES, None
+            )
+        }
+    }
+    #[inline]
+    pub fn homepage(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_HOMEPAGE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn status(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_STATUS,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn tagline(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_TAGLINE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn budget(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(EnhancedMovieDetails::VT_BUDGET, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn revenue(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(EnhancedMovieDetails::VT_REVENUE, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn poster_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_POSTER_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn backdrop_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_BACKDROP_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn logo_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EnhancedMovieDetails::VT_LOGO_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn primary_poster_iid(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::ids::Uuid>(
+                EnhancedMovieDetails::VT_PRIMARY_POSTER_IID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn primary_backdrop_iid(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::ids::Uuid>(
+                EnhancedMovieDetails::VT_PRIMARY_BACKDROP_IID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn images(&self) -> Option<MediaImages<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<MediaImages>>(
+                    EnhancedMovieDetails::VT_IMAGES,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn cast(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CastMember<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CastMember>,
+                >,
+            >>(EnhancedMovieDetails::VT_CAST, None)
+        }
+    }
+    #[inline]
+    pub fn crew(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CrewMember<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CrewMember>,
+                >,
+            >>(EnhancedMovieDetails::VT_CREW, None)
+        }
+    }
+    #[inline]
+    pub fn videos(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Video>,
+                >,
+            >>(EnhancedMovieDetails::VT_VIDEOS, None)
+        }
+    }
+    #[inline]
+    pub fn keywords(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Keyword>,
+                >,
+            >>(EnhancedMovieDetails::VT_KEYWORDS, None)
+        }
+    }
+    #[inline]
+    pub fn external_ids(&self) -> Option<ExternalIds<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<ExternalIds>>(
+                    EnhancedMovieDetails::VT_EXTERNAL_IDS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn alternative_titles(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<AlternativeTitle<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<AlternativeTitle>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_ALTERNATIVE_TITLES, None
+            )
+        }
+    }
+    #[inline]
+    pub fn translations(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<Translation<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<Translation>,
+                >,
+            >>(EnhancedMovieDetails::VT_TRANSLATIONS, None)
+        }
+    }
+    #[inline]
+    pub fn collection(&self) -> Option<CollectionInfo<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<CollectionInfo>>(
+                    EnhancedMovieDetails::VT_COLLECTION,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn recommendations(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>(
+                EnhancedMovieDetails::VT_RECOMMENDATIONS, None
+            )
+        }
+    }
+    #[inline]
+    pub fn similar(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>(EnhancedMovieDetails::VT_SIMILAR, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EnhancedMovieDetails<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("original_title", Self::VT_ORIGINAL_TITLE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("overview", Self::VT_OVERVIEW, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("release_date", Self::VT_RELEASE_DATE, false)?
-     .visit_field::<u32>("runtime", Self::VT_RUNTIME, false)?
-     .visit_field::<f32>("vote_average", Self::VT_VOTE_AVERAGE, false)?
-     .visit_field::<u32>("vote_count", Self::VT_VOTE_COUNT, false)?
-     .visit_field::<f32>("popularity", Self::VT_POPULARITY, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("content_rating", Self::VT_CONTENT_RATING, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ContentRating>>>>("content_ratings", Self::VT_CONTENT_RATINGS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry>>>>("release_dates", Self::VT_RELEASE_DATES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<GenreInfo>>>>("genres", Self::VT_GENRES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<SpokenLanguage>>>>("spoken_languages", Self::VT_SPOKEN_LANGUAGES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ProductionCompany>>>>("production_companies", Self::VT_PRODUCTION_COMPANIES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ProductionCountry>>>>("production_countries", Self::VT_PRODUCTION_COUNTRIES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("homepage", Self::VT_HOMEPAGE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("status", Self::VT_STATUS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("tagline", Self::VT_TAGLINE, false)?
-     .visit_field::<u64>("budget", Self::VT_BUDGET, false)?
-     .visit_field::<u64>("revenue", Self::VT_REVENUE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("poster_path", Self::VT_POSTER_PATH, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("backdrop_path", Self::VT_BACKDROP_PATH, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("logo_path", Self::VT_LOGO_PATH, false)?
-     .visit_field::<super::ids::Uuid>("primary_poster_iid", Self::VT_PRIMARY_POSTER_IID, false)?
-     .visit_field::<super::ids::Uuid>("primary_backdrop_iid", Self::VT_PRIMARY_BACKDROP_IID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<MediaImages>>("images", Self::VT_IMAGES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<CastMember>>>>("cast", Self::VT_CAST, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<CrewMember>>>>("crew", Self::VT_CREW, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Video>>>>("videos", Self::VT_VIDEOS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Keyword>>>>("keywords", Self::VT_KEYWORDS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<ExternalIds>>("external_ids", Self::VT_EXTERNAL_IDS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<AlternativeTitle>>>>("alternative_titles", Self::VT_ALTERNATIVE_TITLES, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Translation>>>>("translations", Self::VT_TRANSLATIONS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<CollectionInfo>>("collection", Self::VT_COLLECTION, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<RelatedMediaRef>>>>("recommendations", Self::VT_RECOMMENDATIONS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<RelatedMediaRef>>>>("similar", Self::VT_SIMILAR, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("id", Self::VT_ID, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "title",
+                Self::VT_TITLE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "original_title",
+                Self::VT_ORIGINAL_TITLE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "overview",
+                Self::VT_OVERVIEW,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "release_date",
+                Self::VT_RELEASE_DATE,
+                false,
+            )?
+            .visit_field::<u32>("runtime", Self::VT_RUNTIME, false)?
+            .visit_field::<f32>("vote_average", Self::VT_VOTE_AVERAGE, false)?
+            .visit_field::<u32>("vote_count", Self::VT_VOTE_COUNT, false)?
+            .visit_field::<f32>("popularity", Self::VT_POPULARITY, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "content_rating",
+                Self::VT_CONTENT_RATING,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ContentRating>,
+                >,
+            >>("content_ratings", Self::VT_CONTENT_RATINGS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry>,
+                >,
+            >>("release_dates", Self::VT_RELEASE_DATES, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<GenreInfo>,
+                >,
+            >>("genres", Self::VT_GENRES, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<SpokenLanguage>,
+                >,
+            >>("spoken_languages", Self::VT_SPOKEN_LANGUAGES, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ProductionCompany>,
+                >,
+            >>(
+                "production_companies", Self::VT_PRODUCTION_COMPANIES, false
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ProductionCountry>,
+                >,
+            >>(
+                "production_countries", Self::VT_PRODUCTION_COUNTRIES, false
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "homepage",
+                Self::VT_HOMEPAGE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "status",
+                Self::VT_STATUS,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "tagline",
+                Self::VT_TAGLINE,
+                false,
+            )?
+            .visit_field::<u64>("budget", Self::VT_BUDGET, false)?
+            .visit_field::<u64>("revenue", Self::VT_REVENUE, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "poster_path",
+                Self::VT_POSTER_PATH,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "backdrop_path",
+                Self::VT_BACKDROP_PATH,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "logo_path",
+                Self::VT_LOGO_PATH,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "primary_poster_iid",
+                Self::VT_PRIMARY_POSTER_IID,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "primary_backdrop_iid",
+                Self::VT_PRIMARY_BACKDROP_IID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<MediaImages>>(
+                "images",
+                Self::VT_IMAGES,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CastMember>,
+                >,
+            >>("cast", Self::VT_CAST, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CrewMember>,
+                >,
+            >>("crew", Self::VT_CREW, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Video>,
+                >,
+            >>("videos", Self::VT_VIDEOS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Keyword>,
+                >,
+            >>("keywords", Self::VT_KEYWORDS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<ExternalIds>>(
+                "external_ids",
+                Self::VT_EXTERNAL_IDS,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<AlternativeTitle>,
+                >,
+            >>(
+                "alternative_titles", Self::VT_ALTERNATIVE_TITLES, false
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<Translation>,
+                >,
+            >>("translations", Self::VT_TRANSLATIONS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<CollectionInfo>>(
+                "collection",
+                Self::VT_COLLECTION,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>("recommendations", Self::VT_RECOMMENDATIONS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>("similar", Self::VT_SIMILAR, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct EnhancedMovieDetailsArgs<'a> {
     pub id: u64,
@@ -427,12 +947,54 @@ pub struct EnhancedMovieDetailsArgs<'a> {
     pub vote_count: u32,
     pub popularity: f32,
     pub content_rating: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub content_ratings: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ContentRating<'a>>>>>,
-    pub release_dates: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'a>>>>>,
-    pub genres: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GenreInfo<'a>>>>>,
-    pub spoken_languages: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<SpokenLanguage<'a>>>>>,
-    pub production_companies: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCompany<'a>>>>>,
-    pub production_countries: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ProductionCountry<'a>>>>>,
+    pub content_ratings: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ContentRating<'a>>,
+            >,
+        >,
+    >,
+    pub release_dates: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'a>>,
+            >,
+        >,
+    >,
+    pub genres: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<GenreInfo<'a>>,
+            >,
+        >,
+    >,
+    pub spoken_languages: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<SpokenLanguage<'a>>,
+            >,
+        >,
+    >,
+    pub production_companies: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ProductionCompany<'a>>,
+            >,
+        >,
+    >,
+    pub production_countries: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ProductionCountry<'a>>,
+            >,
+        >,
+    >,
     pub homepage: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub status: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub tagline: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -444,270 +1006,600 @@ pub struct EnhancedMovieDetailsArgs<'a> {
     pub primary_poster_iid: Option<&'a super::ids::Uuid>,
     pub primary_backdrop_iid: Option<&'a super::ids::Uuid>,
     pub images: Option<::flatbuffers::WIPOffset<MediaImages<'a>>>,
-    pub cast: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CastMember<'a>>>>>,
-    pub crew: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<CrewMember<'a>>>>>,
-    pub videos: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Video<'a>>>>>,
-    pub keywords: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Keyword<'a>>>>>,
+    pub cast: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CastMember<'a>>,
+            >,
+        >,
+    >,
+    pub crew: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CrewMember<'a>>,
+            >,
+        >,
+    >,
+    pub videos: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Video<'a>>,
+            >,
+        >,
+    >,
+    pub keywords: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Keyword<'a>>,
+            >,
+        >,
+    >,
     pub external_ids: Option<::flatbuffers::WIPOffset<ExternalIds<'a>>>,
-    pub alternative_titles: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<AlternativeTitle<'a>>>>>,
-    pub translations: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<Translation<'a>>>>>,
+    pub alternative_titles: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<AlternativeTitle<'a>>,
+            >,
+        >,
+    >,
+    pub translations: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<Translation<'a>>,
+            >,
+        >,
+    >,
     pub collection: Option<::flatbuffers::WIPOffset<CollectionInfo<'a>>>,
-    pub recommendations: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>>>>,
-    pub similar: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>>>>,
+    pub recommendations: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+            >,
+        >,
+    >,
+    pub similar: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for EnhancedMovieDetailsArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    EnhancedMovieDetailsArgs {
-      id: 0,
-      title: None,
-      original_title: None,
-      overview: None,
-      release_date: None,
-      runtime: 0,
-      vote_average: 0.0,
-      vote_count: 0,
-      popularity: 0.0,
-      content_rating: None,
-      content_ratings: None,
-      release_dates: None,
-      genres: None,
-      spoken_languages: None,
-      production_companies: None,
-      production_countries: None,
-      homepage: None,
-      status: None,
-      tagline: None,
-      budget: 0,
-      revenue: 0,
-      poster_path: None,
-      backdrop_path: None,
-      logo_path: None,
-      primary_poster_iid: None,
-      primary_backdrop_iid: None,
-      images: None,
-      cast: None,
-      crew: None,
-      videos: None,
-      keywords: None,
-      external_ids: None,
-      alternative_titles: None,
-      translations: None,
-      collection: None,
-      recommendations: None,
-      similar: None,
+    #[inline]
+    fn default() -> Self {
+        EnhancedMovieDetailsArgs {
+            id: 0,
+            title: None,
+            original_title: None,
+            overview: None,
+            release_date: None,
+            runtime: 0,
+            vote_average: 0.0,
+            vote_count: 0,
+            popularity: 0.0,
+            content_rating: None,
+            content_ratings: None,
+            release_dates: None,
+            genres: None,
+            spoken_languages: None,
+            production_companies: None,
+            production_countries: None,
+            homepage: None,
+            status: None,
+            tagline: None,
+            budget: 0,
+            revenue: 0,
+            poster_path: None,
+            backdrop_path: None,
+            logo_path: None,
+            primary_poster_iid: None,
+            primary_backdrop_iid: None,
+            images: None,
+            cast: None,
+            crew: None,
+            videos: None,
+            keywords: None,
+            external_ids: None,
+            alternative_titles: None,
+            translations: None,
+            collection: None,
+            recommendations: None,
+            similar: None,
+        }
     }
-  }
 }
 
-pub struct EnhancedMovieDetailsBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct EnhancedMovieDetailsBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EnhancedMovieDetailsBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(EnhancedMovieDetails::VT_ID, id, 0);
-  }
-  #[inline]
-  pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_TITLE, title);
-  }
-  #[inline]
-  pub fn add_original_title(&mut self, original_title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_ORIGINAL_TITLE, original_title);
-  }
-  #[inline]
-  pub fn add_overview(&mut self, overview: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_OVERVIEW, overview);
-  }
-  #[inline]
-  pub fn add_release_date(&mut self, release_date: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_RELEASE_DATE, release_date);
-  }
-  #[inline]
-  pub fn add_runtime(&mut self, runtime: u32) {
-    self.fbb_.push_slot::<u32>(EnhancedMovieDetails::VT_RUNTIME, runtime, 0);
-  }
-  #[inline]
-  pub fn add_vote_average(&mut self, vote_average: f32) {
-    self.fbb_.push_slot::<f32>(EnhancedMovieDetails::VT_VOTE_AVERAGE, vote_average, 0.0);
-  }
-  #[inline]
-  pub fn add_vote_count(&mut self, vote_count: u32) {
-    self.fbb_.push_slot::<u32>(EnhancedMovieDetails::VT_VOTE_COUNT, vote_count, 0);
-  }
-  #[inline]
-  pub fn add_popularity(&mut self, popularity: f32) {
-    self.fbb_.push_slot::<f32>(EnhancedMovieDetails::VT_POPULARITY, popularity, 0.0);
-  }
-  #[inline]
-  pub fn add_content_rating(&mut self, content_rating: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_CONTENT_RATING, content_rating);
-  }
-  #[inline]
-  pub fn add_content_ratings(&mut self, content_ratings: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ContentRating<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_CONTENT_RATINGS, content_ratings);
-  }
-  #[inline]
-  pub fn add_release_dates(&mut self, release_dates: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_RELEASE_DATES, release_dates);
-  }
-  #[inline]
-  pub fn add_genres(&mut self, genres: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<GenreInfo<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_GENRES, genres);
-  }
-  #[inline]
-  pub fn add_spoken_languages(&mut self, spoken_languages: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<SpokenLanguage<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_SPOKEN_LANGUAGES, spoken_languages);
-  }
-  #[inline]
-  pub fn add_production_companies(&mut self, production_companies: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ProductionCompany<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_PRODUCTION_COMPANIES, production_companies);
-  }
-  #[inline]
-  pub fn add_production_countries(&mut self, production_countries: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ProductionCountry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_PRODUCTION_COUNTRIES, production_countries);
-  }
-  #[inline]
-  pub fn add_homepage(&mut self, homepage: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_HOMEPAGE, homepage);
-  }
-  #[inline]
-  pub fn add_status(&mut self, status: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_STATUS, status);
-  }
-  #[inline]
-  pub fn add_tagline(&mut self, tagline: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_TAGLINE, tagline);
-  }
-  #[inline]
-  pub fn add_budget(&mut self, budget: u64) {
-    self.fbb_.push_slot::<u64>(EnhancedMovieDetails::VT_BUDGET, budget, 0);
-  }
-  #[inline]
-  pub fn add_revenue(&mut self, revenue: u64) {
-    self.fbb_.push_slot::<u64>(EnhancedMovieDetails::VT_REVENUE, revenue, 0);
-  }
-  #[inline]
-  pub fn add_poster_path(&mut self, poster_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_POSTER_PATH, poster_path);
-  }
-  #[inline]
-  pub fn add_backdrop_path(&mut self, backdrop_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_BACKDROP_PATH, backdrop_path);
-  }
-  #[inline]
-  pub fn add_logo_path(&mut self, logo_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_LOGO_PATH, logo_path);
-  }
-  #[inline]
-  pub fn add_primary_poster_iid(&mut self, primary_poster_iid: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EnhancedMovieDetails::VT_PRIMARY_POSTER_IID, primary_poster_iid);
-  }
-  #[inline]
-  pub fn add_primary_backdrop_iid(&mut self, primary_backdrop_iid: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EnhancedMovieDetails::VT_PRIMARY_BACKDROP_IID, primary_backdrop_iid);
-  }
-  #[inline]
-  pub fn add_images(&mut self, images: ::flatbuffers::WIPOffset<MediaImages<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<MediaImages>>(EnhancedMovieDetails::VT_IMAGES, images);
-  }
-  #[inline]
-  pub fn add_cast(&mut self, cast: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<CastMember<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_CAST, cast);
-  }
-  #[inline]
-  pub fn add_crew(&mut self, crew: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<CrewMember<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_CREW, crew);
-  }
-  #[inline]
-  pub fn add_videos(&mut self, videos: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Video<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_VIDEOS, videos);
-  }
-  #[inline]
-  pub fn add_keywords(&mut self, keywords: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Keyword<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_KEYWORDS, keywords);
-  }
-  #[inline]
-  pub fn add_external_ids(&mut self, external_ids: ::flatbuffers::WIPOffset<ExternalIds<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<ExternalIds>>(EnhancedMovieDetails::VT_EXTERNAL_IDS, external_ids);
-  }
-  #[inline]
-  pub fn add_alternative_titles(&mut self, alternative_titles: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<AlternativeTitle<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_ALTERNATIVE_TITLES, alternative_titles);
-  }
-  #[inline]
-  pub fn add_translations(&mut self, translations: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<Translation<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_TRANSLATIONS, translations);
-  }
-  #[inline]
-  pub fn add_collection(&mut self, collection: ::flatbuffers::WIPOffset<CollectionInfo<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<CollectionInfo>>(EnhancedMovieDetails::VT_COLLECTION, collection);
-  }
-  #[inline]
-  pub fn add_recommendations(&mut self, recommendations: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_RECOMMENDATIONS, recommendations);
-  }
-  #[inline]
-  pub fn add_similar(&mut self, similar: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EnhancedMovieDetails::VT_SIMILAR, similar);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EnhancedMovieDetailsBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EnhancedMovieDetailsBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    EnhancedMovieDetailsBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: u64) {
+        self.fbb_
+            .push_slot::<u64>(EnhancedMovieDetails::VT_ID, id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EnhancedMovieDetails<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_TITLE,
+            title,
+        );
+    }
+    #[inline]
+    pub fn add_original_title(
+        &mut self,
+        original_title: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_ORIGINAL_TITLE,
+            original_title,
+        );
+    }
+    #[inline]
+    pub fn add_overview(
+        &mut self,
+        overview: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_OVERVIEW,
+            overview,
+        );
+    }
+    #[inline]
+    pub fn add_release_date(
+        &mut self,
+        release_date: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_RELEASE_DATE,
+            release_date,
+        );
+    }
+    #[inline]
+    pub fn add_runtime(&mut self, runtime: u32) {
+        self.fbb_.push_slot::<u32>(
+            EnhancedMovieDetails::VT_RUNTIME,
+            runtime,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_vote_average(&mut self, vote_average: f32) {
+        self.fbb_.push_slot::<f32>(
+            EnhancedMovieDetails::VT_VOTE_AVERAGE,
+            vote_average,
+            0.0,
+        );
+    }
+    #[inline]
+    pub fn add_vote_count(&mut self, vote_count: u32) {
+        self.fbb_.push_slot::<u32>(
+            EnhancedMovieDetails::VT_VOTE_COUNT,
+            vote_count,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_popularity(&mut self, popularity: f32) {
+        self.fbb_.push_slot::<f32>(
+            EnhancedMovieDetails::VT_POPULARITY,
+            popularity,
+            0.0,
+        );
+    }
+    #[inline]
+    pub fn add_content_rating(
+        &mut self,
+        content_rating: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_CONTENT_RATING,
+            content_rating,
+        );
+    }
+    #[inline]
+    pub fn add_content_ratings(
+        &mut self,
+        content_ratings: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ContentRating<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_CONTENT_RATINGS,
+            content_ratings,
+        );
+    }
+    #[inline]
+    pub fn add_release_dates(
+        &mut self,
+        release_dates: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ReleaseDatesByCountry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_RELEASE_DATES,
+            release_dates,
+        );
+    }
+    #[inline]
+    pub fn add_genres(
+        &mut self,
+        genres: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<GenreInfo<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_GENRES,
+            genres,
+        );
+    }
+    #[inline]
+    pub fn add_spoken_languages(
+        &mut self,
+        spoken_languages: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<SpokenLanguage<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_SPOKEN_LANGUAGES,
+            spoken_languages,
+        );
+    }
+    #[inline]
+    pub fn add_production_companies(
+        &mut self,
+        production_companies: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ProductionCompany<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_PRODUCTION_COMPANIES,
+            production_companies,
+        );
+    }
+    #[inline]
+    pub fn add_production_countries(
+        &mut self,
+        production_countries: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ProductionCountry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_PRODUCTION_COUNTRIES,
+            production_countries,
+        );
+    }
+    #[inline]
+    pub fn add_homepage(
+        &mut self,
+        homepage: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_HOMEPAGE,
+            homepage,
+        );
+    }
+    #[inline]
+    pub fn add_status(&mut self, status: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_STATUS,
+            status,
+        );
+    }
+    #[inline]
+    pub fn add_tagline(&mut self, tagline: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_TAGLINE,
+            tagline,
+        );
+    }
+    #[inline]
+    pub fn add_budget(&mut self, budget: u64) {
+        self.fbb_
+            .push_slot::<u64>(EnhancedMovieDetails::VT_BUDGET, budget, 0);
+    }
+    #[inline]
+    pub fn add_revenue(&mut self, revenue: u64) {
+        self.fbb_.push_slot::<u64>(
+            EnhancedMovieDetails::VT_REVENUE,
+            revenue,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_poster_path(
+        &mut self,
+        poster_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_POSTER_PATH,
+            poster_path,
+        );
+    }
+    #[inline]
+    pub fn add_backdrop_path(
+        &mut self,
+        backdrop_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_BACKDROP_PATH,
+            backdrop_path,
+        );
+    }
+    #[inline]
+    pub fn add_logo_path(
+        &mut self,
+        logo_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_LOGO_PATH,
+            logo_path,
+        );
+    }
+    #[inline]
+    pub fn add_primary_poster_iid(
+        &mut self,
+        primary_poster_iid: &super::ids::Uuid,
+    ) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            EnhancedMovieDetails::VT_PRIMARY_POSTER_IID,
+            primary_poster_iid,
+        );
+    }
+    #[inline]
+    pub fn add_primary_backdrop_iid(
+        &mut self,
+        primary_backdrop_iid: &super::ids::Uuid,
+    ) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            EnhancedMovieDetails::VT_PRIMARY_BACKDROP_IID,
+            primary_backdrop_iid,
+        );
+    }
+    #[inline]
+    pub fn add_images(
+        &mut self,
+        images: ::flatbuffers::WIPOffset<MediaImages<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<MediaImages>>(
+                EnhancedMovieDetails::VT_IMAGES,
+                images,
+            );
+    }
+    #[inline]
+    pub fn add_cast(
+        &mut self,
+        cast: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CastMember<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_CAST,
+            cast,
+        );
+    }
+    #[inline]
+    pub fn add_crew(
+        &mut self,
+        crew: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CrewMember<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_CREW,
+            crew,
+        );
+    }
+    #[inline]
+    pub fn add_videos(
+        &mut self,
+        videos: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Video<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_VIDEOS,
+            videos,
+        );
+    }
+    #[inline]
+    pub fn add_keywords(
+        &mut self,
+        keywords: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Keyword<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_KEYWORDS,
+            keywords,
+        );
+    }
+    #[inline]
+    pub fn add_external_ids(
+        &mut self,
+        external_ids: ::flatbuffers::WIPOffset<ExternalIds<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<ExternalIds>>(
+                EnhancedMovieDetails::VT_EXTERNAL_IDS,
+                external_ids,
+            );
+    }
+    #[inline]
+    pub fn add_alternative_titles(
+        &mut self,
+        alternative_titles: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<AlternativeTitle<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_ALTERNATIVE_TITLES,
+            alternative_titles,
+        );
+    }
+    #[inline]
+    pub fn add_translations(
+        &mut self,
+        translations: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<Translation<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_TRANSLATIONS,
+            translations,
+        );
+    }
+    #[inline]
+    pub fn add_collection(
+        &mut self,
+        collection: ::flatbuffers::WIPOffset<CollectionInfo<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<CollectionInfo>>(
+                EnhancedMovieDetails::VT_COLLECTION,
+                collection,
+            );
+    }
+    #[inline]
+    pub fn add_recommendations(
+        &mut self,
+        recommendations: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_RECOMMENDATIONS,
+            recommendations,
+        );
+    }
+    #[inline]
+    pub fn add_similar(
+        &mut self,
+        similar: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedMovieDetails::VT_SIMILAR,
+            similar,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> EnhancedMovieDetailsBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        EnhancedMovieDetailsBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<EnhancedMovieDetails<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for EnhancedMovieDetails<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EnhancedMovieDetails");
-      ds.field("id", &self.id());
-      ds.field("title", &self.title());
-      ds.field("original_title", &self.original_title());
-      ds.field("overview", &self.overview());
-      ds.field("release_date", &self.release_date());
-      ds.field("runtime", &self.runtime());
-      ds.field("vote_average", &self.vote_average());
-      ds.field("vote_count", &self.vote_count());
-      ds.field("popularity", &self.popularity());
-      ds.field("content_rating", &self.content_rating());
-      ds.field("content_ratings", &self.content_ratings());
-      ds.field("release_dates", &self.release_dates());
-      ds.field("genres", &self.genres());
-      ds.field("spoken_languages", &self.spoken_languages());
-      ds.field("production_companies", &self.production_companies());
-      ds.field("production_countries", &self.production_countries());
-      ds.field("homepage", &self.homepage());
-      ds.field("status", &self.status());
-      ds.field("tagline", &self.tagline());
-      ds.field("budget", &self.budget());
-      ds.field("revenue", &self.revenue());
-      ds.field("poster_path", &self.poster_path());
-      ds.field("backdrop_path", &self.backdrop_path());
-      ds.field("logo_path", &self.logo_path());
-      ds.field("primary_poster_iid", &self.primary_poster_iid());
-      ds.field("primary_backdrop_iid", &self.primary_backdrop_iid());
-      ds.field("images", &self.images());
-      ds.field("cast", &self.cast());
-      ds.field("crew", &self.crew());
-      ds.field("videos", &self.videos());
-      ds.field("keywords", &self.keywords());
-      ds.field("external_ids", &self.external_ids());
-      ds.field("alternative_titles", &self.alternative_titles());
-      ds.field("translations", &self.translations());
-      ds.field("collection", &self.collection());
-      ds.field("recommendations", &self.recommendations());
-      ds.field("similar", &self.similar());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("EnhancedMovieDetails");
+        ds.field("id", &self.id());
+        ds.field("title", &self.title());
+        ds.field("original_title", &self.original_title());
+        ds.field("overview", &self.overview());
+        ds.field("release_date", &self.release_date());
+        ds.field("runtime", &self.runtime());
+        ds.field("vote_average", &self.vote_average());
+        ds.field("vote_count", &self.vote_count());
+        ds.field("popularity", &self.popularity());
+        ds.field("content_rating", &self.content_rating());
+        ds.field("content_ratings", &self.content_ratings());
+        ds.field("release_dates", &self.release_dates());
+        ds.field("genres", &self.genres());
+        ds.field("spoken_languages", &self.spoken_languages());
+        ds.field("production_companies", &self.production_companies());
+        ds.field("production_countries", &self.production_countries());
+        ds.field("homepage", &self.homepage());
+        ds.field("status", &self.status());
+        ds.field("tagline", &self.tagline());
+        ds.field("budget", &self.budget());
+        ds.field("revenue", &self.revenue());
+        ds.field("poster_path", &self.poster_path());
+        ds.field("backdrop_path", &self.backdrop_path());
+        ds.field("logo_path", &self.logo_path());
+        ds.field("primary_poster_iid", &self.primary_poster_iid());
+        ds.field("primary_backdrop_iid", &self.primary_backdrop_iid());
+        ds.field("images", &self.images());
+        ds.field("cast", &self.cast());
+        ds.field("crew", &self.crew());
+        ds.field("videos", &self.videos());
+        ds.field("keywords", &self.keywords());
+        ds.field("external_ids", &self.external_ids());
+        ds.field("alternative_titles", &self.alternative_titles());
+        ds.field("translations", &self.translations());
+        ds.field("collection", &self.collection());
+        ds.field("recommendations", &self.recommendations());
+        ds.field("similar", &self.similar());
+        ds.finish()
+    }
 }

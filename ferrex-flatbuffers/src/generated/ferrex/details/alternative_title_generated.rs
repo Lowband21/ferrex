@@ -6,74 +6,116 @@ pub enum AlternativeTitleOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct AlternativeTitle<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for AlternativeTitle<'a> {
-  type Inner = AlternativeTitle<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = AlternativeTitle<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> AlternativeTitle<'a> {
-  pub const VT_TITLE: ::flatbuffers::VOffsetT = 4;
-  pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 6;
-  pub const VT_TITLE_TYPE: ::flatbuffers::VOffsetT = 8;
+    pub const VT_TITLE: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 6;
+    pub const VT_TITLE_TYPE: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    AlternativeTitle { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args AlternativeTitleArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<AlternativeTitle<'bldr>> {
-    let mut builder = AlternativeTitleBuilder::new(_fbb);
-    if let Some(x) = args.title_type { builder.add_title_type(x); }
-    if let Some(x) = args.iso_3166_1 { builder.add_iso_3166_1(x); }
-    if let Some(x) = args.title { builder.add_title(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        AlternativeTitle { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args AlternativeTitleArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<AlternativeTitle<'bldr>> {
+        let mut builder = AlternativeTitleBuilder::new(_fbb);
+        if let Some(x) = args.title_type {
+            builder.add_title_type(x);
+        }
+        if let Some(x) = args.iso_3166_1 {
+            builder.add_iso_3166_1(x);
+        }
+        if let Some(x) = args.title {
+            builder.add_title(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn title(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(AlternativeTitle::VT_TITLE, None).unwrap()}
-  }
-  #[inline]
-  pub fn iso_3166_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(AlternativeTitle::VT_ISO_3166_1, None)}
-  }
-  #[inline]
-  pub fn title_type(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(AlternativeTitle::VT_TITLE_TYPE, None)}
-  }
+    #[inline]
+    pub fn title(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    AlternativeTitle::VT_TITLE,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn iso_3166_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                AlternativeTitle::VT_ISO_3166_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn title_type(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                AlternativeTitle::VT_TITLE_TYPE,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for AlternativeTitle<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_3166_1", Self::VT_ISO_3166_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("title_type", Self::VT_TITLE_TYPE, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "title",
+                Self::VT_TITLE,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_3166_1",
+                Self::VT_ISO_3166_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "title_type",
+                Self::VT_TITLE_TYPE,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct AlternativeTitleArgs<'a> {
     pub title: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -81,55 +123,75 @@ pub struct AlternativeTitleArgs<'a> {
     pub title_type: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for AlternativeTitleArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    AlternativeTitleArgs {
-      title: None, // required field
-      iso_3166_1: None,
-      title_type: None,
+    #[inline]
+    fn default() -> Self {
+        AlternativeTitleArgs {
+            title: None, // required field
+            iso_3166_1: None,
+            title_type: None,
+        }
     }
-  }
 }
 
-pub struct AlternativeTitleBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct AlternativeTitleBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> AlternativeTitleBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(AlternativeTitle::VT_TITLE, title);
-  }
-  #[inline]
-  pub fn add_iso_3166_1(&mut self, iso_3166_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(AlternativeTitle::VT_ISO_3166_1, iso_3166_1);
-  }
-  #[inline]
-  pub fn add_title_type(&mut self, title_type: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(AlternativeTitle::VT_TITLE_TYPE, title_type);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> AlternativeTitleBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    AlternativeTitleBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    AlternativeTitleBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            AlternativeTitle::VT_TITLE,
+            title,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<AlternativeTitle<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, AlternativeTitle::VT_TITLE,"title");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_iso_3166_1(
+        &mut self,
+        iso_3166_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            AlternativeTitle::VT_ISO_3166_1,
+            iso_3166_1,
+        );
+    }
+    #[inline]
+    pub fn add_title_type(
+        &mut self,
+        title_type: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            AlternativeTitle::VT_TITLE_TYPE,
+            title_type,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> AlternativeTitleBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        AlternativeTitleBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<AlternativeTitle<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, AlternativeTitle::VT_TITLE, "title");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for AlternativeTitle<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("AlternativeTitle");
-      ds.field("title", &self.title());
-      ds.field("iso_3166_1", &self.iso_3166_1());
-      ds.field("title_type", &self.title_type());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("AlternativeTitle");
+        ds.field("title", &self.title());
+        ds.field("iso_3166_1", &self.iso_3166_1());
+        ds.field("title_type", &self.title_type());
+        ds.finish()
+    }
 }

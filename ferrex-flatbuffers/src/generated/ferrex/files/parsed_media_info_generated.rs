@@ -6,89 +6,108 @@ pub enum ParsedMediaInfoOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct ParsedMediaInfo<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ParsedMediaInfo<'a> {
-  type Inner = ParsedMediaInfo<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ParsedMediaInfo<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ParsedMediaInfo<'a> {
-  pub const VT_VARIANT_TYPE: ::flatbuffers::VOffsetT = 4;
-  pub const VT_VARIANT: ::flatbuffers::VOffsetT = 6;
+    pub const VT_VARIANT_TYPE: ::flatbuffers::VOffsetT = 4;
+    pub const VT_VARIANT: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ParsedMediaInfo { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ParsedMediaInfoArgs
-  ) -> ::flatbuffers::WIPOffset<ParsedMediaInfo<'bldr>> {
-    let mut builder = ParsedMediaInfoBuilder::new(_fbb);
-    if let Some(x) = args.variant { builder.add_variant(x); }
-    builder.add_variant_type(args.variant_type);
-    builder.finish()
-  }
-
-
-  #[inline]
-  pub fn variant_type(&self) -> ParsedMediaInfoVariant {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<ParsedMediaInfoVariant>(ParsedMediaInfo::VT_VARIANT_TYPE, Some(ParsedMediaInfoVariant::NONE)).unwrap()}
-  }
-  #[inline]
-  pub fn variant(&self) -> Option<::flatbuffers::Table<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Table<'a>>>(ParsedMediaInfo::VT_VARIANT, None)}
-  }
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_parsed_movie_info(&self) -> Option<ParsedMovieInfo<'a>> {
-    if self.variant_type() == ParsedMediaInfoVariant::ParsedMovieInfo {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { ParsedMovieInfo::init_from_table(t) }
-     })
-    } else {
-      None
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ParsedMediaInfo { _tab: table }
     }
-  }
-
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_parsed_episode_info(&self) -> Option<ParsedEpisodeInfo<'a>> {
-    if self.variant_type() == ParsedMediaInfoVariant::ParsedEpisodeInfo {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { ParsedEpisodeInfo::init_from_table(t) }
-     })
-    } else {
-      None
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ParsedMediaInfoArgs,
+    ) -> ::flatbuffers::WIPOffset<ParsedMediaInfo<'bldr>> {
+        let mut builder = ParsedMediaInfoBuilder::new(_fbb);
+        if let Some(x) = args.variant {
+            builder.add_variant(x);
+        }
+        builder.add_variant_type(args.variant_type);
+        builder.finish()
     }
-  }
 
+    #[inline]
+    pub fn variant_type(&self) -> ParsedMediaInfoVariant {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<ParsedMediaInfoVariant>(
+                    ParsedMediaInfo::VT_VARIANT_TYPE,
+                    Some(ParsedMediaInfoVariant::NONE),
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn variant(&self) -> Option<::flatbuffers::Table<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Table<'a>>>(ParsedMediaInfo::VT_VARIANT, None)
+        }
+    }
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_parsed_movie_info(&self) -> Option<ParsedMovieInfo<'a>> {
+        if self.variant_type() == ParsedMediaInfoVariant::ParsedMovieInfo {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { ParsedMovieInfo::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_parsed_episode_info(
+        &self,
+    ) -> Option<ParsedEpisodeInfo<'a>> {
+        if self.variant_type() == ParsedMediaInfoVariant::ParsedEpisodeInfo {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { ParsedEpisodeInfo::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ParsedMediaInfo<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
      .visit_union::<ParsedMediaInfoVariant, _>("variant_type", Self::VT_VARIANT_TYPE, "variant", Self::VT_VARIANT, false, |key, v, pos| {
         match key {
           ParsedMediaInfoVariant::ParsedMovieInfo => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<ParsedMovieInfo>>("ParsedMediaInfoVariant::ParsedMovieInfo", pos),
@@ -97,75 +116,91 @@ impl ::flatbuffers::Verifiable for ParsedMediaInfo<'_> {
         }
      })?
      .finish();
-    Ok(())
-  }
+        Ok(())
+    }
 }
 pub struct ParsedMediaInfoArgs {
     pub variant_type: ParsedMediaInfoVariant,
-    pub variant: Option<::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>>,
+    pub variant:
+        Option<::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>>,
 }
 impl<'a> Default for ParsedMediaInfoArgs {
-  #[inline]
-  fn default() -> Self {
-    ParsedMediaInfoArgs {
-      variant_type: ParsedMediaInfoVariant::NONE,
-      variant: None,
+    #[inline]
+    fn default() -> Self {
+        ParsedMediaInfoArgs {
+            variant_type: ParsedMediaInfoVariant::NONE,
+            variant: None,
+        }
     }
-  }
 }
 
-pub struct ParsedMediaInfoBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct ParsedMediaInfoBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ParsedMediaInfoBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_variant_type(&mut self, variant_type: ParsedMediaInfoVariant) {
-    self.fbb_.push_slot::<ParsedMediaInfoVariant>(ParsedMediaInfo::VT_VARIANT_TYPE, variant_type, ParsedMediaInfoVariant::NONE);
-  }
-  #[inline]
-  pub fn add_variant(&mut self, variant: ::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ParsedMediaInfo::VT_VARIANT, variant);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ParsedMediaInfoBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ParsedMediaInfoBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ParsedMediaInfoBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_variant_type(&mut self, variant_type: ParsedMediaInfoVariant) {
+        self.fbb_.push_slot::<ParsedMediaInfoVariant>(
+            ParsedMediaInfo::VT_VARIANT_TYPE,
+            variant_type,
+            ParsedMediaInfoVariant::NONE,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ParsedMediaInfo<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_variant(
+        &mut self,
+        variant: ::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ParsedMediaInfo::VT_VARIANT,
+            variant,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ParsedMediaInfoBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ParsedMediaInfoBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ParsedMediaInfo<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ParsedMediaInfo<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ParsedMediaInfo");
-      ds.field("variant_type", &self.variant_type());
-      match self.variant_type() {
-        ParsedMediaInfoVariant::ParsedMovieInfo => {
-          if let Some(x) = self.variant_as_parsed_movie_info() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        ParsedMediaInfoVariant::ParsedEpisodeInfo => {
-          if let Some(x) = self.variant_as_parsed_episode_info() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        _ => {
-          let x: Option<()> = None;
-          ds.field("variant", &x)
-        },
-      };
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ParsedMediaInfo");
+        ds.field("variant_type", &self.variant_type());
+        match self.variant_type() {
+            ParsedMediaInfoVariant::ParsedMovieInfo => {
+                if let Some(x) = self.variant_as_parsed_movie_info() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            ParsedMediaInfoVariant::ParsedEpisodeInfo => {
+                if let Some(x) = self.variant_as_parsed_episode_info() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            _ => {
+                let x: Option<()> = None;
+                ds.field("variant", &x)
+            }
+        };
+        ds.finish()
+    }
 }

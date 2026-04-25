@@ -7,97 +7,145 @@ pub enum WatchStateOffset {}
 
 /// GET /api/v1/watch/state response.
 pub struct WatchState<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for WatchState<'a> {
-  type Inner = WatchState<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = WatchState<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> WatchState<'a> {
-  pub const VT_ITEMS: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ITEMS: ::flatbuffers::VOffsetT = 4;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    WatchState { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args WatchStateArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<WatchState<'bldr>> {
-    let mut builder = WatchStateBuilder::new(_fbb);
-    if let Some(x) = args.items { builder.add_items(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        WatchState { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args WatchStateArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<WatchState<'bldr>> {
+        let mut builder = WatchStateBuilder::new(_fbb);
+        if let Some(x) = args.items {
+            builder.add_items(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn items(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<WatchStateEntry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<WatchStateEntry>>>>(WatchState::VT_ITEMS, None)}
-  }
+    #[inline]
+    pub fn items(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<WatchStateEntry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<WatchStateEntry>,
+                >,
+            >>(WatchState::VT_ITEMS, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for WatchState<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<WatchStateEntry>>>>("items", Self::VT_ITEMS, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<WatchStateEntry>,
+                >,
+            >>("items", Self::VT_ITEMS, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct WatchStateArgs<'a> {
-    pub items: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<WatchStateEntry<'a>>>>>,
+    pub items: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<WatchStateEntry<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for WatchStateArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    WatchStateArgs {
-      items: None,
+    #[inline]
+    fn default() -> Self {
+        WatchStateArgs { items: None }
     }
-  }
 }
 
 pub struct WatchStateBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> WatchStateBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_items(&mut self, items: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<WatchStateEntry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(WatchState::VT_ITEMS, items);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> WatchStateBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    WatchStateBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    WatchStateBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_items(
+        &mut self,
+        items: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<WatchStateEntry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            WatchState::VT_ITEMS,
+            items,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<WatchState<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> WatchStateBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        WatchStateBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<WatchState<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for WatchState<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("WatchState");
-      ds.field("items", &self.items());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("WatchState");
+        ds.field("items", &self.items());
+        ds.finish()
+    }
 }
 #[inline]
 /// Verifies that a buffer of bytes contains a `WatchState`
@@ -106,8 +154,10 @@ impl ::core::fmt::Debug for WatchState<'_> {
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `root_as_watch_state_unchecked`.
-pub fn root_as_watch_state(buf: &[u8]) -> Result<WatchState<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root::<WatchState>(buf)
+pub fn root_as_watch_state(
+    buf: &[u8],
+) -> Result<WatchState<'_>, ::flatbuffers::InvalidFlatbuffer> {
+    ::flatbuffers::root::<WatchState>(buf)
 }
 #[inline]
 /// Verifies that a buffer of bytes contains a size prefixed
@@ -116,8 +166,10 @@ pub fn root_as_watch_state(buf: &[u8]) -> Result<WatchState<'_>, ::flatbuffers::
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `size_prefixed_root_as_watch_state_unchecked`.
-pub fn size_prefixed_root_as_watch_state(buf: &[u8]) -> Result<WatchState<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root::<WatchState>(buf)
+pub fn size_prefixed_root_as_watch_state(
+    buf: &[u8],
+) -> Result<WatchState<'_>, ::flatbuffers::InvalidFlatbuffer> {
+    ::flatbuffers::size_prefixed_root::<WatchState>(buf)
 }
 #[inline]
 /// Verifies, with the given options, that a buffer of bytes
@@ -127,10 +179,10 @@ pub fn size_prefixed_root_as_watch_state(buf: &[u8]) -> Result<WatchState<'_>, :
 /// previous, unchecked, behavior use
 /// `root_as_watch_state_unchecked`.
 pub fn root_as_watch_state_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
+    opts: &'o ::flatbuffers::VerifierOptions,
+    buf: &'b [u8],
 ) -> Result<WatchState<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root_with_opts::<WatchState<'b>>(opts, buf)
+    ::flatbuffers::root_with_opts::<WatchState<'b>>(opts, buf)
 }
 #[inline]
 /// Verifies, with the given verifier options, that a buffer of
@@ -140,33 +192,43 @@ pub fn root_as_watch_state_with_opts<'b, 'o>(
 /// previous, unchecked, behavior use
 /// `root_as_watch_state_unchecked`.
 pub fn size_prefixed_root_as_watch_state_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
+    opts: &'o ::flatbuffers::VerifierOptions,
+    buf: &'b [u8],
 ) -> Result<WatchState<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root_with_opts::<WatchState<'b>>(opts, buf)
+    ::flatbuffers::size_prefixed_root_with_opts::<WatchState<'b>>(opts, buf)
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a WatchState and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `WatchState`.
 pub unsafe fn root_as_watch_state_unchecked(buf: &[u8]) -> WatchState<'_> {
-  unsafe { ::flatbuffers::root_unchecked::<WatchState>(buf) }
+    unsafe { ::flatbuffers::root_unchecked::<WatchState>(buf) }
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed WatchState and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `WatchState`.
-pub unsafe fn size_prefixed_root_as_watch_state_unchecked(buf: &[u8]) -> WatchState<'_> {
-  unsafe { ::flatbuffers::size_prefixed_root_unchecked::<WatchState>(buf) }
+pub unsafe fn size_prefixed_root_as_watch_state_unchecked(
+    buf: &[u8],
+) -> WatchState<'_> {
+    unsafe { ::flatbuffers::size_prefixed_root_unchecked::<WatchState>(buf) }
 }
 #[inline]
 pub fn finish_watch_state_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
     fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-    root: ::flatbuffers::WIPOffset<WatchState<'a>>) {
-  fbb.finish(root, None);
+    root: ::flatbuffers::WIPOffset<WatchState<'a>>,
+) {
+    fbb.finish(root, None);
 }
 
 #[inline]
-pub fn finish_size_prefixed_watch_state_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>, root: ::flatbuffers::WIPOffset<WatchState<'a>>) {
-  fbb.finish_size_prefixed(root, None);
+pub fn finish_size_prefixed_watch_state_buffer<
+    'a,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+>(
+    fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    root: ::flatbuffers::WIPOffset<WatchState<'a>>,
+) {
+    fbb.finish_size_prefixed(root, None);
 }

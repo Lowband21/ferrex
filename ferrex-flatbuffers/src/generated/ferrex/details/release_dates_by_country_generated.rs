@@ -6,113 +6,192 @@ pub enum ReleaseDatesByCountryOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct ReleaseDatesByCountry<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ReleaseDatesByCountry<'a> {
-  type Inner = ReleaseDatesByCountry<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ReleaseDatesByCountry<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ReleaseDatesByCountry<'a> {
-  pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 4;
-  pub const VT_RELEASE_DATES: ::flatbuffers::VOffsetT = 6;
+    pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 4;
+    pub const VT_RELEASE_DATES: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ReleaseDatesByCountry { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ReleaseDatesByCountryArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<ReleaseDatesByCountry<'bldr>> {
-    let mut builder = ReleaseDatesByCountryBuilder::new(_fbb);
-    if let Some(x) = args.release_dates { builder.add_release_dates(x); }
-    if let Some(x) = args.iso_3166_1 { builder.add_iso_3166_1(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ReleaseDatesByCountry { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ReleaseDatesByCountryArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<ReleaseDatesByCountry<'bldr>> {
+        let mut builder = ReleaseDatesByCountryBuilder::new(_fbb);
+        if let Some(x) = args.release_dates {
+            builder.add_release_dates(x);
+        }
+        if let Some(x) = args.iso_3166_1 {
+            builder.add_iso_3166_1(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn iso_3166_1(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(ReleaseDatesByCountry::VT_ISO_3166_1, None).unwrap()}
-  }
-  #[inline]
-  pub fn release_dates(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDateEntry>>>>(ReleaseDatesByCountry::VT_RELEASE_DATES, None)}
-  }
+    #[inline]
+    pub fn iso_3166_1(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    ReleaseDatesByCountry::VT_ISO_3166_1,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn release_dates(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ReleaseDateEntry>,
+                >,
+            >>(
+                ReleaseDatesByCountry::VT_RELEASE_DATES, None
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ReleaseDatesByCountry<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_3166_1", Self::VT_ISO_3166_1, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ReleaseDateEntry>>>>("release_dates", Self::VT_RELEASE_DATES, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_3166_1",
+                Self::VT_ISO_3166_1,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ReleaseDateEntry>,
+                >,
+            >>("release_dates", Self::VT_RELEASE_DATES, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct ReleaseDatesByCountryArgs<'a> {
     pub iso_3166_1: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub release_dates: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'a>>>>>,
+    pub release_dates: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for ReleaseDatesByCountryArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    ReleaseDatesByCountryArgs {
-      iso_3166_1: None, // required field
-      release_dates: None,
+    #[inline]
+    fn default() -> Self {
+        ReleaseDatesByCountryArgs {
+            iso_3166_1: None, // required field
+            release_dates: None,
+        }
     }
-  }
 }
 
-pub struct ReleaseDatesByCountryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct ReleaseDatesByCountryBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ReleaseDatesByCountryBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_iso_3166_1(&mut self, iso_3166_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDatesByCountry::VT_ISO_3166_1, iso_3166_1);
-  }
-  #[inline]
-  pub fn add_release_dates(&mut self, release_dates: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ReleaseDatesByCountry::VT_RELEASE_DATES, release_dates);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ReleaseDatesByCountryBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ReleaseDatesByCountryBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ReleaseDatesByCountryBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_iso_3166_1(
+        &mut self,
+        iso_3166_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDatesByCountry::VT_ISO_3166_1,
+            iso_3166_1,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ReleaseDatesByCountry<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, ReleaseDatesByCountry::VT_ISO_3166_1,"iso_3166_1");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_release_dates(
+        &mut self,
+        release_dates: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ReleaseDateEntry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ReleaseDatesByCountry::VT_RELEASE_DATES,
+            release_dates,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ReleaseDatesByCountryBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ReleaseDatesByCountryBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ReleaseDatesByCountry<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(
+            o,
+            ReleaseDatesByCountry::VT_ISO_3166_1,
+            "iso_3166_1",
+        );
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ReleaseDatesByCountry<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ReleaseDatesByCountry");
-      ds.field("iso_3166_1", &self.iso_3166_1());
-      ds.field("release_dates", &self.release_dates());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ReleaseDatesByCountry");
+        ds.field("iso_3166_1", &self.iso_3166_1());
+        ds.field("release_dates", &self.release_dates());
+        ds.finish()
+    }
 }

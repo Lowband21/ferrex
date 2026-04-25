@@ -8,122 +8,186 @@ pub enum MovieReferenceOffset {}
 /// Lightweight movie reference for poster grids / batch sync.
 /// Mirrors ferrex-model::MovieReference.
 pub struct MovieReference<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for MovieReference<'a> {
-  type Inner = MovieReference<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = MovieReference<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> MovieReference<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 6;
-  pub const VT_BATCH_ID: ::flatbuffers::VOffsetT = 8;
-  pub const VT_TMDB_ID: ::flatbuffers::VOffsetT = 10;
-  pub const VT_TITLE: ::flatbuffers::VOffsetT = 12;
-  pub const VT_DETAILS: ::flatbuffers::VOffsetT = 14;
-  pub const VT_ENDPOINT: ::flatbuffers::VOffsetT = 16;
-  pub const VT_FILE: ::flatbuffers::VOffsetT = 18;
-  pub const VT_THEME_COLOR: ::flatbuffers::VOffsetT = 20;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 6;
+    pub const VT_BATCH_ID: ::flatbuffers::VOffsetT = 8;
+    pub const VT_TMDB_ID: ::flatbuffers::VOffsetT = 10;
+    pub const VT_TITLE: ::flatbuffers::VOffsetT = 12;
+    pub const VT_DETAILS: ::flatbuffers::VOffsetT = 14;
+    pub const VT_ENDPOINT: ::flatbuffers::VOffsetT = 16;
+    pub const VT_FILE: ::flatbuffers::VOffsetT = 18;
+    pub const VT_THEME_COLOR: ::flatbuffers::VOffsetT = 20;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    MovieReference { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args MovieReferenceArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<MovieReference<'bldr>> {
-    let mut builder = MovieReferenceBuilder::new(_fbb);
-    builder.add_tmdb_id(args.tmdb_id);
-    if let Some(x) = args.theme_color { builder.add_theme_color(x); }
-    if let Some(x) = args.file { builder.add_file(x); }
-    if let Some(x) = args.endpoint { builder.add_endpoint(x); }
-    if let Some(x) = args.details { builder.add_details(x); }
-    if let Some(x) = args.title { builder.add_title(x); }
-    builder.add_batch_id(args.batch_id);
-    if let Some(x) = args.library_id { builder.add_library_id(x); }
-    if let Some(x) = args.id { builder.add_id(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        MovieReference { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args MovieReferenceArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<MovieReference<'bldr>> {
+        let mut builder = MovieReferenceBuilder::new(_fbb);
+        builder.add_tmdb_id(args.tmdb_id);
+        if let Some(x) = args.theme_color {
+            builder.add_theme_color(x);
+        }
+        if let Some(x) = args.file {
+            builder.add_file(x);
+        }
+        if let Some(x) = args.endpoint {
+            builder.add_endpoint(x);
+        }
+        if let Some(x) = args.details {
+            builder.add_details(x);
+        }
+        if let Some(x) = args.title {
+            builder.add_title(x);
+        }
+        builder.add_batch_id(args.batch_id);
+        if let Some(x) = args.library_id {
+            builder.add_library_id(x);
+        }
+        if let Some(x) = args.id {
+            builder.add_id(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(MovieReference::VT_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn library_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(MovieReference::VT_LIBRARY_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn batch_id(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(MovieReference::VT_BATCH_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn tmdb_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(MovieReference::VT_TMDB_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn title(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(MovieReference::VT_TITLE, None).unwrap()}
-  }
-  #[inline]
-  pub fn details(&self) -> Option<super::details::EnhancedMovieDetails<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<super::details::EnhancedMovieDetails>>(MovieReference::VT_DETAILS, None)}
-  }
-  #[inline]
-  pub fn endpoint(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(MovieReference::VT_ENDPOINT, None)}
-  }
-  #[inline]
-  pub fn file(&self) -> Option<super::files::MediaFile<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<super::files::MediaFile>>(MovieReference::VT_FILE, None)}
-  }
-  #[inline]
-  pub fn theme_color(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(MovieReference::VT_THEME_COLOR, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(MovieReference::VT_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn library_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(MovieReference::VT_LIBRARY_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn batch_id(&self) -> u32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u32>(MovieReference::VT_BATCH_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn tmdb_id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(MovieReference::VT_TMDB_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn title(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    MovieReference::VT_TITLE,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn details(&self) -> Option<super::details::EnhancedMovieDetails<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                super::details::EnhancedMovieDetails,
+            >>(MovieReference::VT_DETAILS, None)
+        }
+    }
+    #[inline]
+    pub fn endpoint(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                MovieReference::VT_ENDPOINT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn file(&self) -> Option<super::files::MediaFile<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<super::files::MediaFile>>(
+                    MovieReference::VT_FILE,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn theme_color(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                MovieReference::VT_THEME_COLOR,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for MovieReference<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
      .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
      .visit_field::<super::ids::Uuid>("library_id", Self::VT_LIBRARY_ID, true)?
      .visit_field::<u32>("batch_id", Self::VT_BATCH_ID, false)?
@@ -134,8 +198,8 @@ impl ::flatbuffers::Verifiable for MovieReference<'_> {
      .visit_field::<::flatbuffers::ForwardsUOffset<super::files::MediaFile>>("file", Self::VT_FILE, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("theme_color", Self::VT_THEME_COLOR, false)?
      .finish();
-    Ok(())
-  }
+        Ok(())
+    }
 }
 pub struct MovieReferenceArgs<'a> {
     pub id: Option<&'a super::ids::Uuid>,
@@ -143,99 +207,135 @@ pub struct MovieReferenceArgs<'a> {
     pub batch_id: u32,
     pub tmdb_id: u64,
     pub title: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub details: Option<::flatbuffers::WIPOffset<super::details::EnhancedMovieDetails<'a>>>,
+    pub details: Option<
+        ::flatbuffers::WIPOffset<super::details::EnhancedMovieDetails<'a>>,
+    >,
     pub endpoint: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub file: Option<::flatbuffers::WIPOffset<super::files::MediaFile<'a>>>,
     pub theme_color: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for MovieReferenceArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    MovieReferenceArgs {
-      id: None, // required field
-      library_id: None, // required field
-      batch_id: 0,
-      tmdb_id: 0,
-      title: None, // required field
-      details: None,
-      endpoint: None,
-      file: None,
-      theme_color: None,
+    #[inline]
+    fn default() -> Self {
+        MovieReferenceArgs {
+            id: None,         // required field
+            library_id: None, // required field
+            batch_id: 0,
+            tmdb_id: 0,
+            title: None, // required field
+            details: None,
+            endpoint: None,
+            file: None,
+            theme_color: None,
+        }
     }
-  }
 }
 
 pub struct MovieReferenceBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MovieReferenceBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(MovieReference::VT_ID, id);
-  }
-  #[inline]
-  pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(MovieReference::VT_LIBRARY_ID, library_id);
-  }
-  #[inline]
-  pub fn add_batch_id(&mut self, batch_id: u32) {
-    self.fbb_.push_slot::<u32>(MovieReference::VT_BATCH_ID, batch_id, 0);
-  }
-  #[inline]
-  pub fn add_tmdb_id(&mut self, tmdb_id: u64) {
-    self.fbb_.push_slot::<u64>(MovieReference::VT_TMDB_ID, tmdb_id, 0);
-  }
-  #[inline]
-  pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MovieReference::VT_TITLE, title);
-  }
-  #[inline]
-  pub fn add_details(&mut self, details: ::flatbuffers::WIPOffset<super::details::EnhancedMovieDetails<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::details::EnhancedMovieDetails>>(MovieReference::VT_DETAILS, details);
-  }
-  #[inline]
-  pub fn add_endpoint(&mut self, endpoint: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MovieReference::VT_ENDPOINT, endpoint);
-  }
-  #[inline]
-  pub fn add_file(&mut self, file: ::flatbuffers::WIPOffset<super::files::MediaFile<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::files::MediaFile>>(MovieReference::VT_FILE, file);
-  }
-  #[inline]
-  pub fn add_theme_color(&mut self, theme_color: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(MovieReference::VT_THEME_COLOR, theme_color);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> MovieReferenceBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    MovieReferenceBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    MovieReferenceBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: &super::ids::Uuid) {
+        self.fbb_
+            .push_slot_always::<&super::ids::Uuid>(MovieReference::VT_ID, id);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<MovieReference<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, MovieReference::VT_ID,"id");
-    self.fbb_.required(o, MovieReference::VT_LIBRARY_ID,"library_id");
-    self.fbb_.required(o, MovieReference::VT_TITLE,"title");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            MovieReference::VT_LIBRARY_ID,
+            library_id,
+        );
+    }
+    #[inline]
+    pub fn add_batch_id(&mut self, batch_id: u32) {
+        self.fbb_
+            .push_slot::<u32>(MovieReference::VT_BATCH_ID, batch_id, 0);
+    }
+    #[inline]
+    pub fn add_tmdb_id(&mut self, tmdb_id: u64) {
+        self.fbb_
+            .push_slot::<u64>(MovieReference::VT_TMDB_ID, tmdb_id, 0);
+    }
+    #[inline]
+    pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            MovieReference::VT_TITLE,
+            title,
+        );
+    }
+    #[inline]
+    pub fn add_details(
+        &mut self,
+        details: ::flatbuffers::WIPOffset<
+            super::details::EnhancedMovieDetails<'b>,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::details::EnhancedMovieDetails>>(MovieReference::VT_DETAILS, details);
+    }
+    #[inline]
+    pub fn add_endpoint(
+        &mut self,
+        endpoint: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            MovieReference::VT_ENDPOINT,
+            endpoint,
+        );
+    }
+    #[inline]
+    pub fn add_file(
+        &mut self,
+        file: ::flatbuffers::WIPOffset<super::files::MediaFile<'b>>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::files::MediaFile>>(MovieReference::VT_FILE, file);
+    }
+    #[inline]
+    pub fn add_theme_color(
+        &mut self,
+        theme_color: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            MovieReference::VT_THEME_COLOR,
+            theme_color,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> MovieReferenceBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        MovieReferenceBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<MovieReference<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, MovieReference::VT_ID, "id");
+        self.fbb_
+            .required(o, MovieReference::VT_LIBRARY_ID, "library_id");
+        self.fbb_.required(o, MovieReference::VT_TITLE, "title");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for MovieReference<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("MovieReference");
-      ds.field("id", &self.id());
-      ds.field("library_id", &self.library_id());
-      ds.field("batch_id", &self.batch_id());
-      ds.field("tmdb_id", &self.tmdb_id());
-      ds.field("title", &self.title());
-      ds.field("details", &self.details());
-      ds.field("endpoint", &self.endpoint());
-      ds.field("file", &self.file());
-      ds.field("theme_color", &self.theme_color());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("MovieReference");
+        ds.field("id", &self.id());
+        ds.field("library_id", &self.library_id());
+        ds.field("batch_id", &self.batch_id());
+        ds.field("tmdb_id", &self.tmdb_id());
+        ds.field("title", &self.title());
+        ds.field("details", &self.details());
+        ds.field("endpoint", &self.endpoint());
+        ds.field("file", &self.file());
+        ds.field("theme_color", &self.theme_color());
+        ds.finish()
+    }
 }

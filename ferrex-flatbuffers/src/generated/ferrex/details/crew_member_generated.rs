@@ -6,194 +6,336 @@ pub enum CrewMemberOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct CrewMember<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for CrewMember<'a> {
-  type Inner = CrewMember<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = CrewMember<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> CrewMember<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_PERSON_ID: ::flatbuffers::VOffsetT = 6;
-  pub const VT_CREDIT_ID: ::flatbuffers::VOffsetT = 8;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 10;
-  pub const VT_JOB: ::flatbuffers::VOffsetT = 12;
-  pub const VT_DEPARTMENT: ::flatbuffers::VOffsetT = 14;
-  pub const VT_PROFILE_PATH: ::flatbuffers::VOffsetT = 16;
-  pub const VT_GENDER: ::flatbuffers::VOffsetT = 18;
-  pub const VT_KNOWN_FOR_DEPARTMENT: ::flatbuffers::VOffsetT = 20;
-  pub const VT_ADULT: ::flatbuffers::VOffsetT = 22;
-  pub const VT_POPULARITY: ::flatbuffers::VOffsetT = 24;
-  pub const VT_ORIGINAL_NAME: ::flatbuffers::VOffsetT = 26;
-  pub const VT_ALSO_KNOWN_AS: ::flatbuffers::VOffsetT = 28;
-  pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 30;
-  pub const VT_PROFILE_IID: ::flatbuffers::VOffsetT = 32;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_PERSON_ID: ::flatbuffers::VOffsetT = 6;
+    pub const VT_CREDIT_ID: ::flatbuffers::VOffsetT = 8;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 10;
+    pub const VT_JOB: ::flatbuffers::VOffsetT = 12;
+    pub const VT_DEPARTMENT: ::flatbuffers::VOffsetT = 14;
+    pub const VT_PROFILE_PATH: ::flatbuffers::VOffsetT = 16;
+    pub const VT_GENDER: ::flatbuffers::VOffsetT = 18;
+    pub const VT_KNOWN_FOR_DEPARTMENT: ::flatbuffers::VOffsetT = 20;
+    pub const VT_ADULT: ::flatbuffers::VOffsetT = 22;
+    pub const VT_POPULARITY: ::flatbuffers::VOffsetT = 24;
+    pub const VT_ORIGINAL_NAME: ::flatbuffers::VOffsetT = 26;
+    pub const VT_ALSO_KNOWN_AS: ::flatbuffers::VOffsetT = 28;
+    pub const VT_EXTERNAL_IDS: ::flatbuffers::VOffsetT = 30;
+    pub const VT_PROFILE_IID: ::flatbuffers::VOffsetT = 32;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    CrewMember { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args CrewMemberArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<CrewMember<'bldr>> {
-    let mut builder = CrewMemberBuilder::new(_fbb);
-    builder.add_id(args.id);
-    if let Some(x) = args.profile_iid { builder.add_profile_iid(x); }
-    if let Some(x) = args.external_ids { builder.add_external_ids(x); }
-    if let Some(x) = args.also_known_as { builder.add_also_known_as(x); }
-    if let Some(x) = args.original_name { builder.add_original_name(x); }
-    builder.add_popularity(args.popularity);
-    if let Some(x) = args.known_for_department { builder.add_known_for_department(x); }
-    if let Some(x) = args.profile_path { builder.add_profile_path(x); }
-    if let Some(x) = args.department { builder.add_department(x); }
-    if let Some(x) = args.job { builder.add_job(x); }
-    if let Some(x) = args.name { builder.add_name(x); }
-    if let Some(x) = args.credit_id { builder.add_credit_id(x); }
-    if let Some(x) = args.person_id { builder.add_person_id(x); }
-    builder.add_adult(args.adult);
-    builder.add_gender(args.gender);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        CrewMember { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args CrewMemberArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<CrewMember<'bldr>> {
+        let mut builder = CrewMemberBuilder::new(_fbb);
+        builder.add_id(args.id);
+        if let Some(x) = args.profile_iid {
+            builder.add_profile_iid(x);
+        }
+        if let Some(x) = args.external_ids {
+            builder.add_external_ids(x);
+        }
+        if let Some(x) = args.also_known_as {
+            builder.add_also_known_as(x);
+        }
+        if let Some(x) = args.original_name {
+            builder.add_original_name(x);
+        }
+        builder.add_popularity(args.popularity);
+        if let Some(x) = args.known_for_department {
+            builder.add_known_for_department(x);
+        }
+        if let Some(x) = args.profile_path {
+            builder.add_profile_path(x);
+        }
+        if let Some(x) = args.department {
+            builder.add_department(x);
+        }
+        if let Some(x) = args.job {
+            builder.add_job(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        if let Some(x) = args.credit_id {
+            builder.add_credit_id(x);
+        }
+        if let Some(x) = args.person_id {
+            builder.add_person_id(x);
+        }
+        builder.add_adult(args.adult);
+        builder.add_gender(args.gender);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(CrewMember::VT_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn person_id(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(CrewMember::VT_PERSON_ID, None)}
-  }
-  #[inline]
-  pub fn credit_id(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_CREDIT_ID, None)}
-  }
-  #[inline]
-  pub fn name(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_NAME, None).unwrap()}
-  }
-  #[inline]
-  pub fn job(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_JOB, None)}
-  }
-  #[inline]
-  pub fn department(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_DEPARTMENT, None)}
-  }
-  #[inline]
-  pub fn profile_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_PROFILE_PATH, None)}
-  }
-  #[inline]
-  pub fn gender(&self) -> u8 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u8>(CrewMember::VT_GENDER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn known_for_department(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_KNOWN_FOR_DEPARTMENT, None)}
-  }
-  #[inline]
-  pub fn adult(&self) -> bool {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(CrewMember::VT_ADULT, Some(false)).unwrap()}
-  }
-  #[inline]
-  pub fn popularity(&self) -> f32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(CrewMember::VT_POPULARITY, Some(0.0)).unwrap()}
-  }
-  #[inline]
-  pub fn original_name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CrewMember::VT_ORIGINAL_NAME, None)}
-  }
-  #[inline]
-  pub fn also_known_as(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>>>(CrewMember::VT_ALSO_KNOWN_AS, None)}
-  }
-  #[inline]
-  pub fn external_ids(&self) -> Option<PersonExternalIds<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<PersonExternalIds>>(CrewMember::VT_EXTERNAL_IDS, None)}
-  }
-  #[inline]
-  pub fn profile_iid(&self) -> Option<&'a super::ids::Uuid> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(CrewMember::VT_PROFILE_IID, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u64>(CrewMember::VT_ID, Some(0)).unwrap() }
+    }
+    #[inline]
+    pub fn person_id(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(CrewMember::VT_PERSON_ID, None)
+        }
+    }
+    #[inline]
+    pub fn credit_id(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_CREDIT_ID,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    CrewMember::VT_NAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn job(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_JOB,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn department(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_DEPARTMENT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn profile_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_PROFILE_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn gender(&self) -> u8 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe { self._tab.get::<u8>(CrewMember::VT_GENDER, Some(0)).unwrap() }
+    }
+    #[inline]
+    pub fn known_for_department(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_KNOWN_FOR_DEPARTMENT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn adult(&self) -> bool {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<bool>(CrewMember::VT_ADULT, Some(false))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn popularity(&self) -> f32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f32>(CrewMember::VT_POPULARITY, Some(0.0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn original_name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CrewMember::VT_ORIGINAL_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn also_known_as(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<&'a str>,
+                >,
+            >>(CrewMember::VT_ALSO_KNOWN_AS, None)
+        }
+    }
+    #[inline]
+    pub fn external_ids(&self) -> Option<PersonExternalIds<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<PersonExternalIds>>(
+                    CrewMember::VT_EXTERNAL_IDS,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn profile_iid(&self) -> Option<&'a super::ids::Uuid> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(CrewMember::VT_PROFILE_IID, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for CrewMember<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<super::ids::Uuid>("person_id", Self::VT_PERSON_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("credit_id", Self::VT_CREDIT_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("job", Self::VT_JOB, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("department", Self::VT_DEPARTMENT, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("profile_path", Self::VT_PROFILE_PATH, false)?
-     .visit_field::<u8>("gender", Self::VT_GENDER, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("known_for_department", Self::VT_KNOWN_FOR_DEPARTMENT, false)?
-     .visit_field::<bool>("adult", Self::VT_ADULT, false)?
-     .visit_field::<f32>("popularity", Self::VT_POPULARITY, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("original_name", Self::VT_ORIGINAL_NAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<&'_ str>>>>("also_known_as", Self::VT_ALSO_KNOWN_AS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<PersonExternalIds>>("external_ids", Self::VT_EXTERNAL_IDS, false)?
-     .visit_field::<super::ids::Uuid>("profile_iid", Self::VT_PROFILE_IID, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("id", Self::VT_ID, false)?
+            .visit_field::<super::ids::Uuid>(
+                "person_id",
+                Self::VT_PERSON_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "credit_id",
+                Self::VT_CREDIT_ID,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "job",
+                Self::VT_JOB,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "department",
+                Self::VT_DEPARTMENT,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "profile_path",
+                Self::VT_PROFILE_PATH,
+                false,
+            )?
+            .visit_field::<u8>("gender", Self::VT_GENDER, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "known_for_department",
+                Self::VT_KNOWN_FOR_DEPARTMENT,
+                false,
+            )?
+            .visit_field::<bool>("adult", Self::VT_ADULT, false)?
+            .visit_field::<f32>("popularity", Self::VT_POPULARITY, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "original_name",
+                Self::VT_ORIGINAL_NAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<&'_ str>,
+                >,
+            >>("also_known_as", Self::VT_ALSO_KNOWN_AS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<PersonExternalIds>>(
+                "external_ids",
+                Self::VT_EXTERNAL_IDS,
+                false,
+            )?
+            .visit_field::<super::ids::Uuid>(
+                "profile_iid",
+                Self::VT_PROFILE_IID,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct CrewMemberArgs<'a> {
     pub id: u64,
@@ -208,132 +350,199 @@ pub struct CrewMemberArgs<'a> {
     pub adult: bool,
     pub popularity: f32,
     pub original_name: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub also_known_as: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>>>,
+    pub also_known_as: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+        >,
+    >,
     pub external_ids: Option<::flatbuffers::WIPOffset<PersonExternalIds<'a>>>,
     pub profile_iid: Option<&'a super::ids::Uuid>,
 }
 impl<'a> Default for CrewMemberArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    CrewMemberArgs {
-      id: 0,
-      person_id: None,
-      credit_id: None,
-      name: None, // required field
-      job: None,
-      department: None,
-      profile_path: None,
-      gender: 0,
-      known_for_department: None,
-      adult: false,
-      popularity: 0.0,
-      original_name: None,
-      also_known_as: None,
-      external_ids: None,
-      profile_iid: None,
+    #[inline]
+    fn default() -> Self {
+        CrewMemberArgs {
+            id: 0,
+            person_id: None,
+            credit_id: None,
+            name: None, // required field
+            job: None,
+            department: None,
+            profile_path: None,
+            gender: 0,
+            known_for_department: None,
+            adult: false,
+            popularity: 0.0,
+            original_name: None,
+            also_known_as: None,
+            external_ids: None,
+            profile_iid: None,
+        }
     }
-  }
 }
 
 pub struct CrewMemberBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> CrewMemberBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(CrewMember::VT_ID, id, 0);
-  }
-  #[inline]
-  pub fn add_person_id(&mut self, person_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(CrewMember::VT_PERSON_ID, person_id);
-  }
-  #[inline]
-  pub fn add_credit_id(&mut self, credit_id: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_CREDIT_ID, credit_id);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_NAME, name);
-  }
-  #[inline]
-  pub fn add_job(&mut self, job: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_JOB, job);
-  }
-  #[inline]
-  pub fn add_department(&mut self, department: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_DEPARTMENT, department);
-  }
-  #[inline]
-  pub fn add_profile_path(&mut self, profile_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_PROFILE_PATH, profile_path);
-  }
-  #[inline]
-  pub fn add_gender(&mut self, gender: u8) {
-    self.fbb_.push_slot::<u8>(CrewMember::VT_GENDER, gender, 0);
-  }
-  #[inline]
-  pub fn add_known_for_department(&mut self, known_for_department: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_KNOWN_FOR_DEPARTMENT, known_for_department);
-  }
-  #[inline]
-  pub fn add_adult(&mut self, adult: bool) {
-    self.fbb_.push_slot::<bool>(CrewMember::VT_ADULT, adult, false);
-  }
-  #[inline]
-  pub fn add_popularity(&mut self, popularity: f32) {
-    self.fbb_.push_slot::<f32>(CrewMember::VT_POPULARITY, popularity, 0.0);
-  }
-  #[inline]
-  pub fn add_original_name(&mut self, original_name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_ORIGINAL_NAME, original_name);
-  }
-  #[inline]
-  pub fn add_also_known_as(&mut self, also_known_as: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<&'b  str>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CrewMember::VT_ALSO_KNOWN_AS, also_known_as);
-  }
-  #[inline]
-  pub fn add_external_ids(&mut self, external_ids: ::flatbuffers::WIPOffset<PersonExternalIds<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<PersonExternalIds>>(CrewMember::VT_EXTERNAL_IDS, external_ids);
-  }
-  #[inline]
-  pub fn add_profile_iid(&mut self, profile_iid: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(CrewMember::VT_PROFILE_IID, profile_iid);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> CrewMemberBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    CrewMemberBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    CrewMemberBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: u64) {
+        self.fbb_.push_slot::<u64>(CrewMember::VT_ID, id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<CrewMember<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, CrewMember::VT_NAME,"name");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_person_id(&mut self, person_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            CrewMember::VT_PERSON_ID,
+            person_id,
+        );
+    }
+    #[inline]
+    pub fn add_credit_id(
+        &mut self,
+        credit_id: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_CREDIT_ID,
+            credit_id,
+        );
+    }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn add_job(&mut self, job: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_JOB,
+            job,
+        );
+    }
+    #[inline]
+    pub fn add_department(
+        &mut self,
+        department: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_DEPARTMENT,
+            department,
+        );
+    }
+    #[inline]
+    pub fn add_profile_path(
+        &mut self,
+        profile_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_PROFILE_PATH,
+            profile_path,
+        );
+    }
+    #[inline]
+    pub fn add_gender(&mut self, gender: u8) {
+        self.fbb_.push_slot::<u8>(CrewMember::VT_GENDER, gender, 0);
+    }
+    #[inline]
+    pub fn add_known_for_department(
+        &mut self,
+        known_for_department: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_KNOWN_FOR_DEPARTMENT,
+            known_for_department,
+        );
+    }
+    #[inline]
+    pub fn add_adult(&mut self, adult: bool) {
+        self.fbb_
+            .push_slot::<bool>(CrewMember::VT_ADULT, adult, false);
+    }
+    #[inline]
+    pub fn add_popularity(&mut self, popularity: f32) {
+        self.fbb_
+            .push_slot::<f32>(CrewMember::VT_POPULARITY, popularity, 0.0);
+    }
+    #[inline]
+    pub fn add_original_name(
+        &mut self,
+        original_name: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_ORIGINAL_NAME,
+            original_name,
+        );
+    }
+    #[inline]
+    pub fn add_also_known_as(
+        &mut self,
+        also_known_as: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<'b, ::flatbuffers::ForwardsUOffset<&'b str>>,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CrewMember::VT_ALSO_KNOWN_AS,
+            also_known_as,
+        );
+    }
+    #[inline]
+    pub fn add_external_ids(
+        &mut self,
+        external_ids: ::flatbuffers::WIPOffset<PersonExternalIds<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<PersonExternalIds>>(
+                CrewMember::VT_EXTERNAL_IDS,
+                external_ids,
+            );
+    }
+    #[inline]
+    pub fn add_profile_iid(&mut self, profile_iid: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            CrewMember::VT_PROFILE_IID,
+            profile_iid,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> CrewMemberBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        CrewMemberBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<CrewMember<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, CrewMember::VT_NAME, "name");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for CrewMember<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("CrewMember");
-      ds.field("id", &self.id());
-      ds.field("person_id", &self.person_id());
-      ds.field("credit_id", &self.credit_id());
-      ds.field("name", &self.name());
-      ds.field("job", &self.job());
-      ds.field("department", &self.department());
-      ds.field("profile_path", &self.profile_path());
-      ds.field("gender", &self.gender());
-      ds.field("known_for_department", &self.known_for_department());
-      ds.field("adult", &self.adult());
-      ds.field("popularity", &self.popularity());
-      ds.field("original_name", &self.original_name());
-      ds.field("also_known_as", &self.also_known_as());
-      ds.field("external_ids", &self.external_ids());
-      ds.field("profile_iid", &self.profile_iid());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("CrewMember");
+        ds.field("id", &self.id());
+        ds.field("person_id", &self.person_id());
+        ds.field("credit_id", &self.credit_id());
+        ds.field("name", &self.name());
+        ds.field("job", &self.job());
+        ds.field("department", &self.department());
+        ds.field("profile_path", &self.profile_path());
+        ds.field("gender", &self.gender());
+        ds.field("known_for_department", &self.known_for_department());
+        ds.field("adult", &self.adult());
+        ds.field("popularity", &self.popularity());
+        ds.field("original_name", &self.original_name());
+        ds.field("also_known_as", &self.also_known_as());
+        ds.field("external_ids", &self.external_ids());
+        ds.field("profile_iid", &self.profile_iid());
+        ds.finish()
+    }
 }

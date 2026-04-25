@@ -45,20 +45,24 @@ pub fn serialize_media_query_results(hits: &[MediaQueryHit]) -> Vec<u8> {
             let id = uuid_to_fb(&hit.media_uuid);
             let updated_at = FbTimestamp::new(hit.last_watched_secs * 1000);
 
-            fb::WatchStateEntry::create(&mut builder, &fb::WatchStateEntryArgs {
-                media_id: Some(&id),
-                position: hit.position,
-                duration: hit.duration,
-                completed: hit.completed,
-                updated_at: Some(&updated_at),
-            })
+            fb::WatchStateEntry::create(
+                &mut builder,
+                &fb::WatchStateEntryArgs {
+                    media_id: Some(&id),
+                    position: hit.position,
+                    duration: hit.duration,
+                    completed: hit.completed,
+                    updated_at: Some(&updated_at),
+                },
+            )
         })
         .collect();
 
     let items = builder.create_vector(&entries);
-    let state = fb::WatchState::create(&mut builder, &fb::WatchStateArgs {
-        items: Some(items),
-    });
+    let state = fb::WatchState::create(
+        &mut builder,
+        &fb::WatchStateArgs { items: Some(items) },
+    );
 
     builder.finish(state, None);
     builder.finished_data().to_vec()

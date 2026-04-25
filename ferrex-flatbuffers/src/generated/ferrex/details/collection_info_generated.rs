@@ -6,84 +6,130 @@ pub enum CollectionInfoOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct CollectionInfo<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for CollectionInfo<'a> {
-  type Inner = CollectionInfo<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = CollectionInfo<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> CollectionInfo<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
-  pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 8;
-  pub const VT_BACKDROP_PATH: ::flatbuffers::VOffsetT = 10;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
+    pub const VT_POSTER_PATH: ::flatbuffers::VOffsetT = 8;
+    pub const VT_BACKDROP_PATH: ::flatbuffers::VOffsetT = 10;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    CollectionInfo { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args CollectionInfoArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<CollectionInfo<'bldr>> {
-    let mut builder = CollectionInfoBuilder::new(_fbb);
-    builder.add_id(args.id);
-    if let Some(x) = args.backdrop_path { builder.add_backdrop_path(x); }
-    if let Some(x) = args.poster_path { builder.add_poster_path(x); }
-    if let Some(x) = args.name { builder.add_name(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        CollectionInfo { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args CollectionInfoArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<CollectionInfo<'bldr>> {
+        let mut builder = CollectionInfoBuilder::new(_fbb);
+        builder.add_id(args.id);
+        if let Some(x) = args.backdrop_path {
+            builder.add_backdrop_path(x);
+        }
+        if let Some(x) = args.poster_path {
+            builder.add_poster_path(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(CollectionInfo::VT_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn name(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CollectionInfo::VT_NAME, None).unwrap()}
-  }
-  #[inline]
-  pub fn poster_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CollectionInfo::VT_POSTER_PATH, None)}
-  }
-  #[inline]
-  pub fn backdrop_path(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(CollectionInfo::VT_BACKDROP_PATH, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(CollectionInfo::VT_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    CollectionInfo::VT_NAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn poster_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CollectionInfo::VT_POSTER_PATH,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn backdrop_path(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                CollectionInfo::VT_BACKDROP_PATH,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for CollectionInfo<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("poster_path", Self::VT_POSTER_PATH, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("backdrop_path", Self::VT_BACKDROP_PATH, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u64>("id", Self::VT_ID, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "poster_path",
+                Self::VT_POSTER_PATH,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "backdrop_path",
+                Self::VT_BACKDROP_PATH,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct CollectionInfoArgs<'a> {
     pub id: u64,
@@ -92,61 +138,80 @@ pub struct CollectionInfoArgs<'a> {
     pub backdrop_path: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for CollectionInfoArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    CollectionInfoArgs {
-      id: 0,
-      name: None, // required field
-      poster_path: None,
-      backdrop_path: None,
+    #[inline]
+    fn default() -> Self {
+        CollectionInfoArgs {
+            id: 0,
+            name: None, // required field
+            poster_path: None,
+            backdrop_path: None,
+        }
     }
-  }
 }
 
 pub struct CollectionInfoBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> CollectionInfoBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(CollectionInfo::VT_ID, id, 0);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CollectionInfo::VT_NAME, name);
-  }
-  #[inline]
-  pub fn add_poster_path(&mut self, poster_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CollectionInfo::VT_POSTER_PATH, poster_path);
-  }
-  #[inline]
-  pub fn add_backdrop_path(&mut self, backdrop_path: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(CollectionInfo::VT_BACKDROP_PATH, backdrop_path);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> CollectionInfoBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    CollectionInfoBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    CollectionInfoBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: u64) {
+        self.fbb_.push_slot::<u64>(CollectionInfo::VT_ID, id, 0);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<CollectionInfo<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, CollectionInfo::VT_NAME,"name");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CollectionInfo::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn add_poster_path(
+        &mut self,
+        poster_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CollectionInfo::VT_POSTER_PATH,
+            poster_path,
+        );
+    }
+    #[inline]
+    pub fn add_backdrop_path(
+        &mut self,
+        backdrop_path: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            CollectionInfo::VT_BACKDROP_PATH,
+            backdrop_path,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> CollectionInfoBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        CollectionInfoBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<CollectionInfo<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, CollectionInfo::VT_NAME, "name");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for CollectionInfo<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("CollectionInfo");
-      ds.field("id", &self.id());
-      ds.field("name", &self.name());
-      ds.field("poster_path", &self.poster_path());
-      ds.field("backdrop_path", &self.backdrop_path());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("CollectionInfo");
+        ds.field("id", &self.id());
+        ds.field("name", &self.name());
+        ds.field("poster_path", &self.poster_path());
+        ds.field("backdrop_path", &self.backdrop_path());
+        ds.finish()
+    }
 }

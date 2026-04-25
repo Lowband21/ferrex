@@ -6,124 +6,219 @@ pub enum TranslationOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct Translation<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for Translation<'a> {
-  type Inner = Translation<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = Translation<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> Translation<'a> {
-  pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 4;
-  pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 6;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 8;
-  pub const VT_ENGLISH_NAME: ::flatbuffers::VOffsetT = 10;
-  pub const VT_TITLE: ::flatbuffers::VOffsetT = 12;
-  pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 14;
-  pub const VT_HOMEPAGE: ::flatbuffers::VOffsetT = 16;
-  pub const VT_TAGLINE: ::flatbuffers::VOffsetT = 18;
+    pub const VT_ISO_3166_1: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 6;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 8;
+    pub const VT_ENGLISH_NAME: ::flatbuffers::VOffsetT = 10;
+    pub const VT_TITLE: ::flatbuffers::VOffsetT = 12;
+    pub const VT_OVERVIEW: ::flatbuffers::VOffsetT = 14;
+    pub const VT_HOMEPAGE: ::flatbuffers::VOffsetT = 16;
+    pub const VT_TAGLINE: ::flatbuffers::VOffsetT = 18;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    Translation { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args TranslationArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<Translation<'bldr>> {
-    let mut builder = TranslationBuilder::new(_fbb);
-    if let Some(x) = args.tagline { builder.add_tagline(x); }
-    if let Some(x) = args.homepage { builder.add_homepage(x); }
-    if let Some(x) = args.overview { builder.add_overview(x); }
-    if let Some(x) = args.title { builder.add_title(x); }
-    if let Some(x) = args.english_name { builder.add_english_name(x); }
-    if let Some(x) = args.name { builder.add_name(x); }
-    if let Some(x) = args.iso_639_1 { builder.add_iso_639_1(x); }
-    if let Some(x) = args.iso_3166_1 { builder.add_iso_3166_1(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        Translation { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args TranslationArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<Translation<'bldr>> {
+        let mut builder = TranslationBuilder::new(_fbb);
+        if let Some(x) = args.tagline {
+            builder.add_tagline(x);
+        }
+        if let Some(x) = args.homepage {
+            builder.add_homepage(x);
+        }
+        if let Some(x) = args.overview {
+            builder.add_overview(x);
+        }
+        if let Some(x) = args.title {
+            builder.add_title(x);
+        }
+        if let Some(x) = args.english_name {
+            builder.add_english_name(x);
+        }
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        if let Some(x) = args.iso_639_1 {
+            builder.add_iso_639_1(x);
+        }
+        if let Some(x) = args.iso_3166_1 {
+            builder.add_iso_3166_1(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn iso_3166_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_ISO_3166_1, None)}
-  }
-  #[inline]
-  pub fn iso_639_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_ISO_639_1, None)}
-  }
-  #[inline]
-  pub fn name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_NAME, None)}
-  }
-  #[inline]
-  pub fn english_name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_ENGLISH_NAME, None)}
-  }
-  #[inline]
-  pub fn title(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_TITLE, None)}
-  }
-  #[inline]
-  pub fn overview(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_OVERVIEW, None)}
-  }
-  #[inline]
-  pub fn homepage(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_HOMEPAGE, None)}
-  }
-  #[inline]
-  pub fn tagline(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(Translation::VT_TAGLINE, None)}
-  }
+    #[inline]
+    pub fn iso_3166_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_ISO_3166_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn iso_639_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_ISO_639_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn english_name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_ENGLISH_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn title(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_TITLE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn overview(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_OVERVIEW,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn homepage(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_HOMEPAGE,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn tagline(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                Translation::VT_TAGLINE,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for Translation<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_3166_1", Self::VT_ISO_3166_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_639_1", Self::VT_ISO_639_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("english_name", Self::VT_ENGLISH_NAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("title", Self::VT_TITLE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("overview", Self::VT_OVERVIEW, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("homepage", Self::VT_HOMEPAGE, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("tagline", Self::VT_TAGLINE, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_3166_1",
+                Self::VT_ISO_3166_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_639_1",
+                Self::VT_ISO_639_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "english_name",
+                Self::VT_ENGLISH_NAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "title",
+                Self::VT_TITLE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "overview",
+                Self::VT_OVERVIEW,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "homepage",
+                Self::VT_HOMEPAGE,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "tagline",
+                Self::VT_TAGLINE,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct TranslationArgs<'a> {
     pub iso_3166_1: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -136,84 +231,127 @@ pub struct TranslationArgs<'a> {
     pub tagline: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for TranslationArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    TranslationArgs {
-      iso_3166_1: None,
-      iso_639_1: None,
-      name: None,
-      english_name: None,
-      title: None,
-      overview: None,
-      homepage: None,
-      tagline: None,
+    #[inline]
+    fn default() -> Self {
+        TranslationArgs {
+            iso_3166_1: None,
+            iso_639_1: None,
+            name: None,
+            english_name: None,
+            title: None,
+            overview: None,
+            homepage: None,
+            tagline: None,
+        }
     }
-  }
 }
 
 pub struct TranslationBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TranslationBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_iso_3166_1(&mut self, iso_3166_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_ISO_3166_1, iso_3166_1);
-  }
-  #[inline]
-  pub fn add_iso_639_1(&mut self, iso_639_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_ISO_639_1, iso_639_1);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_NAME, name);
-  }
-  #[inline]
-  pub fn add_english_name(&mut self, english_name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_ENGLISH_NAME, english_name);
-  }
-  #[inline]
-  pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_TITLE, title);
-  }
-  #[inline]
-  pub fn add_overview(&mut self, overview: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_OVERVIEW, overview);
-  }
-  #[inline]
-  pub fn add_homepage(&mut self, homepage: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_HOMEPAGE, homepage);
-  }
-  #[inline]
-  pub fn add_tagline(&mut self, tagline: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Translation::VT_TAGLINE, tagline);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> TranslationBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    TranslationBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    TranslationBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_iso_3166_1(
+        &mut self,
+        iso_3166_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_ISO_3166_1,
+            iso_3166_1,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<Translation<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_iso_639_1(
+        &mut self,
+        iso_639_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_ISO_639_1,
+            iso_639_1,
+        );
+    }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn add_english_name(
+        &mut self,
+        english_name: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_ENGLISH_NAME,
+            english_name,
+        );
+    }
+    #[inline]
+    pub fn add_title(&mut self, title: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_TITLE,
+            title,
+        );
+    }
+    #[inline]
+    pub fn add_overview(
+        &mut self,
+        overview: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_OVERVIEW,
+            overview,
+        );
+    }
+    #[inline]
+    pub fn add_homepage(
+        &mut self,
+        homepage: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_HOMEPAGE,
+            homepage,
+        );
+    }
+    #[inline]
+    pub fn add_tagline(&mut self, tagline: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Translation::VT_TAGLINE,
+            tagline,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> TranslationBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        TranslationBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<Translation<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for Translation<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("Translation");
-      ds.field("iso_3166_1", &self.iso_3166_1());
-      ds.field("iso_639_1", &self.iso_639_1());
-      ds.field("name", &self.name());
-      ds.field("english_name", &self.english_name());
-      ds.field("title", &self.title());
-      ds.field("overview", &self.overview());
-      ds.field("homepage", &self.homepage());
-      ds.field("tagline", &self.tagline());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("Translation");
+        ds.field("iso_3166_1", &self.iso_3166_1());
+        ds.field("iso_639_1", &self.iso_639_1());
+        ds.field("name", &self.name());
+        ds.field("english_name", &self.english_name());
+        ds.field("title", &self.title());
+        ds.field("overview", &self.overview());
+        ds.field("homepage", &self.homepage());
+        ds.field("tagline", &self.tagline());
+        ds.finish()
+    }
 }

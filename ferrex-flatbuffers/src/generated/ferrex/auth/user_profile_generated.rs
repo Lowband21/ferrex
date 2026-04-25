@@ -7,84 +7,130 @@ pub enum UserProfileOffset {}
 
 /// GET /api/v1/users/me response.
 pub struct UserProfile<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for UserProfile<'a> {
-  type Inner = UserProfile<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = UserProfile<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> UserProfile<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_USERNAME: ::flatbuffers::VOffsetT = 6;
-  pub const VT_DISPLAY_NAME: ::flatbuffers::VOffsetT = 8;
-  pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 10;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_USERNAME: ::flatbuffers::VOffsetT = 6;
+    pub const VT_DISPLAY_NAME: ::flatbuffers::VOffsetT = 8;
+    pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 10;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    UserProfile { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args UserProfileArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<UserProfile<'bldr>> {
-    let mut builder = UserProfileBuilder::new(_fbb);
-    if let Some(x) = args.created_at { builder.add_created_at(x); }
-    if let Some(x) = args.display_name { builder.add_display_name(x); }
-    if let Some(x) = args.username { builder.add_username(x); }
-    if let Some(x) = args.id { builder.add_id(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        UserProfile { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args UserProfileArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<UserProfile<'bldr>> {
+        let mut builder = UserProfileBuilder::new(_fbb);
+        if let Some(x) = args.created_at {
+            builder.add_created_at(x);
+        }
+        if let Some(x) = args.display_name {
+            builder.add_display_name(x);
+        }
+        if let Some(x) = args.username {
+            builder.add_username(x);
+        }
+        if let Some(x) = args.id {
+            builder.add_id(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(UserProfile::VT_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn username(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(UserProfile::VT_USERNAME, None)}
-  }
-  #[inline]
-  pub fn display_name(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(UserProfile::VT_DISPLAY_NAME, None)}
-  }
-  #[inline]
-  pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::Timestamp>(UserProfile::VT_CREATED_AT, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(UserProfile::VT_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn username(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                UserProfile::VT_USERNAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn display_name(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                UserProfile::VT_DISPLAY_NAME,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::common::Timestamp>(
+                UserProfile::VT_CREATED_AT,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for UserProfile<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("username", Self::VT_USERNAME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("display_name", Self::VT_DISPLAY_NAME, false)?
-     .visit_field::<super::common::Timestamp>("created_at", Self::VT_CREATED_AT, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "username",
+                Self::VT_USERNAME,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "display_name",
+                Self::VT_DISPLAY_NAME,
+                false,
+            )?
+            .visit_field::<super::common::Timestamp>(
+                "created_at",
+                Self::VT_CREATED_AT,
+                false,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct UserProfileArgs<'a> {
     pub id: Option<&'a super::ids::Uuid>,
@@ -93,61 +139,81 @@ pub struct UserProfileArgs<'a> {
     pub created_at: Option<&'a super::common::Timestamp>,
 }
 impl<'a> Default for UserProfileArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    UserProfileArgs {
-      id: None, // required field
-      username: None,
-      display_name: None,
-      created_at: None,
+    #[inline]
+    fn default() -> Self {
+        UserProfileArgs {
+            id: None, // required field
+            username: None,
+            display_name: None,
+            created_at: None,
+        }
     }
-  }
 }
 
 pub struct UserProfileBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> UserProfileBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(UserProfile::VT_ID, id);
-  }
-  #[inline]
-  pub fn add_username(&mut self, username: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(UserProfile::VT_USERNAME, username);
-  }
-  #[inline]
-  pub fn add_display_name(&mut self, display_name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(UserProfile::VT_DISPLAY_NAME, display_name);
-  }
-  #[inline]
-  pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
-    self.fbb_.push_slot_always::<&super::common::Timestamp>(UserProfile::VT_CREATED_AT, created_at);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> UserProfileBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    UserProfileBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    UserProfileBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: &super::ids::Uuid) {
+        self.fbb_
+            .push_slot_always::<&super::ids::Uuid>(UserProfile::VT_ID, id);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<UserProfile<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, UserProfile::VT_ID,"id");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_username(
+        &mut self,
+        username: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            UserProfile::VT_USERNAME,
+            username,
+        );
+    }
+    #[inline]
+    pub fn add_display_name(
+        &mut self,
+        display_name: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            UserProfile::VT_DISPLAY_NAME,
+            display_name,
+        );
+    }
+    #[inline]
+    pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
+        self.fbb_.push_slot_always::<&super::common::Timestamp>(
+            UserProfile::VT_CREATED_AT,
+            created_at,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> UserProfileBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        UserProfileBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<UserProfile<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, UserProfile::VT_ID, "id");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for UserProfile<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("UserProfile");
-      ds.field("id", &self.id());
-      ds.field("username", &self.username());
-      ds.field("display_name", &self.display_name());
-      ds.field("created_at", &self.created_at());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("UserProfile");
+        ds.field("id", &self.id());
+        ds.field("username", &self.username());
+        ds.field("display_name", &self.display_name());
+        ds.field("created_at", &self.created_at());
+        ds.finish()
+    }
 }

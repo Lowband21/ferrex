@@ -7,119 +7,136 @@ pub enum MediaOffset {}
 
 /// Wrapper table so we can put Media in vectors.
 pub struct Media<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for Media<'a> {
-  type Inner = Media<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = Media<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> Media<'a> {
-  pub const VT_VARIANT_TYPE: ::flatbuffers::VOffsetT = 4;
-  pub const VT_VARIANT: ::flatbuffers::VOffsetT = 6;
+    pub const VT_VARIANT_TYPE: ::flatbuffers::VOffsetT = 4;
+    pub const VT_VARIANT: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    Media { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args MediaArgs
-  ) -> ::flatbuffers::WIPOffset<Media<'bldr>> {
-    let mut builder = MediaBuilder::new(_fbb);
-    if let Some(x) = args.variant { builder.add_variant(x); }
-    builder.add_variant_type(args.variant_type);
-    builder.finish()
-  }
-
-
-  #[inline]
-  pub fn variant_type(&self) -> MediaVariant {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<MediaVariant>(Media::VT_VARIANT_TYPE, Some(MediaVariant::NONE)).unwrap()}
-  }
-  #[inline]
-  pub fn variant(&self) -> Option<::flatbuffers::Table<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Table<'a>>>(Media::VT_VARIANT, None)}
-  }
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_movie_reference(&self) -> Option<MovieReference<'a>> {
-    if self.variant_type() == MediaVariant::MovieReference {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { MovieReference::init_from_table(t) }
-     })
-    } else {
-      None
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        Media { _tab: table }
     }
-  }
-
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_series_reference(&self) -> Option<SeriesReference<'a>> {
-    if self.variant_type() == MediaVariant::SeriesReference {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { SeriesReference::init_from_table(t) }
-     })
-    } else {
-      None
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args MediaArgs,
+    ) -> ::flatbuffers::WIPOffset<Media<'bldr>> {
+        let mut builder = MediaBuilder::new(_fbb);
+        if let Some(x) = args.variant {
+            builder.add_variant(x);
+        }
+        builder.add_variant_type(args.variant_type);
+        builder.finish()
     }
-  }
 
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_season_reference(&self) -> Option<SeasonReference<'a>> {
-    if self.variant_type() == MediaVariant::SeasonReference {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { SeasonReference::init_from_table(t) }
-     })
-    } else {
-      None
+    #[inline]
+    pub fn variant_type(&self) -> MediaVariant {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<MediaVariant>(
+                    Media::VT_VARIANT_TYPE,
+                    Some(MediaVariant::NONE),
+                )
+                .unwrap()
+        }
     }
-  }
-
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn variant_as_episode_reference(&self) -> Option<EpisodeReference<'a>> {
-    if self.variant_type() == MediaVariant::EpisodeReference {
-      self.variant().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { EpisodeReference::init_from_table(t) }
-     })
-    } else {
-      None
+    #[inline]
+    pub fn variant(&self) -> Option<::flatbuffers::Table<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Table<'a>>>(Media::VT_VARIANT, None)
+        }
     }
-  }
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_movie_reference(&self) -> Option<MovieReference<'a>> {
+        if self.variant_type() == MediaVariant::MovieReference {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { MovieReference::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
 
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_series_reference(&self) -> Option<SeriesReference<'a>> {
+        if self.variant_type() == MediaVariant::SeriesReference {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { SeriesReference::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_season_reference(&self) -> Option<SeasonReference<'a>> {
+        if self.variant_type() == MediaVariant::SeasonReference {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { SeasonReference::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    #[allow(non_snake_case)]
+    pub fn variant_as_episode_reference(&self) -> Option<EpisodeReference<'a>> {
+        if self.variant_type() == MediaVariant::EpisodeReference {
+            self.variant().map(|t| {
+                // Safety:
+                // Created from a valid Table for this object
+                // Which contains a valid union in this slot
+                unsafe { EpisodeReference::init_from_table(t) }
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for Media<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
      .visit_union::<MediaVariant, _>("variant_type", Self::VT_VARIANT_TYPE, "variant", Self::VT_VARIANT, false, |key, v, pos| {
         match key {
           MediaVariant::MovieReference => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<MovieReference>>("MediaVariant::MovieReference", pos),
@@ -130,89 +147,102 @@ impl ::flatbuffers::Verifiable for Media<'_> {
         }
      })?
      .finish();
-    Ok(())
-  }
+        Ok(())
+    }
 }
 pub struct MediaArgs {
     pub variant_type: MediaVariant,
-    pub variant: Option<::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>>,
+    pub variant:
+        Option<::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>>,
 }
 impl<'a> Default for MediaArgs {
-  #[inline]
-  fn default() -> Self {
-    MediaArgs {
-      variant_type: MediaVariant::NONE,
-      variant: None,
+    #[inline]
+    fn default() -> Self {
+        MediaArgs {
+            variant_type: MediaVariant::NONE,
+            variant: None,
+        }
     }
-  }
 }
 
 pub struct MediaBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MediaBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_variant_type(&mut self, variant_type: MediaVariant) {
-    self.fbb_.push_slot::<MediaVariant>(Media::VT_VARIANT_TYPE, variant_type, MediaVariant::NONE);
-  }
-  #[inline]
-  pub fn add_variant(&mut self, variant: ::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(Media::VT_VARIANT, variant);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> MediaBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    MediaBuilder {
-      fbb_: _fbb,
-      start_: start,
+    #[inline]
+    pub fn add_variant_type(&mut self, variant_type: MediaVariant) {
+        self.fbb_.push_slot::<MediaVariant>(
+            Media::VT_VARIANT_TYPE,
+            variant_type,
+            MediaVariant::NONE,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<Media<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_variant(
+        &mut self,
+        variant: ::flatbuffers::WIPOffset<::flatbuffers::UnionWIPOffset>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            Media::VT_VARIANT,
+            variant,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> MediaBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        MediaBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<Media<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for Media<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("Media");
-      ds.field("variant_type", &self.variant_type());
-      match self.variant_type() {
-        MediaVariant::MovieReference => {
-          if let Some(x) = self.variant_as_movie_reference() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        MediaVariant::SeriesReference => {
-          if let Some(x) = self.variant_as_series_reference() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        MediaVariant::SeasonReference => {
-          if let Some(x) = self.variant_as_season_reference() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        MediaVariant::EpisodeReference => {
-          if let Some(x) = self.variant_as_episode_reference() {
-            ds.field("variant", &x)
-          } else {
-            ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        _ => {
-          let x: Option<()> = None;
-          ds.field("variant", &x)
-        },
-      };
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("Media");
+        ds.field("variant_type", &self.variant_type());
+        match self.variant_type() {
+            MediaVariant::MovieReference => {
+                if let Some(x) = self.variant_as_movie_reference() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            MediaVariant::SeriesReference => {
+                if let Some(x) = self.variant_as_series_reference() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            MediaVariant::SeasonReference => {
+                if let Some(x) = self.variant_as_season_reference() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            MediaVariant::EpisodeReference => {
+                if let Some(x) = self.variant_as_episode_reference() {
+                    ds.field("variant", &x)
+                } else {
+                    ds.field("variant", &"InvalidFlatbuffer: Union discriminant does not match value.")
+                }
+            }
+            _ => {
+                let x: Option<()> = None;
+                ds.field("variant", &x)
+            }
+        };
+        ds.finish()
+    }
 }

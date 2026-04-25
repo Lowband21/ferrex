@@ -7,74 +7,100 @@ pub enum EpisodeStatusEntryOffset {}
 
 /// Individual episode status entry.
 pub struct EpisodeStatusEntry<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for EpisodeStatusEntry<'a> {
-  type Inner = EpisodeStatusEntry<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = EpisodeStatusEntry<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> EpisodeStatusEntry<'a> {
-  pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 4;
-  pub const VT_STATE: ::flatbuffers::VOffsetT = 6;
-  pub const VT_PROGRESS: ::flatbuffers::VOffsetT = 8;
+    pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 4;
+    pub const VT_STATE: ::flatbuffers::VOffsetT = 6;
+    pub const VT_PROGRESS: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EpisodeStatusEntry { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EpisodeStatusEntryArgs
-  ) -> ::flatbuffers::WIPOffset<EpisodeStatusEntry<'bldr>> {
-    let mut builder = EpisodeStatusEntryBuilder::new(_fbb);
-    builder.add_progress(args.progress);
-    builder.add_episode_number(args.episode_number);
-    builder.add_state(args.state);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        EpisodeStatusEntry { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args EpisodeStatusEntryArgs,
+    ) -> ::flatbuffers::WIPOffset<EpisodeStatusEntry<'bldr>> {
+        let mut builder = EpisodeStatusEntryBuilder::new(_fbb);
+        builder.add_progress(args.progress);
+        builder.add_episode_number(args.episode_number);
+        builder.add_state(args.state);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn episode_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EpisodeStatusEntry::VT_EPISODE_NUMBER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn state(&self) -> EpisodeWatchState {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<EpisodeWatchState>(EpisodeStatusEntry::VT_STATE, Some(EpisodeWatchState::Unwatched)).unwrap()}
-  }
-  #[inline]
-  pub fn progress(&self) -> f32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<f32>(EpisodeStatusEntry::VT_PROGRESS, Some(0.0)).unwrap()}
-  }
+    #[inline]
+    pub fn episode_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(EpisodeStatusEntry::VT_EPISODE_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn state(&self) -> EpisodeWatchState {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<EpisodeWatchState>(
+                    EpisodeStatusEntry::VT_STATE,
+                    Some(EpisodeWatchState::Unwatched),
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn progress(&self) -> f32 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<f32>(EpisodeStatusEntry::VT_PROGRESS, Some(0.0))
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EpisodeStatusEntry<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<u16>("episode_number", Self::VT_EPISODE_NUMBER, false)?
-     .visit_field::<EpisodeWatchState>("state", Self::VT_STATE, false)?
-     .visit_field::<f32>("progress", Self::VT_PROGRESS, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<u16>(
+                "episode_number",
+                Self::VT_EPISODE_NUMBER,
+                false,
+            )?
+            .visit_field::<EpisodeWatchState>("state", Self::VT_STATE, false)?
+            .visit_field::<f32>("progress", Self::VT_PROGRESS, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct EpisodeStatusEntryArgs {
     pub episode_number: u16,
@@ -82,54 +108,74 @@ pub struct EpisodeStatusEntryArgs {
     pub progress: f32,
 }
 impl<'a> Default for EpisodeStatusEntryArgs {
-  #[inline]
-  fn default() -> Self {
-    EpisodeStatusEntryArgs {
-      episode_number: 0,
-      state: EpisodeWatchState::Unwatched,
-      progress: 0.0,
+    #[inline]
+    fn default() -> Self {
+        EpisodeStatusEntryArgs {
+            episode_number: 0,
+            state: EpisodeWatchState::Unwatched,
+            progress: 0.0,
+        }
     }
-  }
 }
 
-pub struct EpisodeStatusEntryBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct EpisodeStatusEntryBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EpisodeStatusEntryBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_episode_number(&mut self, episode_number: u16) {
-    self.fbb_.push_slot::<u16>(EpisodeStatusEntry::VT_EPISODE_NUMBER, episode_number, 0);
-  }
-  #[inline]
-  pub fn add_state(&mut self, state: EpisodeWatchState) {
-    self.fbb_.push_slot::<EpisodeWatchState>(EpisodeStatusEntry::VT_STATE, state, EpisodeWatchState::Unwatched);
-  }
-  #[inline]
-  pub fn add_progress(&mut self, progress: f32) {
-    self.fbb_.push_slot::<f32>(EpisodeStatusEntry::VT_PROGRESS, progress, 0.0);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EpisodeStatusEntryBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EpisodeStatusEntryBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    EpisodeStatusEntryBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_episode_number(&mut self, episode_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            EpisodeStatusEntry::VT_EPISODE_NUMBER,
+            episode_number,
+            0,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeStatusEntry<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_state(&mut self, state: EpisodeWatchState) {
+        self.fbb_.push_slot::<EpisodeWatchState>(
+            EpisodeStatusEntry::VT_STATE,
+            state,
+            EpisodeWatchState::Unwatched,
+        );
+    }
+    #[inline]
+    pub fn add_progress(&mut self, progress: f32) {
+        self.fbb_.push_slot::<f32>(
+            EpisodeStatusEntry::VT_PROGRESS,
+            progress,
+            0.0,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> EpisodeStatusEntryBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        EpisodeStatusEntryBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeStatusEntry<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for EpisodeStatusEntry<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EpisodeStatusEntry");
-      ds.field("episode_number", &self.episode_number());
-      ds.field("state", &self.state());
-      ds.field("progress", &self.progress());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("EpisodeStatusEntry");
+        ds.field("episode_number", &self.episode_number());
+        ds.field("state", &self.state());
+        ds.field("progress", &self.progress());
+        ds.finish()
+    }
 }

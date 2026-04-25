@@ -7,97 +7,149 @@ pub enum ImageManifestResponseOffset {}
 
 /// POST /api/v1/images/manifest response.
 pub struct ImageManifestResponse<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for ImageManifestResponse<'a> {
-  type Inner = ImageManifestResponse<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = ImageManifestResponse<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> ImageManifestResponse<'a> {
-  pub const VT_ENTRIES: ::flatbuffers::VOffsetT = 4;
+    pub const VT_ENTRIES: ::flatbuffers::VOffsetT = 4;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    ImageManifestResponse { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ImageManifestResponseArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<ImageManifestResponse<'bldr>> {
-    let mut builder = ImageManifestResponseBuilder::new(_fbb);
-    if let Some(x) = args.entries { builder.add_entries(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        ImageManifestResponse { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args ImageManifestResponseArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<ImageManifestResponse<'bldr>> {
+        let mut builder = ImageManifestResponseBuilder::new(_fbb);
+        if let Some(x) = args.entries {
+            builder.add_entries(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn entries(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'a>>>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ImageManifestEntry>>>>(ImageManifestResponse::VT_ENTRIES, None)}
-  }
+    #[inline]
+    pub fn entries(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<ImageManifestEntry>,
+                >,
+            >>(ImageManifestResponse::VT_ENTRIES, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ImageManifestResponse<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ImageManifestEntry>>>>("entries", Self::VT_ENTRIES, false)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<ImageManifestEntry>,
+                >,
+            >>("entries", Self::VT_ENTRIES, false)?
+            .finish();
+        Ok(())
+    }
 }
 pub struct ImageManifestResponseArgs<'a> {
-    pub entries: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'a>>>>>,
+    pub entries: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for ImageManifestResponseArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    ImageManifestResponseArgs {
-      entries: None,
+    #[inline]
+    fn default() -> Self {
+        ImageManifestResponseArgs { entries: None }
     }
-  }
 }
 
-pub struct ImageManifestResponseBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct ImageManifestResponseBuilder<
+    'a: 'b,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+> {
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ImageManifestResponseBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_entries(&mut self, entries: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'b >>>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ImageManifestResponse::VT_ENTRIES, entries);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ImageManifestResponseBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    ImageManifestResponseBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    ImageManifestResponseBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_entries(
+        &mut self,
+        entries: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<ImageManifestEntry<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ImageManifestResponse::VT_ENTRIES,
+            entries,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<ImageManifestResponse<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> ImageManifestResponseBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        ImageManifestResponseBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<ImageManifestResponse<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for ImageManifestResponse<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("ImageManifestResponse");
-      ds.field("entries", &self.entries());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("ImageManifestResponse");
+        ds.field("entries", &self.entries());
+        ds.finish()
+    }
 }
 #[inline]
 /// Verifies that a buffer of bytes contains a `ImageManifestResponse`
@@ -106,8 +158,10 @@ impl ::core::fmt::Debug for ImageManifestResponse<'_> {
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `root_as_image_manifest_response_unchecked`.
-pub fn root_as_image_manifest_response(buf: &[u8]) -> Result<ImageManifestResponse<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root::<ImageManifestResponse>(buf)
+pub fn root_as_image_manifest_response(
+    buf: &[u8],
+) -> Result<ImageManifestResponse<'_>, ::flatbuffers::InvalidFlatbuffer> {
+    ::flatbuffers::root::<ImageManifestResponse>(buf)
 }
 #[inline]
 /// Verifies that a buffer of bytes contains a size prefixed
@@ -116,8 +170,10 @@ pub fn root_as_image_manifest_response(buf: &[u8]) -> Result<ImageManifestRespon
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
 /// `size_prefixed_root_as_image_manifest_response_unchecked`.
-pub fn size_prefixed_root_as_image_manifest_response(buf: &[u8]) -> Result<ImageManifestResponse<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root::<ImageManifestResponse>(buf)
+pub fn size_prefixed_root_as_image_manifest_response(
+    buf: &[u8],
+) -> Result<ImageManifestResponse<'_>, ::flatbuffers::InvalidFlatbuffer> {
+    ::flatbuffers::size_prefixed_root::<ImageManifestResponse>(buf)
 }
 #[inline]
 /// Verifies, with the given options, that a buffer of bytes
@@ -127,10 +183,10 @@ pub fn size_prefixed_root_as_image_manifest_response(buf: &[u8]) -> Result<Image
 /// previous, unchecked, behavior use
 /// `root_as_image_manifest_response_unchecked`.
 pub fn root_as_image_manifest_response_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
+    opts: &'o ::flatbuffers::VerifierOptions,
+    buf: &'b [u8],
 ) -> Result<ImageManifestResponse<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root_with_opts::<ImageManifestResponse<'b>>(opts, buf)
+    ::flatbuffers::root_with_opts::<ImageManifestResponse<'b>>(opts, buf)
 }
 #[inline]
 /// Verifies, with the given verifier options, that a buffer of
@@ -140,33 +196,55 @@ pub fn root_as_image_manifest_response_with_opts<'b, 'o>(
 /// previous, unchecked, behavior use
 /// `root_as_image_manifest_response_unchecked`.
 pub fn size_prefixed_root_as_image_manifest_response_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
+    opts: &'o ::flatbuffers::VerifierOptions,
+    buf: &'b [u8],
 ) -> Result<ImageManifestResponse<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root_with_opts::<ImageManifestResponse<'b>>(opts, buf)
+    ::flatbuffers::size_prefixed_root_with_opts::<ImageManifestResponse<'b>>(
+        opts, buf,
+    )
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a ImageManifestResponse and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `ImageManifestResponse`.
-pub unsafe fn root_as_image_manifest_response_unchecked(buf: &[u8]) -> ImageManifestResponse<'_> {
-  unsafe { ::flatbuffers::root_unchecked::<ImageManifestResponse>(buf) }
+pub unsafe fn root_as_image_manifest_response_unchecked(
+    buf: &[u8],
+) -> ImageManifestResponse<'_> {
+    unsafe { ::flatbuffers::root_unchecked::<ImageManifestResponse>(buf) }
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed ImageManifestResponse and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `ImageManifestResponse`.
-pub unsafe fn size_prefixed_root_as_image_manifest_response_unchecked(buf: &[u8]) -> ImageManifestResponse<'_> {
-  unsafe { ::flatbuffers::size_prefixed_root_unchecked::<ImageManifestResponse>(buf) }
+pub unsafe fn size_prefixed_root_as_image_manifest_response_unchecked(
+    buf: &[u8],
+) -> ImageManifestResponse<'_> {
+    unsafe {
+        ::flatbuffers::size_prefixed_root_unchecked::<ImageManifestResponse>(
+            buf,
+        )
+    }
 }
 #[inline]
-pub fn finish_image_manifest_response_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
+pub fn finish_image_manifest_response_buffer<
+    'a,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+>(
     fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-    root: ::flatbuffers::WIPOffset<ImageManifestResponse<'a>>) {
-  fbb.finish(root, None);
+    root: ::flatbuffers::WIPOffset<ImageManifestResponse<'a>>,
+) {
+    fbb.finish(root, None);
 }
 
 #[inline]
-pub fn finish_size_prefixed_image_manifest_response_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>, root: ::flatbuffers::WIPOffset<ImageManifestResponse<'a>>) {
-  fbb.finish_size_prefixed(root, None);
+pub fn finish_size_prefixed_image_manifest_response_buffer<
+    'a,
+    'b,
+    A: ::flatbuffers::Allocator + 'a,
+>(
+    fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    root: ::flatbuffers::WIPOffset<ImageManifestResponse<'a>>,
+) {
+    fbb.finish_size_prefixed(root, None);
 }

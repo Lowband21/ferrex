@@ -6,113 +6,157 @@ pub enum SpokenLanguageOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
 pub struct SpokenLanguage<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for SpokenLanguage<'a> {
-  type Inner = SpokenLanguage<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = SpokenLanguage<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> SpokenLanguage<'a> {
-  pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 4;
-  pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
+    pub const VT_ISO_639_1: ::flatbuffers::VOffsetT = 4;
+    pub const VT_NAME: ::flatbuffers::VOffsetT = 6;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    SpokenLanguage { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args SpokenLanguageArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<SpokenLanguage<'bldr>> {
-    let mut builder = SpokenLanguageBuilder::new(_fbb);
-    if let Some(x) = args.name { builder.add_name(x); }
-    if let Some(x) = args.iso_639_1 { builder.add_iso_639_1(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        SpokenLanguage { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args SpokenLanguageArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<SpokenLanguage<'bldr>> {
+        let mut builder = SpokenLanguageBuilder::new(_fbb);
+        if let Some(x) = args.name {
+            builder.add_name(x);
+        }
+        if let Some(x) = args.iso_639_1 {
+            builder.add_iso_639_1(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn iso_639_1(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SpokenLanguage::VT_ISO_639_1, None)}
-  }
-  #[inline]
-  pub fn name(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(SpokenLanguage::VT_NAME, None).unwrap()}
-  }
+    #[inline]
+    pub fn iso_639_1(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                SpokenLanguage::VT_ISO_639_1,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    SpokenLanguage::VT_NAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for SpokenLanguage<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("iso_639_1", Self::VT_ISO_639_1, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "iso_639_1",
+                Self::VT_ISO_639_1,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "name",
+                Self::VT_NAME,
+                true,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct SpokenLanguageArgs<'a> {
     pub iso_639_1: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub name: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for SpokenLanguageArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    SpokenLanguageArgs {
-      iso_639_1: None,
-      name: None, // required field
+    #[inline]
+    fn default() -> Self {
+        SpokenLanguageArgs {
+            iso_639_1: None,
+            name: None, // required field
+        }
     }
-  }
 }
 
 pub struct SpokenLanguageBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SpokenLanguageBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_iso_639_1(&mut self, iso_639_1: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SpokenLanguage::VT_ISO_639_1, iso_639_1);
-  }
-  #[inline]
-  pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(SpokenLanguage::VT_NAME, name);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> SpokenLanguageBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    SpokenLanguageBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    SpokenLanguageBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_iso_639_1(
+        &mut self,
+        iso_639_1: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SpokenLanguage::VT_ISO_639_1,
+            iso_639_1,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<SpokenLanguage<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, SpokenLanguage::VT_NAME,"name");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            SpokenLanguage::VT_NAME,
+            name,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> SpokenLanguageBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        SpokenLanguageBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<SpokenLanguage<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, SpokenLanguage::VT_NAME, "name");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for SpokenLanguage<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("SpokenLanguage");
-      ds.field("iso_639_1", &self.iso_639_1());
-      ds.field("name", &self.name());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("SpokenLanguage");
+        ds.field("iso_639_1", &self.iso_639_1());
+        ds.field("name", &self.name());
+        ds.finish()
+    }
 }

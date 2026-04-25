@@ -41,20 +41,26 @@ fn build_media_batch_data<'bldr>(
         .iter()
         .map(|movie| {
             let movie_off = build_movie_reference(builder, movie);
-            fb_media::Media::create(builder, &fb_media::MediaArgs {
-                variant_type: fb_media::MediaVariant::MovieReference,
-                variant: Some(movie_off.as_union_value()),
-            })
+            fb_media::Media::create(
+                builder,
+                &fb_media::MediaArgs {
+                    variant_type: fb_media::MediaVariant::MovieReference,
+                    variant: Some(movie_off.as_union_value()),
+                },
+            )
         })
         .collect();
 
     let items = builder.create_vector(&media_offsets);
 
-    fb_lib::MediaBatchData::create(builder, &fb_lib::MediaBatchDataArgs {
-        batch_id: batch.batch_id,
-        version: batch.version,
-        items: Some(items),
-    })
+    fb_lib::MediaBatchData::create(
+        builder,
+        &fb_lib::MediaBatchDataArgs {
+            batch_id: batch.batch_id,
+            version: batch.version,
+            items: Some(items),
+        },
+    )
 }
 
 /// Serialize a complete batch-fetch response (one or more batches) into a
@@ -65,7 +71,8 @@ fn build_media_batch_data<'bldr>(
 pub fn serialize_batch_fetch_response(batches: &[BatchInput<'_>]) -> Vec<u8> {
     // Rough capacity estimate: ~1KB per movie reference.
     let movie_count: usize = batches.iter().map(|b| b.movies.len()).sum();
-    let mut builder = FlatBufferBuilder::with_capacity(1024 * movie_count.max(1));
+    let mut builder =
+        FlatBufferBuilder::with_capacity(1024 * movie_count.max(1));
 
     let batch_offsets: Vec<_> = batches
         .iter()
@@ -115,7 +122,8 @@ pub fn serialize_series_bundle(
     episodes: &[ferrex_model::EpisodeReference],
 ) -> Vec<u8> {
     let item_count = 1 + seasons.len() + episodes.len();
-    let mut builder = FlatBufferBuilder::with_capacity(1024 * item_count.max(1));
+    let mut builder =
+        FlatBufferBuilder::with_capacity(1024 * item_count.max(1));
 
     let mut media_offsets = Vec::with_capacity(item_count);
 
@@ -184,27 +192,36 @@ pub fn serialize_series_bundle(
 /// for both movie and series libraries.
 ///
 /// Used by the series library grid bundle endpoint.
-pub fn serialize_series_batch_fetch_response(series: &[ferrex_model::Series]) -> Vec<u8> {
-    let mut builder = FlatBufferBuilder::with_capacity(1024 * series.len().max(1));
+pub fn serialize_series_batch_fetch_response(
+    series: &[ferrex_model::Series],
+) -> Vec<u8> {
+    let mut builder =
+        FlatBufferBuilder::with_capacity(1024 * series.len().max(1));
 
     let media_offsets: Vec<_> = series
         .iter()
         .map(|s| {
             let series_off = build_series_reference(&mut builder, s);
-            fb_media::Media::create(&mut builder, &fb_media::MediaArgs {
-                variant_type: fb_media::MediaVariant::SeriesReference,
-                variant: Some(series_off.as_union_value()),
-            })
+            fb_media::Media::create(
+                &mut builder,
+                &fb_media::MediaArgs {
+                    variant_type: fb_media::MediaVariant::SeriesReference,
+                    variant: Some(series_off.as_union_value()),
+                },
+            )
         })
         .collect();
 
     let items = builder.create_vector(&media_offsets);
 
-    let batch = fb_lib::MediaBatchData::create(&mut builder, &fb_lib::MediaBatchDataArgs {
-        batch_id: 0,
-        version: 1,
-        items: Some(items),
-    });
+    let batch = fb_lib::MediaBatchData::create(
+        &mut builder,
+        &fb_lib::MediaBatchDataArgs {
+            batch_id: 0,
+            version: 1,
+            items: Some(items),
+        },
+    );
 
     let batches_vec = builder.create_vector(&[batch]);
 

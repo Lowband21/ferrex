@@ -8,149 +8,227 @@ pub enum EpisodeReferenceOffset {}
 /// Lightweight episode reference.
 /// Mirrors ferrex-model::EpisodeReference.
 pub struct EpisodeReference<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for EpisodeReference<'a> {
-  type Inner = EpisodeReference<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = EpisodeReference<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> EpisodeReference<'a> {
-  pub const VT_ID: ::flatbuffers::VOffsetT = 4;
-  pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 6;
-  pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 8;
-  pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 10;
-  pub const VT_SEASON_ID: ::flatbuffers::VOffsetT = 12;
-  pub const VT_SERIES_ID: ::flatbuffers::VOffsetT = 14;
-  pub const VT_TMDB_SERIES_ID: ::flatbuffers::VOffsetT = 16;
-  pub const VT_DETAILS: ::flatbuffers::VOffsetT = 18;
-  pub const VT_ENDPOINT: ::flatbuffers::VOffsetT = 20;
-  pub const VT_FILE: ::flatbuffers::VOffsetT = 22;
-  pub const VT_DISCOVERED_AT: ::flatbuffers::VOffsetT = 24;
-  pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 26;
+    pub const VT_ID: ::flatbuffers::VOffsetT = 4;
+    pub const VT_LIBRARY_ID: ::flatbuffers::VOffsetT = 6;
+    pub const VT_EPISODE_NUMBER: ::flatbuffers::VOffsetT = 8;
+    pub const VT_SEASON_NUMBER: ::flatbuffers::VOffsetT = 10;
+    pub const VT_SEASON_ID: ::flatbuffers::VOffsetT = 12;
+    pub const VT_SERIES_ID: ::flatbuffers::VOffsetT = 14;
+    pub const VT_TMDB_SERIES_ID: ::flatbuffers::VOffsetT = 16;
+    pub const VT_DETAILS: ::flatbuffers::VOffsetT = 18;
+    pub const VT_ENDPOINT: ::flatbuffers::VOffsetT = 20;
+    pub const VT_FILE: ::flatbuffers::VOffsetT = 22;
+    pub const VT_DISCOVERED_AT: ::flatbuffers::VOffsetT = 24;
+    pub const VT_CREATED_AT: ::flatbuffers::VOffsetT = 26;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EpisodeReference { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EpisodeReferenceArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<EpisodeReference<'bldr>> {
-    let mut builder = EpisodeReferenceBuilder::new(_fbb);
-    builder.add_tmdb_series_id(args.tmdb_series_id);
-    if let Some(x) = args.created_at { builder.add_created_at(x); }
-    if let Some(x) = args.discovered_at { builder.add_discovered_at(x); }
-    if let Some(x) = args.file { builder.add_file(x); }
-    if let Some(x) = args.endpoint { builder.add_endpoint(x); }
-    if let Some(x) = args.details { builder.add_details(x); }
-    if let Some(x) = args.series_id { builder.add_series_id(x); }
-    if let Some(x) = args.season_id { builder.add_season_id(x); }
-    if let Some(x) = args.library_id { builder.add_library_id(x); }
-    if let Some(x) = args.id { builder.add_id(x); }
-    builder.add_season_number(args.season_number);
-    builder.add_episode_number(args.episode_number);
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        EpisodeReference { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args EpisodeReferenceArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<EpisodeReference<'bldr>> {
+        let mut builder = EpisodeReferenceBuilder::new(_fbb);
+        builder.add_tmdb_series_id(args.tmdb_series_id);
+        if let Some(x) = args.created_at {
+            builder.add_created_at(x);
+        }
+        if let Some(x) = args.discovered_at {
+            builder.add_discovered_at(x);
+        }
+        if let Some(x) = args.file {
+            builder.add_file(x);
+        }
+        if let Some(x) = args.endpoint {
+            builder.add_endpoint(x);
+        }
+        if let Some(x) = args.details {
+            builder.add_details(x);
+        }
+        if let Some(x) = args.series_id {
+            builder.add_series_id(x);
+        }
+        if let Some(x) = args.season_id {
+            builder.add_season_id(x);
+        }
+        if let Some(x) = args.library_id {
+            builder.add_library_id(x);
+        }
+        if let Some(x) = args.id {
+            builder.add_id(x);
+        }
+        builder.add_season_number(args.season_number);
+        builder.add_episode_number(args.episode_number);
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EpisodeReference::VT_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn library_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EpisodeReference::VT_LIBRARY_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn episode_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EpisodeReference::VT_EPISODE_NUMBER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn season_number(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EpisodeReference::VT_SEASON_NUMBER, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn season_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EpisodeReference::VT_SEASON_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn series_id(&self) -> &'a super::ids::Uuid {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::ids::Uuid>(EpisodeReference::VT_SERIES_ID, None).unwrap()}
-  }
-  #[inline]
-  pub fn tmdb_series_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(EpisodeReference::VT_TMDB_SERIES_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn details(&self) -> Option<super::details::EpisodeDetails<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<super::details::EpisodeDetails>>(EpisodeReference::VT_DETAILS, None)}
-  }
-  #[inline]
-  pub fn endpoint(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(EpisodeReference::VT_ENDPOINT, None)}
-  }
-  #[inline]
-  pub fn file(&self) -> Option<super::files::MediaFile<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<super::files::MediaFile>>(EpisodeReference::VT_FILE, None)}
-  }
-  #[inline]
-  pub fn discovered_at(&self) -> Option<&'a super::common::Timestamp> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::Timestamp>(EpisodeReference::VT_DISCOVERED_AT, None)}
-  }
-  #[inline]
-  pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<super::common::Timestamp>(EpisodeReference::VT_CREATED_AT, None)}
-  }
+    #[inline]
+    pub fn id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(EpisodeReference::VT_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn library_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(EpisodeReference::VT_LIBRARY_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn episode_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(EpisodeReference::VT_EPISODE_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn season_number(&self) -> u16 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u16>(EpisodeReference::VT_SEASON_NUMBER, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn season_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(EpisodeReference::VT_SEASON_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn series_id(&self) -> &'a super::ids::Uuid {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::ids::Uuid>(EpisodeReference::VT_SERIES_ID, None)
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn tmdb_series_id(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(EpisodeReference::VT_TMDB_SERIES_ID, Some(0))
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn details(&self) -> Option<super::details::EpisodeDetails<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                super::details::EpisodeDetails,
+            >>(EpisodeReference::VT_DETAILS, None)
+        }
+    }
+    #[inline]
+    pub fn endpoint(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                EpisodeReference::VT_ENDPOINT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn file(&self) -> Option<super::files::MediaFile<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<super::files::MediaFile>>(
+                    EpisodeReference::VT_FILE,
+                    None,
+                )
+        }
+    }
+    #[inline]
+    pub fn discovered_at(&self) -> Option<&'a super::common::Timestamp> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::common::Timestamp>(
+                EpisodeReference::VT_DISCOVERED_AT,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn created_at(&self) -> Option<&'a super::common::Timestamp> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<super::common::Timestamp>(
+                EpisodeReference::VT_CREATED_AT,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EpisodeReference<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
      .visit_field::<super::ids::Uuid>("id", Self::VT_ID, true)?
      .visit_field::<super::ids::Uuid>("library_id", Self::VT_LIBRARY_ID, true)?
      .visit_field::<u16>("episode_number", Self::VT_EPISODE_NUMBER, false)?
@@ -164,8 +242,8 @@ impl ::flatbuffers::Verifiable for EpisodeReference<'_> {
      .visit_field::<super::common::Timestamp>("discovered_at", Self::VT_DISCOVERED_AT, false)?
      .visit_field::<super::common::Timestamp>("created_at", Self::VT_CREATED_AT, false)?
      .finish();
-    Ok(())
-  }
+        Ok(())
+    }
 }
 pub struct EpisodeReferenceArgs<'a> {
     pub id: Option<&'a super::ids::Uuid>,
@@ -175,119 +253,171 @@ pub struct EpisodeReferenceArgs<'a> {
     pub season_id: Option<&'a super::ids::Uuid>,
     pub series_id: Option<&'a super::ids::Uuid>,
     pub tmdb_series_id: u64,
-    pub details: Option<::flatbuffers::WIPOffset<super::details::EpisodeDetails<'a>>>,
+    pub details:
+        Option<::flatbuffers::WIPOffset<super::details::EpisodeDetails<'a>>>,
     pub endpoint: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub file: Option<::flatbuffers::WIPOffset<super::files::MediaFile<'a>>>,
     pub discovered_at: Option<&'a super::common::Timestamp>,
     pub created_at: Option<&'a super::common::Timestamp>,
 }
 impl<'a> Default for EpisodeReferenceArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    EpisodeReferenceArgs {
-      id: None, // required field
-      library_id: None, // required field
-      episode_number: 0,
-      season_number: 0,
-      season_id: None, // required field
-      series_id: None, // required field
-      tmdb_series_id: 0,
-      details: None,
-      endpoint: None,
-      file: None,
-      discovered_at: None,
-      created_at: None,
+    #[inline]
+    fn default() -> Self {
+        EpisodeReferenceArgs {
+            id: None,         // required field
+            library_id: None, // required field
+            episode_number: 0,
+            season_number: 0,
+            season_id: None, // required field
+            series_id: None, // required field
+            tmdb_series_id: 0,
+            details: None,
+            endpoint: None,
+            file: None,
+            discovered_at: None,
+            created_at: None,
+        }
     }
-  }
 }
 
-pub struct EpisodeReferenceBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct EpisodeReferenceBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EpisodeReferenceBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_id(&mut self, id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EpisodeReference::VT_ID, id);
-  }
-  #[inline]
-  pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EpisodeReference::VT_LIBRARY_ID, library_id);
-  }
-  #[inline]
-  pub fn add_episode_number(&mut self, episode_number: u16) {
-    self.fbb_.push_slot::<u16>(EpisodeReference::VT_EPISODE_NUMBER, episode_number, 0);
-  }
-  #[inline]
-  pub fn add_season_number(&mut self, season_number: u16) {
-    self.fbb_.push_slot::<u16>(EpisodeReference::VT_SEASON_NUMBER, season_number, 0);
-  }
-  #[inline]
-  pub fn add_season_id(&mut self, season_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EpisodeReference::VT_SEASON_ID, season_id);
-  }
-  #[inline]
-  pub fn add_series_id(&mut self, series_id: &super::ids::Uuid) {
-    self.fbb_.push_slot_always::<&super::ids::Uuid>(EpisodeReference::VT_SERIES_ID, series_id);
-  }
-  #[inline]
-  pub fn add_tmdb_series_id(&mut self, tmdb_series_id: u64) {
-    self.fbb_.push_slot::<u64>(EpisodeReference::VT_TMDB_SERIES_ID, tmdb_series_id, 0);
-  }
-  #[inline]
-  pub fn add_details(&mut self, details: ::flatbuffers::WIPOffset<super::details::EpisodeDetails<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::details::EpisodeDetails>>(EpisodeReference::VT_DETAILS, details);
-  }
-  #[inline]
-  pub fn add_endpoint(&mut self, endpoint: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EpisodeReference::VT_ENDPOINT, endpoint);
-  }
-  #[inline]
-  pub fn add_file(&mut self, file: ::flatbuffers::WIPOffset<super::files::MediaFile<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::files::MediaFile>>(EpisodeReference::VT_FILE, file);
-  }
-  #[inline]
-  pub fn add_discovered_at(&mut self, discovered_at: &super::common::Timestamp) {
-    self.fbb_.push_slot_always::<&super::common::Timestamp>(EpisodeReference::VT_DISCOVERED_AT, discovered_at);
-  }
-  #[inline]
-  pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
-    self.fbb_.push_slot_always::<&super::common::Timestamp>(EpisodeReference::VT_CREATED_AT, created_at);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EpisodeReferenceBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EpisodeReferenceBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    EpisodeReferenceBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_id(&mut self, id: &super::ids::Uuid) {
+        self.fbb_
+            .push_slot_always::<&super::ids::Uuid>(EpisodeReference::VT_ID, id);
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeReference<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, EpisodeReference::VT_ID,"id");
-    self.fbb_.required(o, EpisodeReference::VT_LIBRARY_ID,"library_id");
-    self.fbb_.required(o, EpisodeReference::VT_SEASON_ID,"season_id");
-    self.fbb_.required(o, EpisodeReference::VT_SERIES_ID,"series_id");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_library_id(&mut self, library_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            EpisodeReference::VT_LIBRARY_ID,
+            library_id,
+        );
+    }
+    #[inline]
+    pub fn add_episode_number(&mut self, episode_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            EpisodeReference::VT_EPISODE_NUMBER,
+            episode_number,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_season_number(&mut self, season_number: u16) {
+        self.fbb_.push_slot::<u16>(
+            EpisodeReference::VT_SEASON_NUMBER,
+            season_number,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_season_id(&mut self, season_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            EpisodeReference::VT_SEASON_ID,
+            season_id,
+        );
+    }
+    #[inline]
+    pub fn add_series_id(&mut self, series_id: &super::ids::Uuid) {
+        self.fbb_.push_slot_always::<&super::ids::Uuid>(
+            EpisodeReference::VT_SERIES_ID,
+            series_id,
+        );
+    }
+    #[inline]
+    pub fn add_tmdb_series_id(&mut self, tmdb_series_id: u64) {
+        self.fbb_.push_slot::<u64>(
+            EpisodeReference::VT_TMDB_SERIES_ID,
+            tmdb_series_id,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_details(
+        &mut self,
+        details: ::flatbuffers::WIPOffset<super::details::EpisodeDetails<'b>>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::details::EpisodeDetails>>(EpisodeReference::VT_DETAILS, details);
+    }
+    #[inline]
+    pub fn add_endpoint(
+        &mut self,
+        endpoint: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EpisodeReference::VT_ENDPOINT,
+            endpoint,
+        );
+    }
+    #[inline]
+    pub fn add_file(
+        &mut self,
+        file: ::flatbuffers::WIPOffset<super::files::MediaFile<'b>>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::files::MediaFile>>(EpisodeReference::VT_FILE, file);
+    }
+    #[inline]
+    pub fn add_discovered_at(
+        &mut self,
+        discovered_at: &super::common::Timestamp,
+    ) {
+        self.fbb_.push_slot_always::<&super::common::Timestamp>(
+            EpisodeReference::VT_DISCOVERED_AT,
+            discovered_at,
+        );
+    }
+    #[inline]
+    pub fn add_created_at(&mut self, created_at: &super::common::Timestamp) {
+        self.fbb_.push_slot_always::<&super::common::Timestamp>(
+            EpisodeReference::VT_CREATED_AT,
+            created_at,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> EpisodeReferenceBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        EpisodeReferenceBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<EpisodeReference<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_.required(o, EpisodeReference::VT_ID, "id");
+        self.fbb_
+            .required(o, EpisodeReference::VT_LIBRARY_ID, "library_id");
+        self.fbb_
+            .required(o, EpisodeReference::VT_SEASON_ID, "season_id");
+        self.fbb_
+            .required(o, EpisodeReference::VT_SERIES_ID, "series_id");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for EpisodeReference<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EpisodeReference");
-      ds.field("id", &self.id());
-      ds.field("library_id", &self.library_id());
-      ds.field("episode_number", &self.episode_number());
-      ds.field("season_number", &self.season_number());
-      ds.field("season_id", &self.season_id());
-      ds.field("series_id", &self.series_id());
-      ds.field("tmdb_series_id", &self.tmdb_series_id());
-      ds.field("details", &self.details());
-      ds.field("endpoint", &self.endpoint());
-      ds.field("file", &self.file());
-      ds.field("discovered_at", &self.discovered_at());
-      ds.field("created_at", &self.created_at());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("EpisodeReference");
+        ds.field("id", &self.id());
+        ds.field("library_id", &self.library_id());
+        ds.field("episode_number", &self.episode_number());
+        ds.field("season_number", &self.season_number());
+        ds.field("season_id", &self.season_id());
+        ds.field("series_id", &self.series_id());
+        ds.field("tmdb_series_id", &self.tmdb_series_id());
+        ds.field("details", &self.details());
+        ds.field("endpoint", &self.endpoint());
+        ds.field("file", &self.file());
+        ds.field("discovered_at", &self.discovered_at());
+        ds.field("created_at", &self.created_at());
+        ds.finish()
+    }
 }

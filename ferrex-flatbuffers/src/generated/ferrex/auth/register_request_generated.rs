@@ -7,74 +7,120 @@ pub enum RegisterRequestOffset {}
 
 /// POST /api/v1/auth/register request.
 pub struct RegisterRequest<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
+    pub _tab: ::flatbuffers::Table<'a>,
 }
 
 impl<'a> ::flatbuffers::Follow<'a> for RegisterRequest<'a> {
-  type Inner = RegisterRequest<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
+    type Inner = RegisterRequest<'a>;
+    #[inline]
+    unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+        Self {
+            _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+        }
+    }
 }
 
 impl<'a> RegisterRequest<'a> {
-  pub const VT_USERNAME: ::flatbuffers::VOffsetT = 4;
-  pub const VT_PASSWORD: ::flatbuffers::VOffsetT = 6;
-  pub const VT_DISPLAY_NAME: ::flatbuffers::VOffsetT = 8;
+    pub const VT_USERNAME: ::flatbuffers::VOffsetT = 4;
+    pub const VT_PASSWORD: ::flatbuffers::VOffsetT = 6;
+    pub const VT_DISPLAY_NAME: ::flatbuffers::VOffsetT = 8;
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    RegisterRequest { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args RegisterRequestArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<RegisterRequest<'bldr>> {
-    let mut builder = RegisterRequestBuilder::new(_fbb);
-    if let Some(x) = args.display_name { builder.add_display_name(x); }
-    if let Some(x) = args.password { builder.add_password(x); }
-    if let Some(x) = args.username { builder.add_username(x); }
-    builder.finish()
-  }
+    #[inline]
+    pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+        RegisterRequest { _tab: table }
+    }
+    #[allow(unused_mut)]
+    pub fn create<
+        'bldr: 'args,
+        'args: 'mut_bldr,
+        'mut_bldr,
+        A: ::flatbuffers::Allocator + 'bldr,
+    >(
+        _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+        args: &'args RegisterRequestArgs<'args>,
+    ) -> ::flatbuffers::WIPOffset<RegisterRequest<'bldr>> {
+        let mut builder = RegisterRequestBuilder::new(_fbb);
+        if let Some(x) = args.display_name {
+            builder.add_display_name(x);
+        }
+        if let Some(x) = args.password {
+            builder.add_password(x);
+        }
+        if let Some(x) = args.username {
+            builder.add_username(x);
+        }
+        builder.finish()
+    }
 
-
-  #[inline]
-  pub fn username(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(RegisterRequest::VT_USERNAME, None).unwrap()}
-  }
-  #[inline]
-  pub fn password(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(RegisterRequest::VT_PASSWORD, None).unwrap()}
-  }
-  #[inline]
-  pub fn display_name(&self) -> &'a str {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(RegisterRequest::VT_DISPLAY_NAME, None).unwrap()}
-  }
+    #[inline]
+    pub fn username(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    RegisterRequest::VT_USERNAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn password(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    RegisterRequest::VT_PASSWORD,
+                    None,
+                )
+                .unwrap()
+        }
+    }
+    #[inline]
+    pub fn display_name(&self) -> &'a str {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<&str>>(
+                    RegisterRequest::VT_DISPLAY_NAME,
+                    None,
+                )
+                .unwrap()
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for RegisterRequest<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("username", Self::VT_USERNAME, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("password", Self::VT_PASSWORD, true)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("display_name", Self::VT_DISPLAY_NAME, true)?
-     .finish();
-    Ok(())
-  }
+    #[inline]
+    fn run_verifier(
+        v: &mut ::flatbuffers::Verifier,
+        pos: usize,
+    ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+        v.visit_table(pos)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "username",
+                Self::VT_USERNAME,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "password",
+                Self::VT_PASSWORD,
+                true,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "display_name",
+                Self::VT_DISPLAY_NAME,
+                true,
+            )?
+            .finish();
+        Ok(())
+    }
 }
 pub struct RegisterRequestArgs<'a> {
     pub username: Option<::flatbuffers::WIPOffset<&'a str>>,
@@ -82,57 +128,83 @@ pub struct RegisterRequestArgs<'a> {
     pub display_name: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for RegisterRequestArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    RegisterRequestArgs {
-      username: None, // required field
-      password: None, // required field
-      display_name: None, // required field
+    #[inline]
+    fn default() -> Self {
+        RegisterRequestArgs {
+            username: None,     // required field
+            password: None,     // required field
+            display_name: None, // required field
+        }
     }
-  }
 }
 
-pub struct RegisterRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+pub struct RegisterRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+{
+    fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> RegisterRequestBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_username(&mut self, username: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(RegisterRequest::VT_USERNAME, username);
-  }
-  #[inline]
-  pub fn add_password(&mut self, password: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(RegisterRequest::VT_PASSWORD, password);
-  }
-  #[inline]
-  pub fn add_display_name(&mut self, display_name: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(RegisterRequest::VT_DISPLAY_NAME, display_name);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> RegisterRequestBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    RegisterRequestBuilder {
-      fbb_: _fbb,
-      start_: start,
+impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
+    RegisterRequestBuilder<'a, 'b, A>
+{
+    #[inline]
+    pub fn add_username(
+        &mut self,
+        username: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            RegisterRequest::VT_USERNAME,
+            username,
+        );
     }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<RegisterRequest<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    self.fbb_.required(o, RegisterRequest::VT_USERNAME,"username");
-    self.fbb_.required(o, RegisterRequest::VT_PASSWORD,"password");
-    self.fbb_.required(o, RegisterRequest::VT_DISPLAY_NAME,"display_name");
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
+    #[inline]
+    pub fn add_password(
+        &mut self,
+        password: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            RegisterRequest::VT_PASSWORD,
+            password,
+        );
+    }
+    #[inline]
+    pub fn add_display_name(
+        &mut self,
+        display_name: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            RegisterRequest::VT_DISPLAY_NAME,
+            display_name,
+        );
+    }
+    #[inline]
+    pub fn new(
+        _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+    ) -> RegisterRequestBuilder<'a, 'b, A> {
+        let start = _fbb.start_table();
+        RegisterRequestBuilder {
+            fbb_: _fbb,
+            start_: start,
+        }
+    }
+    #[inline]
+    pub fn finish(self) -> ::flatbuffers::WIPOffset<RegisterRequest<'a>> {
+        let o = self.fbb_.end_table(self.start_);
+        self.fbb_
+            .required(o, RegisterRequest::VT_USERNAME, "username");
+        self.fbb_
+            .required(o, RegisterRequest::VT_PASSWORD, "password");
+        self.fbb_
+            .required(o, RegisterRequest::VT_DISPLAY_NAME, "display_name");
+        ::flatbuffers::WIPOffset::new(o.value())
+    }
 }
 
 impl ::core::fmt::Debug for RegisterRequest<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("RegisterRequest");
-      ds.field("username", &self.username());
-      ds.field("password", &self.password());
-      ds.field("display_name", &self.display_name());
-      ds.finish()
-  }
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        let mut ds = f.debug_struct("RegisterRequest");
+        ds.field("username", &self.username());
+        ds.field("password", &self.password());
+        ds.field("display_name", &self.display_name());
+        ds.finish()
+    }
 }
