@@ -8,7 +8,10 @@ import com.ferrex.android.core.watch.ContinueWatchingData
 import com.ferrex.android.core.watch.ContinueWatchingItem
 import com.ferrex.android.core.watch.WatchProgress
 import com.ferrex.android.core.watch.WatchService
+import com.ferrex.android.core.watch.WatchStateCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +28,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val watchService: WatchService,
+    private val watchStateCoordinator: WatchStateCoordinator,
     private val serverConfig: ServerConfig,
 ) : ViewModel() {
 
@@ -40,15 +44,27 @@ class HomeViewModel @Inject constructor(
 
     init {
         refresh()
+
+        viewModelScope.launch {
+            watchStateCoordinator.events.collect {
+                refresh()
+            }
+        }
     }
 
     fun refresh() {
         viewModelScope.launch {
             _isLoading.value = true
-            // Fetch both in parallel
-            launch { fetchContinueWatching() }
-            launch { fetchWatchState() }
-            _isLoading.value = false
+            try {
+                coroutineScope {
+                    val continueWatching = async { fetchContinueWatching() }
+                    val watchState = async { fetchWatchState() }
+                    continueWatching.await()
+                    watchState.await()
+                }
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 

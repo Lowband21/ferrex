@@ -10,6 +10,7 @@ import com.ferrex.android.core.library.MediaAccessor
 import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.core.watch.WatchProgress
 import com.ferrex.android.core.watch.WatchService
+import com.ferrex.android.core.watch.WatchStateCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import ferrex.details.CastMember
 import ferrex.media.EpisodeReference
@@ -17,7 +18,7 @@ import ferrex.media.MovieReference
 import ferrex.media.SeasonReference
 import ferrex.media.SeriesReference
 import ferrex.watch.EpisodeWatchState
-import ferrex.watch.SeasonWatchStatus
+import ferrex.watch.NextReason
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,7 @@ class DetailViewModel @Inject constructor(
     private val serverConfig: ServerConfig,
     private val repository: LibraryRepository,
     private val watchService: WatchService,
+    private val watchStateCoordinator: WatchStateCoordinator,
 ) : ViewModel() {
 
     val mediaId: String = savedStateHandle.get<String>("movieId")
@@ -72,10 +74,44 @@ class DetailViewModel @Inject constructor(
     private val _selectedSeason = MutableStateFlow(1)
     val selectedSeason: StateFlow<Int> = _selectedSeason.asStateFlow()
 
+    /** Primary series-level action resolved from server watch state. */
+    private val _seriesPrimaryAction = MutableStateFlow<SeriesPlaybackAction?>(null)
+    val seriesPrimaryAction: StateFlow<SeriesPlaybackAction?> = _seriesPrimaryAction.asStateFlow()
+
+    /** Start-over action for the series, typically the pilot episode at 0ms. */
+    private val _seriesStartOverAction = MutableStateFlow<SeriesPlaybackAction?>(null)
+    val seriesStartOverAction: StateFlow<SeriesPlaybackAction?> = _seriesStartOverAction.asStateFlow()
+
+    /** Summary counts for current series watch state. */
+    private val _seriesWatchSummary = MutableStateFlow<SeriesWatchSummary?>(null)
+    val seriesWatchSummary: StateFlow<SeriesWatchSummary?> = _seriesWatchSummary.asStateFlow()
+
+    /** In-flight state for explicit watched/unwatched mutations. */
+    private val _isSubmittingWatchAction = MutableStateFlow(false)
+    val isSubmittingWatchAction: StateFlow<Boolean> = _isSubmittingWatchAction.asStateFlow()
+
+    /** One-shot snackbar/toast style message after watch actions. */
+    private val _watchActionMessage = MutableStateFlow<String?>(null)
+    val watchActionMessage: StateFlow<String?> = _watchActionMessage.asStateFlow()
+
     init {
         if (mediaId.isNotEmpty()) {
             loadDetails()
             loadWatchState()
+
+            viewModelScope.launch {
+                watchStateCoordinator.events.collect {
+                    refreshWatchData()
+                }
+            }
+        }
+    }
+
+    fun refreshWatchData() {
+        loadWatchState()
+        val series = (uiState.value as? DetailUiState.SeriesDetail)?.series
+        if (series != null) {
+            refreshSeriesWatchStatus(series)
         }
     }
 
@@ -124,15 +160,22 @@ class DetailViewModel @Inject constructor(
                     _selectedSeason.value = firstSeason
                     _episodes.value = accessor.episodesForSeason(seriesUuid, firstSeason)
                 }
+
+                _seriesStartOverAction.value = findSeriesStartOverAction(seriesUuid)
             }
 
-            // Fetch series watch status (can run after bundle loads)
-            val tmdbId = series.tmdbId.toLong()
-            if (tmdbId > 0) {
-                when (val result = watchService.getSeriesWatchStatus(tmdbId)) {
-                    is ApiResult.Success -> parseSeriesWatchStatus(result.data)
-                    else -> {}
-                }
+            refreshSeriesWatchStatus(series)
+        }
+    }
+
+    private fun refreshSeriesWatchStatus(series: SeriesReference) {
+        val tmdbId = series.tmdbId.toLong()
+        if (tmdbId <= 0) return
+
+        viewModelScope.launch {
+            when (val result = watchService.getSeriesWatchStatus(tmdbId)) {
+                is ApiResult.Success -> parseSeriesWatchStatus(series, result.data)
+                else -> {}
             }
         }
     }
@@ -147,7 +190,10 @@ class DetailViewModel @Inject constructor(
         }
     }
 
-    private fun parseSeriesWatchStatus(status: ferrex.watch.SeriesWatchStatus) {
+    private fun parseSeriesWatchStatus(
+        series: SeriesReference,
+        status: ferrex.watch.SeriesWatchStatus,
+    ) {
         val states = mutableMapOf<String, EpisodeWatchInfo>()
         for (s in 0 until status.seasonsLength) {
             val season = status.seasons(s) ?: continue
@@ -162,6 +208,34 @@ class DetailViewModel @Inject constructor(
             }
         }
         _episodeStates.value = states
+
+        val seriesUuid = series.id?.toUuidString()
+        if (_seriesStartOverAction.value == null && seriesUuid != null) {
+            _seriesStartOverAction.value = findSeriesStartOverAction(seriesUuid)
+        }
+
+        _seriesWatchSummary.value = SeriesWatchSummary(
+            totalEpisodes = status.totalEpisodes.toInt(),
+            watchedEpisodes = status.watched.toInt(),
+            inProgressEpisodes = status.inProgress.toInt(),
+        )
+
+        val nextEpisode = status.nextEpisode
+        _seriesPrimaryAction.value = nextEpisode?.playableMediaId?.toUuidString()?.let { playableId ->
+            val seasonNumber = nextEpisode.key.seasonNumber.toInt()
+            val episodeNumber = nextEpisode.key.episodeNumber.toInt()
+            val subtitle = formatEpisodeLabel(seasonNumber, episodeNumber)
+            val label = when (nextEpisode.reason) {
+                NextReason.FirstUnwatched -> "Next episode"
+                else -> "Resume episode"
+            }
+            SeriesPlaybackAction(
+                mediaId = playableId,
+                label = label,
+                subtitle = subtitle,
+                startPositionMs = null,
+            )
+        }
     }
 
     private fun loadWatchState() {
@@ -172,12 +246,104 @@ class DetailViewModel @Inject constructor(
                     if (isMovie) {
                         val movie = (uiState.value as? DetailUiState.MovieDetail)?.movie
                         val fileId = movie?.file?.id?.toUuidString()
-                        if (fileId != null) {
-                            _watchProgress.value = result.data[fileId]
-                        }
+                        _watchProgress.value = fileId?.let { result.data[it] }
                     }
                 }
                 else -> {} // Watch state is optional
+            }
+        }
+    }
+
+    fun consumeWatchActionMessage() {
+        _watchActionMessage.value = null
+    }
+
+    fun setMovieWatched(markWatched: Boolean) {
+        val movie = (uiState.value as? DetailUiState.MovieDetail)?.movie ?: return
+        val movieId = movie.id?.toUuidString() ?: return
+
+        submitWatchMutation(
+            successMessage = if (markWatched) "Marked movie watched" else "Marked movie unwatched",
+            request = {
+                if (markWatched) {
+                    watchService.markMovieWatched(movieId)
+                } else {
+                    watchService.markMovieUnwatched(movieId)
+                }
+            },
+            onSuccess = {
+                loadWatchState()
+            },
+        )
+    }
+
+    fun setSeriesWatched(markWatched: Boolean) {
+        val series = (uiState.value as? DetailUiState.SeriesDetail)?.series ?: return
+        val tmdbId = series.tmdbId.toLong()
+        if (tmdbId <= 0) {
+            _watchActionMessage.value = "Series is missing a valid TMDB id"
+            return
+        }
+
+        submitWatchMutation(
+            successMessage = if (markWatched) "Marked series watched" else "Marked series unwatched",
+            request = {
+                if (markWatched) {
+                    watchService.markSeriesWatched(tmdbId)
+                } else {
+                    watchService.markSeriesUnwatched(tmdbId)
+                }
+            },
+            onSuccess = {
+                refreshWatchData()
+            },
+        )
+    }
+
+    fun setEpisodeWatched(episodeId: String, markWatched: Boolean) {
+        submitWatchMutation(
+            successMessage = if (markWatched) "Marked episode watched" else "Marked episode unwatched",
+            request = {
+                if (markWatched) {
+                    watchService.markEpisodeWatched(episodeId)
+                } else {
+                    watchService.markEpisodeUnwatched(episodeId)
+                }
+            },
+            onSuccess = {
+                refreshWatchData()
+            },
+        )
+    }
+
+    private fun submitWatchMutation(
+        successMessage: String,
+        request: suspend () -> ApiResult<Unit>,
+        onSuccess: () -> Unit,
+    ) {
+        if (_isSubmittingWatchAction.value) return
+
+        viewModelScope.launch {
+            _isSubmittingWatchAction.value = true
+            try {
+                when (val result = request()) {
+                    is ApiResult.Success -> {
+                        _watchActionMessage.value = successMessage
+                        onSuccess()
+                        watchStateCoordinator.notifyWatchStateChanged(successMessage)
+                    }
+                    is ApiResult.HttpError -> {
+                        _watchActionMessage.value = result.message.ifBlank {
+                            "Watch action failed (HTTP ${result.code})"
+                        }
+                    }
+                    is ApiResult.NetworkError -> {
+                        _watchActionMessage.value =
+                            result.exception.localizedMessage ?: "Watch action failed"
+                    }
+                }
+            } finally {
+                _isSubmittingWatchAction.value = false
             }
         }
     }
@@ -253,8 +419,30 @@ class DetailViewModel @Inject constructor(
         return episode.file?.id?.toUuidString()
     }
 
+    private fun findSeriesStartOverAction(seriesUuid: String): SeriesPlaybackAction? {
+        val accessor = seriesBundleAccessor ?: return null
+        val firstSeason = accessor.seasonsForSeries(seriesUuid).firstOrNull() ?: return null
+        val firstEpisode = accessor
+            .episodesForSeason(seriesUuid, firstSeason.seasonNumber.toInt())
+            .firstOrNull() ?: return null
+        val mediaId = firstEpisode.file?.id?.toUuidString() ?: return null
+
+        return SeriesPlaybackAction(
+            mediaId = mediaId,
+            label = "Start from beginning",
+            subtitle = formatEpisodeLabel(
+                firstEpisode.seasonNumber.toInt(),
+                firstEpisode.episodeNumber.toInt(),
+            ),
+            startPositionMs = 0L,
+        )
+    }
+
     companion object {
         fun episodeKey(season: Int, episode: Int): String = "S${season}E${episode}"
+
+        fun formatEpisodeLabel(season: Int, episode: Int): String =
+            "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
     }
 }
 
@@ -264,6 +452,25 @@ data class EpisodeWatchInfo(
 ) {
     val isCompleted: Boolean get() = state == EpisodeWatchState.Completed
     val isInProgress: Boolean get() = state == EpisodeWatchState.InProgress
+}
+
+data class SeriesPlaybackAction(
+    val mediaId: String,
+    val label: String,
+    val subtitle: String? = null,
+    val startPositionMs: Long? = null,
+)
+
+data class SeriesWatchSummary(
+    val totalEpisodes: Int,
+    val watchedEpisodes: Int,
+    val inProgressEpisodes: Int,
+) {
+    val hasExistingProgress: Boolean
+        get() = watchedEpisodes > 0 || inProgressEpisodes > 0
+
+    val isFullyWatched: Boolean
+        get() = totalEpisodes > 0 && watchedEpisodes >= totalEpisodes && inProgressEpisodes == 0
 }
 
 sealed interface DetailUiState {

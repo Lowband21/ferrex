@@ -3,10 +3,13 @@ package com.ferrex.android.ui.player
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.api.StreamingClient
 import com.ferrex.android.core.diagnostics.DiagnosticLog
 import com.ferrex.android.core.media.WatchProgressTracker
+import com.ferrex.android.core.watch.WatchService
+import com.ferrex.android.core.watch.WatchStateCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,10 +28,13 @@ class PlayerViewModel @Inject constructor(
     private val serverConfig: ServerConfig,
     @StreamingClient val streamingClient: OkHttpClient,
     private val progressTracker: WatchProgressTracker,
+    private val watchService: WatchService,
+    private val watchStateCoordinator: WatchStateCoordinator,
 ) : ViewModel() {
 
     // Media ID from navigation args
     val mediaId: String = savedStateHandle.get<String>("mediaId") ?: ""
+    private val forcedStartPositionMs: Long? = savedStateHandle.get<Long>("startPositionMs")
 
     private val _playerState = MutableStateFlow<PlayerState>(PlayerState.Loading)
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
@@ -41,13 +47,49 @@ class PlayerViewModel @Inject constructor(
 
     init {
         if (mediaId.isNotEmpty()) {
-            preparePlayback(startPositionMs = 0L)
+            prepareInitialPlayback()
         } else {
             DiagnosticLog.e(TAG, "No media ID provided")
             _playerState.value = PlayerState.Error(
                 message = "No media ID provided",
                 canRetry = false,
             )
+        }
+    }
+
+    private fun prepareInitialPlayback() {
+        forcedStartPositionMs?.let { explicitStartMs ->
+            val startPositionMs = explicitStartMs.coerceAtLeast(0L)
+            lastKnownPositionMs = startPositionMs
+            preparePlayback(startPositionMs = startPositionMs)
+            return
+        }
+
+        viewModelScope.launch {
+            val startPositionMs = when (val result = watchService.getMediaProgress(mediaId)) {
+                is ApiResult.Success -> {
+                    val progress = result.data
+                    if (progress != null && !progress.isCompleted && progress.position > 0.0) {
+                        (progress.position * 1000.0).toLong().coerceAtLeast(0L)
+                    } else {
+                        0L
+                    }
+                }
+                is ApiResult.HttpError -> {
+                    DiagnosticLog.w(
+                        TAG,
+                        "Progress lookup failed for $mediaId: HTTP ${result.code} ${result.message}",
+                    )
+                    0L
+                }
+                is ApiResult.NetworkError -> {
+                    DiagnosticLog.w(TAG, "Progress lookup failed for $mediaId", result.exception)
+                    0L
+                }
+            }
+
+            lastKnownPositionMs = startPositionMs
+            preparePlayback(startPositionMs = startPositionMs)
         }
     }
 
@@ -140,14 +182,46 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun onPlaybackEnded() {
+    fun onPlaybackExit(positionMs: Long, durationMs: Long) {
+        if (mediaId.isEmpty() || durationMs <= 0) return
+
+        DiagnosticLog.i(TAG, "Playback exiting at ${positionMs}ms")
+        lastKnownPositionMs = positionMs.coerceAtLeast(0L)
+
+        reportAndInvalidate(
+            positionMs = lastKnownPositionMs,
+            durationMs = durationMs,
+            reason = "playback exit",
+        )
+    }
+
+    fun onPlaybackEnded(durationMs: Long) {
+        if (mediaId.isEmpty() || durationMs <= 0) return
+
         DiagnosticLog.i(TAG, "Playback ended")
+        lastKnownPositionMs = durationMs
+
+        reportAndInvalidate(
+            positionMs = durationMs,
+            durationMs = durationMs,
+            reason = "playback completion",
+        )
+    }
+
+    private fun reportAndInvalidate(
+        positionMs: Long,
+        durationMs: Long,
+        reason: String,
+    ) {
         viewModelScope.launch {
-            progressTracker.reportProgress(
+            val reported = progressTracker.reportProgress(
                 mediaId = mediaId,
-                positionSeconds = -1.0, // Server interprets as completed
-                durationSeconds = -1.0,
+                positionSeconds = positionMs / 1000.0,
+                durationSeconds = durationMs / 1000.0,
             )
+            if (reported) {
+                watchStateCoordinator.notifyWatchStateChanged(reason)
+            }
         }
     }
 }

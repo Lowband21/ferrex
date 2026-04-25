@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,15 +31,26 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +67,7 @@ import com.ferrex.android.ui.components.LoadingScreen
 import ferrex.media.EpisodeReference
 import ferrex.media.SeriesReference
 import ferrex.watch.EpisodeWatchState
+import kotlinx.coroutines.delay
 
 /**
  * Series detail screen — overview, season tabs, episode list with progress.
@@ -71,9 +85,42 @@ import ferrex.watch.EpisodeWatchState
 fun SeriesDetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onEpisodeClick: (mediaId: String) -> Unit,
+    onEpisodeClick: (mediaId: String, startPositionMs: Long?) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val seriesWatchSummary by viewModel.seriesWatchSummary.collectAsState()
+    val watchActionMessage by viewModel.watchActionMessage.collectAsState()
+    val isSubmittingWatchAction by viewModel.isSubmittingWatchAction.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingConfirmation by remember { mutableStateOf<SeriesWatchToggleAction?>(null) }
+    var pendingEpisodeConfirmation by remember { mutableStateOf<EpisodeWatchToggleRequest?>(null) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshWatchData()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            viewModel.refreshWatchData()
+        }
+    }
+
+    LaunchedEffect(watchActionMessage) {
+        watchActionMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeWatchActionMessage()
+        }
+    }
 
     when (val state = uiState) {
         is DetailUiState.Loading -> LoadingScreen()
@@ -83,11 +130,108 @@ fun SeriesDetailScreen(
         )
         is DetailUiState.MovieDetail -> ErrorScreen(message = "Expected series, got movie")
         is DetailUiState.SeriesDetail -> {
+            val isFullyWatched = seriesWatchSummary?.isFullyWatched == true
+            val requiresConfirmation = seriesWatchSummary?.hasExistingProgress == true
+
+            if (pendingConfirmation != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingConfirmation = null },
+                    title = {
+                        Text(
+                            if (pendingConfirmation == SeriesWatchToggleAction.MarkWatched) {
+                                "Mark series watched?"
+                            } else {
+                                "Mark series unwatched?"
+                            }
+                        )
+                    },
+                    text = {
+                        Text(
+                            "This series already has watch progress. Are you sure you want to ${if (pendingConfirmation == SeriesWatchToggleAction.MarkWatched) "mark the whole series watched" else "mark the whole series unwatched"}?"
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val markWatched = pendingConfirmation == SeriesWatchToggleAction.MarkWatched
+                                pendingConfirmation = null
+                                viewModel.setSeriesWatched(markWatched)
+                            },
+                        ) {
+                            Text("Confirm")
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = { pendingConfirmation = null }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
+
+            pendingEpisodeConfirmation?.let { request ->
+                AlertDialog(
+                    onDismissRequest = { pendingEpisodeConfirmation = null },
+                    title = {
+                        Text(
+                            if (request.markWatched) {
+                                "Mark episode watched?"
+                            } else {
+                                "Mark episode unwatched?"
+                            }
+                        )
+                    },
+                    text = {
+                        Text(
+                            "${request.episodeLabel} already has watch progress. Are you sure you want to ${if (request.markWatched) "mark it watched" else "mark it unwatched"}?"
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val pending = pendingEpisodeConfirmation ?: return@Button
+                                pendingEpisodeConfirmation = null
+                                viewModel.setEpisodeWatched(pending.episodeId, pending.markWatched)
+                            },
+                        ) {
+                            Text("Confirm")
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = { pendingEpisodeConfirmation = null }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
+
             SeriesDetailContent(
                 viewModel = viewModel,
                 series = state.series,
                 backdropUrl = viewModel.seriesBackdropUrl(state.series),
                 posterUrl = viewModel.seriesPosterUrl(state.series),
+                snackbarHostState = snackbarHostState,
+                seriesWatchSummary = seriesWatchSummary,
+                isSubmittingWatchAction = isSubmittingWatchAction,
+                onToggleWatched = {
+                    val action = if (isFullyWatched) {
+                        SeriesWatchToggleAction.MarkUnwatched
+                    } else {
+                        SeriesWatchToggleAction.MarkWatched
+                    }
+                    if (requiresConfirmation) {
+                        pendingConfirmation = action
+                    } else {
+                        viewModel.setSeriesWatched(action == SeriesWatchToggleAction.MarkWatched)
+                    }
+                },
+                onToggleEpisodeWatched = { request ->
+                    if (request.requiresConfirmation) {
+                        pendingEpisodeConfirmation = request
+                    } else {
+                        viewModel.setEpisodeWatched(request.episodeId, request.markWatched)
+                    }
+                },
                 onBack = onBack,
                 onEpisodeClick = onEpisodeClick,
             )
@@ -102,8 +246,13 @@ private fun SeriesDetailContent(
     series: SeriesReference,
     backdropUrl: String?,
     posterUrl: String?,
+    snackbarHostState: SnackbarHostState,
+    seriesWatchSummary: SeriesWatchSummary?,
+    isSubmittingWatchAction: Boolean,
+    onToggleWatched: () -> Unit,
+    onToggleEpisodeWatched: (EpisodeWatchToggleRequest) -> Unit,
     onBack: () -> Unit,
-    onEpisodeClick: (mediaId: String) -> Unit,
+    onEpisodeClick: (mediaId: String, startPositionMs: Long?) -> Unit,
 ) {
     val details = series.details
     val scrollState = rememberScrollState()
@@ -113,6 +262,8 @@ private fun SeriesDetailContent(
     val episodes by viewModel.episodes.collectAsState()
     val selectedSeason by viewModel.selectedSeason.collectAsState()
     val episodeStates by viewModel.episodeStates.collectAsState()
+    val seriesPrimaryAction by viewModel.seriesPrimaryAction.collectAsState()
+    val seriesStartOverAction by viewModel.seriesStartOverAction.collectAsState()
 
     // Season count from metadata — always available, even without per-series bundle
     val metadataSeasonCount = details?.numberOfSeasons?.toInt() ?: 0
@@ -122,6 +273,7 @@ private fun SeriesDetailContent(
     val effectiveSeasonCount = if (seasons.isNotEmpty()) seasons.size else metadataSeasonCount
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {},
@@ -205,6 +357,28 @@ private fun SeriesDetailContent(
                 }
 
                 Spacer(Modifier.height(16.dp))
+
+                SeriesPlaybackActionsSection(
+                    primaryAction = seriesPrimaryAction,
+                    startOverAction = seriesStartOverAction,
+                    onPlay = { action ->
+                        onEpisodeClick(action.mediaId, action.startPositionMs)
+                    },
+                )
+
+                if (seriesPrimaryAction != null || seriesStartOverAction != null) {
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                SeriesWatchActionsSection(
+                    summary = seriesWatchSummary,
+                    isSubmittingWatchAction = isSubmittingWatchAction,
+                    onToggleWatched = onToggleWatched,
+                )
+
+                if (seriesPrimaryAction != null || seriesStartOverAction != null || seriesWatchSummary != null) {
+                    Spacer(Modifier.height(16.dp))
+                }
 
                 // Tagline
                 details?.tagline?.let { tagline ->
@@ -303,9 +477,13 @@ private fun SeriesDetailContent(
                                 episode = episode,
                                 watchInfo = watchInfo,
                                 stillUrl = viewModel.episodeStillUrl(episode),
-                                onClick = {
+                                isSubmittingWatchAction = isSubmittingWatchAction,
+                                onPlay = { startPositionMs ->
                                     val fileId = viewModel.episodeStreamFileId(episode)
-                                    if (fileId != null) onEpisodeClick(fileId)
+                                    if (fileId != null) onEpisodeClick(fileId, startPositionMs)
+                                },
+                                onToggleWatched = { request ->
+                                    onToggleEpisodeWatched(request)
                                 },
                             )
                             Spacer(Modifier.height(8.dp))
@@ -335,6 +513,87 @@ private fun SeriesDetailContent(
     }
 }
 
+@Composable
+private fun SeriesPlaybackActionsSection(
+    primaryAction: SeriesPlaybackAction?,
+    startOverAction: SeriesPlaybackAction?,
+    onPlay: (SeriesPlaybackAction) -> Unit,
+) {
+    if (primaryAction == null && startOverAction == null) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        primaryAction?.let { action ->
+            Button(
+                onClick = { onPlay(action) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(seriesPlaybackActionLabel(action))
+            }
+        }
+
+        startOverAction
+            ?.takeIf { startAction ->
+                primaryAction?.let {
+                    it.mediaId != startAction.mediaId || it.startPositionMs != startAction.startPositionMs
+                } ?: true
+            }
+            ?.let { action ->
+                OutlinedButton(
+                    onClick = { onPlay(action) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(seriesPlaybackActionLabel(action))
+                }
+            }
+    }
+}
+
+private fun seriesPlaybackActionLabel(action: SeriesPlaybackAction): String =
+    action.subtitle?.let { "${action.label} • $it" } ?: action.label
+
+@Composable
+private fun SeriesWatchActionsSection(
+    summary: SeriesWatchSummary?,
+    isSubmittingWatchAction: Boolean,
+    onToggleWatched: () -> Unit,
+) {
+    val isFullyWatched = summary?.isFullyWatched == true
+    val statusText = summary?.let {
+        when {
+            it.totalEpisodes > 0 -> "${it.watchedEpisodes}/${it.totalEpisodes} episodes watched"
+            else -> null
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        statusText?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        OutlinedButton(
+            onClick = onToggleWatched,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSubmittingWatchAction,
+        ) {
+            Text(
+                if (isSubmittingWatchAction) {
+                    "Saving…"
+                } else if (isFullyWatched) {
+                    "Mark unwatched"
+                } else {
+                    "Mark watched"
+                }
+            )
+        }
+    }
+}
+
 /**
  * Episode card — still image, title, overview, runtime, watch progress.
  */
@@ -343,14 +602,29 @@ private fun EpisodeCard(
     episode: EpisodeReference,
     watchInfo: EpisodeWatchInfo?,
     stillUrl: String?,
-    onClick: () -> Unit,
+    isSubmittingWatchAction: Boolean,
+    onPlay: (Long?) -> Unit,
+    onToggleWatched: (EpisodeWatchToggleRequest) -> Unit,
 ) {
     val details = episode.details
+    val episodeId = episode.id?.toUuidString()
+    val isWatched = watchInfo?.isCompleted == true
+    val requiresConfirmation = watchInfo?.state?.let { it != EpisodeWatchState.Unwatched } == true
+    val episodeLabel = buildString {
+        append(DetailViewModel.formatEpisodeLabel(
+            episode.seasonNumber.toInt(),
+            episode.episodeNumber.toInt(),
+        ))
+        details?.name?.takeIf { it.isNotBlank() }?.let {
+            append(" • ")
+            append(it)
+        }
+    }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClick = { onPlay(null) }),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -496,7 +770,61 @@ private fun EpisodeCard(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (watchInfo?.isInProgress == true) {
+                        androidx.compose.material3.TextButton(
+                            onClick = { onPlay(0L) },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text(text = "Start from beginning")
+                        }
+                    }
+
+                    if (episodeId != null) {
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                onToggleWatched(
+                                    EpisodeWatchToggleRequest(
+                                        episodeId = episodeId,
+                                        episodeLabel = episodeLabel,
+                                        markWatched = !isWatched,
+                                        requiresConfirmation = requiresConfirmation,
+                                    )
+                                )
+                            },
+                            enabled = !isSubmittingWatchAction,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                text = if (isSubmittingWatchAction) {
+                                    "Saving…"
+                                } else if (isWatched) {
+                                    "Mark unwatched"
+                                } else {
+                                    "Mark watched"
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+private data class EpisodeWatchToggleRequest(
+    val episodeId: String,
+    val episodeLabel: String,
+    val markWatched: Boolean,
+    val requiresConfirmation: Boolean,
+)
+
+private enum class SeriesWatchToggleAction {
+    MarkWatched,
+    MarkUnwatched,
 }

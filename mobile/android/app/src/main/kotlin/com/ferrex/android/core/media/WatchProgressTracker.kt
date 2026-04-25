@@ -53,7 +53,7 @@ class WatchProgressTracker @Inject constructor(
         mediaId: String,
         positionSeconds: Double,
         durationSeconds: Double,
-    ) = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             val builder = FlatBufferBuilder(256)
 
@@ -105,13 +105,24 @@ class WatchProgressTracker @Inject constructor(
                 )
                 .build()
 
-            httpClient.newCall(request).execute().close()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    DiagnosticLog.w(
+                        TAG,
+                        "Progress report rejected: HTTP ${response.code} ${response.message}",
+                    )
+                    return@withContext false
+                }
+            }
+
+            true
         } catch (t: Throwable) {
             // Safety net: catch Throwable (not just Exception) so that
             // AssertionError and other Error subclasses don't kill the
             // player.  Progress reporting is best-effort.
             DiagnosticLog.w(TAG,
                 "Progress report failed (pos=${positionSeconds}s): ${t.message}", t)
+            false
         }
     }
 }

@@ -21,19 +21,31 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +62,7 @@ import com.ferrex.android.ui.components.ErrorScreen
 import com.ferrex.android.ui.components.LoadingScreen
 import ferrex.details.CastMember
 import ferrex.media.MovieReference
+import kotlinx.coroutines.delay
 
 /**
  * Movie detail screen — backdrop, metadata, cast, play button, watch status.
@@ -62,10 +75,41 @@ import ferrex.media.MovieReference
 fun MovieDetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onPlay: (mediaId: String) -> Unit,
+    onPlay: (mediaId: String, startPositionMs: Long?) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val watchProgress by viewModel.watchProgress.collectAsState()
+    val watchActionMessage by viewModel.watchActionMessage.collectAsState()
+    val isSubmittingWatchAction by viewModel.isSubmittingWatchAction.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingConfirmation by remember { mutableStateOf<MovieWatchToggleAction?>(null) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshWatchData()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            viewModel.refreshWatchData()
+        }
+    }
+
+    LaunchedEffect(watchActionMessage) {
+        watchActionMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeWatchActionMessage()
+        }
+    }
 
     when (val state = uiState) {
         is DetailUiState.Loading -> LoadingScreen()
@@ -75,16 +119,74 @@ fun MovieDetailScreen(
         )
         is DetailUiState.SeriesDetail -> ErrorScreen(message = "Expected movie, got series")
         is DetailUiState.MovieDetail -> {
+            val isWatched = watchProgress?.completed == true
+            val requiresConfirmation = watchProgress?.let {
+                it.progress > 0f || it.completed
+            } == true
+
+            if (pendingConfirmation != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingConfirmation = null },
+                    title = {
+                        Text(
+                            if (pendingConfirmation == MovieWatchToggleAction.MarkWatched) {
+                                "Mark watched?"
+                            } else {
+                                "Mark unwatched?"
+                            }
+                        )
+                    },
+                    text = {
+                        Text(
+                            "This movie already has watch progress. Are you sure you want to ${if (pendingConfirmation == MovieWatchToggleAction.MarkWatched) "mark it watched" else "mark it unwatched"}?"
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val markWatched = pendingConfirmation == MovieWatchToggleAction.MarkWatched
+                                pendingConfirmation = null
+                                viewModel.setMovieWatched(markWatched)
+                            },
+                        ) {
+                            Text("Confirm")
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = { pendingConfirmation = null }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
+
             MovieDetailContent(
                 movie = state.movie,
                 watchProgress = watchProgress,
                 backdropUrl = viewModel.backdropUrl(state.movie),
                 posterUrl = viewModel.posterUrl(state.movie),
                 castPhotoUrl = { member -> viewModel.castPhotoUrl(member) },
+                snackbarHostState = snackbarHostState,
+                isSubmittingWatchAction = isSubmittingWatchAction,
+                isWatched = isWatched,
+                onToggleWatched = {
+                    val action = if (isWatched) {
+                        MovieWatchToggleAction.MarkUnwatched
+                    } else {
+                        MovieWatchToggleAction.MarkWatched
+                    }
+                    if (requiresConfirmation) {
+                        pendingConfirmation = action
+                    } else {
+                        viewModel.setMovieWatched(action == MovieWatchToggleAction.MarkWatched)
+                    }
+                },
                 onBack = onBack,
-                onPlay = {
+                onPlay = { forcedStartMs ->
                     val fileId = state.movie.file?.id?.toUuidString()
-                    if (fileId != null) onPlay(fileId)
+                    if (fileId != null) {
+                        onPlay(fileId, forcedStartMs)
+                    }
                 },
             )
         }
@@ -99,13 +201,18 @@ private fun MovieDetailContent(
     backdropUrl: String?,
     posterUrl: String?,
     castPhotoUrl: (CastMember) -> String?,
+    snackbarHostState: SnackbarHostState,
+    isSubmittingWatchAction: Boolean,
+    isWatched: Boolean,
+    onToggleWatched: () -> Unit,
     onBack: () -> Unit,
-    onPlay: () -> Unit,
+    onPlay: (Long?) -> Unit,
 ) {
     val details = movie.details
     val scrollState = rememberScrollState()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {},
@@ -197,6 +304,9 @@ private fun MovieDetailContent(
                 // Watch status + play button
                 WatchStatusSection(
                     watchProgress = watchProgress,
+                    isSubmittingWatchAction = isSubmittingWatchAction,
+                    isWatched = isWatched,
+                    onToggleWatched = onToggleWatched,
                     onPlay = onPlay,
                 )
 
@@ -265,8 +375,18 @@ private fun MovieDetailContent(
 @Composable
 private fun WatchStatusSection(
     watchProgress: WatchProgress?,
-    onPlay: () -> Unit,
+    isSubmittingWatchAction: Boolean,
+    isWatched: Boolean,
+    onToggleWatched: () -> Unit,
+    onPlay: (Long?) -> Unit,
 ) {
+    val shouldResume = watchProgress?.let {
+        !it.completed && it.progress > 0f && it.duration > 0.0
+    } == true
+    val showStartFromBeginning = watchProgress?.let {
+        it.completed || (it.progress > 0f && it.duration > 0.0)
+    } == true
+
     Column {
         if (watchProgress != null) {
             if (watchProgress.completed) {
@@ -310,16 +430,40 @@ private fun WatchStatusSection(
         }
 
         Button(
-            onClick = onPlay,
+            onClick = { onPlay(null) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text(
-                if (watchProgress?.progress?.let { it > 0f && !watchProgress.completed } == true)
-                    "Resume"
-                else
-                    "Play"
+                if (shouldResume) "Resume" else "Play",
+            )
+        }
+
+        if (showStartFromBeginning) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { onPlay(0L) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Start from beginning")
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onToggleWatched,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSubmittingWatchAction,
+        ) {
+            Text(
+                if (isSubmittingWatchAction) {
+                    "Saving…"
+                } else if (isWatched) {
+                    "Mark unwatched"
+                } else {
+                    "Mark watched"
+                }
             )
         }
     }
@@ -511,4 +655,9 @@ internal fun formatFileSize(bytes: Long): String {
         bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
         else -> "$bytes B"
     }
+}
+
+private enum class MovieWatchToggleAction {
+    MarkWatched,
+    MarkUnwatched,
 }

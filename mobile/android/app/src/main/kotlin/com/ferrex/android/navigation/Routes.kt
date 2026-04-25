@@ -42,7 +42,15 @@ sealed interface Route {
 
     /** Video player. */
     @Serializable
-    data class Player(val mediaId: String) : Route
+    data class Player(
+        val mediaId: String,
+        /**
+         * Optional explicit start offset in milliseconds.
+         * - null: let player resolve resume offset from watch progress.
+         * - 0 or more: force playback from that exact position.
+         */
+        val startPositionMs: Long? = null,
+    ) : Route
 
     /** Search screen. */
     @Serializable

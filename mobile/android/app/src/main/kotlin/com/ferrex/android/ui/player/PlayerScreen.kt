@@ -118,7 +118,12 @@ fun PlayerScreen(
                     onProgressUpdate = { positionMs, durationMs ->
                         viewModel.reportProgress(positionMs, durationMs)
                     },
-                    onPlaybackEnded = { viewModel.onPlaybackEnded() },
+                    onPlaybackExit = { positionMs, durationMs ->
+                        viewModel.onPlaybackExit(positionMs, durationMs)
+                    },
+                    onPlaybackEnded = { durationMs ->
+                        viewModel.onPlaybackEnded(durationMs)
+                    },
                     onError = { message, positionMs ->
                         viewModel.onPlayerError(message, positionMs)
                     },
@@ -170,7 +175,8 @@ private fun PlayerContent(
     startPositionMs: Long,
     okHttpClient: OkHttpClient,
     onProgressUpdate: (positionMs: Long, durationMs: Long) -> Unit,
-    onPlaybackEnded: () -> Unit,
+    onPlaybackExit: (positionMs: Long, durationMs: Long) -> Unit,
+    onPlaybackEnded: (durationMs: Long) -> Unit,
     onError: (message: String, lastPositionMs: Long) -> Unit,
 ) {
     val context = LocalContext.current
@@ -178,10 +184,12 @@ private fun PlayerContent(
     // ── UI state for overlay controls ───────────────────────────
     var aspectRatioMode by remember { mutableStateOf(AspectRatioMode.FIT) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var finalizedPlayback by remember { mutableStateOf(false) }
 
     // rememberUpdatedState: callbacks captured in DisposableEffect/LaunchedEffect
     // always point to the latest lambda instance after recomposition.
     val currentOnProgressUpdate by rememberUpdatedState(onProgressUpdate)
+    val currentOnPlaybackExit by rememberUpdatedState(onPlaybackExit)
     val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
     val currentOnError by rememberUpdatedState(onError)
 
@@ -243,7 +251,13 @@ private fun PlayerContent(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
-                    Player.STATE_ENDED -> currentOnPlaybackEnded()
+                    Player.STATE_ENDED -> {
+                        val duration = exoPlayer.duration
+                        if (duration > 0 && duration != C.TIME_UNSET) {
+                            finalizedPlayback = true
+                            currentOnPlaybackEnded(duration)
+                        }
+                    }
                     else -> {}
                 }
             }
@@ -299,8 +313,8 @@ private fun PlayerContent(
             DiagnosticLog.i(TAG, "Releasing ExoPlayer")
             // Report final position before releasing.
             val duration = exoPlayer.duration
-            if (duration > 0 && duration != C.TIME_UNSET) {
-                currentOnProgressUpdate(exoPlayer.currentPosition, duration)
+            if (!finalizedPlayback && duration > 0 && duration != C.TIME_UNSET) {
+                currentOnPlaybackExit(exoPlayer.currentPosition, duration)
             }
             exoPlayer.removeListener(listener)
             exoPlayer.release()

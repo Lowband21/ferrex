@@ -32,12 +32,16 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,10 +52,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.ferrex.android.core.watch.ContinueWatchingActionHint
 import com.ferrex.android.core.watch.ContinueWatchingItem
 import com.ferrex.android.ui.detail.formatTime
 import com.ferrex.android.ui.library.LibraryGridScreen
 import com.ferrex.android.ui.library.LibraryViewModel
+import kotlinx.coroutines.delay
 
 /**
  * Home screen with continue watching carousel, library tabs, and poster grid.
@@ -74,6 +80,26 @@ fun HomeScreen(
     val libraries by libraryViewModel.libraries.collectAsState()
     val continueWatching by homeViewModel.continueWatching.collectAsState()
     var selectedTabIndex by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                homeViewModel.refresh()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            homeViewModel.refresh()
+        }
+    }
 
     // Auto-select first library on load
     LaunchedEffect(libraries) {
@@ -242,7 +268,7 @@ private fun ContinueWatchingCard(
                     ) {
                         Icon(
                             Icons.Default.PlayArrow,
-                            contentDescription = "Resume",
+                            contentDescription = continueWatchingActionLabel(item),
                             tint = Color.White,
                         )
                     }
@@ -281,16 +307,43 @@ private fun ContinueWatchingCard(
                 }
             }
 
-            // Title
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            )
+            Column(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                item.subtitle?.let { subtitle ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = continueWatchingActionLabel(item),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
+}
+
+private fun continueWatchingActionLabel(item: ContinueWatchingItem): String = when (item.actionHint) {
+    ContinueWatchingActionHint.NextEpisode -> "Next episode"
+    ContinueWatchingActionHint.Resume -> "Resume"
+    null -> if (item.progress > 0f) "Resume" else "Play"
 }
