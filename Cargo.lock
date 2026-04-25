@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-contracts"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "ferrex-model",
  "log",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-core"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-model"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "chrono",
  "rkyv 0.8.15",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-player"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "ferrex-server"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "ferrexctl"
-version = "0.1.1-alpha"
+version = "0.1.2-alpha"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -6529,9 +6529,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -7973,7 +7973,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f7c95348f20c1c913d72157b3c6dee6ea3e30b3d19502c5a7f6d3f160dacbf"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
