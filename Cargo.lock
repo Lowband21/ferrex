@@ -303,7 +303,7 @@ dependencies = [
  "enumflags2",
  "futures-channel",
  "futures-util",
- "rand 0.9.2",
+ "rand 0.9.3",
  "raw-window-handle",
  "serde",
  "serde_repr",
@@ -2170,7 +2170,7 @@ dependencies = [
  "ordered-float",
  "password-hash",
  "rancor",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rayon",
  "redis",
  "regex",
@@ -2255,7 +2255,7 @@ dependencies = [
  "puffin",
  "puffin_http",
  "rancor",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_core 0.9.5",
  "regex",
  "reqwest",
@@ -2309,7 +2309,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "rancor",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rayon",
  "rcgen",
  "redis",
@@ -2352,7 +2352,7 @@ dependencies = [
  "humantime",
  "once_cell",
  "predicates",
- "rand 0.9.2",
+ "rand 0.9.3",
  "ratatui",
  "redis",
  "regex",
@@ -4834,7 +4834,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "smallvec",
  "zeroize",
 ]
@@ -5834,7 +5834,7 @@ dependencies = [
  "bytes",
  "getrandom 0.3.4",
  "lru-slab",
- "rand 0.9.2",
+ "rand 0.9.3",
  "ring",
  "rustc-hash 2.1.2",
  "rustls",
@@ -5898,9 +5898,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -5909,9 +5909,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+checksum = "7ec095654a25171c2124e9e3393a930bddbffdc939556c914957a4c3e0a87166"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -6014,7 +6014,7 @@ dependencies = [
  "num-traits",
  "paste",
  "profiling",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_chacha 0.9.0",
  "simd_helpers",
  "thiserror 2.0.18",
@@ -6435,7 +6435,7 @@ dependencies = [
  "futures-util",
  "http",
  "mime",
- "rand 0.9.2",
+ "rand 0.9.3",
  "thiserror 2.0.18",
 ]
 
@@ -6449,7 +6449,7 @@ dependencies = [
  "borsh",
  "bytes",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rkyv 0.7.46",
  "serde",
  "serde_json",
@@ -7127,7 +7127,7 @@ dependencies = [
  "memchr",
  "once_cell",
  "percent-encoding",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rsa",
  "rust_decimal",
  "serde",
@@ -7171,7 +7171,7 @@ dependencies = [
  "memchr",
  "num-bigint",
  "once_cell",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -8008,7 +8008,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
- "rand 0.9.2",
+ "rand 0.9.3",
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
