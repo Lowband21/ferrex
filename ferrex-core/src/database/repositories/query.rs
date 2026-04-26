@@ -20,8 +20,65 @@ use crate::{
     query::types::{MediaQuery, MediaWithStatus},
 };
 
+const WATCH_COMPLETION_THRESHOLD: f32 = 0.95;
+
 fn rating_bound(value: RatingValue) -> BigDecimal {
     BigDecimal::from(value).with_scale(RATING_DECIMAL_SCALE as i64)
+}
+
+fn is_completed_progress_with_threshold(
+    position: f32,
+    duration: f32,
+    threshold: f32,
+) -> bool {
+    duration > 0.0 && (position / duration) >= threshold
+}
+
+fn media_id_from_watch_kind(kind: i32, id: Uuid) -> Option<MediaID> {
+    match kind {
+        0 => Some(MediaID::Movie(MovieID(id))),
+        3 => Some(MediaID::Episode(EpisodeID(id))),
+        _ => None,
+    }
+}
+
+fn watch_status_from_progress_with_threshold(
+    media_id: MediaID,
+    position: f32,
+    duration: f32,
+    last_watched: i64,
+    threshold: f32,
+) -> ItemWatchStatus {
+    let logical_media_id = *media_id.as_uuid();
+
+    if is_completed_progress_with_threshold(position, duration, threshold) {
+        ItemWatchStatus::Completed(CompletedItem {
+            media_id,
+            last_watched,
+        })
+    } else {
+        ItemWatchStatus::InProgress(InProgressItem {
+            media_id: logical_media_id,
+            position,
+            duration,
+            last_watched,
+        })
+    }
+}
+
+fn watch_status_from_progress(
+    media_id: MediaID,
+    position: f32,
+    duration: f32,
+    last_watched: i64,
+) -> ItemWatchStatus {
+    watch_status_from_progress_with_threshold(
+        media_id,
+        position,
+        duration,
+        last_watched,
+        WATCH_COMPLETION_THRESHOLD,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -29,10 +86,9 @@ pub struct PostgresQueryRepository {
     pool: PgPool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 struct InProgressRow {
     id: Uuid,
-    file_id: Uuid,
     position: f32,
     duration: f32,
     last_watched: i64,
@@ -884,71 +940,68 @@ impl QueryRepository for PostgresQueryRepository {
         user_id: Uuid,
         query: &MediaQuery,
     ) -> Result<Vec<MediaWithStatus>> {
-        let rows = sqlx::query_as!(
-            InProgressRow,
+        let rows = sqlx::query_as::<_, InProgressRow>(
             r#"
             WITH inprog AS (
                 SELECT media_uuid, media_type, position, duration, last_watched
                 FROM user_watch_progress
                 WHERE user_id = $1
                   AND position > 0
-                  AND (duration > 0) AND (position / duration) < 0.95
+                  AND (duration > 0) AND (position / duration) < $4
             )
             SELECT * FROM (
                 SELECT
-                    mr.id AS "id!",
-                    mf.id AS "file_id!",
-                    inprog.position::real AS "position!",
-                    inprog.duration::real AS "duration!",
-                    inprog.last_watched::bigint AS "last_watched!",
-                    0::int4                  AS "media_kind!"
+                    mr.id AS id,
+                    inprog.position::real AS position,
+                    inprog.duration::real AS duration,
+                    inprog.last_watched::bigint AS last_watched,
+                    0::int4                  AS media_kind
                 FROM inprog
                 JOIN movie_references mr ON inprog.media_uuid = mr.id AND inprog.media_type = 0
-                JOIN media_files mf ON mr.file_id = mf.id
 
                 UNION ALL
 
                 SELECT
-                    er.id              AS "id!",
-                    mf.id              AS "file_id!",
-                    inprog.position::real AS "position!",
-                    inprog.duration::real AS "duration!",
-                    inprog.last_watched::bigint AS "last_watched!",
-                    3::int4                  AS "media_kind!"
+                    er.id              AS id,
+                    inprog.position::real AS position,
+                    inprog.duration::real AS duration,
+                    inprog.last_watched::bigint AS last_watched,
+                    3::int4                  AS media_kind
                 FROM inprog
                 JOIN episode_references er ON inprog.media_uuid = er.id AND inprog.media_type = 3
-                JOIN media_files mf ON er.file_id = mf.id
             ) AS inprog_rows
-            ORDER BY inprog_rows."last_watched!" DESC
+            ORDER BY inprog_rows.last_watched DESC
             LIMIT $2 OFFSET $3
             "#,
-            user_id,
-            query.pagination.limit as i64,
-            query.pagination.offset as i64
         )
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
+        .bind(user_id)
+        .bind(query.pagination.limit as i64)
+        .bind(query.pagination.offset as i64)
+        .bind(WATCH_COMPLETION_THRESHOLD)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;
 
         let mut results = Vec::with_capacity(rows.len());
         for row in rows {
-            let kind = row.media_kind;
-            let id = if kind == 0 {
-                MediaID::Movie(MovieID(row.id))
-            } else {
-                MediaID::Series(SeriesID(row.id))
-            };
-
-            let watch_status = InProgressItem {
-                media_id: row.file_id,
-                position: row.position,
-                duration: row.duration,
-                last_watched: row.last_watched,
+            let Some(id) = media_id_from_watch_kind(row.media_kind, row.id)
+            else {
+                log::warn!(
+                    "Unexpected watch-status media kind {} for {}",
+                    row.media_kind,
+                    row.id
+                );
+                continue;
             };
 
             results.push(MediaWithStatus {
                 id,
-                watch_status: Some(ItemWatchStatus::InProgress(watch_status)),
+                watch_status: Some(watch_status_from_progress(
+                    id,
+                    row.position,
+                    row.duration,
+                    row.last_watched,
+                )),
             });
         }
 
@@ -1363,24 +1416,12 @@ impl QueryRepository for PostgresQueryRepository {
         })?;
 
         if let Some(row) = progress {
-            // Check if completed (>95% watched)
-            let is_completed =
-                (row.position as f64 / row.duration as f64) >= 0.95;
-            if is_completed {
-                let watch_status = InProgressItem {
-                    media_id: movie_id.to_uuid(),
-                    position: row.position,
-                    duration: row.duration,
-                    last_watched: row.last_watched,
-                };
-                return Ok(Some(ItemWatchStatus::InProgress(watch_status)));
-            } else {
-                let watch_status = CompletedItem {
-                    media_id: MediaID::Movie(*movie_id),
-                    last_watched: row.last_watched,
-                };
-                return Ok(Some(ItemWatchStatus::Completed(watch_status)));
-            }
+            return Ok(Some(watch_status_from_progress(
+                MediaID::Movie(*movie_id),
+                row.position,
+                row.duration,
+                row.last_watched,
+            )));
         }
 
         // Check completed media
@@ -1433,24 +1474,12 @@ impl QueryRepository for PostgresQueryRepository {
         })?;
 
         if let Some(row) = progress {
-            let is_completed =
-                (row.position as f64 / row.duration as f64) >= 0.95;
-
-            if is_completed {
-                let watch_status = InProgressItem {
-                    media_id: episode_id.to_uuid(),
-                    position: row.position,
-                    duration: row.duration,
-                    last_watched: row.last_watched,
-                };
-                return Ok(Some(ItemWatchStatus::InProgress(watch_status)));
-            } else {
-                let watch_status = CompletedItem {
-                    media_id: MediaID::Episode(*episode_id),
-                    last_watched: row.last_watched,
-                };
-                return Ok(Some(ItemWatchStatus::Completed(watch_status)));
-            }
+            return Ok(Some(watch_status_from_progress(
+                MediaID::Episode(*episode_id),
+                row.position,
+                row.duration,
+                row.last_watched,
+            )));
         }
 
         let completed_opt = sqlx::query!(
@@ -1537,4 +1566,59 @@ fn first_token_like_pattern(query: &str) -> Option<String> {
         return None;
     }
     Some(format!("%{}%", clean.to_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_below_threshold_stays_in_progress_on_logical_item() {
+        let media_id = MediaID::Episode(EpisodeID(Uuid::new_v4()));
+        let status = watch_status_from_progress_with_threshold(
+            media_id,
+            94.0,
+            100.0,
+            123,
+            WATCH_COMPLETION_THRESHOLD,
+        );
+
+        match status {
+            ItemWatchStatus::InProgress(item) => {
+                assert_eq!(item.media_id, *media_id.as_uuid());
+                assert_eq!(item.position, 94.0);
+                assert_eq!(item.duration, 100.0);
+                assert_eq!(item.last_watched, 123);
+            }
+            other => panic!("expected in-progress status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn progress_at_threshold_is_completed() {
+        let media_id = MediaID::Movie(MovieID(Uuid::new_v4()));
+        let status = watch_status_from_progress_with_threshold(
+            media_id,
+            95.0,
+            100.0,
+            456,
+            WATCH_COMPLETION_THRESHOLD,
+        );
+
+        match status {
+            ItemWatchStatus::Completed(item) => {
+                assert_eq!(item.media_id, media_id);
+                assert_eq!(item.last_watched, 456);
+            }
+            other => panic!("expected completed status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn watch_kind_mapping_uses_episode_ids_for_episode_rows() {
+        let media_uuid = Uuid::new_v4();
+        let media_id = media_id_from_watch_kind(3, media_uuid);
+
+        assert_eq!(media_id, Some(MediaID::Episode(EpisodeID(media_uuid))));
+    }
 }
