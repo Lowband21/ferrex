@@ -7,6 +7,10 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+fun localOrEnv(key: String): String? =
+    providers.gradleProperty(key).orNull
+        ?: providers.environmentVariable(key).orNull
+
 android {
     namespace = "com.ferrex.android"
     compileSdk = 35
@@ -35,6 +39,18 @@ android {
         }
     }
 
+    signingConfigs {
+        val storeFilePath = localOrEnv("RELEASE_STORE_FILE")
+        if (storeFilePath != null) {
+            create("release") {
+                storeFile = file(storeFilePath)
+                storePassword = localOrEnv("RELEASE_STORE_PASSWORD")
+                keyAlias = localOrEnv("RELEASE_KEY_ALIAS")
+                keyPassword = localOrEnv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -43,6 +59,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfigs.findByName("release")?.let {
+                signingConfig = it
+            }
         }
         debug {
             applicationIdSuffix = ".debug"
