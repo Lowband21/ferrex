@@ -399,6 +399,10 @@ pub fn handle_login_success(
     // BatchMetadataFetcher initialization moved to handle_auth_flow_completed
     // to ensure it's only initialized once after full auth flow completes
 
+    // Reset server-sourced continue-watching state so a fresh login does not
+    // briefly reuse cards from a previous session before the new read model loads.
+    curated::clear_server_continue_watching_items(state);
+
     // After successful login, fetch watch status and then trigger library loading
     // We'll chain the watch status loading with a completion message
     let api_service = state.domains.auth.state.api_service.clone();
@@ -455,6 +459,7 @@ pub fn handle_logout_complete(state: &mut State) -> Task<AuthMessage> {
     state.domains.auth.state.is_authenticated = false;
     state.domains.auth.state.auth_flow = AuthenticationFlow::LoadingUsers;
     state.domains.auth.state.user_permissions = None;
+    curated::clear_server_continue_watching_items(state);
 
     // Load users after logout
     handle_load_users(state)
@@ -642,7 +647,9 @@ pub fn handle_watch_status_loaded(
                 watch_state.completed.len()
             );
             state.domains.media.state.user_watch_state = Some(watch_state);
-            // Update curated carousels now that we have watch state
+            // Update curated carousels now that we have watch state.
+            // Continue Watching may be overwritten by the richer server-side
+            // read model once that follow-up request completes.
             curated::recompute_and_init_curated_carousels(state);
             curated::emit_initial_curated_snapshots(state);
         }
@@ -650,6 +657,38 @@ pub fn handle_watch_status_loaded(
             log::error!("Failed to load watch status: {}", e);
         }
     }
+
+    let api_service = state.domains.auth.state.api_service.clone();
+    Task::perform(
+        async move { api_service.get_continue_watching().await },
+        |result| {
+            AuthMessage::ContinueWatchingLoaded(
+                result.map_err(|e| e.to_string()),
+            )
+        },
+    )
+}
+
+/// Handle server-side continue-watching read model loaded
+pub fn handle_continue_watching_loaded(
+    state: &mut State,
+    result: Result<Vec<core::ContinueWatchingItem>, String>,
+) -> Task<AuthMessage> {
+    match result {
+        Ok(items) => {
+            log::info!(
+                "Continue watching loaded successfully: {} cards",
+                items.len()
+            );
+            curated::set_server_continue_watching_items(state, items);
+            curated::recompute_and_init_curated_carousels(state);
+            curated::emit_initial_curated_snapshots(state);
+        }
+        Err(e) => {
+            log::error!("Failed to load continue watching: {}", e);
+        }
+    }
+
     Task::none()
 }
 

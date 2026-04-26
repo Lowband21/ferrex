@@ -8,7 +8,7 @@
 use crate::infra::{
     render::upload_budget::{TimingBasedBudget, UploadBudgetConfig},
     shader_widgets::poster::{
-        PosterFace,
+        PosterFace, WatchButtonMode,
         animation::{AnimatedPosterBounds, PosterAnimationType},
         font_atlas::FontAtlas,
         render_pipeline::{create_batch_instance, create_placeholder_instance},
@@ -172,6 +172,7 @@ pub struct PendingPrimitive {
     pub mouse_position: Option<Point>,
     pub progress: Option<f32>,
     pub progress_color: Color,
+    pub watch_button_mode: WatchButtonMode,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
     /// Title text to render below the poster
@@ -538,6 +539,7 @@ impl PosterBatchState {
             pending.animated_bounds.as_ref(),
             pending.progress,
             pending.progress_color,
+            pending.watch_button_mode,
             pending.face,
         );
 
@@ -899,6 +901,7 @@ impl PrimitiveBatchState for PosterBatchState {
                             pending.animated_bounds.as_ref(),
                             pending.progress,
                             pending.progress_color,
+                            pending.watch_button_mode,
                             pending.face,
                         );
                         match pending.face {
@@ -953,6 +956,7 @@ impl PrimitiveBatchState for PosterBatchState {
                         pending.animated_bounds.as_ref(),
                         pending.progress,
                         pending.progress_color,
+                        pending.watch_button_mode,
                         pending.face,
                     );
                     match pending.face {
@@ -1065,6 +1069,7 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.mouse_position,
                     pending.progress,
                     pending.progress_color,
+                    pending.watch_button_mode,
                     pending.rotation_override,
                     pending.face,
                     pending.title.as_deref(),

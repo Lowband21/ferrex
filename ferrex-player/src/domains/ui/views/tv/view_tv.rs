@@ -1,23 +1,35 @@
 use std::f32::consts::PI;
 
 use crate::{
+    common::ui_utils::{Icon, icon_text},
     domains::{
         media::selectors,
         ui::{
             components,
+            interaction_ui::InteractionMessage,
+            menu::{
+                MenuButton, PosterMenuMessage,
+                watched_button_mode_for_media_uuid,
+            },
             messages::UiMessage,
             playback_ui::PlaybackMessage,
             shell_ui::UiShellMessage,
             theme,
             views::{
-                grid::macros::{ThemeColorAccess, parse_hex_color},
+                grid::{
+                    macros::{
+                        ThemeColorAccess, parse_hex_color, truncate_text,
+                    },
+                    types::CardSize,
+                },
                 virtual_carousel::{self, types::CarouselKey},
             },
             widgets::image_for::image_for,
         },
     },
     infra::shader_widgets::poster::{
-        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+        PosterFace, PosterInstanceKey, WatchButtonMode,
+        animation::AnimationBehavior,
     },
     infra::theme::accent,
     media_card,
@@ -36,8 +48,265 @@ use rkyv::option::ArchivedOption;
 
 use iced::{
     Element, Length,
-    widget::{Space, Stack, column, container, row, text},
+    widget::{Space, Stack, button, column, container, mouse_area, row, text},
 };
+
+fn first_episode_for_season(
+    state: &State,
+    season_id: SeasonID,
+) -> Option<EpisodeID> {
+    let mut episodes = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+        .unwrap_or_default();
+    episodes.sort_by_key(|episode| episode.episode_number.value());
+    episodes.first().map(|episode| episode.id)
+}
+
+fn first_episode_for_series(
+    state: &State,
+    series_id: SeriesID,
+) -> Option<EpisodeID> {
+    let mut seasons = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_series_seasons(&series_id)
+        .unwrap_or_default();
+    seasons.sort_by_key(|season| season.season_number.value());
+
+    seasons
+        .into_iter()
+        .find_map(|season| first_episode_for_season(state, season.id))
+}
+
+fn season_has_watch_state(state: &State, season_id: SeasonID) -> bool {
+    state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+        .unwrap_or_default()
+        .into_iter()
+        .any(|episode| {
+            state
+                .domains
+                .media
+                .state
+                .has_watch_state(&MediaID::Episode(episode.id))
+        })
+}
+
+fn series_has_watch_state(state: &State, series_id: SeriesID) -> bool {
+    state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_series_seasons(&series_id)
+        .unwrap_or_default()
+        .into_iter()
+        .any(|season| season_has_watch_state(state, season.id))
+}
+
+fn episode_primary_action_label(
+    state: &State,
+    episode_id: EpisodeID,
+) -> &'static str {
+    if state
+        .domains
+        .media
+        .state
+        .resume_position(&MediaID::Episode(episode_id))
+        .is_some()
+    {
+        "Resume episode"
+    } else {
+        "Play"
+    }
+}
+
+fn start_over_button_for_episode<'a>(
+    episode_id: EpisodeID,
+) -> Element<'a, UiMessage> {
+    button(
+        row![
+            icon_text(Icon::Rewind),
+            text("Start from beginning").size(16)
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(
+        PlaybackMessage::PlayMediaWithIdFromStart(MediaID::Episode(episode_id))
+            .into(),
+    )
+    .padding([10, 20])
+    .style(theme::Button::DetailAction.style())
+    .into()
+}
+
+fn watched_action_button_for_media<'a>(
+    state: &State,
+    media_uuid: uuid::Uuid,
+    instance_key: PosterInstanceKey,
+) -> Element<'a, UiMessage> {
+    let watch_button_mode =
+        watched_button_mode_for_media_uuid(state, media_uuid);
+    let (watch_label, watch_icon) = match watch_button_mode {
+        WatchButtonMode::MarkUnwatched => ("Unwatch", Icon::X),
+        WatchButtonMode::MarkWatched | WatchButtonMode::StaticWatched => {
+            ("Watched", Icon::Check)
+        }
+    };
+
+    button(
+        row![icon_text(watch_icon), text(watch_label).size(16)]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_press(UiMessage::PosterMenu(PosterMenuMessage::ButtonClicked(
+        instance_key,
+        MenuButton::Watched,
+    )))
+    .padding([10, 20])
+    .style(theme::Button::DetailAction.style())
+    .into()
+}
+
+fn season_carousel_card<'a>(
+    state: &'a State,
+    season: SeasonReference,
+    carousel_key: &CarouselKey,
+    poster_quality: ferrex_model::ImageSize,
+) -> Element<'a, UiMessage> {
+    let card_size = CardSize::Medium;
+    let (width, height) = card_size.dimensions();
+    let radius = card_size.radius();
+    let (title_size, subtitle_size) = card_size.text_sizes();
+
+    let title = if season.season_number.value() == 0 {
+        "Specials".to_string()
+    } else {
+        format!("Season {}", season.season_number.value())
+    };
+    let subtitle = format!("{} episodes", season.details.episode_count);
+
+    let instance_key =
+        PosterInstanceKey::new(season.id.to_uuid(), Some(carousel_key.clone()));
+    let is_hovered =
+        state.domains.ui.state.hovered_media_id.as_ref() == Some(&instance_key);
+
+    let mut img = image_for(season.id.to_uuid())
+        .iid(season.details.primary_poster_iid)
+        .skip_request(season.details.primary_poster_iid.is_none())
+        .size(poster_quality)
+        .radius(radius)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .animation_behavior(AnimationBehavior::default())
+        .placeholder(lucide_icons::Icon::Tv)
+        .priority(Priority::Preload)
+        .is_hovered(is_hovered)
+        .watch_button_mode(watched_button_mode_for_media_uuid(
+            state,
+            season.id.to_uuid(),
+        ))
+        .carousel_key(carousel_key.clone())
+        .on_play(UiMessage::NoOp)
+        .on_click(
+            UiShellMessage::ViewSeason(season.series_id, season.id).into(),
+        );
+
+    if let Some(theme_color_str) = season.theme_color() {
+        if let Ok(color) = parse_hex_color(theme_color_str) {
+            img = img.theme_color(color);
+        } else {
+            log::warn!(
+                "Could not parse theme_color_str {} for season {:?}",
+                theme_color_str,
+                season.id.to_uuid()
+            );
+        }
+    }
+
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
+    {
+        (menu_state.face_from_angle(), Some(menu_state.angle))
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
+        (PosterFace::Back, Some(PI))
+    } else {
+        (PosterFace::Front, None)
+    };
+    img = img.face(face);
+    if let Some(rot) = rotation_override {
+        img = img.rotation_y(rot);
+    }
+
+    let image_element: Element<'_, UiMessage> = img.into();
+    let image_with_hover = mouse_area(image_element)
+        .on_enter(InteractionMessage::MediaHovered(instance_key.clone()).into())
+        .on_exit(InteractionMessage::MediaUnhovered(instance_key).into());
+
+    let poster_element: Element<'_, UiMessage> = button(image_with_hover)
+        .padding(0)
+        .style(theme::Button::MediaCard.style())
+        .into();
+
+    use crate::infra::constants::animation;
+    let h_padding = animation::calculate_horizontal_padding(width);
+    let v_padding = animation::calculate_vertical_padding(height);
+    let container_width = width + h_padding * 2.0;
+    let container_height = height + v_padding * 2.0;
+
+    let poster_with_overlay_element: Element<'_, UiMessage> =
+        container(poster_element)
+            .width(Length::Fixed(container_width))
+            .height(Length::Fixed(container_height))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into();
+
+    let title_max_chars = ((width - 10.0) / (title_size as f32 * 0.6)) as usize;
+    let subtitle_max_chars =
+        ((width - 10.0) / (subtitle_size as f32 * 0.6)) as usize;
+    let truncated_title = truncate_text(&title, title_max_chars);
+    let truncated_subtitle = truncate_text(&subtitle, subtitle_max_chars);
+
+    let card_content = column![
+        poster_with_overlay_element,
+        container(
+            column![
+                text(truncated_title)
+                    .size(title_size)
+                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                text(truncated_subtitle)
+                    .size(subtitle_size)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY)
+            ]
+            .spacing(2)
+        )
+        .padding(5)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(60.0))
+        .clip(true)
+    ]
+    .spacing(5);
+
+    container(card_content)
+        .width(Length::Fixed(container_width))
+        .height(Length::Fixed(container_height + 65.0))
+        .clip(false)
+        .into()
+}
 
 #[cfg_attr(
     any(
@@ -159,6 +428,10 @@ pub fn view_series_detail<'a>(
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
+        .watch_button_mode(watched_button_mode_for_media_uuid(
+            state,
+            media_id.to_uuid(),
+        ))
         .animation_behavior(AnimationBehavior::flip_then_fade());
 
     if let Some(hex) = series.theme_color()
@@ -256,12 +529,29 @@ pub fn view_series_detail<'a>(
         );
     }
 
-    // Play/Resume button – uses identity endpoint when available, falls back to local selection
-    if selectors::select_next_episode_for_series(state, series_id).is_some() {
-        let button_row = components::create_action_button_row(
+    // Play/Resume button – uses identity endpoint when available, falls back to local selection.
+    if let Some(next_ep_id) =
+        selectors::select_next_episode_for_series(state, series_id)
+    {
+        let primary_label = episode_primary_action_label(state, next_ep_id);
+        let mut additional_buttons = Vec::new();
+        if series_has_watch_state(state, series_id)
+            && let Some(first_ep_id) =
+                first_episode_for_series(state, series_id)
+        {
+            additional_buttons.push(start_over_button_for_episode(first_ep_id));
+        }
+        additional_buttons.push(watched_action_button_for_media(
+            state,
+            media_id.to_uuid(),
+            instance_key.clone(),
+        ));
+
+        let button_row = components::create_action_button_row_with_label(
+            primary_label,
             PlaybackMessage::PlaySeriesNextEpisode(series_id).into(),
             Some(PlaybackMessage::PlaySeriesNextEpisode(series_id).into()),
-            vec![],
+            additional_buttons,
         );
         details = details.push(Space::new().height(10));
         details = details.push(button_row);
@@ -314,38 +604,12 @@ pub fn view_series_detail<'a>(
                 vc_state,
                 move |idx| {
                     seasons_vec.get(idx).map(|s| {
-                        let title_str = if s.season_number.value() == 0 {
-                            "Specials".to_string()
-                        } else {
-                            format!("Season {}", s.season_number.value())
-                        };
-                        let subtitle_str =
-                            format!("{} episodes", s.details.episode_count);
-
-                        media_card! {
-                            type: Season,
-                            data: (s.clone()),
-                            {
-                                id: s.id.to_uuid(),
-                                title: title_str.as_str(),
-                                subtitle: subtitle_str.as_str(),
-                                image: {
-                                    key: s.id.to_uuid(),
-                                    type: poster,
-                                    fallback: "📺",
-                                },
-                                image_size: ImageSize::Poster(library_poster_quality),
-                                size: Medium,
-                                on_click: UiShellMessage::ViewSeason(
-                                    s.series_id,
-                                    s.id,
-                                )
-                                .into(),
-                                on_play: UiMessage::NoOp,
-                                hover_icon: lucide_icons::Icon::List,
-                                is_hovered: false,
-                            }
-                        }
+                        season_carousel_card(
+                            state,
+                            s.clone(),
+                            &key,
+                            ImageSize::Poster(library_poster_quality),
+                        )
                     })
                 },
                 false,
@@ -488,6 +752,10 @@ pub fn view_season_detail<'a>(
         .width(Length::Fixed(300.0))
         .height(Length::Fixed(450.0))
         .priority(Priority::Visible)
+        .watch_button_mode(watched_button_mode_for_media_uuid(
+            state,
+            season.id.to_uuid(),
+        ))
         .animation_behavior(AnimationBehavior::flip_then_fade());
     if let Some(hex) = season.theme_color()
         && let Ok(color) = parse_hex_color(hex)
@@ -540,11 +808,26 @@ pub fn view_season_detail<'a>(
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     );
 
-    // Play button: play first in-progress or first unwatched episode in this season
+    // Play button: play first in-progress or first unwatched episode in this season.
     if let Some(next_ep_id) =
         selectors::select_next_episode_for_season(state, *season_id)
     {
-        let button_row = components::create_action_button_row(
+        let primary_label = episode_primary_action_label(state, next_ep_id);
+        let mut additional_buttons = Vec::new();
+        if season_has_watch_state(state, *season_id)
+            && let Some(first_ep_id) =
+                first_episode_for_season(state, *season_id)
+        {
+            additional_buttons.push(start_over_button_for_episode(first_ep_id));
+        }
+        additional_buttons.push(watched_action_button_for_media(
+            state,
+            season.id.to_uuid(),
+            season_instance_key.clone(),
+        ));
+
+        let button_row = components::create_action_button_row_with_label(
+            primary_label,
             PlaybackMessage::PlayMediaWithId(MediaID::Episode(next_ep_id))
                 .into(),
             Some(
@@ -553,7 +836,7 @@ pub fn view_season_detail<'a>(
                 ))
                 .into(),
             ),
-            vec![],
+            additional_buttons,
         );
         details = details.push(Space::new().height(10));
         details = details.push(button_row);
@@ -761,35 +1044,18 @@ pub fn view_episode_detail<'a>(
         ArchivedOption::None => None,
     };
 
-    // Episode still image
-    let mut still = image_for(episode.id.to_uuid())
+    // Episode still image: keep this as a plain landscape hero image rather than
+    // forcing the portrait backface menu onto a 16:9 surface.
+    let still = image_for(episode.id.to_uuid())
         .iid(still_iid)
         .skip_request(still_iid.is_none())
         .size(ImageSize::thumbnail())
         .width(Length::Fixed(640.0))
         .height(Length::Fixed(360.0))
-        .priority(Priority::Visible);
-    let poster_id = episode.id.to_uuid();
-    let episode_instance_key = PosterInstanceKey::standalone(poster_id);
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&episode_instance_key)
-    {
-        (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open.as_ref()
-        == Some(&episode_instance_key)
-    {
-        (PosterFace::Back, Some(PI))
-    } else {
-        (PosterFace::Front, None)
-    };
-    still = still.face(face);
-    if let Some(rot) = rotation_override {
-        still = still.rotation_y(rot);
-    }
+        .priority(Priority::Visible)
+        .menu_enabled(false);
+    let episode_instance_key =
+        PosterInstanceKey::standalone(episode.id.to_uuid());
     let still_element: Element<UiMessage> = still.into();
 
     // Details column
@@ -834,19 +1100,65 @@ pub fn view_episode_detail<'a>(
         );
     }
 
+    let episode_media_id = MediaID::Episode(EpisodeID(episode.id.to_uuid()));
+    let primary_label = if state
+        .domains
+        .media
+        .state
+        .resume_position(&episode_media_id)
+        .is_some()
+    {
+        "Resume"
+    } else {
+        "Play"
+    };
+
+    let watch_button_mode =
+        watched_button_mode_for_media_uuid(state, episode.id.to_uuid());
+    let (watch_label, watch_icon) = match watch_button_mode {
+        WatchButtonMode::MarkUnwatched => ("Unwatch", Icon::X),
+        WatchButtonMode::MarkWatched | WatchButtonMode::StaticWatched => {
+            ("Watched", Icon::Check)
+        }
+    };
+
+    let watched_button = button(
+        row![icon_text(watch_icon), text(watch_label).size(16)]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_press(UiMessage::PosterMenu(PosterMenuMessage::ButtonClicked(
+        episode_instance_key,
+        MenuButton::Watched,
+    )))
+    .padding([10, 20])
+    .style(theme::Button::DetailAction.style());
+
+    let mut additional_buttons = Vec::new();
+    if state.domains.media.state.has_watch_state(&episode_media_id) {
+        let start_over_button = button(
+            row![
+                icon_text(Icon::Rewind),
+                text("Start from beginning").size(16)
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(
+            PlaybackMessage::PlayMediaWithIdFromStart(episode_media_id).into(),
+        )
+        .padding([10, 20])
+        .style(theme::Button::DetailAction.style());
+        additional_buttons.push(start_over_button.into());
+    }
+    additional_buttons.push(watched_button.into());
+
     // Play button
-    let button_row = components::create_action_button_row(
-        PlaybackMessage::PlayMediaWithId(MediaID::Episode(EpisodeID(
-            episode.id.to_uuid(),
-        )))
-        .into(),
-        Some(
-            PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
-                episode.id.to_uuid(),
-            )))
-            .into(),
-        ),
-        vec![],
+    let button_row = components::create_action_button_row_with_label(
+        primary_label,
+        PlaybackMessage::PlayMediaWithId(episode_media_id).into(),
+        Some(PlaybackMessage::PlayMediaWithIdInMpv(episode_media_id).into()),
+        additional_buttons,
     );
     details = details.push(Space::new().height(10));
     details = details.push(button_row);

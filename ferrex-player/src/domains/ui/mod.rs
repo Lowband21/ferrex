@@ -34,7 +34,7 @@ pub use motion_controller::MotionController;
 use crate::{
     common::messages::{CrossDomainEvent, DomainMessage},
     domains::ui::{
-        menu::PosterMenuState,
+        menu::{PendingWatchToggleConfirmation, PosterMenuState},
         messages::UiMessage as UIMessage,
         scroll_manager::ScrollPositionManager,
         shell_ui::Scope,
@@ -154,6 +154,8 @@ pub struct UIDomainState {
     // Poster menu open state (single target for now)
     pub poster_menu_open: Option<PosterInstanceKey>,
     pub poster_menu_states: HashMap<PosterInstanceKey, PosterMenuState>,
+    pub pending_watch_toggle_confirmation:
+        Option<PendingWatchToggleConfirmation>,
 
     // Toast notification manager
     pub toast_manager: feedback_ui::ToastManager,

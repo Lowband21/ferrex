@@ -8,6 +8,7 @@ use crate::{
     common::text,
     domains::ui::{
         interaction_ui::InteractionMessage,
+        menu::watched_button_mode_for_media_uuid,
         messages::UiMessage,
         playback_ui::PlaybackMessage,
         shell_ui::UiShellMessage,
@@ -198,6 +199,10 @@ pub fn movie_reference_card_with_state<'a>(
                             Priority::Preload
                         })
                         .is_hovered(is_hovered)
+                        .watch_button_mode(watched_button_mode_for_media_uuid(
+                            state,
+                            movie_id.to_uuid(),
+                        ))
                         .on_click(
                             UiShellMessage::ViewMovieDetails(movie_id).into(),
                         );
@@ -272,6 +277,10 @@ pub fn movie_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
         .is_hovered(is_hovered)
+        .watch_button_mode(watched_button_mode_for_media_uuid(
+            state,
+            media_id.to_uuid(),
+        ))
         .on_play(PlaybackMessage::PlayMediaWithId(media_id).into())
         .on_click(UiShellMessage::ViewMovieDetails(movie_id).into());
 
@@ -450,6 +459,10 @@ pub fn series_reference_card_with_state<'a>(
                             Priority::Preload
                         })
                         .is_hovered(is_hovered)
+                        .watch_button_mode(watched_button_mode_for_media_uuid(
+                            state,
+                            series_id.to_uuid(),
+                        ))
                         .on_click(UiShellMessage::ViewTvShow(series_id).into());
                     if let Some(key) = carousel_key {
                         placeholder_widget =
@@ -519,6 +532,10 @@ pub fn series_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
+        .watch_button_mode(watched_button_mode_for_media_uuid(
+            state,
+            series_id.to_uuid(),
+        ))
         .on_play(PlaybackMessage::PlaySeriesNextEpisode(series_id).into())
         .on_click(UiShellMessage::ViewTvShow(series_id).into());
 

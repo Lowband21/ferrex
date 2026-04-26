@@ -1,5 +1,5 @@
 use crate::infra::shader_widgets::poster::{
-    PosterFace,
+    PosterFace, WatchButtonMode,
     animation::{AnimatedPosterBounds, PosterAnimationType},
     batch_state::{PendingPrimitive, PosterBatchState},
 };
@@ -33,6 +33,7 @@ pub struct PosterPrimitive {
     pub mouse_position: Option<Point>, // Mouse position relative to widget
     pub progress: Option<f32>,
     pub progress_color: Color,
+    pub watch_button_mode: WatchButtonMode,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
     /// Title text to render below the poster
@@ -106,6 +107,7 @@ impl BatchPrimitive for PosterPrimitive {
             mouse_position: self.mouse_position,
             progress: self.progress,
             progress_color: self.progress_color,
+            watch_button_mode: self.watch_button_mode,
             rotation_override: self.rotation_override,
             face: self.face,
             title: self.title.clone(),

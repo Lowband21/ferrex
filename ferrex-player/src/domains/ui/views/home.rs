@@ -23,9 +23,9 @@ use crate::{
     state::State,
 };
 
-use ferrex_core::player_prelude::{MediaID, MovieID, SeriesID};
+use ferrex_core::player_prelude::{MovieID, SeriesID, WatchProgress};
 
-use ferrex_model::LibraryType;
+use ferrex_model::{LibraryType, VideoMediaType};
 
 use iced::{
     Element, Length,
@@ -74,8 +74,8 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
         && let TabState::Home(all_state) = tab
     {
         // Continue Watching (mixed movies/series)
-        if !all_state.continue_watching.is_empty() {
-            let ids = all_state.continue_watching.clone();
+        if !all_state.continue_watching_items.is_empty() {
+            let server_items = all_state.continue_watching_items.clone();
             let key = CarouselKey::Custom("ContinueWatching");
             if let Some(vc_state) =
                 state.domains.ui.state.carousel_registry.get(&key)
@@ -87,8 +87,8 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 let is_active = (hover_preferred
                     && cf.hovered_key.as_ref() == Some(&key))
                     || (cf.keyboard_active_key.as_ref() == Some(&key));
-                let total = ids.len();
-                let ids_for_closure = ids.clone();
+                let total = server_items.len();
+                let server_items_for_closure = server_items.clone();
                 let key_for_card = key.clone();
                 let carousel = virtual_carousel::virtual_carousel(
                     key.clone(),
@@ -96,52 +96,49 @@ pub fn view_home_content<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     total,
                     vc_state,
                     move |idx| {
-                        ids_for_closure.get(idx).and_then(|uuid| {
-                            let instance_key = PosterInstanceKey::new(
-                                *uuid,
-                                Some(key_for_card.clone()),
-                            );
-                            let is_hovered = state
-                                .domains
-                                .ui
-                                .state
-                                .hovered_media_id
-                                .as_ref()
+                        let item = server_items_for_closure.get(idx)?;
+                        let card_uuid =
+                            item.card_media_id.unwrap_or(item.media_id);
+                        let instance_key = PosterInstanceKey::new(
+                            card_uuid,
+                            Some(key_for_card.clone()),
+                        );
+                        let is_hovered =
+                            state.domains.ui.state.hovered_media_id.as_ref()
                                 == Some(&instance_key);
-                            let item_watch_progress =
-                                if let Some(watch_state) = watch_state_opt {
-                                    watch_state.get_watch_progress(uuid)
-                                } else {
-                                    None
-                                };
-
-                            let acc = &state.domains.ui.state.repo_accessor;
-                            if acc.get(&MediaID::Movie(MovieID(*uuid))).is_ok()
-                            {
-                                return Some(movie_reference_card_with_state(
-                                    state,
-                                    MovieID(*uuid),
-                                    is_hovered,
-                                    false,
-                                    item_watch_progress,
-                                    Some(&key_for_card),
-                                ));
-                            }
-                            if acc
-                                .get(&MediaID::Series(SeriesID(*uuid)))
-                                .is_ok()
-                            {
-                                return Some(series_reference_card_with_state(
-                                    state,
-                                    SeriesID(*uuid),
-                                    is_hovered,
-                                    false,
-                                    item_watch_progress,
-                                    Some(&key_for_card),
-                                ));
-                            }
+                        let item_watch_progress = if item.duration > 0.0 {
+                            Some(WatchProgress::new(
+                                item.position / item.duration,
+                            ))
+                        } else if let Some(watch_state) = watch_state_opt {
+                            watch_state.get_watch_progress(&card_uuid)
+                        } else {
                             None
-                        })
+                        };
+
+                        match item.media_type {
+                            VideoMediaType::Movie => {
+                                Some(movie_reference_card_with_state(
+                                    state,
+                                    MovieID(card_uuid),
+                                    is_hovered,
+                                    false,
+                                    item_watch_progress,
+                                    Some(&key_for_card),
+                                ))
+                            }
+                            VideoMediaType::Series => {
+                                Some(series_reference_card_with_state(
+                                    state,
+                                    SeriesID(card_uuid),
+                                    is_hovered,
+                                    false,
+                                    item_watch_progress,
+                                    Some(&key_for_card),
+                                ))
+                            }
+                            _ => None,
+                        }
                     },
                     is_active,
                     fonts,

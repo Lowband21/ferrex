@@ -1,6 +1,8 @@
 use ferrex_core::{
     api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
-    player_prelude::{User, UserPermissions, UserWatchState},
+    player_prelude::{
+        ContinueWatchingItem, User, UserPermissions, UserWatchState,
+    },
 };
 use uuid::Uuid;
 
@@ -50,6 +52,7 @@ pub enum AuthMessage {
     // Login results
     LoginSuccess(User, UserPermissions),
     WatchStatusLoaded(Result<UserWatchState, String>),
+    ContinueWatchingLoaded(Result<Vec<ContinueWatchingItem>, String>),
     Logout,
     LogoutComplete,
 
@@ -143,6 +146,9 @@ impl std::fmt::Debug for AuthMessage {
             // Login results
             Self::LoginSuccess(_, _) => write!(f, "LoginSuccess(...)"),
             Self::WatchStatusLoaded(_) => write!(f, "WatchStatusLoaded(...)"),
+            Self::ContinueWatchingLoaded(_) => {
+                write!(f, "ContinueWatchingLoaded(...)")
+            }
             Self::Logout => write!(f, "Logout"),
             Self::LogoutComplete => write!(f, "LogoutComplete"),
 
@@ -283,6 +289,7 @@ impl AuthMessage {
             // Login results
             Self::LoginSuccess(_, _) => "Auth::LoginSuccess",
             Self::WatchStatusLoaded(_) => "Auth::WatchStatusLoaded",
+            Self::ContinueWatchingLoaded(_) => "Auth::ContinueWatchingLoaded",
             Self::Logout => "Auth::Logout",
             Self::LogoutComplete => "Auth::LogoutComplete",
 

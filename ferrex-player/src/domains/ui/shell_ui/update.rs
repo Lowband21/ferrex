@@ -113,6 +113,37 @@ fn restore_library_tab_scroll(
     }
 }
 
+fn refresh_watch_state_task(
+    state: &State,
+    reason: &'static str,
+) -> Option<Task<DomainMessage>> {
+    if !state.is_authenticated {
+        return None;
+    }
+
+    if state.domains.player.state.current_media_id.is_some() {
+        log::debug!(
+            "Skipping watch state refresh on {} while playback is active",
+            reason
+        );
+        return None;
+    }
+
+    let api = state.domains.media.state.api_service.clone()?;
+    log::debug!("Refreshing watch state on {}", reason);
+
+    Some(Task::perform(
+        async move { api.get_watch_state().await },
+        |result| {
+            DomainMessage::Auth(
+                crate::domains::auth::messages::AuthMessage::WatchStatusLoaded(
+                    result.map_err(|e| e.to_string()),
+                ),
+            )
+        },
+    ))
+}
+
 pub fn update_shell_ui(
     state: &mut State,
     message: UiShellMessage,
@@ -346,11 +377,20 @@ pub fn update_shell_ui(
             init_all_tab_view(state);
             emit_initial_all_tab_snapshots_combined(state);
             bump_keep_alive(state);
-            if state.domains.search.state.presentation.is_overlay() {
-                windows::controller::focus_search_input(state)
-            } else {
-                DomainUpdateResult::task(Task::none())
+
+            let mut tasks: Vec<Task<DomainMessage>> = Vec::new();
+
+            if let Some(refresh_task) =
+                refresh_watch_state_task(state, "main window focus")
+            {
+                tasks.push(refresh_task);
             }
+
+            if state.domains.search.state.presentation.is_overlay() {
+                tasks.push(windows::controller::focus_search_input(state).task);
+            }
+
+            DomainUpdateResult::task(Task::batch(tasks))
         }
         UiShellMessage::MainWindowUnfocused => {
             // No special handling currently; keep behavior simple
@@ -424,7 +464,18 @@ pub fn update_shell_ui(
                 );
 
             // Delegate all scope change logic to SelectScope
-            update_shell_ui(state, UiShellMessage::SelectScope(Scope::Home))
+            let mut result = update_shell_ui(
+                state,
+                UiShellMessage::SelectScope(Scope::Home),
+            );
+
+            if let Some(refresh_task) =
+                refresh_watch_state_task(state, "navigate home")
+            {
+                result.task = Task::batch([result.task, refresh_task]);
+            }
+
+            result
         }
         UiShellMessage::NavigateBack => {
             // Navigate to the previous view in history
@@ -536,7 +587,24 @@ pub fn update_shell_ui(
                                     library_id,
                                 );
 
-                            return DomainUpdateResult::task(scroll_task);
+                            let task = if let Some(refresh_task) = matches!(
+                                state.domains.ui.state.scope,
+                                Scope::Home
+                            )
+                            .then(|| {
+                                refresh_watch_state_task(
+                                    state,
+                                    "navigate back to home",
+                                )
+                            })
+                            .flatten()
+                            {
+                                Task::batch([scroll_task, refresh_task])
+                            } else {
+                                scroll_task
+                            };
+
+                            return DomainUpdateResult::task(task);
                         }
                         _ => {
                             // Detail views don't have scrollable content in current implementation
@@ -568,7 +636,20 @@ pub fn update_shell_ui(
                             library_id,
                         );
 
-                    DomainUpdateResult::task(Task::none())
+                    if let Some(refresh_task) =
+                        matches!(state.domains.ui.state.scope, Scope::Home)
+                            .then(|| {
+                                refresh_watch_state_task(
+                                    state,
+                                    "navigate back to home",
+                                )
+                            })
+                            .flatten()
+                    {
+                        DomainUpdateResult::task(refresh_task)
+                    } else {
+                        DomainUpdateResult::task(Task::none())
+                    }
                 }
                 _ => {
                     // No history - return to library view preserving current display mode
@@ -609,7 +690,20 @@ pub fn update_shell_ui(
                             library_id,
                         );
 
-                    DomainUpdateResult::task(Task::none())
+                    if let Some(refresh_task) =
+                        matches!(state.domains.ui.state.scope, Scope::Home)
+                            .then(|| {
+                                refresh_watch_state_task(
+                                    state,
+                                    "navigate back to home",
+                                )
+                            })
+                            .flatten()
+                    {
+                        DomainUpdateResult::task(refresh_task)
+                    } else {
+                        DomainUpdateResult::task(Task::none())
+                    }
                 }
             }
         }

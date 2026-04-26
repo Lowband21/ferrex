@@ -13,12 +13,12 @@ use crate::infra::{
 };
 
 use ferrex_core::player_prelude::{
-    ActiveScansResponse, AuthToken, AuthenticatedDevice, CreateLibraryRequest,
-    FilterIndicesRequest, ImageManifestRequest, ImageManifestResponse,
-    IndicesResponse, LatestProgressResponse, Library, LibraryId,
-    LibraryMediaResponse, Media, MediaID, MediaQuery, MediaRootBrowseResponse,
-    MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
-    MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
+    ActiveScansResponse, AuthToken, AuthenticatedDevice, ContinueWatchingItem,
+    CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
+    ImageManifestResponse, IndicesResponse, LatestProgressResponse, Library,
+    LibraryId, LibraryMediaResponse, Media, MediaID, MediaQuery,
+    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
+    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig, ScanMetrics,
     SeasonWatchStatus, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
     SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus, SortBy, SortOrder,
@@ -520,12 +520,108 @@ impl ApiService for ApiClientAdapter {
             .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
     }
 
+    async fn get_continue_watching(
+        &self,
+    ) -> RepositoryResult<Vec<ContinueWatchingItem>> {
+        self.client
+            .get_continue_watching()
+            .await
+            .map_err(|e| RepositoryError::QueryFailed(e.to_string()))
+    }
+
     async fn update_progress(
         &self,
         request: &UpdateProgressRequest,
     ) -> RepositoryResult<()> {
         self.client
             .update_progress(request)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_movie_watched(&self, media_id: Uuid) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::MOVIE_WATCHED,
+            "{media_id}",
+            media_id.to_string(),
+        );
+        self.client
+            .post_no_content(&path, &())
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_movie_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::MOVIE_WATCHED,
+            "{media_id}",
+            media_id.to_string(),
+        );
+        self.client
+            .delete_no_content(&path)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_episode_watched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::EPISODE_WATCHED,
+            "{media_id}",
+            media_id.to_string(),
+        );
+        self.client
+            .post_no_content(&path, &())
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_episode_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::EPISODE_WATCHED,
+            "{media_id}",
+            media_id.to_string(),
+        );
+        self.client
+            .delete_no_content(&path)
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_series_watched(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::SERIES_WATCHED,
+            "{tmdb_series_id}",
+            tmdb_series_id.to_string(),
+        );
+        self.client
+            .post_no_content(&path, &())
+            .await
+            .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
+    }
+
+    async fn mark_series_unwatched(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<()> {
+        let path = replace_param(
+            v1::watch::SERIES_WATCHED,
+            "{tmdb_series_id}",
+            tmdb_series_id.to_string(),
+        );
+        self.client
+            .delete_no_content(&path)
             .await
             .map_err(|e| RepositoryError::UpdateFailed(e.to_string()))
     }

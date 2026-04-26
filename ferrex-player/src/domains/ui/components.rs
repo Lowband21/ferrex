@@ -175,9 +175,24 @@ pub fn create_action_button_row<'a>(
     play_in_mpv_message: Option<UiMessage>,
     additional_buttons: Vec<Element<'a, UiMessage>>,
 ) -> Element<'a, UiMessage> {
+    create_action_button_row_with_label(
+        "Play",
+        play_message,
+        play_in_mpv_message,
+        additional_buttons,
+    )
+}
+
+/// Create an action button row with a custom primary play/resume label.
+pub fn create_action_button_row_with_label<'a>(
+    play_label: &'static str,
+    play_message: UiMessage,
+    play_in_mpv_message: Option<UiMessage>,
+    additional_buttons: Vec<Element<'a, UiMessage>>,
+) -> Element<'a, UiMessage> {
     // Play button with DetailAction style
     let play_button = button(
-        row![icon_text(Icon::Play), text("Play").size(16)]
+        row![icon_text(Icon::Play), text(play_label).size(16)]
             .spacing(8)
             .align_y(iced::Alignment::Center),
     )

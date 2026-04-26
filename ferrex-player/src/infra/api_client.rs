@@ -2,8 +2,9 @@ use ferrex_core::{
     api::routes::v1,
     player_prelude::{
         ApiResponse, AuthToken, AuthenticatedDevice, ConfirmClaimRequest,
-        ConfirmClaimResponse, MediaQuery, MediaWithStatus, StartClaimRequest,
-        StartClaimResponse, UpdateProgressRequest, UserWatchState,
+        ConfirmClaimResponse, ContinueWatchingItem, MediaQuery,
+        MediaWithStatus, StartClaimRequest, StartClaimResponse,
+        UpdateProgressRequest, UserWatchState,
     },
 };
 
@@ -511,6 +512,80 @@ impl ApiClient {
         }
     }
 
+    /// DELETE request for endpoints that return 204 No Content
+    pub async fn delete_no_content(&self, path: &str) -> Result<()> {
+        let url = self.build_url(path);
+
+        let request = self.client.delete(&url);
+        let request = self.build_request(request).await;
+
+        // Execute request with special handling for 204 No Content
+        let request_clone = request.try_clone();
+        let response = request.send().await?;
+
+        match response.status() {
+            StatusCode::OK | StatusCode::NO_CONTENT => Ok(()),
+            StatusCode::UNAUTHORIZED => {
+                // Try to refresh token if we have a callback
+                if let Some(request_retry) = request_clone
+                    && let Some(ref callback) =
+                        *self.refresh_callback.lock().await
+                {
+                    info!("[ApiClient] Token expired, attempting refresh");
+                    match callback().await {
+                        Ok(new_token) => {
+                            info!(
+                                "[ApiClient] Token refreshed successfully, retrying request"
+                            );
+                            self.set_token(Some(new_token.clone())).await;
+
+                            // Rebuild request with new token and retry
+                            let retry_request =
+                                self.build_request(request_retry).await;
+                            let retry_response = retry_request.send().await?;
+
+                            match retry_response.status() {
+                                StatusCode::OK | StatusCode::NO_CONTENT => {
+                                    return Ok(());
+                                }
+                                _ => {
+                                    let error_text = retry_response
+                                        .text()
+                                        .await
+                                        .unwrap_or_else(|_| {
+                                            "Unknown error".to_string()
+                                        });
+                                    return Err(anyhow::anyhow!(
+                                        "Request failed after retry: {}",
+                                        error_text
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("[ApiClient] Token refresh failed: {}", e);
+                        }
+                    }
+                }
+
+                // Token refresh failed or not available
+                self.set_token(None).await;
+                Err(anyhow::anyhow!("Unauthorized - please login again"))
+            }
+            status => {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                Err(anyhow::anyhow!(
+                    "Request failed with status {}: {}",
+                    status,
+                    error_text
+                ))
+            }
+        }
+    }
+
     /// GET request with authentication, returns raw rkyv bytes (structured data only)
     pub async fn get_rkyv(
         &self,
@@ -858,6 +933,13 @@ impl ApiClient {
     /// Get watch state for the current user
     pub async fn get_watch_state(&self) -> Result<UserWatchState> {
         self.get(v1::watch::STATE).await
+    }
+
+    /// Get presentation-ready continue-watching cards for the current user
+    pub async fn get_continue_watching(
+        &self,
+    ) -> Result<Vec<ContinueWatchingItem>> {
+        self.get(v1::watch::CONTINUE).await
     }
 
     /// Update watch progress for a media item

@@ -126,6 +126,11 @@ pub fn update_auth(
             DomainUpdateResult::task(task.map(DomainMessage::Auth))
         }
 
+        auth::AuthMessage::ContinueWatchingLoaded(result) => {
+            let task = handle_continue_watching_loaded(state, result.clone());
+            DomainUpdateResult::task(task.map(DomainMessage::Auth))
+        }
+
         auth::AuthMessage::Logout => {
             wrap_task!(handle_logout(state))
         }

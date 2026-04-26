@@ -9,16 +9,16 @@ use ferrex_core::domain::users::auth::{
 };
 use ferrex_core::player_prelude::{
     ActiveScansResponse, AuthToken, AuthenticatedDevice, ConfirmClaimResponse,
-    CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
-    ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
-    LibraryType, Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
-    MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
-    MovieBatchSyncResponse, Platform, Role, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanMetrics, SeriesBundleFetchRequest,
-    SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
-    StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
-    UpdateProgressRequest, User, UserPermissions, UserPreferences,
-    UserWatchState,
+    ContinueWatchingItem, CreateLibraryRequest, FilterIndicesRequest,
+    ImageManifestRequest, ImageManifestResponse, LatestProgressResponse,
+    Library, LibraryId, LibraryType, Media, MediaQuery,
+    MediaRootBrowseResponse, MediaWithStatus, MovieBatchFetchRequest,
+    MovieBatchId, MovieBatchSyncRequest, MovieBatchSyncResponse, Platform,
+    Role, ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+    ScanMetrics, SeriesBundleFetchRequest, SeriesBundleSyncRequest,
+    SeriesBundleSyncResponse, SeriesID, StartClaimResponse, StartScanRequest,
+    UpdateLibraryRequest, UpdateProgressRequest, User, UserPermissions,
+    UserPreferences, UserWatchState,
 };
 use ferrex_model::MovieReferenceBatchSize;
 use ferrex_model::image::ImageQuery;
@@ -42,6 +42,7 @@ struct InnerApiState {
     libraries: Vec<Library>,
     library_media: HashMap<Uuid, Vec<Media>>,
     watch_state: UserWatchState,
+    continue_watching: Vec<ContinueWatchingItem>,
     setup_required: bool,
     setup_token_required: bool,
     auth_token: Option<AuthToken>,
@@ -71,6 +72,7 @@ impl TestApiService {
                 libraries: vec![library],
                 library_media: HashMap::new(),
                 watch_state: UserWatchState::new(),
+                continue_watching: Vec::new(),
                 setup_required: true,
                 setup_token_required: false,
                 auth_token: None,
@@ -110,6 +112,15 @@ impl TestApiService {
     pub fn set_watch_state(&self, watch_state: UserWatchState) {
         if let Ok(mut guard) = self.inner.write() {
             guard.watch_state = watch_state;
+        }
+    }
+
+    pub fn set_continue_watching(
+        &self,
+        continue_watching: Vec<ContinueWatchingItem>,
+    ) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.continue_watching = continue_watching;
         }
     }
 }
@@ -449,6 +460,17 @@ impl ApiService for TestApiService {
             .clone())
     }
 
+    async fn get_continue_watching(
+        &self,
+    ) -> RepositoryResult<Vec<ContinueWatchingItem>> {
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .continue_watching
+            .clone())
+    }
+
     async fn update_progress(
         &self,
         request: &UpdateProgressRequest,
@@ -460,6 +482,59 @@ impl ApiService for TestApiService {
                 request.duration,
             );
         }
+        Ok(())
+    }
+
+    async fn mark_movie_watched(&self, media_id: Uuid) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.watch_state.in_progress.remove(&media_id);
+            guard.watch_state.completed.insert(media_id);
+        }
+        Ok(())
+    }
+
+    async fn mark_movie_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.watch_state.clear_progress(&media_id);
+        }
+        Ok(())
+    }
+
+    async fn mark_episode_watched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.watch_state.in_progress.remove(&media_id);
+            guard.watch_state.completed.insert(media_id);
+        }
+        Ok(())
+    }
+
+    async fn mark_episode_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.watch_state.clear_progress(&media_id);
+        }
+        Ok(())
+    }
+
+    async fn mark_series_watched(
+        &self,
+        _tmdb_series_id: u64,
+    ) -> RepositoryResult<()> {
+        Ok(())
+    }
+
+    async fn mark_series_unwatched(
+        &self,
+        _tmdb_series_id: u64,
+    ) -> RepositoryResult<()> {
         Ok(())
     }
 

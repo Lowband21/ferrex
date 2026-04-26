@@ -14,7 +14,7 @@ use crate::{
         image_log::register_media_title,
         service_registry,
         shader_widgets::poster::{
-            Poster, PosterFace, PosterInstanceKey,
+            Poster, PosterFace, PosterInstanceKey, WatchButtonMode,
             animation::{
                 AnimatedPosterBounds, AnimationBehavior, AnimationConfig,
                 PosterAnimationType,
@@ -71,6 +71,8 @@ pub struct ImageFor {
     on_click: Option<UiMessage>,
     progress: Option<f32>,
     progress_color: Option<Color>,
+    watch_button_mode: WatchButtonMode,
+    menu_enabled: bool,
     rotation_y: Option<f32>,
     face: Option<PosterFace>,
     // Optimization: Cache to avoid repeated lookups
@@ -118,6 +120,8 @@ impl ImageFor {
             on_click: None,
             progress: None,
             progress_color: None,
+            watch_button_mode: WatchButtonMode::default(),
+            menu_enabled: true,
             rotation_y: None,
             face: None,
             cached_data: None,
@@ -246,6 +250,18 @@ impl ImageFor {
     /// Set the progress indicator color
     pub fn progress_color(mut self, color: Color) -> Self {
         self.progress_color = Some(color);
+        self
+    }
+
+    /// Set the watched/unwatched button presentation for the backface menu.
+    pub fn watch_button_mode(mut self, mode: WatchButtonMode) -> Self {
+        self.watch_button_mode = mode;
+        self
+    }
+
+    /// Enable or disable the shader backface context menu / flip affordance.
+    pub fn menu_enabled(mut self, enabled: bool) -> Self {
+        self.menu_enabled = enabled;
         self
     }
 
@@ -392,6 +408,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     instance_key,
                     image.face.unwrap_or(PosterFace::Front),
                     image.rotation_y,
+                    image.watch_button_mode,
+                    image.menu_enabled,
                 );
             };
 
@@ -431,8 +449,11 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                             .radius(image.radius)
                             .with_animated_bounds(bounds)
                             .is_hovered(image.is_hovered)
-                            .menu_target(instance_key)
                             .face(image.face.unwrap_or(PosterFace::Front));
+
+                    if image.menu_enabled {
+                        shader = shader.menu_target(instance_key);
+                    }
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);
@@ -449,6 +470,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     if let Some(rot) = image.rotation_y {
                         shader = shader.rotation_y(rot);
                     }
+                    shader = shader.watch_button_mode(image.watch_button_mode);
 
                     // Add a tiny random jitter to animation selection so rows don't animate in lockstep.
                     // We intentionally do NOT set an explicit load_time on the shader here; the
@@ -546,6 +568,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         instance_key,
                         image.face.unwrap_or(PosterFace::Front),
                         image.rotation_y,
+                        image.watch_button_mode,
+                        image.menu_enabled,
                     )
                 }
             }
@@ -563,6 +587,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 instance_key,
                 image.face.unwrap_or(PosterFace::Front),
                 image.rotation_y,
+                image.watch_button_mode,
+                image.menu_enabled,
             )
         }
     }
@@ -592,8 +618,11 @@ fn create_shader_from_cached<'a>(
         .radius(image.radius)
         .with_animated_bounds(bounds)
         .is_hovered(image.is_hovered)
-        .menu_target(instance_key)
         .face(image.face.unwrap_or(PosterFace::Front));
+
+    if image.menu_enabled {
+        shader = shader.menu_target(instance_key);
+    }
 
     // Set theme color if provided
     if let Some(color) = image.theme_color {
@@ -610,6 +639,7 @@ fn create_shader_from_cached<'a>(
     if let Some(rot) = image.rotation_y {
         shader = shader.rotation_y(rot);
     }
+    shader = shader.watch_button_mode(image.watch_button_mode);
 
     // Apply load-time aware animation selection, but defer actual animation start
     // to the batched renderer (GPU upload time).
@@ -659,6 +689,8 @@ fn create_loading_placeholder<'a>(
     instance_key: PosterInstanceKey,
     face: PosterFace,
     rotation_override: Option<f32>,
+    watch_button_mode: WatchButtonMode,
+    menu_enabled: bool,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -680,8 +712,12 @@ fn create_loading_placeholder<'a>(
         .theme_color(color)
         .with_animation(PosterAnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
-        .menu_target(instance_key)
+        .watch_button_mode(watch_button_mode)
         .face(face);
+
+    if menu_enabled {
+        poster = poster.menu_target(instance_key);
+    }
 
     if let Some(rot) = rotation_override {
         poster = poster.rotation_y(rot);

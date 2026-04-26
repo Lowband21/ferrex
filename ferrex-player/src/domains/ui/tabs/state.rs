@@ -8,8 +8,9 @@ use super::HomeFocusState;
 use crate::infra::repository::accessor::{Accessor, ReadOnly};
 use ferrex_core::player_prelude::{
     ArchivedLibraryExt, ArchivedMedia, ArchivedMediaID, ArchivedModel,
-    ArchivedMovieReference, ArchivedSeries, LibraryId, MediaID, MediaIDLike,
-    MediaOps, MovieID, SeriesID, SortBy, SortOrder, compare_media,
+    ArchivedMovieReference, ArchivedSeries, ContinueWatchingItem, LibraryId,
+    MediaID, MediaIDLike, MediaOps, MovieID, SeriesID, SortBy, SortOrder,
+    compare_media,
 };
 use iced::widget::Id;
 use std::cmp::Ordering;
@@ -404,6 +405,8 @@ pub struct HomeTabState {
     /// Navigation history specific to this tab
     pub navigation_history: Vec<String>,
 
+    /// Presentation-ready continue watching items sourced from the server.
+    pub continue_watching_items: Vec<ContinueWatchingItem>,
     /// Curated: combined continue watching across movies and series
     pub continue_watching: Vec<uuid::Uuid>,
     /// Curated: recently added movies (by date added desc)
@@ -425,6 +428,7 @@ impl HomeTabState {
         Self {
             view_model: HomeViewModel::new(accessor),
             navigation_history: Vec::new(),
+            continue_watching_items: Vec::new(),
             continue_watching: Vec::new(),
             recent_movies: Vec::new(),
             recent_series: Vec::new(),

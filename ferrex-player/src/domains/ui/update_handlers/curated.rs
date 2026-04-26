@@ -5,11 +5,9 @@
 //! generic virtual carousel helpers to keep responsibilities focused and
 //! make future extensions straightforward.
 use ferrex_core::player_prelude::{
-    LibraryId, SortBy, SortOrder, compare_media,
+    ContinueWatchingItem, LibraryId, SortBy, SortOrder, compare_media,
 };
-use ferrex_model::{
-    EpisodeID, LibraryType, Media, MediaID, MovieID, SeasonID, SeriesID,
-};
+use ferrex_model::{LibraryType, Media, MediaID, MovieID, SeriesID};
 
 use crate::{
     domains::{
@@ -39,6 +37,34 @@ struct CuratedLists {
     recent_series: Vec<Uuid>,
     released_movies: Vec<Uuid>,
     released_series: Vec<Uuid>,
+}
+
+fn continue_watching_card_id(item: &ContinueWatchingItem) -> Uuid {
+    item.card_media_id.unwrap_or(item.media_id)
+}
+
+pub fn set_server_continue_watching_items(
+    state: &mut State,
+    items: Vec<ContinueWatchingItem>,
+) {
+    let continue_ids: Vec<Uuid> =
+        items.iter().map(continue_watching_card_id).collect();
+
+    if let TabState::Home(home_state) =
+        state.tab_manager.get_or_create_tab(TabId::Home)
+    {
+        home_state.continue_watching_items = items;
+        home_state.continue_watching = continue_ids;
+    }
+}
+
+pub fn clear_server_continue_watching_items(state: &mut State) {
+    if let TabState::Home(home_state) =
+        state.tab_manager.get_or_create_tab(TabId::Home)
+    {
+        home_state.continue_watching_items.clear();
+        home_state.continue_watching.clear();
+    }
 }
 
 fn fetch_media_for_uuid(
@@ -160,66 +186,12 @@ fn k_way_merge_top(
 }
 
 fn compute_curated_lists(state: &State) -> CuratedLists {
-    // Continue Watching: movies and series only; map episodes to parent series and dedupe by most recent
-    let mut cw_map: std::collections::HashMap<Uuid, i64> =
-        std::collections::HashMap::new();
-    // Helper: resolve a Media by unknown UUID by probing known ID kinds.
-    let lookup_media = |uid: Uuid| -> Option<Media> {
-        let acc = &state.domains.ui.state.repo_accessor;
-        acc.get(&MediaID::Movie(MovieID(uid)))
-            .ok()
-            .or_else(|| acc.get(&MediaID::Series(SeriesID(uid))).ok())
-            .or_else(|| acc.get(&MediaID::Season(SeasonID(uid))).ok())
-            .or_else(|| acc.get(&MediaID::Episode(EpisodeID(uid))).ok())
-    };
-
-    if let Some(watch) = state.domains.media.state.get_watch_state() {
-        for item in watch.in_progress.values() {
-            let uid = item.media_id;
-            // Get media by uuid (any type) and map accordingly
-            if let Some(media) = lookup_media(uid) {
-                match media {
-                    Media::Movie(m) => {
-                        let id = m.id.to_uuid();
-                        cw_map
-                            .entry(id)
-                            .and_modify(|t| *t = (*t).max(item.last_watched))
-                            .or_insert(item.last_watched);
-                    }
-                    Media::Series(s) => {
-                        let id = s.id.to_uuid();
-                        cw_map
-                            .entry(id)
-                            .and_modify(|t| *t = (*t).max(item.last_watched))
-                            .or_insert(item.last_watched);
-                    }
-                    Media::Episode(e) => {
-                        let id = e.series_id.to_uuid();
-                        cw_map
-                            .entry(id)
-                            .and_modify(|t| *t = (*t).max(item.last_watched))
-                            .or_insert(item.last_watched);
-                    }
-                    Media::Season(season) => {
-                        // Treat season as series-level continue watching
-                        let id = season.series_id.to_uuid();
-                        cw_map
-                            .entry(id)
-                            .and_modify(|t| *t = (*t).max(item.last_watched))
-                            .or_insert(item.last_watched);
-                    }
-                }
-            }
+    let continue_ids = match state.tab_manager.get_tab(TabId::Home) {
+        Some(TabState::Home(home_state)) => {
+            home_state.continue_watching.clone()
         }
-    }
-    let mut continue_pairs: Vec<(i64, Uuid)> =
-        cw_map.into_iter().map(|(id, t)| (t, id)).collect();
-    continue_pairs.sort_by(|a, b| b.0.cmp(&a.0));
-    let mut continue_ids: Vec<Uuid> =
-        continue_pairs.into_iter().map(|(_, id)| id).collect();
-    if continue_ids.len() > MAX_CAROUSEL_ITEMS {
-        continue_ids.truncate(MAX_CAROUSEL_ITEMS);
-    }
+        _ => Vec::new(),
+    };
 
     // Recently added
     let recent_movies = k_way_merge_top(
@@ -317,6 +289,34 @@ pub fn recompute_and_init_curated_carousels(state: &mut State) {
         CarouselConfig::poster_defaults(),
         scale,
     );
+
+    let ordered = crate::domains::ui::tabs::ordered_keys_for_home(state);
+    if let Some(TabState::Home(home_state)) =
+        state.tab_manager.get_tab_mut(TabId::Home)
+    {
+        home_state.focus.ordered_keys = ordered;
+        if home_state
+            .focus
+            .active_carousel
+            .as_ref()
+            .is_some_and(|key| !home_state.focus.ordered_keys.contains(key))
+        {
+            home_state.focus.active_carousel =
+                home_state.focus.ordered_keys.first().cloned();
+        }
+        if home_state.focus.active_carousel.is_none() {
+            home_state.focus.active_carousel =
+                home_state.focus.ordered_keys.first().cloned();
+        }
+        if let Some(key) = home_state.focus.active_carousel.clone() {
+            state
+                .domains
+                .ui
+                .state
+                .carousel_focus
+                .set_keyboard_active(Some(key));
+        }
+    }
 }
 
 /// Emit initial planner snapshots for curated carousels

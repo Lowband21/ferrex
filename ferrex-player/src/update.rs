@@ -75,7 +75,13 @@ pub fn update(
         profiling::finish_frame!();
     }
 
-    // Get message name for profiling and debug logging
+    // Get message name only when profiling or debug routing logs use it.
+    #[cfg(any(
+        debug_assertions,
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
     let message_name = message.name();
 
     // Profile specific message processing

@@ -20,6 +20,24 @@ pub use animation::{
 pub use batch_state::set_text_scale;
 pub use state::{PosterFace, PosterInstanceKey};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WatchButtonMode {
+    #[default]
+    StaticWatched,
+    MarkWatched,
+    MarkUnwatched,
+}
+
+impl WatchButtonMode {
+    pub(crate) fn shader_value(self) -> f32 {
+        match self {
+            Self::StaticWatched => 0.0,
+            Self::MarkWatched => 1.0,
+            Self::MarkUnwatched => 2.0,
+        }
+    }
+}
+
 use crate::{
     domains::ui::messages::UiMessage,
     infra::shader_widgets::poster::animation::PosterAnimationType,
@@ -59,6 +77,7 @@ pub struct Poster {
     on_click: Option<UiMessage>, // For clicking empty space (details page)
     progress: Option<f32>,       // Progress percentage (0.0 to 1.0)
     progress_color: Color,       // Color for the progress bar
+    watch_button_mode: WatchButtonMode,
     rotation_y: Option<f32>,
     face: PosterFace,
     /// Title text to render below the poster (max 24 chars)
@@ -94,6 +113,7 @@ impl std::fmt::Debug for Poster {
             .field("on_click", &self.on_click.as_ref().map(|_| "<UiMessage>"))
             .field("progress", &self.progress)
             .field("progress_color", &"<Color>")
+            .field("watch_button_mode", &self.watch_button_mode)
             .field("rotation_y", &self.rotation_y)
             .field("face", &self.face)
             .field("title", &self.title)
@@ -127,6 +147,7 @@ impl Poster {
             on_click: None,
             progress: None,
             progress_color: accent(), // Default to dynamic accent color
+            watch_button_mode: WatchButtonMode::default(),
             rotation_y: None,
             face: PosterFace::Front,
             title: None,
@@ -223,6 +244,12 @@ impl Poster {
         self
     }
 
+    /// Set the watched/unwatched button presentation for the backface menu.
+    pub fn watch_button_mode(mut self, mode: WatchButtonMode) -> Self {
+        self.watch_button_mode = mode;
+        self
+    }
+
     /// Overrides rotation_y (radians) for custom flip control.
     pub fn rotation_y(mut self, rotation: f32) -> Self {
         self.rotation_y = Some(rotation);
@@ -298,6 +325,7 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
             is_hovered: image.is_hovered,
             progress: image.progress,
             progress_color: image.progress_color,
+            watch_button_mode: image.watch_button_mode,
             on_play: image.on_play,
             on_edit: image.on_edit,
             on_options: image.on_options,

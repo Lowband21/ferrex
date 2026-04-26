@@ -1,5 +1,5 @@
 use crate::infra::shader_widgets::poster::{
-    Instant, PosterFace,
+    Instant, PosterFace, WatchButtonMode,
     animation::{self, PosterAnimationType, calculate_animation_state},
     batch_state::{self, PosterInstance},
     font_atlas::{pack_meta, pack_title},
@@ -329,6 +329,7 @@ pub(crate) fn create_batch_instance(
     mouse_position: Option<Point>,
     progress: Option<f32>,
     progress_color: Color,
+    watch_button_mode: WatchButtonMode,
     rotation_override: Option<f32>,
     _face: PosterFace,
     title: Option<&str>,
@@ -535,7 +536,12 @@ pub(crate) fn create_batch_instance(
             0.0,
             0.0,
         ],
-        progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
+        progress_color_and_padding: [
+            prog_r,
+            prog_g,
+            prog_b,
+            watch_button_mode.shader_value(),
+        ],
         atlas_uvs: [uv_min[0], uv_min[1], uv_max[0], uv_max[1]],
         atlas_layer: layer as i32,
         _pad_atlas_layer: [0, 0, 0],
@@ -561,6 +567,7 @@ pub fn create_placeholder_instance(
     _animated_bounds: Option<&animation::AnimatedPosterBounds>,
     progress: Option<f32>,
     progress_color: Color,
+    watch_button_mode: WatchButtonMode,
     _face: PosterFace,
 ) -> batch_state::PosterInstance {
     let (
@@ -632,7 +639,12 @@ pub fn create_placeholder_instance(
             progress.unwrap_or(-1.0),
         ],
         mouse_pos_and_padding: [0.0, 0.0, 0.0, 0.0],
-        progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
+        progress_color_and_padding: [
+            prog_r,
+            prog_g,
+            prog_b,
+            watch_button_mode.shader_value(),
+        ],
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer: 0,
         _pad_atlas_layer: [0, 0, 0],

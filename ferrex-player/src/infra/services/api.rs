@@ -11,16 +11,16 @@ use ferrex_core::{
     api::types::setup::{ConfirmClaimResponse, StartClaimResponse},
     player_prelude::{
         ActiveScansResponse, AuthToken, AuthenticatedDevice,
-        CreateLibraryRequest, FilterIndicesRequest, ImageManifestRequest,
-        ImageManifestResponse, LatestProgressResponse, Library, LibraryId,
-        Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
-        MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
-        MovieBatchSyncResponse, NextEpisode, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
-        SeriesBundleFetchRequest, SeriesBundleSyncRequest,
-        SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus,
-        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
-        UserPermissions, UserWatchState,
+        ContinueWatchingItem, CreateLibraryRequest, FilterIndicesRequest,
+        ImageManifestRequest, ImageManifestResponse, LatestProgressResponse,
+        Library, LibraryId, Media, MediaQuery, MediaRootBrowseResponse,
+        MediaWithStatus, MovieBatchFetchRequest, MovieBatchId,
+        MovieBatchSyncRequest, MovieBatchSyncResponse, NextEpisode,
+        ScanCommandAcceptedResponse, ScanCommandRequest, ScanConfig,
+        ScanMetrics, SeasonWatchStatus, SeriesBundleFetchRequest,
+        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
+        SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
+        UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
 use ferrex_model::image::ImageQuery;
@@ -225,10 +225,48 @@ pub trait ApiService: Send + Sync + Debug {
     /// Get watch status for all media
     async fn get_watch_state(&self) -> RepositoryResult<UserWatchState>;
 
+    /// Fetch presentation-ready continue-watching cards.
+    async fn get_continue_watching(
+        &self,
+    ) -> RepositoryResult<Vec<ContinueWatchingItem>>;
+
     /// Update progress for a media item
     async fn update_progress(
         &self,
         request: &UpdateProgressRequest,
+    ) -> RepositoryResult<()>;
+
+    /// Explicitly mark a movie as watched.
+    async fn mark_movie_watched(&self, media_id: Uuid) -> RepositoryResult<()>;
+
+    /// Explicitly mark a movie as unwatched.
+    async fn mark_movie_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()>;
+
+    /// Explicitly mark an episode as watched.
+    async fn mark_episode_watched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()>;
+
+    /// Explicitly mark an episode as unwatched.
+    async fn mark_episode_unwatched(
+        &self,
+        media_id: Uuid,
+    ) -> RepositoryResult<()>;
+
+    /// Explicitly mark a series as watched.
+    async fn mark_series_watched(
+        &self,
+        tmdb_series_id: u64,
+    ) -> RepositoryResult<()>;
+
+    /// Explicitly mark a series as unwatched.
+    async fn mark_series_unwatched(
+        &self,
+        tmdb_series_id: u64,
     ) -> RepositoryResult<()>;
 
     /// Get series watch state

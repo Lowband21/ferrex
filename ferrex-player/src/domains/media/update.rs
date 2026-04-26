@@ -1,7 +1,7 @@
 use super::messages::MediaMessage;
 use crate::{
     common::messages::{DomainMessage, DomainUpdateResult},
-    domains::media::MediaDomainState,
+    domains::{auth::messages::AuthMessage, media::MediaDomainState},
 };
 use ferrex_core::player_prelude::{
     EpisodeKey, MediaID, MediaIDLike, UpdateProgressRequest, UserWatchState,
@@ -137,14 +137,34 @@ pub fn update_media(
                 }
             };
 
-            // If watch state was updated and debounce allows, trigger a UI refresh
+            // If watch state was updated and debounce allows, trigger a scoped UI refresh
+            // and refresh the server-owned Continue Watching read model.
             if should_refresh_ui {
                 log::debug!("Triggering UI refresh for watch progress update");
-                // Use UpdateViewModelFilters for a lightweight refresh
-                DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                let refresh_view_task = Task::done(DomainMessage::Ui(
                     crate::domains::ui::view_model_ui::ViewModelMessage::UpdateViewModelFilters
                         .into(),
-                )))
+                ));
+
+                let continue_task = state.api_service.clone().map(|api| {
+                    Task::perform(
+                        async move { api.get_continue_watching().await },
+                        |result| {
+                            DomainMessage::Auth(
+                                AuthMessage::ContinueWatchingLoaded(
+                                    result.map_err(|e| e.to_string()),
+                                ),
+                            )
+                        },
+                    )
+                });
+
+                let mut tasks = vec![refresh_view_task];
+                if let Some(task) = continue_task {
+                    tasks.push(task);
+                }
+
+                DomainUpdateResult::task(Task::batch(tasks))
             } else {
                 DomainUpdateResult::task(Task::none())
             }

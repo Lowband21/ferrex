@@ -244,6 +244,7 @@ impl State {
             carousel_focus: CarouselFocus::new(),
             poster_menu_open: None,
             poster_menu_states: HashMap::new(),
+            pending_watch_toggle_confirmation: None,
             toast_manager: crate::domains::ui::feedback_ui::ToastManager::new(),
             #[cfg(feature = "debug-cache-overlay")]
             cache_overlay_sample: None,

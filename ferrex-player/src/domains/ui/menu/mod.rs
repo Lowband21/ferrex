@@ -5,8 +5,11 @@ pub mod update;
 pub use messages::PosterMenuMessage;
 pub use state::PosterMenuState;
 pub use update::poster_menu_update;
+pub(crate) use update::watched_button_mode_for_media_uuid;
 
 use crate::infra::constants;
+use std::time::Instant;
+use uuid::Uuid;
 
 /// Menu button identifiers matching shader constants
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +44,36 @@ impl MenuButton {
     /// Uses centralized constants from `crate::infra::constants::menu`.
     pub fn in_x_bounds(x: f32) -> bool {
         constants::menu::in_x_bounds(x)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WatchToggleAction {
+    MarkWatched,
+    MarkUnwatched,
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingWatchToggleConfirmation {
+    pub media_id: Uuid,
+    pub action: WatchToggleAction,
+    pub expires_at: Instant,
+}
+
+impl PendingWatchToggleConfirmation {
+    pub fn matches(
+        &self,
+        media_id: Uuid,
+        action: WatchToggleAction,
+        now: Instant,
+    ) -> bool {
+        self.media_id == media_id
+            && self.action == action
+            && self.expires_at > now
+    }
+
+    pub fn is_expired(&self, now: Instant) -> bool {
+        self.expires_at <= now
     }
 }
 

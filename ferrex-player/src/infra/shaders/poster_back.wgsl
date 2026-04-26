@@ -34,6 +34,7 @@ struct VertexOutput {
     @location(6) mouse_pos: vec2<f32>,
     @location(7) aspect_ratio: f32,
     @location(8) progress_color: vec3<f32>,
+    @location(9) watch_button_mode: f32,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -116,9 +117,19 @@ fn render_char(pos: vec2<f32>, char_pos: vec2<f32>, glyph_index: i32, char_scale
     return smoothstep(0.5 - edge_softness, 0.5 + edge_softness, sdf);
 }
 
+fn resolved_watch_button_mode(mode: f32) -> i32 {
+    if mode >= 1.5 {
+        return 2;
+    }
+    if mode >= 0.5 {
+        return 1;
+    }
+    return 0;
+}
+
 // Render a string label using the font atlas
 // aspect: poster width/height ratio (used to correct for non-square coordinates)
-fn render_atlas_label(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
+fn render_atlas_label(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32, watch_button_mode: i32) -> f32 {
     let btn_y_center = BUTTON_Y_START + (f32(btn_index) + 0.5) * BUTTON_HEIGHT;
     let label_right = 0.9; // 0.85; // Right edge anchor for text alignment
 
@@ -150,13 +161,23 @@ fn render_atlas_label(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) ->
     // WATCHED (7 chars)
     else if btn_index == BTN_WATCHED {
         let start_x = label_right - 6.0 * char_spacing; // 7 chars: positions 0-6
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 22, char_scale, aspect)); // W
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 0, char_scale, aspect)); // A
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 19, char_scale, aspect)); // T
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 2, char_scale, aspect)); // C
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 4.0, btn_y_center), 7, char_scale, aspect)); // H
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 5.0, btn_y_center), 4, char_scale, aspect)); // E
-        coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 6.0, btn_y_center), 3, char_scale, aspect)); // D
+        if watch_button_mode == 2 {
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 20, char_scale, aspect)); // U
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 13, char_scale, aspect)); // N
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 22, char_scale, aspect)); // W
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 0, char_scale, aspect)); // A
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 4.0, btn_y_center), 19, char_scale, aspect)); // T
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 5.0, btn_y_center), 2, char_scale, aspect)); // C
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 6.0, btn_y_center), 7, char_scale, aspect)); // H
+        } else {
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x, btn_y_center), 22, char_scale, aspect)); // W
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing, btn_y_center), 0, char_scale, aspect)); // A
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 2.0, btn_y_center), 19, char_scale, aspect)); // T
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 3.0, btn_y_center), 2, char_scale, aspect)); // C
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 4.0, btn_y_center), 7, char_scale, aspect)); // H
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 5.0, btn_y_center), 4, char_scale, aspect)); // E
+            coverage = max(coverage, render_char(pos, vec2<f32>(start_x + char_spacing * 6.0, btn_y_center), 3, char_scale, aspect)); // D
+        }
     }
     // SOON (4 chars - placeholder for disabled button)
     else if btn_index == BTN_WATCHLIST {
@@ -250,6 +271,7 @@ fn vs_main_back(input: VertexInput) -> VertexOutput {
     output.mouse_pos = mouse_pos; // Already normalized to 0-1 by Rust
     output.aspect_ratio = size.x / size.y;
     output.progress_color = input.progress_color_and_padding.xyz;
+    output.watch_button_mode = input.progress_color_and_padding.w;
     return output;
 }
 
@@ -556,7 +578,20 @@ fn render_label(pos: vec2<f32>, btn_index: i32, size: f32) -> f32 {
 
 // Render button icon - returns coverage (0-1)
 // aspect: poster width/height ratio (used to correct for non-square coordinates)
-fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
+fn icon_unwatch_sdf(p: vec2<f32>, size: f32) -> f32 {
+    let angle = 0.78539816339;
+    let c = cos(angle);
+    let s = sin(angle);
+    let rotated_a = vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+    let rotated_b = vec2<f32>(p.x * c + p.y * s, -p.x * s + p.y * c);
+    let thickness = size * 0.12;
+    let arm = size * 0.75;
+    let slash_a = icon_box_sdf(rotated_a, vec2<f32>(thickness, arm), thickness * 0.5);
+    let slash_b = icon_box_sdf(rotated_b, vec2<f32>(thickness, arm), thickness * 0.5);
+    return min(slash_a, slash_b);
+}
+
+fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32, watch_button_mode: i32) -> f32 {
     let btn_y_center = BUTTON_Y_START + (f32(btn_index) + 0.5) * BUTTON_HEIGHT;
     let icon_x = 0.15; // Left side with padding
     // Apply aspect ratio to X for proper proportions, flip Y for SDF math convention (Y-up)
@@ -576,7 +611,11 @@ fn render_icon(pos: vec2<f32>, btn_index: i32, size: f32, aspect: f32) -> f32 {
         let stem = icon_box_sdf(local_p + vec2<f32>(0.0, -icon_size * 0.15), vec2<f32>(icon_size * 0.1, icon_size * 0.35), 0.0);
         d = min(circle, min(dot, stem));
     } else if btn_index == BTN_WATCHED {
-        d = icon_check_sdf(local_p, icon_size);
+        if watch_button_mode == 2 {
+            d = icon_unwatch_sdf(local_p, icon_size);
+        } else {
+            d = icon_check_sdf(local_p, icon_size);
+        }
     } else if btn_index == BTN_WATCHLIST {
         d = icon_list_sdf(local_p, icon_size);
     } else if btn_index == BTN_EDIT {
@@ -672,6 +711,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
+    let watch_button_mode = resolved_watch_button_mode(input.watch_button_mode);
+
     // Render icons and labels on top of buttons
     for (var i: i32 = 0; i < NUM_BUTTONS; i = i + 1) {
         let is_grayed = (i == BTN_WATCHLIST) || (i == BTN_EDIT);
@@ -681,7 +722,7 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         let accent_darkened = input.progress_color * 0.7;
 
         // Icon (on left side) - pass aspect ratio for proper proportions
-        let icon_coverage = render_icon(pos, i, 0.04, aspect);
+        let icon_coverage = render_icon(pos, i, 0.04, aspect, watch_button_mode);
         if icon_coverage > 0.0 {
             var icon_color: vec3<f32>;
             if is_grayed {
@@ -695,7 +736,7 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         // Label text (centered) - using font atlas SDF, pass aspect ratio
-        let label_coverage = render_atlas_label(pos, i, 0.06, aspect);
+        let label_coverage = render_atlas_label(pos, i, 0.06, aspect, watch_button_mode);
         if label_coverage > 0.0 {
             var label_color: vec3<f32>;
             if is_grayed {

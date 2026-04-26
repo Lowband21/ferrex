@@ -142,6 +142,23 @@ impl MediaDomainState {
         }
     }
 
+    /// Check whether a media item has any stored watch state.
+    pub fn has_watch_state(&self, media_id: &MediaID) -> bool {
+        if let Some(ref watch_state) = self.user_watch_state {
+            watch_state.in_progress.contains_key(media_id.as_uuid())
+                || watch_state.completed.contains(media_id.as_uuid())
+        } else {
+            false
+        }
+    }
+
+    /// Get a resumable position for an in-progress item.
+    pub fn resume_position(&self, media_id: &MediaID) -> Option<f32> {
+        let watch_state = self.user_watch_state.as_ref()?;
+        let item = watch_state.in_progress.get(media_id.as_uuid())?;
+        (item.position > 0.0 && item.duration > 0.0).then_some(item.position)
+    }
+
     /// Get watch status for UI display
     /// Returns: 0.0 for unwatched, 0.0-0.95 for in-progress, 1.0 for watched
     pub fn get_watch_status(&self, media_id: &MediaID) -> f32 {

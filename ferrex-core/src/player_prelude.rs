@@ -8,8 +8,8 @@ pub use crate::domain::users::auth::device::{
     AuthenticatedDevice, DeviceRegistration, Platform,
 };
 pub use crate::domain::watch::{
-    InProgressItem, UpdateProgressRequest, UserWatchState, WatchProgress,
-    WatchStatusFilter,
+    ContinueWatchingActionHint, ContinueWatchingItem, InProgressItem,
+    UpdateProgressRequest, UserWatchState, WatchProgress, WatchStatusFilter,
 };
 #[cfg(feature = "rkyv")]
 pub use crate::infra::archive::ArchivedModel;

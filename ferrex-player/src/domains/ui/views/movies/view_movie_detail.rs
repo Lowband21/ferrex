@@ -1,12 +1,20 @@
 use crate::{
     common::ui_utils::{Icon, icon_text},
     domains::ui::{
-        components, messages::UiMessage, playback_ui::PlaybackMessage, theme,
-        views::grid::macros::parse_hex_color, widgets::image_for::image_for,
+        components,
+        menu::{
+            MenuButton, PosterMenuMessage, watched_button_mode_for_media_uuid,
+        },
+        messages::UiMessage,
+        playback_ui::PlaybackMessage,
+        theme,
+        views::grid::macros::parse_hex_color,
+        widgets::image_for::image_for,
     },
     infra::{
         shader_widgets::poster::{
-            PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+            PosterFace, PosterInstanceKey, WatchButtonMode,
+            animation::AnimationBehavior,
         },
         theme::accent,
     },
@@ -19,7 +27,7 @@ use ferrex_core::{traits::id::MediaIDLike, types::ids::MovieID};
 use ferrex_model::{EnhancedMovieDetails, ImageSize, Priority};
 use iced::{
     Element, Length,
-    widget::{Space, Stack, column, container, row, scrollable, text},
+    widget::{Space, Stack, button, column, container, row, scrollable, text},
 };
 
 use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
@@ -77,6 +85,10 @@ pub fn view_movie_detail<'a>(
                 .width(Length::Fixed(300.0))
                 .height(Length::Fixed(450.0))
                 .priority(Priority::Visible)
+                .watch_button_mode(watched_button_mode_for_media_uuid(
+                    state,
+                    media_id.to_uuid(),
+                ))
                 .animation_behavior(AnimationBehavior::flip_then_fade());
 
             if let Some(hex) = theme_color
@@ -163,16 +175,15 @@ pub fn view_movie_detail<'a>(
                 }
             }
 
-            // Watch status - add to info_parts
-            if let Some(progress) =
+            // Watch status - add to info_parts once there is meaningful state.
+            if state.domains.media.state.is_watched(&media_id) {
+                info_parts.push("✓ Watched".to_string());
+            } else if let Some(progress) =
                 state.domains.media.state.get_media_progress(&media_id)
+                && progress > 0.0
             {
-                if state.domains.media.state.is_watched(&media_id) {
-                    info_parts.push("✓ Watched".to_string());
-                } else {
-                    let percentage = (progress * 100.0) as u32;
-                    info_parts.push(format!("{}% watched", percentage));
-                }
+                let percentage = (progress * 100.0) as u32;
+                info_parts.push(format!("{}% watched", percentage));
             }
 
             // Content rating - TODO: Need to find the right field
@@ -226,14 +237,62 @@ pub fn view_movie_detail<'a>(
                 details = details.push(rating_row);
             }
 
-            let button_row =
-                crate::domains::ui::components::create_action_button_row(
-                    PlaybackMessage::PlayMediaWithId(media_id).into(),
-                    Some(
-                        PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
-                    ),
-                    vec![], // No additional buttons yet
-                );
+            let primary_label = if state
+                .domains
+                .media
+                .state
+                .resume_position(&media_id)
+                .is_some()
+            {
+                "Resume"
+            } else {
+                "Play"
+            };
+
+            let watch_button_mode =
+                watched_button_mode_for_media_uuid(state, media_id.to_uuid());
+            let (watch_label, watch_icon) = match watch_button_mode {
+                WatchButtonMode::MarkUnwatched => ("Unwatch", Icon::X),
+                WatchButtonMode::MarkWatched
+                | WatchButtonMode::StaticWatched => ("Watched", Icon::Check),
+            };
+            let watched_button = button(
+                row![icon_text(watch_icon), text(watch_label).size(16)]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .on_press(UiMessage::PosterMenu(PosterMenuMessage::ButtonClicked(
+                instance_key.clone(),
+                MenuButton::Watched,
+            )))
+            .padding([10, 20])
+            .style(theme::Button::DetailAction.style());
+
+            let mut additional_buttons = Vec::new();
+            if state.domains.media.state.has_watch_state(&media_id) {
+                let start_over_button = button(
+                    row![
+                        icon_text(Icon::Rewind),
+                        text("Start from beginning").size(16)
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(
+                    PlaybackMessage::PlayMediaWithIdFromStart(media_id).into(),
+                )
+                .padding([10, 20])
+                .style(theme::Button::DetailAction.style());
+                additional_buttons.push(start_over_button.into());
+            }
+            additional_buttons.push(watched_button.into());
+
+            let button_row = components::create_action_button_row_with_label(
+                primary_label,
+                PlaybackMessage::PlayMediaWithId(media_id).into(),
+                Some(PlaybackMessage::PlayMediaWithIdInMpv(media_id).into()),
+                additional_buttons,
+            );
 
             details = details.push(Space::new().height(10));
             details = details.push(button_row);
