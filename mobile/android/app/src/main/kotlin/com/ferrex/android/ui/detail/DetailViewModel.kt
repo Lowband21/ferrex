@@ -429,7 +429,7 @@ class DetailViewModel @Inject constructor(
 
         return SeriesPlaybackAction(
             mediaId = mediaId,
-            label = "Start from beginning",
+            label = "Start From Beginning",
             subtitle = formatEpisodeLabel(
                 firstEpisode.seasonNumber.toInt(),
                 firstEpisode.episodeNumber.toInt(),

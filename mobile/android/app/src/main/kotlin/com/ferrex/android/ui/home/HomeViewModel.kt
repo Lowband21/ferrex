@@ -42,6 +42,9 @@ class HomeViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _hasLoaded = MutableStateFlow(false)
+    val hasLoaded: StateFlow<Boolean> = _hasLoaded.asStateFlow()
+
     init {
         refresh()
 
@@ -63,6 +66,7 @@ class HomeViewModel @Inject constructor(
                     watchState.await()
                 }
             } finally {
+                _hasLoaded.value = true
                 _isLoading.value = false
             }
         }

@@ -20,7 +20,7 @@ sealed interface Route {
     @Serializable
     data object Register : Route
 
-    /** Main home screen with library tabs + continue watching. */
+    /** Authenticated mobile landing route, presented as Resume / Continue Watching. */
     @Serializable
     data object Home : Route
 

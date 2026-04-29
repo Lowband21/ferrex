@@ -514,7 +514,7 @@ private fun WatchStatusSection(
             Icon(Icons.Default.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text(
-                text = if (isInProgress) "Resume playback" else "Play movie",
+                text = if (isInProgress) "Resume" else "Play movie",
                 style = MaterialTheme.typography.labelLarge,
             )
         }
@@ -527,7 +527,7 @@ private fun WatchStatusSection(
                     .height(48.dp),
                 shape = RoundedCornerShape(14.dp),
             ) {
-                Text("Start from beginning")
+                Text("Start From Beginning")
             }
         }
 

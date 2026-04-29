@@ -504,7 +504,10 @@ private fun SeriesPlaybackActionsSection(
         primaryAction?.let { action ->
             Button(
                 onClick = { onPlay(action) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -521,7 +524,10 @@ private fun SeriesPlaybackActionsSection(
             ?.let { action ->
                 OutlinedButton(
                     onClick = { onPlay(action) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
                 ) {
                     Text(seriesPlaybackActionLabel(action))
                 }
@@ -557,8 +563,11 @@ private fun SeriesWatchActionsSection(
 
         OutlinedButton(
             onClick = onToggleWatched,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
             enabled = !isSubmittingWatchAction,
+            shape = RoundedCornerShape(14.dp),
         ) {
             Text(
                 if (isSubmittingWatchAction) {
@@ -857,7 +866,7 @@ private fun EpisodeCard(
                             onClick = { onPlay(0L) },
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         ) {
-                            Text(text = "Start from beginning")
+                            Text(text = "Start From Beginning")
                         }
                     }
 
