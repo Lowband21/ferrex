@@ -102,7 +102,7 @@ fun TvFerrexNavGraph() {
                     navController.navigate(Route.SeriesDetail(seriesId))
                 },
                 onContinueWatchingClick = { mediaId ->
-                    navController.navigate(Route.Player(mediaId))
+                    navController.navigate(Route.Player(mediaId = mediaId))
                 },
             )
         }
@@ -112,7 +112,9 @@ fun TvFerrexNavGraph() {
             TvMovieDetailScreen(
                 viewModel = detailViewModel,
                 onBack = { navController.popBackStack() },
-                onPlay = { mediaId -> navController.navigate(Route.Player(mediaId)) },
+                onPlay = { mediaId, startPositionMs ->
+                    navController.navigate(Route.Player(mediaId = mediaId, startPositionMs = startPositionMs))
+                },
             )
         }
 
@@ -121,7 +123,9 @@ fun TvFerrexNavGraph() {
             TvSeriesDetailScreen(
                 viewModel = detailViewModel,
                 onBack = { navController.popBackStack() },
-                onEpisodeClick = { mediaId -> navController.navigate(Route.Player(mediaId)) },
+                onEpisodeClick = { mediaId, startPositionMs ->
+                    navController.navigate(Route.Player(mediaId = mediaId, startPositionMs = startPositionMs))
+                },
             )
         }
 

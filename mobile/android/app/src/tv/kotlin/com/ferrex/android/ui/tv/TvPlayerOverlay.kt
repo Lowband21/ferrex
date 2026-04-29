@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -66,16 +67,24 @@ fun TvPlayerScreen(
     okHttpClient: OkHttpClient,
     onBack: () -> Unit,
 ) {
-    BackHandler(onBack = onBack)
-
     val playerState by viewModel.playerState.collectAsState()
     var player by remember { mutableStateOf<Player?>(null) }
+    var controlsVisible by remember { mutableStateOf(true) }
+
+    BackHandler {
+        if (player != null && !controlsVisible) {
+            controlsVisible = true
+        } else {
+            onBack()
+        }
+    }
 
     // Drop player ref when playback is no longer active so the overlay
     // does not hold a released ExoPlayer instance.
     LaunchedEffect(playerState) {
         if (playerState !is PlayerState.Ready) {
             player = null
+            controlsVisible = true
         }
     }
 
@@ -89,6 +98,8 @@ fun TvPlayerScreen(
         player?.let {
             TvPlayerOverlay(
                 player = it,
+                controlsVisible = controlsVisible,
+                onControlsVisibleChange = { controlsVisible = it },
                 onBack = onBack,
             )
         }
@@ -105,23 +116,25 @@ fun TvPlayerScreen(
  * - D-pad OK toggles play/pause when controls are hidden
  * - D-pad Left/Right seeks when controls are hidden
  * - Any D-pad press restores hidden controls
+ * - Back shows hidden controls first; pressing Back again leaves playback
  */
 @Composable
 fun TvPlayerOverlay(
     player: Player,
+    controlsVisible: Boolean,
+    onControlsVisibleChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
     var position by remember { mutableLongStateOf(player.currentPosition) }
     var duration by remember { mutableLongStateOf(player.duration.coerceAtLeast(0L)) }
-    var controlsVisible by remember { mutableStateOf(true) }
 
     // Auto-hide while playing.
     LaunchedEffect(controlsVisible, isPlaying) {
         if (controlsVisible && isPlaying) {
             delay(5_000)
-            controlsVisible = false
+            onControlsVisibleChange(false)
         }
     }
 
@@ -178,7 +191,7 @@ fun TvPlayerOverlay(
                     Key.DirectionCenter, Key.Enter -> {
                         if (!controlsVisible) {
                             if (player.isPlaying) player.pause() else player.play()
-                            controlsVisible = true
+                            onControlsVisibleChange(true)
                             true
                         } else {
                             false
@@ -188,7 +201,7 @@ fun TvPlayerOverlay(
                     Key.DirectionLeft -> {
                         if (!controlsVisible) {
                             player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
-                            controlsVisible = true
+                            onControlsVisibleChange(true)
                             true
                         } else false
                     }
@@ -199,14 +212,14 @@ fun TvPlayerOverlay(
                             player.seekTo(
                                 (player.currentPosition + 30_000).coerceAtMost(dur)
                             )
-                            controlsVisible = true
+                            onControlsVisibleChange(true)
                             true
                         } else false
                     }
 
                     Key.DirectionUp, Key.DirectionDown -> {
                         if (!controlsVisible) {
-                            controlsVisible = true
+                            onControlsVisibleChange(true)
                             true
                         } else false
                     }
@@ -363,6 +376,7 @@ private fun TvControlButton(
     Button(
         onClick = onClick,
         modifier = modifier
+            .onFocusChanged { isFocused = it.isFocused }
             .scale(if (isFocused) 1.08f else 1f)
             .border(
                 width = if (isFocused) 2.dp else 0.dp,

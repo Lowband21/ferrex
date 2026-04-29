@@ -7,6 +7,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,12 +29,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -70,6 +73,8 @@ import com.ferrex.android.core.watch.WatchProgress
 import com.ferrex.android.ui.detail.DetailUiState
 import com.ferrex.android.ui.detail.DetailViewModel
 import com.ferrex.android.ui.detail.EpisodeWatchInfo
+import com.ferrex.android.ui.detail.SeriesPlaybackAction
+import com.ferrex.android.ui.detail.SeriesWatchSummary
 import com.ferrex.android.ui.detail.formatRuntime
 import com.ferrex.android.ui.detail.formatTime
 import ferrex.media.EpisodeReference
@@ -80,7 +85,7 @@ import ferrex.media.SeriesReference
 fun TvMovieDetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onPlay: (mediaId: String) -> Unit,
+    onPlay: (mediaId: String, startPositionMs: Long?) -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val uiState by viewModel.uiState.collectAsState()
@@ -96,9 +101,12 @@ fun TvMovieDetailScreen(
             backdropUrl = viewModel.backdropUrl(state.movie),
             posterUrl = viewModel.posterUrl(state.movie),
             onBack = onBack,
-            onPlay = {
-                state.movie.file?.id?.toUuidString()?.let(onPlay)
+            onPlay = { startPositionMs ->
+                state.movie.file?.id?.toUuidString()?.let { mediaId ->
+                    onPlay(mediaId, startPositionMs)
+                }
             },
+            onToggleWatched = viewModel::setMovieWatched,
         )
     }
 }
@@ -107,7 +115,7 @@ fun TvMovieDetailScreen(
 fun TvSeriesDetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
-    onEpisodeClick: (mediaId: String) -> Unit,
+    onEpisodeClick: (mediaId: String, startPositionMs: Long?) -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val uiState by viewModel.uiState.collectAsState()
@@ -123,6 +131,7 @@ fun TvSeriesDetailScreen(
             posterUrl = viewModel.seriesPosterUrl(state.series),
             onBack = onBack,
             onEpisodeClick = onEpisodeClick,
+            onToggleSeriesWatched = viewModel::setSeriesWatched,
         )
     }
 }
@@ -134,9 +143,13 @@ private fun TvMovieDetailContent(
     backdropUrl: String?,
     posterUrl: String?,
     onBack: () -> Unit,
-    onPlay: () -> Unit,
+    onPlay: (startPositionMs: Long?) -> Unit,
+    onToggleWatched: (Boolean) -> Unit,
 ) {
     val details = movie.details
+    val isResumable = watchProgress?.let { it.progress > 0f && !it.completed } == true
+    val isWatched = watchProgress?.completed == true
+    var pendingMovieToggle by remember { mutableStateOf<Boolean?>(null) }
     val castItems = remember(details) {
         val count = details?.castLength ?: 0
         (0 until count.coerceAtMost(20)).mapNotNull { index ->
@@ -149,6 +162,25 @@ private fun TvMovieDetailContent(
         }
     }
 
+    pendingMovieToggle?.let { markWatched ->
+        AlertDialog(
+            onDismissRequest = { pendingMovieToggle = null },
+            title = { Text(if (markWatched) "Mark movie watched?" else "Mark movie unwatched?") },
+            text = { Text("This movie already has watch progress. Confirm that you want to update its watched state.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingMovieToggle = null
+                        onToggleWatched(markWatched)
+                    },
+                ) { Text("Confirm") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingMovieToggle = null }) { Text("Cancel") }
+            },
+        )
+    }
+
     TvDetailScaffold(
         title = movie.title,
         subtitle = movieSubtitle(movie),
@@ -157,10 +189,29 @@ private fun TvMovieDetailContent(
         posterUrl = posterUrl,
         onBack = onBack,
         primaryAction = {
-            TvPlayButton(
-                label = if (watchProgress?.progress?.let { it > 0f && !watchProgress.completed } == true) "Resume" else "Play",
-                onClick = onPlay,
-            )
+            TvActionColumn {
+                TvPlayButton(
+                    label = if (isResumable) "Resume" else "Play",
+                    onClick = { onPlay(null) },
+                )
+                if (isResumable) {
+                    TvSecondaryActionButton(
+                        label = "Start from beginning",
+                        onClick = { onPlay(0L) },
+                    )
+                }
+                TvSecondaryActionButton(
+                    label = if (isWatched) "Mark unwatched" else "Mark watched",
+                    onClick = {
+                        val markWatched = !isWatched
+                        if (watchProgress != null) {
+                            pendingMovieToggle = markWatched
+                        } else {
+                            onToggleWatched(markWatched)
+                        }
+                    },
+                )
+            }
         },
         extraContent = {
             if (watchProgress != null && !watchProgress.completed && watchProgress.progress > 0f) {
@@ -184,15 +235,42 @@ private fun TvSeriesDetailContent(
     backdropUrl: String?,
     posterUrl: String?,
     onBack: () -> Unit,
-    onEpisodeClick: (mediaId: String) -> Unit,
+    onEpisodeClick: (mediaId: String, startPositionMs: Long?) -> Unit,
+    onToggleSeriesWatched: (Boolean) -> Unit,
 ) {
     val details = series.details
     val episodes by viewModel.episodes.collectAsState()
     val seasons by viewModel.seasons.collectAsState()
     val selectedSeason by viewModel.selectedSeason.collectAsState()
     val episodeStates by viewModel.episodeStates.collectAsState()
+    val seriesPrimaryAction by viewModel.seriesPrimaryAction.collectAsState()
+    val seriesStartOverAction by viewModel.seriesStartOverAction.collectAsState()
+    val seriesWatchSummary by viewModel.seriesWatchSummary.collectAsState()
+    val isSubmittingWatchAction by viewModel.isSubmittingWatchAction.collectAsState()
+    val isFullyWatched = seriesWatchSummary?.isFullyWatched == true
+    val requiresSeriesConfirmation = seriesWatchSummary?.hasExistingProgress == true
+    var pendingSeriesToggle by remember { mutableStateOf<Boolean?>(null) }
     val metadataSeasonCount = details?.numberOfSeasons?.toInt() ?: 0
     val effectiveSeasonCount = if (seasons.isNotEmpty()) seasons.size else metadataSeasonCount
+
+    pendingSeriesToggle?.let { markWatched ->
+        AlertDialog(
+            onDismissRequest = { pendingSeriesToggle = null },
+            title = { Text(if (markWatched) "Mark series watched?" else "Mark series unwatched?") },
+            text = { Text("This series already has watch progress. Confirm that you want to update every known episode in the series.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingSeriesToggle = null
+                        onToggleSeriesWatched(markWatched)
+                    },
+                ) { Text("Confirm") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingSeriesToggle = null }) { Text("Cancel") }
+            },
+        )
+    }
 
     TvDetailScaffold(
         title = series.title,
@@ -201,8 +279,53 @@ private fun TvSeriesDetailContent(
         backdropUrl = backdropUrl,
         posterUrl = posterUrl,
         onBack = onBack,
-        primaryAction = null,
+        primaryAction = {
+            TvActionColumn {
+                seriesPrimaryAction?.let { action ->
+                    TvPlayButton(
+                        label = seriesPlaybackActionLabel(action),
+                        onClick = { onEpisodeClick(action.mediaId, action.startPositionMs) },
+                    )
+                }
+                seriesStartOverAction
+                    ?.takeIf { startAction ->
+                        seriesPrimaryAction?.let {
+                            it.mediaId != startAction.mediaId || it.startPositionMs != startAction.startPositionMs
+                        } ?: true
+                    }
+                    ?.let { action ->
+                        TvSecondaryActionButton(
+                            label = seriesPlaybackActionLabel(action),
+                            onClick = { onEpisodeClick(action.mediaId, action.startPositionMs) },
+                        )
+                    }
+                TvSecondaryActionButton(
+                    label = if (isSubmittingWatchAction) {
+                        "Saving…"
+                    } else if (isFullyWatched) {
+                        "Mark series unwatched"
+                    } else {
+                        "Mark series watched"
+                    },
+                    enabled = !isSubmittingWatchAction,
+                    onClick = {
+                        val markWatched = !isFullyWatched
+                        if (requiresSeriesConfirmation) {
+                            pendingSeriesToggle = markWatched
+                        } else {
+                            onToggleSeriesWatched(markWatched)
+                        }
+                    },
+                )
+            }
+        },
         extraContent = {
+            seriesWatchSummary?.let { summary ->
+                item {
+                    TvSeriesWatchSummaryPanel(summary)
+                }
+            }
+
             if (effectiveSeasonCount > 0) {
                 item {
                     TvSeasonRow(
@@ -237,7 +360,14 @@ private fun TvSeriesDetailContent(
                                 watchInfo = episodeStates[key],
                                 stillUrl = viewModel.episodeStillUrl(episode),
                                 onClick = {
-                                    viewModel.episodeStreamFileId(episode)?.let(onEpisodeClick)
+                                    viewModel.episodeStreamFileId(episode)?.let { mediaId ->
+                                        onEpisodeClick(mediaId, null)
+                                    }
+                                },
+                                onStartOver = {
+                                    viewModel.episodeStreamFileId(episode)?.let { mediaId ->
+                                        onEpisodeClick(mediaId, 0L)
+                                    }
                                 },
                             )
                         }
@@ -458,6 +588,15 @@ private fun TvPosterPreview(
 }
 
 @Composable
+private fun TvActionColumn(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.padding(top = 6.dp),
+        content = content,
+    )
+}
+
+@Composable
 private fun TvPlayButton(
     label: String,
     onClick: () -> Unit,
@@ -465,14 +604,57 @@ private fun TvPlayButton(
     Button(
         onClick = onClick,
         modifier = Modifier
-            .width(240.dp)
+            .width(320.dp)
             .semantics { contentDescription = label },
     ) {
         Icon(Icons.Default.PlayArrow, contentDescription = null)
         Spacer(Modifier.width(8.dp))
-        Text(label)
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+
+@Composable
+private fun TvSecondaryActionButton(
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .width(320.dp)
+            .semantics { contentDescription = label },
+    ) {
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun TvSeriesWatchSummaryPanel(summary: SeriesWatchSummary) {
+    val text = when {
+        summary.totalEpisodes > 0 -> "${summary.watchedEpisodes}/${summary.totalEpisodes} episodes watched"
+        summary.inProgressEpisodes > 0 -> "${summary.inProgressEpisodes} episodes in progress"
+        else -> "Watch status will update after playback"
+    }
+    Surface(
+        color = Color.Black.copy(alpha = 0.30f),
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .padding(horizontal = 56.dp)
+            .fillMaxWidth(),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            modifier = Modifier.padding(24.dp),
+        )
+    }
+}
+
+private fun seriesPlaybackActionLabel(action: SeriesPlaybackAction): String =
+    action.subtitle?.let { "${action.label} • $it" } ?: action.label
 
 @Composable
 private fun TvProgressPanel(watchProgress: WatchProgress) {
@@ -546,6 +728,7 @@ private fun TvEpisodeCard(
     watchInfo: EpisodeWatchInfo?,
     stillUrl: String?,
     onClick: () -> Unit,
+    onStartOver: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(14.dp)
@@ -673,6 +856,15 @@ private fun TvEpisodeCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (watchInfo?.isInProgress == true) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onStartOver,
+                    modifier = Modifier.semantics { contentDescription = "Start $title from beginning" },
+                ) {
+                    Text("Start from beginning")
+                }
+            }
         }
     }
 }
@@ -738,6 +930,6 @@ private fun seriesEpisodeSummary(series: SeriesReference): String {
     return when {
         availableEpisodes > 0 -> "$availableEpisodes episodes available"
         totalEpisodes > 0 -> "$totalEpisodes episodes"
-        else -> "Episodes loading…"
+        else -> "Episode details are not available yet. Try again after the library finishes syncing."
     }
 }

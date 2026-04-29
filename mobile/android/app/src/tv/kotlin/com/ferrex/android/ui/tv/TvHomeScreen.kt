@@ -40,8 +40,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.SyncState
 import com.ferrex.android.core.library.toUuidString
+import com.ferrex.android.core.watch.ContinueWatchingActionHint
 import com.ferrex.android.ui.detail.formatTime
 import com.ferrex.android.ui.home.HomeViewModel
 import com.ferrex.android.ui.library.LibraryViewModel
@@ -79,7 +81,7 @@ fun TvHomeScreen(
             TvPosterItem(
                 id = "continue-${item.mediaId}",
                 title = item.title,
-                subtitle = remaining?.let { "${formatTime(it)} left" } ?: "Resume",
+                subtitle = continueWatchingSubtitle(item.subtitle, item.actionHint, remaining),
                 posterUrl = homeViewModel.posterUrl(item),
                 progress = item.progress,
             )
@@ -144,22 +146,35 @@ fun TvHomeScreen(
             item {
                 TvHeroHeader(
                     focusedItem = focusedItem,
+                    libraries = libraries,
+                    selectedLibraryId = selectedLibraryId,
                     libraryName = selectedLibrary?.name,
+                    hasResumeItems = continueItems.isNotEmpty(),
+                    onLibraryClick = { library ->
+                        libraryViewModel.selectLibrary(library.id, library.libraryType)
+                    },
                     onSearchClick = onSearchClick,
                 )
             }
 
             item {
-                TvPosterRow(
-                    title = "Continue Watching",
-                    items = continueItems,
-                    style = TvPosterCardStyle.Landscape,
-                    onItemClick = { item ->
-                        onContinueWatchingClick(item.id.removePrefix("continue-"))
-                    },
-                    onItemFocused = { focusedItem = it },
-                    autoFocusFirst = continueItems.isNotEmpty(),
-                )
+                if (continueItems.isEmpty()) {
+                    TvReadableMessage(
+                        title = "Resume",
+                        message = "Nothing is in progress right now. Start a movie or episode and it will appear here.",
+                    )
+                } else {
+                    TvPosterRow(
+                        title = "Continue Watching",
+                        items = continueItems,
+                        style = TvPosterCardStyle.Landscape,
+                        onItemClick = { item ->
+                            onContinueWatchingClick(item.id.removePrefix("continue-"))
+                        },
+                        onItemFocused = { focusedItem = it },
+                        autoFocusFirst = true,
+                    )
+                }
             }
 
             item {
@@ -189,20 +204,27 @@ fun TvHomeScreen(
                         )
                     }
                     is SyncState.Ready -> {
-                        TvPosterRow(
-                            title = selectedLibrary?.name ?: "Library",
-                            items = libraryItems,
-                            style = TvPosterCardStyle.Poster,
-                            onItemClick = { item ->
-                                if (selectedLibraryType == LibraryType.Series) {
-                                    onSeriesClick(item.id)
-                                } else {
-                                    onMovieClick(item.id)
-                                }
-                            },
-                            onItemFocused = { focusedItem = it },
-                            autoFocusFirst = continueItems.isEmpty() && libraryItems.isNotEmpty(),
-                        )
+                        if (libraryItems.isEmpty()) {
+                            TvReadableMessage(
+                                title = "${selectedLibrary?.name ?: "This library"} is empty",
+                                message = "Sync completed, but there are no ${if (selectedLibraryType == LibraryType.Series) "shows" else "movies"} to browse yet.",
+                            )
+                        } else {
+                            TvPosterRow(
+                                title = selectedLibrary?.name ?: "Library",
+                                items = libraryItems,
+                                style = TvPosterCardStyle.Poster,
+                                onItemClick = { item ->
+                                    if (selectedLibraryType == LibraryType.Series) {
+                                        onSeriesClick(item.id)
+                                    } else {
+                                        onMovieClick(item.id)
+                                    }
+                                },
+                                onItemFocused = { focusedItem = it },
+                                autoFocusFirst = continueItems.isEmpty() && libraryItems.isNotEmpty(),
+                            )
+                        }
                     }
                 }
             }
@@ -213,19 +235,70 @@ fun TvHomeScreen(
 }
 
 @Composable
+private fun TvReadableMessage(
+    title: String,
+    message: String,
+) {
+    Surface(
+        color = Color.White.copy(alpha = 0.08f),
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 56.dp, vertical = 12.dp),
+    ) {
+        Column(modifier = Modifier.padding(28.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White.copy(alpha = 0.76f),
+            )
+        }
+    }
+}
+
+private fun continueWatchingSubtitle(
+    serverSubtitle: String?,
+    actionHint: ContinueWatchingActionHint?,
+    remaining: Double?,
+): String {
+    val prefix = when (actionHint) {
+        ContinueWatchingActionHint.NextEpisode -> "Next episode"
+        ContinueWatchingActionHint.Resume, null -> "Resume"
+    }
+    val parts = listOfNotNull(
+        prefix,
+        serverSubtitle,
+        remaining?.let { "${formatTime(it)} left" },
+    ).distinct()
+    return parts.joinToString(" • ")
+}
+
+@Composable
 private fun TvHeroHeader(
     focusedItem: TvPosterItem?,
+    libraries: List<LibraryInfo>,
+    selectedLibraryId: String?,
     libraryName: String?,
+    hasResumeItems: Boolean,
+    onLibraryClick: (LibraryInfo) -> Unit,
     onSearchClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 56.dp, vertical = 36.dp),
+            .padding(horizontal = 56.dp, vertical = 28.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
                 text = "Ferrex TV",
@@ -234,6 +307,23 @@ private fun TvHeroHeader(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
+            libraries.take(4).forEach { library ->
+                val selected = library.id == selectedLibraryId
+                Button(
+                    onClick = { onLibraryClick(library) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.White.copy(alpha = 0.12f)
+                        },
+                        contentColor = Color.White,
+                    ),
+                    modifier = Modifier.semantics { contentDescription = "Open ${library.name}" },
+                ) {
+                    Text(library.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             Button(
                 onClick = onSearchClick,
                 modifier = Modifier.semantics { contentDescription = "Search" },
@@ -248,10 +338,10 @@ private fun TvHeroHeader(
             }
         }
 
-        Spacer(Modifier.height(54.dp))
+        Spacer(Modifier.height(34.dp))
 
         Surface(
-            color = Color.Black.copy(alpha = 0.22f),
+            color = Color.Black.copy(alpha = 0.24f),
             tonalElevation = 0.dp,
             shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth(),
@@ -268,7 +358,11 @@ private fun TvHeroHeader(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     text = focusedItem?.subtitle
-                        ?: "Use the D-pad to browse. ${libraryName ?: "Your libraries"} will appear below.",
+                        ?: if (hasResumeItems) {
+                            "Press OK to resume, or use the top row to switch libraries and search."
+                        } else {
+                            "Use the D-pad to browse ${libraryName ?: "your libraries"}. Search is always available above."
+                        },
                     style = MaterialTheme.typography.titleLarge,
                     color = Color.White.copy(alpha = 0.78f),
                     maxLines = 2,

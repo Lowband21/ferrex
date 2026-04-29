@@ -64,8 +64,8 @@ enum class TvPosterCardStyle(
     val width: Dp,
     val aspectRatio: Float,
 ) {
-    Poster(width = 172.dp, aspectRatio = 2f / 3f),
-    Landscape(width = 300.dp, aspectRatio = 16f / 9f),
+    Poster(width = 196.dp, aspectRatio = 2f / 3f),
+    Landscape(width = 340.dp, aspectRatio = 16f / 9f),
 }
 
 /** Remote/D-pad focusable poster card. */
@@ -188,7 +188,7 @@ fun TvPosterCard(
         Spacer(Modifier.height(8.dp))
         Text(
             text = item.title,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             maxLines = 1,
@@ -198,7 +198,7 @@ fun TvPosterCard(
         if (item.subtitle != null) {
             Text(
                 text = item.subtitle,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleMedium,
                 color = Color.White.copy(alpha = 0.68f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
