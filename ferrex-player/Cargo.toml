@@ -179,7 +179,7 @@ tracy-client = { version = "0.18", default-features = false, optional = true }
 hdrhistogram = { version = "7.5", optional = true }
 parking_lot = { version = "0.12" }
 memory-stats = { version = "1.2", optional = true }
-yoke = "0.8.1"
+yoke = "0.8.2"
 filesize = "0.2.0"
 libc = "0.2"
 normpath = "1.5.0"
