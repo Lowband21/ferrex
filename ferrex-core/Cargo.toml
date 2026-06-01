@@ -102,7 +102,7 @@ constant_time_eq = { version = "0.4.2", default-features = false }
 ed25519-dalek = { version = "2", default-features = false, features = [
   "rand_core",
 ] }
-normpath = "1.5.0"
+normpath = "1.5.1"
 num-bigint = "0.4.6"
 
 # Not sure this is worth the added dep
