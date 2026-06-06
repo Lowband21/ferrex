@@ -3,32 +3,51 @@ use thiserror::Error;
 
 use super::models::{AuthConfig, Config, CorsConfig, RateLimiterSettings};
 
+/// Errors returned when configuration violates non-negotiable safety checks.
 #[derive(Debug, Error)]
 pub enum ConfigGuardRailError {
+    /// A required authentication secret is unset, too short, or still uses a placeholder.
     #[error("authentication secret {field} {reason}")]
-    WeakSecret { field: &'static str, reason: String },
+    WeakSecret {
+        /// The config field or environment variable name.
+        field: &'static str,
+        /// Why the secret was rejected.
+        reason: String,
+    },
+    /// Wildcard CORS origins were enabled outside development mode.
     #[error("CORS wildcard origins are not allowed when DEV_MODE is false")]
     DangerousCorsWildcard,
+    /// The CORS configuration is structurally invalid.
     #[error("invalid CORS configuration: {reason}")]
-    InvalidCorsConfig { reason: String },
+    InvalidCorsConfig {
+        /// A human-readable explanation of the invalid setting.
+        reason: String,
+    },
+    /// Rate limiting was enabled without a production-safe backend.
     #[error(
         "rate limiter configured but no supported backend is available in non-dev mode"
     )]
     MissingRateLimiterBackend,
 }
 
+/// A non-fatal configuration issue along with an optional remediation hint.
 #[derive(Debug, Clone)]
 pub struct ConfigWarning {
+    /// Human-readable warning text.
     pub message: String,
+    /// Optional follow-up guidance for fixing the warning.
     pub hint: Option<String>,
 }
 
+/// Collection of non-fatal configuration warnings gathered during validation.
 #[derive(Debug, Default, Clone)]
 pub struct ConfigWarnings {
+    /// Warning items accumulated while checking config guard rails.
     pub items: Vec<ConfigWarning>,
 }
 
 impl ConfigWarnings {
+    /// Appends a warning without additional remediation guidance.
     pub fn push<S: Into<String>>(&mut self, message: S) {
         self.items.push(ConfigWarning {
             message: message.into(),
@@ -36,6 +55,7 @@ impl ConfigWarnings {
         });
     }
 
+    /// Appends a warning paired with a suggested follow-up action.
     pub fn push_with_hint<S: Into<String>, H: Into<String>>(
         &mut self,
         message: S,
@@ -47,15 +67,18 @@ impl ConfigWarnings {
         });
     }
 
+    /// Returns true when no warnings were recorded.
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
+    /// Appends warnings from another collection.
     pub fn extend(&mut self, other: ConfigWarnings) {
         self.items.extend(other.items);
     }
 }
 
+/// Applies hard guard rails and advisory checks to the resolved runtime configuration.
 pub fn apply_guard_rails(
     config: &Config,
 ) -> Result<ConfigWarnings, ConfigGuardRailError> {

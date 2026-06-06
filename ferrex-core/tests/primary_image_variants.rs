@@ -3,7 +3,7 @@
 use ferrex_core::database::repositories::media_references::PostgresMediaReferencesRepository;
 use ferrex_core::{
     error::Result,
-    types::{ImageMediaType, MediaID, MovieID, ids::LibraryId},
+    types::{MediaID, MovieID, ids::LibraryId},
 };
 use sqlx::PgPool;
 use uuid::Uuid;
