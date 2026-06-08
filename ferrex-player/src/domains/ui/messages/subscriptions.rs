@@ -17,8 +17,11 @@ use crate::{
             shell_ui::UiShellMessage,
             tabs::{TabId, TabState},
             types::ViewState,
-            views::virtual_carousel::{
-                messages::VirtualCarouselMessage as VCM, types::CarouselKey,
+            views::{
+                tenfoot::home::{TenFootHomeMessage, is_tenfoot_home_route},
+                virtual_carousel::{
+                    messages::VirtualCarouselMessage as VCM, types::CarouselKey,
+                },
             },
         },
     },
@@ -47,6 +50,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
     let mut needs_frame_tick = false;
     let search_open = state.domains.search.state.presentation.is_open();
+    let tenfoot_home_active = is_tenfoot_home_route(state);
 
     // Delegate window lifecycle subscriptions (resize, move, focus) to the
     // window management module so secondary windows stay isolated
@@ -73,6 +77,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     }
 
     let in_grid_context = !search_open
+        && !tenfoot_home_active
         && matches!(state.domains.ui.state.view, ViewState::Library)
         && matches!(state.domains.ui.state.scope, Scope::Library(_))
         && matches!(state.tab_manager.active_tab_id(), TabId::Library(_));
@@ -81,7 +86,11 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(event::listen_with(main_window_grid_key_handler));
     }
 
-    if !search_open {
+    if !search_open && tenfoot_home_active {
+        subscriptions.push(event::listen_with(tenfoot_home_key_handler));
+    }
+
+    if !search_open && !tenfoot_home_active {
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -156,6 +165,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // All tab focus navigation (Up/Down to move between carousels)
     let in_all_curated = !search_open
+        && !tenfoot_home_active
         && matches!(state.domains.ui.state.scope, Scope::Home)
         && matches!(state.tab_manager.active_tab_id(), TabId::Home);
     if in_all_curated {
@@ -212,7 +222,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 _ => Vec::new(),
             };
         // If in All view (curated), include its active carousel key
-        if matches!(state.domains.ui.state.scope, Scope::Home)
+        if !tenfoot_home_active
+            && matches!(state.domains.ui.state.scope, Scope::Home)
             && matches!(state.tab_manager.active_tab_id(), TabId::Home)
             && let Some(TabState::Home(all_state)) =
                 state.tab_manager.get_tab(TabId::Home)
@@ -315,6 +326,67 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     }
 
     Subscription::batch(subscriptions)
+}
+
+fn tenfoot_home_key_handler(
+    event: RuntimeEvent,
+    status: EventStatus,
+    _window: iced::window::Id,
+) -> Option<DomainMessage> {
+    use crate::common::focus::{SpatialAction, SpatialDirection};
+    use iced::keyboard::key::Named;
+
+    if !matches!(status, EventStatus::Ignored) {
+        return None;
+    }
+
+    let RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
+        key,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
+    let action = match key {
+        Key::Named(Named::ArrowUp) => {
+            Some(SpatialAction::Move(SpatialDirection::Up))
+        }
+        Key::Named(Named::ArrowDown) => {
+            Some(SpatialAction::Move(SpatialDirection::Down))
+        }
+        Key::Named(Named::ArrowLeft) => {
+            Some(SpatialAction::Move(SpatialDirection::Left))
+        }
+        Key::Named(Named::ArrowRight) => {
+            Some(SpatialAction::Move(SpatialDirection::Right))
+        }
+        Key::Named(Named::Enter) => Some(SpatialAction::Activate),
+        Key::Named(Named::Space) => Some(SpatialAction::Activate),
+        Key::Named(Named::Escape) => Some(SpatialAction::Back),
+        Key::Character(value)
+            if value == "/" || value.eq_ignore_ascii_case("s") =>
+        {
+            Some(SpatialAction::Search)
+        }
+        Key::Character(value) if value == " " => Some(SpatialAction::Activate),
+        _ => None,
+    }?;
+
+    let msg = match action {
+        SpatialAction::Move(direction) => TenFootHomeMessage::Move(direction),
+        SpatialAction::Activate => TenFootHomeMessage::ActivateFocused,
+        SpatialAction::Back => TenFootHomeMessage::Back,
+        SpatialAction::Search => TenFootHomeMessage::Search,
+        SpatialAction::Menu => TenFootHomeMessage::Search,
+    };
+
+    Some(DomainMessage::Ui(msg.into()))
 }
 
 fn search_surface_key_handler(

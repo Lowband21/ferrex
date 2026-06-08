@@ -38,6 +38,12 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
             handle_virtual_carousel_message(state, vc_msg)
                 .map(DomainMessage::Ui),
         ),
+        UiMessage::TenFootHome(tenfoot_msg) => {
+            crate::domains::ui::views::tenfoot::home::update_tenfoot_home(
+                state,
+                tenfoot_msg,
+            )
+        }
         UiMessage::Background(background_msg) => {
             update_background_ui(state, background_msg)
         }
@@ -97,7 +103,8 @@ fn update_frame_tick(state: &mut State, now: Instant) -> DomainUpdateResult {
     }
 
     // ========== HOME TAB VERTICAL FOCUS ANIMATION ==========
-    let in_all_curated = !state.domains.search.state.presentation.is_open()
+    let in_all_curated = !state.interface_mode.is_tenfoot()
+        && !state.domains.search.state.presentation.is_open()
         && matches!(
             state.domains.ui.state.scope,
             crate::domains::ui::shell_ui::Scope::Home
