@@ -34,6 +34,7 @@ struct VertexOutput {
     @location(6) mouse_pos: vec2<f32>,
     @location(7) aspect_ratio: f32,
     @location(8) progress_color: vec3<f32>,
+    @location(9) selected_button: f32,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -250,6 +251,7 @@ fn vs_main_back(input: VertexInput) -> VertexOutput {
     output.mouse_pos = mouse_pos; // Already normalized to 0-1 by Rust
     output.aspect_ratio = size.x / size.y;
     output.progress_color = input.progress_color_and_padding.xyz;
+    output.selected_button = input.mouse_pos_and_padding.z;
     return output;
 }
 
@@ -634,8 +636,9 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
     var final_rgb = frosted_bg;
     var final_alpha = bg_alpha;
 
-    // Get hovered button
+    // Get hovered and keyboard/controller-selected buttons.
     let hovered_btn = get_button_index(mouse);
+    let selected_btn = i32(round(input.selected_button));
 
     // Render each button
     for (var i: i32 = 0; i < NUM_BUTTONS; i = i + 1) {
@@ -646,13 +649,19 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
         if btn_coverage > 0.0 {
             // Determine button state (grayed for Watchlist and Edit)
             let is_grayed = (i == BTN_WATCHLIST) || (i == BTN_EDIT);
+            let is_selected = (i == selected_btn) && !is_grayed;
             let is_hovered = (i == hovered_btn) && !is_grayed;
+            let is_active = is_selected || is_hovered;
 
             // Dark tinted glass button colors
             var btn_base: vec3<f32>;
             if is_grayed {
                 // Grayed out: very dark, muted
                 btn_base = vec3<f32>(0.08, 0.08, 0.10);
+            } else if is_selected {
+                // Keyboard/controller selection: visibly accented even without a cursor.
+                let selected_tint = mix(vec3<f32>(0.20, 0.12, 0.24), input.progress_color * 0.55, 0.45);
+                btn_base = selected_tint;
             } else if is_hovered {
                 // Hovered: slightly lighter dark glass with subtle theme tint
                 let dark_tint = mix(vec3<f32>(0.15, 0.16, 0.18), input.theme_color * 0.3, 0.3);
@@ -662,19 +671,27 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
                 btn_base = vec3<f32>(0.06, 0.06, 0.08);
             }
 
-            // Glass transparency (higher alpha for more opaque dark glass)
-            let glass_alpha = select(0.85, 0.92, is_hovered);
+            // Glass transparency (higher alpha for active states)
+            let glass_alpha = select(0.85, 0.94, is_active);
             let grayed_alpha = 0.75;
             let btn_alpha = select(glass_alpha, grayed_alpha, is_grayed);
 
             // Blend button over background
             final_rgb = mix(final_rgb, btn_base, btn_coverage * btn_alpha);
+
+            if is_selected {
+                let selected_edge = 1.0 - smoothstep(0.0, max(0.002, btn_aa * 2.0), abs(btn_dist));
+                let selection_rail = 1.0 - smoothstep(0.0, 0.018, abs(pos.x - 0.025));
+                let selected_mark = max(selected_edge * 0.75, selection_rail * btn_coverage);
+                final_rgb = mix(final_rgb, input.progress_color, selected_mark * 0.75);
+            }
         }
     }
 
     // Render icons and labels on top of buttons
     for (var i: i32 = 0; i < NUM_BUTTONS; i = i + 1) {
         let is_grayed = (i == BTN_WATCHLIST) || (i == BTN_EDIT);
+        let is_selected = (i == selected_btn) && !is_grayed;
         let is_hovered = (i == hovered_btn) && !is_grayed;
 
         // Darkened accent color for hovered icons/text
@@ -686,6 +703,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
             var icon_color: vec3<f32>;
             if is_grayed {
                 icon_color = vec3<f32>(0.35, 0.35, 0.38);
+            } else if is_selected {
+                icon_color = input.progress_color;
             } else if is_hovered {
                 icon_color = accent_darkened;
             } else {
@@ -700,6 +719,8 @@ fn fs_main_back(input: VertexOutput) -> @location(0) vec4<f32> {
             var label_color: vec3<f32>;
             if is_grayed {
                 label_color = vec3<f32>(0.35, 0.35, 0.38);
+            } else if is_selected {
+                label_color = vec3<f32>(0.98, 0.96, 1.0);
             } else if is_hovered {
                 label_color = accent_darkened;
             } else {

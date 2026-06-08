@@ -21,7 +21,7 @@ pub use batch_state::set_text_scale;
 pub use state::{PosterFace, PosterInstanceKey};
 
 use crate::{
-    domains::ui::messages::UiMessage,
+    domains::ui::{menu::MenuButton, messages::UiMessage},
     infra::shader_widgets::poster::animation::PosterAnimationType,
 };
 
@@ -61,6 +61,7 @@ pub struct Poster {
     progress_color: Color,       // Color for the progress bar
     rotation_y: Option<f32>,
     face: PosterFace,
+    selected_menu_button: Option<MenuButton>,
     /// Title text to render below the poster (max 24 chars)
     title: Option<String>,
     /// Meta text (e.g., year) to render below the title (max 16 chars)
@@ -96,6 +97,7 @@ impl std::fmt::Debug for Poster {
             .field("progress_color", &"<Color>")
             .field("rotation_y", &self.rotation_y)
             .field("face", &self.face)
+            .field("selected_menu_button", &self.selected_menu_button)
             .field("title", &self.title)
             .field("meta", &self.meta)
             .finish()
@@ -129,6 +131,7 @@ impl Poster {
             progress_color: accent(), // Default to dynamic accent color
             rotation_y: None,
             face: PosterFace::Front,
+            selected_menu_button: None,
             title: None,
             meta: None,
         }
@@ -253,6 +256,12 @@ impl Poster {
         self
     }
 
+    /// Sets the keyboard/controller-selected backface menu button.
+    pub fn selected_menu_button(mut self, button: Option<MenuButton>) -> Self {
+        self.selected_menu_button = button;
+        self
+    }
+
     /// Sets the title text to render below the poster
     /// Text is truncated to 24 characters max
     pub fn title(mut self, title: impl Into<String>) -> Self {
@@ -304,6 +313,7 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
             on_click: image.on_click,
             rotation_y: image.rotation_y,
             face: image.face,
+            selected_menu_button: image.selected_menu_button,
             title: image.title,
             meta: image.meta,
         })

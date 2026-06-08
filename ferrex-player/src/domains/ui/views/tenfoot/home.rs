@@ -6,6 +6,7 @@ use crate::{
         messages::{DomainMessage, DomainUpdateResult},
     },
     domains::ui::{
+        menu::{MenuButton, PosterMenuMessage},
         messages::UiMessage,
         playback_ui::PlaybackMessage,
         shell_ui::{Scope, UiShellMessage},
@@ -14,6 +15,7 @@ use crate::{
         views::virtual_carousel::types::CarouselKey,
         widgets::image_for,
     },
+    infra::shader_widgets::poster::{PosterFace, PosterInstanceKey},
     state::State,
 };
 
@@ -65,6 +67,22 @@ impl TenFootRailId {
             Self::Commands => "Commands",
         }
     }
+
+    fn poster_carousel_key(self) -> CarouselKey {
+        match self {
+            Self::ContinueWatching => {
+                CarouselKey::Custom("TenFootHomeContinueWatching")
+            }
+            Self::RecentMovies => {
+                CarouselKey::Custom("TenFootHomeRecentMovies")
+            }
+            Self::RecentSeries => {
+                CarouselKey::Custom("TenFootHomeRecentSeries")
+            }
+            Self::Libraries => CarouselKey::Custom("TenFootHomeLibraries"),
+            Self::Commands => CarouselKey::Custom("TenFootHomeCommands"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -106,6 +124,12 @@ pub enum TenFootFocusId {
 }
 
 #[derive(Debug, Clone)]
+struct TenFootPosterMenuOrigin {
+    focus: TenFootFocusId,
+    rail_index: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TenFootHomeState {
     pub focus_id: Option<TenFootFocusId>,
     pub preview_media: Option<TenFootMediaKind>,
@@ -113,6 +137,8 @@ pub struct TenFootHomeState {
     pub scroll_y: f32,
     pub viewport_height: f32,
     rail_windows: HashMap<TenFootRailId, usize>,
+    poster_menu_origin: Option<TenFootPosterMenuOrigin>,
+    selected_menu_button: MenuButton,
 }
 
 impl Default for TenFootHomeState {
@@ -124,6 +150,8 @@ impl Default for TenFootHomeState {
             scroll_y: 0.0,
             viewport_height: 0.0,
             rail_windows: HashMap::new(),
+            poster_menu_origin: None,
+            selected_menu_button: MenuButton::Play,
         }
     }
 }
@@ -131,6 +159,45 @@ impl Default for TenFootHomeState {
 impl TenFootHomeState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn clear_poster_menu_state(&mut self) {
+        self.poster_menu_origin = None;
+        self.selected_menu_button = MenuButton::Play;
+    }
+
+    pub fn reset_poster_menu_selection(&mut self) {
+        self.selected_menu_button = MenuButton::Play;
+    }
+
+    fn set_poster_menu_origin(
+        &mut self,
+        focus: TenFootFocusId,
+        rail_index: Option<usize>,
+    ) {
+        self.poster_menu_origin =
+            Some(TenFootPosterMenuOrigin { focus, rail_index });
+        self.selected_menu_button = MenuButton::Play;
+    }
+
+    fn move_poster_menu_selection(
+        &mut self,
+        direction: SpatialDirection,
+    ) -> bool {
+        let next = match direction {
+            SpatialDirection::Up => {
+                self.selected_menu_button.previous_tenfoot_action()
+            }
+            SpatialDirection::Down => {
+                self.selected_menu_button.next_tenfoot_action()
+            }
+            SpatialDirection::Left | SpatialDirection::Right => {
+                self.selected_menu_button
+            }
+        };
+        let changed = next != self.selected_menu_button;
+        self.selected_menu_button = next;
+        changed
     }
 
     fn resolved_focus(&self, data: &TenFootHomeData) -> Option<TenFootFocusId> {
@@ -242,6 +309,7 @@ pub enum TenFootHomeMessage {
     ActivateFocused,
     Activate(TenFootFocusId),
     Focus(TenFootFocusId),
+    OpenFocusedMenu,
     Search,
     Back,
     Scrolled(scrollable::Viewport),
@@ -500,6 +568,78 @@ impl TenFootHomeData {
             rail: rail.id,
             card: card.id(),
         })
+    }
+
+    fn poster_instance_key_for_focus(
+        &self,
+        focus: &TenFootFocusId,
+    ) -> Option<PosterInstanceKey> {
+        let TenFootFocusId::RailCard {
+            rail,
+            card: TenFootCardId::Media(kind),
+        } = focus
+        else {
+            return None;
+        };
+
+        if !self.contains_focus(focus) {
+            return None;
+        }
+
+        Some(PosterInstanceKey::new(
+            kind.uuid(),
+            Some(rail.poster_carousel_key()),
+        ))
+    }
+
+    fn focus_for_poster_instance_key(
+        &self,
+        key: &PosterInstanceKey,
+    ) -> Option<TenFootFocusId> {
+        for rail in &self.rails {
+            if key.carousel_key.as_ref() != Some(&rail.id.poster_carousel_key())
+            {
+                continue;
+            }
+
+            for card in &rail.cards {
+                let TenFootCard::Media(item) = card else {
+                    continue;
+                };
+                if item.kind.uuid() == key.media_id {
+                    return Some(TenFootFocusId::RailCard {
+                        rail: rail.id,
+                        card: item.card_id(),
+                    });
+                }
+            }
+        }
+
+        None
+    }
+
+    fn focus_after_menu_close(
+        &self,
+        origin: Option<&TenFootPosterMenuOrigin>,
+        open_key: Option<&PosterInstanceKey>,
+    ) -> Option<TenFootFocusId> {
+        if let Some(origin) = origin {
+            if self.contains_focus(&origin.focus) {
+                return Some(origin.focus.clone());
+            }
+
+            if let TenFootFocusId::RailCard { rail, .. } = &origin.focus
+                && let Some(rail_ref) = self.rail(*rail)
+                && !rail_ref.cards.is_empty()
+            {
+                let index = origin.rail_index.unwrap_or(0);
+                return self.focus_for_rail_index(rail_ref, index);
+            }
+        }
+
+        open_key
+            .and_then(|key| self.focus_for_poster_instance_key(key))
+            .or_else(|| self.first_focus())
     }
 
     fn rail_position(
@@ -767,12 +907,45 @@ pub fn is_tenfoot_home_route(state: &State) -> bool {
         )
 }
 
+fn set_home_focus(
+    state: &mut State,
+    data: &TenFootHomeData,
+    focus: Option<TenFootFocusId>,
+) -> Task<UiMessage> {
+    let Some(focus) = focus else {
+        state.domains.ui.state.tenfoot_home.focus_id = None;
+        return Task::none();
+    };
+
+    let visible_count = visible_cards_for_width(state.window_size.width);
+    let fallback_height = state.window_size.height;
+    let home = &mut state.domains.ui.state.tenfoot_home;
+    home.focus_id = Some(focus.clone());
+    home.sync_preview_from_focus(data, &focus);
+    home.follow_focus_window(data, &focus, visible_count);
+    home.scroll_task_for_focus(data, &focus, fallback_height)
+}
+
+fn menu_task(message: PosterMenuMessage) -> Task<DomainMessage> {
+    Task::done(DomainMessage::Ui(UiMessage::PosterMenu(message)))
+}
+
 pub fn update_tenfoot_home(
     state: &mut State,
     message: TenFootHomeMessage,
 ) -> DomainUpdateResult {
     match message {
         TenFootHomeMessage::Move(direction) => {
+            if state.domains.ui.state.poster_menu_open.is_some() {
+                state
+                    .domains
+                    .ui
+                    .state
+                    .tenfoot_home
+                    .move_poster_menu_selection(direction);
+                return DomainUpdateResult::task(Task::none());
+            }
+
             let data = TenFootHomeData::from_state(state);
             let current =
                 state.domains.ui.state.tenfoot_home.resolved_focus(&data);
@@ -781,37 +954,55 @@ pub fn update_tenfoot_home(
                 return DomainUpdateResult::task(Task::none());
             };
 
-            let visible_count =
-                visible_cards_for_width(state.window_size.width);
-            let fallback_height = state.window_size.height;
-            let task = {
-                let home = &mut state.domains.ui.state.tenfoot_home;
-                home.focus_id = Some(next.clone());
-                home.sync_preview_from_focus(&data, &next);
-                home.follow_focus_window(&data, &next, visible_count);
-                home.scroll_task_for_focus(&data, &next, fallback_height)
-            };
-
+            let task = set_home_focus(state, &data, Some(next));
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         TenFootHomeMessage::Focus(focus) => {
+            if state.domains.ui.state.poster_menu_open.is_some() {
+                return DomainUpdateResult::task(Task::none());
+            }
+
             let data = TenFootHomeData::from_state(state);
             if !data.contains_focus(&focus) {
                 return DomainUpdateResult::task(Task::none());
             }
-            let visible_count =
-                visible_cards_for_width(state.window_size.width);
-            let fallback_height = state.window_size.height;
-            let task = {
-                let home = &mut state.domains.ui.state.tenfoot_home;
-                home.focus_id = Some(focus.clone());
-                home.sync_preview_from_focus(&data, &focus);
-                home.follow_focus_window(&data, &focus, visible_count);
-                home.scroll_task_for_focus(&data, &focus, fallback_height)
-            };
+            let task = set_home_focus(state, &data, Some(focus));
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
         TenFootHomeMessage::ActivateFocused => {
+            if let Some(instance_key) =
+                state.domains.ui.state.poster_menu_open.clone()
+            {
+                let data = TenFootHomeData::from_state(state);
+                let selected =
+                    state.domains.ui.state.tenfoot_home.selected_menu_button;
+                let focus = data.focus_after_menu_close(
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .tenfoot_home
+                        .poster_menu_origin
+                        .as_ref(),
+                    Some(&instance_key),
+                );
+                let focus_task = set_home_focus(state, &data, focus);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .tenfoot_home
+                    .clear_poster_menu_state();
+
+                return DomainUpdateResult::task(Task::batch(vec![
+                    focus_task.map(DomainMessage::Ui),
+                    menu_task(PosterMenuMessage::ButtonClicked(
+                        instance_key,
+                        selected,
+                    )),
+                ]));
+            }
+
             let data = TenFootHomeData::from_state(state);
             let focus =
                 state.domains.ui.state.tenfoot_home.resolved_focus(&data);
@@ -825,6 +1016,10 @@ pub fn update_tenfoot_home(
             DomainUpdateResult::task(task_for_activation(activation))
         }
         TenFootHomeMessage::Activate(focus) => {
+            if state.domains.ui.state.poster_menu_open.is_some() {
+                return DomainUpdateResult::task(Task::none());
+            }
+
             let data = TenFootHomeData::from_state(state);
             if !data.contains_focus(&focus) {
                 return DomainUpdateResult::task(Task::none());
@@ -834,22 +1029,78 @@ pub fn update_tenfoot_home(
                 &focus,
                 state.domains.ui.state.tenfoot_home.preview_media.as_ref(),
             );
-            {
-                let visible_count =
-                    visible_cards_for_width(state.window_size.width);
-                let home = &mut state.domains.ui.state.tenfoot_home;
-                home.focus_id = Some(focus.clone());
-                home.sync_preview_from_focus(&data, &focus);
-                home.follow_focus_window(&data, &focus, visible_count);
+            let focus_task = set_home_focus(state, &data, Some(focus));
+            DomainUpdateResult::task(Task::batch(vec![
+                focus_task.map(DomainMessage::Ui),
+                task_for_activation(activation),
+            ]))
+        }
+        TenFootHomeMessage::OpenFocusedMenu => {
+            if state.domains.ui.state.poster_menu_open.is_some() {
+                return DomainUpdateResult::task(Task::none());
             }
-            DomainUpdateResult::task(task_for_activation(activation))
+
+            let data = TenFootHomeData::from_state(state);
+            let Some(focus) =
+                state.domains.ui.state.tenfoot_home.resolved_focus(&data)
+            else {
+                return DomainUpdateResult::task(Task::none());
+            };
+            let Some(instance_key) = data.poster_instance_key_for_focus(&focus)
+            else {
+                return DomainUpdateResult::task(Task::none());
+            };
+            let rail_index =
+                data.focus_rail_position(&focus).map(|(_, index, _)| index);
+            let focus_task = set_home_focus(state, &data, Some(focus.clone()));
+            state
+                .domains
+                .ui
+                .state
+                .tenfoot_home
+                .set_poster_menu_origin(focus, rail_index);
+
+            DomainUpdateResult::task(Task::batch(vec![
+                focus_task.map(DomainMessage::Ui),
+                menu_task(PosterMenuMessage::Open(instance_key)),
+            ]))
         }
         TenFootHomeMessage::Search => DomainUpdateResult::task(Task::done(
             DomainMessage::Ui(UiShellMessage::OpenSearchOverlay.into()),
         )),
-        TenFootHomeMessage::Back => DomainUpdateResult::task(Task::done(
-            DomainMessage::Ui(UiShellMessage::NavigateBack.into()),
-        )),
+        TenFootHomeMessage::Back => {
+            if let Some(instance_key) =
+                state.domains.ui.state.poster_menu_open.clone()
+            {
+                let data = TenFootHomeData::from_state(state);
+                let focus = data.focus_after_menu_close(
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .tenfoot_home
+                        .poster_menu_origin
+                        .as_ref(),
+                    Some(&instance_key),
+                );
+                let focus_task = set_home_focus(state, &data, focus);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .tenfoot_home
+                    .clear_poster_menu_state();
+
+                DomainUpdateResult::task(Task::batch(vec![
+                    focus_task.map(DomainMessage::Ui),
+                    menu_task(PosterMenuMessage::Close(instance_key)),
+                ]))
+            } else {
+                DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                    UiShellMessage::NavigateBack.into(),
+                )))
+            }
+        }
         TenFootHomeMessage::Scrolled(viewport) => {
             let offset = viewport.absolute_offset();
             let bounds = viewport.bounds();
@@ -963,6 +1214,7 @@ fn view_hero<'a>(
                 HERO_POSTER_WIDTH,
                 HERO_POSTER_HEIGHT,
                 primary_focused || details_focused,
+                CarouselKey::Custom("TenFootHomeHero"),
             );
 
             row![
@@ -1175,7 +1427,14 @@ fn view_media_card<'a>(
     focus_id: TenFootFocusId,
     focused: bool,
 ) -> Element<'a, UiMessage> {
-    let image = view_media_image(state, item, 164.0, 246.0, focused);
+    let image = view_media_image(
+        state,
+        item,
+        164.0,
+        246.0,
+        focused,
+        rail.poster_carousel_key(),
+    );
     let activation_hint = if rail == TenFootRailId::ContinueWatching {
         "Play"
     } else {
@@ -1204,8 +1463,31 @@ fn view_media_image<'a>(
     width: f32,
     height: f32,
     focused: bool,
+    carousel_key: CarouselKey,
 ) -> Element<'a, UiMessage> {
     let poster_quality = state.domains.settings.display.library_poster_quality;
+    let instance_key =
+        PosterInstanceKey::new(item.kind.uuid(), Some(carousel_key.clone()));
+    let (face, rotation_override) = if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
+    {
+        (menu_state.face_from_angle(), Some(menu_state.angle))
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
+        (PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (PosterFace::Front, None)
+    };
+    let selected_menu_button =
+        if state.domains.ui.state.poster_menu_open.as_ref()
+            == Some(&instance_key)
+        {
+            Some(state.domains.ui.state.tenfoot_home.selected_menu_button)
+        } else {
+            None
+        };
+
     let mut image = image_for(item.kind.uuid())
         .iid(item.poster_iid)
         .skip_request(item.poster_iid.is_none())
@@ -1222,9 +1504,14 @@ fn view_media_image<'a>(
             TenFootMediaKind::Movie(_) => lucide_icons::Icon::Film,
             TenFootMediaKind::Series(_) => lucide_icons::Icon::Tv,
         })
+        .face(face)
+        .selected_menu_button(selected_menu_button)
         .no_animation();
 
-    image = image.carousel_key(CarouselKey::Custom("TenFootHome"));
+    if let Some(rot) = rotation_override {
+        image = image.rotation_y(rot);
+    }
+    image = image.carousel_key(carousel_key);
     image.into()
 }
 
@@ -1676,6 +1963,109 @@ mod tests {
             Some(TenFootActivation::PlayMedia(MediaID::Movie(MovieID(
                 Uuid::from_u128(1),
             ))))
+        );
+    }
+
+    #[test]
+    fn poster_menu_selection_clamps_to_enabled_actions() {
+        let mut home = TenFootHomeState::new();
+
+        assert_eq!(home.selected_menu_button, MenuButton::Play);
+        assert!(!home.move_poster_menu_selection(SpatialDirection::Up));
+        assert_eq!(home.selected_menu_button, MenuButton::Play);
+
+        assert!(home.move_poster_menu_selection(SpatialDirection::Down));
+        assert_eq!(home.selected_menu_button, MenuButton::Details);
+        assert!(home.move_poster_menu_selection(SpatialDirection::Down));
+        assert_eq!(home.selected_menu_button, MenuButton::Watched);
+        assert!(!home.move_poster_menu_selection(SpatialDirection::Down));
+        assert_eq!(home.selected_menu_button, MenuButton::Watched);
+
+        assert!(home.move_poster_menu_selection(SpatialDirection::Up));
+        assert_eq!(home.selected_menu_button, MenuButton::Details);
+    }
+
+    #[test]
+    fn poster_instance_key_only_targets_media_rail_posters() {
+        let data = data_with_empty_middle_rail();
+        let media_focus = TenFootFocusId::RailCard {
+            rail: TenFootRailId::ContinueWatching,
+            card: TenFootCardId::Media(TenFootMediaKind::Movie(MovieID(
+                Uuid::from_u128(1),
+            ))),
+        };
+        let key = data
+            .poster_instance_key_for_focus(&media_focus)
+            .expect("media poster key");
+
+        assert_eq!(key.media_id, Uuid::from_u128(1));
+        assert_eq!(
+            key.carousel_key,
+            Some(TenFootRailId::ContinueWatching.poster_carousel_key())
+        );
+        assert!(
+            data.poster_instance_key_for_focus(&TenFootFocusId::HeroPrimary)
+                .is_none()
+        );
+
+        let command_focus = TenFootFocusId::RailCard {
+            rail: TenFootRailId::Commands,
+            card: TenFootCardId::Command(TenFootCommand::Search),
+        };
+        assert!(data.poster_instance_key_for_focus(&command_focus).is_none());
+    }
+
+    #[test]
+    fn menu_close_restores_origin_when_present() {
+        let data = data_with_empty_middle_rail();
+        let focus = TenFootFocusId::RailCard {
+            rail: TenFootRailId::ContinueWatching,
+            card: TenFootCardId::Media(TenFootMediaKind::Movie(MovieID(
+                Uuid::from_u128(1),
+            ))),
+        };
+        let origin = TenFootPosterMenuOrigin {
+            focus: focus.clone(),
+            rail_index: Some(0),
+        };
+
+        assert_eq!(
+            data.focus_after_menu_close(Some(&origin), None),
+            Some(focus)
+        );
+    }
+
+    #[test]
+    fn menu_close_falls_back_to_same_rail_when_origin_disappears() {
+        let data = TenFootHomeData {
+            hero: Some(movie(99)),
+            rails: vec![
+                TenFootRail::new(
+                    TenFootRailId::ContinueWatching,
+                    "empty",
+                    vec![TenFootCard::Media(movie(3))],
+                ),
+                TenFootRail::new(TenFootRailId::RecentMovies, "empty", vec![]),
+            ],
+        };
+        let origin = TenFootPosterMenuOrigin {
+            focus: TenFootFocusId::RailCard {
+                rail: TenFootRailId::ContinueWatching,
+                card: TenFootCardId::Media(TenFootMediaKind::Movie(MovieID(
+                    Uuid::from_u128(1),
+                ))),
+            },
+            rail_index: Some(0),
+        };
+
+        assert_eq!(
+            data.focus_after_menu_close(Some(&origin), None),
+            Some(TenFootFocusId::RailCard {
+                rail: TenFootRailId::ContinueWatching,
+                card: TenFootCardId::Media(TenFootMediaKind::Movie(MovieID(
+                    Uuid::from_u128(3),
+                ))),
+            })
         );
     }
 }

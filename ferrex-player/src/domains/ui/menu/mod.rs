@@ -19,9 +19,35 @@ pub enum MenuButton {
 }
 
 impl MenuButton {
+    pub const TENFOOT_ACTIONS: [Self; 3] =
+        [MenuButton::Play, MenuButton::Details, MenuButton::Watched];
+
     /// Returns true if this button is disabled (grayed out) for alpha
     pub fn is_disabled(&self) -> bool {
         matches!(self, MenuButton::Watchlist | MenuButton::Edit)
+    }
+
+    pub fn next_tenfoot_action(self) -> Self {
+        let actions = Self::TENFOOT_ACTIONS;
+        let current = actions
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        actions[(current + 1).min(actions.len() - 1)]
+    }
+
+    pub fn previous_tenfoot_action(self) -> Self {
+        let actions = Self::TENFOOT_ACTIONS;
+        let current = actions
+            .iter()
+            .position(|button| *button == self)
+            .unwrap_or(0);
+        actions[current.saturating_sub(1)]
+    }
+
+    /// Stable shader index matching the WGSL button constants.
+    pub fn shader_index(self) -> i32 {
+        self as i32
     }
 
     /// Get button index from normalized y position.

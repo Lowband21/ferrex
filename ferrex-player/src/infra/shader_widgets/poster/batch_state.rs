@@ -5,13 +5,18 @@
 //! the widget `encode_batch` phase and lazily uploaded during `prepare` once the
 //! frame budget and texture cache state are known.
 
-use crate::infra::{
-    render::upload_budget::{TimingBasedBudget, UploadBudgetConfig},
-    shader_widgets::poster::{
-        PosterFace,
-        animation::{AnimatedPosterBounds, PosterAnimationType},
-        font_atlas::FontAtlas,
-        render_pipeline::{create_batch_instance, create_placeholder_instance},
+use crate::{
+    domains::ui::menu::MenuButton,
+    infra::{
+        render::upload_budget::{TimingBasedBudget, UploadBudgetConfig},
+        shader_widgets::poster::{
+            PosterFace,
+            animation::{AnimatedPosterBounds, PosterAnimationType},
+            font_atlas::FontAtlas,
+            render_pipeline::{
+                create_batch_instance, create_placeholder_instance,
+            },
+        },
     },
 };
 
@@ -174,6 +179,7 @@ pub struct PendingPrimitive {
     pub progress_color: Color,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
+    pub selected_menu_button: Option<MenuButton>,
     /// Title text to render below the poster
     pub title: Option<String>,
     /// Meta text (e.g., year) to render below the title
@@ -539,6 +545,7 @@ impl PosterBatchState {
             pending.progress,
             pending.progress_color,
             pending.face,
+            pending.selected_menu_button,
         );
 
         match pending.face {
@@ -900,6 +907,7 @@ impl PrimitiveBatchState for PosterBatchState {
                             pending.progress,
                             pending.progress_color,
                             pending.face,
+                            pending.selected_menu_button,
                         );
                         match pending.face {
                             PosterFace::Front => {
@@ -954,6 +962,7 @@ impl PrimitiveBatchState for PosterBatchState {
                         pending.progress,
                         pending.progress_color,
                         pending.face,
+                        pending.selected_menu_button,
                     );
                     match pending.face {
                         PosterFace::Front => {
@@ -1067,6 +1076,7 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.progress_color,
                     pending.rotation_override,
                     pending.face,
+                    pending.selected_menu_button,
                     pending.title.as_deref(),
                     pending.meta.as_deref(),
                 );

@@ -374,6 +374,9 @@ fn tenfoot_home_key_handler(
         {
             Some(SpatialAction::Search)
         }
+        Key::Character(value) if value.eq_ignore_ascii_case("m") => {
+            Some(SpatialAction::Menu)
+        }
         Key::Character(value) if value == " " => Some(SpatialAction::Activate),
         _ => None,
     }?;
@@ -383,7 +386,7 @@ fn tenfoot_home_key_handler(
         SpatialAction::Activate => TenFootHomeMessage::ActivateFocused,
         SpatialAction::Back => TenFootHomeMessage::Back,
         SpatialAction::Search => TenFootHomeMessage::Search,
-        SpatialAction::Menu => TenFootHomeMessage::Search,
+        SpatialAction::Menu => TenFootHomeMessage::OpenFocusedMenu,
     };
 
     Some(DomainMessage::Ui(msg.into()))

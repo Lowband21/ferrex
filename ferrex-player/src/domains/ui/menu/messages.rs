@@ -4,6 +4,8 @@ use crate::infra::shader_widgets::poster::PosterInstanceKey;
 #[derive(Clone, Debug)]
 pub enum PosterMenuMessage {
     Close(PosterInstanceKey),
+    /// Open the backface menu with the same short-click spin used by pointer input.
+    Open(PosterInstanceKey),
     /// Initiate flip interaction (single flip or continuous)
     Start(PosterInstanceKey),
     /// User input release
