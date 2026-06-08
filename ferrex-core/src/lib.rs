@@ -66,7 +66,6 @@
 //! }
 //! ```
 
-// TODO: Document properly
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(missing_docs)]
 
@@ -110,4 +109,5 @@ pub use ferrex_contracts as traits;
 /// Application-level composition utilities (Unit of Work, facades)
 pub mod application;
 
+/// Curated re-exports for player- and client-facing consumers.
 pub mod player_prelude;

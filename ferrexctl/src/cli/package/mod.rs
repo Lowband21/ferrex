@@ -740,13 +740,13 @@ fn parse_ferrexctl_version(cargo_toml: &str) -> Option<String> {
                 continue;
             }
 
-            if trimmed.starts_with("version") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let value = trimmed[eq_pos + 1..].trim();
-                    if value.starts_with('"') {
-                        let version = value.trim_matches('"').trim();
-                        return Some(version.to_string());
-                    }
+            if trimmed.starts_with("version")
+                && let Some(eq_pos) = trimmed.find('=')
+            {
+                let value = trimmed[eq_pos + 1..].trim();
+                if value.starts_with('"') {
+                    let version = value.trim_matches('"').trim();
+                    return Some(version.to_string());
                 }
             }
         }
@@ -1246,10 +1246,10 @@ fn locate_gstreamer_root(
         "GST_MSVC_ROOT"
     };
 
-    if let Ok(path) = std::env::var(env_var) {
-        if !path.is_empty() {
-            return Ok(PathBuf::from(path));
-        }
+    if let Ok(path) = std::env::var(env_var)
+        && !path.is_empty()
+    {
+        return Ok(PathBuf::from(path));
     }
 
     bail!(

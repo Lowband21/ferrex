@@ -4,34 +4,48 @@ use thiserror::Error;
 
 use crate::cli::utils::workspace_root;
 
+/// Errors produced while loading packaging configuration.
 #[derive(Debug, Error)]
 pub enum PackagingConfigError {
+    /// `packaging.toml` exists but contains invalid TOML.
     #[error("failed to parse packaging.toml")]
     TomlParse {
+        /// Parser error reported by the TOML decoder.
         #[source]
         source: toml::de::Error,
     },
+    /// `packaging.toml` could not be read from disk.
     #[error("failed to read packaging.toml at {path}")]
     FileIo {
+        /// Path that failed to load.
         path: PathBuf,
+        /// I/O error returned by the filesystem.
         #[source]
         source: std::io::Error,
     },
+    /// The workspace package version was not present in `Cargo.toml`.
     #[error("workspace version not found in Cargo.toml")]
     WorkspaceVersionNotFound,
+    /// The workspace `Cargo.toml` could not be read from disk.
     #[error("failed to read workspace Cargo.toml at {path}")]
     WorkspaceCargoIo {
+        /// Workspace manifest path that failed to load.
         path: PathBuf,
+        /// I/O error returned by the filesystem.
         #[source]
         source: std::io::Error,
     },
 }
 
+/// Flatpak packaging paths and identifiers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FlatpakConfig {
+    /// Path to the Flatpak manifest relative to the workspace root.
     pub manifest_path: PathBuf,
+    /// Application ID used in generated Flatpak artifacts.
     pub app_id: String,
+    /// Directory where Flatpak build output is written.
     pub output_dir: PathBuf,
 }
 
@@ -47,9 +61,11 @@ impl Default for FlatpakConfig {
     }
 }
 
+/// Release packaging output settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReleaseConfig {
+    /// Directory where release artifacts are written.
     pub output_dir: PathBuf,
 }
 
@@ -61,15 +77,23 @@ impl Default for ReleaseConfig {
     }
 }
 
+/// Checks to run before producing packaging artifacts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PreflightConfig {
+    /// Run `cargo fmt --check`.
     pub run_fmt: bool,
+    /// Run Clippy before packaging.
     pub run_clippy: bool,
+    /// Run tests before packaging.
     pub run_tests: bool,
+    /// Run cargo-deny before packaging.
     pub run_deny: bool,
+    /// Run cargo-audit before packaging.
     pub run_audit: bool,
+    /// Prefer offline-capable checks when possible.
     pub offline: bool,
+    /// Part of the project covered by preflight checks.
     pub scope: PreflightScope,
 }
 
@@ -87,35 +111,37 @@ impl Default for PreflightConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Target scope for packaging preflight checks.
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PreflightScope {
+    /// Run checks across the full workspace.
+    #[default]
     Workspace,
+    /// Limit checks to initialization-related files and commands.
     Init,
 }
 
-impl Default for PreflightScope {
-    fn default() -> Self {
-        Self::Workspace
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Source used to resolve the package version.
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionSource {
+    /// Read the version from the workspace manifest.
+    #[default]
     Workspace,
+    /// Use a manually supplied version value.
     Manual,
 }
 
-impl Default for VersionSource {
-    fn default() -> Self {
-        Self::Workspace
-    }
-}
-
+/// Version resolution settings for package commands.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VersionConfig {
+    /// Strategy used to determine the package version.
     pub source: VersionSource,
 }
 
@@ -127,24 +153,18 @@ impl Default for VersionConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Top-level packaging configuration loaded from `packaging.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PackagingConfig {
+    /// Flatpak-specific packaging settings.
     pub flatpak: FlatpakConfig,
+    /// Release artifact settings.
     pub release: ReleaseConfig,
+    /// Preflight check settings.
     pub preflight: PreflightConfig,
+    /// Version resolution settings.
     pub version: VersionConfig,
-}
-
-impl Default for PackagingConfig {
-    fn default() -> Self {
-        Self {
-            flatpak: FlatpakConfig::default(),
-            release: ReleaseConfig::default(),
-            preflight: PreflightConfig::default(),
-            version: VersionConfig::default(),
-        }
-    }
 }
 
 impl PackagingConfig {
@@ -207,12 +227,12 @@ pub(crate) fn parse_workspace_version(cargo_toml: &str) -> Option<String> {
                 continue;
             }
 
-            if trimmed.starts_with("version") {
-                if let Some(eq_pos) = trimmed.find('=') {
-                    let value = trimmed[eq_pos + 1..].trim();
-                    let version = value.trim_matches('"').trim();
-                    return Some(version.to_string());
-                }
+            if trimmed.starts_with("version")
+                && let Some(eq_pos) = trimmed.find('=')
+            {
+                let value = trimmed[eq_pos + 1..].trim();
+                let version = value.trim_matches('"').trim();
+                return Some(version.to_string());
             }
         }
     }
