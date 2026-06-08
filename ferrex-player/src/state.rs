@@ -67,6 +67,19 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InterfaceMode {
+    #[default]
+    Desktop,
+    TenFoot,
+}
+
+impl InterfaceMode {
+    pub fn is_tenfoot(self) -> bool {
+        matches!(self, Self::TenFoot)
+    }
+}
+
 /// Application state - refactored to use domain-driven architecture
 #[derive(Debug)]
 pub struct State {
@@ -107,11 +120,22 @@ pub struct State {
 
     /// Runtime configuration for user-adjustable performance/animation settings
     pub runtime_config: RuntimeConfig,
+
+    /// Selected top-level interface mode. Desktop is the default; 10-foot is opt-in.
+    pub interface_mode: InterfaceMode,
 }
 
 impl State {
     /// Create a new State with the given server URL
     pub fn new(server_url: String) -> Self {
+        Self::new_with_interface_mode(server_url, InterfaceMode::Desktop)
+    }
+
+    /// Create a new State with an explicit interface mode.
+    pub fn new_with_interface_mode(
+        server_url: String,
+        interface_mode: InterfaceMode,
+    ) -> Self {
         let server_url = server_url
             .trim()
             .trim_end_matches('/')
@@ -352,6 +376,7 @@ impl State {
             windows: WindowManager::new(),
             media_repo,
             runtime_config: RuntimeConfig::new(),
+            interface_mode,
         }
     }
 

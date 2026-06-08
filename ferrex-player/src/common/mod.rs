@@ -3,6 +3,7 @@
 //! This module provides common functionality used across multiple domains
 
 pub mod clear_database;
+pub mod controller_input;
 pub mod focus;
 pub mod messages;
 pub mod prelude;
