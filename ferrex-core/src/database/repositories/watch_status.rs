@@ -2,8 +2,8 @@ use crate::{
     database::repository_ports::watch_status::WatchStatusRepository,
     domain::watch::{
         ContinueWatchingActionHint, ContinueWatchingActionTarget,
-        ContinueWatchingItem, InProgressItem, UpdateProgressRequest,
-        UserWatchState, WatchResumePolicy,
+        ContinueWatchingItem, InProgressItem, SeriesContinueWatchingItem,
+        UpdateProgressRequest, UserWatchState, WatchResumePolicy,
     },
     error::{MediaError, Result},
     types::watch::{
@@ -14,7 +14,7 @@ use crate::{
 
 use async_trait::async_trait;
 use chrono::Utc;
-use ferrex_model::VideoMediaType;
+use ferrex_model::{LibraryId, VideoMediaType};
 use sqlx::{PgPool, Row};
 use std::collections::{HashMap, HashSet};
 use tracing::info;
@@ -23,6 +23,13 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct PostgresWatchStatusRepository {
     pool: PgPool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LibrarySeriesContinueRow {
+    series_id: Uuid,
+    tmdb_series_id: u64,
+    last_watched: i64,
 }
 
 impl PostgresWatchStatusRepository {
@@ -479,6 +486,398 @@ impl PostgresWatchStatusRepository {
             poster_iid,
         }))
     }
+
+    fn sort_series_continue_watching_items(
+        items: &mut [SeriesContinueWatchingItem],
+    ) {
+        items.sort_by(|a, b| {
+            b.last_watched
+                .cmp(&a.last_watched)
+                .then_with(|| compare_series_continue_titles(a, b))
+                .then_with(|| a.series_id.cmp(&b.series_id))
+        });
+    }
+
+    async fn load_library_series_continue_rows(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+    ) -> Result<Vec<LibrarySeriesContinueRow>> {
+        let policy = Self::watch_policy();
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                s.id AS series_id,
+                er.tmdb_series_id AS tmdb_series_id,
+                MAX(ues.last_watched) FILTER (
+                    WHERE ues.is_completed = true
+                       OR (ues.duration > 0 AND (ues.position / ues.duration) >= $6)
+                       OR (
+                              ues.position >= $3
+                          AND ues.duration > 0
+                          AND (ues.position / ues.duration) >= $4
+                          AND (ues.duration - ues.position) >= $5
+                          AND (ues.position / ues.duration) < $6
+                       )
+                ) AS last_watched,
+                COALESCE(sm.name, s.title) AS title
+            FROM user_episode_state ues
+            JOIN episode_references er
+                ON er.tmdb_series_id = ues.tmdb_series_id
+               AND er.season_number = ues.season_number
+               AND er.episode_number = ues.episode_number
+            JOIN series s
+                ON s.id = er.series_id
+            LEFT JOIN series_metadata sm
+                ON sm.series_id = s.id
+            WHERE ues.user_id = $1
+              AND s.library_id = $2
+            GROUP BY s.id, er.tmdb_series_id, COALESCE(sm.name, s.title)
+            HAVING MAX(ues.last_watched) FILTER (
+                    WHERE ues.is_completed = true
+                       OR (ues.duration > 0 AND (ues.position / ues.duration) >= $6)
+                       OR (
+                              ues.position >= $3
+                          AND ues.duration > 0
+                          AND (ues.position / ues.duration) >= $4
+                          AND (ues.duration - ues.position) >= $5
+                          AND (ues.position / ues.duration) < $6
+                       )
+                ) IS NOT NULL
+            ORDER BY last_watched DESC,
+                     LOWER(COALESCE(sm.name, s.title)) ASC,
+                     s.id ASC
+            "#,
+        )
+        .bind(user_id)
+        .bind(library_id.to_uuid())
+        .bind(policy.resume_min_position_seconds)
+        .bind(policy.resume_min_progress_ratio)
+        .bind(policy.resume_min_remaining_seconds)
+        .bind(policy.completion_threshold)
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get library series continue rows: {}",
+                e
+            ))
+        })?;
+
+        rows.into_iter()
+            .map(|row| {
+                let series_id =
+                    row.try_get::<Uuid, _>("series_id").map_err(|e| {
+                        MediaError::Internal(format!(
+                            "Failed to decode library series continue id: {}",
+                            e
+                        ))
+                    })?;
+                let tmdb_series_id = row
+                    .try_get::<i64, _>("tmdb_series_id")
+                    .map_err(|e| {
+                        MediaError::Internal(format!(
+                            "Failed to decode library series continue TMDB id: {}",
+                            e
+                        ))
+                    })? as u64;
+                let last_watched = row
+                    .try_get::<i64, _>("last_watched")
+                    .map_err(|e| {
+                        MediaError::Internal(format!(
+                            "Failed to decode library series continue timestamp: {}",
+                            e
+                        ))
+                    })?;
+
+                Ok(LibrarySeriesContinueRow {
+                    series_id,
+                    tmdb_series_id,
+                    last_watched,
+                })
+            })
+            .collect()
+    }
+
+    async fn build_library_series_continue_watching_item(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+        candidate: LibrarySeriesContinueRow,
+    ) -> Result<Option<SeriesContinueWatchingItem>> {
+        let policy = Self::watch_policy();
+        if let Some(row) = sqlx::query(
+            r#"
+            SELECT
+                er.id AS media_id,
+                er.season_number,
+                er.episode_number,
+                ues.position,
+                ues.duration,
+                COALESCE(sm.name, s.title) AS title,
+                sm.primary_poster_image_id AS poster_iid
+            FROM user_episode_state ues
+            JOIN episode_references er
+                ON er.tmdb_series_id = ues.tmdb_series_id
+               AND er.season_number = ues.season_number
+               AND er.episode_number = ues.episode_number
+            JOIN series s
+                ON s.id = er.series_id
+            LEFT JOIN series_metadata sm
+                ON sm.series_id = s.id
+            WHERE ues.user_id = $1
+              AND s.library_id = $2
+              AND er.series_id = $3
+              AND ues.tmdb_series_id = $4
+              AND ues.position >= $5
+              AND ues.duration > 0
+              AND (ues.position / ues.duration) >= $6
+              AND (ues.duration - ues.position) >= $7
+              AND ues.is_completed = false
+              AND (ues.position / ues.duration) < $8
+            ORDER BY ues.last_watched DESC, er.discovered_at ASC, er.id ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .bind(library_id.to_uuid())
+        .bind(candidate.series_id)
+        .bind(candidate.tmdb_series_id as i64)
+        .bind(policy.resume_min_position_seconds)
+        .bind(policy.resume_min_progress_ratio)
+        .bind(policy.resume_min_remaining_seconds)
+        .bind(policy.completion_threshold)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to resolve library series resume target: {}",
+                e
+            ))
+        })? {
+            let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library series resume media id: {}",
+                    e
+                ))
+            })?;
+            let season_number =
+                row.try_get::<i16, _>("season_number").map_err(|e| {
+                    MediaError::Internal(format!(
+                        "Failed to decode library series resume season: {}",
+                        e
+                    ))
+                })? as u16;
+            let episode_number =
+                row.try_get::<i16, _>("episode_number").map_err(|e| {
+                    MediaError::Internal(format!(
+                        "Failed to decode library series resume episode: {}",
+                        e
+                    ))
+                })? as u16;
+            let position = row.try_get::<f32, _>("position").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library series resume position: {}",
+                    e
+                ))
+            })?;
+            let duration = row.try_get::<f32, _>("duration").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library series resume duration: {}",
+                    e
+                ))
+            })?;
+            let title = row.try_get::<String, _>("title").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library series resume title: {}",
+                    e
+                ))
+            })?;
+            let poster_iid =
+                row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
+                    MediaError::Internal(format!(
+                        "Failed to decode library series poster iid: {}",
+                        e
+                    ))
+                })?;
+            let key = EpisodeKey {
+                tmdb_series_id: candidate.tmdb_series_id,
+                season_number,
+                episode_number,
+            };
+            let label = Self::format_episode_label(&key);
+            let subtitle = Self::format_remaining_label(duration - position)
+                .map(|remaining| format!("Resume {label} • {remaining} left"))
+                .or_else(|| Some(format!("Resume {label}")));
+
+            return Ok(Some(SeriesContinueWatchingItem {
+                series_id: candidate.series_id,
+                library_id,
+                action_episode_id: Some(media_id),
+                action_hint: ContinueWatchingActionHint::Resume,
+                position,
+                duration,
+                last_watched: candidate.last_watched,
+                title: Some(title),
+                subtitle,
+                poster_iid,
+            }));
+        }
+
+        let has_completed = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM user_episode_state ues
+                JOIN episode_references er
+                    ON er.tmdb_series_id = ues.tmdb_series_id
+                   AND er.season_number = ues.season_number
+                   AND er.episode_number = ues.episode_number
+                JOIN series s
+                    ON s.id = er.series_id
+                WHERE ues.user_id = $1
+                  AND s.library_id = $2
+                  AND er.series_id = $3
+                  AND ues.tmdb_series_id = $4
+                  AND ues.is_completed = true
+            )
+            "#,
+        )
+        .bind(user_id)
+        .bind(library_id.to_uuid())
+        .bind(candidate.series_id)
+        .bind(candidate.tmdb_series_id as i64)
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to inspect library completed series history: {}",
+                e
+            ))
+        })?;
+
+        if !has_completed {
+            return Ok(None);
+        }
+
+        let next_row = sqlx::query(
+            r#"
+            SELECT
+                er.id AS media_id,
+                er.season_number,
+                er.episode_number,
+                COALESCE(sm.name, s.title) AS title,
+                sm.primary_poster_image_id AS poster_iid
+            FROM episode_references er
+            JOIN series s
+                ON s.id = er.series_id
+            LEFT JOIN series_metadata sm
+                ON sm.series_id = s.id
+            LEFT JOIN user_episode_state ues
+                ON ues.user_id = $1
+               AND ues.tmdb_series_id = er.tmdb_series_id
+               AND ues.season_number = er.season_number
+               AND ues.episode_number = er.episode_number
+            WHERE s.library_id = $2
+              AND er.series_id = $3
+              AND er.tmdb_series_id = $4
+              AND (ues.is_completed IS NULL OR ues.is_completed = false)
+            ORDER BY er.season_number ASC,
+                     er.episode_number ASC,
+                     er.discovered_at ASC,
+                     er.id ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .bind(library_id.to_uuid())
+        .bind(candidate.series_id)
+        .bind(candidate.tmdb_series_id as i64)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to resolve library series next-episode target: {}",
+                e
+            ))
+        })?;
+
+        let Some(row) = next_row else {
+            return Ok(None);
+        };
+
+        let media_id = row.try_get::<Uuid, _>("media_id").map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to decode library next-episode media id: {}",
+                e
+            ))
+        })?;
+        let season_number =
+            row.try_get::<i16, _>("season_number").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library next-episode season: {}",
+                    e
+                ))
+            })? as u16;
+        let episode_number =
+            row.try_get::<i16, _>("episode_number").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library next-episode episode: {}",
+                    e
+                ))
+            })? as u16;
+        let title = row.try_get::<String, _>("title").map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to decode library next-episode title: {}",
+                e
+            ))
+        })?;
+        let poster_iid =
+            row.try_get::<Option<Uuid>, _>("poster_iid").map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to decode library next-episode poster iid: {}",
+                    e
+                ))
+            })?;
+        let key = EpisodeKey {
+            tmdb_series_id: candidate.tmdb_series_id,
+            season_number,
+            episode_number,
+        };
+
+        Ok(Some(SeriesContinueWatchingItem {
+            series_id: candidate.series_id,
+            library_id,
+            action_episode_id: Some(media_id),
+            action_hint: ContinueWatchingActionHint::NextEpisode,
+            position: 0.0,
+            duration: 0.0,
+            last_watched: candidate.last_watched,
+            title: Some(title),
+            subtitle: Some(format!(
+                "Next up: {}",
+                Self::format_episode_label(&key)
+            )),
+            poster_iid,
+        }))
+    }
+}
+
+fn compare_series_continue_titles(
+    a: &SeriesContinueWatchingItem,
+    b: &SeriesContinueWatchingItem,
+) -> std::cmp::Ordering {
+    let a_title = series_continue_title_key(a);
+    let b_title = series_continue_title_key(b);
+
+    a_title
+        .to_lowercase()
+        .cmp(&b_title.to_lowercase())
+        .then_with(|| a_title.cmp(b_title))
+}
+
+fn series_continue_title_key(item: &SeriesContinueWatchingItem) -> &str {
+    item.title.as_deref().unwrap_or("")
 }
 
 #[async_trait]
@@ -882,6 +1281,135 @@ impl WatchStatusRepository for PostgresWatchStatusRepository {
         items.truncate(limit);
 
         Ok(items)
+    }
+
+    async fn get_library_series_continue_watching(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+        limit: usize,
+    ) -> Result<Vec<SeriesContinueWatchingItem>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let candidates = self
+            .load_library_series_continue_rows(user_id, library_id)
+            .await?;
+        let mut items = Vec::new();
+
+        for candidate in candidates {
+            if let Some(item) = self
+                .build_library_series_continue_watching_item(
+                    user_id, library_id, candidate,
+                )
+                .await?
+            {
+                items.push(item);
+            }
+        }
+
+        Self::sort_series_continue_watching_items(&mut items);
+        items.truncate(limit);
+
+        Ok(items)
+    }
+
+    async fn list_library_series_ids_with_meaningful_watch_state(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+    ) -> Result<Vec<Uuid>> {
+        let policy = Self::watch_policy();
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT watched.series_id
+            FROM (
+                SELECT s.id AS series_id
+                FROM series s
+                JOIN episode_references er
+                    ON er.series_id = s.id
+                JOIN user_episode_state ues
+                    ON ues.tmdb_series_id = er.tmdb_series_id
+                   AND ues.season_number = er.season_number
+                   AND ues.episode_number = er.episode_number
+                WHERE ues.user_id = $1
+                  AND s.library_id = $2
+                  AND (
+                        ues.is_completed = true
+                     OR (ues.duration > 0 AND (ues.position / ues.duration) >= $3)
+                     OR (
+                            ues.position >= $4
+                        AND ues.duration > 0
+                        AND (ues.position / ues.duration) >= $5
+                        AND (ues.duration - ues.position) >= $6
+                        AND (ues.position / ues.duration) < $3
+                     )
+                  )
+
+                UNION
+
+                SELECT s.id AS series_id
+                FROM series s
+                JOIN episode_references er
+                    ON er.series_id = s.id
+                JOIN user_watch_progress uwp
+                    ON uwp.media_uuid = er.id
+                WHERE uwp.user_id = $1
+                  AND s.library_id = $2
+                  AND uwp.media_type = $7
+                  AND uwp.duration > 0
+                  AND (
+                        (uwp.position / uwp.duration) >= $3
+                     OR (
+                            uwp.position >= $4
+                        AND (uwp.position / uwp.duration) >= $5
+                        AND (uwp.duration - uwp.position) >= $6
+                        AND (uwp.position / uwp.duration) < $3
+                     )
+                  )
+
+                UNION
+
+                SELECT s.id AS series_id
+                FROM series s
+                JOIN episode_references er
+                    ON er.series_id = s.id
+                JOIN user_completed_media ucm
+                    ON ucm.media_uuid = er.id
+                WHERE ucm.user_id = $1
+                  AND s.library_id = $2
+                  AND ucm.media_type = $7
+            ) watched
+            ORDER BY watched.series_id
+            "#,
+        )
+        .bind(user_id)
+        .bind(library_id.to_uuid())
+        .bind(policy.completion_threshold)
+        .bind(policy.resume_min_position_seconds)
+        .bind(policy.resume_min_progress_ratio)
+        .bind(policy.resume_min_remaining_seconds)
+        .bind(VideoMediaType::Episode as i16)
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to list library series watch-state ids: {}",
+                e
+            ))
+        })?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get::<Uuid, _>("series_id").map_err(|e| {
+                    MediaError::Internal(format!(
+                        "Failed to decode watched series id: {}",
+                        e
+                    ))
+                })
+            })
+            .collect()
     }
 
     async fn clear_watch_progress(
@@ -2032,5 +2560,50 @@ impl PostgresWatchStatusRepository {
                     e
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn series_continue_item(
+        series_id: Uuid,
+        title: &str,
+        last_watched: i64,
+    ) -> SeriesContinueWatchingItem {
+        SeriesContinueWatchingItem {
+            series_id,
+            library_id: LibraryId(Uuid::from_u128(1)),
+            action_episode_id: Some(Uuid::from_u128(100)),
+            action_hint: ContinueWatchingActionHint::Resume,
+            position: 120.0,
+            duration: 1_200.0,
+            last_watched,
+            title: Some(title.to_string()),
+            subtitle: Some("Resume S01E01".to_string()),
+            poster_iid: None,
+        }
+    }
+
+    #[test]
+    fn library_series_continue_items_sort_by_activity_title_and_series_id() {
+        let alpha_late = Uuid::from_u128(30);
+        let beta = Uuid::from_u128(20);
+        let alpha_tie_low_id = Uuid::from_u128(10);
+        let mut items = vec![
+            series_continue_item(beta, "Beta", 100),
+            series_continue_item(alpha_late, "Alpha", 200),
+            series_continue_item(alpha_tie_low_id, "Alpha", 200),
+        ];
+
+        PostgresWatchStatusRepository::sort_series_continue_watching_items(
+            &mut items,
+        );
+
+        assert_eq!(
+            items.iter().map(|item| item.series_id).collect::<Vec<_>>(),
+            vec![alpha_tie_low_id, alpha_late, beta]
+        );
     }
 }
