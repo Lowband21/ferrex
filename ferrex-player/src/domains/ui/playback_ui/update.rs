@@ -8,6 +8,47 @@ use ferrex_core::player_prelude::{
 };
 use iced::Task;
 
+fn play_media_with_position(
+    state: &mut State,
+    media_id: MediaID,
+    position: f32,
+) -> DomainUpdateResult {
+    match state.domains.ui.state.repo_accessor.get(&media_id) {
+        Ok(media) => {
+            let media_file = match media {
+                Media::Movie(movie) => movie.file(),
+                Media::Episode(episode) => episode.file(),
+                _ => {
+                    log::error!("Media not playable type {}", media_id);
+                    return DomainUpdateResult::task(Task::none());
+                }
+            };
+
+            let duration_hint = media_file
+                .media_file_metadata
+                .as_ref()
+                .and_then(|meta| meta.duration)
+                .filter(|duration| *duration > 0.0)
+                .unwrap_or(0.0);
+
+            state.domains.player.state.last_valid_position = position as f64;
+            state.domains.player.state.last_valid_duration = duration_hint;
+            state.domains.media.state.pending_resume_position = Some(position);
+            state.domains.player.state.pending_resume_position = Some(position);
+
+            DomainUpdateResult::task(Task::done(DomainMessage::Player(
+                crate::domains::player::messages::PlayerMessage::PlayMediaWithId(
+                    media_file, media_id,
+                ),
+            )))
+        }
+        Err(_) => {
+            log::error!("Failed to get media with id {}", media_id);
+            DomainUpdateResult::task(Task::none())
+        }
+    }
+}
+
 pub fn update_playback_ui(
     state: &mut State,
     message: PlaybackMessage,
@@ -40,6 +81,9 @@ pub fn update_playback_ui(
                     DomainUpdateResult::task(Task::none())
                 }
             }
+        }
+        PlaybackMessage::PlayMediaWithIdFromStart(media_id) => {
+            play_media_with_position(state, media_id, 0.0)
         }
         PlaybackMessage::PlayMediaWithIdInMpv(media_id) => {
             match state.domains.ui.state.repo_accessor.get(&media_id) {
