@@ -164,7 +164,7 @@ hkdf = "0.12"
 argon2.workspace = true
 
 # Hardware fingerprinting
-sysinfo = "0.37"
+sysinfo = "0.38"
 mac_address = "1.1"
 
 # Memory zeroization for secure credentials
