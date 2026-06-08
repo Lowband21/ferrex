@@ -73,6 +73,15 @@ pub mod v1 {
         pub const STATE: &str = v1_path!("/watch/state");
         pub const CONTINUE: &str = v1_path!("/watch/continue");
         pub const CLEAR_PROGRESS: &str = v1_path!("/watch/progress/{media_id}");
+        /// Mark or clear watched state for a movie logical or file media id.
+        pub const MOVIE_WATCHED: &str =
+            v1_path!("/watch/movies/{media_id}/watched");
+        /// Mark or clear watched state for an episode logical or file media id.
+        pub const EPISODE_WATCHED: &str =
+            v1_path!("/watch/episodes/{media_id}/watched");
+        /// Mark or clear watched state for every episode in a TMDB series.
+        pub const SERIES_WATCHED: &str =
+            v1_path!("/watch/series/{tmdb_series_id}/watched");
         // Identity-based TV helpers
         pub const SERIES_STATE: &str =
             v1_path!("/watch/series/{tmdb_series_id}");
