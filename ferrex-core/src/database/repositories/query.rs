@@ -8,7 +8,7 @@ use sqlx::{
 };
 // Use Media enum from our domain prelude, not tmdb_api
 
-use crate::domain::watch::{CompletedItem, ItemWatchStatus};
+use crate::domain::watch::{CompletedItem, ItemWatchStatus, WatchResumePolicy};
 use crate::{
     api::types::{RATING_DECIMAL_SCALE, RatingValue},
     database::repositories::fuzzy_title_search::{
@@ -20,7 +20,6 @@ use crate::{
     query::types::{MediaQuery, MediaWithStatus},
 };
 
-const WATCH_COMPLETION_THRESHOLD: f64 = 0.95;
 const MOVIE_WATCH_KIND: i32 = 0;
 const EPISODE_WATCH_KIND: i32 = 3;
 
@@ -29,9 +28,7 @@ fn rating_bound(value: RatingValue) -> BigDecimal {
 }
 
 fn is_completed_progress(position: f32, duration: f32) -> bool {
-    duration > 0.0
-        && (f64::from(position) / f64::from(duration))
-            >= WATCH_COMPLETION_THRESHOLD
+    WatchResumePolicy::from_env().is_completed_progress(position, duration)
 }
 
 fn media_id_from_watch_kind(kind: i32, id: Uuid) -> Result<MediaID> {
@@ -961,7 +958,9 @@ impl QueryRepository for PostgresQueryRepository {
         .bind(user_id)
         .bind(query.pagination.limit as i64)
         .bind(query.pagination.offset as i64)
-        .bind(WATCH_COMPLETION_THRESHOLD)
+        .bind(f64::from(
+            WatchResumePolicy::from_env().completion_threshold,
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| MediaError::Internal(format!("Database query failed: {}", e)))?;

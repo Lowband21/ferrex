@@ -1,12 +1,15 @@
 use crate::{
     database::PostgresDatabase,
     database::repository_ports::watch_status::WatchStatusRepository,
-    domain::watch::{InProgressItem, UpdateProgressRequest, UserWatchState},
+    domain::watch::{
+        ContinueWatchingItem, UpdateProgressRequest, UserWatchState,
+    },
     error::Result,
     types::watch::{
         EpisodeKey, NextEpisode, SeasonWatchStatus, SeriesWatchStatus,
     },
 };
+use ferrex_model::VideoMediaType;
 use uuid::Uuid;
 
 impl PostgresDatabase {
@@ -33,7 +36,7 @@ impl PostgresDatabase {
         &self,
         user_id: Uuid,
         limit: usize,
-    ) -> Result<Vec<InProgressItem>> {
+    ) -> Result<Vec<ContinueWatchingItem>> {
         self.watch_status_repository()
             .get_continue_watching(user_id, limit)
             .await
@@ -56,6 +59,49 @@ impl PostgresDatabase {
     ) -> Result<bool> {
         self.watch_status_repository()
             .is_media_completed(user_id, media_id)
+            .await
+    }
+
+    pub async fn mark_media_watched(
+        &self,
+        user_id: Uuid,
+        media_id: Uuid,
+        media_type: VideoMediaType,
+        last_media_uuid: Option<Uuid>,
+    ) -> Result<()> {
+        self.watch_status_repository()
+            .mark_media_watched(user_id, media_id, media_type, last_media_uuid)
+            .await
+    }
+
+    pub async fn mark_media_unwatched(
+        &self,
+        user_id: Uuid,
+        media_id: Uuid,
+        media_type: VideoMediaType,
+    ) -> Result<()> {
+        self.watch_status_repository()
+            .mark_media_unwatched(user_id, media_id, media_type)
+            .await
+    }
+
+    pub async fn mark_series_watched(
+        &self,
+        user_id: Uuid,
+        tmdb_series_id: u64,
+    ) -> Result<()> {
+        self.watch_status_repository()
+            .mark_series_watched(user_id, tmdb_series_id)
+            .await
+    }
+
+    pub async fn mark_series_unwatched(
+        &self,
+        user_id: Uuid,
+        tmdb_series_id: u64,
+    ) -> Result<()> {
+        self.watch_status_repository()
+            .mark_series_unwatched(user_id, tmdb_series_id)
             .await
     }
 
