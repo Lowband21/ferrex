@@ -2,6 +2,7 @@
 
 pub mod calibrator;
 pub mod error;
+pub mod keyboard;
 pub mod messages;
 pub mod metrics;
 pub mod service;
@@ -13,6 +14,10 @@ use crate::infra::repository::{Accessor, ReadOnly};
 use iced::Task;
 use std::sync::Arc;
 
+pub use self::keyboard::{
+    TenFootKeyboardAction, TenFootKeyboardDirection, TenFootKeyboardKey,
+    TenFootKeyboardState,
+};
 pub use self::messages::{SearchEvent, SearchMessage};
 pub use self::service::SearchService;
 pub use self::types::{
