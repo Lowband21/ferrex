@@ -55,6 +55,13 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let search_open = state.domains.search.state.presentation.is_open();
     let tenfoot_home_active = is_tenfoot_home_route(state);
     let tenfoot_detail_active = is_tenfoot_detail_route(state);
+    let tenfoot_playback_surface_active = state.interface_mode.is_tenfoot()
+        && matches!(
+            state.domains.ui.state.view,
+            ViewState::Player
+                | ViewState::LoadingVideo { .. }
+                | ViewState::VideoError { .. }
+        );
 
     // Delegate window lifecycle subscriptions (resize, move, focus) to the
     // window management module so secondary windows stay isolated
@@ -99,7 +106,11 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(event::listen_with(tenfoot_detail_key_handler));
     }
 
-    if !search_open && !tenfoot_home_active && !tenfoot_detail_active {
+    if !search_open
+        && !tenfoot_home_active
+        && !tenfoot_detail_active
+        && !tenfoot_playback_surface_active
+    {
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -176,6 +187,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let in_all_curated = !search_open
         && !tenfoot_home_active
         && !tenfoot_detail_active
+        && !tenfoot_playback_surface_active
         && matches!(state.domains.ui.state.scope, Scope::Home)
         && matches!(state.tab_manager.active_tab_id(), TabId::Home);
     if in_all_curated {

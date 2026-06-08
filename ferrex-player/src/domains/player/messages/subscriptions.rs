@@ -50,14 +50,26 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         );
     }
 
-    // Player specific keyboard control
-    subs.push(keyboard_shortcuts(state));
+    // Player specific keyboard control. 10-foot mode owns its own
+    // spatial-navigation handler so desktop seek/volume shortcuts do not
+    // compete with overlay focus movement.
+    if state.interface_mode.is_tenfoot() {
+        subs.push(
+            crate::domains::ui::views::tenfoot::player_overlay::keyboard_subscription(
+                state,
+            ),
+        );
+    } else {
+        subs.push(keyboard_shortcuts(state));
+    }
 
     Subscription::batch(subs)
 }
 
 fn keyboard_shortcuts(state: &State) -> Subscription<DomainMessage> {
-    if state.domains.search.state.presentation.is_open() {
+    if state.interface_mode.is_tenfoot()
+        || state.domains.search.state.presentation.is_open()
+    {
         return Subscription::none();
     }
 
