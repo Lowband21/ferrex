@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::watch::{
     ContinueWatchingActionHint, ContinueWatchingItem, ItemWatchStatus,
+    SeriesContinueWatchingItem,
 };
 
 /// Stable section id for the global resume/continue-watching shelf.
@@ -15,6 +16,10 @@ pub const DISCOVERY_SECTION_RECENTLY_RELEASED: &str = "recently-released";
 /// Stable section id for audience-rating based deterministic picks.
 pub const DISCOVERY_SECTION_AUDIENCE_RATING_PICKS: &str =
     "audience-rating-picks";
+/// Stable section id for watch-aware series continuation shelves.
+pub const DISCOVERY_SECTION_CONTINUE_SERIES: &str = "continue-series";
+/// Stable section id for series the authenticated user has not started.
+pub const DISCOVERY_SECTION_UNWATCHED_SERIES: &str = "unwatched-series";
 
 /// Top-level response for deterministic discovery endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -252,6 +257,28 @@ pub struct DiscoveryWatchSummary {
 
 impl DiscoveryWatchSummary {
     pub fn from_continue_watching(item: &ContinueWatchingItem) -> Self {
+        let state = match item.action_hint {
+            ContinueWatchingActionHint::NextEpisode => {
+                DiscoveryWatchState::Unwatched
+            }
+            ContinueWatchingActionHint::Resume => {
+                DiscoveryWatchState::InProgress
+            }
+        };
+
+        Self {
+            state,
+            progress: progress_ratio(item.position, item.duration),
+            position_seconds: finite_seconds(item.position),
+            duration_seconds: finite_seconds(item.duration),
+            last_watched_epoch_seconds: Some(item.last_watched),
+        }
+    }
+
+    /// Build a shelf watch summary from a library-scoped series continue row.
+    pub fn from_series_continue_watching(
+        item: &SeriesContinueWatchingItem,
+    ) -> Self {
         let state = match item.action_hint {
             ContinueWatchingActionHint::NextEpisode => {
                 DiscoveryWatchState::Unwatched
