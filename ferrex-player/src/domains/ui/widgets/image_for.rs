@@ -7,7 +7,8 @@ use crate::{
     domains::{
         metadata::image_service::{FirstDisplayHint, UnifiedImageService},
         ui::{
-            messages::UiMessage, views::virtual_carousel::types::CarouselKey,
+            menu::MenuButton, messages::UiMessage,
+            views::virtual_carousel::types::CarouselKey,
         },
     },
     infra::{
@@ -73,6 +74,7 @@ pub struct ImageFor {
     progress_color: Option<Color>,
     rotation_y: Option<f32>,
     face: Option<PosterFace>,
+    selected_menu_button: Option<MenuButton>,
     // Optimization: Cache to avoid repeated lookups
     cached_data: Option<CachedImageData>,
     // If true, do not enqueue a network request on cache miss.
@@ -120,6 +122,7 @@ impl ImageFor {
             progress_color: None,
             rotation_y: None,
             face: None,
+            selected_menu_button: None,
             cached_data: None,
             skip_request: false,
             title: None,
@@ -261,6 +264,12 @@ impl ImageFor {
         self
     }
 
+    /// Set the keyboard/controller-selected backface menu button.
+    pub fn selected_menu_button(mut self, button: Option<MenuButton>) -> Self {
+        self.selected_menu_button = button;
+        self
+    }
+
     /// If set, the image widget will not enqueue a fetch on cache miss and
     /// will render only a placeholder. Useful when metadata lacks a poster.
     pub fn skip_request(mut self, skip: bool) -> Self {
@@ -392,6 +401,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     instance_key,
                     image.face.unwrap_or(PosterFace::Front),
                     image.rotation_y,
+                    image.selected_menu_button,
                 );
             };
 
@@ -432,7 +442,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                             .with_animated_bounds(bounds)
                             .is_hovered(image.is_hovered)
                             .menu_target(instance_key)
-                            .face(image.face.unwrap_or(PosterFace::Front));
+                            .face(image.face.unwrap_or(PosterFace::Front))
+                            .selected_menu_button(image.selected_menu_button);
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);
@@ -546,6 +557,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         instance_key,
                         image.face.unwrap_or(PosterFace::Front),
                         image.rotation_y,
+                        image.selected_menu_button,
                     )
                 }
             }
@@ -563,6 +575,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 instance_key,
                 image.face.unwrap_or(PosterFace::Front),
                 image.rotation_y,
+                image.selected_menu_button,
             )
         }
     }
@@ -593,7 +606,8 @@ fn create_shader_from_cached<'a>(
         .with_animated_bounds(bounds)
         .is_hovered(image.is_hovered)
         .menu_target(instance_key)
-        .face(image.face.unwrap_or(PosterFace::Front));
+        .face(image.face.unwrap_or(PosterFace::Front))
+        .selected_menu_button(image.selected_menu_button);
 
     // Set theme color if provided
     if let Some(color) = image.theme_color {
@@ -659,6 +673,7 @@ fn create_loading_placeholder<'a>(
     instance_key: PosterInstanceKey,
     face: PosterFace,
     rotation_override: Option<f32>,
+    selected_menu_button: Option<MenuButton>,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -681,7 +696,8 @@ fn create_loading_placeholder<'a>(
         .with_animation(PosterAnimationType::PlaceholderSunken)
         .is_hovered(false) // Placeholders are never hovered
         .menu_target(instance_key)
-        .face(face);
+        .face(face)
+        .selected_menu_button(selected_menu_button);
 
     if let Some(rot) = rotation_override {
         poster = poster.rotation_y(rot);

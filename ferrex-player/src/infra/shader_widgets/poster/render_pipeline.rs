@@ -1,8 +1,11 @@
-use crate::infra::shader_widgets::poster::{
-    Instant, PosterFace,
-    animation::{self, PosterAnimationType, calculate_animation_state},
-    batch_state::{self, PosterInstance},
-    font_atlas::{pack_meta, pack_title},
+use crate::{
+    domains::ui::menu::MenuButton,
+    infra::shader_widgets::poster::{
+        Instant, PosterFace,
+        animation::{self, PosterAnimationType, calculate_animation_state},
+        batch_state::{self, PosterInstance},
+        font_atlas::{pack_meta, pack_title},
+    },
 };
 
 use iced::{Color, Point, Rectangle, wgpu};
@@ -331,6 +334,7 @@ pub(crate) fn create_batch_instance(
     progress_color: Color,
     rotation_override: Option<f32>,
     _face: PosterFace,
+    selected_menu_button: Option<MenuButton>,
     title: Option<&str>,
     meta: Option<&str>,
 ) -> batch_state::PosterInstance {
@@ -463,6 +467,10 @@ pub(crate) fn create_batch_instance(
         scale.max(hover_contribution)
     };
 
+    let selected_menu_button = selected_menu_button
+        .map(|button| button.shader_index() as f32)
+        .unwrap_or(-1.0);
+
     // Calculate mouse position
     let mouse_pos_normalized = if let Some(mouse_pos) = mouse_position {
         let scaled_poster_width = poster_size[0] * effective_scale;
@@ -532,7 +540,7 @@ pub(crate) fn create_batch_instance(
         mouse_pos_and_padding: [
             mouse_pos_normalized[0],
             mouse_pos_normalized[1],
-            0.0,
+            selected_menu_button,
             0.0,
         ],
         progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
@@ -562,7 +570,12 @@ pub fn create_placeholder_instance(
     progress: Option<f32>,
     progress_color: Color,
     _face: PosterFace,
+    selected_menu_button: Option<MenuButton>,
 ) -> batch_state::PosterInstance {
+    let selected_menu_button = selected_menu_button
+        .map(|button| button.shader_index() as f32)
+        .unwrap_or(-1.0);
+
     let (
         actual_opacity,
         rotation_y,
@@ -631,7 +644,7 @@ pub fn create_placeholder_instance(
             show_border,
             progress.unwrap_or(-1.0),
         ],
-        mouse_pos_and_padding: [0.0, 0.0, 0.0, 0.0],
+        mouse_pos_and_padding: [0.0, 0.0, selected_menu_button, 0.0],
         progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer: 0,

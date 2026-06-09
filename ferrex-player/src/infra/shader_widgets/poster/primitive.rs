@@ -1,7 +1,10 @@
-use crate::infra::shader_widgets::poster::{
-    PosterFace,
-    animation::{AnimatedPosterBounds, PosterAnimationType},
-    batch_state::{PendingPrimitive, PosterBatchState},
+use crate::{
+    domains::ui::menu::MenuButton,
+    infra::shader_widgets::poster::{
+        PosterFace,
+        animation::{AnimatedPosterBounds, PosterAnimationType},
+        batch_state::{PendingPrimitive, PosterBatchState},
+    },
 };
 
 use iced::{
@@ -35,6 +38,7 @@ pub struct PosterPrimitive {
     pub progress_color: Color,
     pub rotation_override: Option<f32>,
     pub face: PosterFace,
+    pub selected_menu_button: Option<MenuButton>,
     /// Title text to render below the poster
     pub title: Option<String>,
     /// Meta text (e.g., year) to render below the title
@@ -108,6 +112,7 @@ impl BatchPrimitive for PosterPrimitive {
             progress_color: self.progress_color,
             rotation_override: self.rotation_override,
             face: self.face,
+            selected_menu_button: self.selected_menu_button,
             title: self.title.clone(),
             meta: self.meta.clone(),
         });
