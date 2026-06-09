@@ -20,8 +20,9 @@ pub use admin::{
 };
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
 pub use discovery::{
-    DISCOVERY_SECTION_AUDIENCE_RATING_PICKS, DISCOVERY_SECTION_RECENTLY_ADDED,
-    DISCOVERY_SECTION_RECENTLY_RELEASED, DISCOVERY_SECTION_RESUME,
+    DISCOVERY_SECTION_AUDIENCE_RATING_PICKS, DISCOVERY_SECTION_CONTINUE_SERIES,
+    DISCOVERY_SECTION_RECENTLY_ADDED, DISCOVERY_SECTION_RECENTLY_RELEASED,
+    DISCOVERY_SECTION_RESUME, DISCOVERY_SECTION_UNWATCHED_SERIES,
     DiscoveryItem, DiscoveryLayoutHint, DiscoveryMediaType,
     DiscoveryPlaybackAction, DiscoveryPlaybackHint, DiscoveryRatingSummary,
     DiscoveryResponse, DiscoverySection, DiscoveryWatchState,
@@ -67,8 +68,9 @@ pub mod player {
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
     pub use super::discovery::{
         DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
-        DISCOVERY_SECTION_RECENTLY_ADDED, DISCOVERY_SECTION_RECENTLY_RELEASED,
-        DISCOVERY_SECTION_RESUME, DiscoveryItem, DiscoveryLayoutHint,
+        DISCOVERY_SECTION_CONTINUE_SERIES, DISCOVERY_SECTION_RECENTLY_ADDED,
+        DISCOVERY_SECTION_RECENTLY_RELEASED, DISCOVERY_SECTION_RESUME,
+        DISCOVERY_SECTION_UNWATCHED_SERIES, DiscoveryItem, DiscoveryLayoutHint,
         DiscoveryMediaType, DiscoveryPlaybackAction, DiscoveryPlaybackHint,
         DiscoveryRatingSummary, DiscoveryResponse, DiscoverySection,
         DiscoveryWatchState, DiscoveryWatchSummary,

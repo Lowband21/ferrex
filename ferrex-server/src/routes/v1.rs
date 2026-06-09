@@ -320,6 +320,10 @@ fn create_libraries_routes(state: AppState) -> Router<AppState> {
             v1::libraries::ITEM,
             axum::routing::delete(delete_library_handler),
         )
+        .route(
+            v1::libraries::DISCOVERY,
+            get(discovery::get_library_discovery_handler),
+        )
         .route(v1::libraries::MEDIA, get(get_library_media_handler))
         .route(
             v1::libraries::movie_batches::COLLECTION,
