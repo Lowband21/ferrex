@@ -8,7 +8,13 @@ use crate::domains::ui::{
 };
 
 use crate::{
-    common::messages::DomainMessage,
+    common::{
+        controller_input::{
+            ControllerButton, ControllerEvent, ControllerInputMapper,
+        },
+        focus::SpatialAction,
+        messages::DomainMessage,
+    },
     domains::{
         search::messages::SearchMessage,
         ui::{
@@ -35,7 +41,7 @@ use crate::{
 use iced::{
     Subscription,
     event::{self, Event as RuntimeEvent, Status as EventStatus},
-    keyboard::{self, Key},
+    keyboard::{self, Key, key::Named},
     window,
 };
 
@@ -76,14 +82,23 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
             && state.domains.search.state.presentation.is_overlay();
         let tenfoot_keyboard_open = tenfoot_search_overlay
             && state.domains.search.state.tenfoot_keyboard.is_open();
-        subscriptions.push(event::listen().map(move |event| {
-            search_surface_key_handler(
-                event,
-                tenfoot_search_overlay,
-                tenfoot_keyboard_open,
-            )
-            .unwrap_or(DomainMessage::NoOp)
-        }));
+        subscriptions.push(
+            event::listen()
+                .with((tenfoot_search_overlay, tenfoot_keyboard_open))
+                .map(
+                    |(
+                        (tenfoot_search_overlay, tenfoot_keyboard_open),
+                        event,
+                    )| {
+                        search_surface_key_handler(
+                            event,
+                            tenfoot_search_overlay,
+                            tenfoot_keyboard_open,
+                        )
+                        .unwrap_or(DomainMessage::NoOp)
+                    },
+                ),
+        );
     }
 
     // Watch for close requests and close only our search window
@@ -363,14 +378,59 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     Subscription::batch(subscriptions)
 }
 
+fn tenfoot_spatial_action_for_key(
+    key: Key,
+    allow_search: bool,
+    allow_menu: bool,
+) -> Option<SpatialAction> {
+    let button =
+        tenfoot_controller_button_for_key(key, allow_search, allow_menu)?;
+    Some(
+        ControllerInputMapper::new()
+            .handle_event(ControllerEvent::ButtonPressed(button)),
+    )
+}
+
+fn tenfoot_controller_button_for_key(
+    key: Key,
+    allow_search: bool,
+    allow_menu: bool,
+) -> Option<ControllerButton> {
+    match key {
+        Key::Named(Named::ArrowUp) => Some(ControllerButton::DPadUp),
+        Key::Named(Named::ArrowDown) => Some(ControllerButton::DPadDown),
+        Key::Named(Named::ArrowLeft) => Some(ControllerButton::DPadLeft),
+        Key::Named(Named::ArrowRight) => Some(ControllerButton::DPadRight),
+        Key::Named(Named::Enter) | Key::Named(Named::Space) => {
+            Some(ControllerButton::South)
+        }
+        Key::Named(Named::Escape) | Key::Named(Named::Backspace) => {
+            Some(ControllerButton::East)
+        }
+        Key::Character(value)
+            if allow_search
+                && (value == "/" || value.eq_ignore_ascii_case("s")) =>
+        {
+            Some(ControllerButton::Select)
+        }
+        Key::Character(value)
+            if allow_menu && value.eq_ignore_ascii_case("m") =>
+        {
+            Some(ControllerButton::Start)
+        }
+        Key::Character(value) if value == " " => Some(ControllerButton::South),
+        Key::Character(value) if value.eq_ignore_ascii_case("b") => {
+            Some(ControllerButton::East)
+        }
+        _ => None,
+    }
+}
+
 fn tenfoot_home_key_handler(
     event: RuntimeEvent,
     status: EventStatus,
     _window: iced::window::Id,
 ) -> Option<DomainMessage> {
-    use crate::common::focus::{SpatialAction, SpatialDirection};
-    use iced::keyboard::key::Named;
-
     if !matches!(status, EventStatus::Ignored) {
         return None;
     }
@@ -388,33 +448,7 @@ fn tenfoot_home_key_handler(
         return None;
     }
 
-    let action = match key {
-        Key::Named(Named::ArrowUp) => {
-            Some(SpatialAction::Move(SpatialDirection::Up))
-        }
-        Key::Named(Named::ArrowDown) => {
-            Some(SpatialAction::Move(SpatialDirection::Down))
-        }
-        Key::Named(Named::ArrowLeft) => {
-            Some(SpatialAction::Move(SpatialDirection::Left))
-        }
-        Key::Named(Named::ArrowRight) => {
-            Some(SpatialAction::Move(SpatialDirection::Right))
-        }
-        Key::Named(Named::Enter) => Some(SpatialAction::Activate),
-        Key::Named(Named::Space) => Some(SpatialAction::Activate),
-        Key::Named(Named::Escape) => Some(SpatialAction::Back),
-        Key::Character(value)
-            if value == "/" || value.eq_ignore_ascii_case("s") =>
-        {
-            Some(SpatialAction::Search)
-        }
-        Key::Character(value) if value.eq_ignore_ascii_case("m") => {
-            Some(SpatialAction::Menu)
-        }
-        Key::Character(value) if value == " " => Some(SpatialAction::Activate),
-        _ => None,
-    }?;
+    let action = tenfoot_spatial_action_for_key(key, true, true)?;
 
     let msg = match action {
         SpatialAction::Move(direction) => TenFootHomeMessage::Move(direction),
@@ -432,9 +466,6 @@ fn tenfoot_detail_key_handler(
     status: EventStatus,
     _window: iced::window::Id,
 ) -> Option<DomainMessage> {
-    use crate::common::focus::{SpatialAction, SpatialDirection};
-    use iced::keyboard::key::Named;
-
     if !matches!(status, EventStatus::Ignored) {
         return None;
     }
@@ -452,29 +483,7 @@ fn tenfoot_detail_key_handler(
         return None;
     }
 
-    let action = match key {
-        Key::Named(Named::ArrowUp) => {
-            Some(SpatialAction::Move(SpatialDirection::Up))
-        }
-        Key::Named(Named::ArrowDown) => {
-            Some(SpatialAction::Move(SpatialDirection::Down))
-        }
-        Key::Named(Named::ArrowLeft) => {
-            Some(SpatialAction::Move(SpatialDirection::Left))
-        }
-        Key::Named(Named::ArrowRight) => {
-            Some(SpatialAction::Move(SpatialDirection::Right))
-        }
-        Key::Named(Named::Enter) => Some(SpatialAction::Activate),
-        Key::Named(Named::Space) => Some(SpatialAction::Activate),
-        Key::Named(Named::Escape) => Some(SpatialAction::Back),
-        Key::Named(Named::Backspace) => Some(SpatialAction::Back),
-        Key::Character(value) if value.eq_ignore_ascii_case("b") => {
-            Some(SpatialAction::Back)
-        }
-        Key::Character(value) if value == " " => Some(SpatialAction::Activate),
-        _ => None,
-    }?;
+    let action = tenfoot_spatial_action_for_key(key, false, false)?;
 
     let msg = match action {
         SpatialAction::Move(direction) => TenFootDetailMessage::Move(direction),

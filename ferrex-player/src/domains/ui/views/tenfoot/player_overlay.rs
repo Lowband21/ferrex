@@ -9,9 +9,13 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::{
     common::{
+        controller_input::{
+            ControllerButton, ControllerEvent, ControllerInputMapper,
+        },
         focus::{
-            FocusLayoutRect, SpatialAction, SpatialDirection,
-            SpatialFocusBuilder, SpatialFocusState, SpatialFocusable,
+            FocusLayoutRect, FocusMargins, SpatialAction, SpatialDirection,
+            SpatialFocusBuilder, SpatialFocusId, SpatialFocusState,
+            SpatialFocusable,
         },
         messages::DomainMessage,
         ui_utils::lucide_font,
@@ -46,7 +50,7 @@ const EXIT_ID: &str = "10ft.player.exit";
 
 #[derive(Debug, Default)]
 struct OverlayRuntime {
-    focused: Option<&'static str>,
+    focused: Option<SpatialFocusId>,
     controls_hidden: bool,
 }
 
@@ -95,6 +99,8 @@ impl PlayerOverlayLayout {
 
     const COMMAND_GAP: f32 = 10.0;
     const COMMAND_H: f32 = 52.0;
+    const FOCUS_MARGIN_X: f32 = 8.0;
+    const FOCUS_MARGIN_Y: f32 = 6.0;
     const SUBTITLE_W: f32 = 72.0;
     const AUDIO_W: f32 = 92.0;
     const FULLSCREEN_W: f32 = 96.0;
@@ -105,6 +111,14 @@ impl PlayerOverlayLayout {
         + Self::PANEL_COLUMN_GAP
         + Self::CONTROL_ROW_H
         + Self::PANEL_PAD_BOTTOM;
+
+    fn focus_margins() -> FocusMargins {
+        FocusMargins::symmetric(Self::FOCUS_MARGIN_X, Self::FOCUS_MARGIN_Y)
+    }
+
+    fn focus_layout(layout: FocusLayoutRect) -> FocusLayoutRect {
+        layout.expanded(Self::focus_margins())
+    }
 
     fn viewport_width(width: f32) -> f32 {
         width.max(Self::MIN_VIEWPORT_W)
@@ -291,12 +305,13 @@ impl PlayerOverlayLayout {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct TenFootPlayerInputSnapshot {
     has_internal_video: bool,
     external_active: bool,
     overlay_visible: bool,
-    focusables: Vec<SpatialFocusable<&'static str>>,
+    viewport_width_bits: u32,
+    viewport_height_bits: u32,
 }
 
 impl TenFootPlayerInputSnapshot {
@@ -305,18 +320,22 @@ impl TenFootPlayerInputSnapshot {
         let external_active = player.external_mpv_active;
         let has_internal_video = player.video_opt.is_some() && !external_active;
         let overlay_visible = overlay_controls_visible(player);
-        let focusables = focusables_for_viewport(
-            state.window_size.width,
-            state.window_size.height,
-            has_internal_video && overlay_visible,
-        );
 
         Self {
             has_internal_video,
             external_active,
             overlay_visible,
-            focusables,
+            viewport_width_bits: state.window_size.width.to_bits(),
+            viewport_height_bits: state.window_size.height.to_bits(),
         }
+    }
+
+    fn focusables(self) -> Vec<SpatialFocusable> {
+        focusables_for_viewport(
+            f32::from_bits(self.viewport_width_bits),
+            f32::from_bits(self.viewport_height_bits),
+            self.has_internal_video && self.overlay_visible,
+        )
     }
 
     fn handle_event(&self, event: RuntimeEvent) -> Option<DomainMessage> {
@@ -350,10 +369,12 @@ impl TenFootPlayerInputSnapshot {
             };
         }
 
+        let focusables = self.focusables();
+
         match action {
             SpatialAction::Move(direction) => {
                 show_overlay_controls();
-                move_focus(&self.focusables, direction);
+                move_focus(&focusables, direction);
                 player_message(PlayerMessage::ShowControls)
             }
             SpatialAction::Activate => {
@@ -362,8 +383,8 @@ impl TenFootPlayerInputSnapshot {
                     return player_message(PlayerMessage::ShowControls);
                 }
 
-                let focused = focused_id_for_focusables(&self.focusables);
-                player_message(player_message_for_focus(focused))
+                let focused = focused_id_for_focusables(&focusables);
+                player_message(player_message_for_focus(focused.as_str()))
             }
             SpatialAction::Back => {
                 if self.overlay_visible {
@@ -379,7 +400,7 @@ impl TenFootPlayerInputSnapshot {
             }
             SpatialAction::Menu => {
                 show_overlay_controls();
-                focus_id(SUBTITLE_ID, &self.focusables);
+                focus_id(SUBTITLE_ID, &focusables);
                 player_message(PlayerMessage::ShowControls)
             }
         }
@@ -394,37 +415,34 @@ fn spatial_action_for_player_key(
     key: Key,
     _modifiers: Modifiers,
 ) -> Option<SpatialAction> {
-    match key {
-        Key::Named(Named::ArrowUp) => {
-            Some(SpatialAction::Move(SpatialDirection::Up))
-        }
-        Key::Named(Named::ArrowDown) => {
-            Some(SpatialAction::Move(SpatialDirection::Down))
-        }
-        Key::Named(Named::ArrowLeft) => {
-            Some(SpatialAction::Move(SpatialDirection::Left))
-        }
-        Key::Named(Named::ArrowRight) => {
-            Some(SpatialAction::Move(SpatialDirection::Right))
-        }
+    let button = match key {
+        Key::Named(Named::ArrowUp) => ControllerButton::DPadUp,
+        Key::Named(Named::ArrowDown) => ControllerButton::DPadDown,
+        Key::Named(Named::ArrowLeft) => ControllerButton::DPadLeft,
+        Key::Named(Named::ArrowRight) => ControllerButton::DPadRight,
         Key::Named(Named::Enter) | Key::Named(Named::Space) => {
-            Some(SpatialAction::Activate)
+            ControllerButton::South
         }
         Key::Named(Named::Escape) | Key::Named(Named::Backspace) => {
-            Some(SpatialAction::Back)
+            ControllerButton::East
         }
-        Key::Character(value) if value == "/" => Some(SpatialAction::Search),
+        Key::Character(value) if value == "/" => ControllerButton::Select,
         Key::Character(value) if value.eq_ignore_ascii_case("s") => {
-            Some(SpatialAction::Search)
+            ControllerButton::Select
         }
         Key::Character(value) if value.eq_ignore_ascii_case("b") => {
-            Some(SpatialAction::Back)
+            ControllerButton::East
         }
         Key::Character(value) if value.eq_ignore_ascii_case("m") => {
-            Some(SpatialAction::Menu)
+            ControllerButton::Start
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+
+    Some(
+        ControllerInputMapper::new()
+            .handle_event(ControllerEvent::ButtonPressed(button)),
+    )
 }
 
 /// Player-view keyboard/controller subscription for 10-foot mode.
@@ -440,7 +458,7 @@ pub fn keyboard_subscription(state: &State) -> Subscription<DomainMessage> {
     }
 
     let snapshot = TenFootPlayerInputSnapshot::from_state(state);
-    event::listen().map(move |event| {
+    event::listen().with(snapshot).map(|(snapshot, event)| {
         snapshot.handle_event(event).unwrap_or(DomainMessage::NoOp)
     })
 }
@@ -913,100 +931,122 @@ fn show_overlay_controls() {
     overlay_runtime().controls_hidden = false;
 }
 
+fn play_focus_id() -> SpatialFocusId {
+    SpatialFocusId::from(PLAY_ID)
+}
+
 fn focusables_for_viewport(
     viewport_width: f32,
     viewport_height: f32,
     visible: bool,
-) -> Vec<SpatialFocusable<&'static str>> {
-    let mut builder = SpatialFocusBuilder::new();
+) -> Vec<SpatialFocusable> {
+    let mut builder: SpatialFocusBuilder = SpatialFocusBuilder::new();
 
     builder
         .push_layout_if(
             PLAY_ID,
-            PlayerOverlayLayout::transport_button_rect(
-                viewport_width,
-                viewport_height,
-                PLAY_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    PLAY_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             PREVIOUS_ID,
-            PlayerOverlayLayout::transport_button_rect(
-                viewport_width,
-                viewport_height,
-                PREVIOUS_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    PREVIOUS_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             REWIND_ID,
-            PlayerOverlayLayout::transport_button_rect(
-                viewport_width,
-                viewport_height,
-                REWIND_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    REWIND_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             FORWARD_ID,
-            PlayerOverlayLayout::transport_button_rect(
-                viewport_width,
-                viewport_height,
-                FORWARD_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    FORWARD_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             NEXT_ID,
-            PlayerOverlayLayout::transport_button_rect(
-                viewport_width,
-                viewport_height,
-                NEXT_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    NEXT_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             SUBTITLE_ID,
-            PlayerOverlayLayout::command_button_rect(
-                viewport_width,
-                viewport_height,
-                SUBTITLE_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::command_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    SUBTITLE_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             AUDIO_ID,
-            PlayerOverlayLayout::command_button_rect(
-                viewport_width,
-                viewport_height,
-                AUDIO_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::command_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    AUDIO_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             FULLSCREEN_ID,
-            PlayerOverlayLayout::command_button_rect(
-                viewport_width,
-                viewport_height,
-                FULLSCREEN_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::command_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    FULLSCREEN_ID,
+                ),
             ),
             visible,
             true,
         )
         .push_layout_if(
             EXIT_ID,
-            PlayerOverlayLayout::command_button_rect(
-                viewport_width,
-                viewport_height,
-                EXIT_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::command_button_rect(
+                    viewport_width,
+                    viewport_height,
+                    EXIT_ID,
+                ),
             ),
             visible,
             true,
@@ -1022,77 +1062,78 @@ fn focused_id_for_viewport(
 ) -> String {
     let focusables =
         focusables_for_viewport(viewport_width, viewport_height, visible);
-    focused_id_for_focusables(&focusables).to_string()
+    focused_id_for_focusables(&focusables).as_str().to_string()
 }
 
 fn focused_id_for_focusables(
-    focusables: &[SpatialFocusable<&'static str>],
-) -> &'static str {
+    focusables: &[SpatialFocusable],
+) -> SpatialFocusId {
     let mut runtime = overlay_runtime();
     resolve_runtime_focus(&mut runtime, focusables)
 }
 
 fn focus_id(
     id: &'static str,
-    focusables: &[SpatialFocusable<&'static str>],
-) -> &'static str {
+    focusables: &[SpatialFocusable],
+) -> SpatialFocusId {
     let mut runtime = overlay_runtime();
     let mut focus_state = spatial_state_from_runtime(&runtime, focusables);
-    if focus_state.focus(id) {
-        runtime.focused = Some(id);
-        id
+    let target = SpatialFocusId::from(id);
+    if focus_state.focus(target.clone()) {
+        runtime.focused = Some(target.clone());
+        target
     } else {
         resolve_runtime_focus(&mut runtime, focusables)
     }
 }
 
 fn move_focus(
-    focusables: &[SpatialFocusable<&'static str>],
+    focusables: &[SpatialFocusable],
     direction: SpatialDirection,
-) -> &'static str {
+) -> SpatialFocusId {
     let mut runtime = overlay_runtime();
     let mut focus_state = spatial_state_from_runtime(&runtime, focusables);
     let focused = focus_state
         .move_focus(direction)
-        .copied()
-        .unwrap_or(PLAY_ID);
-    runtime.focused = Some(focused);
+        .cloned()
+        .unwrap_or_else(play_focus_id);
+    runtime.focused = Some(focused.clone());
     focused
 }
 
 fn resolve_runtime_focus(
     runtime: &mut OverlayRuntime,
-    focusables: &[SpatialFocusable<&'static str>],
-) -> &'static str {
+    focusables: &[SpatialFocusable],
+) -> SpatialFocusId {
     if focusables.is_empty() {
-        return runtime.focused.unwrap_or(PLAY_ID);
+        return runtime.focused.clone().unwrap_or_else(play_focus_id);
     }
 
-    if let Some(focused) = runtime.focused
+    if let Some(focused) = runtime.focused.as_ref()
         && focusables
             .iter()
-            .any(|candidate| candidate.enabled && candidate.id == focused)
+            .any(|candidate| candidate.enabled && &candidate.id == focused)
     {
-        return focused;
+        return focused.clone();
     }
 
     let fallback = focusables
         .iter()
         .find(|candidate| candidate.enabled)
-        .map(|candidate| candidate.id)
-        .unwrap_or(PLAY_ID);
-    runtime.focused = Some(fallback);
+        .map(|candidate| candidate.id.clone())
+        .unwrap_or_else(play_focus_id);
+    runtime.focused = Some(fallback.clone());
     fallback
 }
 
 fn spatial_state_from_runtime(
     runtime: &OverlayRuntime,
-    focusables: &[SpatialFocusable<&'static str>],
-) -> SpatialFocusState<&'static str> {
+    focusables: &[SpatialFocusable],
+) -> SpatialFocusState {
     let mut state = SpatialFocusState::default();
     state.set_focusables(focusables.to_vec());
-    if let Some(focused) = runtime.focused {
-        state.focus(focused);
+    if let Some(focused) = runtime.focused.as_ref() {
+        state.focus(focused.clone());
     }
     state
 }
@@ -1270,8 +1311,10 @@ mod tests {
     #[test]
     fn overlay_focusables_keep_play_default_and_layout_ordered_rects() {
         let focusables = focusables_for_viewport(1920.0, 1080.0, true);
-        let ids: Vec<&str> =
-            focusables.iter().map(|focusable| focusable.id).collect();
+        let ids: Vec<&str> = focusables
+            .iter()
+            .map(|focusable| focusable.id.as_str())
+            .collect();
 
         assert_eq!(
             ids,
@@ -1290,7 +1333,7 @@ mod tests {
 
         let play = focusables
             .iter()
-            .find(|focusable| focusable.id == PLAY_ID)
+            .find(|focusable| focusable.id.as_str() == PLAY_ID)
             .expect("play focusable");
         let transport_x = PlayerOverlayLayout::transport_row_x(1920.0);
         assert_eq!(
@@ -1299,8 +1342,10 @@ mod tests {
         );
         assert_eq!(
             play.rect,
-            PlayerOverlayLayout::transport_button_rect(
-                1920.0, 1080.0, PLAY_ID,
+            PlayerOverlayLayout::focus_layout(
+                PlayerOverlayLayout::transport_button_rect(
+                    1920.0, 1080.0, PLAY_ID,
+                ),
             )
             .into_focus_rect()
         );
@@ -1310,8 +1355,13 @@ mod tests {
                 + (PlayerOverlayLayout::TRANSPORT_SMALL_W
                     + PlayerOverlayLayout::TRANSPORT_GAP)
                     * 2.0
+                - PlayerOverlayLayout::FOCUS_MARGIN_X
         );
-        assert_eq!(play.rect.y, PlayerOverlayLayout::control_row_y(1080.0));
+        assert_eq!(
+            play.rect.y,
+            PlayerOverlayLayout::control_row_y(1080.0)
+                - PlayerOverlayLayout::FOCUS_MARGIN_Y
+        );
     }
 
     #[test]
@@ -1319,15 +1369,15 @@ mod tests {
         let focusables = focusables_for_viewport(1920.0, 1080.0, true);
         let subtitle = focusables
             .iter()
-            .find(|focusable| focusable.id == SUBTITLE_ID)
+            .find(|focusable| focusable.id.as_str() == SUBTITLE_ID)
             .expect("subtitle focusable");
         let fullscreen = focusables
             .iter()
-            .find(|focusable| focusable.id == FULLSCREEN_ID)
+            .find(|focusable| focusable.id.as_str() == FULLSCREEN_ID)
             .expect("fullscreen focusable");
         let exit = focusables
             .iter()
-            .find(|focusable| focusable.id == EXIT_ID)
+            .find(|focusable| focusable.id.as_str() == EXIT_ID)
             .expect("exit focusable");
 
         assert_eq!(
@@ -1335,6 +1385,7 @@ mod tests {
             1920.0
                 - PlayerOverlayLayout::PANEL_PAD_RIGHT
                 - PlayerOverlayLayout::command_row_width()
+                - PlayerOverlayLayout::FOCUS_MARGIN_X
         );
         assert_eq!(
             fullscreen.rect.x,
@@ -1347,6 +1398,7 @@ mod tests {
         assert_eq!(
             exit.rect.x + exit.rect.width,
             1920.0 - PlayerOverlayLayout::PANEL_PAD_RIGHT
+                + PlayerOverlayLayout::FOCUS_MARGIN_X
         );
     }
 
@@ -1404,15 +1456,21 @@ mod tests {
         assert!(state.focus(PLAY_ID));
 
         assert_eq!(
-            state.move_focus(SpatialDirection::Right).copied(),
+            state
+                .move_focus(SpatialDirection::Right)
+                .map(SpatialFocusId::as_str),
             Some(FORWARD_ID)
         );
         assert_eq!(
-            state.move_focus(SpatialDirection::Right).copied(),
+            state
+                .move_focus(SpatialDirection::Right)
+                .map(SpatialFocusId::as_str),
             Some(NEXT_ID)
         );
         assert_eq!(
-            state.move_focus(SpatialDirection::Right).copied(),
+            state
+                .move_focus(SpatialDirection::Right)
+                .map(SpatialFocusId::as_str),
             Some(SUBTITLE_ID)
         );
     }
