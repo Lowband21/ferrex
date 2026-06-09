@@ -12,6 +12,7 @@ pub mod library_filter_panel;
 pub mod loading;
 pub mod movies;
 pub mod settings;
+pub mod tenfoot;
 pub mod toast_overlay;
 pub mod tv;
 

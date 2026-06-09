@@ -269,6 +269,9 @@ impl State {
             poster_menu_open: None,
             poster_menu_states: HashMap::new(),
             toast_manager: crate::domains::ui::feedback_ui::ToastManager::new(),
+            tenfoot_home:
+                crate::domains::ui::views::tenfoot::home::TenFootHomeState::new(
+                ),
             #[cfg(feature = "debug-cache-overlay")]
             cache_overlay_sample: None,
         };

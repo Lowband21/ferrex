@@ -42,6 +42,7 @@ use crate::{
         view_model_ui::ViewModelMessage,
         views::{
             carousel::CarouselState,
+            tenfoot::home::TenFootHomeState,
             virtual_carousel::{CarouselFocus, CarouselRegistry},
         },
     },
@@ -157,6 +158,9 @@ pub struct UIDomainState {
 
     // Toast notification manager
     pub toast_manager: feedback_ui::ToastManager,
+
+    // 10-foot Home focus/window state
+    pub tenfoot_home: TenFootHomeState,
 
     #[cfg(feature = "debug-cache-overlay")]
     pub cache_overlay_sample: Option<

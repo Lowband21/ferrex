@@ -13,6 +13,9 @@ use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_unified_settings;
+use crate::domains::ui::views::tenfoot::home::{
+    is_tenfoot_home_route, view_tenfoot_home,
+};
 use crate::domains::ui::views::tv::{
     view_episode_detail, view_season_detail, view_series_detail,
 };
@@ -80,47 +83,56 @@ pub fn view(
             .into();
     }
 
-    // Get the view content
-    let content = match &state.domains.ui.state.view {
-        ViewState::Library => view_library(state).map(DomainMessage::from),
-        ViewState::LibraryManagement => {
-            view_library_management(state).map(DomainMessage::from)
-        }
-        ViewState::AdminDashboard => {
-            view_admin_dashboard(state).map(DomainMessage::from)
-        }
-        ViewState::AdminUsers => {
-            view_admin_users(state).map(DomainMessage::from)
-        }
-        ViewState::Player => view_player(state).map(DomainMessage::Player),
-        ViewState::LoadingVideo { url } => {
-            view_loading_video(state, url).map(DomainMessage::from)
-        }
-        ViewState::VideoError { message } => {
-            view_video_error(message).map(DomainMessage::from)
-        }
-        ViewState::MovieDetail { movie_id, .. } => {
-            view_movie_detail(state, *movie_id).map(DomainMessage::from)
-        }
-        ViewState::SeriesDetail { series_id, .. } => {
-            view_series_detail(state, *series_id).map(DomainMessage::from)
-        }
-        ViewState::SeasonDetail {
-            series_id,
-            season_id,
-            ..
-        } => view_season_detail(state, series_id, season_id)
-            .map(DomainMessage::from),
-        ViewState::EpisodeDetail { episode_id, .. } => {
-            view_episode_detail(state, episode_id).map(DomainMessage::from)
-        }
-        ViewState::UserSettings => {
-            view_unified_settings(state).map(DomainMessage::from)
+    // Get the view content. In 10-foot mode, authenticated shell-like
+    // views converge on the TV Home surface while detail/player paths keep
+    // their dedicated routes.
+    let tenfoot_home_active = is_tenfoot_home_route(state);
+    let content = if tenfoot_home_active {
+        view_tenfoot_home(state).map(DomainMessage::from)
+    } else {
+        match &state.domains.ui.state.view {
+            ViewState::Library => view_library(state).map(DomainMessage::from),
+            ViewState::LibraryManagement => {
+                view_library_management(state).map(DomainMessage::from)
+            }
+            ViewState::AdminDashboard => {
+                view_admin_dashboard(state).map(DomainMessage::from)
+            }
+            ViewState::AdminUsers => {
+                view_admin_users(state).map(DomainMessage::from)
+            }
+            ViewState::Player => view_player(state).map(DomainMessage::Player),
+            ViewState::LoadingVideo { url } => {
+                view_loading_video(state, url).map(DomainMessage::from)
+            }
+            ViewState::VideoError { message } => {
+                view_video_error(message).map(DomainMessage::from)
+            }
+            ViewState::MovieDetail { movie_id, .. } => {
+                view_movie_detail(state, *movie_id).map(DomainMessage::from)
+            }
+            ViewState::SeriesDetail { series_id, .. } => {
+                view_series_detail(state, *series_id).map(DomainMessage::from)
+            }
+            ViewState::SeasonDetail {
+                series_id,
+                season_id,
+                ..
+            } => view_season_detail(state, series_id, season_id)
+                .map(DomainMessage::from),
+            ViewState::EpisodeDetail { episode_id, .. } => {
+                view_episode_detail(state, episode_id).map(DomainMessage::from)
+            }
+            ViewState::UserSettings => {
+                view_unified_settings(state).map(DomainMessage::from)
+            }
         }
     };
 
     // Add header if the view needs it
-    let content_with_header = if state.domains.ui.state.view.has_header() {
+    let content_with_header = if !tenfoot_home_active
+        && state.domains.ui.state.view.has_header()
+    {
         let header = view_header(state).map(DomainMessage::from);
 
         // Wrap header in a container with opaque background
