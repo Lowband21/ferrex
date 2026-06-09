@@ -105,13 +105,12 @@ fn create_cast_card(actor: &ArchivedCastMember) -> Element<'static, UiMessage> {
     let profile_image: Element<'static, UiMessage> = if profile_iid.is_some() {
         image_for(media_id)
             .iid(profile_iid)
-            .size(ImageSize::profile())
+            .request_size(ImageSize::profile())
             .skip_request(profile_iid.is_none())
             .animation_behavior(AnimationBehavior::constant(
                 PosterAnimationType::flip(),
             ))
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(image_height))
+            .display_size(card_width, image_height)
             .radius(CORNER_RADIUS)
             .placeholder(Icon::User)
             .into()

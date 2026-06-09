@@ -7,7 +7,8 @@ use crate::{
     domains::{
         metadata::image_service::{FirstDisplayHint, UnifiedImageService},
         ui::{
-            messages::UiMessage, views::virtual_carousel::types::CarouselKey,
+            menu::MenuButton, messages::UiMessage,
+            views::virtual_carousel::types::CarouselKey,
         },
     },
     infra::{
@@ -49,6 +50,21 @@ struct CachedImageData {
     instance_hash: u64,
 }
 
+/// How much layout space the poster widget should claim.
+///
+/// This is intentionally independent from the requested image/cache size and
+/// the visible display size. Use [`PosterLayoutBounds::ReserveEffects`] when
+/// the caller wants hover/glow/scale effects to have dedicated overflow room in
+/// layout. Use [`PosterLayoutBounds::Tight`] when the widget should occupy only
+/// the visible poster rectangle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PosterLayoutBounds {
+    /// Layout bounds equal the visible poster size.
+    Tight,
+    /// Layout bounds include padding for hover/glow/scale effects.
+    ReserveEffects,
+}
+
 /// A declarative image widget that integrates with UnifiedImageService
 #[derive(Debug, Clone)]
 pub struct ImageFor {
@@ -57,7 +73,7 @@ pub struct ImageFor {
     ///
     /// `None` means "no known image" and will render only a placeholder.
     iid: Option<Uuid>,
-    size: ImageSize,
+    request_size: ImageSize,
     radius: f32,
     width: Length,
     height: Length,
@@ -73,6 +89,7 @@ pub struct ImageFor {
     progress_color: Option<Color>,
     rotation_y: Option<f32>,
     face: Option<PosterFace>,
+    selected_menu_button: Option<MenuButton>,
     // Optimization: Cache to avoid repeated lookups
     cached_data: Option<CachedImageData>,
     // If true, do not enqueue a network request on cache miss.
@@ -85,6 +102,8 @@ pub struct ImageFor {
     // Animation configuration snapshot used for config-aware bounds + animations.
     // Keeping this as a value avoids lifetime plumbing and allows per-widget overrides.
     animation_config: Option<AnimationConfig>,
+    // Whether layout should be tight to the visible poster or reserve effect overflow.
+    layout_bounds: PosterLayoutBounds,
 }
 
 impl ImageFor {
@@ -102,7 +121,7 @@ impl ImageFor {
         Self {
             media_id,
             iid: None,
-            size: ImageSize::poster(),
+            request_size: ImageSize::poster(),
             radius: poster::CORNER_RADIUS,
             width: Length::Fixed(poster::BASE_WIDTH),
             height: Length::Fixed(poster::BASE_HEIGHT),
@@ -120,12 +139,14 @@ impl ImageFor {
             progress_color: None,
             rotation_y: None,
             face: None,
+            selected_menu_button: None,
             cached_data: None,
             skip_request: false,
             title: None,
             meta: None,
             carousel_key: None,
             animation_config: None,
+            layout_bounds: PosterLayoutBounds::ReserveEffects,
         }
     }
 
@@ -135,14 +156,52 @@ impl ImageFor {
         self
     }
 
-    /// Set the image size/type to load
+    /// Set the image size/type to request from the image service.
+    ///
+    /// This controls cache/fetch quality only. It does **not** change the
+    /// widget's visible display size.
+    pub fn request_size(mut self, size: ImageSize) -> Self {
+        self.request_size = size;
+        self
+    }
+
+    /// Legacy convenience for callers that still want request size and display
+    /// size coupled together.
+    ///
+    /// Prefer [`ImageFor::request_size`] plus [`ImageFor::display_size`] in new
+    /// code so image quality and layout are not conflated.
     pub fn size(mut self, size: ImageSize) -> Self {
-        // Update dimensions based on size
+        // Update dimensions based on size for backwards compatibility.
         if let Some((w, h)) = size.dimensions() {
             self.width = Length::Fixed(w as f32);
             self.height = Length::Fixed(h as f32);
         }
-        self.size = size;
+        self.request_size = size;
+        self
+    }
+
+    /// Set the visible display size in layout pixels.
+    pub fn display_size(mut self, width: f32, height: f32) -> Self {
+        self.width = Length::Fixed(width);
+        self.height = Length::Fixed(height);
+        self
+    }
+
+    /// Set the poster layout bounds policy.
+    pub fn layout_bounds(mut self, layout_bounds: PosterLayoutBounds) -> Self {
+        self.layout_bounds = layout_bounds;
+        self
+    }
+
+    /// Make the widget claim only the visible poster rectangle in layout.
+    pub fn tight_bounds(mut self) -> Self {
+        self.layout_bounds = PosterLayoutBounds::Tight;
+        self
+    }
+
+    /// Reserve layout space for hover/glow/scale effect overflow.
+    pub fn reserve_effect_bounds(mut self) -> Self {
+        self.layout_bounds = PosterLayoutBounds::ReserveEffects;
         self
     }
 
@@ -261,6 +320,12 @@ impl ImageFor {
         self
     }
 
+    /// Set the keyboard/controller-selected backface menu button.
+    pub fn selected_menu_button(mut self, button: Option<MenuButton>) -> Self {
+        self.selected_menu_button = button;
+        self
+    }
+
     /// If set, the image widget will not enqueue a fetch on cache miss and
     /// will render only a placeholder. Useful when metadata lacks a poster.
     pub fn skip_request(mut self, skip: bool) -> Self {
@@ -328,7 +393,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
         };
 
         let request = image.iid.map(|iid| {
-            ImageRequest::new(iid, image.size).with_priority(image.priority)
+            ImageRequest::new(iid, image.request_size)
+                .with_priority(image.priority)
         });
 
         // Calculate instance hash for cache invalidation and widget identity.
@@ -338,7 +404,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             image.media_id.hash(&mut hasher);
             image.iid.hash(&mut hasher);
-            image.size.hash(&mut hasher);
+            image.request_size.hash(&mut hasher);
             // Include carousel context for unique instance identity
             image.carousel_key.hash(&mut hasher);
             hasher.finish()
@@ -392,6 +458,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     instance_key,
                     image.face.unwrap_or(PosterFace::Front),
                     image.rotation_y,
+                    image.selected_menu_button,
+                    image.layout_bounds,
                 );
             };
 
@@ -426,13 +494,16 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         image.carousel_key.clone(),
                     );
 
-                    let mut shader: Poster =
+                    let mut shader: Poster = apply_layout_bounds(
                         poster(handle, Some(instance_hash))
-                            .radius(image.radius)
-                            .with_animated_bounds(bounds)
-                            .is_hovered(image.is_hovered)
-                            .menu_target(instance_key)
-                            .face(image.face.unwrap_or(PosterFace::Front));
+                            .radius(image.radius),
+                        bounds,
+                        image.layout_bounds,
+                    )
+                    .is_hovered(image.is_hovered)
+                    .menu_target(instance_key)
+                    .face(image.face.unwrap_or(PosterFace::Front))
+                    .selected_menu_button(image.selected_menu_button);
 
                     if let Some(color) = image.theme_color {
                         shader = shader.theme_color(color);
@@ -546,6 +617,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         instance_key,
                         image.face.unwrap_or(PosterFace::Front),
                         image.rotation_y,
+                        image.selected_menu_button,
+                        image.layout_bounds,
                     )
                 }
             }
@@ -563,7 +636,22 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 instance_key,
                 image.face.unwrap_or(PosterFace::Front),
                 image.rotation_y,
+                image.selected_menu_button,
+                image.layout_bounds,
             )
+        }
+    }
+}
+
+fn apply_layout_bounds(
+    poster: Poster,
+    bounds: AnimatedPosterBounds,
+    layout_bounds: PosterLayoutBounds,
+) -> Poster {
+    match layout_bounds {
+        PosterLayoutBounds::Tight => poster.with_tight_bounds(bounds),
+        PosterLayoutBounds::ReserveEffects => {
+            poster.with_animated_bounds(bounds)
         }
     }
 }
@@ -588,12 +676,15 @@ fn create_shader_from_cached<'a>(
     let instance_key =
         PosterInstanceKey::new(image.media_id, image.carousel_key.clone());
     // Check if we should skip atlas upload for VeryFast scrolling
-    let mut shader = poster(handle, Some(instance_hash))
-        .radius(image.radius)
-        .with_animated_bounds(bounds)
-        .is_hovered(image.is_hovered)
-        .menu_target(instance_key)
-        .face(image.face.unwrap_or(PosterFace::Front));
+    let mut shader = apply_layout_bounds(
+        poster(handle, Some(instance_hash)).radius(image.radius),
+        bounds,
+        image.layout_bounds,
+    )
+    .is_hovered(image.is_hovered)
+    .menu_target(instance_key)
+    .face(image.face.unwrap_or(PosterFace::Front))
+    .selected_menu_button(image.selected_menu_button);
 
     // Set theme color if provided
     if let Some(color) = image.theme_color {
@@ -659,6 +750,8 @@ fn create_loading_placeholder<'a>(
     instance_key: PosterInstanceKey,
     face: PosterFace,
     rotation_override: Option<f32>,
+    selected_menu_button: Option<MenuButton>,
+    layout_bounds: PosterLayoutBounds,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -674,14 +767,17 @@ fn create_loading_placeholder<'a>(
     // The PlaceholderSunken animation type will show backface with theme color
     // and apply sunken depth effect
     // Use the request hash so the placeholder shares identity with the texture once it loads.
-    let mut poster = poster(placeholder_handle, Some(instance_hash))
-        .radius(radius)
-        .with_animated_bounds(bounds)
-        .theme_color(color)
-        .with_animation(PosterAnimationType::PlaceholderSunken)
-        .is_hovered(false) // Placeholders are never hovered
-        .menu_target(instance_key)
-        .face(face);
+    let mut poster = apply_layout_bounds(
+        poster(placeholder_handle, Some(instance_hash)).radius(radius),
+        bounds,
+        layout_bounds,
+    )
+    .theme_color(color)
+    .with_animation(PosterAnimationType::PlaceholderSunken)
+    .is_hovered(false) // Placeholders are never hovered
+    .menu_target(instance_key)
+    .face(face)
+    .selected_menu_button(selected_menu_button);
 
     if let Some(rot) = rotation_override {
         poster = poster.rotation_y(rot);
@@ -745,10 +841,14 @@ impl ImageForExt for EpisodeReference {
                 self.episode_number.value()
             ),
         );
+        let (width, height) = ImageSize::thumbnail()
+            .dimensions()
+            .expect("default thumbnail dimensions");
         image_for(self.id.to_uuid())
             .iid(self.details.primary_still_iid)
             .skip_request(self.details.primary_still_iid.is_none())
-            .size(ImageSize::thumbnail())
+            .request_size(ImageSize::thumbnail())
+            .display_size(width as f32, height as f32)
             .placeholder(Icon::FileImage)
     }
 }

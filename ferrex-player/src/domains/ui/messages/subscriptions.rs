@@ -1,13 +1,20 @@
 use std::time::{Duration, Instant};
 
 use super::UiMessage;
+use crate::domains::search::keyboard::TenFootKeyboardDirection;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::{
     feedback_ui::FeedbackMessage, interaction_ui::InteractionMessage,
 };
 
 use crate::{
-    common::messages::DomainMessage,
+    common::{
+        controller_input::{
+            ControllerButton, ControllerEvent, ControllerInputMapper,
+        },
+        focus::SpatialAction,
+        messages::DomainMessage,
+    },
     domains::{
         search::messages::SearchMessage,
         ui::{
@@ -17,8 +24,14 @@ use crate::{
             shell_ui::UiShellMessage,
             tabs::{TabId, TabState},
             types::ViewState,
-            views::virtual_carousel::{
-                messages::VirtualCarouselMessage as VCM, types::CarouselKey,
+            views::{
+                tenfoot::{
+                    detail::{TenFootDetailMessage, is_tenfoot_detail_route},
+                    home::{TenFootHomeMessage, is_tenfoot_home_route},
+                },
+                virtual_carousel::{
+                    messages::VirtualCarouselMessage as VCM, types::CarouselKey,
+                },
             },
         },
     },
@@ -28,7 +41,7 @@ use crate::{
 use iced::{
     Subscription,
     event::{self, Event as RuntimeEvent, Status as EventStatus},
-    keyboard::{self, Key},
+    keyboard::{self, Key, key::Named},
     window,
 };
 
@@ -47,6 +60,15 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     let mut subscriptions = vec![];
     let mut needs_frame_tick = false;
     let search_open = state.domains.search.state.presentation.is_open();
+    let tenfoot_home_active = is_tenfoot_home_route(state);
+    let tenfoot_detail_active = is_tenfoot_detail_route(state);
+    let tenfoot_playback_surface_active = state.interface_mode.is_tenfoot()
+        && matches!(
+            state.domains.ui.state.view,
+            ViewState::Player
+                | ViewState::LoadingVideo { .. }
+                | ViewState::VideoError { .. }
+        );
 
     // Delegate window lifecycle subscriptions (resize, move, focus) to the
     // window management module so secondary windows stay isolated
@@ -56,7 +78,27 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // Search surface keyboard interactions (overlay or detached window)
     if search_open {
-        subscriptions.push(event::listen_with(search_surface_key_handler));
+        let tenfoot_search_overlay = state.interface_mode.is_tenfoot()
+            && state.domains.search.state.presentation.is_overlay();
+        let tenfoot_keyboard_open = tenfoot_search_overlay
+            && state.domains.search.state.tenfoot_keyboard.is_open();
+        subscriptions.push(
+            event::listen()
+                .with((tenfoot_search_overlay, tenfoot_keyboard_open))
+                .map(
+                    |(
+                        (tenfoot_search_overlay, tenfoot_keyboard_open),
+                        event,
+                    )| {
+                        search_surface_key_handler(
+                            event,
+                            tenfoot_search_overlay,
+                            tenfoot_keyboard_open,
+                        )
+                        .unwrap_or(DomainMessage::NoOp)
+                    },
+                ),
+        );
     }
 
     // Watch for close requests and close only our search window
@@ -73,6 +115,8 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     }
 
     let in_grid_context = !search_open
+        && !tenfoot_home_active
+        && !tenfoot_detail_active
         && matches!(state.domains.ui.state.view, ViewState::Library)
         && matches!(state.domains.ui.state.scope, Scope::Library(_))
         && matches!(state.tab_manager.active_tab_id(), TabId::Library(_));
@@ -81,7 +125,19 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         subscriptions.push(event::listen_with(main_window_grid_key_handler));
     }
 
-    if !search_open {
+    if !search_open && tenfoot_home_active {
+        subscriptions.push(event::listen_with(tenfoot_home_key_handler));
+    }
+
+    if !search_open && tenfoot_detail_active {
+        subscriptions.push(event::listen_with(tenfoot_detail_key_handler));
+    }
+
+    if !search_open
+        && !tenfoot_home_active
+        && !tenfoot_detail_active
+        && !tenfoot_playback_surface_active
+    {
         subscriptions.push(event::listen().map(|ev| match ev {
             RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -156,6 +212,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // All tab focus navigation (Up/Down to move between carousels)
     let in_all_curated = !search_open
+        && !tenfoot_home_active
+        && !tenfoot_detail_active
+        && !tenfoot_playback_surface_active
         && matches!(state.domains.ui.state.scope, Scope::Home)
         && matches!(state.tab_manager.active_tab_id(), TabId::Home);
     if in_all_curated {
@@ -212,7 +271,9 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
                 _ => Vec::new(),
             };
         // If in All view (curated), include its active carousel key
-        if matches!(state.domains.ui.state.scope, Scope::Home)
+        if !tenfoot_home_active
+            && !tenfoot_detail_active
+            && matches!(state.domains.ui.state.scope, Scope::Home)
             && matches!(state.tab_manager.active_tab_id(), TabId::Home)
             && let Some(TabState::Home(all_state)) =
                 state.tab_manager.get_tab(TabId::Home)
@@ -317,10 +378,129 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
     Subscription::batch(subscriptions)
 }
 
+fn tenfoot_spatial_action_for_key(
+    key: Key,
+    allow_search: bool,
+    allow_menu: bool,
+) -> Option<SpatialAction> {
+    let button =
+        tenfoot_controller_button_for_key(key, allow_search, allow_menu)?;
+    Some(
+        ControllerInputMapper::new()
+            .handle_event(ControllerEvent::ButtonPressed(button)),
+    )
+}
+
+fn tenfoot_controller_button_for_key(
+    key: Key,
+    allow_search: bool,
+    allow_menu: bool,
+) -> Option<ControllerButton> {
+    match key {
+        Key::Named(Named::ArrowUp) => Some(ControllerButton::DPadUp),
+        Key::Named(Named::ArrowDown) => Some(ControllerButton::DPadDown),
+        Key::Named(Named::ArrowLeft) => Some(ControllerButton::DPadLeft),
+        Key::Named(Named::ArrowRight) => Some(ControllerButton::DPadRight),
+        Key::Named(Named::Enter) | Key::Named(Named::Space) => {
+            Some(ControllerButton::South)
+        }
+        Key::Named(Named::Escape) | Key::Named(Named::Backspace) => {
+            Some(ControllerButton::East)
+        }
+        Key::Character(value)
+            if allow_search
+                && (value == "/" || value.eq_ignore_ascii_case("s")) =>
+        {
+            Some(ControllerButton::Select)
+        }
+        Key::Character(value)
+            if allow_menu && value.eq_ignore_ascii_case("m") =>
+        {
+            Some(ControllerButton::Start)
+        }
+        Key::Character(value) if value == " " => Some(ControllerButton::South),
+        Key::Character(value) if value.eq_ignore_ascii_case("b") => {
+            Some(ControllerButton::East)
+        }
+        _ => None,
+    }
+}
+
+fn tenfoot_home_key_handler(
+    event: RuntimeEvent,
+    status: EventStatus,
+    _window: iced::window::Id,
+) -> Option<DomainMessage> {
+    if !matches!(status, EventStatus::Ignored) {
+        return None;
+    }
+
+    let RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
+        key,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
+    let action = tenfoot_spatial_action_for_key(key, true, true)?;
+
+    let msg = match action {
+        SpatialAction::Move(direction) => TenFootHomeMessage::Move(direction),
+        SpatialAction::Activate => TenFootHomeMessage::ActivateFocused,
+        SpatialAction::Back => TenFootHomeMessage::Back,
+        SpatialAction::Search => TenFootHomeMessage::Search,
+        SpatialAction::Menu => TenFootHomeMessage::OpenFocusedMenu,
+    };
+
+    Some(DomainMessage::Ui(msg.into()))
+}
+
+fn tenfoot_detail_key_handler(
+    event: RuntimeEvent,
+    status: EventStatus,
+    _window: iced::window::Id,
+) -> Option<DomainMessage> {
+    if !matches!(status, EventStatus::Ignored) {
+        return None;
+    }
+
+    let RuntimeEvent::Keyboard(keyboard::Event::KeyPressed {
+        key,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
+    let action = tenfoot_spatial_action_for_key(key, false, false)?;
+
+    let msg = match action {
+        SpatialAction::Move(direction) => TenFootDetailMessage::Move(direction),
+        SpatialAction::Activate => TenFootDetailMessage::ActivateFocused,
+        SpatialAction::Back => TenFootDetailMessage::Back,
+        SpatialAction::Search | SpatialAction::Menu => {
+            TenFootDetailMessage::Back
+        }
+    };
+
+    Some(DomainMessage::Ui(msg.into()))
+}
+
 fn search_surface_key_handler(
     event: RuntimeEvent,
-    _status: EventStatus,
-    _window: iced::window::Id,
+    tenfoot_search_overlay: bool,
+    tenfoot_keyboard_open: bool,
 ) -> Option<DomainMessage> {
     use iced::keyboard::key::Named;
 
@@ -332,6 +512,38 @@ fn search_surface_key_handler(
     {
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
+        }
+
+        if tenfoot_search_overlay && tenfoot_keyboard_open {
+            return match key {
+                Key::Named(Named::Escape) => {
+                    Some(DomainMessage::Search(SearchMessage::HandleEscape))
+                }
+                Key::Named(Named::Enter) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardActivate,
+                )),
+                Key::Named(Named::ArrowUp) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Up,
+                    ),
+                )),
+                Key::Named(Named::ArrowDown) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Down,
+                    ),
+                )),
+                Key::Named(Named::ArrowLeft) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Left,
+                    ),
+                )),
+                Key::Named(Named::ArrowRight) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Right,
+                    ),
+                )),
+                _ => None,
+            };
         }
 
         match key {
@@ -346,6 +558,11 @@ fn search_surface_key_handler(
             }
             Key::Named(Named::ArrowDown) => {
                 Some(DomainMessage::Search(SearchMessage::SelectNext))
+            }
+            Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowRight)
+                if tenfoot_search_overlay =>
+            {
+                Some(DomainMessage::Search(SearchMessage::ShowTenFootKeyboard))
             }
             Key::Character(value) if modifiers.shift() => None,
             Key::Character(value) if value.eq_ignore_ascii_case("k") => {

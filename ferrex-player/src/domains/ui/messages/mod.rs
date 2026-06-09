@@ -3,12 +3,20 @@ pub mod subscriptions;
 use std::time::Instant;
 
 use crate::domains::ui::{
-    background_ui::BackgroundMessage, feedback_ui::FeedbackMessage,
-    header_ui::HeaderMessage, interaction_ui::InteractionMessage,
-    library_ui::LibraryUiMessage, menu::PosterMenuMessage,
-    playback_ui::PlaybackMessage, settings_ui::SettingsUiMessage,
-    shell_ui::UiShellMessage, view_model_ui::ViewModelMessage,
-    views::virtual_carousel::VirtualCarouselMessage,
+    background_ui::BackgroundMessage,
+    feedback_ui::FeedbackMessage,
+    header_ui::HeaderMessage,
+    interaction_ui::InteractionMessage,
+    library_ui::LibraryUiMessage,
+    menu::PosterMenuMessage,
+    playback_ui::PlaybackMessage,
+    settings_ui::SettingsUiMessage,
+    shell_ui::UiShellMessage,
+    view_model_ui::ViewModelMessage,
+    views::{
+        tenfoot::{detail::TenFootDetailMessage, home::TenFootHomeMessage},
+        virtual_carousel::VirtualCarouselMessage,
+    },
     window_ui::WindowUiMessage,
 };
 use iced::Size;
@@ -31,6 +39,9 @@ pub enum UiMessage {
 
     // Virtual carousel events (new module)
     VirtualCarousel(VirtualCarouselMessage),
+    // 10-foot Home/detail spatial navigation
+    TenFootHome(TenFootHomeMessage),
+    TenFootDetail(TenFootDetailMessage),
     // Poster menu subdomain
     PosterMenu(PosterMenuMessage),
     // Window lifecycle and movement events
@@ -63,6 +74,8 @@ impl UiMessage {
             Self::Feedback(msg) => msg.name(),
 
             Self::VirtualCarousel(_) => "UI::VirtualCarousel",
+            Self::TenFootHome(_) => "UI::TenFootHome",
+            Self::TenFootDetail(_) => "UI::TenFootDetail",
             Self::PosterMenu(_) => "UI::PosterMenu",
             Self::Window(msg) => msg.name(),
             Self::Background(msg) => msg.name(),
@@ -91,6 +104,12 @@ impl std::fmt::Debug for UiMessage {
 
             Self::VirtualCarousel(msg) => {
                 write!(f, "UI::VirtualCarousel({:?})", msg)
+            }
+            Self::TenFootHome(msg) => {
+                write!(f, "UI::TenFootHome({:?})", msg)
+            }
+            Self::TenFootDetail(msg) => {
+                write!(f, "UI::TenFootDetail({:?})", msg)
             }
             Self::PosterMenu(msg) => write!(f, "UI::PosterMenu({:?})", msg),
             Self::Window(msg) => write!(f, "UI::Window({:?})", msg),

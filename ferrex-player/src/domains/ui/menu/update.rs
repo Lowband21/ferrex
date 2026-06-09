@@ -24,6 +24,7 @@ fn handle_button_click(
     if ui_state.poster_menu_open.as_ref() == Some(&instance_key) {
         ui_state.poster_menu_open = None;
     }
+    ui_state.tenfoot_home.clear_poster_menu_state();
     let entry = ui_state
         .poster_menu_states
         .entry(instance_key.clone())
@@ -78,6 +79,29 @@ pub fn poster_menu_update(
             if ui_state.poster_menu_open.as_ref() == Some(&instance_key) {
                 ui_state.poster_menu_open = None;
             }
+            ui_state.tenfoot_home.clear_poster_menu_state();
+        }
+        PosterMenuMessage::Open(instance_key) => {
+            // Close previous open poster if exists
+            if let Some(ref open_key) = ui_state.poster_menu_open
+                && open_key != &instance_key
+            {
+                let entry_prev = ui_state
+                    .poster_menu_states
+                    .entry(open_key.clone())
+                    .or_insert_with(|| PosterMenuState::new(now));
+                entry_prev.force_to(now, PosterFace::Front);
+            }
+
+            let entry = ui_state
+                .poster_menu_states
+                .entry(instance_key.clone())
+                .or_insert_with(|| PosterMenuState::new(now));
+            entry.mark_begin(now);
+            entry.mark_end(now);
+
+            ui_state.poster_menu_open = Some(instance_key);
+            ui_state.tenfoot_home.reset_poster_menu_selection();
         }
         PosterMenuMessage::Start(instance_key) => {
             // Close previous open poster if exists
@@ -100,6 +124,7 @@ pub fn poster_menu_update(
 
             // Always set poster_menu_open to the provided target
             ui_state.poster_menu_open = Some(instance_key);
+            ui_state.tenfoot_home.clear_poster_menu_state();
         }
         PosterMenuMessage::End(instance_key) => {
             if let Some(entry) =

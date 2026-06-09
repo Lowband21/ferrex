@@ -1,8 +1,11 @@
-use crate::infra::shader_widgets::poster::{
-    Instant, PosterFace,
-    animation::{self, PosterAnimationType, calculate_animation_state},
-    batch_state::{self, PosterInstance},
-    font_atlas::{pack_meta, pack_title},
+use crate::{
+    domains::ui::menu::MenuButton,
+    infra::shader_widgets::poster::{
+        Instant, PosterFace,
+        animation::{self, PosterAnimationType, calculate_animation_state},
+        batch_state::{self, PosterInstance},
+        font_atlas::{pack_meta, pack_title},
+    },
 };
 
 use iced::{Color, Point, Rectangle, wgpu};
@@ -331,9 +334,12 @@ pub(crate) fn create_batch_instance(
     progress_color: Color,
     rotation_override: Option<f32>,
     _face: PosterFace,
+    selected_menu_button: Option<MenuButton>,
     title: Option<&str>,
     meta: Option<&str>,
 ) -> batch_state::PosterInstance {
+    let has_atlas_region = atlas_region.is_some();
+
     // Extract UV coordinates and layer from the atlas entry
     let (mut uv_min, mut uv_max, layer) = if let Some(region) = atlas_region {
         (region.uv_min, region.uv_max, region.layer)
@@ -357,6 +363,7 @@ pub(crate) fn create_batch_instance(
     }
 
     // Calculate animation state
+    let hover_scale = animated_bounds.map(|b| b.hover_scale).unwrap_or(1.05);
 
     let (
         actual_opacity,
@@ -375,6 +382,14 @@ pub(crate) fn create_batch_instance(
             1.0,
             0.4,
             0.0,
+        )
+    } else if matches!(animation, PosterAnimationType::None) && has_atlas_region
+    {
+        calculate_animation_state(
+            PosterAnimationType::None,
+            std::time::Duration::ZERO,
+            opacity,
+            hover_scale,
         )
     } else if let Some(load_time) = load_time {
         let elapsed = load_time.elapsed();
@@ -399,9 +414,6 @@ pub(crate) fn create_batch_instance(
             anim => anim,
         };
 
-        // Get hover_scale from animated_bounds or use default
-        let hover_scale =
-            animated_bounds.map(|b| b.hover_scale).unwrap_or(1.05);
         calculate_animation_state(animation, elapsed, opacity, hover_scale)
     } else {
         (
@@ -462,6 +474,10 @@ pub(crate) fn create_batch_instance(
         // This ensures hover scale is maintained during flips triggered while hovered
         scale.max(hover_contribution)
     };
+
+    let selected_menu_button = selected_menu_button
+        .map(|button| button.shader_index() as f32)
+        .unwrap_or(-1.0);
 
     // Calculate mouse position
     let mouse_pos_normalized = if let Some(mouse_pos) = mouse_position {
@@ -532,7 +548,7 @@ pub(crate) fn create_batch_instance(
         mouse_pos_and_padding: [
             mouse_pos_normalized[0],
             mouse_pos_normalized[1],
-            0.0,
+            selected_menu_button,
             0.0,
         ],
         progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
@@ -562,7 +578,12 @@ pub fn create_placeholder_instance(
     progress: Option<f32>,
     progress_color: Color,
     _face: PosterFace,
+    selected_menu_button: Option<MenuButton>,
 ) -> batch_state::PosterInstance {
+    let selected_menu_button = selected_menu_button
+        .map(|button| button.shader_index() as f32)
+        .unwrap_or(-1.0);
+
     let (
         actual_opacity,
         rotation_y,
@@ -631,7 +652,7 @@ pub fn create_placeholder_instance(
             show_border,
             progress.unwrap_or(-1.0),
         ],
-        mouse_pos_and_padding: [0.0, 0.0, 0.0, 0.0],
+        mouse_pos_and_padding: [0.0, 0.0, selected_menu_button, 0.0],
         progress_color_and_padding: [prog_r, prog_g, prog_b, 0.0],
         atlas_uvs: [-1.0, -1.0, -1.0, -1.0],
         atlas_layer: 0,
@@ -639,5 +660,92 @@ pub fn create_placeholder_instance(
         title_chars: [0xFFFFFFFF; 6], // No text for placeholder
         meta_chars: [0xFFFFFFFF; 4],
         text_params: [0.0, 0.0, 0.0, 0.0],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn atlas_region() -> AtlasRegion {
+        AtlasRegion {
+            uv_min: [0.1, 0.2],
+            uv_max: [0.3, 0.4],
+            layer: 2,
+        }
+    }
+
+    fn bounds() -> Rectangle {
+        Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 150.0,
+        }
+    }
+
+    #[test]
+    fn no_animation_with_atlas_region_renders_front_texture_without_load_time()
+    {
+        let instance = create_batch_instance(
+            Some(atlas_region()),
+            &bounds(),
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            None,
+            false,
+            0.0,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(instance.radius_opacity_rotation_anim[1], 1.0);
+        assert_eq!(instance.radius_opacity_rotation_anim[2], 0.0);
+        assert_eq!(instance.radius_opacity_rotation_anim[3], 1.0);
+        assert_eq!(instance.theme_color_zdepth[3], 0.0);
+        assert_eq!(instance.atlas_layer, 2);
+        assert!(instance.atlas_uvs.iter().all(|uv| *uv >= 0.0));
+    }
+
+    #[test]
+    fn no_animation_without_atlas_region_still_uses_placeholder_state() {
+        let instance = create_batch_instance(
+            None,
+            &bounds(),
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            None,
+            false,
+            0.0,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(instance.radius_opacity_rotation_anim[1], 0.7);
+        assert_eq!(
+            instance.radius_opacity_rotation_anim[2],
+            std::f32::consts::PI
+        );
+        assert_eq!(instance.radius_opacity_rotation_anim[3], 0.0);
+        assert_eq!(instance.theme_color_zdepth[3], -10.0);
+        assert!(instance.atlas_uvs.iter().all(|uv| *uv < 0.0));
     }
 }

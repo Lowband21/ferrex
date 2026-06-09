@@ -1,5 +1,6 @@
 //! Search domain messages
 
+use super::keyboard::{TenFootKeyboardDirection, TenFootKeyboardKey};
 use super::metrics::SearchPerformanceMetrics;
 use super::types::{SearchMode, SearchResponse};
 use crate::infra::api_types::Media;
@@ -32,6 +33,16 @@ pub enum SearchMessage {
     SelectCurrent,
     /// Handle escape press inside search window
     HandleEscape,
+    /// Move focus within the 10-foot on-screen keyboard.
+    TenFootKeyboardMove(TenFootKeyboardDirection),
+    /// Activate the currently focused 10-foot on-screen keyboard key.
+    TenFootKeyboardActivate,
+    /// Press a specific 10-foot on-screen keyboard key.
+    TenFootKeyboardPress(TenFootKeyboardKey),
+    /// Show the 10-foot on-screen keyboard.
+    ShowTenFootKeyboard,
+    /// Hide the 10-foot on-screen keyboard.
+    HideTenFootKeyboard,
 
     // Internal events
     /// Debounced search trigger
@@ -80,6 +91,17 @@ impl std::fmt::Debug for SearchMessage {
             Self::SelectNext => write!(f, "SelectNext"),
             Self::SelectCurrent => write!(f, "SelectCurrent"),
             Self::HandleEscape => write!(f, "HandleEscape"),
+            Self::TenFootKeyboardMove(direction) => {
+                write!(f, "TenFootKeyboardMove({direction:?})")
+            }
+            Self::TenFootKeyboardActivate => {
+                write!(f, "TenFootKeyboardActivate")
+            }
+            Self::TenFootKeyboardPress(key) => {
+                write!(f, "TenFootKeyboardPress({key:?})")
+            }
+            Self::ShowTenFootKeyboard => write!(f, "ShowTenFootKeyboard"),
+            Self::HideTenFootKeyboard => write!(f, "HideTenFootKeyboard"),
 
             // Internal events
             Self::SearchDebounced(query) => {
@@ -151,6 +173,11 @@ impl SearchMessage {
             Self::SelectNext => "SelectNext",
             Self::SelectCurrent => "SelectCurrent",
             Self::HandleEscape => "HandleEscape",
+            Self::TenFootKeyboardMove(_) => "TenFootKeyboardMove",
+            Self::TenFootKeyboardActivate => "TenFootKeyboardActivate",
+            Self::TenFootKeyboardPress(_) => "TenFootKeyboardPress",
+            Self::ShowTenFootKeyboard => "ShowTenFootKeyboard",
+            Self::HideTenFootKeyboard => "HideTenFootKeyboard",
             Self::SearchDebounced(_) => "SearchDebounced",
             Self::ResultsReceived { .. } => "ResultsReceived",
             Self::SearchError(_) => "SearchError",

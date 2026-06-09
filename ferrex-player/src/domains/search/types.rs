@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::infra::api_types::Media;
 
+use super::keyboard::TenFootKeyboardState;
+
 pub const SEARCH_RESULTS_SCROLL_ID: &str = "search-window-results";
 
 /// Where search UI is currently presented
@@ -135,6 +137,8 @@ pub struct SearchState {
     pub decision_engine: SearchDecisionEngine,
     /// Last search performance metric (for recording)
     pub last_metric: Option<super::metrics::SearchPerformanceMetrics>,
+    /// 10-foot on-screen keyboard state for remote text entry.
+    pub tenfoot_keyboard: TenFootKeyboardState,
 }
 
 impl Default for SearchState {
@@ -163,6 +167,7 @@ impl Default for SearchState {
             fuzzy_matching: true,
             decision_engine: SearchDecisionEngine::new_simple(), // Start with simple engine
             last_metric: None,
+            tenfoot_keyboard: TenFootKeyboardState::default(),
         }
     }
 }

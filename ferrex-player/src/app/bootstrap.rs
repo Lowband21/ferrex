@@ -8,12 +8,13 @@ use crate::domains::auth::{
     messages as auth_messages, types::AuthenticationFlow,
 };
 use crate::infra::service_registry::init_registry;
-use crate::state::State;
+use crate::state::{InterfaceMode, State};
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub server_url: Arc<str>,
     pub use_test_stubs: bool,
+    pub tenfoot_mode: bool,
     #[cfg(feature = "demo")]
     pub demo_mode: bool,
     #[cfg(feature = "demo")]
@@ -25,6 +26,7 @@ impl AppConfig {
         Self {
             server_url: Arc::from(server_url.into()),
             use_test_stubs: false,
+            tenfoot_mode: false,
             #[cfg(feature = "demo")]
             demo_mode: false,
             #[cfg(feature = "demo")]
@@ -38,6 +40,7 @@ impl AppConfig {
         let raw = std::env::var("FERREX_SERVER_URL")
             .unwrap_or_else(|_| "http://localhost:3000".to_string());
         let server_url = sanitize_server_url(&raw);
+        let tenfoot_mode = tenfoot_mode_requested();
 
         #[cfg(feature = "demo")]
         {
@@ -69,6 +72,7 @@ impl AppConfig {
             Self {
                 server_url: Arc::from(server_url),
                 use_test_stubs: false,
+                tenfoot_mode,
                 demo_mode,
                 demo_credentials,
             }
@@ -79,6 +83,7 @@ impl AppConfig {
             Self {
                 server_url: Arc::from(server_url),
                 use_test_stubs: false,
+                tenfoot_mode,
             }
         }
     }
@@ -91,8 +96,25 @@ impl AppConfig {
         self.use_test_stubs
     }
 
+    pub fn tenfoot_enabled(&self) -> bool {
+        self.tenfoot_mode
+    }
+
+    pub fn interface_mode(&self) -> InterfaceMode {
+        if self.tenfoot_mode {
+            InterfaceMode::TenFoot
+        } else {
+            InterfaceMode::Desktop
+        }
+    }
+
     pub fn with_test_stubs(mut self, enabled: bool) -> Self {
         self.use_test_stubs = enabled;
+        self
+    }
+
+    pub fn with_tenfoot_mode(mut self, enabled: bool) -> Self {
+        self.tenfoot_mode = enabled;
         self
     }
 }
@@ -114,9 +136,28 @@ fn sanitize_server_url(input: &str) -> String {
     .to_string()
 }
 
+fn tenfoot_mode_requested() -> bool {
+    let env_enabled = std::env::var("FERREX_10FT")
+        .ok()
+        .map(|value| matches_truthy(&value))
+        .unwrap_or(false);
+
+    env_enabled || std::env::args().any(|arg| arg == "--10ft")
+}
+
+fn matches_truthy(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 /// Boot logic used both by the runtime application and presets.
 pub fn base_state(config: &AppConfig) -> State {
-    let mut state = State::new(config.server_url().to_string());
+    let mut state = State::new_with_interface_mode(
+        config.server_url().to_string(),
+        config.interface_mode(),
+    );
 
     init_registry(state.image_service.clone());
 
@@ -397,4 +438,36 @@ pub fn reset_to_first_run(state: &mut State) {
     state.domains.auth.state.is_authenticated = false;
     state.domains.auth.state.user_permissions = None;
     state.domains.auth.state.auth_flow = AuthenticationFlow::CheckingSetup;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_config_defaults_to_desktop_mode() {
+        let config = AppConfig::new("localhost:3000");
+
+        assert!(!config.tenfoot_enabled());
+        assert_eq!(config.interface_mode(), InterfaceMode::Desktop);
+    }
+
+    #[test]
+    fn app_config_can_select_tenfoot_mode() {
+        let config = AppConfig::new("localhost:3000").with_tenfoot_mode(true);
+
+        assert!(config.tenfoot_enabled());
+        assert_eq!(config.interface_mode(), InterfaceMode::TenFoot);
+    }
+
+    #[test]
+    fn tenfoot_truthy_values_are_recognized() {
+        for value in ["1", "true", "TRUE", " yes ", "on"] {
+            assert!(matches_truthy(value), "{value:?} should be truthy");
+        }
+
+        for value in ["", "0", "false", "off", "no", "enabled"] {
+            assert!(!matches_truthy(value), "{value:?} should not be truthy");
+        }
+    }
 }

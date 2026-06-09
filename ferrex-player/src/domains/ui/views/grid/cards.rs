@@ -186,10 +186,12 @@ pub fn movie_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(movie_id.to_uuid())
-                        .size(poster_request_size)
+                        .request_size(poster_request_size)
+                        .display_size(
+                            scaled_layout.poster_width,
+                            scaled_layout.poster_height,
+                        )
                         .radius(scaled_layout.corner_radius)
-                        .width(Length::Fixed(scaled_layout.poster_width))
-                        .height(Length::Fixed(scaled_layout.poster_height))
                         .animation_behavior(AnimationBehavior::default())
                         .placeholder(lucide_icons::Icon::Film)
                         .priority(if is_hovered || is_visible {
@@ -264,10 +266,9 @@ pub fn movie_reference_card_with_state<'a>(
     let mut img = image_for(media_id.to_uuid())
         .iid(poster_iid)
         .skip_request(poster_iid.is_none())
-        .size(poster_request_size)
+        .request_size(poster_request_size)
+        .display_size(scaled_layout.poster_width, scaled_layout.poster_height)
         .radius(scaled_layout.corner_radius)
-        .width(Length::Fixed(scaled_layout.poster_width))
-        .height(Length::Fixed(scaled_layout.poster_height))
         .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
@@ -438,10 +439,12 @@ pub fn series_reference_card_with_state<'a>(
                     let instance_key =
                         PosterInstanceKey::new(uuid, carousel_key.cloned());
                     let mut placeholder_widget = image_for(series_id.to_uuid())
-                        .size(poster_request_size)
+                        .request_size(poster_request_size)
+                        .display_size(
+                            scaled_layout.poster_width,
+                            scaled_layout.poster_height,
+                        )
                         .radius(scaled_layout.corner_radius)
-                        .width(Length::Fixed(scaled_layout.poster_width))
-                        .height(Length::Fixed(scaled_layout.poster_height))
                         .animation_behavior(AnimationBehavior::default())
                         .placeholder(lucide_icons::Icon::Tv)
                         .priority(if is_hovered || is_visible {
@@ -511,10 +514,9 @@ pub fn series_reference_card_with_state<'a>(
     let mut img = image_for(series_id.to_uuid())
         .iid(poster_iid)
         .skip_request(poster_iid.is_none())
-        .size(poster_request_size)
+        .request_size(poster_request_size)
+        .display_size(scaled_layout.poster_width, scaled_layout.poster_height)
         .radius(scaled_layout.corner_radius)
-        .width(Length::Fixed(scaled_layout.poster_width))
-        .height(Length::Fixed(scaled_layout.poster_height))
         .animation_behavior(AnimationBehavior::default())
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)

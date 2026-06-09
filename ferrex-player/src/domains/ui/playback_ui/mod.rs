@@ -8,6 +8,7 @@ pub use update::update_playback_ui;
 #[derive(Clone)]
 pub enum PlaybackMessage {
     PlayMediaWithId(MediaID),
+    PlayMediaWithIdFromStart(MediaID),
     PlayMediaWithIdInMpv(MediaID),
     PlaySeriesNextEpisode(SeriesID),
 }
@@ -22,6 +23,7 @@ impl PlaybackMessage {
     pub fn name(&self) -> &'static str {
         match self {
             Self::PlayMediaWithId(_) => "UI::PlayMediaWithId",
+            Self::PlayMediaWithIdFromStart(_) => "UI::PlayMediaWithIdFromStart",
             Self::PlayMediaWithIdInMpv(_) => "UI::PlayMediaWithIdInMpv",
             Self::PlaySeriesNextEpisode(_) => "UI::PlaySeriesNextEpisode",
         }
@@ -33,6 +35,9 @@ impl std::fmt::Debug for PlaybackMessage {
         match self {
             Self::PlayMediaWithId(id) => {
                 write!(f, "UI::PlayMediaWithId({:?})", id)
+            }
+            Self::PlayMediaWithIdFromStart(id) => {
+                write!(f, "UI::PlayMediaWithIdFromStart({:?})", id)
             }
             Self::PlayMediaWithIdInMpv(id) => {
                 write!(f, "UI::PlayMediaWithIdInMpv({:?})", id)
