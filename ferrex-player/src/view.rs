@@ -13,8 +13,9 @@ use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
 use crate::domains::ui::views::movies::view_movie_detail;
 use crate::domains::ui::views::settings::view_unified_settings;
-use crate::domains::ui::views::tenfoot::home::{
-    is_tenfoot_home_route, view_tenfoot_home,
+use crate::domains::ui::views::tenfoot::{
+    detail::{is_tenfoot_detail_route, view_tenfoot_detail},
+    home::{is_tenfoot_home_route, view_tenfoot_home},
 };
 use crate::domains::ui::views::tv::{
     view_episode_detail, view_season_detail, view_series_detail,
@@ -87,8 +88,11 @@ pub fn view(
     // views converge on the TV Home surface while detail/player paths keep
     // their dedicated routes.
     let tenfoot_home_active = is_tenfoot_home_route(state);
+    let tenfoot_detail_active = is_tenfoot_detail_route(state);
     let content = if tenfoot_home_active {
         view_tenfoot_home(state).map(DomainMessage::from)
+    } else if tenfoot_detail_active {
+        view_tenfoot_detail(state).map(DomainMessage::from)
     } else {
         match &state.domains.ui.state.view {
             ViewState::Library => view_library(state).map(DomainMessage::from),
@@ -131,6 +135,7 @@ pub fn view(
 
     // Add header if the view needs it
     let content_with_header = if !tenfoot_home_active
+        && !tenfoot_detail_active
         && state.domains.ui.state.view.has_header()
     {
         let header = view_header(state).map(DomainMessage::from);

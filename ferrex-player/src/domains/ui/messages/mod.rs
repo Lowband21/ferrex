@@ -14,7 +14,7 @@ use crate::domains::ui::{
     shell_ui::UiShellMessage,
     view_model_ui::ViewModelMessage,
     views::{
-        tenfoot::home::TenFootHomeMessage,
+        tenfoot::{detail::TenFootDetailMessage, home::TenFootHomeMessage},
         virtual_carousel::VirtualCarouselMessage,
     },
     window_ui::WindowUiMessage,
@@ -39,8 +39,9 @@ pub enum UiMessage {
 
     // Virtual carousel events (new module)
     VirtualCarousel(VirtualCarouselMessage),
-    // 10-foot Home spatial navigation
+    // 10-foot Home/detail spatial navigation
     TenFootHome(TenFootHomeMessage),
+    TenFootDetail(TenFootDetailMessage),
     // Poster menu subdomain
     PosterMenu(PosterMenuMessage),
     // Window lifecycle and movement events
@@ -74,6 +75,7 @@ impl UiMessage {
 
             Self::VirtualCarousel(_) => "UI::VirtualCarousel",
             Self::TenFootHome(_) => "UI::TenFootHome",
+            Self::TenFootDetail(_) => "UI::TenFootDetail",
             Self::PosterMenu(_) => "UI::PosterMenu",
             Self::Window(msg) => msg.name(),
             Self::Background(msg) => msg.name(),
@@ -105,6 +107,9 @@ impl std::fmt::Debug for UiMessage {
             }
             Self::TenFootHome(msg) => {
                 write!(f, "UI::TenFootHome({:?})", msg)
+            }
+            Self::TenFootDetail(msg) => {
+                write!(f, "UI::TenFootDetail({:?})", msg)
             }
             Self::PosterMenu(msg) => write!(f, "UI::PosterMenu({:?})", msg),
             Self::Window(msg) => write!(f, "UI::Window({:?})", msg),

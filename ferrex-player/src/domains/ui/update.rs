@@ -44,6 +44,12 @@ pub fn update_ui(state: &mut State, message: UiMessage) -> DomainUpdateResult {
                 tenfoot_msg,
             )
         }
+        UiMessage::TenFootDetail(tenfoot_msg) => {
+            crate::domains::ui::views::tenfoot::detail::update_tenfoot_detail(
+                state,
+                tenfoot_msg,
+            )
+        }
         UiMessage::Background(background_msg) => {
             update_background_ui(state, background_msg)
         }

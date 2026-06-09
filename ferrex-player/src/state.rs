@@ -272,6 +272,9 @@ impl State {
             tenfoot_home:
                 crate::domains::ui::views::tenfoot::home::TenFootHomeState::new(
                 ),
+            tenfoot_detail:
+                crate::domains::ui::views::tenfoot::detail::TenFootDetailState::new(
+                ),
             #[cfg(feature = "debug-cache-overlay")]
             cache_overlay_sample: None,
         };

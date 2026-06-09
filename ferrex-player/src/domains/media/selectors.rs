@@ -85,6 +85,32 @@ pub fn select_next_episode_for_series(
     Some(episodes[0].id)
 }
 
+/// Select the first playable episode in canonical series order.
+pub fn select_first_episode_for_series(
+    state: &State,
+    series_id: SeriesID,
+) -> Option<EpisodeID> {
+    ordered_series_episodes(&state.domains.ui.state.repo_accessor, &series_id)
+        .first()
+        .map(|episode| episode.id)
+}
+
+/// Select the first playable episode in a season by episode number.
+pub fn select_first_episode_for_season(
+    state: &State,
+    season_id: SeasonID,
+) -> Option<EpisodeID> {
+    let mut episodes = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+        .unwrap_or_default();
+    episodes.sort_by_key(|episode| episode.episode_number.value());
+    episodes.first().map(|episode| episode.id)
+}
+
 /// For a season: choose the first in-progress episode, else the first
 /// unwatched episode. If all are completed (or no watch state), fallback to
 /// the first episode in the season if available.
