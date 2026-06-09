@@ -1,5 +1,6 @@
 pub mod detail;
 pub mod home;
+pub mod player_overlay;
 
 #[cfg(test)]
 mod detail_tests {

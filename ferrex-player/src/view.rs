@@ -16,6 +16,10 @@ use crate::domains::ui::views::settings::view_unified_settings;
 use crate::domains::ui::views::tenfoot::{
     detail::{is_tenfoot_detail_route, view_tenfoot_detail},
     home::{is_tenfoot_home_route, view_tenfoot_home},
+    player_overlay::{
+        view_loading_status as view_tenfoot_loading_status,
+        view_player as view_tenfoot_player,
+    },
 };
 use crate::domains::ui::views::tv::{
     view_episode_detail, view_season_detail, view_series_detail,
@@ -107,7 +111,11 @@ pub fn view(
             }
             ViewState::Player => view_player(state).map(DomainMessage::Player),
             ViewState::LoadingVideo { url } => {
-                view_loading_video(state, url).map(DomainMessage::from)
+                if state.interface_mode.is_tenfoot() {
+                    view_tenfoot_loading_status(url).map(DomainMessage::Player)
+                } else {
+                    view_loading_video(state, url).map(DomainMessage::from)
+                }
             }
             ViewState::VideoError { message } => {
                 view_video_error(message).map(DomainMessage::from)
@@ -368,7 +376,11 @@ pub fn view(
     profiling::function
 )]
 fn view_player(state: &State) -> Element<'_, player::messages::PlayerMessage> {
-    state.domains.player.state.view()
+    if state.interface_mode.is_tenfoot() {
+        view_tenfoot_player(state)
+    } else {
+        state.domains.player.state.view()
+    }
 }
 
 /// Get the lucide font
