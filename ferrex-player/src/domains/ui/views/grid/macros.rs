@@ -464,10 +464,9 @@ macro_rules! media_card {
             let mut img = image_for($id)
                 .iid(iid)
                 .skip_request(iid.is_none())
-                .size(image_size)
+                .request_size(image_size)
+                .display_size(width, height)
                 .radius(radius)
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(height))
                 .animation_behavior(animation_behavior)
                 .placeholder($fallback.chars().next().map(|c| {
                     // Convert emoji to appropriate icon

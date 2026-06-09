@@ -155,9 +155,8 @@ pub fn view_series_detail<'a>(
     let mut poster = image_for(media_id.to_uuid())
         .iid(series_poster_iid)
         .skip_request(series_poster_iid.is_none())
-        .size(ImageSize::Poster(detail_poster_quality))
-        .width(Length::Fixed(300.0))
-        .height(Length::Fixed(450.0))
+        .request_size(ImageSize::Poster(detail_poster_quality))
+        .display_size(300.0, 450.0)
         .priority(Priority::Visible)
         .animation_behavior(AnimationBehavior::flip_then_fade());
 
@@ -484,9 +483,8 @@ pub fn view_season_detail<'a>(
     let mut poster = image_for(season.id.to_uuid())
         .iid(season_poster_iid)
         .skip_request(season_poster_iid.is_none())
-        .size(ImageSize::Poster(detail_poster_quality))
-        .width(Length::Fixed(300.0))
-        .height(Length::Fixed(450.0))
+        .request_size(ImageSize::Poster(detail_poster_quality))
+        .display_size(300.0, 450.0)
         .priority(Priority::Visible)
         .animation_behavior(AnimationBehavior::flip_then_fade());
     if let Some(hex) = season.theme_color()
@@ -765,9 +763,8 @@ pub fn view_episode_detail<'a>(
     let mut still = image_for(episode.id.to_uuid())
         .iid(still_iid)
         .skip_request(still_iid.is_none())
-        .size(ImageSize::thumbnail())
-        .width(Length::Fixed(640.0))
-        .height(Length::Fixed(360.0))
+        .request_size(ImageSize::thumbnail())
+        .display_size(640.0, 360.0)
         .priority(Priority::Visible);
     let poster_id = episode.id.to_uuid();
     let episode_instance_key = PosterInstanceKey::standalone(poster_id);

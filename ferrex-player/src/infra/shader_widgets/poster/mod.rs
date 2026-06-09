@@ -183,16 +183,29 @@ impl Poster {
         self
     }
 
-    /// Sets animated bounds with padding
+    /// Sets animated bounds and reserves layout space for effect overflow.
     pub fn with_animated_bounds(
         mut self,
         bounds: animation::AnimatedPosterBounds,
     ) -> Self {
         self.bounds = Some(bounds);
-        // Use layout bounds for stable grid positioning
+        // Use layout bounds for stable grid positioning when hover/glow/scale
+        // effects are allowed to draw outside the base poster rectangle.
         let (width, height) = bounds.layout_bounds();
         self.width = Length::Fixed(width);
         self.height = Length::Fixed(height);
+        self
+    }
+
+    /// Sets animated bounds while keeping the layout box equal to the visible poster.
+    pub fn with_tight_bounds(
+        mut self,
+        bounds: animation::AnimatedPosterBounds,
+    ) -> Self {
+        self.bounds = Some(bounds);
+        self.width = Length::Fixed(bounds.base_width * bounds.ui_scale_factor);
+        self.height =
+            Length::Fixed(bounds.base_height * bounds.ui_scale_factor);
         self
     }
 
@@ -284,6 +297,46 @@ impl Poster {
             Some(meta_str.chars().take(16).collect())
         };
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn transparent_handle() -> Handle {
+        Handle::from_rgba(1, 1, vec![0, 0, 0, 0])
+    }
+
+    #[test]
+    fn tight_bounds_keep_layout_equal_to_visible_poster() {
+        let bounds = animation::AnimatedPosterBounds::new(100.0, 150.0);
+        let poster =
+            Poster::new(transparent_handle(), None).with_tight_bounds(bounds);
+
+        assert!(
+            matches!(poster.width, Length::Fixed(width) if (width - 100.0).abs() < f32::EPSILON)
+        );
+        assert!(
+            matches!(poster.height, Length::Fixed(height) if (height - 150.0).abs() < f32::EPSILON)
+        );
+    }
+
+    #[test]
+    fn animated_bounds_explicitly_reserve_effect_padding() {
+        let bounds = animation::AnimatedPosterBounds::new(100.0, 150.0);
+        let (layout_width, layout_height) = bounds.layout_bounds();
+        let poster = Poster::new(transparent_handle(), None)
+            .with_animated_bounds(bounds);
+
+        assert!(
+            matches!(poster.width, Length::Fixed(width) if (width - layout_width).abs() < f32::EPSILON)
+        );
+        assert!(
+            matches!(poster.height, Length::Fixed(height) if (height - layout_height).abs() < f32::EPSILON)
+        );
+        assert!(layout_width > bounds.base_width);
+        assert!(layout_height > bounds.base_height);
     }
 }
 

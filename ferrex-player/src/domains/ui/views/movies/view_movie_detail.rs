@@ -73,9 +73,8 @@ pub fn view_movie_detail<'a>(
             let mut poster_element = image_for(media_id.to_uuid())
                 .iid(movie_details.primary_poster_iid)
                 .skip_request(movie_details.primary_poster_iid.is_none())
-                .size(ImageSize::Poster(detail_poster_quality))
-                .width(Length::Fixed(300.0))
-                .height(Length::Fixed(450.0))
+                .request_size(ImageSize::Poster(detail_poster_quality))
+                .display_size(300.0, 450.0)
                 .priority(Priority::Visible)
                 .animation_behavior(AnimationBehavior::flip_then_fade());
 

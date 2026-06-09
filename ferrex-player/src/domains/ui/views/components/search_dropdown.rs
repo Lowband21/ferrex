@@ -710,12 +710,12 @@ fn tenfoot_result_art(media_ref: &Media) -> Element<'_, Message> {
     let image: Element<'_, UiMessage> = image_for(art.media_uuid)
         .iid(art.image_iid)
         .skip_request(art.image_iid.is_none())
-        .size(art.image_size)
-        .width(Length::Fixed(art.width))
-        .height(Length::Fixed(art.height))
+        .request_size(art.image_size)
+        .display_size(art.width, art.height)
         .radius(8.0)
         .placeholder(Icon::Film)
         .priority(Priority::Visible)
+        .tight_bounds()
         .no_animation()
         .into();
 

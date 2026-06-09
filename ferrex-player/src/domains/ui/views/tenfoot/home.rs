@@ -1420,6 +1420,76 @@ fn view_card<'a>(
     }
 }
 
+fn card_content_padding() -> f32 {
+    18.0
+}
+
+fn rail_media_content_spacing() -> f32 {
+    10.0
+}
+
+fn rail_media_title_size() -> f32 {
+    20.0
+}
+
+fn rail_media_subtitle_size() -> f32 {
+    15.0
+}
+
+fn rail_media_text_block_height() -> f32 {
+    rail_media_title_size()
+        + rail_media_subtitle_size()
+        + rail_media_content_spacing() * 2.0
+}
+
+fn media_poster_radius() -> f32 {
+    16.0
+}
+
+fn tenfoot_button_radius() -> f32 {
+    22.0
+}
+
+fn media_poster_button_inset() -> f32 {
+    0.0
+}
+
+fn rail_media_image_size(card_width: f32, card_height: f32) -> (f32, f32) {
+    let available_width =
+        (card_width - media_poster_button_inset() * 2.0).max(0.0);
+    let available_height = (card_height
+        - media_poster_button_inset() * 2.0
+        - rail_media_text_block_height())
+    .max(0.0);
+
+    fit_poster_to_bounds(available_width, available_height)
+}
+
+fn rail_media_poster_button_size(
+    image_width: f32,
+    image_height: f32,
+) -> (f32, f32) {
+    (
+        image_width + media_poster_button_inset() * 2.0,
+        image_height + media_poster_button_inset() * 2.0,
+    )
+}
+
+fn fit_poster_to_bounds(max_width: f32, max_height: f32) -> (f32, f32) {
+    const POSTER_ASPECT_RATIO: f32 = 2.0 / 3.0;
+
+    if max_width <= 0.0 || max_height <= 0.0 {
+        return (0.0, 0.0);
+    }
+
+    let width_limited_height = max_width / POSTER_ASPECT_RATIO;
+    if width_limited_height <= max_height {
+        (max_width, width_limited_height)
+    } else {
+        (max_height * POSTER_ASPECT_RATIO, max_height)
+    }
+}
+
 fn view_media_card<'a>(
     state: &'a State,
     rail: TenFootRailId,
@@ -1427,13 +1497,24 @@ fn view_media_card<'a>(
     focus_id: TenFootFocusId,
     focused: bool,
 ) -> Element<'a, UiMessage> {
+    let (image_width, image_height) =
+        rail_media_image_size(RAIL_CARD_WIDTH, RAIL_CARD_HEIGHT);
     let image = view_media_image(
         state,
         item,
-        164.0,
-        246.0,
+        image_width,
+        image_height,
         focused,
         rail.poster_carousel_key(),
+    );
+    let (poster_button_width, poster_button_height) =
+        rail_media_poster_button_size(image_width, image_height);
+    let poster_button = media_poster_button(
+        image,
+        focus_id.clone(),
+        focused,
+        poster_button_width,
+        poster_button_height,
     );
     let activation_hint = if rail == TenFootRailId::ContinueWatching {
         "Play"
@@ -1442,19 +1523,50 @@ fn view_media_card<'a>(
     };
 
     let content = column![
-        image,
+        poster_button,
         text(item.title.clone())
-            .size(20)
+            .size(rail_media_title_size())
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         text(format!("{} • {}", item.subtitle, activation_hint))
-            .size(15)
+            .size(rail_media_subtitle_size())
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
-    .spacing(10)
+    .spacing(rail_media_content_spacing())
     .width(Length::Fill)
     .align_x(iced::Alignment::Center);
 
-    card_button(content.into(), focus_id, focused, RAIL_CARD_HEIGHT)
+    let card = container(content)
+        .width(Length::Fixed(RAIL_CARD_WIDTH))
+        .height(Length::Fixed(RAIL_CARD_HEIGHT))
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    mouse_area(card)
+        .on_enter(TenFootHomeMessage::Focus(focus_id).into())
+        .into()
+}
+
+fn media_poster_button<'a>(
+    content: Element<'a, UiMessage>,
+    focus_id: TenFootFocusId,
+    focused: bool,
+    width: f32,
+    height: f32,
+) -> Element<'a, UiMessage> {
+    button(
+        container(content)
+            .padding(media_poster_button_inset())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center),
+    )
+    .padding(0)
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(height))
+    .style(tenfoot_button_style(focused))
+    .on_press(TenFootHomeMessage::Activate(focus_id).into())
+    .into()
 }
 
 fn view_media_image<'a>(
@@ -1491,10 +1603,9 @@ fn view_media_image<'a>(
     let mut image = image_for(item.kind.uuid())
         .iid(item.poster_iid)
         .skip_request(item.poster_iid.is_none())
-        .size(ImageSize::Poster(poster_quality))
-        .radius(16.0)
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
+        .request_size(ImageSize::Poster(poster_quality))
+        .display_size(width, height)
+        .radius(media_poster_radius())
         .priority(if focused {
             Priority::Visible
         } else {
@@ -1506,6 +1617,7 @@ fn view_media_image<'a>(
         })
         .face(face)
         .selected_menu_button(selected_menu_button)
+        .tight_bounds()
         .no_animation();
 
     if let Some(rot) = rotation_override {
@@ -1578,7 +1690,7 @@ fn card_button<'a>(
 ) -> Element<'a, UiMessage> {
     let button_element = button(
         container(content)
-            .padding(18)
+            .padding(card_content_padding())
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(iced::Alignment::Center)
@@ -1847,7 +1959,7 @@ fn tenfoot_button_style(
             border: Border {
                 color: border_color,
                 width: if focused { 3.0 } else { 1.0 },
-                radius: 22.0.into(),
+                radius: tenfoot_button_radius().into(),
             },
             shadow: if focused {
                 Shadow {
@@ -1904,6 +2016,27 @@ mod tests {
                 ),
             ],
         }
+    }
+
+    #[test]
+    fn rail_media_image_size_is_derived_from_card_bounds() {
+        let (width, height) =
+            rail_media_image_size(RAIL_CARD_WIDTH, RAIL_CARD_HEIGHT);
+        let max_width = RAIL_CARD_WIDTH - media_poster_button_inset() * 2.0;
+        let max_height = RAIL_CARD_HEIGHT
+            - media_poster_button_inset() * 2.0
+            - rail_media_text_block_height();
+
+        assert!(width <= max_width);
+        assert!(height <= max_height);
+        assert!(((width / height) - (2.0 / 3.0)).abs() < 0.001);
+
+        assert_eq!(media_poster_button_inset(), 0.0);
+
+        let (_button_width, button_height) =
+            rail_media_poster_button_size(width, height);
+        let total_height = button_height + rail_media_text_block_height();
+        assert!((total_height - RAIL_CARD_HEIGHT).abs() < 0.001);
     }
 
     #[test]

@@ -1590,11 +1590,10 @@ fn view_detail_image<'a>(
         } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
-            .size(ImageSize::Poster(
+            .request_size(ImageSize::Poster(
                 state.domains.settings.display.detail_poster_quality,
             ))
-            .width(Length::Fixed(HERO_IMAGE_WIDTH))
-            .height(Length::Fixed(HERO_POSTER_HEIGHT))
+            .display_size(HERO_IMAGE_WIDTH, HERO_POSTER_HEIGHT)
             .radius(18.0)
             .priority(if priority_visible {
                 Priority::Visible
@@ -1602,14 +1601,14 @@ fn view_detail_image<'a>(
                 Priority::Preload
             })
             .placeholder(*placeholder)
+            .tight_bounds()
             .no_animation()
             .into(),
         DetailImage::Still { media_uuid, iid } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
-            .size(ImageSize::thumbnail())
-            .width(Length::Fixed(HERO_STILL_WIDTH))
-            .height(Length::Fixed(HERO_STILL_HEIGHT))
+            .request_size(ImageSize::thumbnail())
+            .display_size(HERO_STILL_WIDTH, HERO_STILL_HEIGHT)
             .radius(18.0)
             .priority(if priority_visible {
                 Priority::Visible
@@ -1617,6 +1616,7 @@ fn view_detail_image<'a>(
                 Priority::Preload
             })
             .placeholder(lucide_icons::Icon::Clapperboard)
+            .tight_bounds()
             .no_animation()
             .into(),
         DetailImage::None => container(
@@ -1646,11 +1646,10 @@ fn view_panel_item_image<'a>(
         } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
-            .size(ImageSize::Poster(
+            .request_size(ImageSize::Poster(
                 state.domains.settings.display.library_poster_quality,
             ))
-            .width(Length::Fixed(74.0))
-            .height(Length::Fixed(110.0))
+            .display_size(74.0, 110.0)
             .radius(10.0)
             .priority(if focused {
                 Priority::Visible
@@ -1658,14 +1657,14 @@ fn view_panel_item_image<'a>(
                 Priority::Preload
             })
             .placeholder(*placeholder)
+            .tight_bounds()
             .no_animation()
             .into(),
         DetailImage::Still { media_uuid, iid } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
-            .size(ImageSize::thumbnail())
-            .width(Length::Fixed(118.0))
-            .height(Length::Fixed(66.0))
+            .request_size(ImageSize::thumbnail())
+            .display_size(118.0, 66.0)
             .radius(10.0)
             .priority(if focused {
                 Priority::Visible
@@ -1673,6 +1672,7 @@ fn view_panel_item_image<'a>(
                 Priority::Preload
             })
             .placeholder(lucide_icons::Icon::Clapperboard)
+            .tight_bounds()
             .no_animation()
             .into(),
         DetailImage::None => Space::new()
