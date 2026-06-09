@@ -1156,7 +1156,11 @@ fn player_message_for_focus(focused_id: &str) -> PlayerMessage {
 fn player_container_style(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(Color::WHITE),
-        background: Some(Background::Color(Color::BLACK)),
+        // Keep the full-window player container transparent. The Wayland
+        // subsurface backend renders video below iced; an opaque parent layer
+        // (even black) hides the native video surface and produces audio-only
+        // playback. HUD layers add their own semi-transparent scrims.
+        background: Some(Background::Color(Color::TRANSPARENT)),
         ..Default::default()
     }
 }
@@ -1285,6 +1289,20 @@ fn overlay_button_style(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_container_stays_transparent_for_subsurface_video() {
+        let style = player_container_style(&MediaServerTheme::theme());
+
+        match style.background {
+            Some(Background::Color(color)) => {
+                assert_eq!(color, Color::TRANSPARENT);
+            }
+            other => {
+                panic!("expected transparent color background, got {other:?}")
+            }
+        }
+    }
 
     #[test]
     fn progress_ratio_clamps_to_playable_range() {
