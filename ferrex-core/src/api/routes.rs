@@ -104,6 +104,7 @@ pub mod v1 {
     pub mod libraries {
         pub const COLLECTION: &str = v1_path!("/libraries");
         pub const ITEM: &str = v1_path!("/libraries/{id}");
+        pub const DISCOVERY: &str = v1_path!("/libraries/{id}/discovery");
         pub const MEDIA: &str = v1_path!("/libraries/{id}/media");
         pub const SORTED_IDS: &str = v1_path!("/libraries/{id}/sorted-ids");
         pub const SORTED_INDICES: &str =
