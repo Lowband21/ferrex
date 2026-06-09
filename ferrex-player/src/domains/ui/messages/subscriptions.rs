@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::UiMessage;
+use crate::domains::search::keyboard::TenFootKeyboardDirection;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::{
     feedback_ui::FeedbackMessage, interaction_ui::InteractionMessage,
@@ -60,7 +61,18 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
 
     // Search surface keyboard interactions (overlay or detached window)
     if search_open {
-        subscriptions.push(event::listen_with(search_surface_key_handler));
+        let tenfoot_search_overlay = state.interface_mode.is_tenfoot()
+            && state.domains.search.state.presentation.is_overlay();
+        let tenfoot_keyboard_open = tenfoot_search_overlay
+            && state.domains.search.state.tenfoot_keyboard.is_open();
+        subscriptions.push(event::listen().map(move |event| {
+            search_surface_key_handler(
+                event,
+                tenfoot_search_overlay,
+                tenfoot_keyboard_open,
+            )
+            .unwrap_or(DomainMessage::NoOp)
+        }));
     }
 
     // Watch for close requests and close only our search window
@@ -394,8 +406,8 @@ fn tenfoot_home_key_handler(
 
 fn search_surface_key_handler(
     event: RuntimeEvent,
-    _status: EventStatus,
-    _window: iced::window::Id,
+    tenfoot_search_overlay: bool,
+    tenfoot_keyboard_open: bool,
 ) -> Option<DomainMessage> {
     use iced::keyboard::key::Named;
 
@@ -407,6 +419,38 @@ fn search_surface_key_handler(
     {
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
+        }
+
+        if tenfoot_search_overlay && tenfoot_keyboard_open {
+            return match key {
+                Key::Named(Named::Escape) => {
+                    Some(DomainMessage::Search(SearchMessage::HandleEscape))
+                }
+                Key::Named(Named::Enter) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardActivate,
+                )),
+                Key::Named(Named::ArrowUp) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Up,
+                    ),
+                )),
+                Key::Named(Named::ArrowDown) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Down,
+                    ),
+                )),
+                Key::Named(Named::ArrowLeft) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Left,
+                    ),
+                )),
+                Key::Named(Named::ArrowRight) => Some(DomainMessage::Search(
+                    SearchMessage::TenFootKeyboardMove(
+                        TenFootKeyboardDirection::Right,
+                    ),
+                )),
+                _ => None,
+            };
         }
 
         match key {
@@ -421,6 +465,11 @@ fn search_surface_key_handler(
             }
             Key::Named(Named::ArrowDown) => {
                 Some(DomainMessage::Search(SearchMessage::SelectNext))
+            }
+            Key::Named(Named::ArrowLeft) | Key::Named(Named::ArrowRight)
+                if tenfoot_search_overlay =>
+            {
+                Some(DomainMessage::Search(SearchMessage::ShowTenFootKeyboard))
             }
             Key::Character(value) if modifiers.shift() => None,
             Key::Character(value) if value.eq_ignore_ascii_case("k") => {

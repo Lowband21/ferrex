@@ -26,17 +26,59 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         return Subscription::none();
     }
 
-    event::listen_with(|event, _status, _id| {
-        let iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key,
-            modifiers,
-            ..
-        }) = event
-        else {
-            return None;
-        };
-        handle_search_key_press(key, modifiers)
-    })
+    if state.interface_mode.is_tenfoot() {
+        event::listen().map(|event| {
+            let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                ..
+            }) = event
+            else {
+                return DomainMessage::NoOp;
+            };
+
+            handle_tenfoot_search_key_press(key, modifiers)
+                .unwrap_or(DomainMessage::NoOp)
+        })
+    } else {
+        event::listen_with(desktop_search_key_handler)
+    }
+}
+
+fn desktop_search_key_handler(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _id: iced::window::Id,
+) -> Option<DomainMessage> {
+    let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+
+    handle_search_key_press(key, modifiers)
+}
+
+fn handle_tenfoot_search_key_press(
+    key: Key,
+    modifiers: Modifiers,
+) -> Option<DomainMessage> {
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
+    match key {
+        Key::Character(value)
+            if value.as_str() == "/"
+                || value.as_str().eq_ignore_ascii_case("s") =>
+        {
+            Some(DomainMessage::Ui(UiShellMessage::OpenSearchOverlay.into()))
+        }
+        _ => None,
+    }
 }
 
 fn handle_search_key_press(
