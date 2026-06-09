@@ -1,10 +1,11 @@
 use async_trait::async_trait;
-use ferrex_model::VideoMediaType;
+use ferrex_model::{LibraryId, VideoMediaType};
 use uuid::Uuid;
 
 use crate::domain::watch::{
     ContinueWatchingItem, EpisodeKey, NextEpisode, SeasonWatchStatus,
-    SeriesWatchStatus, UpdateProgressRequest, UserWatchState,
+    SeriesContinueWatchingItem, SeriesWatchStatus, UpdateProgressRequest,
+    UserWatchState,
 };
 use crate::error::Result;
 
@@ -24,6 +25,19 @@ pub trait WatchStatusRepository: Send + Sync {
         user_id: Uuid,
         limit: usize,
     ) -> Result<Vec<ContinueWatchingItem>>;
+    /// Return series continue/next-up cards scoped to one library.
+    async fn get_library_series_continue_watching(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+        limit: usize,
+    ) -> Result<Vec<SeriesContinueWatchingItem>>;
+    /// Return library-scoped series ids with completed or resume-eligible episode state.
+    async fn list_library_series_ids_with_meaningful_watch_state(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+    ) -> Result<Vec<Uuid>>;
     async fn clear_watch_progress(
         &self,
         user_id: Uuid,

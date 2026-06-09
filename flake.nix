@@ -371,6 +371,8 @@
           ffmpegPkgPlayer =
             if pkgsPlayer ? ffmpeg-full then pkgsPlayer.ffmpeg-full else pkgsPlayer.ffmpeg;
           libclang = pkgs.llvmPackages.libclang;
+          postgresqlWithPgUuidv7 = pkgs.postgresql.withPackages (ps: [ ps.pg_uuidv7 ]);
+          postgresqlWithPgUuidv7Player = pkgsPlayer.postgresql.withPackages (ps: [ ps.pg_uuidv7 ]);
         in
         {
           default = pkgs.mkShell {
@@ -385,7 +387,7 @@
               curl
               git
               wl-clipboard
-              postgresql
+              postgresqlWithPgUuidv7
               flatpak
               flatpak-builder
               appstream
@@ -422,7 +424,7 @@
               curl
               git
               wl-clipboard
-              postgresql
+              postgresqlWithPgUuidv7Player
               flatpak
               flatpak-builder
               appstream

@@ -2,14 +2,15 @@ use crate::{
     database::PostgresDatabase,
     database::repository_ports::watch_status::WatchStatusRepository,
     domain::watch::{
-        ContinueWatchingItem, UpdateProgressRequest, UserWatchState,
+        ContinueWatchingItem, SeriesContinueWatchingItem,
+        UpdateProgressRequest, UserWatchState,
     },
     error::Result,
     types::watch::{
         EpisodeKey, NextEpisode, SeasonWatchStatus, SeriesWatchStatus,
     },
 };
-use ferrex_model::VideoMediaType;
+use ferrex_model::{LibraryId, VideoMediaType};
 use uuid::Uuid;
 
 impl PostgresDatabase {
@@ -39,6 +40,31 @@ impl PostgresDatabase {
     ) -> Result<Vec<ContinueWatchingItem>> {
         self.watch_status_repository()
             .get_continue_watching(user_id, limit)
+            .await
+    }
+
+    /// Return series continue/next-up cards scoped to one library.
+    pub async fn get_library_series_continue_watching(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+        limit: usize,
+    ) -> Result<Vec<SeriesContinueWatchingItem>> {
+        self.watch_status_repository()
+            .get_library_series_continue_watching(user_id, library_id, limit)
+            .await
+    }
+
+    /// Return library-scoped series ids with completed or resume-eligible episode state.
+    pub async fn list_library_series_ids_with_meaningful_watch_state(
+        &self,
+        user_id: Uuid,
+        library_id: LibraryId,
+    ) -> Result<Vec<Uuid>> {
+        self.watch_status_repository()
+            .list_library_series_ids_with_meaningful_watch_state(
+                user_id, library_id,
+            )
             .await
     }
 

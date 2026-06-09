@@ -9,7 +9,7 @@ pub use crate::types::watch::{
     EpisodeKey, EpisodeStatus, NextEpisode, NextReason, SeasonKey,
     SeasonWatchStatus, SeriesWatchStatus,
 };
-use ferrex_model::{MediaID, VideoMediaType};
+use ferrex_model::{LibraryId, MediaID, VideoMediaType};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
@@ -300,6 +300,34 @@ pub struct ContinueWatchingItem {
     #[serde(default)]
     pub subtitle: Option<String>,
     /// Optional poster image iid for the card.
+    #[serde(default)]
+    pub poster_iid: Option<Uuid>,
+}
+
+/// Library-scoped continue/next-up row for a series card.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SeriesContinueWatchingItem {
+    /// Series card represented by this row.
+    pub series_id: Uuid,
+    /// Library that supplied the series card and playback target.
+    pub library_id: LibraryId,
+    /// Reliable episode action target when one was resolved in the library.
+    pub action_episode_id: Option<Uuid>,
+    /// Hint describing whether the action resumes progress or plays next up.
+    pub action_hint: ContinueWatchingActionHint,
+    /// Current playback position in seconds for resume rows, or zero for next-up.
+    pub position: f32,
+    /// Total media duration in seconds for resume rows, or zero for next-up.
+    pub duration: f32,
+    /// Unix timestamp of the last meaningful watch activity in this series.
+    pub last_watched: i64,
+    /// Denormalized display title for the series card when available.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Optional subtitle / episode label for rendering resume intent.
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    /// Optional poster image iid for the series card.
     #[serde(default)]
     pub poster_iid: Option<Uuid>,
 }

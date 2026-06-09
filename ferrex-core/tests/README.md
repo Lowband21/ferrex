@@ -33,4 +33,5 @@ cargo test -p ferrex-core --test orchestration
 ## Notes
 
 - Tests with `#[sqlx::test]` are isolated and run against ephemeral databases managed by the macro.
+- `watch_status_library_series_continue` also provisions an isolated database per test. When a localhost `DATABASE_URL` is unavailable, it starts a temporary PostgreSQL from the Nix dev shell and applies the same migrator.
 - No manual `cargo sqlx migrate` is required for tests; the migrator runs automatically.
