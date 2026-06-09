@@ -1179,6 +1179,7 @@ impl QueryRepository for PostgresQueryRepository {
             SortOrder::Descending => sql_builder.push(" DESC NULLS "),
         };
         sql_builder.push(null_position);
+        sql_builder.push(", mr.id ASC");
     }
 
     fn add_series_sort_clause(

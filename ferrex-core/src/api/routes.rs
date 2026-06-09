@@ -68,6 +68,11 @@ pub mod v1 {
         }
     }
 
+    pub mod discovery {
+        pub const EXPLORE: &str = v1_path!("/discovery/explore");
+        pub const RESUME: &str = v1_path!("/discovery/resume");
+    }
+
     pub mod watch {
         pub const UPDATE_PROGRESS: &str = v1_path!("/watch/progress");
         pub const STATE: &str = v1_path!("/watch/state");

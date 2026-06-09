@@ -4,6 +4,7 @@
 
 pub mod admin;
 pub mod demo;
+pub mod discovery;
 pub mod filters;
 pub mod library;
 pub mod media;
@@ -18,6 +19,15 @@ pub use admin::{
     MediaRootEntry, MediaRootEntryKind,
 };
 pub use demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
+pub use discovery::{
+    DISCOVERY_SECTION_AUDIENCE_RATING_PICKS, DISCOVERY_SECTION_RECENTLY_ADDED,
+    DISCOVERY_SECTION_RECENTLY_RELEASED, DISCOVERY_SECTION_RESUME,
+    DiscoveryItem, DiscoveryLayoutHint, DiscoveryMediaType,
+    DiscoveryPlaybackAction, DiscoveryPlaybackHint, DiscoveryRatingSummary,
+    DiscoveryResponse, DiscoverySection, DiscoveryWatchState,
+    DiscoveryWatchSummary, discovery_item_from_continue_watching,
+    discovery_media_stable_id, release_year_from_date,
+};
 pub use filters::{
     FilterIndicesRequest, IndicesResponse, LibraryFilters,
     RATING_DECIMAL_SCALE, RATING_SCALE_FACTOR, RatingValue, ScalarRange,
@@ -55,6 +65,16 @@ pub mod player {
         MediaRootEntry, MediaRootEntryKind,
     };
     pub use super::demo::{DemoLibraryStatus, DemoResetRequest, DemoStatus};
+    pub use super::discovery::{
+        DISCOVERY_SECTION_AUDIENCE_RATING_PICKS,
+        DISCOVERY_SECTION_RECENTLY_ADDED, DISCOVERY_SECTION_RECENTLY_RELEASED,
+        DISCOVERY_SECTION_RESUME, DiscoveryItem, DiscoveryLayoutHint,
+        DiscoveryMediaType, DiscoveryPlaybackAction, DiscoveryPlaybackHint,
+        DiscoveryRatingSummary, DiscoveryResponse, DiscoverySection,
+        DiscoveryWatchState, DiscoveryWatchSummary,
+        discovery_item_from_continue_watching, discovery_media_stable_id,
+        release_year_from_date,
+    };
     pub use super::library::{
         BatchMediaRequest, BatchMediaResponse, CreateLibraryRequest,
         FetchMediaRequest, LibraryMediaCache, LibraryMediaResponse,

@@ -8,6 +8,7 @@ use ferrex_core::api::routes::v1::admin::MEDIA_ROOT_BROWSER;
 
 #[cfg(feature = "demo")]
 use crate::handlers::admin::demo_handlers;
+use crate::handlers::discovery;
 use crate::handlers::stream::stream_handlers;
 use crate::handlers::users::admin_user_management;
 use crate::handlers::users::{
@@ -174,6 +175,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             v1::users::ITEM,
             axum::routing::delete(user_management::delete_user),
         )
+        // Discovery endpoints
+        //
+        .route(v1::discovery::EXPLORE, get(discovery::get_explore_handler))
+        .route(v1::discovery::RESUME, get(discovery::get_resume_handler))
         // Watch status endpoints
         //
         .route(
