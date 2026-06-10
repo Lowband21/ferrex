@@ -84,6 +84,9 @@ cache/
 
 # Scripts are tracked; avoid ignoring the whole directory.
 
+# Generated Android FlatBuffers Kotlin types.
+mobile/android/app/src/main/java/ferrex/
+
 *.zip
 
 node_modules/

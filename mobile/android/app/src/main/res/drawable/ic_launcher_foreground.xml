@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="@color/ferrex_primary"
+        android:pathData="M24,4L42,14V34L24,44L6,34V14Z" />
+    <path
+        android:fillColor="@color/ferrex_background"
+        android:pathData="M20,15V33L34,24Z" />
+</vector>

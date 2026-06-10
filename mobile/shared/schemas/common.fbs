@@ -1,0 +1,44 @@
+// FlatBuffers schema: shared primitive wrappers and common enums.
+
+namespace ferrex.common;
+
+/// UTC timestamp as milliseconds since the Unix epoch.
+/// A zero value represents an absent optional timestamp in legacy endpoints.
+struct Timestamp {
+  millis: long;
+}
+
+/// Library content type.
+enum LibraryType : byte {
+  Movies = 0,
+  Series = 1,
+}
+
+/// Video/media discriminator used for file ownership and media references.
+enum VideoMediaType : byte {
+  Movie   = 0,
+  Series  = 1,
+  Season  = 2,
+  Episode = 3,
+}
+
+/// Image kind used by the mobile image manifest/readiness contracts.
+enum ImageCategory : byte {
+  Poster   = 0,
+  Backdrop = 1,
+  Profile  = 2,
+  Episode  = 3,
+}
+
+/// Generic response metadata for endpoints that need an out-of-band message.
+table ApiResponse {
+  success: bool = true;
+  message: string;
+}
+
+table PaginationMeta {
+  total:     uint;
+  page:      uint;
+  page_size: uint;
+  has_more:  bool;
+}

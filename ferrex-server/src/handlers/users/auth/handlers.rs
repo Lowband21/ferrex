@@ -1,11 +1,20 @@
 use crate::handlers::users::map_auth_facade_error;
-use axum::{Extension, Json, extract::State, http::StatusCode};
+use axum::{
+    Extension, Json,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Response,
+};
 use chrono::Utc;
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::{
         auth::{
-            domain::services::{AuthenticationError, TokenBundle},
+            domain::{
+                services::{AuthenticationError, TokenBundle},
+                value_objects::SessionScope as CoreSessionScope,
+            },
             policy::PasswordPolicyRule,
         },
         user::{
@@ -15,6 +24,7 @@ use ferrex_core::{
     },
     error::MediaError,
 };
+use ferrex_flatbuffers::conversions::auth as fb_auth;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -25,7 +35,9 @@ use uuid::Uuid;
 
 use crate::infra::{
     app_state::AppState,
+    content_negotiation::{AcceptedFormat, json_or_flatbuffers},
     errors::{AppError, AppResult},
+    fb_request_parsing::parse_json_or_flatbuffers,
 };
 
 pub async fn register(
@@ -127,32 +139,60 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
-    Json(request): Json<LoginRequest>,
-) -> AppResult<Json<ApiResponse<AuthToken>>> {
+    AcceptedFormat(response_format): AcceptedFormat,
+    headers: HeaderMap,
+    body: Bytes,
+) -> AppResult<Response> {
+    let request: LoginRequest =
+        parse_json_or_flatbuffers(&headers, body, |bytes| {
+            fb_auth::parse_login_request(bytes).map(|request| LoginRequest {
+                username: request.username,
+                password: request.password,
+                device_name: request.device_name,
+            })
+        })?;
+
     let token_bundle = state
         .auth_service()
         .authenticate_with_password(&request.username, &request.password)
         .await
         .map_err(map_auth_error)?;
+    let auth_token = bundle_to_auth_token(token_bundle);
 
-    Ok(Json(ApiResponse::success(bundle_to_auth_token(
-        token_bundle,
-    ))))
+    Ok(json_or_flatbuffers(
+        response_format,
+        ApiResponse::success(auth_token.clone()),
+        || fb_auth::serialize_auth_token(&auth_token_to_fb(&auth_token)),
+    ))
 }
 
 pub async fn refresh(
     State(state): State<AppState>,
-    Json(request): Json<RefreshRequest>,
-) -> AppResult<Json<ApiResponse<AuthToken>>> {
+    AcceptedFormat(response_format): AcceptedFormat,
+    headers: HeaderMap,
+    body: Bytes,
+) -> AppResult<Response> {
+    let request: RefreshRequest =
+        parse_json_or_flatbuffers(&headers, body, |bytes| {
+            fb_auth::parse_refresh_request(bytes).map(|request| {
+                RefreshRequest {
+                    refresh_token: request.refresh_token,
+                }
+            })
+        })?;
+
     let token_bundle = state
         .auth_service()
         .refresh_session(&request.refresh_token)
         .await
         .map_err(map_auth_error)?;
+    let auth_token = bundle_to_auth_token(token_bundle);
 
-    Ok(Json(ApiResponse::success(bundle_to_auth_token(
-        token_bundle,
-    ))))
+    Ok(json_or_flatbuffers(
+        response_format,
+        ApiResponse::success(auth_token.clone()),
+        || fb_auth::serialize_auth_token(&auth_token_to_fb(&auth_token)),
+    ))
 }
 
 pub async fn logout(
@@ -181,9 +221,47 @@ pub async fn logout(
 }
 
 pub async fn get_current_user(
+    AcceptedFormat(response_format): AcceptedFormat,
     Extension(user): Extension<User>,
-) -> AppResult<Json<ApiResponse<User>>> {
-    Ok(Json(ApiResponse::success(user)))
+) -> AppResult<Response> {
+    Ok(json_or_flatbuffers(
+        response_format,
+        ApiResponse::success(user.clone()),
+        || fb_auth::serialize_user_profile(&user_to_fb_profile(&user)),
+    ))
+}
+
+fn auth_token_to_fb(token: &AuthToken) -> fb_auth::AuthToken<'_> {
+    fb_auth::AuthToken {
+        access_token: &token.access_token,
+        refresh_token: &token.refresh_token,
+        expires_in: token.expires_in,
+        session_id: token.session_id,
+        device_session_id: token.device_session_id,
+        user_id: token.user_id,
+        scope: session_scope_to_fb(token.scope),
+    }
+}
+
+fn user_to_fb_profile(user: &User) -> fb_auth::UserProfile<'_> {
+    fb_auth::UserProfile {
+        id: user.id,
+        username: &user.username,
+        display_name: &user.display_name,
+        avatar_url: user.avatar_url.as_deref(),
+        email: user.email.as_deref(),
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        last_login: user.last_login,
+        is_active: user.is_active,
+    }
+}
+
+fn session_scope_to_fb(scope: CoreSessionScope) -> fb_auth::SessionScope {
+    match scope {
+        CoreSessionScope::Full => fb_auth::SessionScope::Full,
+        CoreSessionScope::Playback => fb_auth::SessionScope::Playback,
+    }
 }
 
 fn bundle_to_auth_token(bundle: TokenBundle) -> AuthToken {

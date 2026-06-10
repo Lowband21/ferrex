@@ -1,0 +1,43 @@
+name: Mobile Schemas
+
+on:
+  push:
+    branches: ["dev", "main"]
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "ferrex-flatbuffers/**"
+      - "mobile/shared/codegen/generate-rust.sh"
+      - "mobile/shared/schemas/**"
+      - ".github/workflows/mobile-schemas.yml"
+  pull_request:
+    branches: ["dev", "main"]
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "ferrex-flatbuffers/**"
+      - "mobile/shared/codegen/generate-rust.sh"
+      - "mobile/shared/schemas/**"
+      - ".github/workflows/mobile-schemas.yml"
+
+jobs:
+  rust-flatbuffers:
+    name: Rust FlatBuffers schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: moonrepo/setup-rust@v1
+        with:
+          components: rustfmt
+
+      - name: Generate Rust FlatBuffers bindings
+        run: nix shell nixpkgs#flatbuffers -c ./mobile/shared/codegen/generate-rust.sh
+
+      - name: Check ferrex-flatbuffers
+        run: cargo check -p ferrex-flatbuffers
+
+      - name: Test ferrex-flatbuffers
+        run: cargo test -p ferrex-flatbuffers

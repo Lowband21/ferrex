@@ -167,6 +167,8 @@ pub mod v1 {
         pub const REFRESH: &str = v1_path!("/media/{type}/{id}/refresh-images");
         /// Batch image readiness lookup (rkyv request/response).
         pub const MANIFEST: &str = v1_path!("/images/manifest");
+        /// Image-instance compatibility endpoint; redirects to immutable blob when ready.
+        pub const IID_ITEM: &str = v1_path!("/images/iid/{iid}");
         /// Immutable, content-addressed image blob (token is hex).
         pub const BLOB_ITEM: &str = v1_path!("/images/blob/{token}");
         /// SSE stream for image readiness notifications.

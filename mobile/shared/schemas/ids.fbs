@@ -1,0 +1,42 @@
+// FlatBuffers schema: strongly typed Ferrex identifiers.
+// UUID values are stored as the 16 raw RFC 4122 bytes in uuid::Uuid byte order.
+
+namespace ferrex.ids;
+
+/// Fixed-size UUID stored as 16 raw bytes.
+struct Uuid {
+  b0:  ubyte;
+  b1:  ubyte;
+  b2:  ubyte;
+  b3:  ubyte;
+  b4:  ubyte;
+  b5:  ubyte;
+  b6:  ubyte;
+  b7:  ubyte;
+  b8:  ubyte;
+  b9:  ubyte;
+  b10: ubyte;
+  b11: ubyte;
+  b12: ubyte;
+  b13: ubyte;
+  b14: ubyte;
+  b15: ubyte;
+}
+
+union MediaIdVariant {
+  MovieId,
+  SeriesId,
+  SeasonId,
+  EpisodeId,
+}
+
+table MovieId   { id: Uuid (required); }
+table SeriesId  { id: Uuid (required); }
+table SeasonId  { id: Uuid (required); }
+table EpisodeId { id: Uuid (required); }
+
+table MediaId {
+  variant: MediaIdVariant;
+}
+
+root_type MediaId;

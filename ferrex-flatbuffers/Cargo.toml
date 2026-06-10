@@ -1,0 +1,21 @@
+[package]
+name = "ferrex-flatbuffers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "FlatBuffers serialization foundation for Ferrex mobile clients"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+flatbuffers.workspace = true
+ferrex-model = { workspace = true, features = ["serde", "chrono"] }
+chrono.workspace = true
+uuid.workspace = true

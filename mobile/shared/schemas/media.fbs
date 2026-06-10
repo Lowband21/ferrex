@@ -1,0 +1,77 @@
+// FlatBuffers schema: media reference payloads for mobile libraries and bundles.
+
+include "ids.fbs";
+include "common.fbs";
+include "details.fbs";
+include "files.fbs";
+
+namespace ferrex.media;
+
+union MediaVariant {
+  MovieReference,
+  SeriesReference,
+  SeasonReference,
+  EpisodeReference,
+}
+
+table Media {
+  variant: MediaVariant;
+}
+
+table MovieReference {
+  id:          ferrex.ids.Uuid (required);
+  library_id:  ferrex.ids.Uuid (required);
+  batch_id:    uint;
+  tmdb_id:     ulong;
+  title:       string (required);
+  details:     ferrex.details.EnhancedMovieDetails;
+  endpoint:    string;
+  file:        ferrex.files.MediaFile;
+  theme_color: string;
+}
+
+table SeriesReference {
+  id:            ferrex.ids.Uuid (required);
+  library_id:    ferrex.ids.Uuid (required);
+  tmdb_id:       ulong;
+  title:         string (required);
+  details:       ferrex.details.EnhancedSeriesDetails;
+  endpoint:      string;
+  discovered_at: ferrex.common.Timestamp;
+  created_at:    ferrex.common.Timestamp;
+  theme_color:   string;
+}
+
+table SeasonReference {
+  id:             ferrex.ids.Uuid (required);
+  library_id:     ferrex.ids.Uuid (required);
+  season_number:  ushort;
+  series_id:      ferrex.ids.Uuid (required);
+  tmdb_series_id: ulong;
+  details:        ferrex.details.SeasonDetails;
+  endpoint:       string;
+  discovered_at:  ferrex.common.Timestamp;
+  created_at:     ferrex.common.Timestamp;
+  theme_color:    string;
+}
+
+table EpisodeReference {
+  id:             ferrex.ids.Uuid (required);
+  library_id:     ferrex.ids.Uuid (required);
+  episode_number: ushort;
+  season_number:  ushort;
+  season_id:      ferrex.ids.Uuid (required);
+  series_id:      ferrex.ids.Uuid (required);
+  tmdb_series_id: ulong;
+  details:        ferrex.details.EpisodeDetails;
+  endpoint:       string;
+  file:           ferrex.files.MediaFile;
+  discovered_at:  ferrex.common.Timestamp;
+  created_at:     ferrex.common.Timestamp;
+}
+
+table MediaBatch {
+  items: [Media];
+}
+
+root_type MediaBatch;

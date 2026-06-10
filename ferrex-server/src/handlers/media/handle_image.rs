@@ -8,12 +8,20 @@ use base64::{
     Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
 };
 use ferrex_core::{
-    api::types::{
-        ImageManifestRequest, ImageManifestResponse, ImageManifestResult,
-        ImageManifestStatus,
+    api::{
+        routes::v1,
+        types::{
+            ImageManifestItem, ImageManifestRequest, ImageManifestResponse,
+            ImageManifestResult, ImageManifestStatus,
+        },
     },
     infra::{cache::ImageFileStore, image_service::CachePolicy},
 };
+use ferrex_flatbuffers::{
+    FLATBUFFERS_MIME, conversions::image as fb_image,
+    fb::common::ImageCategory as FbImageCategory,
+};
+use ferrex_model::ImageSize;
 use ferrex_model::events::ImageSseEventType;
 use httpdate::{fmt_http_date, parse_http_date};
 use rkyv::util::AlignedVec;
@@ -26,151 +34,271 @@ use uuid::Uuid;
 
 use crate::{
     handlers::media::image_validation::validate_magic_bytes,
-    infra::app_state::AppState,
+    infra::{
+        app_state::AppState,
+        content_negotiation::{
+            AcceptedFormat, RKYV_OCTET_STREAM_MIME, RequestBodyFormat,
+            WireFormat,
+        },
+    },
 };
 
 const BLOB_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
-/// POST /api/v1/images/manifest - Batch image readiness lookup (rkyv request/response).
+/// POST /api/v1/images/manifest - Batch image readiness lookup.
 pub async fn post_image_manifest_handler(
     State(state): State<AppState>,
+    AcceptedFormat(response_format): AcceptedFormat,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    // rkyv expects aligned bytes; axum's `Bytes` is not guaranteed to be aligned,
-    // which can cause intermittent decode failures under load.
-    let mut aligned: AlignedVec = AlignedVec::with_capacity(body.len());
-    aligned.extend_from_slice(&body);
-
-    let request = match from_bytes::<ImageManifestRequest, RkyvError>(&aligned)
-    {
-        Ok(req) => req,
-        Err(err) => {
-            let content_type = headers
-                .get(header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            warn!(
-                "image manifest decode failed: {err} (content-type='{}', bytes={})",
-                content_type,
-                body.len()
-            );
-            return StatusCode::BAD_REQUEST.into_response();
-        }
+    let request = match parse_image_manifest_request(&headers, body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
     };
 
+    let response = build_image_manifest_response(&state, request).await;
+
+    match response_format {
+        WireFormat::FlatBuffers => {
+            let entries = response
+                .results
+                .iter()
+                .map(|result| fb_image::ImageManifestEntry {
+                    iid: result.iid,
+                    status: match &result.status {
+                        ImageManifestStatus::Ready { token, .. } => {
+                            fb_image::ImageManifestEntryStatus::Ready { token }
+                        }
+                        ImageManifestStatus::Pending { .. } => {
+                            fb_image::ImageManifestEntryStatus::Pending
+                        }
+                        ImageManifestStatus::Missing { .. } => {
+                            fb_image::ImageManifestEntryStatus::Failed
+                        }
+                    },
+                })
+                .collect::<Vec<_>>();
+            let bytes = fb_image::serialize_image_manifest_response(&entries);
+            (
+                [(header::CONTENT_TYPE, FLATBUFFERS_MIME)],
+                Bytes::from(bytes),
+            )
+                .into_response()
+        }
+        WireFormat::RkyvOctetStream => {
+            let bytes = match to_bytes::<RkyvError>(&response) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    error!("image manifest encode failed: {err}");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
+
+            (
+                [(header::CONTENT_TYPE, RKYV_OCTET_STREAM_MIME)],
+                Bytes::from(bytes.into_vec()),
+            )
+                .into_response()
+        }
+        WireFormat::Json => axum::Json(response).into_response(),
+    }
+}
+
+fn parse_image_manifest_request(
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<ImageManifestRequest, StatusCode> {
+    match RequestBodyFormat::from_headers(headers) {
+        RequestBodyFormat::RkyvOctetStream => {
+            // rkyv expects aligned bytes; axum's `Bytes` is not guaranteed to be aligned,
+            // which can cause intermittent decode failures under load.
+            let mut aligned: AlignedVec = AlignedVec::with_capacity(body.len());
+            aligned.extend_from_slice(&body);
+
+            from_bytes::<ImageManifestRequest, RkyvError>(&aligned).map_err(
+                |err| {
+                    warn!(
+                        "image manifest rkyv decode failed: {err} (bytes={})",
+                        body.len()
+                    );
+                    StatusCode::BAD_REQUEST
+                },
+            )
+        }
+        RequestBodyFormat::FlatBuffers => {
+            let queries = fb_image::parse_image_manifest_request(&body)
+                .map_err(|err| {
+                    warn!(
+                        "image manifest FlatBuffers decode failed: {err} (bytes={})",
+                        body.len()
+                    );
+                    StatusCode::BAD_REQUEST
+                })?;
+            let mut requests = Vec::with_capacity(queries.len());
+            for query in queries {
+                let imz = image_category_to_size(query.category)
+                    .ok_or(StatusCode::BAD_REQUEST)?;
+                requests.push(ImageManifestItem {
+                    iid: query.iid,
+                    imz,
+                });
+            }
+            Ok(ImageManifestRequest { requests })
+        }
+        RequestBodyFormat::Json => {
+            serde_json::from_slice(&body).map_err(|err| {
+                warn!(
+                    "image manifest JSON decode failed: {err} (bytes={})",
+                    body.len()
+                );
+                StatusCode::BAD_REQUEST
+            })
+        }
+        RequestBodyFormat::Unsupported(content_type) => {
+            warn!("unsupported image manifest content type: {content_type}");
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
+fn image_category_to_size(category: FbImageCategory) -> Option<ImageSize> {
+    if category == FbImageCategory::Poster {
+        Some(ImageSize::poster())
+    } else if category == FbImageCategory::Backdrop {
+        Some(ImageSize::backdrop())
+    } else if category == FbImageCategory::Profile {
+        Some(ImageSize::profile())
+    } else if category == FbImageCategory::Episode {
+        Some(ImageSize::thumbnail())
+    } else {
+        None
+    }
+}
+
+async fn build_image_manifest_response(
+    state: &AppState,
+    request: ImageManifestRequest,
+) -> ImageManifestResponse {
     let mut results = Vec::with_capacity(request.requests.len());
 
     for item in request.requests {
-        let iid: Uuid = item.iid;
-        let imz = item.imz;
-
-        #[cfg(feature = "demo")]
-        {
-            if matches!(
-                imz.image_variant(),
-                ferrex_model::image::ImageVariant::Thumbnail
-            ) {
-                results.push(ImageManifestResult {
-                    iid,
-                    imz,
-                    status: ImageManifestStatus::Missing {
-                        reason:
-                            "thumbnail images are not available in demo mode"
-                                .to_string(),
-                    },
-                });
-                continue;
-            }
-        }
-
-        let meta = match state
-            .image_service()
-            .read_cached_meta_by_key(iid, imz)
-            .await
-        {
-            Ok(meta) => meta,
-            Err(err) => {
-                error!(
-                    "image manifest meta lookup failed: iid={}, imz={:?}, err={}",
-                    iid, imz, err
-                );
-                results.push(ImageManifestResult {
-                    iid,
-                    imz,
-                    status: ImageManifestStatus::Pending {
-                        retry_after_ms: 1_000,
-                    },
-                });
-                state.image_service().enqueue_cache(
-                    iid,
-                    imz,
-                    CachePolicy::Ensure,
-                );
-                continue;
-            }
-        };
-
-        let Some(meta) = meta else {
-            results.push(ImageManifestResult {
-                iid,
-                imz,
-                status: ImageManifestStatus::Pending {
-                    retry_after_ms: 1_000,
-                },
-            });
-            state
-                .image_service()
-                .enqueue_cache(iid, imz, CachePolicy::Ensure);
-            continue;
-        };
-
-        let token =
-            ImageFileStore::token_from_integrity(&meta.integrity.to_string());
-        let blob_exists = match state.image_service().image_blob_path(&token) {
-            Ok(path) => tokio::fs::try_exists(path).await.unwrap_or(false),
-            Err(_) => false,
-        };
-
-        if blob_exists {
-            results.push(ImageManifestResult {
-                iid,
-                imz,
-                status: ImageManifestStatus::Ready {
-                    token,
-                    byte_len: meta.byte_len as u64,
-                },
-            });
-            continue;
-        }
-
-        // Cached in `cacache`, but not yet materialized for the immutable blob path.
-        state
-            .image_service()
-            .enqueue_cache(iid, imz, CachePolicy::Ensure);
+        let status = image_manifest_status(state, item.iid, item.imz).await;
         results.push(ImageManifestResult {
-            iid,
-            imz,
-            status: ImageManifestStatus::Pending {
-                retry_after_ms: 1_000,
-            },
+            iid: item.iid,
+            imz: item.imz,
+            status,
         });
     }
 
-    let response = ImageManifestResponse { results };
-    let bytes = match to_bytes::<RkyvError>(&response) {
-        Ok(bytes) => bytes,
+    ImageManifestResponse { results }
+}
+
+async fn image_manifest_status(
+    state: &AppState,
+    iid: Uuid,
+    imz: ImageSize,
+) -> ImageManifestStatus {
+    #[cfg(feature = "demo")]
+    {
+        if matches!(
+            imz.image_variant(),
+            ferrex_model::image::ImageVariant::Thumbnail
+        ) {
+            return ImageManifestStatus::Missing {
+                reason: "thumbnail images are not available in demo mode"
+                    .to_string(),
+            };
+        }
+    }
+
+    let meta = match state
+        .image_service()
+        .read_cached_meta_by_key(iid, imz)
+        .await
+    {
+        Ok(meta) => meta,
         Err(err) => {
-            error!("image manifest encode failed: {err}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            error!(
+                "image manifest meta lookup failed: iid={}, imz={:?}, err={}",
+                iid, imz, err
+            );
+            state
+                .image_service()
+                .enqueue_cache(iid, imz, CachePolicy::Ensure);
+            return ImageManifestStatus::Pending {
+                retry_after_ms: 1_000,
+            };
         }
     };
 
-    (
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        Bytes::from(bytes.into_vec()),
-    )
-        .into_response()
+    let Some(meta) = meta else {
+        state
+            .image_service()
+            .enqueue_cache(iid, imz, CachePolicy::Ensure);
+        return ImageManifestStatus::Pending {
+            retry_after_ms: 1_000,
+        };
+    };
+
+    let token =
+        ImageFileStore::token_from_integrity(&meta.integrity.to_string());
+    let blob_exists = match state.image_service().image_blob_path(&token) {
+        Ok(path) => tokio::fs::try_exists(path).await.unwrap_or(false),
+        Err(_) => false,
+    };
+
+    if blob_exists {
+        return ImageManifestStatus::Ready {
+            token,
+            byte_len: meta.byte_len as u64,
+        };
+    }
+
+    // Cached in `cacache`, but not yet materialized for the immutable blob path.
+    state
+        .image_service()
+        .enqueue_cache(iid, imz, CachePolicy::Ensure);
+    ImageManifestStatus::Pending {
+        retry_after_ms: 1_000,
+    }
+}
+
+/// GET /api/v1/images/iid/{iid} - Image-instance compatibility redirect.
+pub async fn get_image_iid_handler(
+    State(state): State<AppState>,
+    Path(iid): Path<Uuid>,
+) -> Response {
+    match image_manifest_status(&state, iid, ImageSize::poster()).await {
+        ImageManifestStatus::Ready { token, .. } => Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header(
+                header::LOCATION,
+                v1::images::BLOB_ITEM.replace("{token}", &token),
+            )
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::empty())
+            .unwrap(),
+        ImageManifestStatus::Pending { retry_after_ms } => Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .header(header::RETRY_AFTER, "1")
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from(
+                serde_json::json!({
+                    "status": "pending",
+                    "retry_after_ms": retry_after_ms,
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        ImageManifestStatus::Missing { .. } => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from(
+                serde_json::json!({ "status": "missing" }).to_string(),
+            ))
+            .unwrap(),
+    }
 }
 
 /// GET /api/v1/images/blob/{token} - Content-addressed immutable image blob.
