@@ -1,0 +1,40 @@
+// FlatBuffers schema: image manifest and readiness contracts for mobile clients.
+
+include "ids.fbs";
+include "common.fbs";
+
+namespace ferrex.image;
+
+table ImageManifestRequest {
+  queries: [ImageQuery];
+}
+
+table ImageQuery {
+  iid:      ferrex.ids.Uuid (required);
+  category: ferrex.common.ImageCategory;
+}
+
+table ImageManifestResponse {
+  entries: [ImageManifestEntry];
+}
+
+enum ImageStatus : byte {
+  Ready   = 0,
+  Pending = 1,
+  Failed  = 2,
+}
+
+table ImageManifestEntry {
+  iid:    ferrex.ids.Uuid (required);
+  status: ImageStatus;
+  /// Content-addressed blob token. Present only when status == Ready.
+  token:  string;
+}
+
+table ImageReadyEvent {
+  iid:      ferrex.ids.Uuid (required);
+  category: ferrex.common.ImageCategory;
+  token:    string (required);
+}
+
+root_type ImageManifestResponse;

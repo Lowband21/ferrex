@@ -1,0 +1,90 @@
+// FlatBuffers schema: library metadata, movie-batch sync/fetch contracts,
+// and per-series bundle payloads for mobile clients.
+
+include "ids.fbs";
+include "common.fbs";
+include "media.fbs";
+
+namespace ferrex.library;
+
+table Library {
+  id:                    ferrex.ids.Uuid (required);
+  name:                  string (required);
+  library_type:          ferrex.common.LibraryType;
+  paths:                 [string];
+  scan_interval_minutes: uint;
+  last_scan:             ferrex.common.Timestamp;
+  enabled:               bool = true;
+  auto_scan:             bool = true;
+  watch_for_changes:     bool = true;
+  analyze_on_scan:       bool;
+  max_retry_attempts:    uint = 3;
+  movie_ref_batch_size:  uint = 100;
+  created_at:            ferrex.common.Timestamp;
+  updated_at:            ferrex.common.Timestamp;
+  media:                 [ferrex.media.Media];
+}
+
+table LibraryList {
+  items: [Library];
+}
+
+table BatchVersion {
+  batch_id: uint;
+  version:  ulong;
+}
+
+table BatchSyncRequest {
+  cached_versions: [BatchVersion];
+}
+
+table BatchSyncResponse {
+  stale_batch_ids:   [uint];
+  deleted_batch_ids: [uint];
+  server_versions:   [BatchVersion];
+}
+
+table BatchFetchRequest {
+  batch_ids: [uint];
+}
+
+table BatchFetchResponse {
+  batches: [MediaBatchData];
+}
+
+table MediaBatchData {
+  batch_id: uint;
+  version:  ulong;
+  items:    [ferrex.media.Media];
+}
+
+table SeriesBundleVersion {
+  series_id: ferrex.ids.Uuid (required);
+  version:   ulong;
+}
+
+table SeriesBundleSyncRequest {
+  cached_versions: [SeriesBundleVersion];
+}
+
+table SeriesBundleSyncResponse {
+  stale_series_ids:   [ferrex.ids.Uuid];
+  deleted_series_ids: [ferrex.ids.Uuid];
+  server_versions:    [SeriesBundleVersion];
+}
+
+table SeriesBundleFetchRequest {
+  series_ids: [ferrex.ids.Uuid];
+}
+
+table SeriesBundleFetchResponse {
+  bundles: [SeriesBundleData];
+}
+
+table SeriesBundleData {
+  series_id: ferrex.ids.Uuid (required);
+  version:   ulong;
+  items:     [ferrex.media.Media];
+}
+
+root_type LibraryList;

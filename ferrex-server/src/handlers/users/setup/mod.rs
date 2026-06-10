@@ -22,7 +22,7 @@
 
 pub mod claim;
 
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, response::Response};
 use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
     api::types::ApiResponse,
@@ -44,11 +44,13 @@ use tracing::{info, warn};
 use crate::handlers::users::{UserService, user_service::CreateUserParams};
 use crate::infra::{
     app_state::AppState,
+    content_negotiation::{AcceptedFormat, json_or_flatbuffers},
     demo_mode,
     errors::{AppError, AppResult},
 };
 use axum::extract::ConnectInfo;
 use ferrex_core::domain::setup::SetupClaimError;
+use ferrex_flatbuffers::conversions::auth as fb_auth;
 use std::net::SocketAddr;
 
 /// Simple in-memory rate limiter for setup endpoints
@@ -132,7 +134,7 @@ fn get_rate_limiter() -> &'static SetupRateLimiter {
 }
 
 /// Response for setup status check
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SetupStatus {
     /// Whether the server needs initial setup
     pub needs_setup: bool,
@@ -221,7 +223,8 @@ impl CreateAdminRequest {
 /// It returns information about whether the server has been set up.
 pub async fn check_setup_status(
     State(state): State<AppState>,
-) -> AppResult<Json<ApiResponse<SetupStatus>>> {
+    AcceptedFormat(response_format): AcceptedFormat,
+) -> AppResult<Response> {
     let user_service = UserService::new(&state);
     let needs_setup = user_service.needs_setup().await?;
 
@@ -277,7 +280,11 @@ pub async fn check_setup_status(
         ),
     };
 
-    Ok(Json(ApiResponse::success(status)))
+    Ok(json_or_flatbuffers(
+        response_format,
+        ApiResponse::success(status.clone()),
+        || fb_auth::serialize_setup_status(&setup_status_to_fb(&status)),
+    ))
 }
 
 /// Create the initial admin user
@@ -515,6 +522,39 @@ async fn check_setup_status_internal(
             &security_settings.user_password_policy,
         ),
     })
+}
+
+fn setup_status_to_fb(status: &SetupStatus) -> fb_auth::SetupStatus {
+    fb_auth::SetupStatus {
+        needs_setup: status.needs_setup,
+        has_admin: status.has_admin,
+        requires_setup_token: status.requires_setup_token,
+        user_count: usize_to_u32(status.user_count),
+        library_count: usize_to_u32(status.library_count),
+        admin_password_policy: Some(password_policy_to_fb(
+            &status.admin_password_policy,
+        )),
+        user_password_policy: Some(password_policy_to_fb(
+            &status.user_password_policy,
+        )),
+    }
+}
+
+fn password_policy_to_fb(
+    policy: &PasswordPolicyResponse,
+) -> fb_auth::PasswordPolicy {
+    fb_auth::PasswordPolicy {
+        enforce: policy.enforce,
+        min_length: policy.min_length,
+        require_uppercase: policy.require_uppercase,
+        require_lowercase: policy.require_lowercase,
+        require_number: policy.require_number,
+        require_special: policy.require_special,
+    }
+}
+
+fn usize_to_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 fn auth_error_to_app(err: AuthenticationError) -> AppError {

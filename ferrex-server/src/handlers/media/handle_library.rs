@@ -3,7 +3,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     http::header,
-    response::{IntoResponse, Json},
+    response::{IntoResponse, Json, Response},
 };
 use ferrex_core::domain::users::user::User;
 use ferrex_core::error::MediaError;
@@ -22,6 +22,9 @@ use ferrex_core::{
     },
     types::LibraryType,
 };
+use ferrex_flatbuffers::{
+    FLATBUFFERS_MIME, conversions::library as fb_library,
+};
 use rkyv::rancor::Error as RkyvError;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -31,8 +34,11 @@ use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::infra::app_state::AppState;
-use crate::infra::demo_mode;
+use crate::infra::{
+    app_state::AppState,
+    content_negotiation::{AcceptedFormat, RKYV_OCTET_STREAM_MIME, WireFormat},
+    demo_mode,
+};
 
 use ferrex_core::domain::scan::orchestration::LibraryActorConfig;
 use futures::{StreamExt, TryStreamExt, stream};
@@ -123,7 +129,8 @@ pub async fn get_library_media_handler(
 
 pub async fn get_libraries_with_media_handler(
     State(state): State<AppState>,
-) -> impl IntoResponse {
+    AcceptedFormat(response_format): AcceptedFormat,
+) -> Result<Response, StatusCode> {
     let request_started = Instant::now();
     let uow = state.unit_of_work();
 
@@ -216,33 +223,63 @@ pub async fn get_libraries_with_media_handler(
         .sum();
 
     let serialize_started = Instant::now();
-    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses)
-    {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Failed to serialize response with rkyv: {:?}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    let (payload_len, response) = match response_format {
+        WireFormat::FlatBuffers => {
+            let bytes = fb_library::serialize_library_list(&library_responses);
+            let payload_len = bytes.len();
+            (
+                payload_len,
+                (
+                    [(header::CONTENT_TYPE, FLATBUFFERS_MIME)],
+                    Bytes::from(bytes),
+                )
+                    .into_response(),
+            )
         }
+        WireFormat::RkyvOctetStream => {
+            let bytes =
+                match rkyv::to_bytes::<rkyv::rancor::Error>(&library_responses)
+                {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!(
+                            "Failed to serialize response with rkyv: {:?}",
+                            e
+                        );
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+                };
+            let payload_len = bytes.len();
+            (
+                payload_len,
+                (
+                    [(header::CONTENT_TYPE, RKYV_OCTET_STREAM_MIME)],
+                    Bytes::from(bytes.into_vec()),
+                )
+                    .into_response(),
+            )
+        }
+        WireFormat::Json => (
+            0,
+            Json(ApiResponse::success(library_responses)).into_response(),
+        ),
     };
     let serialize_elapsed = serialize_started.elapsed();
-    let payload_len = bytes.len();
 
     let total_elapsed = request_started.elapsed();
     info!(
-        "Libraries snapshot built: libraries={} media_items={} bytes={} refs_elapsed={:?} fetch_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
+        "Libraries snapshot built: libraries={} media_items={} bytes={} format={:?} refs_elapsed={:?} fetch_elapsed={:?} serialize_elapsed={:?} total_elapsed={:?}",
         library_count,
         media_count,
         payload_len,
+        response_format,
         refs_elapsed,
         fetch_elapsed,
         serialize_elapsed,
         total_elapsed
     );
 
-    Ok::<_, StatusCode>((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        Bytes::from(bytes.into_vec()),
-    ))
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
