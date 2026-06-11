@@ -106,8 +106,12 @@ pub trait AuthService: Send + Sync {
         &self,
     ) -> RepositoryResult<bool>;
 
-    /// Get the identifier for the current device
+    /// Get the local client-generated identifier for the current device
     async fn current_device_id(&self) -> RepositoryResult<Uuid>;
+
+    /// Get the server-side device session id for the current authenticated device, if any
+    async fn current_device_session_id(&self)
+    -> RepositoryResult<Option<Uuid>>;
 
     /// Authenticate and set current auth state (used after successful login)
     async fn authenticate(

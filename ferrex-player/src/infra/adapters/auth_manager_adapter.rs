@@ -262,6 +262,17 @@ impl AuthService for AuthManagerAdapter {
         })
     }
 
+    async fn current_device_session_id(
+        &self,
+    ) -> RepositoryResult<Option<Uuid>> {
+        self.manager.current_device_session_id().await.map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "Get current device session id failed: {}",
+                e
+            ))
+        })
+    }
+
     async fn validate_session(
         &self,
     ) -> RepositoryResult<(User, UserPermissions)> {
