@@ -22,6 +22,36 @@ enum SessionScope : byte {
   Playback = 1,
 }
 
+/// Device platform values mirror the backend JSON strings:
+/// unknown, macos, linux, windows, ios, android, tvos, web.
+enum Platform : byte {
+  Unknown = 0,
+  MacOS   = 1,
+  Linux   = 2,
+  Windows = 3,
+  IOS     = 4,
+  Android = 5,
+  TvOS    = 6,
+  Web     = 7,
+}
+
+/// Trust lifecycle values mirror backend AuthDeviceStatus JSON strings:
+/// pending, trusted, revoked.
+enum AuthDeviceStatus : byte {
+  Pending = 0,
+  Trusted = 1,
+  Revoked = 2,
+}
+
+/// Device information sent during password login/profile lookup.
+table DeviceInfo {
+  device_id:   ferrex.ids.Uuid (required);
+  device_name: string (required);
+  platform:    Platform = Unknown;
+  app_version: string (required);
+  hardware_id: string;
+}
+
 table AuthToken {
   access_token:      string (required);
   refresh_token:     string (required);
@@ -30,6 +60,121 @@ table AuthToken {
   device_session_id: ferrex.ids.Uuid;
   user_id:           ferrex.ids.Uuid;
   scope:             SessionScope = Full;
+}
+
+/// Device registration summary returned with device password/PIN login.
+table DeviceRegistration {
+  id:             ferrex.ids.Uuid (required);
+  user_id:        ferrex.ids.Uuid (required);
+  device_id:      ferrex.ids.Uuid (required);
+  device_name:    string (required);
+  platform:       Platform = Unknown;
+  app_version:    string (required);
+  pin_configured: bool;
+  registered_at:  ferrex.common.Timestamp (required);
+  last_used_at:   ferrex.common.Timestamp (required);
+  expires_at:     ferrex.common.Timestamp;
+  revoked:        bool;
+  revoked_by:     ferrex.ids.Uuid;
+  revoked_at:     ferrex.common.Timestamp;
+}
+
+/// Password/device login request for /auth/device/login.
+table DeviceLoginRequest {
+  username:          string (required);
+  password:          string (required);
+  device_info:       DeviceInfo;
+  remember_device:   bool;
+  device_public_key: string;
+  device_key_alg:    string;
+}
+
+/// AuthToken-shaped response returned by device password login and PIN login.
+table DeviceLoginResponse {
+  access_token:        string (required);
+  /// Backwards-compatible alias for older device clients.
+  session_token:       string (required);
+  refresh_token:       string (required);
+  expires_in:          uint;
+  session_id:          ferrex.ids.Uuid;
+  device_session_id:   ferrex.ids.Uuid;
+  user_id:             ferrex.ids.Uuid;
+  scope:               SessionScope = Full;
+  device_registration: DeviceRegistration;
+  requires_pin_setup:  bool;
+}
+
+table PinChallengeRequest {
+  device_id: ferrex.ids.Uuid (required);
+}
+
+table PinChallengeResponse {
+  challenge_id:    ferrex.ids.Uuid (required);
+  nonce:           string (required);
+  expires_in_secs: long;
+  pin_salt:        string (required);
+}
+
+table PinLoginRequest {
+  device_id:        ferrex.ids.Uuid (required);
+  client_proof:     string (required);
+  challenge_id:     ferrex.ids.Uuid (required);
+  device_signature: string (required);
+}
+
+table DeviceAuthStatus {
+  device_registered: bool;
+  has_pin:           bool;
+  remaining_attempts: ubyte = null;
+}
+
+/// Minimal authenticated-device management summary for mobile settings.
+table AuthenticatedDevice {
+  id:                     ferrex.ids.Uuid (required);
+  user_id:                ferrex.ids.Uuid (required);
+  fingerprint:            string (required);
+  name:                   string (required);
+  platform:               Platform = Unknown;
+  app_version:            string;
+  hardware_id:            string;
+  status:                 AuthDeviceStatus = Pending;
+  pin_configured:         bool;
+  failed_attempts:        int;
+  locked_until:           ferrex.common.Timestamp;
+  first_authenticated_by: ferrex.ids.Uuid (required);
+  first_authenticated_at: ferrex.common.Timestamp (required);
+  trusted_until:          ferrex.common.Timestamp;
+  last_seen_at:           ferrex.common.Timestamp (required);
+  last_activity:          ferrex.common.Timestamp (required);
+  auto_login_enabled:     bool;
+  revoked_by:             ferrex.ids.Uuid;
+  revoked_at:             ferrex.common.Timestamp;
+  revoked_reason:         string;
+  created_at:             ferrex.common.Timestamp (required);
+  updated_at:             ferrex.common.Timestamp (required);
+}
+
+table AuthenticatedDevicesResponse {
+  devices: [AuthenticatedDevice];
+}
+
+/// Request body for known-device profile selection.
+table KnownDeviceProfilesRequest {
+  device_info: DeviceInfo;
+}
+
+/// Minimal pre-auth user card returned only for known devices.
+table KnownDeviceUserCard {
+  id:           ferrex.ids.Uuid (required);
+  username:     string (required);
+  display_name: string (required);
+  avatar_url:   string;
+  has_pin:      bool;
+}
+
+table KnownDeviceProfilesResponse {
+  known_device: bool;
+  users:        [KnownDeviceUserCard];
 }
 
 table RefreshRequest {
