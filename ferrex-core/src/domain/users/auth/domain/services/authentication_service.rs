@@ -417,6 +417,101 @@ impl AuthenticationService {
         })
     }
 
+    /// Issue a full-scope password-authenticated token bound to a device session.
+    pub async fn issue_device_password_session(
+        &self,
+        user_id: Uuid,
+        device_session_id: Uuid,
+    ) -> Result<(TokenBundle, DeviceSession), AuthenticationError> {
+        let mut session = self
+            .session_repo
+            .find_by_id(device_session_id)
+            .await?
+            .ok_or(AuthenticationError::DeviceNotFound)?;
+
+        if session.user_id() != user_id {
+            return Err(AuthenticationError::InvalidCredentials);
+        }
+
+        if session.is_revoked() {
+            return Err(AuthenticationError::DeviceNotTrusted);
+        }
+
+        session.update_activity();
+        self.session_repo.save(&session).await?;
+
+        let session_token = SessionToken::generate(Duration::hours(24))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate session token"
+                ))
+            })?;
+
+        self.session_store
+            .revoke_by_device(
+                device_session_id,
+                RevocationReason::SessionReplaced,
+            )
+            .await?;
+
+        let session_hash = self.crypto.hash_token(session_token.as_str());
+        let session_scope = SessionScope::Full;
+        let session_record_id = self
+            .session_store
+            .insert_session(
+                user_id,
+                Some(device_session_id),
+                session_scope,
+                &session_hash,
+                session_token.created_at(),
+                session_token.expires_at(),
+            )
+            .await?;
+
+        let refresh_token = RefreshToken::generate(Duration::days(30))
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "failed to generate refresh token"
+                ))
+            })?;
+
+        let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
+        let refresh_generation = i32::try_from(refresh_token.generation())
+            .map_err(|_| {
+                AuthenticationError::DatabaseError(anyhow::anyhow!(
+                    "refresh token generation overflow"
+                ))
+            })?;
+
+        let refresh_record_id = self
+            .refresh_repo
+            .insert_refresh_token(
+                &refresh_hash,
+                user_id,
+                Some(device_session_id),
+                Some(session_record_id),
+                refresh_token.issued_at(),
+                refresh_token.expires_at(),
+                refresh_token.family_id(),
+                refresh_generation,
+                session_scope,
+            )
+            .await?;
+
+        Ok((
+            TokenBundle {
+                session_token,
+                refresh_token,
+                session_record_id,
+                refresh_record_id,
+                device_session_id: Some(device_session_id),
+                user_id,
+                scope: session_scope,
+            },
+            session,
+        ))
+    }
+
     /// Authenticate using a client-derived PIN proof with a device fingerprint
     pub async fn authenticate_device_with_pin(
         &self,
@@ -438,9 +533,10 @@ impl AuthenticationService {
             .await?
             .ok_or(AuthenticationError::DeviceNotFound)?;
 
-        // Enforce trust window (remember-me): require password after 30 days of inactivity
-        if Utc::now() - session.last_activity() > Duration::days(30) {
-            // Persist any state changes (none here) then reject
+        // Enforce legacy trust window when no explicit trusted_until exists.
+        if session.trusted_until().is_none()
+            && Utc::now() - session.last_activity() > Duration::days(30)
+        {
             return Err(AuthenticationError::DeviceNotTrusted);
         }
 
@@ -595,84 +691,167 @@ impl AuthenticationService {
                 .await?
                 .ok_or(AuthenticationError::DeviceNotFound)?;
 
-            // Enforce trust window for playback-origin refreshes
-            if record.origin_scope == SessionScope::Playback
-                && Utc::now() - session.last_activity() > Duration::days(30)
-            {
+            if session.is_revoked() {
                 return Err(AuthenticationError::DeviceNotTrusted);
             }
 
-            let session_token = session
-                .refresh_token(Duration::hours(24))
-                .map_err(|_| AuthenticationError::SessionExpired)?;
+            if record.origin_scope == SessionScope::Playback {
+                session
+                    .ensure_pin_available(3)
+                    .map_err(map_device_pin_error)?;
 
-            let persisted_hash = self.crypto.hash_token(session_token.as_str());
-            let persisted_token = SessionToken::from_value(
-                persisted_hash,
-                session_token.created_at(),
-                session_token.expires_at(),
-            )
-            .map_err(|_| {
-                AuthenticationError::DatabaseError(anyhow::anyhow!(
-                    "failed to construct persisted session token"
-                ))
-            })?;
-            session.set_persisted_token(Some(persisted_token));
+                let session_token = session
+                    .refresh_token(Duration::hours(24))
+                    .map_err(|_| AuthenticationError::SessionExpired)?;
 
-            let events = session.take_events();
-
-            let session_record_id =
-                self.session_repo.save(&session).await?.ok_or_else(|| {
+                let persisted_hash =
+                    self.crypto.hash_token(session_token.as_str());
+                let persisted_token = SessionToken::from_value(
+                    persisted_hash,
+                    session_token.created_at(),
+                    session_token.expires_at(),
+                )
+                .map_err(|_| {
                     AuthenticationError::DatabaseError(anyhow::anyhow!(
-                        "failed to persist refreshed session token"
+                        "failed to construct persisted session token"
                     ))
                 })?;
+                session.set_persisted_token(Some(persisted_token));
 
-            let context = AuthEventContext {
-                auth_session_id: Some(session_record_id),
-                ..Default::default()
-            };
-            self.publish_events(events, context).await?;
+                let events = session.take_events();
 
-            let refresh_token =
-                record.token.rotate(Duration::days(30)).map_err(|_| {
-                    AuthenticationError::DatabaseError(anyhow::anyhow!(
-                        "failed to rotate refresh token"
-                    ))
-                })?;
+                let session_record_id =
+                    self.session_repo.save(&session).await?.ok_or_else(
+                        || {
+                            AuthenticationError::DatabaseError(anyhow::anyhow!(
+                                "failed to persist refreshed session token"
+                            ))
+                        },
+                    )?;
 
-            let refresh_hash = self.crypto.hash_token(refresh_token.as_str());
-            let refresh_generation = i32::try_from(refresh_token.generation())
+                let context = AuthEventContext {
+                    auth_session_id: Some(session_record_id),
+                    ..Default::default()
+                };
+                self.publish_events(events, context).await?;
+
+                let refresh_token =
+                    record.token.rotate(Duration::days(30)).map_err(|_| {
+                        AuthenticationError::DatabaseError(anyhow::anyhow!(
+                            "failed to rotate refresh token"
+                        ))
+                    })?;
+
+                let refresh_hash =
+                    self.crypto.hash_token(refresh_token.as_str());
+                let refresh_generation = i32::try_from(
+                    refresh_token.generation(),
+                )
                 .map_err(|_| {
                     AuthenticationError::DatabaseError(anyhow::anyhow!(
                         "refresh token generation overflow"
                     ))
                 })?;
 
-            let refresh_record_id = self
-                .refresh_repo
-                .insert_refresh_token(
-                    &refresh_hash,
-                    record.user_id,
-                    Some(device_session_id),
-                    Some(session_record_id),
-                    refresh_token.issued_at(),
-                    refresh_token.expires_at(),
-                    refresh_token.family_id(),
-                    refresh_generation,
-                    SessionScope::Playback,
-                )
-                .await?;
+                let refresh_record_id = self
+                    .refresh_repo
+                    .insert_refresh_token(
+                        &refresh_hash,
+                        record.user_id,
+                        Some(device_session_id),
+                        Some(session_record_id),
+                        refresh_token.issued_at(),
+                        refresh_token.expires_at(),
+                        refresh_token.family_id(),
+                        refresh_generation,
+                        SessionScope::Playback,
+                    )
+                    .await?;
 
-            Ok(TokenBundle {
-                session_token,
-                refresh_token,
-                session_record_id,
-                refresh_record_id,
-                device_session_id: Some(device_session_id),
-                user_id: record.user_id,
-                scope: SessionScope::Playback,
-            })
+                Ok(TokenBundle {
+                    session_token,
+                    refresh_token,
+                    session_record_id,
+                    refresh_record_id,
+                    device_session_id: Some(device_session_id),
+                    user_id: record.user_id,
+                    scope: SessionScope::Playback,
+                })
+            } else {
+                session.update_activity();
+                self.session_repo.save(&session).await?;
+
+                let session_token = SessionToken::generate(Duration::hours(24))
+                    .map_err(|_| {
+                        AuthenticationError::DatabaseError(anyhow::anyhow!(
+                            "failed to generate session token"
+                        ))
+                    })?;
+
+                self.session_store
+                    .revoke_by_device(
+                        device_session_id,
+                        RevocationReason::SessionReplaced,
+                    )
+                    .await?;
+
+                let session_hash =
+                    self.crypto.hash_token(session_token.as_str());
+                let session_record_id = self
+                    .session_store
+                    .insert_session(
+                        record.user_id,
+                        Some(device_session_id),
+                        SessionScope::Full,
+                        &session_hash,
+                        session_token.created_at(),
+                        session_token.expires_at(),
+                    )
+                    .await?;
+
+                let refresh_token =
+                    record.token.rotate(Duration::days(30)).map_err(|_| {
+                        AuthenticationError::DatabaseError(anyhow::anyhow!(
+                            "failed to rotate refresh token"
+                        ))
+                    })?;
+
+                let refresh_hash =
+                    self.crypto.hash_token(refresh_token.as_str());
+                let refresh_generation = i32::try_from(
+                    refresh_token.generation(),
+                )
+                .map_err(|_| {
+                    AuthenticationError::DatabaseError(anyhow::anyhow!(
+                        "refresh token generation overflow"
+                    ))
+                })?;
+
+                let refresh_record_id = self
+                    .refresh_repo
+                    .insert_refresh_token(
+                        &refresh_hash,
+                        record.user_id,
+                        Some(device_session_id),
+                        Some(session_record_id),
+                        refresh_token.issued_at(),
+                        refresh_token.expires_at(),
+                        refresh_token.family_id(),
+                        refresh_generation,
+                        SessionScope::Full,
+                    )
+                    .await?;
+
+                Ok(TokenBundle {
+                    session_token,
+                    refresh_token,
+                    session_record_id,
+                    refresh_record_id,
+                    device_session_id: Some(device_session_id),
+                    user_id: record.user_id,
+                    scope: SessionScope::Full,
+                })
+            }
         } else {
             let session_token = SessionToken::generate(Duration::hours(24))
                 .map_err(|_| {
@@ -799,8 +978,10 @@ impl AuthenticationService {
             }
         }
 
-        // Enforce trust window (remember-me): require password after 30 days of inactivity
-        if Utc::now() - session.last_activity() > Duration::days(30) {
+        // Enforce legacy trust window when no explicit trusted_until exists.
+        if session.trusted_until().is_none()
+            && Utc::now() - session.last_activity() > Duration::days(30)
+        {
             return Err(AuthenticationError::DeviceNotTrusted);
         }
 
