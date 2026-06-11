@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::domains::auth::AuthenticationFlow;
 use crate::domains::auth::messages::AuthMessage;
+use crate::domains::auth::types::PinEntryTarget;
 use crate::domains::ui::update_handlers::curated;
 use crate::{
     domains::auth::{
@@ -253,22 +254,38 @@ pub fn handle_device_status_checked(
     );
 
     let default_remember = state.domains.auth.state.auto_login_enabled;
+    state.domains.auth.state.remember_device_explicit_override = false;
     let auth_service = Arc::clone(&state.domains.auth.state.auth_service);
     let user_id = user.id;
 
     match result {
         Ok(status) => {
+            state.domains.auth.state.pin_policy = status.pin_policy.clone();
+            state.domains.auth.state.device_trust_policy =
+                status.device_trust_policy.clone();
+            let remember_device = default_remember
+                || status.device_trust_policy.remember_device_default;
+
             if status.device_registered && status.has_pin {
                 state.domains.auth.state.auth_flow =
                     AuthenticationFlow::EnteringCredentials {
                         user,
-                        input_type: CredentialType::Pin { max_length: 4 },
+                        input_type: CredentialType::Pin {
+                            min_length: usize::from(
+                                status.pin_policy.min_length,
+                            ),
+                            max_length: usize::from(
+                                status.pin_policy.max_length,
+                            ),
+                        },
                         input: SecureCredential::new(String::new()),
                         show_password: false,
-                        remember_device: default_remember,
+                        remember_device,
                         error: None,
                         attempts_remaining: Some(
-                            status.remaining_attempts.unwrap_or(5),
+                            status.remaining_attempts.unwrap_or(
+                                status.device_trust_policy.pin_max_attempts,
+                            ),
                         ),
                         loading: false,
                     };
@@ -279,7 +296,7 @@ pub fn handle_device_status_checked(
                         input_type: CredentialType::Password,
                         input: SecureCredential::new(String::new()),
                         show_password: false,
-                        remember_device: default_remember,
+                        remember_device,
                         error: None,
                         attempts_remaining: None,
                         loading: false,
@@ -660,7 +677,13 @@ pub fn handle_auth_flow_update_credential(
     state: &mut State,
     input: String,
 ) -> Task<AuthMessage> {
-    use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
+    use crate::domains::auth::{
+        pin_policy::{PinPolicyRules, validate_pin_with_policy},
+        types::{AuthenticationFlow, CredentialType},
+    };
+
+    let base_policy: PinPolicyRules =
+        (&state.domains.auth.state.pin_policy).into();
 
     match &mut state.domains.auth.state.auth_flow {
         AuthenticationFlow::EnteringCredentials {
@@ -669,14 +692,41 @@ pub fn handle_auth_flow_update_credential(
             error,
             ..
         } => {
-            *current_input = SecureCredential::new(input.clone());
+            match input_type {
+                CredentialType::Password => {
+                    *current_input = SecureCredential::new(input);
+                }
+                CredentialType::Pin { max_length, .. } => {
+                    let normalized = input
+                        .chars()
+                        .filter(|c| c.is_ascii_digit())
+                        .take(*max_length)
+                        .collect::<String>();
+                    *current_input = SecureCredential::new(normalized);
+                }
+            }
             *error = None;
 
-            // Auto-submit when PIN is complete
-            if matches!(input_type, CredentialType::Pin { .. })
-                && current_input.len() == 4
+            // Only auto-submit variable-length PINs at the configured maximum;
+            // otherwise a valid minimum-length prefix would prematurely submit
+            // a longer configured PIN. Shorter valid PINs remain
+            // submit-button driven.
+            if let CredentialType::Pin {
+                min_length,
+                max_length,
+            } = input_type
             {
-                return Task::done(AuthMessage::SubmitCredential);
+                let policy = PinPolicyRules {
+                    min_length: *min_length,
+                    max_length: *max_length,
+                    ..base_policy
+                };
+                if current_input.len() == *max_length
+                    && validate_pin_with_policy(current_input.as_str(), policy)
+                        .is_ok()
+                {
+                    return Task::done(AuthMessage::SubmitCredential);
+                }
             }
         }
 
@@ -697,33 +747,67 @@ pub fn handle_auth_flow_update_credential(
 pub fn handle_auth_flow_submit_credential(
     state: &mut State,
 ) -> Task<AuthMessage> {
-    use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
+    use crate::domains::auth::{
+        pin_policy::{PinPolicyRules, validate_pin_with_policy},
+        types::{AuthenticationFlow, CredentialType},
+    };
+
+    let base_policy: PinPolicyRules =
+        (&state.domains.auth.state.pin_policy).into();
+    let flow = state.domains.auth.state.auth_flow.clone();
 
     if let AuthenticationFlow::EnteringCredentials {
         user,
         input_type,
         input,
         remember_device,
-        loading,
         ..
-    } = &mut state.domains.auth.state.auth_flow.clone()
+    } = flow
     {
+        if let CredentialType::Pin {
+            min_length,
+            max_length,
+        } = &input_type
+        {
+            let policy = PinPolicyRules {
+                min_length: *min_length,
+                max_length: *max_length,
+                ..base_policy
+            };
+            if let Err(message) =
+                validate_pin_with_policy(input.as_str(), policy)
+            {
+                if let AuthenticationFlow::EnteringCredentials {
+                    error,
+                    loading,
+                    ..
+                } = &mut state.domains.auth.state.auth_flow
+                {
+                    *error = Some(message);
+                    *loading = false;
+                }
+                return Task::none();
+            }
+        }
+
+        if let AuthenticationFlow::EnteringCredentials { loading, .. } =
+            &mut state.domains.auth.state.auth_flow
+        {
+            *loading = true;
+        }
+
         let auth_service = &state.domains.auth.state.auth_service;
         let svc: Arc<dyn AuthService> = std::sync::Arc::clone(auth_service);
-        let user_clone = user.clone();
         let input_clone = input.clone();
-        let remember = *remember_device;
-
-        *loading = true;
 
         match input_type {
             CredentialType::Password => {
                 return Task::perform(
                     async move {
                         svc.authenticate_device(
-                            user_clone.username,
+                            user.username,
                             input_clone.as_str().to_string(),
-                            remember,
+                            remember_device,
                         )
                         .await
                         .map_err(|e| e.to_string())
@@ -735,7 +819,7 @@ pub fn handle_auth_flow_submit_credential(
                 return Task::perform(
                     async move {
                         svc.authenticate_pin(
-                            user_clone.id,
+                            user.id,
                             input_clone.as_str().to_string(),
                         )
                         .await
@@ -789,6 +873,7 @@ pub fn handle_pre_auth_toggle_remember_device(
     {
         *remember_device = !*remember_device;
         state.domains.auth.state.auto_login_enabled = *remember_device;
+        state.domains.auth.state.remember_device_explicit_override = true;
     }
     Task::none()
 }
@@ -885,6 +970,7 @@ pub fn handle_auth_flow_auth_result(
                         user: auth_result.user.clone(),
                         pin: SecureCredential::new(String::new()),
                         confirm_pin: SecureCredential::new(String::new()),
+                        pin_entry_target: PinEntryTarget::Pin,
                         error: None,
                     };
                 return Task::none();
@@ -940,7 +1026,11 @@ pub fn handle_auth_flow_auth_result(
 
 /// Handle PIN setup submission
 pub fn handle_auth_flow_submit_pin(state: &mut State) -> Task<AuthMessage> {
-    use crate::domains::auth::types::AuthenticationFlow;
+    use crate::domains::auth::{
+        pin_policy::validate_pin_with_policy, types::AuthenticationFlow,
+    };
+
+    let policy = (&state.domains.auth.state.pin_policy).into();
 
     if let AuthenticationFlow::SettingUpPin {
         pin,
@@ -954,8 +1044,8 @@ pub fn handle_auth_flow_submit_pin(state: &mut State) -> Task<AuthMessage> {
             return Task::none();
         }
 
-        if pin.len() != 4 {
-            *error = Some("PIN must be 4 digits".to_string());
+        if let Err(message) = validate_pin_with_policy(pin.as_str(), policy) {
+            *error = Some(message);
             return Task::none();
         }
 
@@ -1056,6 +1146,7 @@ pub fn handle_auth_flow_toggle_remember_device(
     {
         *remember_device = !*remember_device;
         state.domains.auth.state.auto_login_enabled = *remember_device;
+        state.domains.auth.state.remember_device_explicit_override = true;
     }
     Task::none()
 }
@@ -1066,14 +1157,31 @@ pub fn handle_remember_device_synced(
 ) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
-    state.domains.auth.state.auto_login_enabled = enabled;
+    let explicit_override =
+        state.domains.auth.state.remember_device_explicit_override;
+    let remember_device_default = state
+        .domains
+        .auth
+        .state
+        .device_trust_policy
+        .remember_device_default;
+    let mut synced_enabled = enabled;
 
     if let AuthenticationFlow::EnteringCredentials {
         remember_device, ..
     } = &mut state.domains.auth.state.auth_flow
     {
-        *remember_device = enabled;
+        synced_enabled = if explicit_override {
+            *remember_device
+        } else {
+            // Local storage returns false for both disabled and absent choices;
+            // keep the server-provided default unless the user changed the box.
+            enabled || remember_device_default
+        };
+        *remember_device = synced_enabled;
     }
+
+    state.domains.auth.state.auto_login_enabled = synced_enabled;
 
     Task::none()
 }
@@ -1096,6 +1204,7 @@ pub fn handle_auth_flow_setup_pin(state: &mut State) -> Task<AuthMessage> {
             user,
             pin: SecureCredential::new(String::new()),
             confirm_pin: SecureCredential::new(String::new()),
+            pin_entry_target: PinEntryTarget::Pin,
             error: None,
         };
     }
@@ -1110,17 +1219,44 @@ pub fn handle_auth_flow_update_pin(
 ) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
-    if let AuthenticationFlow::SettingUpPin { pin, error, .. } =
-        &mut state.domains.auth.state.auth_flow
-    {
-        let normalized = raw_value
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .take(4)
-            .collect::<String>();
+    let max_length =
+        usize::from(state.domains.auth.state.pin_policy.max_length);
+    let normalized = raw_value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(max_length)
+        .collect::<String>();
 
-        *pin = SecureCredential::new(normalized);
-        *error = None;
+    match &mut state.domains.auth.state.auth_flow {
+        AuthenticationFlow::SettingUpPin {
+            pin,
+            confirm_pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            if pin.as_str() != normalized {
+                *confirm_pin = SecureCredential::new(String::new());
+            }
+            *pin = SecureCredential::new(normalized);
+            *pin_entry_target = PinEntryTarget::Pin;
+            *error = None;
+        }
+        AuthenticationFlow::FirstRunSetup {
+            pin,
+            confirm_pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            if pin.as_str() != normalized {
+                *confirm_pin = SecureCredential::new(String::new());
+            }
+            *pin = SecureCredential::new(normalized);
+            *pin_entry_target = PinEntryTarget::Pin;
+            *error = None;
+        }
+        _ => {}
     }
 
     Task::none()
@@ -1133,18 +1269,86 @@ pub fn handle_auth_flow_update_confirm_pin(
 ) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
 
-    if let AuthenticationFlow::SettingUpPin {
-        confirm_pin, error, ..
-    } = &mut state.domains.auth.state.auth_flow
-    {
-        let normalized = raw_value
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .take(4)
-            .collect::<String>();
+    let max_length =
+        usize::from(state.domains.auth.state.pin_policy.max_length);
+    let normalized = raw_value
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(max_length)
+        .collect::<String>();
 
-        *confirm_pin = SecureCredential::new(normalized);
-        *error = None;
+    match &mut state.domains.auth.state.auth_flow {
+        AuthenticationFlow::SettingUpPin {
+            confirm_pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            *confirm_pin = SecureCredential::new(normalized);
+            *pin_entry_target = PinEntryTarget::ConfirmPin;
+            *error = None;
+        }
+        AuthenticationFlow::FirstRunSetup {
+            confirm_pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            *confirm_pin = SecureCredential::new(normalized);
+            *pin_entry_target = PinEntryTarget::ConfirmPin;
+            *error = None;
+        }
+        _ => {}
+    }
+
+    Task::none()
+}
+
+/// Select which PIN setup field receives keypad input.
+pub fn handle_auth_flow_select_pin_entry_target(
+    state: &mut State,
+    target: PinEntryTarget,
+) -> Task<AuthMessage> {
+    use crate::domains::auth::{
+        pin_policy::validate_pin_with_policy, types::AuthenticationFlow,
+    };
+
+    let policy = (&state.domains.auth.state.pin_policy).into();
+
+    match &mut state.domains.auth.state.auth_flow {
+        AuthenticationFlow::SettingUpPin {
+            pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            if target == PinEntryTarget::ConfirmPin
+                && let Err(message) =
+                    validate_pin_with_policy(pin.as_str(), policy)
+            {
+                *error = Some(message);
+                return Task::none();
+            }
+            *pin_entry_target = target;
+            *error = None;
+        }
+        AuthenticationFlow::FirstRunSetup {
+            pin,
+            pin_entry_target,
+            error,
+            ..
+        } => {
+            if target == PinEntryTarget::ConfirmPin
+                && let Err(message) =
+                    validate_pin_with_policy(pin.as_str(), policy)
+            {
+                *error = Some(message);
+                return Task::none();
+            }
+            *pin_entry_target = target;
+            *error = None;
+        }
+        _ => {}
     }
 
     Task::none()

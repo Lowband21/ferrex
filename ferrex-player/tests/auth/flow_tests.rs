@@ -29,6 +29,7 @@ fn users_loaded_success_sets_selecting_user() {
         username: "alice".into(),
         display_name: "Alice".into(),
         avatar_url: None,
+        has_pin: false,
         last_login: None,
     };
 
@@ -56,6 +57,7 @@ fn device_status_with_pin_shows_pin_entry() {
         device_registered: true,
         has_pin: true,
         remaining_attempts: Some(3),
+        ..Default::default()
     };
 
     let _ = auth_updates::handle_device_status_checked(
@@ -72,8 +74,12 @@ fn device_status_with_pin_shows_pin_entry() {
         } => {
             assert_eq!(u.username, "bob");
             match input_type {
-                CredentialType::Pin { max_length } => {
-                    assert_eq!(*max_length, 4)
+                CredentialType::Pin {
+                    min_length,
+                    max_length,
+                } => {
+                    assert_eq!(*min_length, 4);
+                    assert_eq!(*max_length, 8);
                 }
                 _ => panic!("expected PIN input type"),
             }
@@ -91,6 +97,7 @@ fn device_status_no_pin_shows_password_entry() {
         device_registered: false,
         has_pin: false,
         remaining_attempts: None,
+        ..Default::default()
     };
 
     let _ = auth_updates::handle_device_status_checked(

@@ -168,4 +168,5 @@ Notes:
 
 - Ferrex is under active development; avoid exposing the server directly to the public Internet.
 - Prefer running on an internal network, behind a reverse proxy, or via the Tailscale sidecar.
-- See `.github/SECURITY.md` for the security policy.
+- See `.github/SECURITY.md` for the vulnerability disclosure policy.
+- See `docs/auth-security.md` for password login, remember-device, PIN login, auto-login, profile listing privacy, lockout, revoke, and recovery semantics.

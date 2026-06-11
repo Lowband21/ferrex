@@ -45,6 +45,23 @@ table PasswordPolicy {
   require_special: bool;
 }
 
+table PinPolicy {
+  min_length:                 ushort;
+  max_length:                 ushort;
+  require_numeric:            bool;
+  reject_repeated_digits:     bool;
+  max_consecutive_identical:  ushort;
+  reject_sequential_digits:   bool;
+}
+
+table DeviceTrustPolicy {
+  remember_device_default:   bool;
+  trust_duration_days:       ushort;
+  pin_max_attempts:          ubyte;
+  pin_lockout_minutes:       ushort;
+  admin_pin_unlock_enabled:  bool;
+}
+
 table SetupStatus {
   needs_setup:          bool;
   has_admin:            bool;
@@ -53,6 +70,8 @@ table SetupStatus {
   library_count:        uint;
   admin_password_policy: PasswordPolicy;
   user_password_policy:  PasswordPolicy;
+  pin_policy:            PinPolicy;
+  device_trust_policy:   DeviceTrustPolicy;
 }
 
 table UserProfile {

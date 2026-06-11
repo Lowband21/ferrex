@@ -1,5 +1,6 @@
 use ferrex_core::player_prelude::UserScale;
 
+use crate::domains::auth::pin_policy::validate_pin;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::ui::views::settings::device_management::DeviceManagementState;
 
@@ -327,12 +328,7 @@ impl PinChangeState {
         if self.new.is_empty() {
             return Err("New PIN is required".to_string());
         }
-        if self.new.len() != 4 {
-            return Err("PIN must be exactly 4 digits".to_string());
-        }
-        if !self.new.chars().all(|c| c.is_ascii_digit()) {
-            return Err("PIN must contain only digits".to_string());
-        }
+        validate_pin(&self.new)?;
         if self.new != self.confirm {
             return Err("PINs do not match".to_string());
         }

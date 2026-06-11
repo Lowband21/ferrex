@@ -6,10 +6,14 @@ pub mod ferrex {
         use super::*;
         mod auth_token_generated;
         pub use self::auth_token_generated::*;
+        mod device_trust_policy_generated;
+        pub use self::device_trust_policy_generated::*;
         mod login_request_generated;
         pub use self::login_request_generated::*;
         mod password_policy_generated;
         pub use self::password_policy_generated::*;
+        mod pin_policy_generated;
+        pub use self::pin_policy_generated::*;
         mod refresh_request_generated;
         pub use self::refresh_request_generated::*;
         mod register_request_generated;

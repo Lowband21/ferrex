@@ -8,8 +8,8 @@ use crate::{
             dto::UserListItemDto,
             security::secure_credential::SecureCredential,
             types::{
-                AuthenticationFlow, SetupClaimStatus, SetupStep,
-                TransitionDirection,
+                AuthenticationFlow, PinEntryTarget, SetupClaimStatus,
+                SetupStep, TransitionDirection,
             },
         },
         settings::state::PreferencesState,
@@ -59,6 +59,7 @@ fn first_run_preset(config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
                 claim_loading: false,
                 pin: SecureCredential::from(""),
                 confirm_pin: SecureCredential::from(""),
+                pin_entry_target: PinEntryTarget::Pin,
                 error: None,
                 loading: false,
                 setup_token_required: true,

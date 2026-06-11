@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::domains::auth::dto::UserListItemDto;
 use crate::domains::auth::manager::{DeviceAuthStatus, PlayerAuthResult};
+use crate::domains::auth::types::PinEntryTarget;
 use crate::infra::api_client::SetupStatus as ApiSetupStatus;
 
 pub mod commands;
@@ -64,6 +65,7 @@ pub enum AuthMessage {
     SetupPin,
     UpdatePin(String),
     UpdateConfirmPin(String),
+    SelectPinEntryTarget(PinEntryTarget),
     SubmitPin,
     PinSet(Result<(), String>),
     Retry,
@@ -163,6 +165,9 @@ impl std::fmt::Debug for AuthMessage {
             Self::SetupPin => write!(f, "SetupPin"),
             Self::UpdatePin(_) => write!(f, "UpdatePin(***)"),
             Self::UpdateConfirmPin(_) => write!(f, "UpdateConfirmPin(***)"),
+            Self::SelectPinEntryTarget(target) => {
+                write!(f, "SelectPinEntryTarget({:?})", target)
+            }
             Self::SubmitPin => write!(f, "SubmitPin"),
             Self::PinSet(result) => write!(f, "PinSet({:?})", result),
             Self::Retry => write!(f, "Retry"),
@@ -297,6 +302,7 @@ impl AuthMessage {
             Self::SetupPin => "Auth::SetupPin",
             Self::UpdatePin(_) => "Auth::UpdatePin",
             Self::UpdateConfirmPin(_) => "Auth::UpdateConfirmPin",
+            Self::SelectPinEntryTarget(_) => "Auth::SelectPinEntryTarget",
             Self::SubmitPin => "Auth::SubmitPin",
             Self::PinSet(_) => "Auth::PinSet",
             Self::Retry => "Auth::Retry",

@@ -3,7 +3,8 @@
 use crate::domains::auth::messages as auth;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
-    AuthenticationFlow, SetupClaimStatus, SetupStep, TransitionDirection,
+    AuthenticationFlow, PinEntryTarget, SetupClaimStatus, SetupStep,
+    TransitionDirection,
 };
 use crate::infra::api_client::SetupStatus;
 use crate::state::State;
@@ -51,6 +52,7 @@ pub fn handle_check_setup_status(state: &mut State) -> Task<auth::AuthMessage> {
                     requires_setup_token: false,
                     user_count: 0,
                     library_count: 0,
+                    ..Default::default()
                 })
             }
         },
@@ -66,6 +68,10 @@ pub fn handle_setup_status_checked(
         "[Auth] handle_setup_status_checked called with needs_setup = {}, requires_setup_token = {}",
         status.needs_setup, status.requires_setup_token
     );
+
+    state.domains.auth.state.pin_policy = status.pin_policy.clone();
+    state.domains.auth.state.device_trust_policy =
+        status.device_trust_policy.clone();
 
     if status.needs_setup {
         info!("First-run setup needed, showing setup wizard");
@@ -87,6 +93,7 @@ pub fn handle_setup_status_checked(
                 claim_loading: false,
                 pin: SecureCredential::new(String::new()),
                 confirm_pin: SecureCredential::new(String::new()),
+                pin_entry_target: PinEntryTarget::Pin,
                 error: None,
                 loading: false,
                 setup_token_required: status.requires_setup_token,
@@ -110,7 +117,13 @@ pub fn handle_setup_status_checked(
             password: SecureCredential::new(String::new()),
             show_password: false,
             // Mirror current device preference as default toggle state
-            remember_device: state.domains.auth.state.auto_login_enabled,
+            remember_device: state.domains.auth.state.auto_login_enabled
+                || state
+                    .domains
+                    .auth
+                    .state
+                    .device_trust_policy
+                    .remember_device_default,
             error: None,
             loading: false,
         };
@@ -170,6 +183,10 @@ pub fn handle_toggle_setup_password_visibility(
 
 /// Navigate to the next step in the setup wizard
 pub fn handle_setup_next_step(state: &mut State) -> Task<auth::AuthMessage> {
+    use crate::domains::auth::pin_policy::validate_pin_with_policy;
+
+    let pin_policy = (&state.domains.auth.state.pin_policy).into();
+
     if let AuthenticationFlow::FirstRunSetup {
         current_step,
         username,
@@ -179,6 +196,8 @@ pub fn handle_setup_next_step(state: &mut State) -> Task<auth::AuthMessage> {
         setup_token,
         setup_token_required,
         claim_token,
+        pin,
+        confirm_pin,
         error,
         transition_direction,
         transition_progress,
@@ -186,24 +205,24 @@ pub fn handle_setup_next_step(state: &mut State) -> Task<auth::AuthMessage> {
     } = &mut state.domains.auth.state.auth_flow
     {
         // Validate current step before proceeding
-        let validation_error = match current_step {
+        let validation_error: Option<String> = match current_step {
             SetupStep::Welcome => None,
             SetupStep::Account => {
                 if username.trim().is_empty() {
-                    Some("Username is required")
+                    Some("Username is required".to_string())
                 } else if display_name.trim().is_empty() {
-                    Some("Display name is required")
+                    Some("Display name is required".to_string())
                 } else if password.as_str().is_empty() {
-                    Some("Password is required")
+                    Some("Password is required".to_string())
                 } else if password.as_str() != confirm_password.as_str() {
-                    Some("Passwords do not match")
+                    Some("Passwords do not match".to_string())
                 } else {
                     None
                 }
             }
             SetupStep::SetupToken => {
                 if setup_token.trim().is_empty() {
-                    Some("Setup token is required")
+                    Some("Setup token is required".to_string())
                 } else {
                     None
                 }
@@ -211,17 +230,25 @@ pub fn handle_setup_next_step(state: &mut State) -> Task<auth::AuthMessage> {
             SetupStep::DeviceClaim => {
                 // Must have a confirmed claim token to proceed
                 if claim_token.is_none() {
-                    Some("Please verify your device first")
+                    Some("Please verify your device first".to_string())
                 } else {
                     None
                 }
             }
-            SetupStep::Pin => None, // PIN is optional
+            SetupStep::Pin => {
+                if pin.is_empty() && confirm_pin.is_empty() {
+                    None
+                } else if pin.as_str() != confirm_pin.as_str() {
+                    Some("PINs do not match".to_string())
+                } else {
+                    validate_pin_with_policy(pin.as_str(), pin_policy).err()
+                }
+            }
             SetupStep::Complete => None,
         };
 
         if let Some(err) = validation_error {
-            *error = Some(err.to_string());
+            *error = Some(err);
             return Task::none();
         }
 
@@ -275,6 +302,8 @@ pub fn handle_skip_pin_setup(state: &mut State) -> Task<auth::AuthMessage> {
         current_step,
         pin,
         confirm_pin,
+        pin_entry_target,
+        error,
         transition_direction,
         transition_progress,
         ..
@@ -284,6 +313,8 @@ pub fn handle_skip_pin_setup(state: &mut State) -> Task<auth::AuthMessage> {
         // Clear any partial PIN entry
         *pin = SecureCredential::new(String::new());
         *confirm_pin = SecureCredential::new(String::new());
+        *pin_entry_target = PinEntryTarget::Pin;
+        *error = None;
         // Move to complete
         *current_step = SetupStep::Complete;
         *transition_direction = TransitionDirection::Forward;

@@ -85,6 +85,7 @@ pub fn view_navigation_buttons<'a>(
     current_step: &SetupStep,
     setup_token_required: bool,
     loading: bool,
+    pin_can_submit: bool,
     fonts: &FontTokens,
 ) -> Element<'a, DomainMessage> {
     let mut nav = row![].spacing(16).width(Length::Fill);
@@ -141,13 +142,14 @@ pub fn view_navigation_buttons<'a>(
                     ))
                     .width(Length::FillPortion(1)),
             );
-            nav = nav.push(
-                primary_button("Set PIN", fonts.body)
-                    .on_press(DomainMessage::Auth(
-                        auth::AuthMessage::SetupNextStep,
-                    ))
-                    .width(Length::FillPortion(1)),
-            );
+            let mut set_pin_button = primary_button("Set PIN", fonts.body)
+                .width(Length::FillPortion(1));
+            if pin_can_submit {
+                set_pin_button = set_pin_button.on_press(DomainMessage::Auth(
+                    auth::AuthMessage::SetupNextStep,
+                ));
+            }
+            nav = nav.push(set_pin_button);
         }
         SetupStep::Complete => {
             let label = if loading {

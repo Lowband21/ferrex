@@ -528,6 +528,7 @@ impl ApiService for TestApiService {
             user_count: guard.current_user.iter().count(),
             library_count: guard.libraries.len(),
             requires_setup_token: guard.setup_token_required,
+            ..Default::default()
         })
     }
 

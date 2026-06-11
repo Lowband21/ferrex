@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::domain::users::auth::policy::{
-    AuthSecuritySettings, PasswordPolicy,
+    AuthSecuritySettings, DeviceTrustPolicy, PasswordPolicy, PinSecurityPolicy,
 };
 use crate::error::Result;
 
@@ -10,6 +10,8 @@ use crate::error::Result;
 pub struct SecuritySettingsUpdate {
     pub admin_password_policy: PasswordPolicy,
     pub user_password_policy: PasswordPolicy,
+    pub pin_policy: PinSecurityPolicy,
+    pub device_trust_policy: DeviceTrustPolicy,
     pub updated_by: Option<Uuid>,
 }
 

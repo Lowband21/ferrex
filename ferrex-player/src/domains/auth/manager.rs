@@ -26,6 +26,9 @@ use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
 
 use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
+use crate::domains::auth::pin_policy::{
+    PIN_MAX_LENGTH, PIN_MIN_LENGTH, PinPolicyRules,
+};
 use crate::domains::auth::storage::{AuthStorage, StoredAuth};
 use crate::infra::api_client::ApiClient;
 
@@ -35,10 +38,124 @@ struct RefreshTokenRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinPolicyResponse {
+    #[serde(default = "default_pin_min_length")]
+    pub min_length: u16,
+    #[serde(default = "default_pin_max_length")]
+    pub max_length: u16,
+    #[serde(default = "default_true")]
+    pub require_numeric: bool,
+    #[serde(default = "default_true")]
+    pub reject_repeated_digits: bool,
+    #[serde(default = "default_max_consecutive_identical")]
+    pub max_consecutive_identical: u16,
+    #[serde(default = "default_true")]
+    pub reject_sequential_digits: bool,
+}
+
+impl Default for PinPolicyResponse {
+    fn default() -> Self {
+        Self {
+            min_length: default_pin_min_length(),
+            max_length: default_pin_max_length(),
+            require_numeric: true,
+            reject_repeated_digits: true,
+            max_consecutive_identical: default_max_consecutive_identical(),
+            reject_sequential_digits: true,
+        }
+    }
+}
+
+impl From<&PinPolicyResponse> for PinPolicyRules {
+    fn from(value: &PinPolicyResponse) -> Self {
+        Self {
+            min_length: usize::from(value.min_length),
+            max_length: usize::from(value.max_length),
+            require_numeric: value.require_numeric,
+            reject_repeated_digits: value.reject_repeated_digits,
+            max_consecutive_identical: usize::from(
+                value.max_consecutive_identical,
+            ),
+            reject_sequential_digits: value.reject_sequential_digits,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceTrustPolicyResponse {
+    #[serde(default)]
+    pub remember_device_default: bool,
+    #[serde(default = "default_trust_duration_days")]
+    pub trust_duration_days: u16,
+    #[serde(default = "default_pin_max_attempts")]
+    pub pin_max_attempts: u8,
+    #[serde(default = "default_pin_lockout_minutes")]
+    pub pin_lockout_minutes: u16,
+    #[serde(default)]
+    pub admin_pin_unlock_enabled: bool,
+}
+
+impl Default for DeviceTrustPolicyResponse {
+    fn default() -> Self {
+        Self {
+            remember_device_default: false,
+            trust_duration_days: default_trust_duration_days(),
+            pin_max_attempts: default_pin_max_attempts(),
+            pin_lockout_minutes: default_pin_lockout_minutes(),
+            admin_pin_unlock_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceAuthStatus {
     pub device_registered: bool,
     pub has_pin: bool,
     pub remaining_attempts: Option<u8>,
+    #[serde(default)]
+    pub pin_policy: PinPolicyResponse,
+    #[serde(default)]
+    pub device_trust_policy: DeviceTrustPolicyResponse,
+}
+
+fn default_pin_min_length() -> u16 {
+    PIN_MIN_LENGTH as u16
+}
+
+fn default_pin_max_length() -> u16 {
+    PIN_MAX_LENGTH as u16
+}
+
+fn default_max_consecutive_identical() -> u16 {
+    2
+}
+
+fn default_trust_duration_days() -> u16 {
+    30
+}
+
+fn default_pin_max_attempts() -> u8 {
+    3
+}
+
+fn default_pin_lockout_minutes() -> u16 {
+    5
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for DeviceAuthStatus {
+    fn default() -> Self {
+        Self {
+            device_registered: false,
+            has_pin: false,
+            remaining_attempts: None,
+            pin_policy: PinPolicyResponse::default(),
+            device_trust_policy: DeviceTrustPolicyResponse::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1036,6 +1153,8 @@ impl AuthManager {
                 device_registered: false,
                 has_pin: false,
                 remaining_attempts: None,
+                pin_policy: PinPolicyResponse::default(),
+                device_trust_policy: DeviceTrustPolicyResponse::default(),
             });
         }
 
@@ -1084,6 +1203,8 @@ impl AuthManager {
                 device_registered: true,
                 has_pin: u.has_pin,
                 remaining_attempts: None,
+                pin_policy: PinPolicyResponse::default(),
+                device_trust_policy: DeviceTrustPolicyResponse::default(),
             });
         }
         None
@@ -1457,15 +1578,18 @@ impl AuthManager {
         Ok(phc)
     }
 
-    /// Enable admin PIN unlock (stub for now)
+    /// Enable admin PIN unlock.
+    ///
+    /// Server policy currently disables admin PIN unlock: PIN sessions are
+    /// playback-scoped and admin operations require full password auth.
     pub async fn enable_admin_pin_unlock(&self) -> AuthResult<()> {
-        // TODO: Implement admin PIN unlock
-        Ok(())
+        Err(AuthError::Internal(
+            "Admin PIN unlock is disabled; use password authentication for admin actions".to_string(),
+        ))
     }
 
-    /// Disable admin PIN unlock (stub for now)
+    /// Disable admin PIN unlock.
     pub async fn disable_admin_pin_unlock(&self) -> AuthResult<()> {
-        // TODO: Implement admin PIN unlock
         Ok(())
     }
 
