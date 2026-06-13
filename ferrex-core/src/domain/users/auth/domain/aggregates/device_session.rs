@@ -86,6 +86,7 @@ impl Default for DeviceSessionClientMetadata {
     }
 }
 
+#[cfg(feature = "database")]
 #[derive(Debug, Clone)]
 pub(crate) struct DeviceSessionHydration {
     pub id: Uuid,
@@ -209,6 +210,7 @@ pub struct DeviceSession {
 
 impl DeviceSession {
     /// Rehydrate a device session from persisted storage.
+    #[cfg(feature = "database")]
     pub(crate) fn hydrate(row: DeviceSessionHydration) -> Self {
         Self {
             id: row.id,

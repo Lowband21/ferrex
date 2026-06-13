@@ -43,8 +43,8 @@ impl<'a> DeviceTrustPolicy<'a> {
         let mut builder = DeviceTrustPolicyBuilder::new(_fbb);
         builder.add_pin_lockout_minutes(args.pin_lockout_minutes);
         builder.add_trust_duration_days(args.trust_duration_days);
-        builder.add_pin_max_attempts(args.pin_max_attempts);
         builder.add_admin_pin_unlock_enabled(args.admin_pin_unlock_enabled);
+        builder.add_pin_max_attempts(args.pin_max_attempts);
         builder.add_remember_device_default(args.remember_device_default);
         builder.finish()
     }

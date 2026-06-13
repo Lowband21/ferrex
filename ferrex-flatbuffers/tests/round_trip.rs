@@ -350,6 +350,201 @@ fn auth_token_round_trips_optional_ids_and_scope() {
 }
 
 #[test]
+fn device_auth_contracts_round_trip() {
+    let device_id = Uuid::now_v7();
+    let user_id = Uuid::now_v7();
+    let session_id = Uuid::now_v7();
+    let device_session_id = Uuid::now_v7();
+    let challenge_id = Uuid::now_v7();
+    let now = Utc::now();
+
+    let request = auth::DeviceLoginRequest {
+        username: "alice".into(),
+        password: "correct horse battery staple".into(),
+        device_info: Some(auth::DeviceInfo {
+            device_id,
+            device_name: "Alice Phone".into(),
+            platform: auth::Platform::Android,
+            app_version: "1.2.3".into(),
+            hardware_id: Some("hardware-1".into()),
+        }),
+        remember_device: true,
+        device_public_key: Some("base64-public-key".into()),
+        device_key_alg: Some("ed25519".into()),
+    };
+    let parsed = auth::parse_device_login_request(
+        &auth::serialize_device_login_request(&request),
+    )
+    .expect("parse device login request");
+    assert_eq!(parsed, request);
+
+    let challenge_request = auth::PinChallengeRequest { device_id };
+    let parsed_challenge = auth::parse_pin_challenge_request(
+        &auth::serialize_pin_challenge_request(&challenge_request),
+    )
+    .expect("parse pin challenge request");
+    assert_eq!(parsed_challenge, challenge_request);
+
+    let pin_login = auth::PinLoginRequest {
+        device_id: device_session_id,
+        client_proof: "pin-proof".into(),
+        challenge_id,
+        device_signature: "device-signature".into(),
+    };
+    let parsed_pin_login = auth::parse_pin_login_request(
+        &auth::serialize_pin_login_request(&pin_login),
+    )
+    .expect("parse pin login request");
+    assert_eq!(parsed_pin_login, pin_login);
+
+    let response_bytes =
+        auth::serialize_device_login_response(&auth::DeviceLoginResponse {
+            access_token: "access",
+            session_token: "access",
+            refresh_token: "refresh",
+            expires_in: 900,
+            session_id: Some(session_id),
+            device_session_id: Some(device_session_id),
+            user_id: Some(user_id),
+            scope: auth::SessionScope::Playback,
+            device_registration: Some(auth::DeviceRegistration {
+                id: device_session_id,
+                user_id,
+                device_id,
+                device_name: "Alice Phone",
+                platform: auth::Platform::Android,
+                app_version: "1.2.3",
+                pin_configured: true,
+                registered_at: now,
+                last_used_at: now,
+                expires_at: None,
+                revoked: false,
+                revoked_by: None,
+                revoked_at: None,
+            }),
+            requires_pin_setup: false,
+        });
+    let response =
+        flatbuffers::root::<fb::auth::DeviceLoginResponse>(&response_bytes)
+            .expect("device login response root");
+    assert_eq!(response.access_token(), "access");
+    assert_eq!(response.session_token(), "access");
+    assert_eq!(response.refresh_token(), "refresh");
+    assert_eq!(response.scope(), fb::auth::SessionScope::Playback);
+    assert_eq!(
+        fb_to_uuid(response.session_id().expect("session id")),
+        session_id
+    );
+    assert_eq!(
+        fb_to_uuid(response.device_session_id().expect("device session id")),
+        device_session_id
+    );
+    let registration = response.device_registration().expect("registration");
+    assert_eq!(fb_to_uuid(registration.id()), device_session_id);
+    assert_eq!(registration.device_name(), "Alice Phone");
+    assert_eq!(registration.platform(), fb::auth::Platform::Android);
+    assert!(registration.expires_at().is_none());
+
+    let challenge_response_bytes =
+        auth::serialize_pin_challenge_response(&auth::PinChallengeResponse {
+            challenge_id,
+            nonce: "nonce-b64",
+            expires_in_secs: 120,
+            pin_salt: "salt-b64",
+        });
+    let challenge_response =
+        flatbuffers::root::<fb::auth::PinChallengeResponse>(
+            &challenge_response_bytes,
+        )
+        .expect("pin challenge response root");
+    assert_eq!(fb_to_uuid(challenge_response.challenge_id()), challenge_id);
+    assert_eq!(challenge_response.nonce(), "nonce-b64");
+    assert_eq!(challenge_response.expires_in_secs(), 120);
+    assert_eq!(challenge_response.pin_salt(), "salt-b64");
+
+    let status_bytes =
+        auth::serialize_device_auth_status(&auth::DeviceAuthStatus {
+            device_registered: true,
+            has_pin: true,
+            remaining_attempts: Some(2),
+        });
+    let status = flatbuffers::root::<fb::auth::DeviceAuthStatus>(&status_bytes)
+        .expect("device status root");
+    assert!(status.device_registered());
+    assert!(status.has_pin());
+    assert_eq!(status.remaining_attempts(), Some(2));
+
+    let known_request = auth::KnownDeviceProfilesRequest {
+        device_info: Some(auth::DeviceInfo {
+            device_id,
+            device_name: "Alice Phone".into(),
+            platform: auth::Platform::Android,
+            app_version: "1.2.3".into(),
+            hardware_id: None,
+        }),
+    };
+    let parsed_known_request = auth::parse_known_device_profiles_request(
+        &auth::serialize_known_device_profiles_request(&known_request),
+    )
+    .expect("parse known device profiles request");
+    assert_eq!(parsed_known_request, known_request);
+
+    let known_response_bytes = auth::serialize_known_device_profiles_response(
+        true,
+        &[auth::KnownDeviceUserCard {
+            id: user_id,
+            username: "alice",
+            display_name: "Alice",
+            avatar_url: Some("https://example.invalid/avatar.png"),
+            has_pin: true,
+        }],
+    );
+    let known_response = flatbuffers::root::<
+        fb::auth::KnownDeviceProfilesResponse,
+    >(&known_response_bytes)
+    .expect("known profiles response root");
+    assert!(known_response.known_device());
+    let user_card = known_response.users().expect("users").get(0);
+    assert_eq!(fb_to_uuid(user_card.id()), user_id);
+    assert_eq!(user_card.username(), "alice");
+    assert!(user_card.has_pin());
+
+    let devices_bytes =
+        auth::serialize_authenticated_devices(&[auth::AuthenticatedDevice {
+            id: device_session_id,
+            user_id,
+            fingerprint: "fingerprint",
+            name: "Alice Phone",
+            platform: auth::Platform::Android,
+            app_version: Some("1.2.3"),
+            hardware_id: None,
+            status: auth::AuthDeviceStatus::Trusted,
+            pin_configured: true,
+            failed_attempts: 1,
+            locked_until: None,
+            first_authenticated_by: user_id,
+            first_authenticated_at: now,
+            trusted_until: None,
+            last_seen_at: now,
+            last_activity: now,
+            auto_login_enabled: true,
+            revoked_by: None,
+            revoked_at: None,
+            revoked_reason: None,
+            created_at: now,
+            updated_at: now,
+        }]);
+    let devices = flatbuffers::root::<fb::auth::AuthenticatedDevicesResponse>(
+        &devices_bytes,
+    )
+    .expect("authenticated devices response root");
+    let device = devices.devices().expect("devices").get(0);
+    assert_eq!(device.fingerprint(), "fingerprint");
+    assert_eq!(device.status(), fb::auth::AuthDeviceStatus::Trusted);
+    assert!(device.auto_login_enabled());
+}
+
+#[test]
 fn setup_status_and_user_profile_round_trip() {
     let policy = auth::PasswordPolicy {
         enforce: true,
