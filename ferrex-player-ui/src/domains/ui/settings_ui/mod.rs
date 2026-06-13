@@ -203,7 +203,7 @@ pub enum SettingsUiMessage {
     ToggleLibraryFormAutoScan, // Proxy for Library::ToggleLibraryFormAutoScan
     ToggleLibraryFormWatchForChanges, // Proxy for Library::ToggleLibraryFormWatchForChanges
     ToggleLibraryFormStartScan, // Proxy for Library::ToggleLibraryFormStartScan
-    SubmitLibraryForm,        // Proxy for Library::SubmitLibraryForm
+    SubmitLibraryForm,          // Proxy for Library::SubmitLibraryForm
     LibraryMediaRoot(media_root_browser::Message), // Proxy collection for media root browser actions
     PauseLibraryScan(LibraryId, Uuid), // Proxy for Library::PauseScan
     ResumeLibraryScan(LibraryId, Uuid), // Proxy for Library::ResumeScan

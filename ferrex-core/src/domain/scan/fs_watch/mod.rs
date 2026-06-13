@@ -381,8 +381,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         self.libraries.read().await.len()
     }
 
-    #[cfg(test)]
-    async fn send_watch_message_for_test(
+    async fn send_watch_message(
         &self,
         library_id: LibraryId,
         message: WatchMessage,
@@ -403,6 +402,26 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                 "failed to send test watch message: {err}"
             ))
         })
+    }
+
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub async fn inject_notify_event_for_test(
+        &self,
+        library_id: LibraryId,
+        event: Event,
+    ) -> Result<()> {
+        self.send_watch_message(library_id, WatchMessage::Event(event))
+            .await
+    }
+
+    #[cfg(test)]
+    async fn send_watch_message_for_test(
+        &self,
+        library_id: LibraryId,
+        message: WatchMessage,
+    ) -> Result<()> {
+        self.send_watch_message(library_id, message).await
     }
 }
 
