@@ -30,7 +30,11 @@ pub struct FileChangeCursor {
 
 #[async_trait]
 pub trait FileChangeEventBus: Send + Sync {
-    async fn publish(&self, event: FileWatchEvent) -> Result<()>;
+    /// Persist a normalized event before it is handed to a consumer.
+    ///
+    /// Returns `true` when the event was inserted, or `false` when a row with
+    /// the same idempotency key already exists.
+    async fn publish(&self, event: FileWatchEvent) -> Result<bool>;
 
     async fn subscribe(
         &self,
@@ -97,7 +101,7 @@ impl fmt::Debug for LegacyDatabaseFileChangeEventBus {
 
 #[async_trait]
 impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
-    async fn publish(&self, event: FileWatchEvent) -> Result<()> {
+    async fn publish(&self, event: FileWatchEvent) -> Result<bool> {
         self.repository.create_event(&event).await
     }
 
@@ -111,11 +115,8 @@ impl FileChangeEventBus for LegacyDatabaseFileChangeEventBus {
         ))
     }
 
-    async fn ack(&self, _group: &str, _event_id: Uuid) -> Result<()> {
-        Err(MediaError::Internal(
-            "LegacyDatabaseFileChangeEventBus does not support durable ack"
-                .into(),
-        ))
+    async fn ack(&self, _group: &str, event_id: Uuid) -> Result<()> {
+        self.repository.mark_processed(event_id).await
     }
 
     async fn commit_cursor(&self, _cursor: FileChangeCursor) -> Result<()> {
