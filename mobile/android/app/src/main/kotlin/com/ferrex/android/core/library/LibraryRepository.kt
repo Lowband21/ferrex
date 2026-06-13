@@ -1,5 +1,7 @@
 package com.ferrex.android.core.library
 
+import com.ferrex.android.core.image.ImageCacheClearer
+import com.ferrex.android.core.image.ImageRequestKey
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ class LibraryRepository(
     private val transport: LibrarySyncTransport,
     private val cache: LibraryDiskCache,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val imageCacheClearer: ImageCacheClearer? = null,
 ) {
     private val _state = MutableStateFlow(LibraryRepositoryState())
     val state: StateFlow<LibraryRepositoryState> = _state.asStateFlow()
@@ -190,7 +193,9 @@ class LibraryRepository(
     }
 
     fun clearSelectedCache(scope: ServerCacheScope, libraryId: String) {
+        val imageKeys = selectedImageKeys(libraryId)
         cache.clearSelectedLibrary(scope, libraryId)
+        imageCacheClearer?.clearSelectedImages(scope, imageKeys)
         if (_state.value.scope?.directoryName == scope.directoryName && _state.value.selectedLibraryId == libraryId) {
             publish(
                 _state.value.copy(
@@ -204,6 +209,7 @@ class LibraryRepository(
 
     fun clearAllCache(scope: ServerCacheScope) {
         cache.clearAllForScope(scope)
+        imageCacheClearer?.clearAllImages(scope)
         if (_state.value.scope?.directoryName == scope.directoryName) {
             publish(
                 LibraryRepositoryState(
@@ -211,6 +217,15 @@ class LibraryRepository(
                     freshness = LibraryFreshness.Empty,
                 ),
             )
+        }
+    }
+
+    private fun selectedImageKeys(libraryId: String): Set<ImageRequestKey> {
+        val state = _state.value
+        if (state.selectedLibraryId != libraryId) return emptySet()
+        return buildSet {
+            state.movieAccessor?.primaryImageKeys()?.let(::addAll)
+            state.seriesAccessor?.primaryImageKeys()?.let(::addAll)
         }
     }
 

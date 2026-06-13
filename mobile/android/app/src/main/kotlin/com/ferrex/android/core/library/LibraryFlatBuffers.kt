@@ -1,5 +1,7 @@
 package com.ferrex.android.core.library
 
+import com.ferrex.android.core.image.BrowseImageCategory
+import com.ferrex.android.core.image.ImageRequestKey
 import com.google.flatbuffers.FlatBufferBuilder
 import ferrex.library.BatchFetchRequest
 import ferrex.library.BatchFetchResponse
@@ -248,6 +250,14 @@ class MovieLibraryAccessor internal constructor(
         val item = batches[batchIndex].data.items(itemIndex) ?: return null
         return item.variant(MovieReference()) as? MovieReference
     }
+
+    fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
+        for (index in movieLocations.indices) {
+            val details = movieAt(index)?.details ?: continue
+            details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
+            details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
+        }
+    }
 }
 
 data class ParsedSeriesBundle(
@@ -307,5 +317,17 @@ class SeriesLibraryAccessor internal constructor(
         val (bundleIndex, itemIndex) = episodeLocations[index]
         val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
         return item.variant(EpisodeReference()) as? EpisodeReference
+    }
+
+    fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
+        for (index in seriesLocations.indices) {
+            val details = seriesAt(index)?.details ?: continue
+            details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
+            details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
+        }
+        for (index in episodeLocations.indices) {
+            val details = episodeAt(index)?.details ?: continue
+            details.primaryStillIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Episode)) }
+        }
     }
 }

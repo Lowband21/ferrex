@@ -305,16 +305,41 @@ fn image_manifest_conversions_round_trip() {
     let response_bytes = image::serialize_image_manifest_response(&[
         image::ImageManifestEntry {
             iid,
+            category: fb::common::ImageCategory::Poster,
             status: image::ImageManifestEntryStatus::Ready { token: "abc" },
+        },
+        image::ImageManifestEntry {
+            iid,
+            category: fb::common::ImageCategory::Backdrop,
+            status: image::ImageManifestEntryStatus::Pending {
+                retry_after_ms: 1_500,
+            },
+        },
+        image::ImageManifestEntry {
+            iid,
+            category: fb::common::ImageCategory::Profile,
+            status: image::ImageManifestEntryStatus::Failed {
+                reason: Some("missing"),
+            },
         },
     ]);
     let response =
         flatbuffers::root::<fb::image::ImageManifestResponse>(&response_bytes)
             .expect("image manifest response root");
-    let entry = response.entries().expect("entries").get(0);
+    let entries = response.entries().expect("entries");
+    let entry = entries.get(0);
     assert_eq!(fb_to_uuid(entry.iid()), iid);
+    assert_eq!(entry.category(), fb::common::ImageCategory::Poster);
     assert_eq!(entry.status(), fb::image::ImageStatus::Ready);
     assert_eq!(entry.token(), Some("abc"));
+    let pending = entries.get(1);
+    assert_eq!(pending.category(), fb::common::ImageCategory::Backdrop);
+    assert_eq!(pending.status(), fb::image::ImageStatus::Pending);
+    assert_eq!(pending.retry_after_millis(), 1_500);
+    let failed = entries.get(2);
+    assert_eq!(failed.category(), fb::common::ImageCategory::Profile);
+    assert_eq!(failed.status(), fb::image::ImageStatus::Failed);
+    assert_eq!(failed.failure_reason(), Some("missing"));
 }
 
 #[test]
