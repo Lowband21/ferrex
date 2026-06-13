@@ -1354,6 +1354,99 @@ pub fn handle_auth_flow_select_pin_entry_target(
     Task::none()
 }
 
+/// Switch a selected known-device user to password login.
+pub fn handle_auth_flow_use_password_login(
+    state: &mut State,
+) -> Task<AuthMessage> {
+    use crate::domains::auth::types::{AuthenticationFlow, CredentialType};
+
+    let user = match state.domains.auth.state.auth_flow.clone() {
+        AuthenticationFlow::EnteringCredentials { user, .. }
+        | AuthenticationFlow::CheckingDevice { user } => Some(user),
+        _ => None,
+    };
+
+    if let Some(user) = user {
+        state.domains.auth.state.auth_flow =
+            AuthenticationFlow::EnteringCredentials {
+                user,
+                input_type: CredentialType::Password,
+                input: SecureCredential::new(String::new()),
+                show_password: false,
+                remember_device: true,
+                error: Some(
+                    "Sign in with your password to repair this device's trusted login."
+                        .to_string(),
+                ),
+                attempts_remaining: None,
+                loading: false,
+            };
+    }
+
+    Task::none()
+}
+
+/// Clear local auth/device state so stale trusted-device data cannot trap login.
+pub fn handle_reset_local_auth_state(state: &mut State) -> Task<AuthMessage> {
+    let svc: Arc<dyn AuthService> =
+        Arc::clone(&state.domains.auth.state.auth_service);
+
+    state.is_authenticated = false;
+    state.domains.auth.state.is_authenticated = false;
+    state.domains.auth.state.user_permissions = None;
+    state.domains.auth.state.auto_login_enabled = false;
+    state.domains.settings.preferences.auto_login_enabled = false;
+    state.domains.auth.state.auth_flow = AuthenticationFlow::LoadingUsers;
+
+    Task::perform(
+        async move {
+            svc.reset_local_auth_state()
+                .await
+                .map_err(|e| e.to_string())
+        },
+        AuthMessage::LocalAuthStateReset,
+    )
+}
+
+/// Handle local auth/device reset completion.
+pub fn handle_local_auth_state_reset(
+    state: &mut State,
+    result: Result<(), String>,
+) -> Task<AuthMessage> {
+    match result {
+        Ok(()) => {
+            state.domains.auth.state.auth_flow =
+                AuthenticationFlow::PreAuthLogin {
+                    username: String::new(),
+                    password: SecureCredential::new(String::new()),
+                    show_password: false,
+                    remember_device: false,
+                    error: Some(
+                        "Local auth and trusted-device state cleared. Sign in with your username and password to trust this device again."
+                            .to_string(),
+                    ),
+                    loading: false,
+                };
+        }
+        Err(error) => {
+            state.domains.auth.state.auth_flow =
+                AuthenticationFlow::PreAuthLogin {
+                    username: String::new(),
+                    password: SecureCredential::new(String::new()),
+                    show_password: false,
+                    remember_device: false,
+                    error: Some(format!(
+                        "Could not clear all local auth state: {}. You can still sign in with your password.",
+                        error
+                    )),
+                    loading: false,
+                };
+        }
+    }
+
+    Task::none()
+}
+
 /// Retry the current authentication step.
 pub fn handle_auth_flow_retry(state: &mut State) -> Task<AuthMessage> {
     use crate::domains::auth::types::AuthenticationFlow;
@@ -1380,6 +1473,9 @@ pub fn handle_auth_flow_retry(state: &mut State) -> Task<AuthMessage> {
         }
         AuthenticationFlow::EnteringCredentials { .. } => {
             handle_auth_flow_submit_credential(state)
+        }
+        AuthenticationFlow::PreAuthLogin { .. } => {
+            handle_pre_auth_submit(state)
         }
         _ => Task::none(),
     }

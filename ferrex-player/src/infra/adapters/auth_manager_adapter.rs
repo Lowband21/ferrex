@@ -139,10 +139,66 @@ impl AuthService for AuthManagerAdapter {
         })
     }
 
+    async fn change_password(
+        &self,
+        current_password: String,
+        new_password: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .change_password(current_password, new_password)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Change password failed: {}",
+                    e
+                ))
+            })
+    }
+
     async fn set_device_pin(&self, pin: String) -> RepositoryResult<()> {
         self.manager.set_device_pin(pin).await.map_err(|e| {
             RepositoryError::QueryFailed(format!(
                 "Set device PIN failed: {}",
+                e
+            ))
+        })
+    }
+
+    async fn change_device_pin(
+        &self,
+        current_pin: String,
+        new_pin: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .change_device_pin(current_pin, new_pin)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Change device PIN failed: {}",
+                    e
+                ))
+            })
+    }
+
+    async fn remove_device_pin(
+        &self,
+        current_pin: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .remove_device_pin(current_pin)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Remove device PIN failed: {}",
+                    e
+                ))
+            })
+    }
+
+    async fn reset_local_auth_state(&self) -> RepositoryResult<()> {
+        self.manager.reset_local_auth_state().await.map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "Reset local auth state failed: {}",
                 e
             ))
         })

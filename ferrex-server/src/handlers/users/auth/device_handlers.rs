@@ -155,6 +155,17 @@ pub struct ChangePinRequest {
     pub device_signature: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RemovePinRequest {
+    pub device_id: Uuid,
+    /// Current PIN client proof
+    pub current_proof: String,
+    /// Challenge id obtained from PIN challenge endpoint
+    pub challenge_id: Uuid,
+    /// Base64-encoded device signature over challenge
+    pub device_signature: String,
+}
+
 async fn load_security_settings(
     state: &AppState,
 ) -> AppResult<AuthSecuritySettings> {
@@ -531,6 +542,57 @@ pub async fn revoke_device(
             user.id,
             session.device_fingerprint(),
             Some("user_initiated".to_string()),
+            None,
+        )
+        .await
+        .map_err(map_facade_error)?;
+
+    Ok(Json(ApiResponse::success(())))
+}
+
+pub async fn remove_device_pin(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(request): Json<RemovePinRequest>,
+) -> AppResult<Json<ApiResponse<()>>> {
+    let facade = state.auth_facade().clone();
+    let session = facade
+        .get_device_by_id(request.device_id)
+        .await
+        .map_err(map_facade_error)?;
+
+    if session.user_id() != user.id {
+        return Err(AppError::forbidden(
+            "Device not owned by user".to_string(),
+        ));
+    }
+
+    if session.device_public_key().is_none() {
+        return Err(AppError::bad_request(
+            "device key not registered; cannot remove PIN".to_string(),
+        ));
+    }
+
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(request.device_signature.as_bytes())
+        .map_err(|_| {
+            AppError::bad_request(
+                "invalid device_signature encoding".to_string(),
+            )
+        })?;
+    state
+        .auth_service()
+        .verify_device_possession(request.device_id, request.challenge_id, &sig)
+        .await
+        .map_err(map_core_auth_error)?;
+
+    let security_settings = load_security_settings(&state).await?;
+    facade
+        .clear_device_pin(
+            user.id,
+            session.device_fingerprint(),
+            &request.current_proof,
+            security_settings.device_trust_policy.pin_max_attempts,
             None,
         )
         .await

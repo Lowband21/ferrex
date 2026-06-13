@@ -413,6 +413,23 @@ impl AuthStorage {
         Ok(())
     }
 
+    /// Clear all remembered server-side device sessions for one server.
+    pub async fn clear_device_sessions_for_server(
+        &self,
+        base_url: &str,
+    ) -> Result<()> {
+        let path = self.device_sessions_path_for_server(base_url);
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
+            log::info!(
+                "Cleared remembered device sessions for server {} at {:?}",
+                base_url,
+                path
+            );
+        }
+        Ok(())
+    }
+
     /// Load locally cached user summaries for offline user selection
     pub async fn load_user_summaries(&self) -> Result<Vec<UserListItemDto>> {
         let path = self.users_cache_path();
@@ -748,14 +765,18 @@ impl AuthStorage {
         Ok(())
     }
 
-    /// Check if auto-login is enabled for a specific user on this device
-    pub async fn is_auto_login_enabled(&self, user_id: &Uuid) -> Result<bool> {
-        // Read auto-login preferences from a separate file
-        let auto_login_path = self
+    fn auto_login_path(&self) -> Result<PathBuf> {
+        Ok(self
             .cache_path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Invalid cache path"))?
-            .join("auto_login.json");
+            .join("auto_login.json"))
+    }
+
+    /// Check if auto-login is enabled for a specific user on this device
+    pub async fn is_auto_login_enabled(&self, user_id: &Uuid) -> Result<bool> {
+        // Read auto-login preferences from a separate file
+        let auto_login_path = self.auto_login_path()?;
 
         if !auto_login_path.exists() {
             return Ok(false);
@@ -774,11 +795,7 @@ impl AuthStorage {
         user_id: &Uuid,
         enabled: bool,
     ) -> Result<()> {
-        let auto_login_path = self
-            .cache_path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Invalid cache path"))?
-            .join("auto_login.json");
+        let auto_login_path = self.auto_login_path()?;
 
         // Read existing preferences
         let mut auto_login_map: std::collections::HashMap<Uuid, bool> =
@@ -796,6 +813,19 @@ impl AuthStorage {
         let data = serde_json::to_string_pretty(&auto_login_map)?;
         tokio::fs::write(&auto_login_path, data).await?;
 
+        Ok(())
+    }
+
+    /// Clear all device-local auto-login preferences.
+    pub async fn clear_auto_login_preferences(&self) -> Result<()> {
+        let auto_login_path = self.auto_login_path()?;
+        if auto_login_path.exists() {
+            tokio::fs::remove_file(&auto_login_path).await?;
+            log::info!(
+                "Cleared auto-login preferences at {:?}",
+                auto_login_path
+            );
+        }
         Ok(())
     }
 

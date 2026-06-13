@@ -95,8 +95,14 @@ pub fn update_settings(
         SettingsMessage::SubmitPinChange => {
             security::handle_submit_pin_change(state)
         }
+        SettingsMessage::SubmitPinRemoval => {
+            security::handle_submit_pin_removal(state)
+        }
         SettingsMessage::PinChangeResult(result) => {
             security::handle_pin_change_result(state, result)
+        }
+        SettingsMessage::PinRemovalResult(result) => {
+            security::handle_pin_removal_result(state, result)
         }
         SettingsMessage::CancelPinChange => {
             security::handle_cancel_pin_change(state)
