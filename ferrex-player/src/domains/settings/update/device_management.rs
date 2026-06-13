@@ -30,8 +30,8 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
 
     let task = Task::perform(
         async move {
-            let current_device_id = auth_service
-                .current_device_id()
+            let current_device_session_id = auth_service
+                .current_device_session_id()
                 .await
                 .map_err(|e| e.to_string())?;
 
@@ -67,8 +67,10 @@ pub fn handle_load_devices(state: &mut State) -> DomainUpdateResult {
                                 device_name: device.name.clone(),
                                 device_type,
                                 last_active: device.last_activity,
-                                is_current_device: device.id
-                                    == current_device_id,
+                                is_current_device: current_device_session_id
+                                    .is_some_and(|current_id| {
+                                        device.id == current_id
+                                    }),
                                 location,
                             }
                         })

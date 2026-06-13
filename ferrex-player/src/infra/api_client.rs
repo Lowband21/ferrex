@@ -942,9 +942,8 @@ impl ApiClient {
 
         let payload = RevokeDeviceRequest { device_id };
 
-        self.post::<_, ()>(v1::auth::device::REVOKE, &payload)
-            .await?;
-        Ok(())
+        self.post_no_content(v1::auth::device::REVOKE, &payload)
+            .await
     }
 
     /// Execute a media query

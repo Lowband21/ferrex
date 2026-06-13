@@ -445,6 +445,18 @@ impl AuthService for StubAuthService {
         Ok(self.inner.read().expect("lock poisoned").device_id)
     }
 
+    async fn current_device_session_id(
+        &self,
+    ) -> RepositoryResult<Option<Uuid>> {
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .auth_token
+            .as_ref()
+            .and_then(|token| token.device_session_id))
+    }
+
     async fn authenticate(
         &self,
         user: User,
