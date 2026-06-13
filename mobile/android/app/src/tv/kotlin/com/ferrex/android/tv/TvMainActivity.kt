@@ -22,6 +22,8 @@ class TvMainActivity : ComponentActivity() {
                 TvFerrexNavGraph(
                     authManager = dependencies.authManager,
                     libraryRepository = dependencies.libraryRepository,
+                    imageRepository = dependencies.imageRepository,
+                    imagePipeline = dependencies.imagePipeline,
                 )
             }
         }

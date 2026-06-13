@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
                 FerrexNavGraph(
                     authManager = dependencies.authManager,
                     libraryRepository = dependencies.libraryRepository,
+                    imageRepository = dependencies.imageRepository,
+                    imagePipeline = dependencies.imagePipeline,
                 )
             }
         }

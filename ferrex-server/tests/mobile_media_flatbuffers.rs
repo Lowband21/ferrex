@@ -843,7 +843,9 @@ async fn images_support_flatbuffers_manifest_and_iid_pending(
     >(manifest.as_bytes().as_ref())?;
     let entry = manifest_response.entries().expect("entries").get(0);
     assert_eq!(fb_to_uuid(entry.iid()), iid);
+    assert_eq!(entry.category(), fb::common::ImageCategory::Poster);
     assert_eq!(entry.status(), fb::image::ImageStatus::Pending);
+    assert_eq!(entry.retry_after_millis(), 1_000);
     assert!(entry.token().is_none());
 
     let iid_path =

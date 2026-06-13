@@ -25,10 +25,16 @@ enum ImageStatus : byte {
 }
 
 table ImageManifestEntry {
-  iid:    ferrex.ids.Uuid (required);
-  status: ImageStatus;
+  iid:      ferrex.ids.Uuid (required);
+  status:   ImageStatus;
   /// Content-addressed blob token. Present only when status == Ready.
-  token:  string;
+  token:    string;
+  /// Echoes the requested image category so clients can key iid + category.
+  category: ferrex.common.ImageCategory;
+  /// Exact server retry delay for Pending entries; zero when not pending.
+  retry_after_millis: ulong;
+  /// Deterministic failure/missing reason for Failed entries.
+  failure_reason: string;
 }
 
 table ImageReadyEvent {

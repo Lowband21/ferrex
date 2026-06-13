@@ -8,6 +8,10 @@ import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.api.TokenRefreshAuthenticator
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.EncryptedAuthStorage
+import com.ferrex.android.core.image.FerrexImagePipeline
+import com.ferrex.android.core.image.ImageDiskCache
+import com.ferrex.android.core.image.ImageRepository
+import com.ferrex.android.core.image.OkHttpImageManifestTransport
 import com.ferrex.android.core.library.LibraryDiskCache
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.OkHttpLibrarySyncTransport
@@ -34,11 +38,25 @@ class AndroidAuthDependencies(
     private val storage = EncryptedAuthStorage(context)
     private val apiClient = FerrexApiClient(httpClient, serverConfig)
     private val libraryCache = LibraryDiskCache.fromContext(context)
+    private val imageCache = ImageDiskCache.fromContext(context)
     private val libraryTransport = OkHttpLibrarySyncTransport(httpClient, serverConfig)
+    private val imageTransport = OkHttpImageManifestTransport(httpClient, serverConfig)
+
+    val imageRepository = ImageRepository(
+        transport = imageTransport,
+        cache = imageCache,
+    )
+
+    val imagePipeline = FerrexImagePipeline(
+        context = context,
+        authenticatedHttpClient = httpClient,
+        imageDiskCache = imageCache,
+    )
 
     val libraryRepository = LibraryRepository(
         transport = libraryTransport,
         cache = libraryCache,
+        imageCacheClearer = imageRepository,
     )
 
     val authManager = AuthManager(
@@ -50,7 +68,9 @@ class AndroidAuthDependencies(
         deviceName = deviceName,
         appVersion = BuildConfig.VERSION_NAME,
         onResetConnectionCacheClear = { serverUrl, userId ->
-            libraryCache.clearAllForScope(ServerCacheScope.from(serverUrl, userId))
+            val scope = ServerCacheScope.from(serverUrl, userId)
+            libraryCache.clearAllForScope(scope)
+            imageRepository.clearAllImages(scope)
         },
     )
 }
