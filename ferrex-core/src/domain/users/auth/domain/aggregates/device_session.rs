@@ -9,6 +9,17 @@ use crate::domain::users::auth::domain::value_objects::{
     DeviceFingerprint, SessionToken,
 };
 
+const DEFAULT_DEVICE_TRUST_DURATION_DAYS: i64 = 30;
+const DEFAULT_PIN_LOCKOUT_MINUTES: i64 = 5;
+
+fn default_device_trust_duration() -> Duration {
+    Duration::days(DEFAULT_DEVICE_TRUST_DURATION_DAYS)
+}
+
+fn default_pin_lockout_duration() -> Duration {
+    Duration::minutes(DEFAULT_PIN_LOCKOUT_MINUTES)
+}
+
 /// Errors that can occur with device sessions
 #[derive(Debug, Error)]
 pub enum DeviceSessionError {
@@ -342,6 +353,14 @@ impl DeviceSession {
 
     /// Mark the device as trusted after a PIN has been configured for the user.
     pub fn mark_trusted_after_pin_setup(&mut self) {
+        self.mark_trusted_after_pin_setup_for(default_device_trust_duration());
+    }
+
+    /// Mark the device as trusted using the configured trust window.
+    pub fn mark_trusted_after_pin_setup_for(
+        &mut self,
+        trust_duration: Duration,
+    ) {
         if self.status == DeviceStatus::Pending {
             self.status = DeviceStatus::Trusted;
             self.add_event(AuthEvent::DeviceTrusted {
@@ -354,9 +373,7 @@ impl DeviceSession {
         self.pin_configured = true;
         self.failed_attempts = 0;
         self.locked_until = None;
-        if self.trusted_until.is_none() {
-            self.trusted_until = Some(Utc::now() + Duration::days(30));
-        }
+        self.trusted_until = Some(Utc::now() + trust_duration);
         self.touch();
 
         self.add_event(AuthEvent::PinSet {
@@ -441,9 +458,21 @@ impl DeviceSession {
         &mut self,
         max_attempts: u8,
     ) -> DeviceSessionError {
+        self.register_pin_failure_with_lockout(
+            max_attempts,
+            default_pin_lockout_duration(),
+        )
+    }
+
+    /// Record a failed PIN authentication attempt with the configured lockout.
+    pub fn register_pin_failure_with_lockout(
+        &mut self,
+        max_attempts: u8,
+        lockout_duration: Duration,
+    ) -> DeviceSessionError {
         self.failed_attempts = self.failed_attempts.saturating_add(1);
         if self.failed_attempts >= max_attempts {
-            self.locked_until = Some(Utc::now() + Duration::minutes(5));
+            self.locked_until = Some(Utc::now() + lockout_duration);
         }
         self.touch();
 
@@ -466,6 +495,18 @@ impl DeviceSession {
         &mut self,
         session_lifetime: Duration,
     ) -> Result<SessionToken, DeviceSessionError> {
+        self.issue_pin_session_with_trust_duration(
+            session_lifetime,
+            default_device_trust_duration(),
+        )
+    }
+
+    /// Issue a session token and extend trust using the configured trust window.
+    pub fn issue_pin_session_with_trust_duration(
+        &mut self,
+        session_lifetime: Duration,
+        trust_duration: Duration,
+    ) -> Result<SessionToken, DeviceSessionError> {
         if self.status != DeviceStatus::Trusted {
             return Err(DeviceSessionError::DeviceNotTrusted);
         }
@@ -477,7 +518,7 @@ impl DeviceSession {
         self.session_token_dirty = true;
         self.failed_attempts = 0;
         self.locked_until = None;
-        self.trusted_until = Some(Utc::now() + Duration::days(30));
+        self.trusted_until = Some(Utc::now() + trust_duration);
         self.touch();
 
         self.add_event(AuthEvent::SessionCreated {
@@ -492,9 +533,14 @@ impl DeviceSession {
 
     /// Reset failure counters after a successful PIN verification.
     pub fn record_pin_success(&mut self) {
+        self.record_pin_success_for(default_device_trust_duration());
+    }
+
+    /// Reset failure counters and extend trust using the configured trust window.
+    pub fn record_pin_success_for(&mut self, trust_duration: Duration) {
         self.failed_attempts = 0;
         self.locked_until = None;
-        self.trusted_until = Some(Utc::now() + Duration::days(30));
+        self.trusted_until = Some(Utc::now() + trust_duration);
         self.touch();
     }
 
@@ -502,6 +548,18 @@ impl DeviceSession {
     pub fn refresh_token(
         &mut self,
         session_lifetime: Duration,
+    ) -> Result<SessionToken, DeviceSessionError> {
+        self.refresh_token_with_trust_duration(
+            session_lifetime,
+            default_device_trust_duration(),
+        )
+    }
+
+    /// Refresh a session token and extend trust using the configured trust window.
+    pub fn refresh_token_with_trust_duration(
+        &mut self,
+        session_lifetime: Duration,
+        trust_duration: Duration,
     ) -> Result<SessionToken, DeviceSessionError> {
         // Check device status
         if self.status != DeviceStatus::Trusted {
@@ -524,7 +582,7 @@ impl DeviceSession {
 
         self.session_token = Some(token.clone());
         self.session_token_dirty = true;
-        self.trusted_until = Some(Utc::now() + Duration::days(30));
+        self.trusted_until = Some(Utc::now() + trust_duration);
         self.touch();
 
         self.add_event(AuthEvent::SessionRefreshed {
@@ -562,10 +620,19 @@ impl DeviceSession {
 
     /// Update last activity timestamp
     pub fn update_activity(&mut self) {
+        self.update_activity_with_trust_duration(
+            default_device_trust_duration(),
+        );
+    }
+
+    /// Update last activity and extend explicit trust with the configured window.
+    pub fn update_activity_with_trust_duration(
+        &mut self,
+        trust_duration: Duration,
+    ) {
         self.touch();
-        if self.status == DeviceStatus::Trusted && self.trusted_until.is_some()
-        {
-            self.trusted_until = Some(Utc::now() + Duration::days(30));
+        if self.status == DeviceStatus::Trusted {
+            self.trusted_until = Some(Utc::now() + trust_duration);
         }
     }
 

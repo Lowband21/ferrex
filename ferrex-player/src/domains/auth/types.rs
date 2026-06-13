@@ -72,7 +72,18 @@ impl SetupClaimUi {
 #[derive(Debug, Clone)]
 pub enum CredentialType {
     Password,
-    Pin { max_length: usize },
+    Pin {
+        min_length: usize,
+        max_length: usize,
+    },
+}
+
+/// Active field while setting and confirming a PIN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PinEntryTarget {
+    #[default]
+    Pin,
+    ConfirmPin,
 }
 
 /// Authentication mode for offline support
@@ -92,7 +103,7 @@ pub enum SetupStep {
     Account,     // Username, display name, password, confirm (combined)
     SetupToken,  // If required by server (conditional)
     DeviceClaim, // Secure claim verification (show code, wait for server confirmation)
-    Pin,         // Optional 4-digit PIN
+    Pin,         // Optional secure PIN
     Complete,    // Success message
 }
 
@@ -223,6 +234,7 @@ pub enum AuthenticationFlow {
         // PIN fields (embedded in wizard)
         pin: SecureCredential,
         confirm_pin: SecureCredential,
+        pin_entry_target: PinEntryTarget,
 
         // State
         error: Option<String>,
@@ -277,6 +289,7 @@ pub enum AuthenticationFlow {
         user: User,
         pin: SecureCredential,
         confirm_pin: SecureCredential,
+        pin_entry_target: PinEntryTarget,
         error: Option<String>,
     },
 

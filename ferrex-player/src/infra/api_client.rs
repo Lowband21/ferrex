@@ -17,6 +17,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
+use crate::domains::auth::manager::{
+    DeviceTrustPolicyResponse, PinPolicyResponse,
+};
 use crate::infra::services::api::ImageFetchResult;
 
 /// Callback for token refresh
@@ -956,7 +959,7 @@ impl ApiClient {
 }
 
 /// Server setup status
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct SetupStatus {
     pub needs_setup: bool,
     pub has_admin: bool,
@@ -964,4 +967,8 @@ pub struct SetupStatus {
     pub requires_setup_token: bool,
     pub user_count: usize,
     pub library_count: usize,
+    #[serde(default)]
+    pub pin_policy: PinPolicyResponse,
+    #[serde(default)]
+    pub device_trust_policy: DeviceTrustPolicyResponse,
 }

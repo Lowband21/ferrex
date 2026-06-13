@@ -22,6 +22,9 @@ use ferrex_core::{
                 },
                 value_objects::{DeviceFingerprint, PinPolicy},
             },
+            policy::{
+                AuthSecuritySettings, DeviceTrustPolicy, PinSecurityPolicy,
+            },
         },
         user::User,
     },
@@ -33,7 +36,12 @@ use sha2::{Digest, Sha256};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::handlers::users::map_auth_facade_error;
+use crate::handlers::users::{
+    map_auth_facade_error,
+    security_settings_handlers::{
+        DeviceTrustPolicyResponse, PinPolicyResponse,
+    },
+};
 use crate::{
     application::auth::AuthFacadeError,
     infra::{
@@ -43,14 +51,15 @@ use crate::{
 };
 use ferrex_core::domain::users::auth::domain::services::AuthenticationError as CoreAuthError;
 
-const MAX_PIN_ATTEMPTS: u8 = 3;
-
 #[derive(Debug, Deserialize)]
 pub struct DeviceLoginRequest {
     pub username: String,
     pub password: String,
     pub device_info: Option<DeviceInfo>,
-    pub remember_device: bool,
+    /// Whether to remember this device. When omitted, the persisted server
+    /// device trust policy supplies the default.
+    #[serde(default)]
+    pub remember_device: Option<bool>,
     /// Optional device public key for possession validation (base64-encoded)
     #[serde(default)]
     pub device_public_key: Option<String>,
@@ -84,6 +93,8 @@ pub struct DeviceAuthToken {
         ferrex_core::domain::users::auth::domain::value_objects::SessionScope,
     pub device_registration: Option<DeviceRegistration>,
     pub requires_pin_setup: bool,
+    pub pin_policy: PinPolicyResponse,
+    pub device_trust_policy: DeviceTrustPolicyResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +122,8 @@ pub struct DeviceAuthStatus {
     pub device_registered: bool,
     pub has_pin: bool,
     pub remaining_attempts: Option<u8>,
+    pub pin_policy: PinPolicyResponse,
+    pub device_trust_policy: DeviceTrustPolicyResponse,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +155,37 @@ pub struct ChangePinRequest {
     pub device_signature: String,
 }
 
+async fn load_security_settings(
+    state: &AppState,
+) -> AppResult<AuthSecuritySettings> {
+    state
+        .unit_of_work()
+        .security_settings
+        .get_settings()
+        .await
+        .map_err(|e| {
+            AppError::internal(format!("Failed to load security settings: {e}"))
+        })
+}
+
+fn trust_duration(policy: &DeviceTrustPolicy) -> Duration {
+    Duration::days(i64::from(policy.trust_duration_days))
+}
+
+fn pin_lockout_duration(policy: &DeviceTrustPolicy) -> Duration {
+    Duration::minutes(i64::from(policy.pin_lockout_minutes))
+}
+
+fn server_pin_policy(policy: &PinSecurityPolicy) -> PinPolicy {
+    PinPolicy {
+        min_length: usize::from(policy.min_length),
+        max_length: usize::from(policy.max_length),
+        check_patterns: policy.reject_repeated_digits,
+        max_consecutive: usize::from(policy.max_consecutive_identical),
+        check_sequential: policy.reject_sequential_digits,
+    }
+}
+
 pub async fn device_login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -156,17 +200,25 @@ pub async fn device_login(
         request.device_key_alg.as_deref(),
     )?;
 
-    if request.remember_device && public_key.is_none() {
+    let security_settings = load_security_settings(&state).await?;
+    let trust_policy = &security_settings.device_trust_policy;
+    let remember_device = request
+        .remember_device
+        .unwrap_or(trust_policy.remember_device_default);
+
+    if remember_device && public_key.is_none() {
         return Err(AppError::bad_request(
             "remember_device requires a registered device_public_key"
                 .to_string(),
         ));
     }
 
+    let device_trust_duration = trust_duration(trust_policy);
+
     let mut context = build_event_context(&headers);
     context
         .insert_metadata("device_name", json!(device_info.device_name.clone()));
-    context.insert_metadata("remember_device", json!(request.remember_device));
+    context.insert_metadata("remember_device", json!(remember_device));
 
     let (device_key_alg, device_public_key) = public_key
         .map(|(alg, key)| (Some(alg), Some(key)))
@@ -178,13 +230,12 @@ pub async fn device_login(
         hardware_id: device_info.hardware_id.clone(),
         device_public_key,
         device_key_alg,
-        trusted_until: request
-            .remember_device
-            .then(|| Utc::now() + Duration::days(30)),
-        auto_login_enabled: Some(request.remember_device),
+        trusted_until: remember_device
+            .then(|| Utc::now() + device_trust_duration),
+        auto_login_enabled: Some(remember_device),
         metadata: Some(json!({
             "device_id": device_info.device_id,
-            "remember_device": request.remember_device,
+            "remember_device": remember_device,
         })),
     };
 
@@ -197,6 +248,7 @@ pub async fn device_login(
             fingerprint,
             device_info.device_name.clone(),
             metadata,
+            device_trust_duration,
             context,
         )
         .await
@@ -214,6 +266,7 @@ pub async fn device_login(
         bundle,
         Some(device_session_to_device_registration(&session)),
         !session.has_pin(),
+        &security_settings,
     );
 
     Ok(Json(ApiResponse::success(result)))
@@ -232,13 +285,18 @@ pub async fn pin_login(
                 "invalid device_signature encoding".to_string(),
             )
         })?;
+    let security_settings = load_security_settings(&state).await?;
+    let trust_policy = &security_settings.device_trust_policy;
     let bundle = state
         .auth_service()
-        .authenticate_with_pin_session(
+        .authenticate_with_pin_session_with_policy(
             request.device_id,
             &request.client_proof,
             request.challenge_id,
             &sig,
+            trust_policy.pin_max_attempts,
+            pin_lockout_duration(trust_policy),
+            trust_duration(trust_policy),
         )
         .await
         .map_err(map_authentication_error)?;
@@ -253,6 +311,7 @@ pub async fn pin_login(
         bundle,
         Some(device_session_to_device_registration(&session)),
         false,
+        &security_settings,
     );
 
     Ok(Json(ApiResponse::success(result)))
@@ -374,13 +433,15 @@ pub async fn set_device_pin(
         .await
         .map_err(map_core_auth_error)?;
 
-    let policy = PinPolicy::default();
+    let security_settings = load_security_settings(&state).await?;
+    let policy = server_pin_policy(&security_settings.pin_policy);
     facade
         .set_device_pin(
             user.id,
             session.device_fingerprint(),
             request.client_proof,
             &policy,
+            trust_duration(&security_settings.device_trust_policy),
             None,
         )
         .await
@@ -394,36 +455,36 @@ pub async fn check_device_status(
     Extension(user): Extension<User>,
     axum::extract::Query(query): axum::extract::Query<DeviceStatusQuery>,
 ) -> AppResult<Json<ApiResponse<DeviceAuthStatus>>> {
+    let security_settings = load_security_settings(&state).await?;
+    let max_attempts = security_settings.device_trust_policy.pin_max_attempts;
+    let pin_policy = PinPolicyResponse::from(&security_settings.pin_policy);
+    let device_trust_policy =
+        DeviceTrustPolicyResponse::from(&security_settings.device_trust_policy);
+    let build_status =
+        |device_registered, has_pin, remaining_attempts| DeviceAuthStatus {
+            device_registered,
+            has_pin,
+            remaining_attempts,
+            pin_policy: pin_policy.clone(),
+            device_trust_policy: device_trust_policy.clone(),
+        };
+
     let facade = state.auth_facade().clone();
     let status = match facade.get_device_by_id(query.device_id).await {
         Ok(session) if session.user_id() == user.id => {
             if matches!(session.status(), DeviceStatus::Revoked) {
-                DeviceAuthStatus {
-                    device_registered: false,
-                    has_pin: false,
-                    remaining_attempts: Some(0),
-                }
+                build_status(false, false, Some(0))
             } else {
                 let remaining =
-                    MAX_PIN_ATTEMPTS.saturating_sub(session.failed_attempts());
-                DeviceAuthStatus {
-                    device_registered: true,
-                    has_pin: session.has_pin(),
-                    remaining_attempts: Some(remaining),
-                }
+                    max_attempts.saturating_sub(session.failed_attempts());
+                build_status(true, session.has_pin(), Some(remaining))
             }
         }
-        Ok(_) => DeviceAuthStatus {
-            device_registered: false,
-            has_pin: false,
-            remaining_attempts: Some(MAX_PIN_ATTEMPTS),
-        },
+        Ok(_) => build_status(false, false, Some(max_attempts)),
         Err(AuthFacadeError::DeviceTrust(_))
-        | Err(AuthFacadeError::UserNotFound) => DeviceAuthStatus {
-            device_registered: false,
-            has_pin: false,
-            remaining_attempts: Some(MAX_PIN_ATTEMPTS),
-        },
+        | Err(AuthFacadeError::UserNotFound) => {
+            build_status(false, false, Some(max_attempts))
+        }
         Err(err) => return Err(map_facade_error(err)),
     };
 
@@ -516,7 +577,9 @@ pub async fn change_device_pin(
         .await
         .map_err(map_core_auth_error)?;
 
-    let policy = PinPolicy::default();
+    let security_settings = load_security_settings(&state).await?;
+    let policy = server_pin_policy(&security_settings.pin_policy);
+    let trust_policy = &security_settings.device_trust_policy;
     facade
         .rotate_device_pin(
             user.id,
@@ -524,7 +587,9 @@ pub async fn change_device_pin(
             &request.current_proof,
             request.new_proof,
             &policy,
-            MAX_PIN_ATTEMPTS,
+            trust_policy.pin_max_attempts,
+            pin_lockout_duration(trust_policy),
+            trust_duration(trust_policy),
             None,
         )
         .await
@@ -661,6 +726,7 @@ fn bundle_to_device_auth_token(
     bundle: TokenBundle,
     registration: Option<DeviceRegistration>,
     requires_pin_setup: bool,
+    security_settings: &AuthSecuritySettings,
 ) -> DeviceAuthToken {
     let expires_in = bundle
         .session_token
@@ -681,6 +747,10 @@ fn bundle_to_device_auth_token(
         scope: bundle.scope,
         device_registration: registration,
         requires_pin_setup,
+        pin_policy: PinPolicyResponse::from(&security_settings.pin_policy),
+        device_trust_policy: DeviceTrustPolicyResponse::from(
+            &security_settings.device_trust_policy,
+        ),
     }
 }
 

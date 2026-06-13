@@ -6,7 +6,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::Response,
 };
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::{
@@ -181,9 +181,24 @@ pub async fn refresh(
             })
         })?;
 
+    let security_settings = state
+        .unit_of_work()
+        .security_settings
+        .get_settings()
+        .await
+        .map_err(|e| {
+            AppError::internal(format!("Failed to load security settings: {e}"))
+        })?;
+    let trust_policy = &security_settings.device_trust_policy;
+
     let token_bundle = state
         .auth_service()
-        .refresh_session(&request.refresh_token)
+        .refresh_session_with_policy(
+            &request.refresh_token,
+            trust_policy.pin_max_attempts,
+            Duration::minutes(i64::from(trust_policy.pin_lockout_minutes)),
+            Duration::days(i64::from(trust_policy.trust_duration_days)),
+        )
         .await
         .map_err(map_auth_error)?;
     let auth_token = bundle_to_auth_token(token_bundle);

@@ -8,7 +8,7 @@ mod steps;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::{
-    SetupClaimStatus, SetupStep, TransitionDirection,
+    PinEntryTarget, SetupClaimStatus, SetupStep, TransitionDirection,
 };
 use crate::domains::ui::views::auth::components::{auth_card, auth_container};
 use crate::state::State;
@@ -38,6 +38,7 @@ pub fn view_setup_wizard<'a>(
     claim_loading: bool,
     pin: &'a SecureCredential,
     confirm_pin: &'a SecureCredential,
+    pin_entry_target: PinEntryTarget,
     error: Option<&'a str>,
     loading: bool,
     setup_token_required: bool,
@@ -76,7 +77,13 @@ pub fn view_setup_wizard<'a>(
             error,
             fonts,
         ),
-        SetupStep::Pin => steps::view_pin_step(state, pin, confirm_pin, error),
+        SetupStep::Pin => steps::view_pin_step(
+            state,
+            pin,
+            confirm_pin,
+            pin_entry_target,
+            error,
+        ),
         SetupStep::Complete => steps::view_complete_step(fonts),
     };
 
@@ -86,10 +93,18 @@ pub fn view_setup_wizard<'a>(
         .height(Length::FillPortion(1));
 
     // Build navigation buttons
+    let pin_policy = (&state.domains.auth.state.pin_policy).into();
+    let pin_can_submit =
+        crate::domains::auth::pin_policy::pin_pair_satisfies_policy(
+            pin.as_str(),
+            confirm_pin.as_str(),
+            pin_policy,
+        );
     let nav_buttons = navigation::view_navigation_buttons(
         current_step,
         setup_token_required,
         loading,
+        pin_can_submit,
         fonts,
     );
 

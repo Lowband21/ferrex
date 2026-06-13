@@ -15,8 +15,8 @@ pub mod rate_limit;
 pub use crypto::{AuthCrypto, AuthCryptoError};
 pub use device::*;
 pub use policy::{
-    AuthSecuritySettings, PasswordPolicy, PasswordPolicyCheck,
-    PasswordPolicyRule,
+    AuthSecuritySettings, DeviceTrustPolicy, PasswordPolicy,
+    PasswordPolicyCheck, PasswordPolicyRule, PinSecurityPolicy,
 };
 
 use serde::{Deserialize, Serialize};

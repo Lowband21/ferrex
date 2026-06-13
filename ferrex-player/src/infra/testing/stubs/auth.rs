@@ -89,6 +89,7 @@ impl StubAuthService {
                 device_registered: true,
                 has_pin: false,
                 remaining_attempts: Some(5),
+                ..DeviceAuthStatus::default()
             },
         );
 
@@ -126,6 +127,7 @@ impl StubAuthService {
                     device_registered: true,
                     has_pin: false,
                     remaining_attempts: Some(5),
+                    ..DeviceAuthStatus::default()
                 },
             );
         }
@@ -207,6 +209,7 @@ impl InnerAuthState {
                 device_registered: true,
                 has_pin: false,
                 remaining_attempts: Some(5),
+                ..DeviceAuthStatus::default()
             },
         );
 
@@ -305,6 +308,7 @@ impl AuthService for StubAuthService {
                         device_registered: true,
                         has_pin,
                         remaining_attempts: Some(5),
+                        ..DeviceAuthStatus::default()
                     },
                 );
             }

@@ -423,6 +423,22 @@ impl AuthenticationService {
         user_id: Uuid,
         device_session_id: Uuid,
     ) -> Result<(TokenBundle, DeviceSession), AuthenticationError> {
+        self.issue_device_password_session_with_policy(
+            user_id,
+            device_session_id,
+            Duration::days(30),
+        )
+        .await
+    }
+
+    /// Issue a full-scope password-authenticated token bound to a device session,
+    /// extending `trusted_until` with the configured trust window.
+    pub async fn issue_device_password_session_with_policy(
+        &self,
+        user_id: Uuid,
+        device_session_id: Uuid,
+        trust_duration: Duration,
+    ) -> Result<(TokenBundle, DeviceSession), AuthenticationError> {
         let mut session = self
             .session_repo
             .find_by_id(device_session_id)
@@ -437,7 +453,7 @@ impl AuthenticationService {
             return Err(AuthenticationError::DeviceNotTrusted);
         }
 
-        session.update_activity();
+        session.update_activity_with_trust_duration(trust_duration);
         self.session_repo.save(&session).await?;
 
         let session_token = SessionToken::generate(Duration::hours(24))
@@ -519,6 +535,29 @@ impl AuthenticationService {
         device_fingerprint: &DeviceFingerprint,
         pin_proof: &str,
     ) -> Result<TokenBundle, AuthenticationError> {
+        self.authenticate_device_with_pin_with_policy(
+            user_id,
+            device_fingerprint,
+            pin_proof,
+            3,
+            Duration::minutes(5),
+            Duration::days(30),
+        )
+        .await
+    }
+
+    /// Authenticate using a client-derived PIN proof with configured PIN and trust policy.
+    pub async fn authenticate_device_with_pin_with_policy(
+        &self,
+        user_id: Uuid,
+        device_fingerprint: &DeviceFingerprint,
+        pin_proof: &str,
+        max_attempts: u8,
+        lockout_duration: Duration,
+        trust_duration: Duration,
+    ) -> Result<TokenBundle, AuthenticationError> {
+        ensure_non_empty_pin_proof(pin_proof)?;
+
         // Load user and device session separately
         let user = self
             .user_repo
@@ -535,13 +574,13 @@ impl AuthenticationService {
 
         // Enforce legacy trust window when no explicit trusted_until exists.
         if session.trusted_until().is_none()
-            && Utc::now() - session.last_activity() > Duration::days(30)
+            && Utc::now() - session.last_activity() > trust_duration
         {
             return Err(AuthenticationError::DeviceNotTrusted);
         }
 
         // Enforce lockout gate then verify the user-level PIN proof
-        if let Err(err) = session.ensure_pin_available(3) {
+        if let Err(err) = session.ensure_pin_available(max_attempts) {
             let events = session.take_events();
             self.session_repo.save(&session).await?;
             self.publish_events(events, AuthEventContext::default())
@@ -554,12 +593,18 @@ impl AuthenticationService {
             .map_err(|_| AuthenticationError::InvalidPin)?;
 
         let session_token = if verified {
-            session.record_pin_success();
+            session.record_pin_success_for(trust_duration);
             session
-                .issue_pin_session(Duration::hours(24))
+                .issue_pin_session_with_trust_duration(
+                    Duration::hours(24),
+                    trust_duration,
+                )
                 .map_err(|_| AuthenticationError::InvalidCredentials)?
         } else {
-            let err = session.register_pin_failure(3);
+            let err = session.register_pin_failure_with_lockout(
+                max_attempts,
+                lockout_duration,
+            );
             let events = session.take_events();
             // persist device changes (failed attempt)
             self.session_repo.save(&session).await?;
@@ -642,6 +687,23 @@ impl AuthenticationService {
         &self,
         refresh_token: &str,
     ) -> Result<TokenBundle, AuthenticationError> {
+        self.refresh_session_with_policy(
+            refresh_token,
+            3,
+            Duration::minutes(5),
+            Duration::days(30),
+        )
+        .await
+    }
+
+    /// Refresh a session using configured PIN lockout and device trust policy.
+    pub async fn refresh_session_with_policy(
+        &self,
+        refresh_token: &str,
+        max_attempts: u8,
+        _lockout_duration: Duration,
+        trust_duration: Duration,
+    ) -> Result<TokenBundle, AuthenticationError> {
         let token_hash = self.crypto.hash_token(refresh_token);
 
         let record = self
@@ -695,13 +757,25 @@ impl AuthenticationService {
                 return Err(AuthenticationError::DeviceNotTrusted);
             }
 
+            let now = Utc::now();
+            if let Some(trusted_until) = session.trusted_until() {
+                if trusted_until < now {
+                    return Err(AuthenticationError::DeviceNotTrusted);
+                }
+            } else if now - session.last_activity() > trust_duration {
+                return Err(AuthenticationError::DeviceNotTrusted);
+            }
+
             if record.origin_scope == SessionScope::Playback {
                 session
-                    .ensure_pin_available(3)
+                    .ensure_pin_available(max_attempts)
                     .map_err(map_device_pin_error)?;
 
                 let session_token = session
-                    .refresh_token(Duration::hours(24))
+                    .refresh_token_with_trust_duration(
+                        Duration::hours(24),
+                        trust_duration,
+                    )
                     .map_err(|_| AuthenticationError::SessionExpired)?;
 
                 let persisted_hash =
@@ -778,7 +852,7 @@ impl AuthenticationService {
                     scope: SessionScope::Playback,
                 })
             } else {
-                session.update_activity();
+                session.update_activity_with_trust_duration(trust_duration);
                 self.session_repo.save(&session).await?;
 
                 let session_token = SessionToken::generate(Duration::hours(24))
@@ -923,6 +997,32 @@ impl AuthenticationService {
         challenge_id: Uuid,
         device_signature: &[u8],
     ) -> Result<TokenBundle, AuthenticationError> {
+        self.authenticate_with_pin_session_with_policy(
+            device_session_id,
+            pin_proof,
+            challenge_id,
+            device_signature,
+            3,
+            Duration::minutes(5),
+            Duration::days(30),
+        )
+        .await
+    }
+
+    /// Authenticate using a PIN proof and device challenge with configured policy.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn authenticate_with_pin_session_with_policy(
+        &self,
+        device_session_id: Uuid,
+        pin_proof: &str,
+        challenge_id: Uuid,
+        device_signature: &[u8],
+        max_attempts: u8,
+        lockout_duration: Duration,
+        trust_duration: Duration,
+    ) -> Result<TokenBundle, AuthenticationError> {
+        ensure_non_empty_pin_proof(pin_proof)?;
+
         let mut session = self
             .session_repo
             .find_by_id(device_session_id)
@@ -980,12 +1080,12 @@ impl AuthenticationService {
 
         // Enforce legacy trust window when no explicit trusted_until exists.
         if session.trusted_until().is_none()
-            && Utc::now() - session.last_activity() > Duration::days(30)
+            && Utc::now() - session.last_activity() > trust_duration
         {
             return Err(AuthenticationError::DeviceNotTrusted);
         }
 
-        if let Err(err) = session.ensure_pin_available(3) {
+        if let Err(err) = session.ensure_pin_available(max_attempts) {
             let events = session.take_events();
             self.session_repo.save(&session).await?;
             self.publish_events(events, AuthEventContext::default())
@@ -998,12 +1098,18 @@ impl AuthenticationService {
             .map_err(|_| AuthenticationError::InvalidPin)?;
 
         let session_token = if verified {
-            session.record_pin_success();
+            session.record_pin_success_for(trust_duration);
             session
-                .issue_pin_session(Duration::hours(24))
+                .issue_pin_session_with_trust_duration(
+                    Duration::hours(24),
+                    trust_duration,
+                )
                 .map_err(|_| AuthenticationError::InvalidCredentials)?
         } else {
-            let err = session.register_pin_failure(3);
+            let err = session.register_pin_failure_with_lockout(
+                max_attempts,
+                lockout_duration,
+            );
             let events = session.take_events();
             self.session_repo.save(&session).await?;
             self.publish_events(events, AuthEventContext::default())
@@ -1259,6 +1365,13 @@ impl AuthenticationService {
             .map_err(AuthenticationError::from)?;
         Ok((id, nonce))
     }
+}
+
+fn ensure_non_empty_pin_proof(proof: &str) -> Result<(), AuthenticationError> {
+    if proof.trim().is_empty() {
+        return Err(AuthenticationError::InvalidPin);
+    }
+    Ok(())
 }
 
 fn map_device_pin_error(err: DeviceSessionError) -> AuthenticationError {
