@@ -200,6 +200,8 @@ pub enum SettingsUiMessage {
     UpdateLibraryFormPaths(String), // Proxy for Library::UpdateLibraryFormPaths
     UpdateLibraryFormScanInterval(String), // Proxy for Library::UpdateLibraryFormScanInterval
     ToggleLibraryFormEnabled, // Proxy for Library::ToggleLibraryFormEnabled
+    ToggleLibraryFormAutoScan, // Proxy for Library::ToggleLibraryFormAutoScan
+    ToggleLibraryFormWatchForChanges, // Proxy for Library::ToggleLibraryFormWatchForChanges
     ToggleLibraryFormStartScan, // Proxy for Library::ToggleLibraryFormStartScan
     SubmitLibraryForm,        // Proxy for Library::SubmitLibraryForm
     LibraryMediaRoot(media_root_browser::Message), // Proxy collection for media root browser actions
@@ -332,6 +334,10 @@ impl SettingsUiMessage {
                 "UI::UpdateLibraryFormScanInterval"
             }
             Self::ToggleLibraryFormEnabled => "UI::ToggleLibraryFormEnabled",
+            Self::ToggleLibraryFormAutoScan => "UI::ToggleLibraryFormAutoScan",
+            Self::ToggleLibraryFormWatchForChanges => {
+                "UI::ToggleLibraryFormWatchForChanges"
+            }
             Self::ToggleLibraryFormStartScan => {
                 "UI::ToggleLibraryFormStartScan"
             }
@@ -497,6 +503,12 @@ impl std::fmt::Debug for SettingsUiMessage {
             }
             SettingsUiMessage::ToggleLibraryFormEnabled => {
                 write!(f, "UI::ToggleLibraryFormEnabled")
+            }
+            SettingsUiMessage::ToggleLibraryFormAutoScan => {
+                write!(f, "UI::ToggleLibraryFormAutoScan")
+            }
+            SettingsUiMessage::ToggleLibraryFormWatchForChanges => {
+                write!(f, "UI::ToggleLibraryFormWatchForChanges")
             }
             SettingsUiMessage::ToggleLibraryFormStartScan => {
                 write!(f, "UI::ToggleLibraryFormStartScan")

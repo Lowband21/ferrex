@@ -16,7 +16,7 @@ use crate::{
     types::{ids::LibraryId, prelude::LibraryReference},
 };
 
-use super::folder::is_media_file_path;
+use super::folder::ScannerFileFilterPolicy;
 use super::messages::{ActorObserver, IssuedJobRecord};
 use crate::domain::scan::orchestration::context::{
     FolderScanContext, MovieFolderScanContext, MovieRootPath,
@@ -250,6 +250,7 @@ where
     _observer: Arc<O>,
     _events: Arc<E>,
     _correlations: CorrelationCache,
+    file_filters: ScannerFileFilterPolicy,
 }
 
 impl<Q, O, E> fmt::Debug for DefaultLibraryActor<Q, O, E>
@@ -317,6 +318,24 @@ where
         events: Arc<E>,
         correlations: CorrelationCache,
     ) -> Self {
+        Self::with_file_filter_policy(
+            config,
+            queue,
+            observer,
+            events,
+            correlations,
+            ScannerFileFilterPolicy::default(),
+        )
+    }
+
+    pub fn with_file_filter_policy(
+        config: LibraryActorConfig,
+        queue: Arc<Q>,
+        observer: Arc<O>,
+        events: Arc<E>,
+        correlations: CorrelationCache,
+        file_filters: ScannerFileFilterPolicy,
+    ) -> Self {
         Self {
             config,
             state: LibraryActorState::default(),
@@ -324,6 +343,7 @@ where
             _observer: observer,
             _events: events,
             _correlations: correlations,
+            file_filters,
         }
     }
 
@@ -566,7 +586,7 @@ where
                     if ev.path.is_dir() {
                         return true;
                     }
-                    is_media_file_path(&ev.path)
+                    self.file_filters.is_media_file_path(&ev.path)
                 })
                 .collect();
             let dropped = total_changes.saturating_sub(filtered.len());

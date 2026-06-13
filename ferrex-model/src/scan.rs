@@ -96,7 +96,7 @@ pub mod scanner {
         /// Default file extensions treated as video assets by the scanner.
         pub const DEFAULT_VIDEO_FILE_EXTENSIONS: &[&str] = &[
             "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v", "mpg",
-            "mpeg",
+            "mpeg", "3gp", "ts",
         ];
 
         /// Convenience helper for consumers that work with owned strings.
@@ -117,6 +117,7 @@ pub mod orchestration {
         /// Configuration for workload limits.
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct BudgetConfig {
             /// Default 1 - one library scan at a time.
             pub library_scan_limit: usize,
@@ -159,6 +160,7 @@ pub mod orchestration {
         /// new scheduling features without supplying a full configuration payload.
         #[derive(Clone, Debug, Default)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct OrchestratorConfig {
             /// Queue sizing, fairness weights, and per-library overrides.
             pub queue: QueueConfig,
@@ -183,6 +185,7 @@ pub mod orchestration {
 
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct QueueConfig {
             /// Maximum worker concurrency per queue. These values drive worker pool sizes.
             pub max_parallel_scans: usize,
@@ -241,6 +244,7 @@ pub mod orchestration {
         /// Lease/heartbeat tuning for worker tasks.
         #[derive(Clone, Copy, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct LeaseConfig {
             /// Default TTL for job leases (seconds).
             pub lease_ttl_secs: i64,
@@ -265,6 +269,7 @@ pub mod orchestration {
 
         #[derive(Clone, Copy, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct PriorityWeights {
             pub p0: u8,
             pub p1: u8,
@@ -285,6 +290,7 @@ pub mod orchestration {
 
         #[derive(Clone, Copy, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct RetryConfig {
             pub max_attempts: u16,
             pub backoff_base_ms: u64,
@@ -331,6 +337,7 @@ pub mod orchestration {
 
         #[derive(Clone, Copy, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct MetadataLimits {
             pub max_concurrency: usize,
             pub max_qps: u32,
@@ -347,6 +354,7 @@ pub mod orchestration {
 
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct BulkModeTuning {
             pub speedup_factor: f32,
             pub maintenance_partition_count: usize,
@@ -364,6 +372,7 @@ pub mod orchestration {
         /// Cursor-based incremental maintenance scheduler controls.
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct MaintenanceConfig {
             /// Enables periodic maintenance sweeps for libraries with `auto_scan=true`.
             #[cfg_attr(
@@ -466,6 +475,7 @@ pub mod orchestration {
         /// Tuning controls for filesystem watch coalescing.
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
         pub struct WatchConfig {
             /// Debounce window in milliseconds.
             pub debounce_window_ms: u64,
