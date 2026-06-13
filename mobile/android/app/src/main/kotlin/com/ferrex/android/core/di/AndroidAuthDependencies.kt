@@ -19,6 +19,9 @@ import com.ferrex.android.core.library.OkHttpLibrarySyncTransport
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.OkHttpContinueWatchingTransport
+import com.ferrex.android.core.watch.OkHttpWatchStateTransport
+import com.ferrex.android.core.watch.WatchRepository
+import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -45,11 +48,18 @@ class AndroidAuthDependencies(
     private val libraryTransport = OkHttpLibrarySyncTransport(httpClient, serverConfig)
     private val imageTransport = OkHttpImageManifestTransport(httpClient, serverConfig)
     private val continueWatchingTransport = OkHttpContinueWatchingTransport(httpClient, serverConfig)
+    private val watchStateTransport = OkHttpWatchStateTransport(httpClient, serverConfig)
 
     val libraryIndexTransport = OkHttpLibraryIndexTransport(httpClient, serverConfig)
+    val watchStateInvalidationBus = WatchStateInvalidationBus()
 
     val continueWatchingRepository = ContinueWatchingRepository(
         transport = continueWatchingTransport,
+    )
+
+    val watchRepository = WatchRepository(
+        transport = watchStateTransport,
+        invalidationBus = watchStateInvalidationBus,
     )
 
     val imageRepository = ImageRepository(

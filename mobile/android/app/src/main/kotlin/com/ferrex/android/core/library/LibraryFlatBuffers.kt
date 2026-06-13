@@ -19,6 +19,7 @@ import ferrex.library.SeriesBundleVersion
 import ferrex.media.EpisodeReference
 import ferrex.media.MediaVariant
 import ferrex.media.MovieReference
+import ferrex.media.SeasonReference
 import ferrex.media.SeriesReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -256,6 +257,10 @@ class MovieLibraryAccessor internal constructor(
 
     fun movieAt(index: Int): MovieReference? = movieReferences.getOrNull(index)
 
+    fun movieById(mediaId: String): MovieReference? = movieReferences.firstOrNull { movie ->
+        runCatching { movie.id.toUuidString() }.getOrNull() == mediaId
+    }
+
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
         for (index in movieReferences.indices) {
             val details = movieAt(index)?.details ?: continue
@@ -330,25 +335,81 @@ class SeriesLibraryAccessor internal constructor(
         }
     }
 
+    private val seasonReferences: List<SeasonReference> by lazy {
+        bundles.flatMap(::seasonReferencesInBundle)
+            .sortedWith(compareBy<SeasonReference> { it.seriesId.toUuidString() }.thenBy { it.seasonNumber.toInt() })
+    }
+
     private val episodeReferences: List<EpisodeReference> by lazy {
-        buildList {
-            bundles.forEach { bundle ->
-                for (itemIndex in 0 until bundle.data.itemsLength) {
-                    val item = bundle.data.items(itemIndex) ?: continue
-                    if (item.variantType == MediaVariant.EpisodeReference) {
-                        (item.variant(EpisodeReference()) as? EpisodeReference)?.let(::add)
-                    }
-                }
-            }
-        }
+        bundles.flatMap(::episodeReferencesInBundle)
+            .sortedWith(
+                compareBy<EpisodeReference> { it.seriesId.toUuidString() }
+                    .thenBy { it.seasonNumber.toInt() }
+                    .thenBy { it.episodeNumber.toInt() },
+            )
     }
 
     val seriesReferenceCount: Int get() = seriesReferences.size
+    val seasonCount: Int get() = seasonReferences.size
     val episodeCount: Int get() = episodeReferences.size
 
     fun seriesAt(index: Int): SeriesReference? = seriesReferences.getOrNull(index)
 
+    fun seasonAt(index: Int): SeasonReference? = seasonReferences.getOrNull(index)
+
     fun episodeAt(index: Int): EpisodeReference? = episodeReferences.getOrNull(index)
+
+    fun seriesById(seriesId: String): SeriesReference? = seriesReferences.firstOrNull { series ->
+        runCatching { series.id.toUuidString() }.getOrNull() == seriesId
+    }
+
+    fun episodeById(episodeId: String): EpisodeReference? = episodeReferences.firstOrNull { episode ->
+        runCatching { episode.id.toUuidString() }.getOrNull() == episodeId
+    }
+
+    fun bundleForSeries(seriesId: String): SeriesBundleAccessor? {
+        val bundle = bundles.firstOrNull { it.seriesId == seriesId } ?: return null
+        return SeriesBundleAccessor(
+            seriesId = seriesId,
+            seriesReferences = seriesReferencesInBundle(bundle).filter { runCatching { it.id.toUuidString() }.getOrNull() == seriesId },
+            seasons = seasonReferencesInBundle(bundle).filter { runCatching { it.seriesId.toUuidString() }.getOrNull() == seriesId },
+            episodes = episodeReferencesInBundle(bundle).filter { runCatching { it.seriesId.toUuidString() }.getOrNull() == seriesId },
+        )
+    }
+
+    fun seasonsForSeries(seriesId: String): List<SeasonReference> = bundleForSeries(seriesId)?.seasons.orEmpty()
+
+    fun episodesForSeries(seriesId: String): List<EpisodeReference> = bundleForSeries(seriesId)?.episodes.orEmpty()
+
+    fun episodesForSeason(seriesId: String, seasonNumber: Int): List<EpisodeReference> = episodesForSeries(seriesId)
+        .filter { it.seasonNumber.toInt() == seasonNumber }
+
+    private fun seriesReferencesInBundle(bundle: ParsedSeriesBundle): List<SeriesReference> = buildList {
+        for (itemIndex in 0 until bundle.data.itemsLength) {
+            val item = bundle.data.items(itemIndex) ?: continue
+            if (item.variantType == MediaVariant.SeriesReference) {
+                (item.variant(SeriesReference()) as? SeriesReference)?.let(::add)
+            }
+        }
+    }
+
+    private fun seasonReferencesInBundle(bundle: ParsedSeriesBundle): List<SeasonReference> = buildList {
+        for (itemIndex in 0 until bundle.data.itemsLength) {
+            val item = bundle.data.items(itemIndex) ?: continue
+            if (item.variantType == MediaVariant.SeasonReference) {
+                (item.variant(SeasonReference()) as? SeasonReference)?.let(::add)
+            }
+        }
+    }
+
+    private fun episodeReferencesInBundle(bundle: ParsedSeriesBundle): List<EpisodeReference> = buildList {
+        for (itemIndex in 0 until bundle.data.itemsLength) {
+            val item = bundle.data.items(itemIndex) ?: continue
+            if (item.variantType == MediaVariant.EpisodeReference) {
+                (item.variant(EpisodeReference()) as? EpisodeReference)?.let(::add)
+            }
+        }
+    }
 
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
         for (index in seriesReferences.indices) {
@@ -406,4 +467,16 @@ class SeriesLibraryAccessor internal constructor(
             if (size >= limit) return@buildList
         }
     }
+}
+
+class SeriesBundleAccessor internal constructor(
+    val seriesId: String,
+    val seriesReferences: List<SeriesReference>,
+    val seasons: List<SeasonReference>,
+    val episodes: List<EpisodeReference>,
+) {
+    val series: SeriesReference? get() = seriesReferences.firstOrNull()
+
+    fun episodesForSeason(seasonNumber: Int): List<EpisodeReference> = episodes
+        .filter { it.seasonNumber.toInt() == seasonNumber }
 }

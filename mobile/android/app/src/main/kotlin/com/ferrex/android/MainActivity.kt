@@ -36,6 +36,8 @@ class MainActivity : ComponentActivity() {
                     imageRepository = dependencies.imageRepository,
                     imagePipeline = dependencies.imagePipeline,
                     continueWatchingRepository = dependencies.continueWatchingRepository,
+                    watchRepository = dependencies.watchRepository,
+                    watchStateInvalidationBus = dependencies.watchStateInvalidationBus,
                 )
             }
         }

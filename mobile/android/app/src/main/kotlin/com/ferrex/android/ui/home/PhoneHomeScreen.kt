@@ -49,6 +49,7 @@ import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.LibraryIndexResult
 import com.ferrex.android.core.browse.LibraryIndexTransport
 import com.ferrex.android.core.browse.LibraryMediaCard
+import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.browse.MovieFilterMode
 import com.ferrex.android.core.browse.MovieSortMode
 import com.ferrex.android.core.image.FerrexImagePipeline
@@ -56,6 +57,9 @@ import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.image.PosterOnlyIidFallback
+import com.ferrex.android.core.detail.DetailCache
+import com.ferrex.android.core.detail.DetailLoadResult
+import com.ferrex.android.core.detail.PlaybackRouteContract
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
 import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
@@ -69,8 +73,12 @@ import com.ferrex.android.core.watch.ContinueWatchingCard
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.ContinueWatchingStatus
+import com.ferrex.android.core.watch.WatchRepository
+import com.ferrex.android.core.watch.WatchRepositoryState
+import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
+import com.ferrex.android.ui.detail.PhoneDetailScreen
 import kotlinx.coroutines.launch
 
 @Composable
@@ -81,6 +89,8 @@ fun PhoneHomeScreen(
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
     continueWatchingRepository: ContinueWatchingRepository? = null,
+    watchRepository: WatchRepository? = null,
+    watchStateInvalidationBus: WatchStateInvalidationBus? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
@@ -90,6 +100,8 @@ fun PhoneHomeScreen(
     val repositoryState by libraryRepository?.state?.collectAsState() ?: emptyRepositoryState
     val emptyContinueState = remember { mutableStateOf(ContinueWatchingState()) }
     val continueState by continueWatchingRepository?.state?.collectAsState() ?: emptyContinueState
+    val emptyWatchState = remember { mutableStateOf(WatchRepositoryState()) }
+    val watchState by watchRepository?.state?.collectAsState() ?: emptyWatchState
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(HomeLibraryTab.Movies) }
     var selectedMovieLibraryId by remember { mutableStateOf<String?>(null) }
@@ -97,13 +109,22 @@ fun PhoneHomeScreen(
     var movieSort by remember { mutableStateOf(MovieSortMode.TitleAsc) }
     var movieFilter by remember { mutableStateOf(MovieFilterMode.All) }
     var movieIndexState by remember { mutableStateOf<MovieIndexUiState>(MovieIndexUiState.Idle) }
-    var selectedRoute by remember { mutableStateOf<String?>(null) }
+    var selectedDetailRoute by remember { mutableStateOf<MediaRouteArgs?>(null) }
+    var preparedPlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
 
     LaunchedEffect(libraryRepository, scope) {
         libraryRepository?.refreshLibraries(scope)
     }
     LaunchedEffect(continueWatchingRepository, state.serverUrl, state.user.id) {
         continueWatchingRepository?.refresh()
+    }
+    LaunchedEffect(watchStateInvalidationBus, continueWatchingRepository) {
+        watchStateInvalidationBus?.events?.collect {
+            continueWatchingRepository?.refresh()
+        }
+    }
+    LaunchedEffect(selectedDetailRoute) {
+        preparedPlaybackContract = null
     }
 
     val movieLibraries = repositoryState?.movieLibraries.orEmpty()
@@ -172,12 +193,25 @@ fun PhoneHomeScreen(
         LibraryBrowseModels.homeShelves(movieLibraries, seriesLibraries)
     }
     val imageLoader = remember(imagePipeline, scope) { imagePipeline?.imageLoader(scope) }
-    val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab) {
+    val detailResult = remember(repositoryState, selectedDetailRoute) {
+        selectedDetailRoute?.let { DetailCache.resolve(repositoryState, it) }
+    }
+    LaunchedEffect(detailResult, watchRepository) {
+        when (val detail = detailResult) {
+            is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Missing,
+            null -> Unit
+        }
+    }
+    val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab, detailResult) {
         buildList {
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
             val gridCards = if (selectedTab == HomeLibraryTab.Movies) indexedMovieCards.cards else selectedSeriesCards
             gridCards.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
+            DetailCache.imageKeys(detailResult).forEach(::add)
         }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT).toSet()
     }
     var imageResolutions by remember(scope.directoryName) { mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap()) }
@@ -189,20 +223,76 @@ fun PhoneHomeScreen(
         }
     }
 
+    fun retryDetailCacheSync(route: MediaRouteArgs?) {
+        coroutineScope.launch {
+            val libraryId = route?.libraryId
+            val library = repositoryState?.libraries.orEmpty().firstOrNull { it.id == libraryId }
+            when (route?.mediaType) {
+                com.ferrex.android.core.browse.BrowseMediaType.Movie -> if (library != null) {
+                    libraryRepository?.syncMovieLibrary(scope, library, repositoryState?.libraries.orEmpty())
+                } else {
+                    libraryRepository?.refreshLibraries(scope, libraryId)
+                }
+                com.ferrex.android.core.browse.BrowseMediaType.Series,
+                com.ferrex.android.core.browse.BrowseMediaType.Episode -> if (library != null) {
+                    libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
+                } else {
+                    libraryRepository?.refreshLibraries(scope, libraryId)
+                }
+                com.ferrex.android.core.browse.BrowseMediaType.Unknown,
+                null -> libraryRepository?.refreshLibraries(scope, libraryId)
+            }
+        }
+    }
+
+    fun retryDetailWatch(detail: DetailLoadResult?) {
+        coroutineScope.launch {
+            when (detail) {
+                is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
+                is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
+                is DetailLoadResult.Missing,
+                null -> Unit
+            }
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
-        ) {
+        if (detailResult != null && selectedDetailRoute != null) {
+            PhoneDetailScreen(
+                detailResult = detailResult,
+                watchState = watchState,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoader != null,
+                imageLoader = imageLoader,
+                scope = scope,
+                preparedPlaybackContract = preparedPlaybackContract,
+                onBack = { selectedDetailRoute = null },
+                onRetryCacheSync = { retryDetailCacheSync(selectedDetailRoute) },
+                onClearSelectedCache = { selectedDetailRoute?.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onRetryWatch = { retryDetailWatch(detailResult) },
+                onRetryEpisodes = { retryDetailCacheSync(selectedDetailRoute) },
+                onMarkMovieWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markMovieWatched(mediaId, watched) } },
+                onMarkEpisodeWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markEpisodeWatched(mediaId, watched) } },
+                onMarkSeriesWatched = { tmdbId, watched -> coroutineScope.launch { watchRepository?.markSeriesWatched(tmdbId, watched) } },
+                onPlaybackContract = { preparedPlaybackContract = it },
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
             item {
                 HomeHeader(
                     state = state,
-                    selectedRoute = selectedRoute,
+                    selectedRoute = preparedPlaybackContract?.toDisplayString(),
                     onSignOut = onSignOut,
                 )
             }
@@ -214,7 +304,7 @@ fun PhoneHomeScreen(
                     imageLoader = imageLoader,
                     scope = scope,
                     onRetry = { coroutineScope.launch { continueWatchingRepository?.refresh() } },
-                    onSelect = { selectedRoute = it.route.toRouteString() },
+                    onSelect = { selectedDetailRoute = it.route },
                 )
             }
             if (shelves.isNotEmpty()) {
@@ -225,7 +315,7 @@ fun PhoneHomeScreen(
                         imageLoaderAvailable = imageLoader != null,
                         imageLoader = imageLoader,
                         scope = scope,
-                        onSelect = { selectedRoute = it.route.toRouteString() },
+                        onSelect = { selectedDetailRoute = it.route },
                     )
                 }
             } else {
@@ -261,7 +351,7 @@ fun PhoneHomeScreen(
                     imageLoaderAvailable = imageLoader != null,
                     imageLoader = imageLoader,
                     scope = scope,
-                    onSelect = { selectedRoute = it.route.toRouteString() },
+                    onSelect = { selectedDetailRoute = it.route },
                     onSyncSelected = {
                         coroutineScope.launch {
                             when (selectedTab) {
@@ -296,6 +386,7 @@ fun PhoneHomeScreen(
                 )
             }
         }
+        }
     }
 }
 
@@ -326,7 +417,7 @@ private fun HomeHeader(
         }
         selectedRoute?.let {
             Text(
-                text = "Prepared details route: $it",
+                text = "Prepared playback contract: $it",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
