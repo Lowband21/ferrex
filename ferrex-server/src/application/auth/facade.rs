@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Error as AnyhowError;
+use chrono::Duration;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
     database::repository_ports::users::UsersRepository,
     domain::users::{
         auth::domain::{
-            aggregates::DeviceSession,
+            aggregates::{DeviceSession, DeviceSessionClientMetadata},
             repositories::AuthSessionRecord,
             services::{
                 AuthEventContext, AuthenticationError, AuthenticationService,
@@ -102,20 +103,32 @@ impl AuthApplicationFacade {
         password: &str,
         fingerprint: DeviceFingerprint,
         device_name: String,
+        metadata: DeviceSessionClientMetadata,
+        trust_duration: Duration,
         context: AuthEventContext,
     ) -> Result<(TokenBundle, DeviceSession), AuthFacadeError> {
-        let bundle = self
+        let user = self
             .auth_service
-            .authenticate_with_password(username, password)
+            .authenticate_user(username, password)
             .await?;
 
         let session = self
             .device_trust_service
-            .register_device(
-                bundle.user_id,
+            .register_device_with_metadata(
+                user.user_id(),
                 fingerprint,
                 device_name,
+                metadata,
                 Some(context),
+            )
+            .await?;
+
+        let (bundle, session) = self
+            .auth_service
+            .issue_device_password_session_with_policy(
+                user.user_id(),
+                session.id(),
+                trust_duration,
             )
             .await?;
 
@@ -196,30 +209,29 @@ impl AuthApplicationFacade {
         &self,
         fingerprint: &DeviceFingerprint,
     ) -> Result<(bool, Vec<User>, HashMap<Uuid, bool>), AuthFacadeError> {
-        let known = self
+        let pin_map: HashMap<Uuid, bool> = self
             .device_trust_service
-            .is_known_device(fingerprint)
-            .await?;
+            .pin_status_by_device(fingerprint)
+            .await?
+            .into_iter()
+            .map(|status| (status.user_id, status.has_pin))
+            .collect();
+
+        if pin_map.is_empty() {
+            return Ok((false, Vec::new(), HashMap::new()));
+        }
 
         let users = self
             .unit_of_work
             .users
             .get_all_users()
             .await
-            .map_err(|err| AuthFacadeError::Storage(err.into()))?;
+            .map_err(|err| AuthFacadeError::Storage(err.into()))?
+            .into_iter()
+            .filter(|user| pin_map.contains_key(&user.id))
+            .collect();
 
-        let pin_map = if known {
-            self.device_trust_service
-                .pin_status_by_device(fingerprint)
-                .await?
-                .into_iter()
-                .map(|status| (status.user_id, status.has_pin))
-                .collect()
-        } else {
-            HashMap::new()
-        };
-
-        Ok((known, users, pin_map))
+        Ok((true, users, pin_map))
     }
 
     pub async fn revoke_device(
@@ -241,10 +253,18 @@ impl AuthApplicationFacade {
         fingerprint: &DeviceFingerprint,
         new_pin: String,
         policy: &PinPolicy,
+        trust_duration: Duration,
         context: Option<AuthEventContext>,
     ) -> Result<(), AuthFacadeError> {
         self.pin_management_service
-            .set_pin(user_id, fingerprint, new_pin, policy, context)
+            .set_pin_with_policy(
+                user_id,
+                fingerprint,
+                new_pin,
+                policy,
+                trust_duration,
+                context,
+            )
             .await?;
         Ok(())
     }
@@ -299,16 +319,20 @@ impl AuthApplicationFacade {
         new_pin: String,
         policy: &PinPolicy,
         max_attempts: u8,
+        lockout_duration: Duration,
+        trust_duration: Duration,
         context: Option<AuthEventContext>,
     ) -> Result<(), AuthFacadeError> {
         self.pin_management_service
-            .rotate_pin(
+            .rotate_pin_with_policy(
                 user_id,
                 fingerprint,
                 current_pin,
                 new_pin,
                 policy,
                 max_attempts,
+                lockout_duration,
+                trust_duration,
                 context,
             )
             .await?;

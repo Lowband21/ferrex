@@ -89,6 +89,7 @@ impl StubAuthService {
                 device_registered: true,
                 has_pin: false,
                 remaining_attempts: Some(5),
+                ..DeviceAuthStatus::default()
             },
         );
 
@@ -126,6 +127,7 @@ impl StubAuthService {
                     device_registered: true,
                     has_pin: false,
                     remaining_attempts: Some(5),
+                    ..DeviceAuthStatus::default()
                 },
             );
         }
@@ -207,6 +209,7 @@ impl InnerAuthState {
                 device_registered: true,
                 has_pin: false,
                 remaining_attempts: Some(5),
+                ..DeviceAuthStatus::default()
             },
         );
 
@@ -294,6 +297,14 @@ impl AuthService for StubAuthService {
         })
     }
 
+    async fn change_password(
+        &self,
+        _current_password: String,
+        _new_password: String,
+    ) -> RepositoryResult<()> {
+        Ok(())
+    }
+
     async fn set_device_pin(&self, pin: String) -> RepositoryResult<()> {
         let has_pin = !pin.trim().is_empty();
         if let Ok(mut guard) = self.inner.write() {
@@ -305,9 +316,50 @@ impl AuthService for StubAuthService {
                         device_registered: true,
                         has_pin,
                         remaining_attempts: Some(5),
+                        ..DeviceAuthStatus::default()
                     },
                 );
             }
+        }
+        Ok(())
+    }
+
+    async fn change_device_pin(
+        &self,
+        _current_pin: String,
+        new_pin: String,
+    ) -> RepositoryResult<()> {
+        self.set_device_pin(new_pin).await
+    }
+
+    async fn remove_device_pin(
+        &self,
+        _current_pin: String,
+    ) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            let user_id = guard.current_user.as_ref().map(|user| user.id);
+            if let Some(user_id) = user_id {
+                guard.device_status.insert(
+                    user_id,
+                    DeviceAuthStatus {
+                        device_registered: true,
+                        has_pin: false,
+                        remaining_attempts: Some(5),
+                        ..DeviceAuthStatus::default()
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn reset_local_auth_state(&self) -> RepositoryResult<()> {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.current_user = None;
+            guard.current_permissions = None;
+            guard.stored_auth = None;
+            guard.auth_token = None;
+            guard.auto_login.clear();
         }
         Ok(())
     }
@@ -443,6 +495,18 @@ impl AuthService for StubAuthService {
 
     async fn current_device_id(&self) -> RepositoryResult<Uuid> {
         Ok(self.inner.read().expect("lock poisoned").device_id)
+    }
+
+    async fn current_device_session_id(
+        &self,
+    ) -> RepositoryResult<Option<Uuid>> {
+        Ok(self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .auth_token
+            .as_ref()
+            .and_then(|token| token.device_session_id))
     }
 
     async fn authenticate(

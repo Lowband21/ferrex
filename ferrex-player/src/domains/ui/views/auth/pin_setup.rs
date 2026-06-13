@@ -6,7 +6,12 @@ use super::components::{
 };
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
+use crate::domains::auth::pin_policy::{
+    PinPolicyRules, pin_pair_satisfies_policy, pin_satisfies_policy,
+    policy_label_for,
+};
 use crate::domains::auth::security::secure_credential::SecureCredential;
+use crate::domains::auth::types::PinEntryTarget;
 use crate::state::State;
 use ferrex_core::player_prelude::User;
 use iced::{
@@ -27,14 +32,34 @@ pub fn view_pin_setup<'a>(
     user: &'a User,
     pin: &'a SecureCredential,
     confirm_pin: &'a SecureCredential,
+    pin_entry_target: PinEntryTarget,
     error: Option<&'a str>,
 ) -> Element<'a, DomainMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
+    let policy: PinPolicyRules = (&state.domains.auth.state.pin_policy).into();
+    let max_length = policy.max_length;
+    let pin_is_valid = pin_satisfies_policy(pin.as_str(), policy);
+    let effective_target =
+        if pin_entry_target == PinEntryTarget::ConfirmPin && pin_is_valid {
+            PinEntryTarget::ConfirmPin
+        } else {
+            PinEntryTarget::Pin
+        };
 
     let mut content = column![
         title("Set Up PIN", fonts.title_lg),
-        text(format!("Create a 4-digit PIN for {}", user.display_name))
+        text(format!("Create a secure PIN for {}", user.display_name))
             .size(fonts.body)
+            .style(|theme: &Theme| {
+                text::Style {
+                    color: Some(
+                        theme.extended_palette().background.strong.text,
+                    ),
+                }
+            })
+            .align_x(iced::alignment::Horizontal::Center),
+        text(policy_label_for(policy))
+            .size(fonts.caption)
             .style(|theme: &Theme| {
                 text::Style {
                     color: Some(
@@ -62,7 +87,7 @@ pub fn view_pin_setup<'a>(
     content = content.push(Space::new().height(Length::Fixed(8.0)));
 
     content = content.push(
-        container(pin_display(pin.as_str(), false, fonts.title))
+        container(pin_display(pin.as_str(), false, fonts.title, max_length))
             .width(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center),
     );
@@ -79,19 +104,49 @@ pub fn view_pin_setup<'a>(
     content = content.push(Space::new().height(Length::Fixed(8.0)));
 
     content = content.push(
-        container(pin_display(confirm_pin.as_str(), true, fonts.title))
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center),
+        container(pin_display(
+            confirm_pin.as_str(),
+            true,
+            fonts.title,
+            max_length,
+        ))
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center),
+    );
+
+    content = content.push(spacing());
+
+    let edit_pin = secondary_button("Edit PIN", fonts.caption).on_press(
+        DomainMessage::Auth(auth::AuthMessage::SelectPinEntryTarget(
+            PinEntryTarget::Pin,
+        )),
+    );
+    let mut edit_confirm = secondary_button("Confirm PIN", fonts.caption);
+    if pin_is_valid {
+        edit_confirm = edit_confirm.on_press(DomainMessage::Auth(
+            auth::AuthMessage::SelectPinEntryTarget(PinEntryTarget::ConfirmPin),
+        ));
+    }
+    content = content.push(
+        row![edit_pin, edit_confirm]
+            .spacing(8)
+            .align_y(Alignment::Center),
     );
 
     content = content.push(spacing());
 
     // Numeric keypad
-    let keypad = if pin.len() < 4 {
-        numeric_keypad(pin.as_str(), false, fonts.title, fonts.body)
-    } else {
-        numeric_keypad(confirm_pin.as_str(), true, fonts.title, fonts.body)
+    let (keypad_value, is_confirm) = match effective_target {
+        PinEntryTarget::Pin => (pin.as_str(), false),
+        PinEntryTarget::ConfirmPin => (confirm_pin.as_str(), true),
     };
+    let keypad = numeric_keypad(
+        keypad_value,
+        is_confirm,
+        fonts.title,
+        fonts.body,
+        max_length,
+    );
 
     content = content.push(
         container(keypad)
@@ -102,7 +157,8 @@ pub fn view_pin_setup<'a>(
     content = content.push(spacing());
 
     // Submit button
-    let can_submit = pin.len() == 4 && confirm_pin.len() == 4;
+    let can_submit =
+        pin_pair_satisfies_policy(pin.as_str(), confirm_pin.as_str(), policy);
     let submit_button = if can_submit {
         primary_button("Set PIN", fonts.body)
             .on_press(DomainMessage::Auth(auth::AuthMessage::SubmitPin))
@@ -136,8 +192,9 @@ pub fn pin_display<'a>(
     value: &str,
     _is_confirm: bool,
     font_size: f32,
+    max_length: usize,
 ) -> Element<'a, DomainMessage> {
-    let digits: Vec<Element<'a, DomainMessage>> = (0..4)
+    let digits: Vec<Element<'a, DomainMessage>> = (0..max_length)
         .map(|i| {
             let digit = value.chars().nth(i);
             let display = if digit.is_some() { "●" } else { "○" };
@@ -191,6 +248,7 @@ pub fn numeric_keypad<'a>(
     is_confirm: bool,
     digit_font_size: f32,
     label_font_size: f32,
+    max_length: usize,
 ) -> Element<'a, DomainMessage> {
     let button_size = 60.0;
 
@@ -212,7 +270,7 @@ pub fn numeric_keypad<'a>(
                 .size(digit_font_size)
                 .align_x(iced::alignment::Horizontal::Center),
         )
-        .on_press_maybe(if current_value.len() < 4 {
+        .on_press_maybe(if current_value.len() < max_length {
             Some(message)
         } else {
             None

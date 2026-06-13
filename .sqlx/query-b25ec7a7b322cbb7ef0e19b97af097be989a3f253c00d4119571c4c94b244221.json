@@ -1,0 +1,185 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                ds.id,\n                ds.user_id,\n                ds.device_fingerprint,\n                ds.device_name,\n                ds.platform,\n                ds.app_version,\n                ds.hardware_id,\n                ds.device_public_key,\n                ds.device_key_alg::text AS \"device_key_alg?\",\n                ds.status::text AS \"status!\",\n                (uc.pin_hash IS NOT NULL) AS \"pin_configured!\",\n                ds.failed_attempts,\n                ds.locked_until,\n                ds.trusted_until,\n                ds.auto_login_enabled,\n                ds.first_authenticated_by,\n                ds.first_authenticated_at,\n                ds.last_seen_at,\n                ds.last_activity,\n                ds.metadata,\n                ds.created_at,\n                ds.updated_at,\n                ds.revoked_by,\n                ds.revoked_at,\n                ds.revoked_reason,\n                sess.session_token_hash AS \"session_token_hash?\",\n                sess.created_at AS \"session_created_at?\",\n                sess.expires_at AS \"session_expires_at?\"\n            FROM auth_device_sessions ds\n            INNER JOIN user_credentials uc ON uc.user_id = ds.user_id\n            LEFT JOIN LATERAL (\n                SELECT\n                    s.session_token_hash,\n                    s.created_at,\n                    s.expires_at\n                FROM auth_sessions s\n                WHERE s.device_session_id = ds.id\n                  AND s.revoked = FALSE\n                  AND s.expires_at > NOW()\n                ORDER BY s.created_at DESC\n                LIMIT 1\n            ) sess ON TRUE\n            WHERE ds.user_id = $1\n              AND ds.device_fingerprint = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "device_fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "platform",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "app_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "hardware_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "device_public_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "device_key_alg?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "pin_configured!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "failed_attempts",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 12,
+        "name": "locked_until",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "trusted_until",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "auto_login_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "first_authenticated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
+        "name": "first_authenticated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "last_activity",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "revoked_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 23,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 24,
+        "name": "revoked_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "session_token_hash?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 26,
+        "name": "session_created_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 27,
+        "name": "session_expires_at?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b25ec7a7b322cbb7ef0e19b97af097be989a3f253c00d4119571c4c94b244221"
+}

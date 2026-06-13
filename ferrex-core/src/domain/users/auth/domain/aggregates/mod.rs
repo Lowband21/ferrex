@@ -5,5 +5,10 @@
 mod device_session;
 mod user_authentication;
 
-pub use device_session::{DeviceSession, DeviceSessionError, DeviceStatus};
+#[cfg(feature = "database")]
+pub(crate) use device_session::DeviceSessionHydration;
+pub use device_session::{
+    DeviceSession, DeviceSessionClientMetadata, DeviceSessionError,
+    DeviceStatus,
+};
 pub use user_authentication::{UserAuthentication, UserAuthenticationError};

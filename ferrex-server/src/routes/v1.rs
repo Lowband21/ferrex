@@ -82,6 +82,10 @@ pub fn create_v1_router(state: AppState) -> Router<AppState> {
             v1::auth::device::PIN_CHALLENGE,
             post(auth::device_handlers::pin_challenge),
         )
+        .route(
+            v1::auth::device::KNOWN_USERS,
+            post(auth::device_handlers::known_device_profiles),
+        )
         // Public setup endpoints (for first-run)
         .route(v1::setup::STATUS, get(check_setup_status))
         .route(v1::setup::CREATE_ADMIN, post(create_initial_admin))
@@ -116,6 +120,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
         .route(
             v1::auth::device::CHANGE_PIN,
             post(auth::device_handlers::change_device_pin),
+        )
+        .route(
+            v1::auth::device::REMOVE_PIN,
+            post(auth::device_handlers::remove_device_pin),
         )
         .route(
             v1::auth::device::LIST,

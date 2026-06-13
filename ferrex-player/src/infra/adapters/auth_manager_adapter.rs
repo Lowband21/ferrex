@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::domains::auth::hardware_fingerprint::generate_hardware_fingerprint;
 use crate::domains::auth::manager::{AuthManager, AutoLoginScope};
 use crate::domains::auth::storage::StoredAuth;
 use crate::infra::repository::{RepositoryError, RepositoryResult};
@@ -44,12 +43,14 @@ impl AuthService for AuthManagerAdapter {
 
     async fn load_from_keychain(&self) -> RepositoryResult<Option<StoredAuth>> {
         let fingerprint =
-            generate_hardware_fingerprint().await.map_err(|e| {
-                RepositoryError::QueryFailed(format!(
-                    "Hardware fingerprint failed: {}",
-                    e
-                ))
-            })?;
+            self.manager.device_auth_cache_fingerprint().await.map_err(
+                |e| {
+                    RepositoryError::QueryFailed(format!(
+                        "Device identity load failed: {}",
+                        e
+                    ))
+                },
+            )?;
 
         match self.manager.auth_storage().load_auth(&fingerprint).await {
             Ok(result) => Ok(result),
@@ -139,10 +140,66 @@ impl AuthService for AuthManagerAdapter {
         })
     }
 
+    async fn change_password(
+        &self,
+        current_password: String,
+        new_password: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .change_password(current_password, new_password)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Change password failed: {}",
+                    e
+                ))
+            })
+    }
+
     async fn set_device_pin(&self, pin: String) -> RepositoryResult<()> {
         self.manager.set_device_pin(pin).await.map_err(|e| {
             RepositoryError::QueryFailed(format!(
                 "Set device PIN failed: {}",
+                e
+            ))
+        })
+    }
+
+    async fn change_device_pin(
+        &self,
+        current_pin: String,
+        new_pin: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .change_device_pin(current_pin, new_pin)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Change device PIN failed: {}",
+                    e
+                ))
+            })
+    }
+
+    async fn remove_device_pin(
+        &self,
+        current_pin: String,
+    ) -> RepositoryResult<()> {
+        self.manager
+            .remove_device_pin(current_pin)
+            .await
+            .map_err(|e| {
+                RepositoryError::QueryFailed(format!(
+                    "Remove device PIN failed: {}",
+                    e
+                ))
+            })
+    }
+
+    async fn reset_local_auth_state(&self) -> RepositoryResult<()> {
+        self.manager.reset_local_auth_state().await.map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "Reset local auth state failed: {}",
                 e
             ))
         })
@@ -257,6 +314,17 @@ impl AuthService for AuthManagerAdapter {
         self.manager.current_device_id().await.map_err(|e| {
             RepositoryError::QueryFailed(format!(
                 "Get current device id failed: {}",
+                e
+            ))
+        })
+    }
+
+    async fn current_device_session_id(
+        &self,
+    ) -> RepositoryResult<Option<Uuid>> {
+        self.manager.current_device_session_id().await.map_err(|e| {
+            RepositoryError::QueryFailed(format!(
+                "Get current device session id failed: {}",
                 e
             ))
         })

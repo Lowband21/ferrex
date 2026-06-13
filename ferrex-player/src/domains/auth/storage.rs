@@ -63,6 +63,20 @@ pub struct StoredAuth {
     pub refresh_token: Option<String>,
 }
 
+/// Server-side device session persisted for PIN login and device management.
+///
+/// `client_device_id` is the locally generated stable device id. It is stored
+/// alongside the server `device_session_id` so a reset/recreated local identity
+/// cannot accidentally reuse a stale server session belonging to old key
+/// material.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredDeviceSession {
+    pub user_id: Uuid,
+    pub client_device_id: Uuid,
+    pub device_session_id: Uuid,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Local encrypted storage for authentication data
 #[derive(Debug)]
 pub struct AuthStorage {
@@ -128,14 +142,17 @@ impl AuthStorage {
             .join("device_key.enc")
     }
 
+    fn device_key_wrap_path(&self) -> PathBuf {
+        self.cache_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("device_key_wrap.key")
+    }
+
     /// Save device private key encrypted with a random wrapping key (not derived from fingerprint)
     pub async fn save_device_key(&self, private_key: &[u8]) -> Result<()> {
         // Create or load wrapping key from filesystem
-        let wrap_path = self
-            .cache_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("device_key_wrap.key");
+        let wrap_path = self.device_key_wrap_path();
         let wrap_key = if wrap_path.exists() {
             read(&wrap_path).await?
         } else {
@@ -194,11 +211,7 @@ impl AuthStorage {
         let data = tokio::fs::read_to_string(&path).await?;
         let encrypted: EncryptedAuthData = serde_json::from_str(&data)?;
         // Load or create wrap key
-        let wrap_path = self
-            .cache_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("device_key_wrap.key");
+        let wrap_path = self.device_key_wrap_path();
         let wrap_key = if wrap_path.exists() {
             tokio::fs::read(&wrap_path).await?
         } else {
@@ -247,6 +260,22 @@ impl AuthStorage {
         Ok(Some(plaintext))
     }
 
+    /// Clear the persisted device signing key and its wrapping key.
+    ///
+    /// This is intentionally separate from `clear_auth`: losing the device key
+    /// only disables remembered/PIN login until the next password login can
+    /// register a fresh key, and should not crash startup.
+    pub async fn clear_device_key(&self) -> Result<()> {
+        for path in [self.device_key_path(), self.device_key_wrap_path()] {
+            if path.exists() {
+                tokio::fs::remove_file(&path).await.with_context(|| {
+                    format!("Failed to remove device key file {:?}", path)
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     /// Get path to auth cache file
     pub fn cache_path(&self) -> &PathBuf {
         &self.cache_path
@@ -291,14 +320,114 @@ impl AuthStorage {
         out
     }
 
-    fn users_cache_path_for_server(&self, base_url: &str) -> PathBuf {
-        let server_dir = self
-            .cache_path
+    fn server_dir_for(&self, base_url: &str) -> PathBuf {
+        self.cache_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .join("servers")
-            .join(Self::server_hash(base_url));
-        server_dir.join("users_cache.json")
+            .join(Self::server_hash(base_url))
+    }
+
+    fn users_cache_path_for_server(&self, base_url: &str) -> PathBuf {
+        self.server_dir_for(base_url).join("users_cache.json")
+    }
+
+    fn device_sessions_path_for_server(&self, base_url: &str) -> PathBuf {
+        self.server_dir_for(base_url).join("device_sessions.json")
+    }
+
+    async fn load_device_sessions_for_server(
+        &self,
+        base_url: &str,
+    ) -> Result<std::collections::HashMap<Uuid, StoredDeviceSession>> {
+        let path = self.device_sessions_path_for_server(base_url);
+        if !path.exists() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let data = tokio::fs::read_to_string(&path).await?;
+        let sessions = serde_json::from_str(&data)?;
+        Ok(sessions)
+    }
+
+    async fn save_device_sessions_for_server(
+        &self,
+        base_url: &str,
+        sessions: &std::collections::HashMap<Uuid, StoredDeviceSession>,
+    ) -> Result<()> {
+        let path = self.device_sessions_path_for_server(base_url);
+        if let Some(parent) = path.parent() {
+            create_dir_all(parent).await?;
+        }
+
+        let data = serde_json::to_string_pretty(sessions)?;
+        tokio::fs::write(&path, data).await?;
+        Ok(())
+    }
+
+    /// Persist the server-side device session id for a user on a server.
+    pub async fn save_device_session_for_server(
+        &self,
+        base_url: &str,
+        user_id: Uuid,
+        client_device_id: Uuid,
+        device_session_id: Uuid,
+    ) -> Result<()> {
+        let mut sessions =
+            self.load_device_sessions_for_server(base_url).await?;
+        sessions.insert(
+            user_id,
+            StoredDeviceSession {
+                user_id,
+                client_device_id,
+                device_session_id,
+                updated_at: Utc::now(),
+            },
+        );
+        self.save_device_sessions_for_server(base_url, &sessions)
+            .await
+    }
+
+    /// Load the remembered server-side device session id for a user on a server.
+    pub async fn load_device_session_for_server(
+        &self,
+        base_url: &str,
+        user_id: Uuid,
+    ) -> Result<Option<StoredDeviceSession>> {
+        let sessions = self.load_device_sessions_for_server(base_url).await?;
+        Ok(sessions.get(&user_id).cloned())
+    }
+
+    /// Clear one remembered server-side device session id.
+    pub async fn clear_device_session_for_server(
+        &self,
+        base_url: &str,
+        user_id: Uuid,
+    ) -> Result<()> {
+        let mut sessions =
+            self.load_device_sessions_for_server(base_url).await?;
+        if sessions.remove(&user_id).is_some() {
+            self.save_device_sessions_for_server(base_url, &sessions)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Clear all remembered server-side device sessions for one server.
+    pub async fn clear_device_sessions_for_server(
+        &self,
+        base_url: &str,
+    ) -> Result<()> {
+        let path = self.device_sessions_path_for_server(base_url);
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
+            log::info!(
+                "Cleared remembered device sessions for server {} at {:?}",
+                base_url,
+                path
+            );
+        }
+        Ok(())
     }
 
     /// Load locally cached user summaries for offline user selection
@@ -636,14 +765,18 @@ impl AuthStorage {
         Ok(())
     }
 
-    /// Check if auto-login is enabled for a specific user on this device
-    pub async fn is_auto_login_enabled(&self, user_id: &Uuid) -> Result<bool> {
-        // Read auto-login preferences from a separate file
-        let auto_login_path = self
+    fn auto_login_path(&self) -> Result<PathBuf> {
+        Ok(self
             .cache_path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Invalid cache path"))?
-            .join("auto_login.json");
+            .join("auto_login.json"))
+    }
+
+    /// Check if auto-login is enabled for a specific user on this device
+    pub async fn is_auto_login_enabled(&self, user_id: &Uuid) -> Result<bool> {
+        // Read auto-login preferences from a separate file
+        let auto_login_path = self.auto_login_path()?;
 
         if !auto_login_path.exists() {
             return Ok(false);
@@ -662,11 +795,7 @@ impl AuthStorage {
         user_id: &Uuid,
         enabled: bool,
     ) -> Result<()> {
-        let auto_login_path = self
-            .cache_path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Invalid cache path"))?
-            .join("auto_login.json");
+        let auto_login_path = self.auto_login_path()?;
 
         // Read existing preferences
         let mut auto_login_map: std::collections::HashMap<Uuid, bool> =
@@ -684,6 +813,19 @@ impl AuthStorage {
         let data = serde_json::to_string_pretty(&auto_login_map)?;
         tokio::fs::write(&auto_login_path, data).await?;
 
+        Ok(())
+    }
+
+    /// Clear all device-local auto-login preferences.
+    pub async fn clear_auto_login_preferences(&self) -> Result<()> {
+        let auto_login_path = self.auto_login_path()?;
+        if auto_login_path.exists() {
+            tokio::fs::remove_file(&auto_login_path).await?;
+            log::info!(
+                "Cleared auto-login preferences at {:?}",
+                auto_login_path
+            );
+        }
         Ok(())
     }
 

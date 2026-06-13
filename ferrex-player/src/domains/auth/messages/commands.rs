@@ -13,8 +13,8 @@ pub enum AuthCommand {
     /// Set a new PIN for the current user
     SetUserPin { pin: SecureCredential },
 
-    /// Remove PIN from current user (requires password authentication)
-    RemoveUserPin,
+    /// Remove PIN from current device after verifying the current PIN
+    RemoveUserPin { current_pin: SecureCredential },
 
     /// Enable admin PIN unlock feature (requires admin permissions)
     EnableAdminPinUnlock,
@@ -34,7 +34,9 @@ impl AuthCommand {
                 "AuthCommand::ChangePassword { old_password: ***, new_password: *** }".to_string()
             }
             Self::SetUserPin { .. } => "AuthCommand::SetUserPin { pin: *** }".to_string(),
-            Self::RemoveUserPin => "AuthCommand::RemoveUserPin".to_string(),
+            Self::RemoveUserPin { .. } => {
+                "AuthCommand::RemoveUserPin { current_pin: *** }".to_string()
+            }
             Self::EnableAdminPinUnlock => "AuthCommand::EnableAdminPinUnlock".to_string(),
             Self::ChangeUserPin { .. } => {
                 "AuthCommand::ChangeUserPin { current_pin: ***, new_pin: *** }".to_string()
@@ -47,7 +49,7 @@ impl AuthCommand {
         match self {
             Self::ChangePassword { .. } => "AuthCommand::ChangePassword",
             Self::SetUserPin { .. } => "AuthCommand::SetUserPin",
-            Self::RemoveUserPin => "AuthCommand::RemoveUserPin",
+            Self::RemoveUserPin { .. } => "AuthCommand::RemoveUserPin",
             Self::EnableAdminPinUnlock => "AuthCommand::EnableAdminPinUnlock",
             Self::ChangeUserPin { .. } => "AuthCommand::ChangeUserPin",
         }

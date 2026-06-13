@@ -29,6 +29,7 @@ async fn empty_users_plus_setup_failure_transitions_to_first_run() {
         requires_setup_token: false,
         user_count: 0,
         library_count: 0,
+        ..Default::default()
     };
 
     let _ = ferrex_player::domains::auth::update::update_auth(

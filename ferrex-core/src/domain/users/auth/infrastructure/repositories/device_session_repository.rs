@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use sqlx::PgPool;
 use std::{fmt, sync::Arc};
 use uuid::Uuid;
 
 use crate::domain::users::auth::AuthCrypto;
 use crate::domain::users::auth::domain::aggregates::{
-    DeviceSession, DeviceStatus,
+    DeviceSession, DeviceSessionHydration, DeviceStatus,
 };
 use crate::domain::users::auth::domain::repositories::{
     DevicePinStatus, DeviceSessionRepository,
@@ -22,13 +23,27 @@ struct DeviceSessionRecord {
     user_id: Uuid,
     device_fingerprint: String,
     device_name: String,
+    platform: Option<String>,
+    app_version: Option<String>,
+    hardware_id: Option<String>,
     device_public_key: Option<String>,
     device_key_alg: Option<String>,
     status: String,
     pin_configured: bool,
     failed_attempts: i16,
-    created_at: DateTime<Utc>,
+    locked_until: Option<DateTime<Utc>>,
+    trusted_until: Option<DateTime<Utc>>,
+    auto_login_enabled: bool,
+    first_authenticated_by: Uuid,
+    first_authenticated_at: DateTime<Utc>,
+    last_seen_at: DateTime<Utc>,
     last_activity: DateTime<Utc>,
+    metadata: Value,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    revoked_by: Option<Uuid>,
+    revoked_at: Option<DateTime<Utc>>,
+    revoked_reason: Option<String>,
     session_token_hash: Option<String>,
     session_created_at: Option<DateTime<Utc>>,
     session_expires_at: Option<DateTime<Utc>>,
@@ -65,13 +80,27 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.platform,
+                ds.app_version,
+                ds.hardware_id,
                 ds.device_public_key,
-                ds.device_key_alg::text AS device_key_alg,
+                ds.device_key_alg::text AS "device_key_alg?",
                 ds.status::text AS "status!",
                 (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
-                ds.created_at,
+                ds.locked_until,
+                ds.trusted_until,
+                ds.auto_login_enabled,
+                ds.first_authenticated_by,
+                ds.first_authenticated_at,
+                ds.last_seen_at,
                 ds.last_activity,
+                ds.metadata,
+                ds.created_at,
+                ds.updated_at,
+                ds.revoked_by,
+                ds.revoked_at,
+                ds.revoked_reason,
                 sess.session_token_hash AS "session_token_hash?",
                 sess.created_at AS "session_created_at?",
                 sess.expires_at AS "session_expires_at?"
@@ -112,13 +141,27 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.platform,
+                ds.app_version,
+                ds.hardware_id,
                 ds.device_public_key,
-                ds.device_key_alg::text AS device_key_alg,
+                ds.device_key_alg::text AS "device_key_alg?",
                 ds.status::text AS "status!",
                 (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
-                ds.created_at,
+                ds.locked_until,
+                ds.trusted_until,
+                ds.auto_login_enabled,
+                ds.first_authenticated_by,
+                ds.first_authenticated_at,
+                ds.last_seen_at,
                 ds.last_activity,
+                ds.metadata,
+                ds.created_at,
+                ds.updated_at,
+                ds.revoked_by,
+                ds.revoked_at,
+                ds.revoked_reason,
                 sess.session_token_hash AS "session_token_hash?",
                 sess.created_at AS "session_created_at?",
                 sess.expires_at AS "session_expires_at?"
@@ -160,13 +203,27 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 ds.user_id,
                 ds.device_fingerprint,
                 ds.device_name,
+                ds.platform,
+                ds.app_version,
+                ds.hardware_id,
                 ds.device_public_key,
-                ds.device_key_alg::text AS device_key_alg,
+                ds.device_key_alg::text AS "device_key_alg?",
                 ds.status::text AS "status!",
                 (uc.pin_hash IS NOT NULL) AS "pin_configured!",
                 ds.failed_attempts,
-                ds.created_at,
+                ds.locked_until,
+                ds.trusted_until,
+                ds.auto_login_enabled,
+                ds.first_authenticated_by,
+                ds.first_authenticated_at,
+                ds.last_seen_at,
                 ds.last_activity,
+                ds.metadata,
+                ds.created_at,
+                ds.updated_at,
+                ds.revoked_by,
+                ds.revoked_at,
+                ds.revoked_reason,
                 sess.session_token_hash AS "session_token_hash?",
                 sess.created_at AS "session_created_at?",
                 sess.expires_at AS "session_expires_at?"
@@ -200,58 +257,92 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
     async fn save(&self, session: &DeviceSession) -> Result<Option<Uuid>> {
         let status = status_to_db(session.status());
         let failed_attempts: i16 = session.failed_attempts().into();
+        let metadata = session.metadata().clone();
 
         sqlx::query!(
-                r#"
-                INSERT INTO auth_device_sessions (
+            r#"
+            INSERT INTO auth_device_sessions (
                 id,
                 user_id,
                 device_fingerprint,
                 device_name,
+                platform,
+                app_version,
+                hardware_id,
                 device_public_key,
                 device_key_alg,
                 status,
                 failed_attempts,
+                locked_until,
+                trusted_until,
+                auto_login_enabled,
                 first_authenticated_by,
                 first_authenticated_at,
                 last_seen_at,
                 last_activity,
-                created_at
+                metadata,
+                created_at,
+                updated_at,
+                revoked_by,
+                revoked_at,
+                revoked_reason
             ) VALUES (
                 $1,
                 $2,
                 $3,
                 $4,
                 $5,
-                ($6)::text::auth_device_key_alg,
-                ($7)::text::auth_device_status,
+                $6,
+                $7,
                 $8,
-                $2,
-                $9,
-                $10,
+                ($9)::text::auth_device_key_alg,
+                ($10)::text::auth_device_status,
                 $11,
-                $12
-                )
+                $12,
+                $13,
+                $14,
+                $15,
+                $16,
+                $17,
+                $18,
+                $19,
+                $20,
+                $21,
+                $22,
+                $23,
+                $24
+            )
             ON CONFLICT (id) DO UPDATE SET
                 device_name = EXCLUDED.device_name,
+                platform = EXCLUDED.platform,
+                app_version = EXCLUDED.app_version,
+                hardware_id = EXCLUDED.hardware_id,
                 device_public_key = COALESCE(EXCLUDED.device_public_key, auth_device_sessions.device_public_key),
                 device_key_alg = COALESCE(EXCLUDED.device_key_alg, auth_device_sessions.device_key_alg),
                 status = EXCLUDED.status,
                 failed_attempts = EXCLUDED.failed_attempts,
+                locked_until = EXCLUDED.locked_until,
+                trusted_until = EXCLUDED.trusted_until,
+                auto_login_enabled = EXCLUDED.auto_login_enabled,
+                first_authenticated_by = auth_device_sessions.first_authenticated_by,
+                first_authenticated_at = auth_device_sessions.first_authenticated_at,
                 last_seen_at = EXCLUDED.last_seen_at,
                 last_activity = EXCLUDED.last_activity,
+                metadata = EXCLUDED.metadata,
                 updated_at = NOW(),
                 revoked_at = CASE
                     WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN
-                        COALESCE(auth_device_sessions.revoked_at, NOW())
+                        COALESCE(auth_device_sessions.revoked_at, EXCLUDED.revoked_at, NOW())
                     ELSE NULL
                 END,
                 revoked_by = CASE
-                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_by
+                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN
+                        COALESCE(EXCLUDED.revoked_by, auth_device_sessions.revoked_by)
                     ELSE NULL
                 END,
                 revoked_reason = CASE
-                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN auth_device_sessions.revoked_reason
+                    WHEN EXCLUDED.status = 'revoked'::auth_device_status THEN
+                        COALESCE(EXCLUDED.revoked_reason, auth_device_sessions.revoked_reason)
                     ELSE NULL
                 END
             "#,
@@ -259,14 +350,26 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
             session.user_id(),
             session.device_fingerprint().as_str(),
             session.device_name(),
+            session.platform(),
+            session.app_version(),
+            session.hardware_id(),
             session.device_public_key(),
             session.device_key_alg(),
             status,
             failed_attempts,
-            session.created_at(),
+            session.locked_until(),
+            session.trusted_until(),
+            session.auto_login_enabled(),
+            session.first_authenticated_by(),
+            session.first_authenticated_at(),
+            session.last_seen_at(),
             session.last_activity(),
+            metadata,
             session.created_at(),
-            session.created_at()
+            session.updated_at(),
+            session.revoked_by(),
+            session.revoked_at(),
+            session.revoked_reason()
         )
         .execute(&self.pool)
         .await?;
@@ -289,7 +392,9 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
             )
             .execute(&self.pool)
             .await?;
-        } else if let Some(token) = session.session_token() {
+        } else if session.should_persist_session_token()
+            && let Some(token) = session.session_token()
+        {
             let token_hash = if is_hex_digest(token.as_str()) {
                 token.as_str().to_string()
             } else {
@@ -361,6 +466,9 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
                 SELECT 1
                 FROM auth_device_sessions
                 WHERE device_fingerprint = $1
+                  AND status = 'trusted'::auth_device_status
+                  AND revoked_at IS NULL
+                  AND (trusted_until IS NULL OR trusted_until > NOW())
             ) AS "exists!"
             "#,
             fingerprint.as_str()
@@ -383,21 +491,22 @@ impl DeviceSessionRepository for PostgresDeviceSessionRepository {
             FROM auth_device_sessions ds
             INNER JOIN user_credentials uc ON uc.user_id = ds.user_id
             WHERE ds.device_fingerprint = $1
+              AND ds.status = 'trusted'::auth_device_status
+              AND ds.revoked_at IS NULL
+              AND (ds.trusted_until IS NULL OR ds.trusted_until > NOW())
             "#,
             fingerprint.as_str()
         )
         .fetch_all(&self.pool)
         .await?;
 
-        let mut statuses = Vec::with_capacity(rows.len());
-        for row in rows {
-            statuses.push(DevicePinStatus {
+        Ok(rows
+            .into_iter()
+            .map(|row| DevicePinStatus {
                 user_id: row.user_id,
                 has_pin: row.has_pin,
-            });
-        }
-
-        Ok(statuses)
+            })
+            .collect())
     }
 }
 
@@ -411,17 +520,30 @@ impl PostgresDeviceSessionRepository {
             user_id,
             device_fingerprint,
             device_name,
+            platform,
+            app_version,
+            hardware_id,
             device_public_key,
             device_key_alg,
             status: status_value,
             pin_configured,
             failed_attempts,
-            created_at,
+            locked_until,
+            trusted_until,
+            auto_login_enabled,
+            first_authenticated_by,
+            first_authenticated_at,
+            last_seen_at,
             last_activity,
+            metadata,
+            created_at,
+            updated_at,
+            revoked_by,
+            revoked_at,
+            revoked_reason,
             session_token_hash,
             session_created_at,
             session_expires_at,
-            ..
         } = row;
 
         let fingerprint = DeviceFingerprint::from_hash(device_fingerprint)
@@ -448,20 +570,34 @@ impl PostgresDeviceSessionRepository {
             .try_into()
             .context("failed_attempts exceeds u8 range")?;
 
-        Ok(DeviceSession::hydrate(
+        Ok(DeviceSession::hydrate(DeviceSessionHydration {
             id,
             user_id,
-            fingerprint,
+            device_fingerprint: fingerprint,
             device_name,
+            platform,
+            app_version,
+            hardware_id,
             device_public_key,
             device_key_alg,
             status,
             pin_configured,
             session_token,
             failed_attempts,
-            created_at,
+            locked_until,
+            trusted_until,
+            auto_login_enabled,
+            first_authenticated_by,
+            first_authenticated_at,
+            last_seen_at,
             last_activity,
-        ))
+            metadata,
+            created_at,
+            updated_at,
+            revoked_by,
+            revoked_at,
+            revoked_reason,
+        }))
     }
 }
 

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1\n                FROM auth_device_sessions\n                WHERE device_fingerprint = $1\n                  AND status = 'trusted'::auth_device_status\n                  AND revoked_at IS NULL\n                  AND (trusted_until IS NULL OR trusted_until > NOW())\n            ) AS \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4d0f11566bfe10657485f0ff36118facdc40983f95d5eadf7040c74073885df4"
+}

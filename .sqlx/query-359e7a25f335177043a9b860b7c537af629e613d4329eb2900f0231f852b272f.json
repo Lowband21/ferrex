@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                admin_password_policy,\n                user_password_policy,\n                pin_policy,\n                device_trust_policy,\n                updated_at,\n                updated_by\n            FROM auth_security_settings\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "admin_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "pin_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_trust_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "359e7a25f335177043a9b860b7c537af629e613d4329eb2900f0231f852b272f"
+}

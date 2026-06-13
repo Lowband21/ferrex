@@ -20,9 +20,11 @@ pub mod v1 {
             pub const PIN_LOGIN: &str = v1_path!("/auth/device/pin");
             pub const PIN_CHALLENGE: &str =
                 v1_path!("/auth/device/pin/challenge");
+            pub const KNOWN_USERS: &str = v1_path!("/auth/device/users");
             pub const STATUS: &str = v1_path!("/auth/device/status");
             pub const SET_PIN: &str = v1_path!("/auth/device/pin/set");
             pub const CHANGE_PIN: &str = v1_path!("/auth/device/pin/change");
+            pub const REMOVE_PIN: &str = v1_path!("/auth/device/pin/remove");
             pub const LIST: &str = v1_path!("/auth/device/list");
             pub const REVOKE: &str = v1_path!("/auth/device/revoke");
             pub const VALIDATE_TRUST: &str = v1_path!("/auth/device/validate");

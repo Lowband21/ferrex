@@ -257,6 +257,9 @@ pub fn update_settings_ui(
         SettingsUiMessage::SubmitPinChange => DomainUpdateResult::task(Task::done(
                 DomainMessage::Settings(crate::domains::settings::messages::SettingsMessage::SubmitPinChange),
             )),
+        SettingsUiMessage::SubmitPinRemoval => DomainUpdateResult::task(Task::done(
+                DomainMessage::Settings(crate::domains::settings::messages::SettingsMessage::SubmitPinRemoval),
+            )),
         SettingsUiMessage::PinChangeResult(_result) => {
                 DomainUpdateResult::task(Task::none())
             }
@@ -340,6 +343,12 @@ pub fn update_settings_ui(
                 use crate::domains::auth::messages as auth;
                 DomainUpdateResult::task(Task::done(DomainMessage::Auth(
                     auth::AuthMessage::Logout,
+                )))
+            }
+        SettingsUiMessage::ResetLocalAuthState => {
+                use crate::domains::auth::messages as auth;
+                DomainUpdateResult::task(Task::done(DomainMessage::Auth(
+                    auth::AuthMessage::ResetLocalAuthState,
                 )))
             }
 

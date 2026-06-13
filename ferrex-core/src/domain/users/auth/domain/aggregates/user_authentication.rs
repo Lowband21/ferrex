@@ -93,6 +93,7 @@ pub struct UserAuthentication {
 
 impl UserAuthentication {
     /// Rehydrate a user authentication aggregate from persisted storage
+    #[cfg(feature = "database")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn hydrate(
         user_id: Uuid,

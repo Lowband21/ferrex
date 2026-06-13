@@ -121,6 +121,7 @@ pub enum SettingsUiMessage {
     // User settings navigation
     ShowSettings,
     Logout,
+    ResetLocalAuthState,
 
     // Security settings
     ShowChangePassword,
@@ -138,6 +139,7 @@ pub enum SettingsUiMessage {
     UpdatePinNew(String),
     UpdatePinConfirm(String),
     SubmitPinChange,
+    SubmitPinRemoval,
     PinChangeResult(Result<(), String>),
     CancelPinChange,
 
@@ -249,6 +251,7 @@ impl SettingsUiMessage {
             // User settings navigation
             Self::ShowSettings => "UI::ShowSettings",
             Self::Logout => "UI::Logout",
+            Self::ResetLocalAuthState => "UI::ResetLocalAuthState",
 
             // Security settings
             Self::ShowChangePassword => "UI::ShowChangePassword",
@@ -266,6 +269,7 @@ impl SettingsUiMessage {
             Self::UpdatePinNew(_) => "UI::UpdatePinNew",
             Self::UpdatePinConfirm(_) => "UI::UpdatePinConfirm",
             Self::SubmitPinChange => "UI::SubmitPinChange",
+            Self::SubmitPinRemoval => "UI::SubmitPinRemoval",
             Self::PinChangeResult(_) => "UI::PinChangeResult",
             Self::CancelPinChange => "UI::CancelPinChange",
 
@@ -400,6 +404,9 @@ impl std::fmt::Debug for SettingsUiMessage {
                 write!(f, "UI::ShowSettings")
             }
             SettingsUiMessage::Logout => write!(f, "UI::Logout"),
+            SettingsUiMessage::ResetLocalAuthState => {
+                write!(f, "UI::ResetLocalAuthState")
+            }
             SettingsUiMessage::ShowChangePassword => {
                 write!(f, "UI::ShowChangePassword")
             }
@@ -435,6 +442,9 @@ impl std::fmt::Debug for SettingsUiMessage {
             }
             SettingsUiMessage::SubmitPinChange => {
                 write!(f, "UI::SubmitPinChange")
+            }
+            SettingsUiMessage::SubmitPinRemoval => {
+                write!(f, "UI::SubmitPinRemoval")
             }
             SettingsUiMessage::PinChangeResult(_) => {
                 write!(f, "UI::PinChangeResult")

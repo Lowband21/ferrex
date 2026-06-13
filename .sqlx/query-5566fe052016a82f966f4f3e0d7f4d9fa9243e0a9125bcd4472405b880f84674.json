@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE auth_security_settings\n            SET admin_password_policy = $1,\n                user_password_policy = $2,\n                pin_policy = $3,\n                device_trust_policy = $4,\n                updated_at = NOW(),\n                updated_by = $5\n            WHERE id = $6\n            RETURNING\n                admin_password_policy,\n                user_password_policy,\n                pin_policy,\n                device_trust_policy,\n                updated_at,\n                updated_by\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "admin_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_password_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "pin_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_trust_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "5566fe052016a82f966f4f3e0d7f4d9fa9243e0a9125bcd4472405b880f84674"
+}

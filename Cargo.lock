@@ -2305,6 +2305,7 @@ dependencies = [
  "dashmap",
  "dialoguer",
  "dotenvy",
+ "ed25519-dalek",
  "ferrex-core",
  "ferrex-flatbuffers",
  "ferrex-model",

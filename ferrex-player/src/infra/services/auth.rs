@@ -54,8 +54,31 @@ pub trait AuthService: Send + Sync {
         user_id: Uuid,
     ) -> RepositoryResult<crate::domains::auth::manager::DeviceAuthStatus>;
 
+    /// Change the current user's account password.
+    async fn change_password(
+        &self,
+        current_password: String,
+        new_password: String,
+    ) -> RepositoryResult<()>;
+
     /// Set PIN for current device
     async fn set_device_pin(&self, pin: String) -> RepositoryResult<()>;
+
+    /// Change PIN for current device
+    async fn change_device_pin(
+        &self,
+        current_pin: String,
+        new_pin: String,
+    ) -> RepositoryResult<()>;
+
+    /// Remove PIN for current device
+    async fn remove_device_pin(
+        &self,
+        current_pin: String,
+    ) -> RepositoryResult<()>;
+
+    /// Clear local auth/device caches so the client can recover from stale trust.
+    async fn reset_local_auth_state(&self) -> RepositoryResult<()>;
 
     /// Check if setup is needed (no admin exists)
     async fn check_setup_status(&self) -> RepositoryResult<bool>;
@@ -106,8 +129,12 @@ pub trait AuthService: Send + Sync {
         &self,
     ) -> RepositoryResult<bool>;
 
-    /// Get the identifier for the current device
+    /// Get the local client-generated identifier for the current device
     async fn current_device_id(&self) -> RepositoryResult<Uuid>;
+
+    /// Get the server-side device session id for the current authenticated device, if any
+    async fn current_device_session_id(&self)
+    -> RepositoryResult<Option<Uuid>>;
 
     /// Authenticate and set current auth state (used after successful login)
     async fn authenticate(

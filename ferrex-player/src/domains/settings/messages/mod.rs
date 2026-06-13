@@ -41,7 +41,9 @@ pub enum SettingsMessage {
     UpdatePinNew(String),
     UpdatePinConfirm(String),
     SubmitPinChange,
+    SubmitPinRemoval,
     PinChangeResult(Result<(), String>),
+    PinRemovalResult(Result<(), String>),
     CancelPinChange,
 
     // Preferences - Auto-login
@@ -97,7 +99,9 @@ impl SettingsMessage {
             Self::UpdatePinNew(_) => "Settings::UpdatePinNew",
             Self::UpdatePinConfirm(_) => "Settings::UpdatePinConfirm",
             Self::SubmitPinChange => "Settings::SubmitPinChange",
+            Self::SubmitPinRemoval => "Settings::SubmitPinRemoval",
             Self::PinChangeResult(_) => "Settings::PinChangeResult",
+            Self::PinRemovalResult(_) => "Settings::PinRemovalResult",
             Self::CancelPinChange => "Settings::CancelPinChange",
 
             // Preferences

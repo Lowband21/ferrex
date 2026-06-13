@@ -10,6 +10,7 @@ pub mod hardware_fingerprint;
 pub mod manager;
 pub mod messages;
 pub mod permissions;
+pub mod pin_policy;
 pub mod security;
 pub mod state_types;
 pub mod storage;
@@ -26,7 +27,7 @@ use iced::Task;
 // Re-export commonly used auth types
 pub use dto::*;
 pub use errors::*;
-pub use manager::AuthManager;
+pub use manager::{AuthManager, DeviceTrustPolicyResponse, PinPolicyResponse};
 pub use testkit::MockAuthService;
 pub use types::AuthenticationFlow;
 
@@ -36,6 +37,10 @@ pub struct AuthDomainState {
     pub auth_flow: AuthenticationFlow,
     pub user_permissions: Option<UserPermissions>,
     pub auto_login_enabled: bool,
+    /// Tracks whether the active remember-device checkbox was changed by the user.
+    pub remember_device_explicit_override: bool,
+    pub pin_policy: PinPolicyResponse,
+    pub device_trust_policy: DeviceTrustPolicyResponse,
     pub auth_service:
         std::sync::Arc<dyn crate::infra::services::auth::AuthService>,
 }
@@ -61,6 +66,9 @@ impl AuthDomainState {
             auth_flow: AuthenticationFlow::default(),
             user_permissions: None,
             auto_login_enabled: false,
+            remember_device_explicit_override: false,
+            pin_policy: PinPolicyResponse::default(),
+            device_trust_policy: DeviceTrustPolicyResponse::default(),
             auth_service,
         }
     }
@@ -74,6 +82,12 @@ impl std::fmt::Debug for AuthDomainState {
             .field("auth_flow", &self.auth_flow)
             .field("user_permissions", &self.user_permissions)
             .field("auto_login_enabled", &self.auto_login_enabled)
+            .field(
+                "remember_device_explicit_override",
+                &self.remember_device_explicit_override,
+            )
+            .field("pin_policy", &self.pin_policy)
+            .field("device_trust_policy", &self.device_trust_policy)
             .field("auth_service", &"AuthService(..)")
             .finish()
     }

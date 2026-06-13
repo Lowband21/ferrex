@@ -190,6 +190,18 @@ pub fn update_auth(
             wrap_task!(handle_auth_flow_auth_result(state, result))
         }
 
+        auth::AuthMessage::UsePasswordLogin => {
+            wrap_task!(handle_auth_flow_use_password_login(state))
+        }
+
+        auth::AuthMessage::ResetLocalAuthState => {
+            wrap_task!(handle_reset_local_auth_state(state))
+        }
+
+        auth::AuthMessage::LocalAuthStateReset(result) => {
+            wrap_task!(handle_local_auth_state_reset(state, result))
+        }
+
         auth::AuthMessage::SetupPin => {
             wrap_task!(handle_auth_flow_setup_pin(state))
         }
@@ -200,6 +212,10 @@ pub fn update_auth(
 
         auth::AuthMessage::UpdateConfirmPin(pin) => {
             wrap_task!(handle_auth_flow_update_confirm_pin(state, pin))
+        }
+
+        auth::AuthMessage::SelectPinEntryTarget(target) => {
+            wrap_task!(handle_auth_flow_select_pin_entry_target(state, target))
         }
 
         auth::AuthMessage::SubmitPin => {
@@ -246,6 +262,35 @@ pub fn update_auth(
                 access_token,
                 refresh_token,
             ))
+        }
+
+        auth::AuthMessage::SetupDeviceLoginFailed { username, error } => {
+            if let crate::domains::auth::types::AuthenticationFlow::FirstRunSetup {
+                ..
+            } = &state.domains.auth.state.auth_flow
+            {
+                state.domains.auth.state.auth_flow =
+                    crate::domains::auth::types::AuthenticationFlow::PreAuthLogin {
+                        username,
+                        password: crate::domains::auth::security::secure_credential::SecureCredential::new(String::new()),
+                        show_password: false,
+                        remember_device: true,
+                        error: Some(error),
+                        loading: false,
+                    };
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        auth::AuthMessage::SetupCompletedWithWarning(
+            user,
+            permissions,
+            warning,
+        ) => {
+            state.domains.ui.state.error_message = Some(warning);
+            DomainUpdateResult::task(Task::done(DomainMessage::Auth(
+                auth::AuthMessage::LoginSuccess(user, permissions),
+            )))
         }
 
         auth::AuthMessage::SetupError(error) => {
@@ -334,15 +379,18 @@ async fn execute_auth_command(
 ) -> auth::AuthCommandResult {
     match command {
         auth::AuthCommand::ChangePassword {
-            old_password: _old_password,
-            new_password: _new_password,
-        } => {
-            // Note: This would require a change_password method on AuthManager
-            // For now, return not implemented
-            auth::AuthCommandResult::Error(
-                "Password change not yet implemented".to_string(),
+            old_password,
+            new_password,
+        } => match auth_service
+            .change_password(
+                old_password.expose_secret().to_string(),
+                new_password.expose_secret().to_string(),
             )
-        }
+            .await
+        {
+            Ok(()) => auth::AuthCommandResult::Success,
+            Err(e) => auth::AuthCommandResult::Error(e.to_string()),
+        },
 
         auth::AuthCommand::SetUserPin { pin } => {
             match auth_service
@@ -354,12 +402,14 @@ async fn execute_auth_command(
             }
         }
 
-        auth::AuthCommand::RemoveUserPin => {
-            // Note: This would require a remove_device_pin method on AuthManager
-            // For now, return not implemented
-            auth::AuthCommandResult::Error(
-                "PIN removal not yet implemented".to_string(),
-            )
+        auth::AuthCommand::RemoveUserPin { current_pin } => {
+            match auth_service
+                .remove_device_pin(current_pin.expose_secret().to_string())
+                .await
+            {
+                Ok(()) => auth::AuthCommandResult::Success,
+                Err(e) => auth::AuthCommandResult::Error(e.to_string()),
+            }
         }
 
         auth::AuthCommand::EnableAdminPinUnlock => {
@@ -370,14 +420,18 @@ async fn execute_auth_command(
         }
 
         auth::AuthCommand::ChangeUserPin {
-            current_pin: _current_pin,
-            new_pin: _new_pin,
-        } => {
-            // TODO: Add change_device_pin method to AuthService trait
-            auth::AuthCommandResult::Error(
-                "PIN change not yet implemented in AuthService".to_string(),
+            current_pin,
+            new_pin,
+        } => match auth_service
+            .change_device_pin(
+                current_pin.expose_secret().to_string(),
+                new_pin.expose_secret().to_string(),
             )
-        }
+            .await
+        {
+            Ok(()) => auth::AuthCommandResult::Success,
+            Err(e) => auth::AuthCommandResult::Error(e.to_string()),
+        },
     }
 }
 

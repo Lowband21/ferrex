@@ -86,6 +86,19 @@ pub fn handle_event(
                         ),
                     ))
                 }
+                auth::messages::AuthCommand::RemoveUserPin { .. } => {
+                    let settings_result = match result {
+                        auth::messages::AuthCommandResult::Success => Ok(()),
+                        auth::messages::AuthCommandResult::Error(msg) => {
+                            Err(msg.clone())
+                        }
+                    };
+                    Task::done(DomainMessage::Settings(
+                        crate::domains::settings::messages::SettingsMessage::PinRemovalResult(
+                            settings_result,
+                        ),
+                    ))
+                }
                 _ => Task::none(),
             }
         }

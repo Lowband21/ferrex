@@ -8,6 +8,9 @@ use crate::common::focus::FocusMessage;
 use crate::common::focus::ids;
 use crate::common::messages::DomainMessage;
 use crate::domains::auth::messages as auth;
+use crate::domains::auth::pin_policy::{
+    PinPolicyRules, validate_pin_with_policy,
+};
 use crate::domains::auth::security::secure_credential::SecureCredential;
 use crate::domains::auth::types::CredentialType;
 use crate::domains::ui::theme;
@@ -168,9 +171,9 @@ pub fn view_credential_entry<'a>(
                     .spacing(8),
             );
         }
-        CredentialType::Pin { max_length } => {
+        CredentialType::Pin { max_length, .. } => {
             content = content.push(
-                container(pin_input(input.as_str(), *max_length as u8))
+                container(pin_input(input.as_str(), *max_length))
                     .width(Length::Fill)
                     .align_x(iced::alignment::Horizontal::Center),
             );
@@ -189,10 +192,23 @@ pub fn view_credential_entry<'a>(
         }
     };
 
-    let submit_button = if loading
-        || (matches!(input_type, CredentialType::Pin { .. })
-            && input.len() != 4)
-    {
+    let base_pin_policy: PinPolicyRules =
+        (&state.domains.auth.state.pin_policy).into();
+    let pin_can_submit = match input_type {
+        CredentialType::Password => true,
+        CredentialType::Pin {
+            min_length,
+            max_length,
+        } => {
+            let pin_policy = PinPolicyRules {
+                min_length: *min_length,
+                max_length: *max_length,
+                ..base_pin_policy
+            };
+            validate_pin_with_policy(input.as_str(), pin_policy).is_ok()
+        }
+    };
+    let submit_button = if loading || !pin_can_submit {
         primary_button(submit_label, fonts.body)
     } else {
         primary_button(submit_label, fonts.body)
@@ -202,6 +218,31 @@ pub fn view_credential_entry<'a>(
     content = content.push(submit_button);
 
     content = content.push(Space::new().height(Length::Fixed(12.0)));
+
+    if matches!(input_type, CredentialType::Pin { .. }) {
+        content = content.push(
+            secondary_button("Use password instead", fonts.body).on_press(
+                DomainMessage::Auth(auth::AuthMessage::UsePasswordLogin),
+            ),
+        );
+        content = content.push(Space::new().height(Length::Fixed(8.0)));
+    }
+
+    if error.is_some() {
+        content = content.push(
+            secondary_button("Retry", fonts.body)
+                .on_press(DomainMessage::Auth(auth::AuthMessage::Retry)),
+        );
+        content = content.push(Space::new().height(Length::Fixed(8.0)));
+    }
+
+    content = content.push(
+        secondary_button("Reset local auth state", fonts.body).on_press(
+            DomainMessage::Auth(auth::AuthMessage::ResetLocalAuthState),
+        ),
+    );
+
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
 
     // Back button
     content = content.push(
@@ -316,6 +357,12 @@ pub fn view_pre_auth_login<'a>(
     };
 
     content = content.push(submit_button);
+    content = content.push(Space::new().height(Length::Fixed(12.0)));
+    content = content.push(
+        secondary_button("Reset local auth state", fonts.body).on_press(
+            DomainMessage::Auth(auth::AuthMessage::ResetLocalAuthState),
+        ),
+    );
 
     // Wrap in auth container (centered on screen)
     let card = login_card(
@@ -329,10 +376,10 @@ pub fn view_pre_auth_login<'a>(
 }
 
 /// Creates a PIN input display
-fn pin_input<'a>(value: &str, max_length: u8) -> Element<'a, DomainMessage> {
+fn pin_input<'a>(value: &str, max_length: usize) -> Element<'a, DomainMessage> {
     let digits: Vec<Element<'a, DomainMessage>> = (0..max_length)
         .map(|i| {
-            let digit = value.chars().nth(i as usize);
+            let digit = value.chars().nth(i);
             let display = if digit.is_some() { "●" } else { "○" };
 
             container(
@@ -372,14 +419,17 @@ fn pin_input<'a>(value: &str, max_length: u8) -> Element<'a, DomainMessage> {
         row(digits).spacing(12).align_y(Alignment::Center),
         Space::new().height(Length::Fixed(20.0)),
         // Numeric keypad
-        numeric_keypad(value)
+        numeric_keypad(value, max_length)
     ]
     .align_x(Alignment::Center)
     .into()
 }
 
 /// Creates a numeric keypad for PIN entry
-fn numeric_keypad<'a>(current_value: &str) -> Element<'a, DomainMessage> {
+fn numeric_keypad<'a>(
+    current_value: &str,
+    max_length: usize,
+) -> Element<'a, DomainMessage> {
     let button_size = 60.0;
 
     let create_digit_button = |digit: char| {
@@ -388,7 +438,7 @@ fn numeric_keypad<'a>(current_value: &str) -> Element<'a, DomainMessage> {
                 .size(24)
                 .align_x(iced::alignment::Horizontal::Center),
         )
-        .on_press_maybe(if current_value.len() < 4 {
+        .on_press_maybe(if current_value.len() < max_length {
             Some(DomainMessage::Auth(auth::AuthMessage::UpdateCredential(
                 format!("{}{}", current_value, digit),
             )))
