@@ -170,6 +170,9 @@ pub mod orchestration {
             pub metadata_limits: MetadataLimits,
             /// Bulk maintenance tuning settings.
             pub bulk_mode: BulkModeTuning,
+            /// Cursor-based incremental maintenance scheduler configuration.
+            #[cfg_attr(feature = "serde", serde(default))]
+            pub maintenance: MaintenanceConfig,
             /// Lease defaults (TTL, renewal thresholds, housekeeping cadence).
             pub lease: LeaseConfig,
             /// Global concurrency budget configuration for actor workloads.
@@ -358,6 +361,108 @@ pub mod orchestration {
             }
         }
 
+        /// Cursor-based incremental maintenance scheduler controls.
+        #[derive(Clone, Debug)]
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        pub struct MaintenanceConfig {
+            /// Enables periodic maintenance sweeps for libraries with `auto_scan=true`.
+            #[cfg_attr(
+                feature = "serde",
+                serde(default = "MaintenanceConfig::default_enabled")
+            )]
+            pub enabled: bool,
+            /// Cadence for checking libraries and stale cursors.
+            #[cfg_attr(
+                feature = "serde",
+                serde(default = "MaintenanceConfig::default_tick_interval_ms")
+            )]
+            pub tick_interval_ms: u64,
+            /// Maximum folder scan jobs to enqueue for a library in one tick.
+            #[cfg_attr(
+                feature = "serde",
+                serde(
+                    default = "MaintenanceConfig::default_max_jobs_per_library"
+                )
+            )]
+            pub max_jobs_per_library: usize,
+            /// Maximum root entries inspected for new top-level folders in one tick.
+            #[cfg_attr(
+                feature = "serde",
+                serde(
+                    default = "MaintenanceConfig::default_max_root_entries_per_library"
+                )
+            )]
+            pub max_root_entries_per_library: usize,
+            /// Per-library backoff after planning, enqueue, or terminal sweep errors.
+            #[cfg_attr(
+                feature = "serde",
+                serde(default = "MaintenanceConfig::default_error_backoff_ms")
+            )]
+            pub error_backoff_ms: u64,
+            /// Maximum time a maintenance run may wait for terminal job events.
+            #[cfg_attr(
+                feature = "serde",
+                serde(
+                    default = "MaintenanceConfig::default_run_stall_timeout_ms"
+                )
+            )]
+            pub run_stall_timeout_ms: u64,
+        }
+
+        impl Default for MaintenanceConfig {
+            fn default() -> Self {
+                Self {
+                    enabled: Self::default_enabled(),
+                    tick_interval_ms: Self::default_tick_interval_ms(),
+                    max_jobs_per_library: Self::default_max_jobs_per_library(),
+                    max_root_entries_per_library:
+                        Self::default_max_root_entries_per_library(),
+                    error_backoff_ms: Self::default_error_backoff_ms(),
+                    run_stall_timeout_ms: Self::default_run_stall_timeout_ms(),
+                }
+            }
+        }
+
+        impl MaintenanceConfig {
+            const fn default_enabled() -> bool {
+                true
+            }
+
+            const fn default_tick_interval_ms() -> u64 {
+                60_000
+            }
+
+            const fn default_max_jobs_per_library() -> usize {
+                128
+            }
+
+            const fn default_max_root_entries_per_library() -> usize {
+                512
+            }
+
+            const fn default_error_backoff_ms() -> u64 {
+                5 * 60 * 1_000
+            }
+
+            const fn default_run_stall_timeout_ms() -> u64 {
+                30 * 60 * 1_000
+            }
+        }
+
+        /// Watch backend selection for filesystem change detection.
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+        pub enum WatchStrategy {
+            /// Try native notifications first and fall back to polling when unavailable.
+            #[default]
+            Auto,
+            /// Require native notifications; initialization errors are surfaced.
+            Native,
+            /// Force notify's polling watcher, useful for network/container mounts.
+            Poll,
+        }
+
         /// Tuning controls for filesystem watch coalescing.
         #[derive(Clone, Debug)]
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -366,12 +471,21 @@ pub mod orchestration {
             pub debounce_window_ms: u64,
             /// Maximum number of events to flush in a single batch.
             pub max_batch_events: usize,
+            /// Native/poll/auto backend strategy for filesystem watches.
+            #[cfg_attr(feature = "serde", serde(default))]
+            pub strategy: WatchStrategy,
             /// Polling cadence in milliseconds for filesystems without native watchers.
             #[cfg_attr(
                 feature = "serde",
                 serde(default = "WatchConfig::default_poll_interval_ms")
             )]
             pub poll_interval_ms: u64,
+            /// Upper bound used by poll-oriented maintenance/backoff loops.
+            #[cfg_attr(
+                feature = "serde",
+                serde(default = "WatchConfig::default_poll_backoff_max_ms")
+            )]
+            pub poll_backoff_max_ms: u64,
         }
 
         impl Default for WatchConfig {
@@ -379,7 +493,9 @@ pub mod orchestration {
                 Self {
                     debounce_window_ms: 250,
                     max_batch_events: 8192,
+                    strategy: WatchStrategy::Auto,
                     poll_interval_ms: Self::default_poll_interval_ms(),
+                    poll_backoff_max_ms: Self::default_poll_backoff_max_ms(),
                 }
             }
         }
@@ -387,6 +503,10 @@ pub mod orchestration {
         impl WatchConfig {
             const fn default_poll_interval_ms() -> u64 {
                 30_000
+            }
+
+            const fn default_poll_backoff_max_ms() -> u64 {
+                5 * 60 * 1_000
             }
         }
     }
