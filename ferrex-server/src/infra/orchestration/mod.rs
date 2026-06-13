@@ -56,6 +56,8 @@ use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
+mod maintenance;
+
 pub struct ScanOrchestrator {
     runtime: Arc<
         OrchestratorRuntime<
@@ -69,6 +71,8 @@ pub struct ScanOrchestrator {
     events: Arc<InProcJobEventBus>,
     watchers: Arc<FsWatchService>,
     correlations: CorrelationCache,
+    unit_of_work: Arc<AppUnitOfWork>,
+    maintenance: Mutex<Option<maintenance::MaintenanceSchedulerHandle>>,
 }
 
 impl fmt::Debug for ScanOrchestrator {
@@ -156,6 +160,8 @@ impl ScanOrchestrator {
             events,
             watchers,
             correlations,
+            unit_of_work,
+            maintenance: Mutex::new(None),
         })
     }
 
@@ -238,12 +244,36 @@ impl ScanOrchestrator {
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(self: &Arc<Self>) -> Result<()> {
         self.prime_ready_jobs().await?;
-        self.runtime.start().await
+        self.runtime.start().await?;
+        self.start_maintenance_scheduler().await;
+        Ok(())
+    }
+
+    async fn start_maintenance_scheduler(self: &Arc<Self>) {
+        let config = self.runtime.config().maintenance.clone();
+        if !config.enabled {
+            debug!("incremental maintenance scheduler disabled");
+            return;
+        }
+
+        let mut guard = self.maintenance.lock().await;
+        if guard.is_some() {
+            return;
+        }
+
+        *guard = Some(maintenance::spawn_maintenance_scheduler(
+            Arc::clone(self),
+            config,
+        ));
+        info!("incremental maintenance scheduler started");
     }
 
     pub async fn shutdown(&self) -> Result<()> {
+        if let Some(handle) = self.maintenance.lock().await.take() {
+            handle.shutdown().await;
+        }
         self.watchers.shutdown().await;
         self.runtime.shutdown().await
     }

@@ -28,9 +28,9 @@ use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api::scan::{
-    BudgetConfigView, BulkModeView, LeaseConfigView, MetadataLimitsView,
-    OrchestratorConfigView, QueueConfigView, RetryConfigView, ScanConfig,
-    ScanMetrics, WatchConfigView,
+    BudgetConfigView, BulkModeView, LeaseConfigView, MaintenanceConfigView,
+    MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
+    RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -295,13 +295,25 @@ pub async fn scan_config_handler(
                 .bulk_mode
                 .maintenance_partition_count,
         },
+        maintenance: MaintenanceConfigView {
+            enabled: cfg.maintenance.enabled,
+            tick_interval_ms: cfg.maintenance.tick_interval_ms,
+            max_jobs_per_library: cfg.maintenance.max_jobs_per_library,
+            max_root_entries_per_library: cfg
+                .maintenance
+                .max_root_entries_per_library,
+            error_backoff_ms: cfg.maintenance.error_backoff_ms,
+            run_stall_timeout_ms: cfg.maintenance.run_stall_timeout_ms,
+        },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
         },
         watch: WatchConfigView {
             debounce_window_ms: cfg.watch.debounce_window_ms,
             max_batch_events: cfg.watch.max_batch_events,
+            strategy: format!("{:?}", cfg.watch.strategy).to_ascii_lowercase(),
             poll_interval_ms: cfg.watch.poll_interval_ms,
+            poll_backoff_max_ms: cfg.watch.poll_backoff_max_ms,
         },
         budget: BudgetConfigView {
             library_scan_limit: cfg.budget.library_scan_limit,

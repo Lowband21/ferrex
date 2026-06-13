@@ -29,6 +29,7 @@ pub struct OrchestratorConfigView {
     pub retry: RetryConfigView,
     pub metadata_limits: MetadataLimitsView,
     pub bulk_mode: BulkModeView,
+    pub maintenance: MaintenanceConfigView,
     pub lease: LeaseConfigView,
     pub watch: WatchConfigView,
     pub budget: BudgetConfigView,
@@ -72,6 +73,16 @@ pub struct BulkModeView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintenanceConfigView {
+    pub enabled: bool,
+    pub tick_interval_ms: u64,
+    pub max_jobs_per_library: usize,
+    pub max_root_entries_per_library: usize,
+    pub error_backoff_ms: u64,
+    pub run_stall_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeaseConfigView {
     pub lease_ttl_secs: i64,
 }
@@ -80,7 +91,9 @@ pub struct LeaseConfigView {
 pub struct WatchConfigView {
     pub debounce_window_ms: u64,
     pub max_batch_events: usize,
+    pub strategy: String,
     pub poll_interval_ms: u64,
+    pub poll_backoff_max_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
