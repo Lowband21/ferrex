@@ -4,9 +4,16 @@
 //! together so the REST server can enqueue work, observe progress, and drive
 //! follow-up automation using the same runtime that production nodes execute.
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt,
+    sync::{
+        Arc, Mutex as StdMutex,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
-use ferrex_core::api::ScanQueueDepths;
+use ferrex_core::api::{IncrementalScanStatusView, ScanQueueDepths};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::database::repositories::media::PostgresMediaRepository;
@@ -15,7 +22,7 @@ use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
     LibraryActorConfig, LibraryRootsId, NoopActorObserver,
     analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
-    folder::FolderScanActor,
+    folder::{FolderScanActor, ScannerFileFilterPolicy},
 };
 use ferrex_core::domain::scan::image_fetch::{
     DefaultImageFetchActor, ImageFetchActor,
@@ -45,7 +52,7 @@ use ferrex_core::domain::scan::orchestration::{
     series_state::PostgresSeriesScanStateRepository,
 };
 use ferrex_core::domain::scan::{
-    FileChangeEventBus, FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+    FileChangeEventBus, FsWatchConfig, FsWatchObserver, FsWatchService,
     PostgresCursorRepository, PostgresFileChangeEventBus, PostgresQueueService,
     SeriesScanStateRepository,
 };
@@ -54,10 +61,51 @@ use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
 };
 use ferrex_core::types::LibraryId;
+use sqlx::Row;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
 mod maintenance;
+
+#[derive(Debug, Default)]
+struct ScanWatchObserver {
+    error_count: AtomicU64,
+    last_error: StdMutex<Option<String>>,
+}
+
+impl ScanWatchObserver {
+    fn snapshot(&self) -> (u64, Option<String>) {
+        let last_error = self
+            .last_error
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        (self.error_count.load(Ordering::Relaxed), last_error)
+    }
+}
+
+impl FsWatchObserver for ScanWatchObserver {
+    fn on_error(&self, library_id: LibraryId, error: &str) {
+        self.error_count.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut guard) = self.last_error.lock() {
+            *guard = Some(format!("library {library_id}: {error}"));
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct FileWatchHealth {
+    replay_pending_events: u64,
+    replay_lag_ms: Option<u64>,
+    overflow_events: u64,
+}
+
+#[derive(Debug, Default)]
+struct CursorHealth {
+    stale_cursor_libraries: u64,
+    stale_cursors: u64,
+    oldest_cursor_staleness_ms: Option<u64>,
+}
 
 pub struct ScanOrchestrator {
     runtime: Arc<
@@ -70,7 +118,8 @@ pub struct ScanOrchestrator {
     actors: Arc<ActorSystem>,
     cursors: Arc<PostgresCursorRepository>,
     events: Arc<InProcJobEventBus>,
-    watchers: Arc<FsWatchService>,
+    watchers: Arc<FsWatchService<ScanWatchObserver>>,
+    watch_observer: Arc<ScanWatchObserver>,
     correlations: CorrelationCache,
     unit_of_work: Arc<AppUnitOfWork>,
     maintenance: Mutex<Option<maintenance::MaintenanceSchedulerHandle>>,
@@ -91,6 +140,7 @@ impl ScanOrchestrator {
         queue: Arc<PostgresQueueService>,
         cursors: Arc<PostgresCursorRepository>,
         budget: Arc<InMemoryBudget>,
+        file_filters: ScannerFileFilterPolicy,
     ) -> Result<Self> {
         let events = Arc::new(InProcJobEventBus::new(256));
         let correlations = CorrelationCache::default();
@@ -100,6 +150,7 @@ impl ScanOrchestrator {
             Arc::clone(&unit_of_work),
             Arc::clone(&events),
             correlations.clone(),
+            file_filters,
         ));
 
         let dispatcher_actors = DispatcherActors::new(
@@ -150,10 +201,11 @@ impl ScanOrchestrator {
         let command_executor: Arc<dyn LibraryCommandExecutor> = runtime.clone();
         let file_change_bus: Arc<dyn FileChangeEventBus> =
             Arc::new(PostgresFileChangeEventBus::new(queue.pool().clone()));
-        let watchers: Arc<FsWatchService> =
+        let watch_observer = Arc::new(ScanWatchObserver::default());
+        let watchers: Arc<FsWatchService<ScanWatchObserver>> =
             Arc::new(FsWatchService::with_event_bus(
                 FsWatchConfig::from(watch_cfg),
-                Arc::new(NoopFsWatchObserver),
+                Arc::clone(&watch_observer),
                 command_executor,
                 file_change_bus,
             ));
@@ -164,6 +216,7 @@ impl ScanOrchestrator {
             cursors,
             events,
             watchers,
+            watch_observer,
             correlations,
             unit_of_work,
             maintenance: Mutex::new(None),
@@ -247,6 +300,152 @@ impl ScanOrchestrator {
             debug!(library_id = %config.library.id, "skipping watcher registration (disabled)");
         }
         Ok(())
+    }
+
+    pub async fn unregister_library_watch(&self, library_id: LibraryId) {
+        self.watchers.unregister_library(library_id).await;
+    }
+
+    pub async fn incremental_status(
+        &self,
+    ) -> Result<IncrementalScanStatusView> {
+        let libraries = self.unit_of_work.libraries.list_libraries().await?;
+        let enabled_libraries = libraries.iter().filter(|l| l.enabled).count();
+        let auto_scan_libraries = libraries
+            .iter()
+            .filter(|l| l.enabled && l.auto_scan)
+            .count();
+        let watch_enabled_libraries = libraries
+            .iter()
+            .filter(|l| l.enabled && l.watch_for_changes)
+            .count();
+
+        let watcher_runtime = self.watchers.runtime_snapshot().await;
+        let (watcher_error_count, last_watcher_error) =
+            self.watch_observer.snapshot();
+        let file_watch = self.file_watch_health().await?;
+        let cursor = self.cursor_health().await?;
+
+        Ok(IncrementalScanStatusView {
+            enabled_libraries,
+            auto_scan_libraries,
+            watch_enabled_libraries,
+            registered_watch_libraries: watcher_runtime.registered_libraries,
+            active_watch_libraries: watcher_runtime.active_libraries,
+            initializing_watch_libraries: watcher_runtime
+                .initializing_libraries,
+            registered_watch_roots: watcher_runtime.registered_roots,
+            active_watch_roots: watcher_runtime.active_roots,
+            watcher_error_count,
+            last_watcher_error,
+            replay_pending_events: file_watch.replay_pending_events,
+            replay_lag_ms: file_watch.replay_lag_ms,
+            overflow_events: file_watch.overflow_events,
+            stale_cursor_libraries: cursor.stale_cursor_libraries,
+            stale_cursors: cursor.stale_cursors,
+            oldest_cursor_staleness_ms: cursor.oldest_cursor_staleness_ms,
+        })
+    }
+
+    async fn file_watch_health(&self) -> Result<FileWatchHealth> {
+        let queue = self.runtime.queue();
+        let row = sqlx::query(
+            r#"
+            SELECT
+                COUNT(*) FILTER (WHERE processed = false)::bigint AS replay_pending_events,
+                COUNT(*) FILTER (WHERE event_type = 'overflow')::bigint AS overflow_events,
+                (EXTRACT(EPOCH FROM (
+                    NOW() - (MIN(detected_at) FILTER (WHERE processed = false))
+                )) * 1000)::bigint AS replay_lag_ms
+            FROM file_watch_events
+            "#,
+        )
+        .fetch_one(queue.pool())
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "file watch health query failed: {err}"
+            ))
+        })?;
+
+        let replay_pending_events: i64 =
+            row.try_get("replay_pending_events").map_err(|err| {
+                MediaError::Internal(format!(
+                    "file watch health decode failed: {err}"
+                ))
+            })?;
+        let overflow_events: i64 =
+            row.try_get("overflow_events").map_err(|err| {
+                MediaError::Internal(format!(
+                    "file watch health decode failed: {err}"
+                ))
+            })?;
+        let replay_lag_ms: Option<i64> =
+            row.try_get("replay_lag_ms").map_err(|err| {
+                MediaError::Internal(format!(
+                    "file watch health decode failed: {err}"
+                ))
+            })?;
+
+        Ok(FileWatchHealth {
+            replay_pending_events: replay_pending_events.max(0) as u64,
+            replay_lag_ms: replay_lag_ms.map(|value| value.max(0) as u64),
+            overflow_events: overflow_events.max(0) as u64,
+        })
+    }
+
+    async fn cursor_health(&self) -> Result<CursorHealth> {
+        let queue = self.runtime.queue();
+        let row = sqlx::query(
+            r#"
+            WITH stale AS (
+                SELECT sc.library_id, sc.last_scan_at
+                FROM scan_cursors sc
+                JOIN libraries l ON l.id = sc.library_id
+                WHERE l.enabled = true
+                  AND l.auto_scan = true
+                  AND sc.last_scan_at < NOW() - (
+                      GREATEST(l.scan_interval_minutes, 1)::text || ' minutes'
+                  )::interval
+            )
+            SELECT
+                COUNT(*)::bigint AS stale_cursors,
+                COUNT(DISTINCT library_id)::bigint AS stale_cursor_libraries,
+                (EXTRACT(EPOCH FROM (NOW() - MIN(last_scan_at))) * 1000)::bigint AS oldest_cursor_staleness_ms
+            FROM stale
+            "#,
+        )
+        .fetch_one(queue.pool())
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!("cursor health query failed: {err}"))
+        })?;
+
+        let stale_cursors: i64 =
+            row.try_get("stale_cursors").map_err(|err| {
+                MediaError::Internal(format!(
+                    "cursor health decode failed: {err}"
+                ))
+            })?;
+        let stale_cursor_libraries: i64 =
+            row.try_get("stale_cursor_libraries").map_err(|err| {
+                MediaError::Internal(format!(
+                    "cursor health decode failed: {err}"
+                ))
+            })?;
+        let oldest_cursor_staleness_ms: Option<i64> =
+            row.try_get("oldest_cursor_staleness_ms").map_err(|err| {
+                MediaError::Internal(format!(
+                    "cursor health decode failed: {err}"
+                ))
+            })?;
+
+        Ok(CursorHealth {
+            stale_cursor_libraries: stale_cursor_libraries.max(0) as u64,
+            stale_cursors: stale_cursors.max(0) as u64,
+            oldest_cursor_staleness_ms: oldest_cursor_staleness_ms
+                .map(|value| value.max(0) as u64),
+        })
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
@@ -463,6 +662,7 @@ impl ScanOrchestrator {
         tmdb: Arc<TmdbApiProvider>,
         image_service: Arc<ImageService>,
         unit_of_work: Arc<AppUnitOfWork>,
+        file_filters: ScannerFileFilterPolicy,
     ) -> Result<Self> {
         let pool = postgres.pool().clone();
         let queue = Arc::new(
@@ -480,6 +680,7 @@ impl ScanOrchestrator {
             queue,
             cursors,
             budget,
+            file_filters,
         )
     }
 }
@@ -494,6 +695,7 @@ pub struct ActorSystem {
     image_actor: Arc<dyn ImageFetchActor>,
     events: Arc<InProcJobEventBus>,
     correlations: CorrelationCache,
+    file_filters: ScannerFileFilterPolicy,
 }
 
 impl fmt::Debug for ActorSystem {
@@ -509,6 +711,7 @@ impl ActorSystem {
         unit_of_work: Arc<AppUnitOfWork>,
         events: Arc<InProcJobEventBus>,
         correlations: CorrelationCache,
+        file_filters: ScannerFileFilterPolicy,
     ) -> Self {
         let image_actor: Arc<dyn ImageFetchActor> =
             Arc::new(DefaultImageFetchActor::new(Arc::clone(&image_service)));
@@ -524,7 +727,9 @@ impl ActorSystem {
 
         Self {
             observer: Arc::new(NoopActorObserver),
-            folder_actor: Arc::new(DefaultFolderScanActor::new()),
+            folder_actor: Arc::new(DefaultFolderScanActor::with_filter_policy(
+                file_filters.clone(),
+            )),
             analyze_actor: Arc::new(DefaultMediaAnalyzeActor::new()),
             metadata_actor,
             series_provider,
@@ -534,6 +739,7 @@ impl ActorSystem {
             image_actor,
             events,
             correlations,
+            file_filters,
         }
     }
 
@@ -542,13 +748,16 @@ impl ActorSystem {
         config: LibraryActorConfig,
         queue: Arc<PostgresQueueService>,
     ) -> LibraryActorHandle {
-        Arc::new(Mutex::new(Box::new(DefaultLibraryActor::new(
-            config,
-            queue,
-            Arc::clone(&self.observer),
-            Arc::clone(&self.events),
-            self.correlations.clone(),
-        ))))
+        Arc::new(Mutex::new(Box::new(
+            DefaultLibraryActor::with_file_filter_policy(
+                config,
+                queue,
+                Arc::clone(&self.observer),
+                Arc::clone(&self.events),
+                self.correlations.clone(),
+                self.file_filters.clone(),
+            ),
+        )))
     }
 
     pub fn folder_actor(&self) -> Arc<dyn FolderScanActor> {

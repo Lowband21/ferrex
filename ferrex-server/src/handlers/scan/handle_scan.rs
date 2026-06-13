@@ -28,7 +28,8 @@ use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api::scan::{
-    BudgetConfigView, BulkModeView, LeaseConfigView, MaintenanceConfigView,
+    BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
+    IncrementalScanStatusView, LeaseConfigView, MaintenanceConfigView,
     MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
     RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
 };
@@ -167,9 +168,11 @@ pub async fn active_scans_handler(
     let count = scans.len();
     let dto_scans: Vec<ScanSnapshotDto> =
         scans.into_iter().map(Into::into).collect();
+    let incremental = incremental_status(&state).await?;
     Ok(Json(ApiResponse::success(ActiveScansResponse {
         scans: dto_scans,
         count,
+        incremental,
     })))
 }
 
@@ -246,9 +249,11 @@ pub async fn scan_metrics_handler(
             message: e.to_string(),
         })?;
     let active = state.scan_control().active_scans().await.len();
+    let incremental = incremental_status(&state).await?;
     Ok(Json(ApiResponse::success(ScanMetrics {
         queue_depths: depths,
         active_scans: active,
+        incremental,
     })))
 }
 
@@ -256,6 +261,7 @@ pub async fn scan_config_handler(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScanConfig>>, ScanHttpError> {
     let cfg = state.scan_control().orchestrator().config();
+    let scanner = &state.config().scanner;
     // Map internal config to view that is feature-agnostic
     let view = OrchestratorConfigView {
         queue: QueueConfigView {
@@ -311,7 +317,7 @@ pub async fn scan_config_handler(
         watch: WatchConfigView {
             debounce_window_ms: cfg.watch.debounce_window_ms,
             max_batch_events: cfg.watch.max_batch_events,
-            strategy: format!("{:?}", cfg.watch.strategy).to_ascii_lowercase(),
+            strategy: watch_strategy_label(cfg.watch.strategy),
             poll_interval_ms: cfg.watch.poll_interval_ms,
             poll_backoff_max_ms: cfg.watch.poll_backoff_max_ms,
         },
@@ -319,9 +325,49 @@ pub async fn scan_config_handler(
             library_scan_limit: cfg.budget.library_scan_limit,
         },
     };
+    let incremental_policy = IncrementalScanPolicyView {
+        default_auto_scan: true,
+        default_watch_for_changes: true,
+        default_scan_interval_minutes: 60,
+        watch_strategy: watch_strategy_label(cfg.watch.strategy),
+        poll_interval_ms: cfg.watch.poll_interval_ms,
+        debounce_window_ms: cfg.watch.debounce_window_ms,
+        max_batch_events: cfg.watch.max_batch_events,
+        maintenance_enabled: cfg.maintenance.enabled,
+        maintenance_tick_interval_ms: cfg.maintenance.tick_interval_ms,
+        maintenance_max_jobs_per_library: cfg.maintenance.max_jobs_per_library,
+        maintenance_max_root_entries_per_library: cfg
+            .maintenance
+            .max_root_entries_per_library,
+        media_extensions: scanner.video_extensions.clone(),
+        ignored_extensions: scanner.ignored_extensions.clone(),
+        ignored_path_patterns: scanner.ignored_path_patterns.clone(),
+    };
+
     Ok(Json(ApiResponse::success(ScanConfig {
         orchestrator: view,
+        incremental_policy,
     })))
+}
+
+async fn incremental_status(
+    state: &AppState,
+) -> Result<IncrementalScanStatusView, ScanHttpError> {
+    state
+        .scan_control()
+        .orchestrator()
+        .incremental_status()
+        .await
+        .map_err(|err| ScanHttpError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: err.to_string(),
+        })
+}
+
+fn watch_strategy_label(
+    strategy: ferrex_core::domain::scan::orchestration::config::WatchStrategy,
+) -> String {
+    format!("{strategy:?}").to_ascii_lowercase()
 }
 
 pub async fn build_scan_progress_stream(

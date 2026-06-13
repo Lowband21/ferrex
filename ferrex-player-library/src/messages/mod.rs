@@ -42,6 +42,8 @@ pub enum LibraryMessage {
     UpdateLibraryFormPaths(String),
     UpdateLibraryFormScanInterval(String),
     ToggleLibraryFormEnabled,
+    ToggleLibraryFormAutoScan,
+    ToggleLibraryFormWatchForChanges,
     ToggleLibraryFormStartScan,
     SubmitLibraryForm,
     MediaRootBrowser(media_root_browser::Message),
@@ -159,6 +161,12 @@ impl LibraryMessage {
             }
             Self::ToggleLibraryFormEnabled => {
                 "Library::ToggleLibraryFormEnabled"
+            }
+            Self::ToggleLibraryFormAutoScan => {
+                "Library::ToggleLibraryFormAutoScan"
+            }
+            Self::ToggleLibraryFormWatchForChanges => {
+                "Library::ToggleLibraryFormWatchForChanges"
             }
             Self::ToggleLibraryFormStartScan => {
                 "Library::ToggleLibraryFormStartScan"
@@ -318,6 +326,12 @@ impl std::fmt::Debug for LibraryMessage {
             }
             Self::ToggleLibraryFormEnabled => {
                 write!(f, "Library::ToggleLibraryFormEnabled")
+            }
+            Self::ToggleLibraryFormAutoScan => {
+                write!(f, "Library::ToggleLibraryFormAutoScan")
+            }
+            Self::ToggleLibraryFormWatchForChanges => {
+                write!(f, "Library::ToggleLibraryFormWatchForChanges")
             }
             Self::ToggleLibraryFormStartScan => {
                 write!(f, "Library::ToggleLibraryFormStartScan")

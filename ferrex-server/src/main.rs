@@ -484,6 +484,10 @@ async fn wire_app_resources(
             tmdb_provider.clone(),
             image_service.clone(),
             unit_of_work.clone(),
+            ferrex_core::domain::scan::actors::folder::ScannerFileFilterPolicy::new(
+                config.scanner.video_extensions.clone(),
+                config.scanner.ignored_extensions.clone(),
+            ),
         )
         .await?,
     );

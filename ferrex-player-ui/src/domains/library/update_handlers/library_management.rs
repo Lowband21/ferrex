@@ -242,6 +242,8 @@ pub fn handle_show_library_form(
                     .collect(),
                 scan_interval_minutes: lib.scan_interval_minutes.to_string(),
                 enabled: lib.enabled,
+                auto_scan: lib.auto_scan,
+                watch_for_changes: lib.watch_for_changes,
                 editing: true,
                 start_scan: true,
             }
@@ -255,6 +257,8 @@ pub fn handle_show_library_form(
                 paths: String::new(),
                 scan_interval_minutes: "60".to_string(),
                 enabled: true,
+                auto_scan: true,
+                watch_for_changes: true,
                 editing: false,
                 start_scan: true,
             }
@@ -386,6 +390,28 @@ pub fn handle_toggle_library_form_enabled(
     Task::none()
 }
 
+pub fn handle_toggle_library_form_auto_scan(
+    state: &mut State,
+) -> Task<LibraryMessage> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
+        form_data.auto_scan = !form_data.auto_scan;
+    }
+    Task::none()
+}
+
+pub fn handle_toggle_library_form_watch_for_changes(
+    state: &mut State,
+) -> Task<LibraryMessage> {
+    if let Some(ref mut form_data) =
+        state.domains.library.state.library_form_data
+    {
+        form_data.watch_for_changes = !form_data.watch_for_changes;
+    }
+    Task::none()
+}
+
 pub fn handle_toggle_library_form_start_scan(
     state: &mut State,
 ) -> Task<LibraryMessage> {
@@ -421,13 +447,20 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
                 .push("At least one path is required".to_string());
         }
 
-        if form_data.scan_interval_minutes.parse::<u32>().is_err() {
-            state
+        match form_data.scan_interval_minutes.parse::<u32>() {
+            Ok(0) => state
                 .domains
                 .library
                 .state
                 .library_form_errors
-                .push("Scan interval must be a valid number".to_string());
+                .push("Scan interval must be at least 1 minute".to_string()),
+            Ok(_) => {}
+            Err(_) => state
+                .domains
+                .library
+                .state
+                .library_form_errors
+                .push("Scan interval must be a valid number".to_string()),
         }
 
         if !state.domains.library.state.library_form_errors.is_empty() {
@@ -472,8 +505,8 @@ pub fn handle_submit_library_form(state: &mut State) -> Task<LibraryMessage> {
             last_scan: None,
             enabled: form_data.enabled,
             media: None,
-            auto_scan: true,
-            watch_for_changes: true,
+            auto_scan: form_data.auto_scan,
+            watch_for_changes: form_data.watch_for_changes,
             analyze_on_scan: true,
             max_retry_attempts: 3,
             movie_ref_batch_size: MovieReferenceBatchSize::default(),

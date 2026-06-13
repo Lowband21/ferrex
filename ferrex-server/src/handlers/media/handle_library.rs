@@ -46,6 +46,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
 const FILTER_CACHE_TTL: Duration = Duration::from_secs(30);
+const MIN_SCAN_INTERVAL_MINUTES: u32 = 1;
 
 static FILTER_CACHE: Lazy<RwLock<HashMap<FilterCacheKey, CachedIndices>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
@@ -504,6 +505,14 @@ fn requires_user_scope(spec: &FilterIndicesRequest) -> bool {
         )
 }
 
+fn validate_scan_interval(scan_interval_minutes: u32) -> Option<String> {
+    (scan_interval_minutes < MIN_SCAN_INTERVAL_MINUTES).then(|| {
+        format!(
+            "scan_interval_minutes must be at least {MIN_SCAN_INTERVAL_MINUTES} minute"
+        )
+    })
+}
+
 pub fn invalidate_filter_cache_for(library_id: Uuid) {
     FILTER_CACHE
         .write()
@@ -725,6 +734,11 @@ pub async fn create_library_handler(
     let library_id = LibraryId::new();
     info!("Generated library ID: {}", library_id);
 
+    if let Some(message) = validate_scan_interval(request.scan_interval_minutes)
+    {
+        return Ok(Json(ApiResponse::error(message)));
+    }
+
     let movie_ref_batch_size =
         match ferrex_core::types::ids::MovieReferenceBatchSize::new(
             request.movie_ref_batch_size,
@@ -749,8 +763,8 @@ pub async fn create_library_handler(
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
         media: None,
-        auto_scan: true,
-        watch_for_changes: true,
+        auto_scan: request.auto_scan,
+        watch_for_changes: request.watch_for_changes,
         analyze_on_scan: false,
         max_retry_attempts: 3,
         movie_ref_batch_size,
@@ -776,7 +790,10 @@ pub async fn create_library_handler(
                     paths: library.paths.clone(),
                 },
                 root_paths: library.paths.clone(),
-                max_outstanding_jobs: 8,
+                max_outstanding_jobs: state
+                    .config()
+                    .scanner
+                    .library_actor_max_outstanding_jobs,
             };
 
             if let Err(err) = orchestrator
@@ -868,6 +885,9 @@ pub async fn update_library_handler(
         }
     };
 
+    let previous_paths = library.paths.clone();
+    let previous_watch_for_changes = library.watch_for_changes;
+
     // Update fields if provided
     if let Some(name) = request.name {
         library.name = name;
@@ -876,10 +896,19 @@ pub async fn update_library_handler(
         library.paths = paths.into_iter().map(PathBuf::from).collect();
     }
     if let Some(scan_interval) = request.scan_interval_minutes {
+        if let Some(message) = validate_scan_interval(scan_interval) {
+            return Ok(Json(ApiResponse::error(message)));
+        }
         library.scan_interval_minutes = scan_interval;
     }
     if let Some(enabled) = request.enabled {
         library.enabled = enabled;
+    }
+    if let Some(auto_scan) = request.auto_scan {
+        library.auto_scan = auto_scan;
+    }
+    if let Some(watch_for_changes) = request.watch_for_changes {
+        library.watch_for_changes = watch_for_changes;
     }
     if let Some(size) = request.movie_ref_batch_size {
         match ferrex_core::types::ids::MovieReferenceBatchSize::new(size) {
@@ -896,11 +925,51 @@ pub async fn update_library_handler(
     }
     library.updated_at = chrono::Utc::now();
 
+    let actor_config = LibraryActorConfig {
+        library: LibraryReference {
+            id: library.id,
+            name: library.name.clone(),
+            library_type: library.library_type,
+            paths: library.paths.clone(),
+        },
+        root_paths: library.paths.clone(),
+        max_outstanding_jobs: state
+            .config()
+            .scanner
+            .library_actor_max_outstanding_jobs,
+    };
+    let watch_runtime_changed = previous_paths != library.paths
+        || previous_watch_for_changes != library.watch_for_changes;
+    let watch_for_changes = library.watch_for_changes;
+
     match libraries_repo
         .update_library(LibraryId(uuid), library)
         .await
     {
         Ok(_) => {
+            if watch_runtime_changed {
+                state
+                    .scan_control()
+                    .orchestrator()
+                    .unregister_library_watch(LibraryId(uuid))
+                    .await;
+            }
+
+            if let Err(err) = state
+                .scan_control()
+                .orchestrator()
+                .register_library(actor_config, watch_for_changes)
+                .await
+            {
+                error!(
+                    "Failed to refresh library {} scan runtime after update: {}",
+                    id, err
+                );
+                return Ok(Json(ApiResponse::error(
+                    "failed_to_refresh_library_scan_runtime".to_string(),
+                )));
+            }
+
             info!("Library updated: {}", id);
             Ok(Json(ApiResponse::success("Library updated".to_string())))
         }

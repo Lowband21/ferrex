@@ -104,6 +104,16 @@ pub trait FsWatchObserver: Send + Sync {
 /// No-op observer used when metrics instrumentation is not wired up.
 pub struct NoopFsWatchObserver;
 
+/// Point-in-time watcher registration health for scan observability.
+#[derive(Clone, Debug, Default)]
+pub struct FsWatchRuntimeSnapshot {
+    pub registered_libraries: usize,
+    pub active_libraries: usize,
+    pub initializing_libraries: usize,
+    pub registered_roots: usize,
+    pub active_roots: usize,
+}
+
 impl FsWatchObserver for NoopFsWatchObserver {
     fn on_error(&self, _library_id: LibraryId, _error: &str) {}
 }
@@ -243,6 +253,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                 watchers: None,
                 flush_task,
                 tx: tx.clone(),
+                root_count: resolved_roots.len(),
             },
         );
         drop(guard);
@@ -341,6 +352,30 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         }
     }
 
+    pub async fn runtime_snapshot(&self) -> FsWatchRuntimeSnapshot {
+        let guard = self.libraries.read().await;
+        let registered_libraries = guard.len();
+        let active_libraries = guard
+            .values()
+            .filter(|watch| watch.watchers.is_some())
+            .count();
+        let registered_roots =
+            guard.values().map(|watch| watch.root_count).sum();
+        let active_roots = guard
+            .values()
+            .filter_map(|watch| watch.watchers.as_ref().map(Vec::len))
+            .sum();
+
+        FsWatchRuntimeSnapshot {
+            registered_libraries,
+            active_libraries,
+            initializing_libraries: registered_libraries
+                .saturating_sub(active_libraries),
+            registered_roots,
+            active_roots,
+        }
+    }
+
     #[cfg(test)]
     pub async fn watcher_count(&self) -> usize {
         self.libraries.read().await.len()
@@ -375,6 +410,7 @@ struct LibraryWatch {
     watchers: Option<Vec<ActiveWatcher>>,
     flush_task: JoinHandle<()>,
     tx: mpsc::Sender<WatchMessage>,
+    root_count: usize,
 }
 
 impl LibraryWatch {
@@ -383,6 +419,7 @@ impl LibraryWatch {
             watchers,
             flush_task,
             tx,
+            root_count: _,
         } = self;
         // Drop watchers first — this stops the notify streams and
         // ensures all in-flight callbacks complete. Drop the retained sender
@@ -399,6 +436,7 @@ impl fmt::Debug for LibraryWatch {
             self.watchers.as_ref().map(|watchers| watchers.len());
         f.debug_struct("LibraryWatch")
             .field("watcher_count", &watcher_count)
+            .field("root_count", &self.root_count)
             .field("flush_task_finished", &self.flush_task.is_finished())
             .field("tx_closed", &self.tx.is_closed())
             .finish()
@@ -1787,6 +1825,27 @@ mod tests {
         .expect("published durable file watch events")
     }
 
+    async fn wait_for_acked_events(
+        bus: &MemoryFileChangeEventBus,
+        expected: usize,
+    ) -> Vec<FileWatchEvent> {
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let events = bus.events().await;
+                let acked = bus.acked().await;
+                if events.len() >= expected
+                    && acked.len() >= expected
+                    && events.iter().take(expected).all(|event| event.processed)
+                {
+                    return events;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("acked durable file watch events")
+    }
+
     async fn clear_startup_watch_noise(
         bus: &MemoryFileChangeEventBus,
         executor: &RecordingCommandExecutor,
@@ -1895,7 +1954,7 @@ mod tests {
 
         let commands = wait_for_commands(&executor, 1).await;
         assert!(matches!(commands[0], LibraryActorCommand::FsEvents { .. }));
-        let events = wait_for_published_events(&bus, 1).await;
+        let events = wait_for_acked_events(&bus, 1).await;
         assert_eq!(events[0].event_type, FileWatchEventType::Created);
         assert_eq!(events[0].library_root_id, 0);
         assert!(events[0].processed);

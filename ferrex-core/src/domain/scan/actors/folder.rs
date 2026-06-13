@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -106,35 +107,89 @@ pub trait FolderScanActor: Send + Sync {
     ) -> Result<FolderScanSummary>;
 }
 
-/// Stateless `FolderScanActor` that performs filesystem operations for one folder per job.
+/// Extension policy applied when classifying files during folder scans.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScannerFileFilterPolicy {
+    media_extensions: BTreeSet<String>,
+    ignored_extensions: BTreeSet<String>,
+}
+
+impl ScannerFileFilterPolicy {
+    pub fn new(
+        media_extensions: impl IntoIterator<Item = String>,
+        ignored_extensions: impl IntoIterator<Item = String>,
+    ) -> Self {
+        let media_extensions = media_extensions
+            .into_iter()
+            .filter_map(|ext| normalize_extension(&ext))
+            .collect();
+        let ignored_extensions = ignored_extensions
+            .into_iter()
+            .filter_map(|ext| normalize_extension(&ext))
+            .collect();
+
+        Self {
+            media_extensions,
+            ignored_extensions,
+        }
+    }
+
+    pub fn media_extensions(&self) -> impl Iterator<Item = &str> {
+        self.media_extensions.iter().map(String::as_str)
+    }
+
+    pub fn ignored_extensions(&self) -> impl Iterator<Item = &str> {
+        self.ignored_extensions.iter().map(String::as_str)
+    }
+
+    pub fn is_supported_media_ext(&self, ext: &str) -> bool {
+        let Some(ext) = normalize_extension(ext) else {
+            return false;
+        };
+        self.media_extensions.contains(&ext)
+            && !self.ignored_extensions.contains(&ext)
+    }
+
+    pub fn is_media_file_path(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|ext| self.is_supported_media_ext(ext))
+            .unwrap_or(false)
+    }
+}
+
+impl Default for ScannerFileFilterPolicy {
+    fn default() -> Self {
+        Self::new(
+            crate::domain::scan::scanner::settings::default_video_file_extensions_vec(),
+            Vec::<String>::new(),
+        )
+    }
+}
+
+fn normalize_extension(ext: &str) -> Option<String> {
+    let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    (!normalized.is_empty()
+        && !normalized.contains('/')
+        && !normalized.contains('\\')
+        && !normalized.contains('*'))
+    .then_some(normalized)
+}
+
+/// Folder scan actor that performs filesystem operations for one folder per job.
 #[derive(Debug)]
-pub struct DefaultFolderScanActor;
+pub struct DefaultFolderScanActor {
+    filters: ScannerFileFilterPolicy,
+}
 
 /// Shared helper so other actors (e.g., LibraryActor) can apply the
 /// same definition of what constitutes a media file.
 pub fn is_supported_media_ext(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "mkv"
-            | "mp4"
-            | "avi"
-            | "mov"
-            | "webm"
-            | "flv"
-            | "wmv"
-            | "mpg"
-            | "mpeg"
-            | "m4v"
-            | "3gp"
-            | "ts"
-    )
+    ScannerFileFilterPolicy::default().is_supported_media_ext(ext)
 }
 
 pub fn is_media_file_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(is_supported_media_ext)
-        .unwrap_or(false)
+    ScannerFileFilterPolicy::default().is_media_file_path(path)
 }
 
 impl Default for DefaultFolderScanActor {
@@ -145,11 +200,17 @@ impl Default for DefaultFolderScanActor {
 
 impl DefaultFolderScanActor {
     pub fn new() -> Self {
-        Self
+        Self {
+            filters: ScannerFileFilterPolicy::default(),
+        }
+    }
+
+    pub fn with_filter_policy(filters: ScannerFileFilterPolicy) -> Self {
+        Self { filters }
     }
 
     fn is_media_file(&self, path: &Path) -> bool {
-        is_media_file_path(path)
+        self.filters.is_media_file_path(path)
     }
 
     async fn list_directory(&self, path: &Path) -> Result<Vec<ListingEntry>> {
@@ -549,6 +610,19 @@ mod tests {
             enqueue_time: Utc::now(),
             device_id: None,
         }
+    }
+
+    #[test]
+    fn filter_policy_preserves_media_allow_and_ignore_lists() {
+        let filters = ScannerFileFilterPolicy::new(
+            vec![".MKV".to_string(), "mp4".to_string()],
+            vec!["tmp".to_string()],
+        );
+
+        assert!(filters.is_media_file_path(Path::new("movie.mkv")));
+        assert!(filters.is_media_file_path(Path::new("movie.MP4")));
+        assert!(!filters.is_media_file_path(Path::new("movie.avi")));
+        assert!(!filters.is_media_file_path(Path::new("partial.tmp")));
     }
 
     #[tokio::test]

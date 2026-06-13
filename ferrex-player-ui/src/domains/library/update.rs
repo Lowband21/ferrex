@@ -599,6 +599,20 @@ pub fn update_library(
             DomainUpdateResult::task(task.map(DomainMessage::Library))
         }
 
+        LibraryMessage::ToggleLibraryFormAutoScan => {
+            let task = super::update_handlers::library_management::handle_toggle_library_form_auto_scan(
+                state,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::ToggleLibraryFormWatchForChanges => {
+            let task = super::update_handlers::library_management::handle_toggle_library_form_watch_for_changes(
+                state,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
         LibraryMessage::ToggleLibraryFormStartScan => {
             let task =
                 super::update_handlers::library_management::handle_toggle_library_form_start_scan(

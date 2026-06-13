@@ -11,6 +11,7 @@ pub mod types;
 // Curated re-exports for callers that previously imported from root modules.
 pub use routes::v1;
 pub use scan::{
+    IncrementalScanPolicyView, IncrementalScanStatusView,
     OrchestratorConfigView, ScanConfig, ScanMetrics, ScanQueueDepths,
 };
 pub use types::*;
