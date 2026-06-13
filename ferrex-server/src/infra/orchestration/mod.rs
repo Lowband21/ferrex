@@ -44,8 +44,9 @@ use ferrex_core::domain::scan::orchestration::{
     series_state::PostgresSeriesScanStateRepository,
 };
 use ferrex_core::domain::scan::{
-    FsWatchConfig, FsWatchService, NoopFsWatchObserver,
-    PostgresCursorRepository, PostgresQueueService, SeriesScanStateRepository,
+    FileChangeEventBus, FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+    PostgresCursorRepository, PostgresFileChangeEventBus, PostgresQueueService,
+    SeriesScanStateRepository,
 };
 use ferrex_core::error::{MediaError, Result};
 use ferrex_core::infra::media::{
@@ -138,11 +139,15 @@ impl ScanOrchestrator {
         );
 
         let command_executor: Arc<dyn LibraryCommandExecutor> = runtime.clone();
-        let watchers: Arc<FsWatchService> = Arc::new(FsWatchService::new(
-            FsWatchConfig::from(watch_cfg),
-            Arc::new(NoopFsWatchObserver),
-            command_executor,
-        ));
+        let file_change_bus: Arc<dyn FileChangeEventBus> =
+            Arc::new(PostgresFileChangeEventBus::new(queue.pool().clone()));
+        let watchers: Arc<FsWatchService> =
+            Arc::new(FsWatchService::with_event_bus(
+                FsWatchConfig::from(watch_cfg),
+                Arc::new(NoopFsWatchObserver),
+                command_executor,
+                file_change_bus,
+            ));
 
         Ok(Self {
             runtime,
