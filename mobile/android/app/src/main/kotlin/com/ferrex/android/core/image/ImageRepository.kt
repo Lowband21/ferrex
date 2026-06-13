@@ -32,8 +32,9 @@ class ImageRepository(
     }
 
     /**
-     * Refresh only the visible pending/failed images. Ready images stay cached and
-     * no OkHttp thread sleeps while waiting for server-side cache fills.
+     * Refresh visible pending/failed/missing images while returning a complete
+     * visible-key snapshot. Ready images stay cached and no OkHttp thread sleeps
+     * while waiting for server-side cache fills.
      */
     suspend fun retryPendingOrFailed(
         scope: ServerCacheScope,
@@ -41,16 +42,21 @@ class ImageRepository(
     ): Map<ImageRequestKey, ImageResolution> = withContext(ioDispatcher) {
         val distinct = visibleKeys.distinct()
         val retryKeys = distinct.filter { key ->
+            if (key.iid.toJavaUuidOrNull() == null) return@filter false
             when (val cached = cache.readManifestEntry(scope, key)) {
                 is ManifestCacheRead.Valid -> cached.record.status !is ManifestImageStatus.Ready
                 is ManifestCacheRead.Corrupt -> true
-                ManifestCacheRead.Missing -> false
+                ManifestCacheRead.Missing -> true
             }
         }
-        if (retryKeys.isEmpty()) {
-            return@withContext distinct.associateWith { cachedOrPlaceholder(scope, it) }
+        val refreshed = if (retryKeys.isEmpty()) emptyMap() else refreshManifest(scope, retryKeys)
+        distinct.associateWith { key ->
+            if (key.iid.toJavaUuidOrNull() == null) {
+                ImageResolution.Placeholder(key, "Image iid is not a valid UUID")
+            } else {
+                refreshed[key] ?: cachedOrPlaceholder(scope, key)
+            }
         }
-        refreshManifest(scope, retryKeys)
     }
 
     override fun clearSelectedImages(scope: ServerCacheScope, keys: Collection<ImageRequestKey>) {

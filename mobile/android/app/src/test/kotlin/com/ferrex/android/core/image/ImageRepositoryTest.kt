@@ -134,7 +134,7 @@ class ImageRepositoryTest {
     }
 
     @Test
-    fun retryRefreshesOnlyVisiblePendingAndFailedImages() = runTest {
+    fun retryRefreshesOnlyVisiblePendingAndFailedImagesAndKeepsReadyResolutions() = runTest {
         val fixture = Fixture()
         val ready = key(50, BrowseImageCategory.Poster)
         val pending = key(51, BrowseImageCategory.Poster)
@@ -152,9 +152,29 @@ class ImageRepositoryTest {
         val resolved = fixture.repository.retryPendingOrFailed(fixture.scope, listOf(ready, pending, failed))
 
         assertEquals(listOf(pending, failed), fixture.transport.requested.single())
-        assertFalse(resolved.containsKey(ready))
+        assertEquals("ready-token", (resolved[ready] as ImageResolution.Ready).token)
         assertEquals("pending-token", (resolved[pending] as ImageResolution.Ready).token)
         assertEquals(3_000, (resolved[failed] as ImageResolution.Pending).retryAfterMillis)
+    }
+
+    @Test
+    fun retryFetchesMissingVisibleImagesAfterManifestTransportFailure() = runTest {
+        val fixture = Fixture()
+        val image = key(53, BrowseImageCategory.Backdrop)
+        fixture.transport.result = LibrarySyncResult.Failure(LibrarySyncFailure.Network("offline"))
+
+        val failed = fixture.repository.resolveImages(fixture.scope, listOf(image))[image] as ImageResolution.Failed
+
+        assertTrue(failed.retryable)
+        assertTrue(fixture.cache.readManifestEntry(fixture.scope, image) is ManifestCacheRead.Missing)
+        fixture.transport.result = LibrarySyncResult.Success(
+            listOf(ImageManifestRecord(image, ManifestImageStatus.Ready("recovered-token"))),
+        )
+
+        val retried = fixture.repository.retryPendingOrFailed(fixture.scope, listOf(image))
+
+        assertEquals(listOf(listOf(image), listOf(image)), fixture.transport.requested)
+        assertEquals("recovered-token", (retried[image] as ImageResolution.Ready).token)
     }
 
     @Test

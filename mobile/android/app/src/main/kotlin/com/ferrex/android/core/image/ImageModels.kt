@@ -6,9 +6,10 @@ import ferrex.common.ImageCategory
  * Ferrex image categories supported by the mobile manifest contract.
  *
  * The compatibility `/api/v1/images/iid/{iid}` endpoint resolves poster-sized
- * images only on the current server, so browse/detail callers should resolve
- * every category through `/api/v1/images/manifest` and then load immutable
- * `/api/v1/images/blob/{token}` URLs.
+ * images only on the current server, so browse/home callers resolve every
+ * visible category through `/api/v1/images/manifest` and load immutable
+ * `/api/v1/images/blob/{token}` URLs for Ready records before considering
+ * guarded poster-only fallback.
  */
 enum class BrowseImageCategory(
     val flatBufferValue: Byte,

@@ -19,6 +19,11 @@ import coil.compose.AsyncImage
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageResolution
 
+data class FerrexImageFallback(
+    val url: String,
+    val label: String,
+)
+
 @Composable
 fun FerrexAsyncImage(
     resolution: ImageResolution?,
@@ -26,40 +31,35 @@ fun FerrexAsyncImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     category: BrowseImageCategory = resolution?.key?.category ?: BrowseImageCategory.Poster,
+    fallback: FerrexImageFallback? = null,
 ) {
     val baseModifier = modifier
         .fillMaxWidth()
         .aspectRatio(category.placeholderAspectRatio)
-    when (resolution) {
-        is ImageResolution.Ready -> Box(modifier = baseModifier) {
-            AsyncImage(
-                model = resolution.url,
-                imageLoader = imageLoader,
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-            if (resolution.stale) {
-                Text(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    text = "Offline image",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-        }
-        is ImageResolution.Pending -> ImageStatePlaceholder(
+    when {
+        resolution is ImageResolution.Ready -> ResolvedImage(
+            url = resolution.url,
+            imageLoader = imageLoader,
+            contentDescription = contentDescription,
+            modifier = baseModifier,
+            badge = if (resolution.stale) "Offline image" else null,
+        )
+        fallback != null -> ResolvedImage(
+            url = fallback.url,
+            imageLoader = imageLoader,
+            contentDescription = contentDescription,
+            modifier = baseModifier,
+            badge = fallback.label,
+        )
+        resolution is ImageResolution.Pending -> ImageStatePlaceholder(
             label = stalePrefix(resolution.stale) + "Image pending. Retry after ${resolution.retryAfterMillis} ms.",
             modifier = baseModifier,
         )
-        is ImageResolution.Failed -> ImageStatePlaceholder(
+        resolution is ImageResolution.Failed -> ImageStatePlaceholder(
             label = stalePrefix(resolution.stale) + resolution.reason,
             modifier = baseModifier,
         )
-        is ImageResolution.Placeholder, null -> ImageStatePlaceholder(
+        resolution is ImageResolution.Placeholder || resolution == null -> ImageStatePlaceholder(
             label = (resolution as? ImageResolution.Placeholder)?.reason ?: "Image unavailable",
             modifier = baseModifier,
         )
@@ -67,6 +67,36 @@ fun FerrexAsyncImage(
 }
 
 private fun stalePrefix(stale: Boolean): String = if (stale) "Offline image. " else ""
+
+@Composable
+private fun ResolvedImage(
+    url: String,
+    imageLoader: ImageLoader,
+    contentDescription: String?,
+    modifier: Modifier,
+    badge: String?,
+) {
+    Box(modifier = modifier) {
+        AsyncImage(
+            model = url,
+            imageLoader = imageLoader,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        badge?.let {
+            Text(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
+}
 
 @Composable
 private fun ImageStatePlaceholder(
