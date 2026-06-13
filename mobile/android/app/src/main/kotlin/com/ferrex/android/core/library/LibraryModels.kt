@@ -26,7 +26,19 @@ data class LibraryRepositoryState(
     val selectedLibraryId: String? = null,
     val movieAccessor: MovieLibraryAccessor? = null,
     val seriesAccessor: SeriesLibraryAccessor? = null,
+    val movieLibraries: List<CachedMovieLibrary> = emptyList(),
+    val seriesLibraries: List<CachedSeriesLibrary> = emptyList(),
     val freshness: LibraryFreshness = LibraryFreshness.Empty,
+)
+
+data class CachedMovieLibrary(
+    val library: LibraryInfo,
+    val accessor: MovieLibraryAccessor,
+)
+
+data class CachedSeriesLibrary(
+    val library: LibraryInfo,
+    val accessor: SeriesLibraryAccessor,
 )
 
 sealed interface LibraryFreshness {

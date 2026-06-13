@@ -434,8 +434,35 @@ class LibraryRepository(
     }
 
     private fun publish(state: LibraryRepositoryState): LibraryRepositoryState {
-        _state.value = state
-        return state
+        val enriched = if (state.scope != null && state.freshness != LibraryFreshness.Syncing) {
+            state.withCachedDatasets()
+        } else {
+            state
+        }
+        _state.value = enriched
+        return enriched
+    }
+
+    private fun LibraryRepositoryState.withCachedDatasets(): LibraryRepositoryState {
+        val scoped = scope ?: return copy(movieLibraries = emptyList(), seriesLibraries = emptyList())
+        val cachedMovies = libraries.filter { it.kind == LibraryKind.Movies }.mapNotNull { library ->
+            when (val load = loadCachedMovieAccessor(scoped, library.id)) {
+                is CacheLoad.Success -> CachedMovieLibrary(library, load.accessor)
+                is CacheLoad.Corrupt -> load.accessor?.let { CachedMovieLibrary(library, it) }
+                CacheLoad.Empty -> null
+            }
+        }
+        val cachedSeries = libraries.filter { it.kind == LibraryKind.Series }.mapNotNull { library ->
+            when (val load = loadCachedSeriesAccessor(scoped, library.id)) {
+                is CacheLoad.Success -> CachedSeriesLibrary(library, load.accessor)
+                is CacheLoad.Corrupt -> load.accessor?.let { CachedSeriesLibrary(library, it) }
+                CacheLoad.Empty -> null
+            }
+        }
+        return copy(
+            movieLibraries = cachedMovies,
+            seriesLibraries = cachedSeries,
+        )
     }
 
     private fun ByteArray.wrapFlatBuffer() = java.nio.ByteBuffer.wrap(this).order(java.nio.ByteOrder.LITTLE_ENDIAN)

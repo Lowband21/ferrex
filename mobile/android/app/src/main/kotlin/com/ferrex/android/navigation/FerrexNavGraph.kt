@@ -11,10 +11,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.browse.LibraryIndexTransport
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
-import com.ferrex.android.ui.recovery.PhoneHomeScreen
+import com.ferrex.android.core.watch.ContinueWatchingRepository
+import com.ferrex.android.ui.home.PhoneHomeScreen
 import com.ferrex.android.ui.recovery.PhoneLoadingScreen
 import com.ferrex.android.ui.recovery.PhoneLoginScreen
 import com.ferrex.android.ui.recovery.PhoneRecoverableScreen
@@ -33,8 +35,10 @@ object FerrexRoutes {
 fun FerrexNavGraph(
     authManager: AuthManager,
     libraryRepository: LibraryRepository? = null,
+    libraryIndexTransport: LibraryIndexTransport? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    continueWatchingRepository: ContinueWatchingRepository? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -89,8 +93,10 @@ fun FerrexNavGraph(
                 PhoneHomeScreen(
                     state = state,
                     libraryRepository = libraryRepository,
+                    libraryIndexTransport = libraryIndexTransport,
                     imageRepository = imageRepository,
                     imagePipeline = imagePipeline,
+                    continueWatchingRepository = continueWatchingRepository,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,

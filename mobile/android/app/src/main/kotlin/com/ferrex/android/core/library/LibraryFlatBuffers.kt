@@ -239,27 +239,25 @@ class MovieLibraryAccessor internal constructor(
     val batchCount: Int get() = batches.size
     val itemCount: Int get() = batches.sumOf { it.itemCount }
 
-    private val movieLocations: List<Pair<Int, Int>> by lazy {
+    private val movieReferences: List<MovieReference> by lazy {
         buildList {
-            batches.forEachIndexed { batchIndex, batch ->
+            batches.forEach { batch ->
                 for (itemIndex in 0 until batch.data.itemsLength) {
                     val item = batch.data.items(itemIndex) ?: continue
-                    if (item.variantType == MediaVariant.MovieReference) add(batchIndex to itemIndex)
+                    if (item.variantType == MediaVariant.MovieReference) {
+                        (item.variant(MovieReference()) as? MovieReference)?.let(::add)
+                    }
                 }
             }
         }
     }
 
-    val movieCount: Int get() = movieLocations.size
+    val movieCount: Int get() = movieReferences.size
 
-    fun movieAt(index: Int): MovieReference? {
-        val (batchIndex, itemIndex) = movieLocations[index]
-        val item = batches[batchIndex].data.items(itemIndex) ?: return null
-        return item.variant(MovieReference()) as? MovieReference
-    }
+    fun movieAt(index: Int): MovieReference? = movieReferences.getOrNull(index)
 
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
-        for (index in movieLocations.indices) {
+        for (index in movieReferences.indices) {
             val details = movieAt(index)?.details ?: continue
             details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
             details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
@@ -268,7 +266,7 @@ class MovieLibraryAccessor internal constructor(
 
     fun primaryImageCards(limit: Int): List<BrowseImageCard> = buildList {
         if (limit <= 0) return@buildList
-        for (index in movieLocations.indices) {
+        for (index in movieReferences.indices) {
             val movie = movieAt(index) ?: continue
             val details = movie.details ?: continue
             details.primaryPosterIid?.let {
@@ -319,50 +317,46 @@ class SeriesLibraryAccessor internal constructor(
     val bundleCount: Int get() = bundles.size
     val itemCount: Int get() = bundles.sumOf { it.itemCount }
 
-    private val seriesLocations: List<Pair<Int, Int>> by lazy {
+    private val seriesReferences: List<SeriesReference> by lazy {
         buildList {
-            bundles.forEachIndexed { bundleIndex, bundle ->
+            bundles.forEach { bundle ->
                 for (itemIndex in 0 until bundle.data.itemsLength) {
                     val item = bundle.data.items(itemIndex) ?: continue
-                    if (item.variantType == MediaVariant.SeriesReference) add(bundleIndex to itemIndex)
+                    if (item.variantType == MediaVariant.SeriesReference) {
+                        (item.variant(SeriesReference()) as? SeriesReference)?.let(::add)
+                    }
                 }
             }
         }
     }
 
-    private val episodeLocations: List<Pair<Int, Int>> by lazy {
+    private val episodeReferences: List<EpisodeReference> by lazy {
         buildList {
-            bundles.forEachIndexed { bundleIndex, bundle ->
+            bundles.forEach { bundle ->
                 for (itemIndex in 0 until bundle.data.itemsLength) {
                     val item = bundle.data.items(itemIndex) ?: continue
-                    if (item.variantType == MediaVariant.EpisodeReference) add(bundleIndex to itemIndex)
+                    if (item.variantType == MediaVariant.EpisodeReference) {
+                        (item.variant(EpisodeReference()) as? EpisodeReference)?.let(::add)
+                    }
                 }
             }
         }
     }
 
-    val seriesReferenceCount: Int get() = seriesLocations.size
-    val episodeCount: Int get() = episodeLocations.size
+    val seriesReferenceCount: Int get() = seriesReferences.size
+    val episodeCount: Int get() = episodeReferences.size
 
-    fun seriesAt(index: Int): SeriesReference? {
-        val (bundleIndex, itemIndex) = seriesLocations[index]
-        val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
-        return item.variant(SeriesReference()) as? SeriesReference
-    }
+    fun seriesAt(index: Int): SeriesReference? = seriesReferences.getOrNull(index)
 
-    fun episodeAt(index: Int): EpisodeReference? {
-        val (bundleIndex, itemIndex) = episodeLocations[index]
-        val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
-        return item.variant(EpisodeReference()) as? EpisodeReference
-    }
+    fun episodeAt(index: Int): EpisodeReference? = episodeReferences.getOrNull(index)
 
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
-        for (index in seriesLocations.indices) {
+        for (index in seriesReferences.indices) {
             val details = seriesAt(index)?.details ?: continue
             details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
             details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
         }
-        for (index in episodeLocations.indices) {
+        for (index in episodeReferences.indices) {
             val details = episodeAt(index)?.details ?: continue
             details.primaryStillIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Episode)) }
         }
@@ -370,7 +364,7 @@ class SeriesLibraryAccessor internal constructor(
 
     fun primaryImageCards(limit: Int): List<BrowseImageCard> = buildList {
         if (limit <= 0) return@buildList
-        for (index in seriesLocations.indices) {
+        for (index in seriesReferences.indices) {
             val series = seriesAt(index) ?: continue
             val details = series.details ?: continue
             details.primaryPosterIid?.let {
@@ -396,7 +390,7 @@ class SeriesLibraryAccessor internal constructor(
             }
             if (size >= limit) return@buildList
         }
-        for (index in episodeLocations.indices) {
+        for (index in episodeReferences.indices) {
             val episode = episodeAt(index) ?: continue
             val details = episode.details ?: continue
             details.primaryStillIid?.let {
