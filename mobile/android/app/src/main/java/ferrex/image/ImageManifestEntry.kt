@@ -56,6 +56,36 @@ class ImageManifestEntry : Table() {
         }
     val tokenAsByteBuffer : ByteBuffer? get() = __vector_as_bytebuffer(8, 1)
     fun tokenInByteBuffer(_bb: ByteBuffer) : ByteBuffer? = __vector_in_bytebuffer(_bb, 8, 1)
+    /**
+     * Echoes the requested image category so clients can key iid + category.
+     */
+    val category : Byte
+        get() {
+            val o = __offset(10)
+            return if(o != 0) bb.get(o + bb_pos) else 0
+        }
+    /**
+     * Exact server retry delay for Pending entries; zero when not pending.
+     */
+    val retryAfterMillis : ULong
+        get() {
+            val o = __offset(12)
+            return if(o != 0) bb.getLong(o + bb_pos).toULong() else 0UL
+        }
+    /**
+     * Deterministic failure/missing reason for Failed entries.
+     */
+    val failureReason : String?
+        get() {
+            val o = __offset(14)
+            return if (o != 0) {
+                __string(o + bb_pos)
+            } else {
+                null
+            }
+        }
+    val failureReasonAsByteBuffer : ByteBuffer? get() = __vector_as_bytebuffer(14, 1)
+    fun failureReasonInByteBuffer(_bb: ByteBuffer) : ByteBuffer? = __vector_in_bytebuffer(_bb, 14, 1)
     companion object {
         fun validateVersion() = Constants.FLATBUFFERS_25_2_10()
         fun getRootAsImageManifestEntry(_bb: ByteBuffer): ImageManifestEntry = getRootAsImageManifestEntry(_bb, ImageManifestEntry())
@@ -63,10 +93,13 @@ class ImageManifestEntry : Table() {
             _bb.order(ByteOrder.LITTLE_ENDIAN)
             return (obj.__assign(_bb.getInt(_bb.position()) + _bb.position(), _bb))
         }
-        fun startImageManifestEntry(builder: FlatBufferBuilder) = builder.startTable(3)
+        fun startImageManifestEntry(builder: FlatBufferBuilder) = builder.startTable(6)
         fun addIid(builder: FlatBufferBuilder, iid: Int) = builder.addStruct(0, iid, 0)
         fun addStatus(builder: FlatBufferBuilder, status: Byte) = builder.addByte(1, status, 0)
         fun addToken(builder: FlatBufferBuilder, token: Int) = builder.addOffset(2, token, 0)
+        fun addCategory(builder: FlatBufferBuilder, category: Byte) = builder.addByte(3, category, 0)
+        fun addRetryAfterMillis(builder: FlatBufferBuilder, retryAfterMillis: ULong) = builder.addLong(4, retryAfterMillis.toLong(), 0)
+        fun addFailureReason(builder: FlatBufferBuilder, failureReason: Int) = builder.addOffset(5, failureReason, 0)
         fun endImageManifestEntry(builder: FlatBufferBuilder) : Int {
             val o = builder.endTable()
                 builder.required(o, 4)

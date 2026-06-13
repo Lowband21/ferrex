@@ -47,10 +47,13 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.image.FerrexImagePipeline
+import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.ui.components.FerrexBrowseImageRail
 import kotlinx.coroutines.launch
 
 @Composable
@@ -254,6 +257,8 @@ fun TvRecoverableScreen(
 fun TvHomeScreen(
     state: SessionState.Authenticated,
     libraryRepository: LibraryRepository? = null,
+    imageRepository: ImageRepository? = null,
+    imagePipeline: FerrexImagePipeline? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
@@ -291,6 +296,16 @@ fun TvHomeScreen(
                 libraryRepository?.clearSelectedCache(scope, libraryId)
             },
             onClearAll = { libraryRepository?.clearAllCache(scope) },
+        )
+        FerrexBrowseImageRail(
+            modifier = Modifier.padding(top = 28.dp),
+            repositoryState = repositoryState,
+            scope = scope,
+            imageRepository = imageRepository,
+            imagePipeline = imagePipeline,
+            maxImages = 10,
+            itemWidth = 180.dp,
+            horizontalAlignment = Alignment.CenterHorizontally,
         )
         TvRecoveryActions(
             includeRetry = false,

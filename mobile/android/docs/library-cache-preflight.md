@@ -7,3 +7,5 @@ LOW-344 depends on the LOW-342 recovery/auth substrate. This workspace is based 
 - `AuthManager.resetConnection()` now invokes the server/user-scoped cache clear hook before clearing saved connection data, so reset remains a data-wipe-free recovery exit for corrupt or mismatched library cache state.
 
 If any of those exits disappear, LOW-344 cache work should be deferred rather than shipping protected screens that can trap users behind corrupt cache or auth state.
+
+LOW-345 extends this preflight for image manifest metadata and Coil blobs in `image-pipeline-preflight.md`.

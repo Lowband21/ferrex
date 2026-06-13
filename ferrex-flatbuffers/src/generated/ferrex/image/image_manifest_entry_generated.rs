@@ -23,6 +23,9 @@ impl<'a> ImageManifestEntry<'a> {
     pub const VT_IID: ::flatbuffers::VOffsetT = 4;
     pub const VT_STATUS: ::flatbuffers::VOffsetT = 6;
     pub const VT_TOKEN: ::flatbuffers::VOffsetT = 8;
+    pub const VT_CATEGORY: ::flatbuffers::VOffsetT = 10;
+    pub const VT_RETRY_AFTER_MILLIS: ::flatbuffers::VOffsetT = 12;
+    pub const VT_FAILURE_REASON: ::flatbuffers::VOffsetT = 14;
 
     #[inline]
     pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -39,12 +42,17 @@ impl<'a> ImageManifestEntry<'a> {
         args: &'args ImageManifestEntryArgs<'args>,
     ) -> ::flatbuffers::WIPOffset<ImageManifestEntry<'bldr>> {
         let mut builder = ImageManifestEntryBuilder::new(_fbb);
+        builder.add_retry_after_millis(args.retry_after_millis);
+        if let Some(x) = args.failure_reason {
+            builder.add_failure_reason(x);
+        }
         if let Some(x) = args.token {
             builder.add_token(x);
         }
         if let Some(x) = args.iid {
             builder.add_iid(x);
         }
+        builder.add_category(args.category);
         builder.add_status(args.status);
         builder.finish()
     }
@@ -87,6 +95,46 @@ impl<'a> ImageManifestEntry<'a> {
             )
         }
     }
+    /// Echoes the requested image category so clients can key iid + category.
+    #[inline]
+    pub fn category(&self) -> super::common::ImageCategory {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<super::common::ImageCategory>(
+                    ImageManifestEntry::VT_CATEGORY,
+                    Some(super::common::ImageCategory::Poster),
+                )
+                .unwrap()
+        }
+    }
+    /// Exact server retry delay for Pending entries; zero when not pending.
+    #[inline]
+    pub fn retry_after_millis(&self) -> u64 {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<u64>(ImageManifestEntry::VT_RETRY_AFTER_MILLIS, Some(0))
+                .unwrap()
+        }
+    }
+    /// Deterministic failure/missing reason for Failed entries.
+    #[inline]
+    pub fn failure_reason(&self) -> Option<&'a str> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                ImageManifestEntry::VT_FAILURE_REASON,
+                None,
+            )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for ImageManifestEntry<'_> {
@@ -103,6 +151,21 @@ impl ::flatbuffers::Verifiable for ImageManifestEntry<'_> {
                 Self::VT_TOKEN,
                 false,
             )?
+            .visit_field::<super::common::ImageCategory>(
+                "category",
+                Self::VT_CATEGORY,
+                false,
+            )?
+            .visit_field::<u64>(
+                "retry_after_millis",
+                Self::VT_RETRY_AFTER_MILLIS,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                "failure_reason",
+                Self::VT_FAILURE_REASON,
+                false,
+            )?
             .finish();
         Ok(())
     }
@@ -111,6 +174,9 @@ pub struct ImageManifestEntryArgs<'a> {
     pub iid: Option<&'a super::ids::Uuid>,
     pub status: ImageStatus,
     pub token: Option<::flatbuffers::WIPOffset<&'a str>>,
+    pub category: super::common::ImageCategory,
+    pub retry_after_millis: u64,
+    pub failure_reason: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for ImageManifestEntryArgs<'a> {
     #[inline]
@@ -119,6 +185,9 @@ impl<'a> Default for ImageManifestEntryArgs<'a> {
             iid: None, // required field
             status: ImageStatus::Ready,
             token: None,
+            category: super::common::ImageCategory::Poster,
+            retry_after_millis: 0,
+            failure_reason: None,
         }
     }
 }
@@ -157,6 +226,32 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
         );
     }
     #[inline]
+    pub fn add_category(&mut self, category: super::common::ImageCategory) {
+        self.fbb_.push_slot::<super::common::ImageCategory>(
+            ImageManifestEntry::VT_CATEGORY,
+            category,
+            super::common::ImageCategory::Poster,
+        );
+    }
+    #[inline]
+    pub fn add_retry_after_millis(&mut self, retry_after_millis: u64) {
+        self.fbb_.push_slot::<u64>(
+            ImageManifestEntry::VT_RETRY_AFTER_MILLIS,
+            retry_after_millis,
+            0,
+        );
+    }
+    #[inline]
+    pub fn add_failure_reason(
+        &mut self,
+        failure_reason: ::flatbuffers::WIPOffset<&'b str>,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            ImageManifestEntry::VT_FAILURE_REASON,
+            failure_reason,
+        );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> ImageManifestEntryBuilder<'a, 'b, A> {
@@ -180,6 +275,9 @@ impl ::core::fmt::Debug for ImageManifestEntry<'_> {
         ds.field("iid", &self.iid());
         ds.field("status", &self.status());
         ds.field("token", &self.token());
+        ds.field("category", &self.category());
+        ds.field("retry_after_millis", &self.retry_after_millis());
+        ds.field("failure_reason", &self.failure_reason());
         ds.finish()
     }
 }

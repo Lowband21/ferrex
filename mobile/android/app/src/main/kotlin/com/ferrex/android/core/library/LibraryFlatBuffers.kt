@@ -1,5 +1,7 @@
 package com.ferrex.android.core.library
 
+import com.ferrex.android.core.image.BrowseImageCategory
+import com.ferrex.android.core.image.ImageRequestKey
 import com.google.flatbuffers.FlatBufferBuilder
 import ferrex.library.BatchFetchRequest
 import ferrex.library.BatchFetchResponse
@@ -221,6 +223,13 @@ enum class MoviePayloadRoot {
     BatchFetchResponse,
 }
 
+data class BrowseImageCard(
+    val key: ImageRequestKey,
+    val title: String,
+    val subtitle: String,
+    val publicFallbackPath: String?,
+)
+
 class MovieLibraryAccessor internal constructor(
     batches: List<ParsedMovieBatch>,
 ) {
@@ -247,6 +256,44 @@ class MovieLibraryAccessor internal constructor(
         val (batchIndex, itemIndex) = movieLocations[index]
         val item = batches[batchIndex].data.items(itemIndex) ?: return null
         return item.variant(MovieReference()) as? MovieReference
+    }
+
+    fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
+        for (index in movieLocations.indices) {
+            val details = movieAt(index)?.details ?: continue
+            details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
+            details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
+        }
+    }
+
+    fun primaryImageCards(limit: Int): List<BrowseImageCard> = buildList {
+        if (limit <= 0) return@buildList
+        for (index in movieLocations.indices) {
+            val movie = movieAt(index) ?: continue
+            val details = movie.details ?: continue
+            details.primaryPosterIid?.let {
+                add(
+                    BrowseImageCard(
+                        key = ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster),
+                        title = movie.title,
+                        subtitle = "Movie poster",
+                        publicFallbackPath = details.posterPath,
+                    ),
+                )
+            }
+            if (size >= limit) return@buildList
+            details.primaryBackdropIid?.let {
+                add(
+                    BrowseImageCard(
+                        key = ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop),
+                        title = movie.title,
+                        subtitle = "Movie backdrop",
+                        publicFallbackPath = details.backdropPath,
+                    ),
+                )
+            }
+            if (size >= limit) return@buildList
+        }
     }
 }
 
@@ -307,5 +354,62 @@ class SeriesLibraryAccessor internal constructor(
         val (bundleIndex, itemIndex) = episodeLocations[index]
         val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
         return item.variant(EpisodeReference()) as? EpisodeReference
+    }
+
+    fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
+        for (index in seriesLocations.indices) {
+            val details = seriesAt(index)?.details ?: continue
+            details.primaryPosterIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster)) }
+            details.primaryBackdropIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop)) }
+        }
+        for (index in episodeLocations.indices) {
+            val details = episodeAt(index)?.details ?: continue
+            details.primaryStillIid?.let { add(ImageRequestKey(it.toUuidString(), BrowseImageCategory.Episode)) }
+        }
+    }
+
+    fun primaryImageCards(limit: Int): List<BrowseImageCard> = buildList {
+        if (limit <= 0) return@buildList
+        for (index in seriesLocations.indices) {
+            val series = seriesAt(index) ?: continue
+            val details = series.details ?: continue
+            details.primaryPosterIid?.let {
+                add(
+                    BrowseImageCard(
+                        key = ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster),
+                        title = series.title,
+                        subtitle = "Series poster",
+                        publicFallbackPath = details.posterPath,
+                    ),
+                )
+            }
+            if (size >= limit) return@buildList
+            details.primaryBackdropIid?.let {
+                add(
+                    BrowseImageCard(
+                        key = ImageRequestKey(it.toUuidString(), BrowseImageCategory.Backdrop),
+                        title = series.title,
+                        subtitle = "Series backdrop",
+                        publicFallbackPath = details.backdropPath,
+                    ),
+                )
+            }
+            if (size >= limit) return@buildList
+        }
+        for (index in episodeLocations.indices) {
+            val episode = episodeAt(index) ?: continue
+            val details = episode.details ?: continue
+            details.primaryStillIid?.let {
+                add(
+                    BrowseImageCard(
+                        key = ImageRequestKey(it.toUuidString(), BrowseImageCategory.Episode),
+                        title = details.name ?: "Season ${episode.seasonNumber.toInt()}, episode ${episode.episodeNumber.toInt()}",
+                        subtitle = "Episode still • S${episode.seasonNumber.toInt()} E${episode.episodeNumber.toInt()}",
+                        publicFallbackPath = details.stillPath,
+                    ),
+                )
+            }
+            if (size >= limit) return@buildList
+        }
     }
 }
