@@ -16,6 +16,9 @@ import com.ferrex.android.core.library.LibraryDiskCache
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.OkHttpLibrarySyncTransport
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.search.LibraryMediaSearchCache
+import com.ferrex.android.core.search.MediaSearchRepository
+import com.ferrex.android.core.search.OkHttpMediaSearchTransport
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -41,6 +44,7 @@ class AndroidAuthDependencies(
     private val imageCache = ImageDiskCache.fromContext(context)
     private val libraryTransport = OkHttpLibrarySyncTransport(httpClient, serverConfig)
     private val imageTransport = OkHttpImageManifestTransport(httpClient, serverConfig)
+    private val searchTransport = OkHttpMediaSearchTransport(httpClient, serverConfig)
 
     val imageRepository = ImageRepository(
         transport = imageTransport,
@@ -57,6 +61,11 @@ class AndroidAuthDependencies(
         transport = libraryTransport,
         cache = libraryCache,
         imageCacheClearer = imageRepository,
+    )
+
+    val searchRepository = MediaSearchRepository(
+        transport = searchTransport,
+        cache = LibraryMediaSearchCache(libraryRepository),
     )
 
     val authManager = AuthManager(

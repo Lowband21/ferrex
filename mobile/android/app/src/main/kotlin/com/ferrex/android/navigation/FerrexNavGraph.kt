@@ -1,5 +1,6 @@
 package com.ferrex.android.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -14,11 +15,16 @@ import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.search.MediaSearchRepository
+import com.ferrex.android.core.search.SearchDetailTarget
+import com.ferrex.android.core.search.SearchMediaType
 import com.ferrex.android.ui.recovery.PhoneHomeScreen
 import com.ferrex.android.ui.recovery.PhoneLoadingScreen
 import com.ferrex.android.ui.recovery.PhoneLoginScreen
 import com.ferrex.android.ui.recovery.PhoneRecoverableScreen
 import com.ferrex.android.ui.recovery.PhoneServerConnectScreen
+import com.ferrex.android.ui.search.PhoneSearchDetailScreen
 import kotlinx.coroutines.launch
 
 object FerrexRoutes {
@@ -27,6 +33,12 @@ object FerrexRoutes {
     const val LOGIN = "login"
     const val RECOVERY = "recovery"
     const val HOME = "home"
+    const val DETAIL = "detail/{mediaType}/{mediaId}?libraryId={libraryId}"
+
+    fun detail(target: SearchDetailTarget): String {
+        val libraryQuery = target.libraryId?.let { "?libraryId=${Uri.encode(it)}" }.orEmpty()
+        return "detail/${Uri.encode(target.mediaType.routeSegment)}/${Uri.encode(target.mediaId)}$libraryQuery"
+    }
 }
 
 @Composable
@@ -35,6 +47,7 @@ fun FerrexNavGraph(
     libraryRepository: LibraryRepository? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    searchRepository: MediaSearchRepository? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -91,9 +104,31 @@ fun FerrexNavGraph(
                     libraryRepository = libraryRepository,
                     imageRepository = imageRepository,
                     imagePipeline = imagePipeline,
+                    searchRepository = searchRepository,
+                    onOpenSearchResult = { target -> navController.navigate(FerrexRoutes.detail(target)) },
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
+                )
+            }
+        }
+        composable(FerrexRoutes.DETAIL) { backStackEntry ->
+            val state = sessionState as? SessionState.Authenticated
+            val mediaType = SearchMediaType.fromRouteSegment(backStackEntry.arguments?.getString("mediaType"))
+            val mediaId = backStackEntry.arguments?.getString("mediaId")
+            if (state == null || mediaType == null || mediaId.isNullOrBlank()) {
+                PhoneLoadingScreen()
+            } else {
+                val scope = ServerCacheScope.from(state.serverUrl, state.user.id)
+                PhoneSearchDetailScreen(
+                    scope = scope,
+                    mediaType = mediaType,
+                    mediaId = mediaId,
+                    libraryId = backStackEntry.arguments?.getString("libraryId")?.takeIf { it.isNotBlank() },
+                    libraryRepository = libraryRepository,
+                    imageRepository = imageRepository,
+                    imagePipeline = imagePipeline,
+                    onBack = { navController.popBackStack() },
                 )
             }
         }

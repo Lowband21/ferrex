@@ -28,6 +28,49 @@ class LibraryRepository(
     private val _state = MutableStateFlow(LibraryRepositoryState())
     val state: StateFlow<LibraryRepositoryState> = _state.asStateFlow()
 
+    fun searchFreshness(scope: ServerCacheScope): LibraryFreshness =
+        if (_state.value.scope?.directoryName == scope.directoryName) _state.value.freshness else LibraryFreshness.Empty
+
+    fun resolveCachedMedia(scope: ServerCacheScope, key: CachedMediaLookupKey): CachedMediaReference? {
+        resolveCachedMediaFromState(scope, key)?.let { return it }
+        val libraries = knownLibrariesForSearch(scope).filter { it.supports(key) }
+        for (library in libraries) {
+            val resolved = when (key.type) {
+                CachedMediaType.Movie -> movieAccessorForSearch(scope, library.id)?.findMovie(key.id)
+                CachedMediaType.Series -> seriesAccessorForSearch(scope, library.id)?.findSeries(key.id)
+                CachedMediaType.Season -> seriesAccessorForSearch(scope, library.id)?.findSeason(key.id)
+                CachedMediaType.Episode -> seriesAccessorForSearch(scope, library.id)?.findEpisode(key.id)
+            }
+            if (resolved != null) return resolved
+        }
+        return null
+    }
+
+    suspend fun resyncCachedMediaForSearch(
+        scope: ServerCacheScope,
+        key: CachedMediaLookupKey,
+        maxLibraries: Int = DEFAULT_SEARCH_RESYNC_LIBRARY_LIMIT,
+    ): CachedMediaResyncSummary = withContext(ioDispatcher) {
+        var libraries = knownLibrariesForSearch(scope)
+        if (libraries.isEmpty()) {
+            refreshLibraries(scope)
+            libraries = knownLibrariesForSearch(scope)
+        }
+        val matchingLibraries = libraries.filter { it.supports(key) }
+        val candidates = matchingLibraries.take(maxLibraries.coerceAtLeast(0))
+        candidates.forEach { library ->
+            when (library.kind) {
+                LibraryKind.Movies -> syncMovieLibrary(scope, library, libraries)
+                LibraryKind.Series -> syncSeriesLibrary(scope, library, libraries)
+                LibraryKind.Unknown -> Unit
+            }
+        }
+        CachedMediaResyncSummary(
+            attemptedLibraryIds = candidates.map { it.id },
+            bounded = candidates.size < matchingLibraries.size,
+        )
+    }
+
     suspend fun refreshLibraries(scope: ServerCacheScope, selectedLibraryId: String? = null): LibraryRepositoryState =
         withContext(ioDispatcher) {
             publish(
@@ -433,6 +476,46 @@ class LibraryRepository(
         }
     }
 
+    private fun resolveCachedMediaFromState(scope: ServerCacheScope, key: CachedMediaLookupKey): CachedMediaReference? {
+        val state = _state.value
+        if (state.scope?.directoryName != scope.directoryName) return null
+        return when (key.type) {
+            CachedMediaType.Movie -> state.movieAccessor?.findMovie(key.id)
+            CachedMediaType.Series -> state.seriesAccessor?.findSeries(key.id)
+            CachedMediaType.Season -> state.seriesAccessor?.findSeason(key.id)
+            CachedMediaType.Episode -> state.seriesAccessor?.findEpisode(key.id)
+        }
+    }
+
+    private fun knownLibrariesForSearch(scope: ServerCacheScope): List<LibraryInfo> {
+        val state = _state.value
+        if (state.scope?.directoryName == scope.directoryName && state.libraries.isNotEmpty()) return state.libraries
+        return runCatching {
+            cache.readLibraryList(scope)?.let { LibraryFlatBuffers.parseLibraryList(it.bytes) }.orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    private fun movieAccessorForSearch(scope: ServerCacheScope, libraryId: String): MovieLibraryAccessor? =
+        when (val load = runCatching { loadCachedMovieAccessor(scope, libraryId) }.getOrNull()) {
+            is CacheLoad.Success -> load.accessor
+            is CacheLoad.Corrupt -> load.accessor
+            CacheLoad.Empty, null -> null
+        }
+
+    private fun seriesAccessorForSearch(scope: ServerCacheScope, libraryId: String): SeriesLibraryAccessor? =
+        when (val load = runCatching { loadCachedSeriesAccessor(scope, libraryId) }.getOrNull()) {
+            is CacheLoad.Success -> load.accessor
+            is CacheLoad.Corrupt -> load.accessor
+            CacheLoad.Empty, null -> null
+        }
+
+    private fun LibraryInfo.supports(key: CachedMediaLookupKey): Boolean = when (key.type) {
+        CachedMediaType.Movie -> kind == LibraryKind.Movies
+        CachedMediaType.Series,
+        CachedMediaType.Season,
+        CachedMediaType.Episode -> kind == LibraryKind.Series
+    }
+
     private fun publish(state: LibraryRepositoryState): LibraryRepositoryState {
         _state.value = state
         return state
@@ -451,5 +534,9 @@ class LibraryRepository(
         data class Success<T>(val accessor: T) : CacheLoad<T>
         data object Empty : CacheLoad<Nothing>
         data class Corrupt<T>(val message: String, val quarantinedFiles: Int, val accessor: T?) : CacheLoad<T>
+    }
+
+    companion object {
+        const val DEFAULT_SEARCH_RESYNC_LIBRARY_LIMIT = 4
     }
 }

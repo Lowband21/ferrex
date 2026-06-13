@@ -48,7 +48,10 @@ import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.search.MediaSearchRepository
+import com.ferrex.android.core.search.SearchDetailTarget
 import com.ferrex.android.ui.components.FerrexBrowseImageRail
+import com.ferrex.android.ui.search.PhoneSearchPanel
 import kotlinx.coroutines.launch
 
 @Composable
@@ -294,6 +297,8 @@ fun PhoneHomeScreen(
     libraryRepository: LibraryRepository? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    searchRepository: MediaSearchRepository? = null,
+    onOpenSearchResult: (SearchDetailTarget) -> Unit = {},
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
@@ -355,6 +360,14 @@ fun PhoneHomeScreen(
             scope = scope,
             imageRepository = imageRepository,
             imagePipeline = imagePipeline,
+        )
+        PhoneSearchPanel(
+            modifier = Modifier.padding(top = 28.dp),
+            scope = scope,
+            searchRepository = searchRepository,
+            imageRepository = imageRepository,
+            imagePipeline = imagePipeline,
+            onOpenResult = onOpenSearchResult,
         )
         RecoveryActions(
             includeRetry = false,

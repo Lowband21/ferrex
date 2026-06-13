@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
                     libraryRepository = dependencies.libraryRepository,
                     imageRepository = dependencies.imageRepository,
                     imagePipeline = dependencies.imagePipeline,
+                    searchRepository = dependencies.searchRepository,
                 )
             }
         }

@@ -19,6 +19,7 @@ import ferrex.library.SeriesBundleVersion
 import ferrex.media.EpisodeReference
 import ferrex.media.MediaVariant
 import ferrex.media.MovieReference
+import ferrex.media.SeasonReference
 import ferrex.media.SeriesReference
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -258,6 +259,32 @@ class MovieLibraryAccessor internal constructor(
         return item.variant(MovieReference()) as? MovieReference
     }
 
+    fun findMovie(id: String): CachedMediaReference.Movie? {
+        val normalized = id.trim().lowercase()
+        for (index in movieLocations.indices) {
+            val movie = movieAt(index) ?: continue
+            if (movie.id.toUuidString().lowercase() == normalized) return movie.toCachedReference()
+        }
+        return null
+    }
+
+    fun allMovieReferences(): List<CachedMediaReference.Movie> = buildList {
+        for (index in movieLocations.indices) {
+            movieAt(index)?.toCachedReference()?.let(::add)
+        }
+    }
+
+    private fun MovieReference.toCachedReference(): CachedMediaReference.Movie {
+        val details = details
+        return CachedMediaReference.Movie(
+            id = id.toUuidString(),
+            libraryId = libraryId.toUuidString(),
+            title = title,
+            imageKey = details?.primaryPosterIid?.let { ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster) },
+            publicFallbackPath = details?.posterPath,
+        )
+    }
+
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
         for (index in movieLocations.indices) {
             val details = movieAt(index)?.details ?: continue
@@ -330,6 +357,17 @@ class SeriesLibraryAccessor internal constructor(
         }
     }
 
+    private val seasonLocations: List<Pair<Int, Int>> by lazy {
+        buildList {
+            bundles.forEachIndexed { bundleIndex, bundle ->
+                for (itemIndex in 0 until bundle.data.itemsLength) {
+                    val item = bundle.data.items(itemIndex) ?: continue
+                    if (item.variantType == MediaVariant.SeasonReference) add(bundleIndex to itemIndex)
+                }
+            }
+        }
+    }
+
     private val episodeLocations: List<Pair<Int, Int>> by lazy {
         buildList {
             bundles.forEachIndexed { bundleIndex, bundle ->
@@ -342,6 +380,7 @@ class SeriesLibraryAccessor internal constructor(
     }
 
     val seriesReferenceCount: Int get() = seriesLocations.size
+    val seasonCount: Int get() = seasonLocations.size
     val episodeCount: Int get() = episodeLocations.size
 
     fun seriesAt(index: Int): SeriesReference? {
@@ -350,10 +389,91 @@ class SeriesLibraryAccessor internal constructor(
         return item.variant(SeriesReference()) as? SeriesReference
     }
 
+    fun seasonAt(index: Int): SeasonReference? {
+        val (bundleIndex, itemIndex) = seasonLocations[index]
+        val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
+        return item.variant(SeasonReference()) as? SeasonReference
+    }
+
     fun episodeAt(index: Int): EpisodeReference? {
         val (bundleIndex, itemIndex) = episodeLocations[index]
         val item = bundles[bundleIndex].data.items(itemIndex) ?: return null
         return item.variant(EpisodeReference()) as? EpisodeReference
+    }
+
+    fun findSeries(id: String): CachedMediaReference.Series? {
+        val normalized = id.trim().lowercase()
+        for (index in seriesLocations.indices) {
+            val series = seriesAt(index) ?: continue
+            if (series.id.toUuidString().lowercase() == normalized) return series.toCachedReference()
+        }
+        return null
+    }
+
+    fun findSeason(id: String): CachedMediaReference.Season? {
+        val normalized = id.trim().lowercase()
+        for (index in seasonLocations.indices) {
+            val season = seasonAt(index) ?: continue
+            if (season.id.toUuidString().lowercase() == normalized) return season.toCachedReference()
+        }
+        return null
+    }
+
+    fun findEpisode(id: String): CachedMediaReference.Episode? {
+        val normalized = id.trim().lowercase()
+        for (index in episodeLocations.indices) {
+            val episode = episodeAt(index) ?: continue
+            if (episode.id.toUuidString().lowercase() == normalized) return episode.toCachedReference()
+        }
+        return null
+    }
+
+    fun allSeriesReferences(): List<CachedMediaReference.Series> = buildList {
+        for (index in seriesLocations.indices) {
+            seriesAt(index)?.toCachedReference()?.let(::add)
+        }
+    }
+
+    private fun SeriesReference.toCachedReference(): CachedMediaReference.Series {
+        val details = details
+        return CachedMediaReference.Series(
+            id = id.toUuidString(),
+            libraryId = libraryId.toUuidString(),
+            title = title,
+            imageKey = details?.primaryPosterIid?.let { ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster) },
+            publicFallbackPath = details?.posterPath,
+        )
+    }
+
+    private fun SeasonReference.toCachedReference(): CachedMediaReference.Season {
+        val details = details
+        val number = seasonNumber.toInt()
+        return CachedMediaReference.Season(
+            id = id.toUuidString(),
+            libraryId = libraryId.toUuidString(),
+            title = details?.name ?: "Season $number",
+            imageKey = details?.primaryPosterIid?.let { ImageRequestKey(it.toUuidString(), BrowseImageCategory.Poster) },
+            publicFallbackPath = details?.posterPath,
+            seriesId = seriesId.toUuidString(),
+            seasonNumber = number,
+        )
+    }
+
+    private fun EpisodeReference.toCachedReference(): CachedMediaReference.Episode {
+        val details = details
+        val season = seasonNumber.toInt()
+        val episode = episodeNumber.toInt()
+        return CachedMediaReference.Episode(
+            id = id.toUuidString(),
+            libraryId = libraryId.toUuidString(),
+            title = details?.name ?: "Season $season, episode $episode",
+            imageKey = details?.primaryStillIid?.let { ImageRequestKey(it.toUuidString(), BrowseImageCategory.Episode) },
+            publicFallbackPath = details?.stillPath,
+            seriesId = seriesId.toUuidString(),
+            seasonId = seasonId.toUuidString(),
+            seasonNumber = season,
+            episodeNumber = episode,
+        )
     }
 
     fun primaryImageKeys(): Set<ImageRequestKey> = buildSet {
