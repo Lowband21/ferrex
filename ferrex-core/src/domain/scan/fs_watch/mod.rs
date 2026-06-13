@@ -10,7 +10,8 @@ use crate::{
     database::traits::{FileWatchEvent, FileWatchEventType},
     domain::scan::orchestration::{
         FileSystemEvent, FileSystemEventKind, LibraryActorCommand,
-        LibraryCommandExecutor, LibraryRootsId, config::WatchConfig,
+        LibraryCommandExecutor, LibraryRootsId,
+        config::{WatchConfig, WatchStrategy},
         scan_cursor::normalize_path,
     },
     error::{MediaError, Result},
@@ -59,8 +60,12 @@ pub struct FsWatchConfig {
     pub debounce_window: Duration,
     /// Maximum number of filesystem events bundled into a single flush.
     pub max_batch_events: usize,
+    /// Native/poll/auto backend strategy for filesystem watches.
+    pub strategy: WatchStrategy,
     /// Polling cadence for backends that cannot deliver native filesystem events.
     pub poll_interval: Duration,
+    /// Maximum backoff for poll-oriented recovery loops.
+    pub poll_backoff_max: Duration,
 }
 
 impl Default for FsWatchConfig {
@@ -68,7 +73,9 @@ impl Default for FsWatchConfig {
         Self {
             debounce_window: Duration::from_millis(250),
             max_batch_events: 1024,
+            strategy: WatchStrategy::Auto,
             poll_interval: Duration::from_secs(30),
+            poll_backoff_max: Duration::from_secs(5 * 60),
         }
     }
 }
@@ -80,7 +87,11 @@ impl From<WatchConfig> for FsWatchConfig {
                 cfg.debounce_window_ms.max(1),
             ),
             max_batch_events: cfg.max_batch_events.max(1),
+            strategy: cfg.strategy,
             poll_interval: Duration::from_millis(cfg.poll_interval_ms.max(1)),
+            poll_backoff_max: Duration::from_millis(
+                cfg.poll_backoff_max_ms.max(1),
+            ),
         }
     }
 }
@@ -1134,34 +1145,49 @@ fn init_watchers(
 ) -> Result<Vec<ActiveWatcher>> {
     let mut watchers = Vec::with_capacity(watcher_roots.len());
     for (_root_id, root_path) in &watcher_roots {
-        match build_native_watcher(root_path, watcher_tx.clone()) {
-            Ok(watcher) => {
-                watchers.push(ActiveWatcher::Native { _watcher: watcher })
+        match config.strategy {
+            WatchStrategy::Native => {
+                let watcher =
+                    build_native_watcher(root_path, watcher_tx.clone())?;
+                watchers.push(ActiveWatcher::Native { _watcher: watcher });
             }
-            Err(native_err) => {
-                let native_err_msg = native_err.to_string();
-                warn!(
-                    path = %root_path.display(),
-                    "native watcher unavailable, falling back to polling: {}",
-                    native_err_msg
-                );
-
-                match build_poll_watcher(
+            WatchStrategy::Poll => {
+                let poller = build_poll_watcher(
                     root_path,
                     watcher_tx.clone(),
                     config.poll_interval,
-                ) {
-                    Ok(poller) => {
-                        watchers.push(ActiveWatcher::Poll { _watcher: poller })
-                    }
-                    Err(poll_err) => {
-                        let poll_err_msg = poll_err.to_string();
-                        return Err(MediaError::Internal(format!(
-                            "failed to watch {} (native error: {}; polling error: {})",
-                            root_path.display(),
-                            native_err_msg,
-                            poll_err_msg
-                        )));
+                )?;
+                watchers.push(ActiveWatcher::Poll { _watcher: poller });
+            }
+            WatchStrategy::Auto => {
+                match build_native_watcher(root_path, watcher_tx.clone()) {
+                    Ok(watcher) => watchers
+                        .push(ActiveWatcher::Native { _watcher: watcher }),
+                    Err(native_err) => {
+                        let native_err_msg = native_err.to_string();
+                        warn!(
+                            path = %root_path.display(),
+                            "native watcher unavailable, falling back to polling: {}",
+                            native_err_msg
+                        );
+
+                        match build_poll_watcher(
+                            root_path,
+                            watcher_tx.clone(),
+                            config.poll_interval,
+                        ) {
+                            Ok(poller) => watchers
+                                .push(ActiveWatcher::Poll { _watcher: poller }),
+                            Err(poll_err) => {
+                                let poll_err_msg = poll_err.to_string();
+                                return Err(MediaError::Internal(format!(
+                                    "failed to watch {} (native error: {}; polling error: {})",
+                                    root_path.display(),
+                                    native_err_msg,
+                                    poll_err_msg
+                                )));
+                            }
+                        }
                     }
                 }
             }
@@ -1301,7 +1327,7 @@ mod tests {
 
     use super::{
         EVENT_VERSION, FsWatchConfig, FsWatchService, NoopFsWatchObserver,
-        WatchMessage, encode_hash,
+        WatchConfig, WatchMessage, WatchStrategy, encode_hash,
     };
     use crate::database::traits::{FileWatchEvent, FileWatchEventType};
     use crate::domain::scan::fs_watch::event_bus::FileChangeEventBus;
@@ -1325,6 +1351,20 @@ mod tests {
 
     type TestRuntime =
         OrchestratorRuntime<RecordingQueue, InProcJobEventBus, InMemoryBudget>;
+
+    #[test]
+    fn fs_watch_config_preserves_forced_poll_strategy() {
+        let mut watch = WatchConfig::default();
+        watch.strategy = WatchStrategy::Poll;
+        watch.poll_interval_ms = 2_500;
+        watch.poll_backoff_max_ms = 42_000;
+
+        let config = FsWatchConfig::from(watch);
+
+        assert_eq!(config.strategy, WatchStrategy::Poll);
+        assert_eq!(config.poll_interval, Duration::from_millis(2_500));
+        assert_eq!(config.poll_backoff_max, Duration::from_millis(42_000));
+    }
 
     #[derive(Clone, Debug)]
     struct RecordedRequest {
@@ -1830,7 +1870,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,
@@ -1885,7 +1927,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,
@@ -1978,7 +2022,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,
@@ -2030,7 +2076,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,
@@ -2138,7 +2186,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,
@@ -2214,7 +2264,9 @@ mod tests {
             FsWatchConfig {
                 debounce_window: Duration::from_millis(25),
                 max_batch_events: 16,
+                strategy: WatchStrategy::Auto,
                 poll_interval: Duration::from_secs(1),
+                poll_backoff_max: Duration::from_secs(5 * 60),
             },
             Arc::new(NoopFsWatchObserver),
             command_executor,

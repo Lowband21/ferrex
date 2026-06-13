@@ -379,68 +379,19 @@ where
                 // downstream consumers (scan progress, bundle finalization trackers, etc.)
                 // can treat this folder scan as a completed unit of work.
                 //
-                // We intentionally do *not* publish MediaFileDiscovered / FolderDiscovered
-                // here to preserve the short-circuit behavior (no downstream pipeline
-                // fan-out when nothing changed).
-                let discovered = match self.actors.folder.discover_media(&plan, job).await {
-                    Ok(files) => files,
-                    Err(err) => return self.handle_media_error(err),
-                };
-
+                // We intentionally do *not* discover media, publish FolderDiscovered,
+                // or enqueue series/analyze/metadata/index follow-ups here. An unchanged
+                // listing only refreshes the cursor timestamp and emits folder completion
+                // for progress accounting.
                 let summary = match self.actors.folder.finalize(
                     &context,
                     &plan,
-                    &discovered,
+                    &[],
                     &[],
                 ) {
                     Ok(summary) => summary,
                     Err(err) => return self.handle_media_error(err),
                 };
-
-                if let FolderScanContext::Series(series_ctx) = &context {
-                    let folder_name = std::path::Path::new(
-                        series_ctx.series_root_path.as_str(),
-                    )
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.to_string())
-                    .unwrap_or_else(|| {
-                        series_ctx.series_root_path.as_str().to_string()
-                    });
-
-                    let state = match self
-                        .series_states
-                        .mark_discovered(
-                            series_ctx.library_id,
-                            series_ctx.series_root_path.clone(),
-                            None,
-                        )
-                        .await
-                    {
-                        Ok(state) => state,
-                        Err(err) => return self.handle_media_error(err),
-                    };
-
-                    if !matches!(state.status, SeriesScanStatus::Resolved) {
-                        let series_job = SeriesResolveJob {
-                            library_id: series_ctx.library_id,
-                            series_root_path: series_ctx.series_root_path.clone(),
-                            hint: None,
-                            folder_name,
-                            scan_reason: job.scan_reason,
-                        };
-                        let priority = priority_for_reason(&job.scan_reason)
-                            .elevate(JobPriority::P0);
-                        let req = EnqueueRequest::new(
-                            priority,
-                            JobPayload::SeriesResolve(series_job),
-                        );
-                        match self.enqueue_follow_up(req).await {
-                            DispatchStatus::Success => {}
-                            status => return status,
-                        }
-                    }
-                }
 
                 if let Err(err) = self
                     .events
