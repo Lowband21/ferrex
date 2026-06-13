@@ -1378,6 +1378,53 @@ impl AuthManager {
         Ok(())
     }
 
+    /// Change the current user's password.
+    pub async fn change_password(
+        &self,
+        current_password: String,
+        new_password: String,
+    ) -> AuthResult<()> {
+        #[derive(serde::Serialize)]
+        struct ChangePasswordRequest {
+            current_password: String,
+            new_password: String,
+        }
+
+        let url = self.api_client.build_url(v1::users::CHANGE_PASSWORD);
+        let request =
+            self.api_client
+                .client
+                .put(&url)
+                .json(&ChangePasswordRequest {
+                    current_password,
+                    new_password,
+                });
+        let request = self.api_client.build_request(request).await;
+        let response = request.send().await.map_err(|e| {
+            AuthError::Network(NetworkError::RequestFailed(e.to_string()))
+        })?;
+
+        match response.status() {
+            status if status.is_success() => Ok(()),
+            StatusCode::UNAUTHORIZED => {
+                Err(AuthError::Network(NetworkError::InvalidCredentials))
+            }
+            StatusCode::TOO_MANY_REQUESTS => {
+                Err(AuthError::Network(NetworkError::RateLimited))
+            }
+            status => {
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "<unavailable>".to_string());
+                Err(AuthError::Network(NetworkError::RequestFailed(format!(
+                    "{} {}",
+                    status, body
+                ))))
+            }
+        }
+    }
+
     /// Set PIN for current remembered device session.
     pub async fn set_device_pin(&self, pin: String) -> AuthResult<()> {
         let user = self
@@ -1414,6 +1461,7 @@ impl AuthManager {
                 device_registered: true,
                 has_pin: true,
                 remaining_attempts: None,
+                ..DeviceAuthStatus::default()
             },
         )
         .await;
@@ -1468,6 +1516,75 @@ impl AuthManager {
             Some(client_device_id),
         )
         .await?;
+
+        self.cache_device_status(
+            user.id,
+            &DeviceAuthStatus {
+                device_registered: true,
+                has_pin: true,
+                remaining_attempts: None,
+                ..DeviceAuthStatus::default()
+            },
+        )
+        .await;
+
+        Ok(())
+    }
+
+    /// Remove PIN for current remembered device session.
+    pub async fn remove_device_pin(
+        &self,
+        current_pin: String,
+    ) -> AuthResult<()> {
+        #[derive(serde::Serialize)]
+        struct RemovePinRequest {
+            /// Server-side device session id.
+            device_id: Uuid,
+            current_proof: String,
+            challenge_id: Uuid,
+            device_signature: String,
+        }
+
+        let user = self
+            .get_current_user()
+            .await
+            .ok_or(AuthError::NotAuthenticated)?;
+        let device_session_id = self
+            .current_device_session_id()
+            .await?
+            .ok_or(AuthError::Device(DeviceError::NotRegistered))?;
+        let (challenge, pin_salt, device_signature) = self
+            .request_signed_pin_challenge(device_session_id, user.id)
+            .await?;
+        let current_proof =
+            Self::derive_client_pin_proof(&current_pin, &pin_salt)?;
+
+        let request = RemovePinRequest {
+            device_id: device_session_id,
+            current_proof,
+            challenge_id: challenge.challenge_id,
+            device_signature,
+        };
+
+        let client_device_id = self.get_or_create_device_id().await?;
+        self.post_device_json_no_data(
+            v1::auth::device::REMOVE_PIN,
+            &request,
+            true,
+            Some(client_device_id),
+        )
+        .await?;
+
+        self.cache_device_status(
+            user.id,
+            &DeviceAuthStatus {
+                device_registered: true,
+                has_pin: false,
+                remaining_attempts: None,
+                ..DeviceAuthStatus::default()
+            },
+        )
+        .await;
 
         Ok(())
     }
@@ -2110,6 +2227,61 @@ impl AuthManager {
                     )),
                 ))
             })
+    }
+
+    /// Clear local auth, remembered-device, and fallback caches for recovery.
+    pub async fn reset_local_auth_state(&self) -> AuthResult<()> {
+        self.api_client.set_token(None).await;
+        self.auth_state.logout();
+        {
+            let mut guard = self.device_trust_expires_at.lock().await;
+            *guard = None;
+        }
+
+        let base_url = self.api_client.base_url().to_string();
+        let mut errors = Vec::new();
+
+        if let Err(err) = self.clear_keychain().await {
+            errors.push(format!("auth cache: {}", err));
+        }
+        if let Err(err) = self
+            .auth_storage
+            .clear_user_summaries_for_server(&base_url)
+            .await
+        {
+            errors.push(format!("user cache: {}", err));
+        }
+        if let Err(err) = self
+            .auth_storage
+            .clear_device_sessions_for_server(&base_url)
+            .await
+        {
+            errors.push(format!("device sessions: {}", err));
+        }
+        if let Err(err) = self.auth_storage.clear_auto_login_preferences().await
+        {
+            errors.push(format!("auto-login preferences: {}", err));
+        }
+        if let Err(err) = self.auth_storage.clear_device_key().await {
+            errors.push(format!("device key: {}", err));
+        }
+        if let Err(err) = self.auth_storage.disable_admin_pin_unlock().await {
+            errors.push(format!("admin PIN unlock: {}", err));
+        }
+        if let Err(err) = DeviceIdentity::reset().await {
+            errors.push(format!("device identity: {}", err));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(AuthError::Storage(StorageError::WriteFailed(
+                std::io::Error::other(format!(
+                    "Failed to clear all local auth state: {}",
+                    errors.join(", ")
+                )),
+            )))
+        }
     }
 
     /// Derive a deterministic client-side PIN proof (PHC string) scoped to the provided salt.

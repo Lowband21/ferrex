@@ -334,6 +334,33 @@ pub fn handle_submit_pin_change(state: &mut State) -> DomainUpdateResult {
     )
 }
 
+/// Handle PIN removal submission
+pub fn handle_submit_pin_removal(state: &mut State) -> DomainUpdateResult {
+    let pin_current = state.domains.settings.security.pin_current.clone();
+
+    if !state.domains.settings.security.has_pin {
+        state.domains.settings.security.pin_error =
+            Some("No PIN is currently set".to_string());
+        return DomainUpdateResult::task(Task::none());
+    }
+
+    if pin_current.is_empty() {
+        state.domains.settings.security.pin_error =
+            Some("Current PIN is required to remove PIN login".to_string());
+        return DomainUpdateResult::task(Task::none());
+    }
+
+    state.domains.settings.security.pin_loading = true;
+    DomainUpdateResult::with_events(
+        Task::none(),
+        vec![CrossDomainEvent::AuthCommandRequested(
+            auth::AuthCommand::RemoveUserPin {
+                current_pin: pin_current,
+            },
+        )],
+    )
+}
+
 /// Handle PIN change result
 pub fn handle_pin_change_result(
     state: &mut State,
@@ -355,6 +382,34 @@ pub fn handle_pin_change_result(
 
             // TODO: Show success notification
             log::info!("PIN changed successfully");
+        }
+        Err(error) => {
+            state.domains.settings.security.pin_error = Some(error);
+            state.domains.settings.security.pin_loading = false;
+        }
+    }
+    DomainUpdateResult::task(Task::none())
+}
+
+/// Handle PIN removal result
+pub fn handle_pin_removal_result(
+    state: &mut State,
+    result: Result<(), String>,
+) -> DomainUpdateResult {
+    match result {
+        Ok(()) => {
+            state.domains.settings.security.pin_current =
+                SecureCredential::from("");
+            state.domains.settings.security.pin_new =
+                SecureCredential::from("");
+            state.domains.settings.security.pin_confirm =
+                SecureCredential::from("");
+            state.domains.settings.security.pin_error = None;
+            state.domains.settings.security.pin_loading = false;
+            state.domains.settings.security.showing_pin_change = false;
+            state.domains.settings.security.has_pin = false;
+
+            log::info!("PIN removed successfully");
         }
         Err(error) => {
             state.domains.settings.security.pin_error = Some(error);

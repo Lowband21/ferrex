@@ -219,6 +219,31 @@ pub fn view_credential_entry<'a>(
 
     content = content.push(Space::new().height(Length::Fixed(12.0)));
 
+    if matches!(input_type, CredentialType::Pin { .. }) {
+        content = content.push(
+            secondary_button("Use password instead", fonts.body).on_press(
+                DomainMessage::Auth(auth::AuthMessage::UsePasswordLogin),
+            ),
+        );
+        content = content.push(Space::new().height(Length::Fixed(8.0)));
+    }
+
+    if error.is_some() {
+        content = content.push(
+            secondary_button("Retry", fonts.body)
+                .on_press(DomainMessage::Auth(auth::AuthMessage::Retry)),
+        );
+        content = content.push(Space::new().height(Length::Fixed(8.0)));
+    }
+
+    content = content.push(
+        secondary_button("Reset local auth state", fonts.body).on_press(
+            DomainMessage::Auth(auth::AuthMessage::ResetLocalAuthState),
+        ),
+    );
+
+    content = content.push(Space::new().height(Length::Fixed(8.0)));
+
     // Back button
     content = content.push(
         secondary_button("Back", fonts.body)
@@ -332,6 +357,12 @@ pub fn view_pre_auth_login<'a>(
     };
 
     content = content.push(submit_button);
+    content = content.push(Space::new().height(Length::Fixed(12.0)));
+    content = content.push(
+        secondary_button("Reset local auth state", fonts.body).on_press(
+            DomainMessage::Auth(auth::AuthMessage::ResetLocalAuthState),
+        ),
+    );
 
     // Wrap in auth container (centered on screen)
     let card = login_card(

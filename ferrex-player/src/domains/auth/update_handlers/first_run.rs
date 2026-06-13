@@ -348,6 +348,16 @@ pub fn handle_setup_animation_tick(
 
 /// Submit the first-run admin setup form
 pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
+    use crate::domains::auth::pin_policy::validate_pin_with_policy;
+
+    let remember_device_default = state
+        .domains
+        .auth
+        .state
+        .device_trust_policy
+        .remember_device_default;
+    let pin_policy = (&state.domains.auth.state.pin_policy).into();
+
     if let AuthenticationFlow::FirstRunSetup {
         username,
         password,
@@ -355,6 +365,8 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
         display_name,
         setup_token,
         claim_token,
+        pin,
+        confirm_pin,
         error,
         loading,
         ..
@@ -387,9 +399,24 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
             return Task::none();
         }
 
+        let pin_to_set = if pin.is_empty() && confirm_pin.is_empty() {
+            None
+        } else if pin.as_str() != confirm_pin.as_str() {
+            *error = Some("PINs do not match".to_string());
+            return Task::none();
+        } else if let Err(message) =
+            validate_pin_with_policy(pin.as_str(), pin_policy)
+        {
+            *error = Some(message);
+            return Task::none();
+        } else {
+            Some(pin.as_str().to_string())
+        };
+
         *loading = true;
 
         let api_service = state.domains.auth.state.api_service.clone();
+        let auth_service = state.domains.auth.state.auth_service.clone();
         let username = username.clone();
         let password = password.as_str().to_string();
         let display_name = if display_name.trim().is_empty() {
@@ -403,42 +430,72 @@ pub fn handle_submit_setup(state: &mut State) -> Task<auth::AuthMessage> {
             Some(setup_token.clone())
         };
         let claim_token = claim_token.clone();
+        let remember_device = pin_to_set.is_some() || remember_device_default;
 
         return Task::perform(
             async move {
-                api_service
+                match api_service
                     .create_initial_admin(
-                        username,
-                        password,
+                        username.clone(),
+                        password.clone(),
                         display_name,
                         setup_token,
                         claim_token,
                     )
                     .await
-                    .map_err(|e| e.to_string())
-                    .map(|(_user, token)| core::AuthToken {
-                        access_token: token.access_token,
-                        refresh_token: token.refresh_token,
-                        expires_in: 900,
-                        session_id: None,
-                        device_session_id: None,
-                        user_id: None,
-                        scope: token.scope,
-                    })
-            },
-            |result| match result {
-                Ok(auth_token) => {
-                    info!("[Auth] Admin setup successful");
-                    auth::AuthMessage::SetupComplete(
-                        auth_token.access_token,
-                        auth_token.refresh_token,
+                {
+                    Ok((_user, _token)) => {
+                        info!(
+                            "[Auth] Admin setup successful; registering current device"
+                        );
+                    }
+                    Err(e) => {
+                        error!("[Auth] Admin setup failed: {}", e);
+                        return auth::AuthMessage::SetupError(e.to_string());
+                    }
+                }
+
+                let auth_result = match auth_service
+                    .authenticate_device(
+                        username.clone(),
+                        password,
+                        remember_device,
                     )
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        let message = format!(
+                            "Admin account was created, but this device could not finish sign-in: {}. Sign in with your password to retry device setup.",
+                            e
+                        );
+                        return auth::AuthMessage::SetupDeviceLoginFailed {
+                            username,
+                            error: message,
+                        };
+                    }
+                };
+
+                if let Some(pin) = pin_to_set
+                    && let Err(e) = auth_service.set_device_pin(pin).await
+                {
+                    let warning = format!(
+                        "Your admin account and device login are ready, but PIN setup failed: {}. You can set a PIN later in Settings > Security.",
+                        e
+                    );
+                    return auth::AuthMessage::SetupCompletedWithWarning(
+                        auth_result.user,
+                        auth_result.permissions,
+                        warning,
+                    );
                 }
-                Err(e) => {
-                    error!("[Auth] Admin setup failed: {}", e);
-                    auth::AuthMessage::SetupError(e.to_string())
-                }
+
+                auth::AuthMessage::LoginSuccess(
+                    auth_result.user,
+                    auth_result.permissions,
+                )
             },
+            |message| message,
         );
     }
 

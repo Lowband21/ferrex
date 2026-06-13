@@ -62,6 +62,9 @@ pub enum AuthMessage {
     ToggleRememberDevice,
     RememberDeviceSynced(bool),
     AuthResult(Result<PlayerAuthResult, String>),
+    UsePasswordLogin,
+    ResetLocalAuthState,
+    LocalAuthStateReset(Result<(), String>),
     SetupPin,
     UpdatePin(String),
     UpdateConfirmPin(String),
@@ -76,6 +79,8 @@ pub enum AuthMessage {
     ToggleSetupPasswordVisibility,
     SubmitSetup,
     SetupComplete(String, String), // access_token, refresh_token
+    SetupDeviceLoginFailed { username: String, error: String },
+    SetupCompletedWithWarning(User, UserPermissions, String),
     SetupError(String),
 
     // Setup wizard navigation
@@ -162,6 +167,11 @@ impl std::fmt::Debug for AuthMessage {
                 write!(f, "RememberDeviceSynced({})", value)
             }
             Self::AuthResult(_) => write!(f, "AuthResult(...)"),
+            Self::UsePasswordLogin => write!(f, "UsePasswordLogin"),
+            Self::ResetLocalAuthState => write!(f, "ResetLocalAuthState"),
+            Self::LocalAuthStateReset(result) => {
+                write!(f, "LocalAuthStateReset({:?})", result.is_ok())
+            }
             Self::SetupPin => write!(f, "SetupPin"),
             Self::UpdatePin(_) => write!(f, "UpdatePin(***)"),
             Self::UpdateConfirmPin(_) => write!(f, "UpdateConfirmPin(***)"),
@@ -199,6 +209,14 @@ impl std::fmt::Debug for AuthMessage {
             }
             Self::SubmitSetup => write!(f, "SubmitSetup"),
             Self::SetupComplete(_, _) => write!(f, "SetupComplete(***, ***)"),
+            Self::SetupDeviceLoginFailed { username, error } => write!(
+                f,
+                "SetupDeviceLoginFailed(username={}, error={})",
+                username, error
+            ),
+            Self::SetupCompletedWithWarning(_, _, warning) => {
+                write!(f, "SetupCompletedWithWarning({})", warning)
+            }
             Self::SetupError(error) => write!(f, "SetupError({})", error),
 
             // Setup wizard navigation
@@ -299,6 +317,9 @@ impl AuthMessage {
             Self::ToggleRememberDevice => "Auth::ToggleRememberDevice",
             Self::RememberDeviceSynced(_) => "Auth::RememberDeviceSynced",
             Self::AuthResult(_) => "Auth::AuthResult",
+            Self::UsePasswordLogin => "Auth::UsePasswordLogin",
+            Self::ResetLocalAuthState => "Auth::ResetLocalAuthState",
+            Self::LocalAuthStateReset(_) => "Auth::LocalAuthStateReset",
             Self::SetupPin => "Auth::SetupPin",
             Self::UpdatePin(_) => "Auth::UpdatePin",
             Self::UpdateConfirmPin(_) => "Auth::UpdateConfirmPin",
@@ -315,6 +336,12 @@ impl AuthMessage {
             }
             Self::SubmitSetup => "Auth::SubmitSetup",
             Self::SetupComplete(_, _) => "Auth::SetupComplete",
+            Self::SetupDeviceLoginFailed { .. } => {
+                "Auth::SetupDeviceLoginFailed"
+            }
+            Self::SetupCompletedWithWarning(_, _, _) => {
+                "Auth::SetupCompletedWithWarning"
+            }
             Self::SetupError(_) => "Auth::SetupError",
 
             // Setup wizard navigation

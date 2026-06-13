@@ -133,6 +133,9 @@ pub fn view_user_carousel<'a>(
         content = content.push(carousel);
     }
 
+    content = content.push(cache_fallback_notice(fonts.caption));
+    content = content.push(recovery_actions(fonts.caption));
+
     let card = auth_card(content);
     auth_container(card).into()
 }
@@ -198,6 +201,9 @@ pub fn view_user_selection_with_carousel<'a>(
         );
         content = content.push(carousel);
     }
+
+    content = content.push(cache_fallback_notice(fonts.caption));
+    content = content.push(recovery_actions(fonts.caption));
 
     let card = auth_card(content);
     auth_container(card).into()
@@ -408,6 +414,20 @@ fn create_user_avatar<'a>(
                     theme.extended_palette().background.base.text
                 }),
             }),
+        text(if user.has_pin {
+            "PIN ready"
+        } else {
+            "Password"
+        })
+        .size(name_size * 0.8)
+        .align_x(iced::alignment::Horizontal::Center)
+        .style(move |theme: &Theme| text::Style {
+            color: Some(if user.has_pin {
+                theme.extended_palette().success.weak.color
+            } else {
+                theme.extended_palette().background.strong.text
+            }),
+        }),
     ]
     .align_x(Alignment::Center)
     .width(Length::Fixed(120.0));
@@ -419,6 +439,34 @@ fn create_user_avatar<'a>(
             ..Default::default()
         })
         .into()
+}
+
+fn cache_fallback_notice<'a>(font_size: f32) -> Element<'a, DomainMessage> {
+    container(
+        text(
+            "Profiles are refreshed from the server for known devices; cached profiles are only an offline fallback. If this list is stale, reset local auth state and sign in with your password.",
+        )
+        .size(font_size * 0.9)
+        .style(|theme: &Theme| text::Style {
+            color: Some(theme.extended_palette().background.strong.text),
+        }),
+    )
+    .width(Length::Fill)
+    .padding([8, 0])
+    .into()
+}
+
+fn recovery_actions<'a>(font_size: f32) -> Element<'a, DomainMessage> {
+    row![
+        button(text("Retry").size(font_size))
+            .on_press(DomainMessage::Auth(auth::AuthMessage::Retry)),
+        button(text("Reset local auth state").size(font_size)).on_press(
+            DomainMessage::Auth(auth::AuthMessage::ResetLocalAuthState),
+        ),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 // Helper functions

@@ -122,6 +122,10 @@ fn create_protected_routes(state: AppState) -> Router<AppState> {
             post(auth::device_handlers::change_device_pin),
         )
         .route(
+            v1::auth::device::REMOVE_PIN,
+            post(auth::device_handlers::remove_device_pin),
+        )
+        .route(
             v1::auth::device::LIST,
             get(auth::device_handlers::list_user_devices),
         )
