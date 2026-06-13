@@ -4,7 +4,7 @@ use axum::{
     Extension, Json,
     extract::{Query, State},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use ferrex_core::{
     api::types::ApiResponse,
     domain::users::{
@@ -78,11 +78,14 @@ pub async fn validate_device_trust(
         AppError::bad_request("Device ID required".to_string())
     })?;
 
+    let trust_duration = configured_trust_duration(&state).await?;
     let facade = state.auth_facade().clone();
     let status = match facade.get_device_by_id(device_id).await {
-        Ok(session) if session.user_id() == user.id => {
-            validate_session(session, params.fingerprint.as_deref())?
-        }
+        Ok(session) if session.user_id() == user.id => validate_session(
+            session,
+            params.fingerprint.as_deref(),
+            trust_duration,
+        )?,
         Ok(_) => DeviceTrustStatus {
             is_trusted: false,
             trusted_until: None,
@@ -140,18 +143,19 @@ pub async fn list_trusted_devices(
     Extension(user): Extension<User>,
     Extension(current_device): Extension<Option<Uuid>>,
 ) -> AppResult<Json<ApiResponse<Vec<TrustedDevice>>>> {
+    let trust_duration = configured_trust_duration(&state).await?;
     let facade = state.auth_facade().clone();
     let devices = facade
         .list_user_devices(user.id)
         .await
         .map_err(map_facade_error)?
         .into_iter()
-        .filter(|session| matches!(session.status(), DeviceStatus::Trusted))
+        .filter(|session| is_session_currently_trusted(session, trust_duration))
         .map(|session| TrustedDevice {
             device_id: session.id(),
             device_name: session.device_name().to_string(),
-            platform: "unknown".to_string(),
-            trusted_until: None,
+            platform: session.platform().unwrap_or("unknown").to_string(),
+            trusted_until: session.trusted_until(),
             last_seen: session.last_activity(),
             is_current: current_device.is_some_and(|id| id == session.id()),
         })
@@ -170,6 +174,7 @@ pub async fn extend_device_trust(
         AppError::bad_request("Device ID required".to_string())
     })?;
 
+    let trust_duration = configured_trust_duration(&state).await?;
     let facade = state.auth_facade().clone();
     let session = facade
         .get_device_by_id(device_id)
@@ -183,19 +188,60 @@ pub async fn extend_device_trust(
     }
 
     let status = DeviceTrustStatus {
-        is_trusted: matches!(session.status(), DeviceStatus::Trusted),
-        trusted_until: None,
+        is_trusted: is_session_currently_trusted(&session, trust_duration),
+        trusted_until: session.trusted_until(),
         device_name: Some(session.device_name().to_string()),
         registered_at: Some(session.created_at()),
-        reason: Some("Device trust does not expire".to_string()),
+        reason: Some(
+            "Device trust extension uses the configured trusted_until window on the next full password or PIN authentication".to_string(),
+        ),
     };
 
     Ok(Json(ApiResponse::success(status)))
 }
 
+async fn configured_trust_duration(state: &AppState) -> AppResult<Duration> {
+    let settings = state
+        .unit_of_work()
+        .security_settings
+        .get_settings()
+        .await
+        .map_err(|e| {
+            AppError::internal(format!("Failed to load security settings: {e}"))
+        })?;
+    Ok(Duration::days(i64::from(
+        settings.device_trust_policy.trust_duration_days,
+    )))
+}
+
+fn is_session_currently_trusted(
+    session: &DeviceSession,
+    trust_duration: Duration,
+) -> bool {
+    matches!(session.status(), DeviceStatus::Trusted)
+        && trust_expiry_reason(session, trust_duration).is_none()
+}
+
+fn trust_expiry_reason(
+    session: &DeviceSession,
+    trust_duration: Duration,
+) -> Option<String> {
+    let now = Utc::now();
+    if let Some(trusted_until) = session.trusted_until() {
+        return (trusted_until < now)
+            .then(|| "Device trust has expired".to_string());
+    }
+
+    (now - session.last_activity() > trust_duration).then(|| {
+        "Device trust expired after the configured inactivity window"
+            .to_string()
+    })
+}
+
 fn validate_session(
     session: DeviceSession,
     expected_fingerprint: Option<&str>,
+    trust_duration: Duration,
 ) -> Result<DeviceTrustStatus, AppError> {
     if let Some(expected) = expected_fingerprint {
         let stored = session.device_fingerprint().as_str();
@@ -215,13 +261,17 @@ fn validate_session(
     }
 
     let status = match session.status() {
-        DeviceStatus::Trusted => DeviceTrustStatus {
-            is_trusted: true,
-            trusted_until: None,
-            device_name: Some(session.device_name().to_string()),
-            registered_at: Some(session.created_at()),
-            reason: None,
-        },
+        DeviceStatus::Trusted => {
+            let trusted_until = session.trusted_until();
+            let reason = trust_expiry_reason(&session, trust_duration);
+            DeviceTrustStatus {
+                is_trusted: reason.is_none(),
+                trusted_until,
+                device_name: Some(session.device_name().to_string()),
+                registered_at: Some(session.created_at()),
+                reason,
+            }
+        }
         DeviceStatus::Pending => DeviceTrustStatus {
             is_trusted: false,
             trusted_until: None,

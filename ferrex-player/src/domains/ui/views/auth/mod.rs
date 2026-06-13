@@ -77,6 +77,7 @@ pub fn view_auth<'a>(
             claim_loading,
             pin,
             confirm_pin,
+            pin_entry_target,
             error,
             loading,
             setup_token_required,
@@ -97,6 +98,7 @@ pub fn view_auth<'a>(
             *claim_loading,
             pin,
             confirm_pin,
+            *pin_entry_target,
             error.as_deref(),
             *loading,
             *setup_token_required,
@@ -142,8 +144,16 @@ pub fn view_auth<'a>(
             user,
             pin,
             confirm_pin,
+            pin_entry_target,
             error,
-        } => view_pin_setup(state, user, pin, confirm_pin, error.as_deref()),
+        } => view_pin_setup(
+            state,
+            user,
+            pin,
+            confirm_pin,
+            *pin_entry_target,
+            error.as_deref(),
+        ),
 
         Authenticated {
             user: _user,

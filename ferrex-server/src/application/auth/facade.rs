@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Error as AnyhowError;
+use chrono::Duration;
 use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
     database::repository_ports::users::UsersRepository,
@@ -103,6 +104,7 @@ impl AuthApplicationFacade {
         fingerprint: DeviceFingerprint,
         device_name: String,
         metadata: DeviceSessionClientMetadata,
+        trust_duration: Duration,
         context: AuthEventContext,
     ) -> Result<(TokenBundle, DeviceSession), AuthFacadeError> {
         let user = self
@@ -123,7 +125,11 @@ impl AuthApplicationFacade {
 
         let (bundle, session) = self
             .auth_service
-            .issue_device_password_session(user.user_id(), session.id())
+            .issue_device_password_session_with_policy(
+                user.user_id(),
+                session.id(),
+                trust_duration,
+            )
             .await?;
 
         Ok((bundle, session))
@@ -247,10 +253,18 @@ impl AuthApplicationFacade {
         fingerprint: &DeviceFingerprint,
         new_pin: String,
         policy: &PinPolicy,
+        trust_duration: Duration,
         context: Option<AuthEventContext>,
     ) -> Result<(), AuthFacadeError> {
         self.pin_management_service
-            .set_pin(user_id, fingerprint, new_pin, policy, context)
+            .set_pin_with_policy(
+                user_id,
+                fingerprint,
+                new_pin,
+                policy,
+                trust_duration,
+                context,
+            )
             .await?;
         Ok(())
     }
@@ -305,16 +319,20 @@ impl AuthApplicationFacade {
         new_pin: String,
         policy: &PinPolicy,
         max_attempts: u8,
+        lockout_duration: Duration,
+        trust_duration: Duration,
         context: Option<AuthEventContext>,
     ) -> Result<(), AuthFacadeError> {
         self.pin_management_service
-            .rotate_pin(
+            .rotate_pin_with_policy(
                 user_id,
                 fingerprint,
                 current_pin,
                 new_pin,
                 policy,
                 max_attempts,
+                lockout_duration,
+                trust_duration,
                 context,
             )
             .await?;

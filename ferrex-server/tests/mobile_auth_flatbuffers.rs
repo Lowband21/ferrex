@@ -116,6 +116,14 @@ async fn setup_login_refresh_and_current_user_support_flatbuffers(
     assert!(!setup.has_admin());
     assert_eq!(setup.user_count(), 0);
     assert!(setup.admin_password_policy().is_some());
+    let setup_pin_policy = setup.pin_policy().expect("setup pin policy");
+    assert_eq!(setup_pin_policy.min_length(), 4);
+    assert_eq!(setup_pin_policy.max_length(), 8);
+    let setup_device_trust_policy = setup
+        .device_trust_policy()
+        .expect("setup device trust policy");
+    assert_eq!(setup_device_trust_policy.pin_max_attempts(), 3);
+    assert_eq!(setup_device_trust_policy.trust_duration_days(), 30);
 
     let username = "mobile_fb_user";
     let password = "Password#123";

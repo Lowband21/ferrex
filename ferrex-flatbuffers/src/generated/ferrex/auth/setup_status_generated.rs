@@ -27,6 +27,8 @@ impl<'a> SetupStatus<'a> {
     pub const VT_LIBRARY_COUNT: ::flatbuffers::VOffsetT = 12;
     pub const VT_ADMIN_PASSWORD_POLICY: ::flatbuffers::VOffsetT = 14;
     pub const VT_USER_PASSWORD_POLICY: ::flatbuffers::VOffsetT = 16;
+    pub const VT_PIN_POLICY: ::flatbuffers::VOffsetT = 18;
+    pub const VT_DEVICE_TRUST_POLICY: ::flatbuffers::VOffsetT = 20;
 
     #[inline]
     pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -43,6 +45,12 @@ impl<'a> SetupStatus<'a> {
         args: &'args SetupStatusArgs<'args>,
     ) -> ::flatbuffers::WIPOffset<SetupStatus<'bldr>> {
         let mut builder = SetupStatusBuilder::new(_fbb);
+        if let Some(x) = args.device_trust_policy {
+            builder.add_device_trust_policy(x);
+        }
+        if let Some(x) = args.pin_policy {
+            builder.add_pin_policy(x);
+        }
         if let Some(x) = args.user_password_policy {
             builder.add_user_password_policy(x);
         }
@@ -138,6 +146,31 @@ impl<'a> SetupStatus<'a> {
                 )
         }
     }
+    #[inline]
+    pub fn pin_policy(&self) -> Option<PinPolicy<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<PinPolicy>>(
+                SetupStatus::VT_PIN_POLICY,
+                None,
+            )
+        }
+    }
+    #[inline]
+    pub fn device_trust_policy(&self) -> Option<DeviceTrustPolicy<'a>> {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab
+                .get::<::flatbuffers::ForwardsUOffset<DeviceTrustPolicy>>(
+                    SetupStatus::VT_DEVICE_TRUST_POLICY,
+                    None,
+                )
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for SetupStatus<'_> {
@@ -166,6 +199,16 @@ impl ::flatbuffers::Verifiable for SetupStatus<'_> {
                 Self::VT_USER_PASSWORD_POLICY,
                 false,
             )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<PinPolicy>>(
+                "pin_policy",
+                Self::VT_PIN_POLICY,
+                false,
+            )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<DeviceTrustPolicy>>(
+                "device_trust_policy",
+                Self::VT_DEVICE_TRUST_POLICY,
+                false,
+            )?
             .finish();
         Ok(())
     }
@@ -180,6 +223,9 @@ pub struct SetupStatusArgs<'a> {
         Option<::flatbuffers::WIPOffset<PasswordPolicy<'a>>>,
     pub user_password_policy:
         Option<::flatbuffers::WIPOffset<PasswordPolicy<'a>>>,
+    pub pin_policy: Option<::flatbuffers::WIPOffset<PinPolicy<'a>>>,
+    pub device_trust_policy:
+        Option<::flatbuffers::WIPOffset<DeviceTrustPolicy<'a>>>,
 }
 impl<'a> Default for SetupStatusArgs<'a> {
     #[inline]
@@ -192,6 +238,8 @@ impl<'a> Default for SetupStatusArgs<'a> {
             library_count: 0,
             admin_password_policy: None,
             user_password_policy: None,
+            pin_policy: None,
+            device_trust_policy: None,
         }
     }
 }
@@ -263,6 +311,28 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
             );
     }
     #[inline]
+    pub fn add_pin_policy(
+        &mut self,
+        pin_policy: ::flatbuffers::WIPOffset<PinPolicy<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<PinPolicy>>(
+                SetupStatus::VT_PIN_POLICY,
+                pin_policy,
+            );
+    }
+    #[inline]
+    pub fn add_device_trust_policy(
+        &mut self,
+        device_trust_policy: ::flatbuffers::WIPOffset<DeviceTrustPolicy<'b>>,
+    ) {
+        self.fbb_
+            .push_slot_always::<::flatbuffers::WIPOffset<DeviceTrustPolicy>>(
+                SetupStatus::VT_DEVICE_TRUST_POLICY,
+                device_trust_policy,
+            );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> SetupStatusBuilder<'a, 'b, A> {
@@ -289,6 +359,8 @@ impl ::core::fmt::Debug for SetupStatus<'_> {
         ds.field("library_count", &self.library_count());
         ds.field("admin_password_policy", &self.admin_password_policy());
         ds.field("user_password_policy", &self.user_password_policy());
+        ds.field("pin_policy", &self.pin_policy());
+        ds.field("device_trust_policy", &self.device_trust_policy());
         ds.finish()
     }
 }

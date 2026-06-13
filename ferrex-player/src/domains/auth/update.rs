@@ -202,6 +202,10 @@ pub fn update_auth(
             wrap_task!(handle_auth_flow_update_confirm_pin(state, pin))
         }
 
+        auth::AuthMessage::SelectPinEntryTarget(target) => {
+            wrap_task!(handle_auth_flow_select_pin_entry_target(state, target))
+        }
+
         auth::AuthMessage::SubmitPin => {
             wrap_task!(handle_auth_flow_submit_pin(state))
         }

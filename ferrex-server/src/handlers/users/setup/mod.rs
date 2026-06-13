@@ -41,7 +41,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::handlers::users::{UserService, user_service::CreateUserParams};
+use crate::handlers::users::{
+    UserService,
+    security_settings_handlers::{
+        DeviceTrustPolicyResponse, PinPolicyResponse,
+    },
+    user_service::CreateUserParams,
+};
 use crate::infra::{
     app_state::AppState,
     content_negotiation::{AcceptedFormat, json_or_flatbuffers},
@@ -150,6 +156,10 @@ pub struct SetupStatus {
     pub admin_password_policy: PasswordPolicyResponse,
     /// Current password policy for regular users
     pub user_password_policy: PasswordPolicyResponse,
+    /// PIN policy official clients should enforce before deriving proofs
+    pub pin_policy: PinPolicyResponse,
+    /// Device trust and remember-device policy
+    pub device_trust_policy: DeviceTrustPolicyResponse,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -277,6 +287,10 @@ pub async fn check_setup_status(
         ),
         user_password_policy: PasswordPolicyResponse::from(
             &security_settings.user_password_policy,
+        ),
+        pin_policy: PinPolicyResponse::from(&security_settings.pin_policy),
+        device_trust_policy: DeviceTrustPolicyResponse::from(
+            &security_settings.device_trust_policy,
         ),
     };
 
@@ -521,6 +535,10 @@ async fn check_setup_status_internal(
         user_password_policy: PasswordPolicyResponse::from(
             &security_settings.user_password_policy,
         ),
+        pin_policy: PinPolicyResponse::from(&security_settings.pin_policy),
+        device_trust_policy: DeviceTrustPolicyResponse::from(
+            &security_settings.device_trust_policy,
+        ),
     })
 }
 
@@ -537,6 +555,10 @@ fn setup_status_to_fb(status: &SetupStatus) -> fb_auth::SetupStatus {
         user_password_policy: Some(password_policy_to_fb(
             &status.user_password_policy,
         )),
+        pin_policy: Some(pin_policy_to_fb(&status.pin_policy)),
+        device_trust_policy: Some(device_trust_policy_to_fb(
+            &status.device_trust_policy,
+        )),
     }
 }
 
@@ -550,6 +572,29 @@ fn password_policy_to_fb(
         require_lowercase: policy.require_lowercase,
         require_number: policy.require_number,
         require_special: policy.require_special,
+    }
+}
+
+fn pin_policy_to_fb(policy: &PinPolicyResponse) -> fb_auth::PinPolicy {
+    fb_auth::PinPolicy {
+        min_length: policy.min_length,
+        max_length: policy.max_length,
+        require_numeric: policy.require_numeric,
+        reject_repeated_digits: policy.reject_repeated_digits,
+        max_consecutive_identical: policy.max_consecutive_identical,
+        reject_sequential_digits: policy.reject_sequential_digits,
+    }
+}
+
+fn device_trust_policy_to_fb(
+    policy: &DeviceTrustPolicyResponse,
+) -> fb_auth::DeviceTrustPolicy {
+    fb_auth::DeviceTrustPolicy {
+        remember_device_default: policy.remember_device_default,
+        trust_duration_days: policy.trust_duration_days,
+        pin_max_attempts: policy.pin_max_attempts,
+        pin_lockout_minutes: policy.pin_lockout_minutes,
+        admin_pin_unlock_enabled: policy.admin_pin_unlock_enabled,
     }
 }
 

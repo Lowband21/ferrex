@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use chrono::Duration;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -82,6 +83,29 @@ impl PinManagementService {
         policy: &PinPolicy,
         context: Option<AuthEventContext>,
     ) -> Result<(), PinManagementError> {
+        self.set_pin_with_policy(
+            user_id,
+            fingerprint,
+            new_pin,
+            policy,
+            Duration::days(30),
+            context,
+        )
+        .await
+    }
+
+    /// Configure or replace a device PIN using the configured trust window.
+    pub async fn set_pin_with_policy(
+        &self,
+        user_id: Uuid,
+        fingerprint: &DeviceFingerprint,
+        new_pin: String,
+        policy: &PinPolicy,
+        trust_duration: Duration,
+        context: Option<AuthEventContext>,
+    ) -> Result<(), PinManagementError> {
+        ensure_non_empty_pin_proof(&new_pin)?;
+
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("set"));
         let (mut user, mut session) =
@@ -90,7 +114,7 @@ impl PinManagementService {
         user.set_user_pin(&new_pin, policy, &self.crypto)
             .map_err(|_| PinManagementError::InvalidPinFormat)?;
 
-        session.mark_trusted_after_pin_setup();
+        session.mark_trusted_after_pin_setup_for(trust_duration);
 
         self.persist_state(&user, &mut session, ctx).await
     }
@@ -107,6 +131,37 @@ impl PinManagementService {
         max_attempts: u8,
         context: Option<AuthEventContext>,
     ) -> Result<(), PinManagementError> {
+        self.rotate_pin_with_policy(
+            user_id,
+            fingerprint,
+            current_pin,
+            new_pin,
+            policy,
+            max_attempts,
+            Duration::minutes(5),
+            Duration::days(30),
+            context,
+        )
+        .await
+    }
+
+    /// Rotate an existing PIN using configured attempt, lockout, and trust windows.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn rotate_pin_with_policy(
+        &self,
+        user_id: Uuid,
+        fingerprint: &DeviceFingerprint,
+        current_pin: &str,
+        new_pin: String,
+        policy: &PinPolicy,
+        max_attempts: u8,
+        lockout_duration: Duration,
+        trust_duration: Duration,
+        context: Option<AuthEventContext>,
+    ) -> Result<(), PinManagementError> {
+        ensure_non_empty_pin_proof(current_pin)?;
+        ensure_non_empty_pin_proof(&new_pin)?;
+
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("rotate"));
         let (mut user, mut session) =
@@ -121,7 +176,10 @@ impl PinManagementService {
             .map_err(|_| PinManagementError::PinVerificationFailed)?;
 
         if !verified {
-            let err = session.register_pin_failure(max_attempts);
+            let err = session.register_pin_failure_with_lockout(
+                max_attempts,
+                lockout_duration,
+            );
             let mapped = map_pin_error(err, true);
             self.persist_state(&user, &mut session, ctx.clone()).await?;
             return Err(mapped);
@@ -130,7 +188,7 @@ impl PinManagementService {
         user.set_user_pin(&new_pin, policy, &self.crypto)
             .map_err(|_| PinManagementError::InvalidPinFormat)?;
 
-        session.mark_trusted_after_pin_setup();
+        session.mark_trusted_after_pin_setup_for(trust_duration);
 
         self.persist_state(&user, &mut session, ctx).await
     }
@@ -144,6 +202,8 @@ impl PinManagementService {
         max_attempts: u8,
         context: Option<AuthEventContext>,
     ) -> Result<(), PinManagementError> {
+        ensure_non_empty_pin_proof(current_pin)?;
+
         let mut ctx = context.unwrap_or_default();
         ctx.insert_metadata("operation", json!("clear"));
         let (mut user, mut session) =
@@ -288,6 +348,13 @@ impl PinManagementService {
 
         Ok(())
     }
+}
+
+fn ensure_non_empty_pin_proof(proof: &str) -> Result<(), PinManagementError> {
+    if proof.trim().is_empty() {
+        return Err(PinManagementError::InvalidPinFormat);
+    }
+    Ok(())
 }
 
 fn map_pin_error(

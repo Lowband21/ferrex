@@ -50,6 +50,27 @@ pub struct PasswordPolicy {
     pub require_special: bool,
 }
 
+/// PIN policy fields exposed to clients before deriving PIN proofs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PinPolicy {
+    pub min_length: u16,
+    pub max_length: u16,
+    pub require_numeric: bool,
+    pub reject_repeated_digits: bool,
+    pub max_consecutive_identical: u16,
+    pub reject_sequential_digits: bool,
+}
+
+/// Device trust and remember-device policy fields exposed to clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceTrustPolicy {
+    pub remember_device_default: bool,
+    pub trust_duration_days: u16,
+    pub pin_max_attempts: u8,
+    pub pin_lockout_minutes: u16,
+    pub admin_pin_unlock_enabled: bool,
+}
+
 /// Server setup status payload.
 #[derive(Debug, Clone, Copy)]
 pub struct SetupStatus {
@@ -60,6 +81,8 @@ pub struct SetupStatus {
     pub library_count: u32,
     pub admin_password_policy: Option<PasswordPolicy>,
     pub user_password_policy: Option<PasswordPolicy>,
+    pub pin_policy: Option<PinPolicy>,
+    pub device_trust_policy: Option<DeviceTrustPolicy>,
 }
 
 /// Current-user profile payload.
@@ -172,6 +195,41 @@ pub fn build_password_policy<'a>(
     )
 }
 
+/// Build a FlatBuffers `PinPolicy` table.
+pub fn build_pin_policy<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    policy: &PinPolicy,
+) -> WIPOffset<fb::PinPolicy<'a>> {
+    fb::PinPolicy::create(
+        builder,
+        &fb::PinPolicyArgs {
+            min_length: policy.min_length,
+            max_length: policy.max_length,
+            require_numeric: policy.require_numeric,
+            reject_repeated_digits: policy.reject_repeated_digits,
+            max_consecutive_identical: policy.max_consecutive_identical,
+            reject_sequential_digits: policy.reject_sequential_digits,
+        },
+    )
+}
+
+/// Build a FlatBuffers `DeviceTrustPolicy` table.
+pub fn build_device_trust_policy<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    policy: &DeviceTrustPolicy,
+) -> WIPOffset<fb::DeviceTrustPolicy<'a>> {
+    fb::DeviceTrustPolicy::create(
+        builder,
+        &fb::DeviceTrustPolicyArgs {
+            remember_device_default: policy.remember_device_default,
+            trust_duration_days: policy.trust_duration_days,
+            pin_max_attempts: policy.pin_max_attempts,
+            pin_lockout_minutes: policy.pin_lockout_minutes,
+            admin_pin_unlock_enabled: policy.admin_pin_unlock_enabled,
+        },
+    )
+}
+
 /// Build a FlatBuffers `SetupStatus` table.
 pub fn build_setup_status<'a>(
     builder: &mut FlatBufferBuilder<'a>,
@@ -185,6 +243,14 @@ pub fn build_setup_status<'a>(
         .user_password_policy
         .as_ref()
         .map(|policy| build_password_policy(builder, policy));
+    let pin_policy = status
+        .pin_policy
+        .as_ref()
+        .map(|policy| build_pin_policy(builder, policy));
+    let device_trust_policy = status
+        .device_trust_policy
+        .as_ref()
+        .map(|policy| build_device_trust_policy(builder, policy));
 
     fb::SetupStatus::create(
         builder,
@@ -196,13 +262,15 @@ pub fn build_setup_status<'a>(
             library_count: status.library_count,
             admin_password_policy,
             user_password_policy,
+            pin_policy,
+            device_trust_policy,
         },
     )
 }
 
 /// Serialize a `SetupStatus` into root FlatBuffers bytes.
 pub fn serialize_setup_status(status: &SetupStatus) -> Vec<u8> {
-    let mut builder = FlatBufferBuilder::with_capacity(256);
+    let mut builder = FlatBufferBuilder::with_capacity(384);
     let status = build_setup_status(&mut builder, status);
     builder.finish(status, None);
     builder.finished_data().to_vec()

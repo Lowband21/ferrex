@@ -180,9 +180,9 @@ fn admin_session_indicator<'a>(
     text_size: f32,
 ) -> Element<'a, DomainMessage> {
     let (icon_text, status_text) = if admin_pin_unlock_enabled {
-        ("🔓", "PIN Available")
+        ("🔓", "Admin PIN unlock enabled")
     } else {
-        ("🔐", "Password Required")
+        ("🔐", "Admin actions require password")
     };
 
     let theme_color = if admin_pin_unlock_enabled {
@@ -235,18 +235,18 @@ fn admin_session_indicator<'a>(
 )]
 fn user_button<'a>(
     user: &'a UserListItemDto,
-    admin_pin_unlock_enabled: bool,
+    _admin_pin_unlock_enabled: bool,
     display_name_size: f32,
     username_size: f32,
     auth_method_size: f32,
 ) -> Element<'a, DomainMessage> {
-    let auth_method_text = if admin_pin_unlock_enabled {
-        "PIN or Password"
+    let auth_method_text = if user.has_pin {
+        "PIN or password"
     } else {
-        "Password Required"
+        "Password required"
     };
 
-    let auth_method_color = if admin_pin_unlock_enabled {
+    let auth_method_color = if user.has_pin {
         |theme: &Theme| theme.extended_palette().success.weak.color
     } else {
         |theme: &Theme| theme.extended_palette().background.strong.text

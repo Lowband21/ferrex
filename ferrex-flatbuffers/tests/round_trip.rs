@@ -359,6 +359,21 @@ fn setup_status_and_user_profile_round_trip() {
         require_number: true,
         require_special: false,
     };
+    let pin_policy = auth::PinPolicy {
+        min_length: 5,
+        max_length: 6,
+        require_numeric: true,
+        reject_repeated_digits: true,
+        max_consecutive_identical: 2,
+        reject_sequential_digits: false,
+    };
+    let device_trust_policy = auth::DeviceTrustPolicy {
+        remember_device_default: true,
+        trust_duration_days: 45,
+        pin_max_attempts: 7,
+        pin_lockout_minutes: 12,
+        admin_pin_unlock_enabled: true,
+    };
     let status_bytes = auth::serialize_setup_status(&auth::SetupStatus {
         needs_setup: false,
         has_admin: true,
@@ -367,6 +382,8 @@ fn setup_status_and_user_profile_round_trip() {
         library_count: 3,
         admin_password_policy: Some(policy),
         user_password_policy: Some(policy),
+        pin_policy: Some(pin_policy),
+        device_trust_policy: Some(device_trust_policy),
     });
     let status = flatbuffers::root::<fb::auth::SetupStatus>(&status_bytes)
         .expect("setup status root");
@@ -381,6 +398,21 @@ fn setup_status_and_user_profile_round_trip() {
             .expect("admin policy")
             .min_length(),
         8
+    );
+    assert_eq!(status.pin_policy().expect("pin policy").min_length(), 5);
+    assert_eq!(status.pin_policy().expect("pin policy").max_length(), 6);
+    assert!(
+        status
+            .device_trust_policy()
+            .expect("device trust policy")
+            .remember_device_default()
+    );
+    assert_eq!(
+        status
+            .device_trust_policy()
+            .expect("device trust policy")
+            .pin_max_attempts(),
+        7
     );
 
     let id = Uuid::now_v7();
