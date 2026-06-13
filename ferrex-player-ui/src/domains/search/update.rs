@@ -1,0 +1,557 @@
+//! Search domain update integration for app-specific navigation and 10-foot UI behavior.
+
+use super::{
+    SearchService, SearchState,
+    keyboard::{TenFootKeyboardAction, TenFootKeyboardKey},
+    messages::SearchMessage,
+    types::SEARCH_RESULTS_SCROLL_ID,
+};
+
+use crate::{
+    common::{
+        messages::{CrossDomainEvent, DomainMessage, DomainUpdateResult},
+        task::into_iced_task,
+    },
+    domains::ui::{
+        shell_ui::UiShellMessage, windows::focus::focus_active_search_input,
+    },
+    infra::constants::layout::search as search_layout,
+    state::State,
+};
+use ferrex_player_search::update::SearchUpdateContext;
+
+use iced::{
+    Task,
+    widget::{operation::snap_to, scrollable::RelativeOffset},
+};
+
+use std::sync::Arc;
+
+impl SearchUpdateContext for State {
+    type AppMessage = DomainMessage;
+
+    fn search_state(&self) -> &SearchState {
+        &self.domains.search.state
+    }
+
+    fn search_state_mut(&mut self) -> &mut SearchState {
+        &mut self.domains.search.state
+    }
+
+    fn search_service(&self) -> Arc<SearchService> {
+        self.domains.search.service.clone()
+    }
+
+    fn search_message(message: SearchMessage) -> Self::AppMessage {
+        DomainMessage::Search(message)
+    }
+
+    fn close_search_message(&self) -> Option<Self::AppMessage> {
+        Some(DomainMessage::Ui(UiShellMessage::CloseSearch.into()))
+    }
+
+    fn navigate_to_media(
+        &self,
+        media: ferrex_player_api::api_types::Media,
+    ) -> Option<Self::AppMessage> {
+        Some(DomainMessage::Event(CrossDomainEvent::NavigateToMedia(
+            media,
+        )))
+    }
+
+    fn request_media_details(
+        &self,
+        media: ferrex_player_api::api_types::Media,
+    ) -> Option<Self::AppMessage> {
+        Some(DomainMessage::Event(CrossDomainEvent::RequestMediaDetails(
+            media,
+        )))
+    }
+}
+
+pub fn update(state: &mut State, message: SearchMessage) -> DomainUpdateResult {
+    #[cfg(any(
+        feature = "profile-with-puffin",
+        feature = "profile-with-tracy",
+        feature = "profile-with-tracing"
+    ))]
+    profiling::scope!("search_update");
+
+    match message {
+        SearchMessage::SelectPrevious => {
+            if (state.interface_mode.is_tenfoot()
+                && !state.domains.search.state.tenfoot_keyboard.is_open())
+                || state.domains.search.state.escape_pending
+            {
+                state.domains.search.state.select_previous();
+                let scroll_task = scroll_selected_into_view(state);
+                return DomainUpdateResult::task(scroll_task);
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        SearchMessage::SelectNext => {
+            if (state.interface_mode.is_tenfoot()
+                && !state.domains.search.state.tenfoot_keyboard.is_open())
+                || state.domains.search.state.escape_pending
+            {
+                state.domains.search.state.select_next();
+                let scroll_task = scroll_selected_into_view(state);
+                return DomainUpdateResult::task(scroll_task);
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        SearchMessage::SelectCurrent => {
+            let selected_media = {
+                let search_state = &mut state.domains.search.state;
+
+                let result = if let Some(selected) =
+                    search_state.get_selected().cloned()
+                {
+                    Some(selected)
+                } else if let Some(first) =
+                    search_state.results.first().cloned()
+                {
+                    search_state.selected_index = Some(0);
+                    Some(first)
+                } else {
+                    None
+                };
+
+                search_state.escape_pending = false;
+
+                result.map(|res| res.media_ref)
+            };
+
+            if let Some(media_ref) = selected_media {
+                update_data_domain(
+                    state,
+                    SearchMessage::SelectResult(media_ref),
+                )
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+
+        SearchMessage::HandleEscape => {
+            if state.interface_mode.is_tenfoot() {
+                state.domains.search.state.escape_pending = false;
+                if state.domains.search.state.tenfoot_keyboard.is_open() {
+                    close_tenfoot_keyboard_for_results(state);
+                    return DomainUpdateResult::task(Task::none());
+                }
+                return DomainUpdateResult::task(Task::done(
+                    DomainMessage::Ui(UiShellMessage::CloseSearch.into()),
+                ));
+            }
+
+            if state.domains.search.state.escape_pending {
+                state.domains.search.state.escape_pending = false;
+                DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                    UiShellMessage::CloseSearch.into(),
+                )))
+            } else {
+                {
+                    let search_state = &mut state.domains.search.state;
+                    if search_state.selected_index.is_none()
+                        && !search_state.results.is_empty()
+                    {
+                        search_state.selected_index = Some(0);
+                    }
+                    search_state.escape_pending = true;
+                }
+                DomainUpdateResult::task(scroll_selected_into_view(state))
+            }
+        }
+
+        SearchMessage::TenFootKeyboardMove(direction) => {
+            if tenfoot_keyboard_available(state)
+                && state.domains.search.state.tenfoot_keyboard.is_open()
+            {
+                state
+                    .domains
+                    .search
+                    .state
+                    .tenfoot_keyboard
+                    .move_focus(direction);
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        SearchMessage::TenFootKeyboardActivate => {
+            if !tenfoot_keyboard_available(state)
+                || !state.domains.search.state.tenfoot_keyboard.is_open()
+            {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            let Some(key) =
+                state.domains.search.state.tenfoot_keyboard.focused_key()
+            else {
+                return DomainUpdateResult::task(Task::none());
+            };
+
+            activate_tenfoot_keyboard_key(state, key)
+        }
+
+        SearchMessage::TenFootKeyboardPress(key) => {
+            if !tenfoot_keyboard_available(state)
+                || !state.domains.search.state.tenfoot_keyboard.is_open()
+            {
+                return DomainUpdateResult::task(Task::none());
+            }
+
+            state.domains.search.state.tenfoot_keyboard.focus_key(key);
+            activate_tenfoot_keyboard_key(state, key)
+        }
+
+        SearchMessage::ShowTenFootKeyboard => {
+            if tenfoot_keyboard_available(state) {
+                state.domains.search.state.tenfoot_keyboard.open();
+                state.domains.search.state.selected_index = None;
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        SearchMessage::HideTenFootKeyboard => {
+            if tenfoot_keyboard_available(state) {
+                close_tenfoot_keyboard_for_results(state);
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        SearchMessage::ResultsReceived {
+            query,
+            results,
+            total_count,
+        } => {
+            if state.domains.search.state.query == query {
+                state.domains.search.state.results = results;
+                state.domains.search.state.total_results = total_count;
+                state.domains.search.state.displayed_results =
+                    total_count.min(state.domains.search.state.page_size);
+                state.domains.search.state.is_searching = false;
+                state.domains.search.state.error = None;
+                state.domains.search.state.escape_pending = false;
+                state.domains.search.state.window_scroll_offset = 0.0;
+                if state.domains.search.state.presentation.is_open() {
+                    state.domains.search.state.selected_index =
+                        if state.interface_mode.is_tenfoot()
+                            && !state
+                                .domains
+                                .search
+                                .state
+                                .tenfoot_keyboard
+                                .is_open()
+                            && !state.domains.search.state.results.is_empty()
+                        {
+                            Some(0)
+                        } else {
+                            None
+                        };
+                }
+
+                if let Some(metric) =
+                    state.domains.search.state.last_metric.take()
+                {
+                    state
+                        .domains
+                        .search
+                        .state
+                        .decision_engine
+                        .record_execution(metric);
+                }
+
+                DomainUpdateResult::task(Task::batch(vec![
+                    focus_active_search_input(state)
+                        .map(|_| DomainMessage::NoOp),
+                ]))
+            } else {
+                DomainUpdateResult::task(Task::none())
+            }
+        }
+
+        other => update_data_domain(state, other),
+    }
+}
+
+fn update_data_domain(
+    state: &mut State,
+    message: SearchMessage,
+) -> DomainUpdateResult {
+    let should_focus = matches!(message, SearchMessage::UpdateQuery(_));
+    let result = ferrex_player_search::update::update(state, message);
+    let mut tasks = vec![into_iced_task(result.task)];
+
+    if should_focus && state.domains.search.state.presentation.is_open() {
+        tasks.push(
+            focus_active_search_input(state).map(|_| DomainMessage::NoOp),
+        );
+    }
+
+    DomainUpdateResult::task(Task::batch(tasks))
+}
+
+fn tenfoot_keyboard_available(state: &State) -> bool {
+    state.interface_mode.is_tenfoot()
+        && state.domains.search.state.presentation.is_overlay()
+}
+
+fn close_tenfoot_keyboard_for_results(state: &mut State) {
+    let search_state = &mut state.domains.search.state;
+    search_state.tenfoot_keyboard.close();
+    search_state.escape_pending = false;
+
+    if search_state.selected_index.is_none() && !search_state.results.is_empty()
+    {
+        search_state.selected_index = Some(0);
+    }
+}
+
+fn activate_tenfoot_keyboard_key(
+    state: &mut State,
+    key: TenFootKeyboardKey,
+) -> DomainUpdateResult {
+    let query = state.domains.search.state.query.clone();
+
+    match crate::domains::search::keyboard::TenFootKeyboardState::action_for_key(
+        key, &query,
+    ) {
+        TenFootKeyboardAction::UpdateQuery(query) => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                UiShellMessage::UpdateSearchQuery(query).into(),
+            )))
+        }
+        TenFootKeyboardAction::ExecuteSearch => {
+            close_tenfoot_keyboard_for_results(state);
+            DomainUpdateResult::task(Task::done(DomainMessage::Ui(
+                UiShellMessage::ExecuteSearch.into(),
+            )))
+        }
+        TenFootKeyboardAction::CloseKeyboard => {
+            close_tenfoot_keyboard_for_results(state);
+            DomainUpdateResult::task(Task::none())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ResultScrollMetrics {
+    viewport_height: f32,
+    row_height: f32,
+    row_spacing: f32,
+    footer_height: f32,
+    half_step: f32,
+}
+
+impl ResultScrollMetrics {
+    fn desktop() -> Self {
+        Self {
+            viewport_height: search_layout::RESULTS_VIEWPORT_HEIGHT,
+            row_height: search_layout::RESULT_ROW_HEIGHT,
+            row_spacing: search_layout::RESULT_ROW_SPACING,
+            footer_height: search_layout::RESULTS_FOOTER_HEIGHT,
+            half_step: search_layout::RESULTS_HALF_STEP,
+        }
+    }
+
+    fn tenfoot(window_height: f32, keyboard_open: bool) -> Self {
+        let scale = (window_height / 1080.0).clamp(0.8, 1.8);
+        let reserved_height = if keyboard_open { 492.0 } else { 318.0 } * scale;
+        let viewport_height = (window_height - reserved_height)
+            .clamp(240.0 * scale, 760.0 * scale);
+        Self {
+            viewport_height,
+            row_height: 128.0 * scale,
+            row_spacing: 12.0 * scale,
+            footer_height: 36.0 * scale,
+            half_step: (viewport_height / 2.0).max(1.0),
+        }
+    }
+}
+
+fn result_scroll_metrics(state: &State) -> ResultScrollMetrics {
+    if state.interface_mode.is_tenfoot() {
+        ResultScrollMetrics::tenfoot(
+            state.window_size.height,
+            state.domains.search.state.tenfoot_keyboard.is_open(),
+        )
+    } else {
+        ResultScrollMetrics::desktop()
+    }
+}
+
+fn result_content_height(
+    total: usize,
+    total_results: usize,
+    metrics: ResultScrollMetrics,
+) -> f32 {
+    if total == 0 {
+        return 0.0;
+    }
+
+    let mut content_height = metrics.row_height * (total as f32)
+        + metrics.row_spacing * (total.saturating_sub(1) as f32);
+
+    if total_results > 0 {
+        content_height += metrics.row_spacing + metrics.footer_height;
+    }
+
+    content_height
+}
+
+fn result_max_scroll_offset(
+    total: usize,
+    total_results: usize,
+    metrics: ResultScrollMetrics,
+) -> f32 {
+    (result_content_height(total, total_results, metrics)
+        - metrics.viewport_height)
+        .max(0.0)
+}
+
+fn selected_result_scroll_offset(
+    current_offset: f32,
+    selected_index: usize,
+    total: usize,
+    total_results: usize,
+    metrics: ResultScrollMetrics,
+) -> f32 {
+    if total == 0
+        || metrics.viewport_height <= 0.0
+        || metrics.row_height <= 0.0
+        || metrics.half_step <= 0.0
+    {
+        return 0.0;
+    }
+
+    let max_offset = result_max_scroll_offset(total, total_results, metrics);
+    if max_offset <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let row_pitch = metrics.row_height + metrics.row_spacing;
+    let selected_index = selected_index.min(total - 1);
+    let mut offset = current_offset.clamp(0.0, max_offset);
+
+    let row_top = (selected_index as f32) * row_pitch;
+    let row_bottom = row_top + metrics.row_height;
+
+    let viewport_top = offset;
+    let viewport_bottom = offset + metrics.viewport_height;
+
+    if row_top < viewport_top {
+        let needed = viewport_top - row_top;
+        let steps = (needed / metrics.half_step).ceil().max(1.0);
+        offset = (offset - steps * metrics.half_step).max(0.0);
+    } else if row_bottom > viewport_bottom {
+        let needed = row_bottom - viewport_bottom;
+        let steps = (needed / metrics.half_step).ceil().max(1.0);
+        offset = (offset + steps * metrics.half_step).min(max_offset);
+    }
+
+    offset = (offset / metrics.half_step).round() * metrics.half_step;
+    offset.clamp(0.0, max_offset)
+}
+
+fn scroll_selected_into_view(state: &mut State) -> Task<DomainMessage> {
+    if !state.domains.search.state.presentation.is_open() {
+        return Task::none();
+    }
+
+    let metrics = result_scroll_metrics(state);
+    let search_state = &mut state.domains.search.state;
+    let Some(selected_index) = search_state.selected_index else {
+        return Task::none();
+    };
+
+    let total = search_state.results.len();
+    if total == 0 {
+        search_state.window_scroll_offset = 0.0;
+        return Task::none();
+    }
+
+    let offset = selected_result_scroll_offset(
+        search_state.window_scroll_offset,
+        selected_index,
+        total,
+        search_state.total_results,
+        metrics,
+    );
+
+    if (offset - search_state.window_scroll_offset).abs() <= f32::EPSILON {
+        return Task::none();
+    }
+
+    search_state.window_scroll_offset = offset;
+
+    let max_offset =
+        result_max_scroll_offset(total, search_state.total_results, metrics);
+    if max_offset <= f32::EPSILON {
+        return Task::none();
+    }
+
+    let y = (offset / max_offset).clamp(0.0, 1.0);
+
+    snap_to(SEARCH_RESULTS_SCROLL_ID, RelativeOffset { x: 0.0, y })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tenfoot_test_metrics() -> ResultScrollMetrics {
+        ResultScrollMetrics {
+            viewport_height: 300.0,
+            row_height: 120.0,
+            row_spacing: 12.0,
+            footer_height: 36.0,
+            half_step: 150.0,
+        }
+    }
+
+    #[test]
+    fn selected_result_scroll_offset_keeps_large_rows_visible() {
+        let offset =
+            selected_result_scroll_offset(0.0, 4, 8, 8, tenfoot_test_metrics());
+
+        assert!((offset - 450.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn selected_result_scroll_offset_moves_near_content_end() {
+        let offset = selected_result_scroll_offset(
+            0.0,
+            9,
+            10,
+            10,
+            tenfoot_test_metrics(),
+        );
+
+        assert!((offset - 1050.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn selected_result_scroll_offset_resets_when_results_fit() {
+        let offset = selected_result_scroll_offset(
+            240.0,
+            1,
+            2,
+            2,
+            tenfoot_test_metrics(),
+        );
+
+        assert!((offset - 0.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn tenfoot_metrics_use_larger_rows_than_desktop() {
+        let desktop = ResultScrollMetrics::desktop();
+        let tenfoot = ResultScrollMetrics::tenfoot(1080.0, false);
+
+        assert!(tenfoot.row_height > desktop.row_height);
+        assert!(tenfoot.row_spacing > desktop.row_spacing);
+        assert!(tenfoot.viewport_height > tenfoot.row_height);
+    }
+}

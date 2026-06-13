@@ -1,0 +1,38 @@
+[package]
+name = "ferrex-player-user-admin"
+description = "User administration domain state, messages, and reducers for Ferrex player clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../README.md"
+publish = true
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.rust]
+# Extracted player user administration surfaces are still stabilizing during 0.1.0-alpha.
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+ferrex-core = { path = "../ferrex-core", default-features = false, features = [
+  "rkyv",
+] }
+ferrex-player-api = { workspace = true }
+
+uuid.workspace = true

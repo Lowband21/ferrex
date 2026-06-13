@@ -1,14 +1,15 @@
 //! Filesystem watch provider for library actors.
 //!
 //! A thin wrapper around `notify` that debounces raw filesystem notifications
-//! into batches and forwards them as `LibraryActorCommand::FsEvents` messages.
-//! Overflow conditions are surfaced explicitly so the library actor can fall
-//! back to breadth-first rescans of the affected subtree.
+//! into batches and forwards them as `LibraryActorCommand::FsEvents` messages
+//! through the scan orchestrator mailbox. Overflow conditions are surfaced
+//! explicitly so the library actor can fall back to breadth-first rescans of the
+//! affected subtree.
 
 use crate::{
     domain::scan::orchestration::{
         FileSystemEvent, FileSystemEventKind, LibraryActorCommand,
-        LibraryActorHandle, LibraryRootsId, config::WatchConfig,
+        LibraryCommandExecutor, LibraryRootsId, config::WatchConfig,
         scan_cursor::normalize_path,
     },
     error::{MediaError, Result},
@@ -96,10 +97,11 @@ impl fmt::Debug for NoopFsWatchObserver {
     }
 }
 
-/// Dispatches debounced filesystem notifications to library actors.
+/// Dispatches debounced filesystem notifications through the scan orchestrator.
 pub struct FsWatchService<O: FsWatchObserver = NoopFsWatchObserver> {
     config: FsWatchConfig,
     observer: Arc<O>,
+    command_executor: Arc<dyn LibraryCommandExecutor>,
     libraries: Arc<RwLock<HashMap<LibraryId, LibraryWatch>>>,
 }
 
@@ -108,7 +110,8 @@ impl<O: FsWatchObserver + 'static> fmt::Debug for FsWatchService<O> {
         let mut debug = f.debug_struct("FsWatchService");
         debug
             .field("config", &self.config)
-            .field("observer_type", &std::any::type_name::<O>());
+            .field("observer_type", &std::any::type_name::<O>())
+            .field("command_executor", &"LibraryCommandExecutor");
 
         match self.libraries.try_read() {
             Ok(guard) => {
@@ -131,21 +134,25 @@ impl<O: FsWatchObserver + 'static> fmt::Debug for FsWatchService<O> {
 }
 
 impl<O: FsWatchObserver + 'static> FsWatchService<O> {
-    pub fn new(config: FsWatchConfig, observer: Arc<O>) -> Self {
+    pub fn new(
+        config: FsWatchConfig,
+        observer: Arc<O>,
+        command_executor: Arc<dyn LibraryCommandExecutor>,
+    ) -> Self {
         Self {
             config,
             observer,
+            command_executor,
             libraries: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Attach notify watchers for the supplied library roots. Events are
-    /// debounced and forwarded directly to the actor handle.
+    /// debounced and forwarded to the orchestrator command executor.
     pub async fn register_library(
         &self,
         library_id: LibraryId,
         roots: Vec<(LibraryRootsId, PathBuf)>,
-        actor: LibraryActorHandle,
     ) -> Result<()> {
         {
             let guard = self.libraries.read().await;
@@ -162,7 +169,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
             library_id,
             resolved_roots.clone(),
             Arc::clone(&self.observer),
-            actor,
+            Arc::clone(&self.command_executor),
             rx,
             self.config.clone(),
         );
@@ -178,6 +185,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
             LibraryWatch {
                 watchers: None,
                 flush_task,
+                tx: tx.clone(),
             },
         );
 
@@ -260,11 +268,36 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
     pub async fn watcher_count(&self) -> usize {
         self.libraries.read().await.len()
     }
+
+    #[cfg(test)]
+    async fn send_watch_message_for_test(
+        &self,
+        library_id: LibraryId,
+        message: WatchMessage,
+    ) -> Result<()> {
+        let tx = {
+            let guard = self.libraries.read().await;
+            guard
+                .get(&library_id)
+                .map(|watch| watch.tx.clone())
+                .ok_or_else(|| {
+                    MediaError::Internal(format!(
+                        "watcher not registered for library {library_id}"
+                    ))
+                })?
+        };
+        tx.send(message).await.map_err(|err| {
+            MediaError::Internal(format!(
+                "failed to send test watch message: {err}"
+            ))
+        })
+    }
 }
 
 struct LibraryWatch {
     watchers: Option<Vec<ActiveWatcher>>,
     flush_task: JoinHandle<()>,
+    tx: mpsc::Sender<WatchMessage>,
 }
 
 impl LibraryWatch {
@@ -272,12 +305,13 @@ impl LibraryWatch {
         let Self {
             watchers,
             flush_task,
+            tx,
         } = self;
         // Drop watchers first — this stops the notify streams and
-        // ensures all in-flight callbacks complete, releasing their
-        // channel senders. The watch loop then exits naturally when
-        // rx.recv() returns None.
+        // ensures all in-flight callbacks complete. Drop the retained sender
+        // before aborting the flush task so no new test messages can enter.
         drop(watchers);
+        drop(tx);
         flush_task.abort();
     }
 }
@@ -289,6 +323,7 @@ impl fmt::Debug for LibraryWatch {
         f.debug_struct("LibraryWatch")
             .field("watcher_count", &watcher_count)
             .field("flush_task_finished", &self.flush_task.is_finished())
+            .field("tx_closed", &self.tx.is_closed())
             .finish()
     }
 }
@@ -335,7 +370,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
     library_id: LibraryId,
     roots: Vec<(LibraryRootsId, PathBuf)>,
     observer: Arc<O>,
-    actor: LibraryActorHandle,
+    command_executor: Arc<dyn LibraryCommandExecutor>,
     mut rx: mpsc::Receiver<WatchMessage>,
     config: FsWatchConfig,
 ) -> JoinHandle<()> {
@@ -354,7 +389,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                             Arc::clone(&observer),
                             library_id,
                             &mut pending,
-                            &actor,
+                            &command_executor,
                         )
                         .await
                         {
@@ -370,7 +405,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                     Arc::clone(&observer),
                     library_id,
                     &mut pending,
-                    &actor,
+                    &command_executor,
                 )
                 .await
                 {
@@ -391,7 +426,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                             if let Err(err) = dispatch_events(
                                 Arc::clone(&observer),
                                 library_id,
-                                &actor,
+                                &command_executor,
                                 root_id,
                                 vec![fs_event],
                             )
@@ -409,7 +444,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                             if let Err(err) = dispatch_events(
                                 Arc::clone(&observer),
                                 library_id,
-                                &actor,
+                                &command_executor,
                                 root_id,
                                 events,
                             )
@@ -429,7 +464,7 @@ fn spawn_watch_loop<O: FsWatchObserver + 'static>(
                             if let Err(err) = dispatch_events(
                                 Arc::clone(&observer),
                                 library_id,
-                                &actor,
+                                &command_executor,
                                 root_id,
                                 events,
                             )
@@ -449,7 +484,7 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
     observer: Arc<O>,
     library_id: LibraryId,
     pending: &mut HashMap<LibraryRootsId, Vec<FileSystemEvent>>,
-    actor: &LibraryActorHandle,
+    command_executor: &Arc<dyn LibraryCommandExecutor>,
 ) -> Result<()> {
     let mut batches = Vec::new();
     for (root_id, events) in pending.iter_mut() {
@@ -464,7 +499,7 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
         dispatch_events(
             Arc::clone(&observer),
             library_id,
-            actor,
+            command_executor,
             root_id,
             events,
         )
@@ -477,7 +512,7 @@ async fn flush_pending<O: FsWatchObserver + 'static>(
 async fn dispatch_events<O: FsWatchObserver + 'static>(
     observer: Arc<O>,
     library_id: LibraryId,
-    actor: &LibraryActorHandle,
+    command_executor: &Arc<dyn LibraryCommandExecutor>,
     root_id: LibraryRootsId,
     events: Vec<FileSystemEvent>,
 ) -> Result<()> {
@@ -500,13 +535,14 @@ async fn dispatch_events<O: FsWatchObserver + 'static>(
         }
     }
 
-    let mut guard = actor.lock().await;
-    if let Err(err) = guard
-        .handle_command(LibraryActorCommand::FsEvents {
-            root: root_id,
-            events,
-            correlation_id: correlation_hint,
-        })
+    let command = LibraryActorCommand::FsEvents {
+        root: root_id,
+        events,
+        correlation_id: correlation_hint,
+    };
+
+    if let Err(err) = command_executor
+        .execute_library_command(library_id, command)
         .await
     {
         observer.on_error(library_id, &err.to_string());
@@ -843,42 +879,306 @@ fn encode_hash(parts: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use super::{FsWatchConfig, FsWatchService, NoopFsWatchObserver};
-    use crate::domain::scan::orchestration::{
-        LibraryActor, LibraryActorCommand, LibraryActorConfig,
-        LibraryActorEvent, LibraryActorHandle, LibraryActorState,
-        LibraryRootsId,
-    };
-    use crate::error::Result;
-    use crate::types::ids::LibraryId;
-
+    use async_trait::async_trait;
+    use chrono::Utc;
+    use notify::Event;
+    use notify::event::{CreateKind, DataChange, EventKind, ModifyKind};
     use tempfile::tempdir;
     use tokio::sync::Mutex;
+    use tokio::time;
+    use uuid::Uuid;
 
-    struct DummyActor;
+    use super::{
+        EVENT_VERSION, FsWatchConfig, FsWatchService, NoopFsWatchObserver,
+        WatchMessage, encode_hash,
+    };
+    use crate::domain::scan::orchestration::lease::DequeueRequest;
+    use crate::domain::scan::orchestration::scan_cursor::normalize_path;
+    use crate::domain::scan::orchestration::{
+        CorrelationCache, DefaultLibraryActor, DependencyKey, DispatchStatus,
+        EnqueueRequest, FileSystemEvent, FileSystemEventKind, FolderScanJob,
+        InMemoryBudget, InProcJobEventBus, JobDispatcher, JobEvent,
+        JobEventPayload, JobHandle, JobId, JobKind, JobLease, JobPayload,
+        JobPriority, LeaseExpiryScanner, LeaseId, LeaseRenewal,
+        LibraryActorCommand, LibraryActorConfig, LibraryActorHandle,
+        LibraryCommandExecutor, LibraryRootsId, NoopActorObserver,
+        OrchestratorConfig, OrchestratorRuntime, OrchestratorRuntimeBuilder,
+        QueueService, ScanReason,
+    };
+    use crate::error::{MediaError, Result};
+    use crate::types::{
+        LibraryType, ids::LibraryId, prelude::LibraryReference,
+    };
 
-    #[async_trait::async_trait]
-    impl LibraryActor for DummyActor {
-        fn config(&self) -> &LibraryActorConfig {
-            panic!("not used")
+    type TestRuntime =
+        OrchestratorRuntime<RecordingQueue, InProcJobEventBus, InMemoryBudget>;
+
+    #[derive(Clone, Debug)]
+    struct RecordedRequest {
+        job: FolderScanJob,
+        priority: JobPriority,
+        correlation_id: Option<Uuid>,
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingQueue {
+        records: Arc<Mutex<Vec<RecordedRequest>>>,
+        accepted_by_dedupe: Arc<Mutex<HashMap<String, JobId>>>,
+    }
+
+    impl std::fmt::Debug for RecordingQueue {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let queued = self
+                .records
+                .try_lock()
+                .map(|records| records.len())
+                .unwrap_or_default();
+            f.debug_struct("RecordingQueue")
+                .field("queued", &queued)
+                .finish()
+        }
+    }
+
+    impl RecordingQueue {
+        async fn records(&self) -> Vec<RecordedRequest> {
+            self.records.lock().await.clone()
+        }
+    }
+
+    #[async_trait]
+    impl QueueService for RecordingQueue {
+        async fn enqueue(&self, request: EnqueueRequest) -> Result<JobHandle> {
+            let payload = request.payload.clone();
+            let dedupe_key = request.dedupe_key().to_string();
+
+            let mut accepted = self.accepted_by_dedupe.lock().await;
+            if let Some(existing) = accepted.get(&dedupe_key).copied() {
+                return Ok(JobHandle::merged(
+                    existing,
+                    &payload,
+                    request.priority,
+                ));
+            }
+
+            let job_id = JobId::new();
+            accepted.insert(dedupe_key, job_id);
+            drop(accepted);
+
+            if let JobPayload::FolderScan(job) = payload.clone() {
+                self.records.lock().await.push(RecordedRequest {
+                    job,
+                    priority: request.priority,
+                    correlation_id: request.correlation_id,
+                });
+            }
+
+            Ok(JobHandle::accepted(job_id, &payload, request.priority))
         }
 
-        fn state(&self) -> &LibraryActorState {
-            panic!("not used")
+        async fn dequeue(
+            &self,
+            _request: DequeueRequest,
+        ) -> Result<Option<JobLease>> {
+            Ok(None)
         }
 
-        fn state_mut(&mut self) -> &mut LibraryActorState {
-            panic!("not used")
+        async fn renew(&self, _renewal: LeaseRenewal) -> Result<JobLease> {
+            Err(MediaError::Internal(
+                "renew not implemented in RecordingQueue".into(),
+            ))
         }
 
-        async fn handle_command(
-            &mut self,
+        async fn complete(&self, _lease_id: LeaseId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn fail(
+            &self,
+            _lease_id: LeaseId,
+            _retryable: bool,
+            _error: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn dead_letter(
+            &self,
+            _lease_id: LeaseId,
+            _error: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn cancel_job(&self, _job_id: JobId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn queue_depth(&self, kind: JobKind) -> Result<usize> {
+            Ok(self
+                .records()
+                .await
+                .into_iter()
+                .filter(|record| {
+                    JobPayload::FolderScan(record.job.clone()).kind() == kind
+                })
+                .count())
+        }
+
+        async fn release_dependency(
+            &self,
+            _library_id: LibraryId,
+            _dependency_key: &DependencyKey,
+        ) -> Result<u64> {
+            Ok(0)
+        }
+    }
+
+    #[async_trait]
+    impl LeaseExpiryScanner for RecordingQueue {
+        async fn scan_expired_leases(&self) -> Result<u64> {
+            Ok(0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct NoopDispatcher;
+
+    #[async_trait]
+    impl JobDispatcher for NoopDispatcher {
+        async fn dispatch(&self, _lease: &JobLease) -> DispatchStatus {
+            DispatchStatus::Success
+        }
+    }
+
+    #[derive(Debug)]
+    struct NoopCommandExecutor;
+
+    #[async_trait]
+    impl LibraryCommandExecutor for NoopCommandExecutor {
+        async fn execute_library_command(
+            &self,
+            _library_id: LibraryId,
             _command: LibraryActorCommand,
-        ) -> Result<Vec<LibraryActorEvent>> {
-            Ok(vec![])
+        ) -> Result<()> {
+            Ok(())
         }
+    }
+
+    struct RuntimeHarness {
+        runtime: Arc<TestRuntime>,
+        queue: Arc<RecordingQueue>,
+        events: Arc<InProcJobEventBus>,
+        library_id: LibraryId,
+    }
+
+    async fn runtime_harness(root: PathBuf) -> Result<RuntimeHarness> {
+        let library_id = LibraryId::new();
+        let queue = Arc::new(RecordingQueue::default());
+        let events = Arc::new(InProcJobEventBus::new(32));
+        let config = OrchestratorConfig::default();
+        let budget = Arc::new(InMemoryBudget::new(config.budget.clone()));
+        let dispatcher = Arc::new(NoopDispatcher);
+
+        let runtime = Arc::new(
+            OrchestratorRuntimeBuilder::new(config)
+                .with_queue(Arc::clone(&queue))
+                .with_events(Arc::clone(&events))
+                .with_budget(budget)
+                .with_dispatcher(dispatcher)
+                .with_correlations(CorrelationCache::default())
+                .build()?,
+        );
+
+        let actor_config = LibraryActorConfig {
+            library: LibraryReference {
+                id: library_id,
+                name: "Watch Test".into(),
+                library_type: LibraryType::Movies,
+                paths: vec![root.clone()],
+            },
+            root_paths: vec![root.clone()],
+            max_outstanding_jobs: 16,
+        };
+        let actor = DefaultLibraryActor::new(
+            actor_config,
+            Arc::clone(&queue),
+            Arc::new(NoopActorObserver),
+            Arc::clone(&events),
+            CorrelationCache::default(),
+        );
+        let actor: LibraryActorHandle = Arc::new(Mutex::new(Box::new(actor)));
+
+        runtime.register_library_actor(library_id, actor).await?;
+        runtime.start_mailbox_runner().await?;
+
+        Ok(RuntimeHarness {
+            runtime,
+            queue,
+            events,
+            library_id,
+        })
+    }
+
+    fn make_fs_event(
+        library_id: LibraryId,
+        path: &Path,
+        kind: FileSystemEventKind,
+        correlation_id: Option<Uuid>,
+    ) -> Result<FileSystemEvent> {
+        let path_key = normalize_path(path)?;
+        Ok(FileSystemEvent {
+            version: EVENT_VERSION,
+            correlation_id,
+            idempotency_key: encode_hash(&[
+                "fs-test",
+                &library_id.to_string(),
+                &path_key,
+            ]),
+            library_id,
+            path_key,
+            fingerprint: None,
+            path: path.to_path_buf(),
+            old_path: None,
+            kind,
+            occurred_at: Utc::now(),
+        })
+    }
+
+    async fn wait_for_records(
+        queue: &RecordingQueue,
+        expected: usize,
+    ) -> Vec<RecordedRequest> {
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let records = queue.records().await;
+                if records.len() >= expected {
+                    return records;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("queued folder scan records")
+    }
+
+    async fn wait_for_enqueued_event(
+        rx: &mut tokio::sync::broadcast::Receiver<JobEvent>,
+    ) -> JobEvent {
+        time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = rx.recv().await.expect("job event");
+                if matches!(event.payload, JobEventPayload::Enqueued { .. }) {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("published enqueue event")
     }
 
     #[tokio::test]
@@ -889,21 +1189,220 @@ mod tests {
         let service: FsWatchService = FsWatchService::new(
             FsWatchConfig::default(),
             Arc::new(NoopFsWatchObserver),
+            Arc::new(NoopCommandExecutor),
         );
 
-        let actor: LibraryActorHandle =
-            Arc::new(Mutex::new(Box::new(DummyActor)));
         let library_id = LibraryId::new();
         service
-            .register_library(
-                library_id,
-                vec![(LibraryRootsId(0), root)],
-                Arc::clone(&actor),
-            )
+            .register_library(library_id, vec![(LibraryRootsId(0), root)])
             .await?;
         assert_eq!(service.watcher_count().await, 1);
         service.unregister_library(library_id).await;
         assert_eq!(service.watcher_count().await, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn direct_fs_events_command_enqueues_deduped_folder_scan()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Movie A");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let harness = runtime_harness(root).await?;
+        let correlation_id = Uuid::now_v7();
+        let mut job_rx = harness.events.subscribe();
+        let events = vec![
+            make_fs_event(
+                harness.library_id,
+                &media_path,
+                FileSystemEventKind::Created,
+                Some(correlation_id),
+            )?,
+            make_fs_event(
+                harness.library_id,
+                &media_path,
+                FileSystemEventKind::Modified,
+                None,
+            )?,
+        ];
+
+        harness
+            .runtime
+            .submit_library_command(
+                harness.library_id,
+                LibraryActorCommand::FsEvents {
+                    root: LibraryRootsId(0),
+                    events,
+                    correlation_id: Some(correlation_id),
+                },
+            )
+            .await?;
+
+        let records = wait_for_records(&harness.queue, 1).await;
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.priority, JobPriority::P0);
+        assert_eq!(record.correlation_id, Some(correlation_id));
+        assert_eq!(record.job.scan_reason, ScanReason::HotChange);
+        assert_eq!(
+            record.job.context.folder_path_norm(),
+            normalize_path(&movie_dir)?.as_str()
+        );
+
+        let event = wait_for_enqueued_event(&mut job_rx).await;
+        assert_eq!(event.meta.correlation_id, correlation_id);
+        assert!(matches!(
+            event.payload,
+            JobEventPayload::Enqueued {
+                kind: JobKind::FolderScan,
+                priority: JobPriority::P0,
+                ..
+            }
+        ));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_batch_enqueues_deduped_folder_scan() -> Result<()>
+    {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Movie B");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let harness = runtime_harness(root.clone()).await?;
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            harness.runtime.clone();
+        let service: FsWatchService = FsWatchService::new(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(25),
+                max_batch_events: 16,
+                poll_interval: Duration::from_secs(1),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+        );
+        service
+            .register_library(
+                harness.library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+
+        let mut job_rx = harness.events.subscribe();
+        // Native and polling watchers both enter the service through
+        // WatchMessage::Event; inject that shared seam to keep the test
+        // deterministic without relying on platform-specific notify timing.
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Create(CreateKind::File))
+                        .add_path(media_path.clone()),
+                ),
+            )
+            .await?;
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Event(
+                    Event::new(EventKind::Modify(ModifyKind::Data(
+                        DataChange::Content,
+                    )))
+                    .add_path(media_path),
+                ),
+            )
+            .await?;
+
+        let records = wait_for_records(&harness.queue, 1).await;
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.priority, JobPriority::P0);
+        assert_eq!(record.job.scan_reason, ScanReason::HotChange);
+        assert_eq!(
+            record.job.context.folder_path_norm(),
+            normalize_path(&movie_dir)?.as_str()
+        );
+
+        let event = wait_for_enqueued_event(&mut job_rx).await;
+        assert!(matches!(
+            event.payload,
+            JobEventPayload::Enqueued {
+                kind: JobKind::FolderScan,
+                priority: JobPriority::P0,
+                ..
+            }
+        ));
+        service.unregister_library(harness.library_id).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fs_watch_service_overflow_enqueues_p0_rescan_for_root_child()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Movie C");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+
+        let harness = runtime_harness(root.clone()).await?;
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            harness.runtime.clone();
+        let service: FsWatchService = FsWatchService::new(
+            FsWatchConfig {
+                debounce_window: Duration::from_millis(25),
+                max_batch_events: 16,
+                poll_interval: Duration::from_secs(1),
+            },
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+        );
+        service
+            .register_library(
+                harness.library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
+            .await?;
+
+        let mut job_rx = harness.events.subscribe();
+        // Watcher backend errors use the same service channel before being
+        // converted into overflow rescans.
+        service
+            .send_watch_message_for_test(
+                harness.library_id,
+                WatchMessage::Error("overflow".into()),
+            )
+            .await?;
+
+        let records = wait_for_records(&harness.queue, 1).await;
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.priority, JobPriority::P0);
+        assert_eq!(record.job.scan_reason, ScanReason::WatcherOverflow);
+        assert_eq!(
+            record.job.context.folder_path_norm(),
+            normalize_path(&movie_dir)?.as_str()
+        );
+
+        let event = wait_for_enqueued_event(&mut job_rx).await;
+        assert!(matches!(
+            event.payload,
+            JobEventPayload::Enqueued {
+                kind: JobKind::FolderScan,
+                priority: JobPriority::P0,
+                ..
+            }
+        ));
+        service.unregister_library(harness.library_id).await;
+
         Ok(())
     }
 }

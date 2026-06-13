@@ -34,6 +34,17 @@ use crate::{
 
 pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
 
+/// Orchestrator-owned command executor used by producers that should share the
+/// normal library actor mailbox and enqueue/event publication path.
+#[async_trait::async_trait]
+pub trait LibraryCommandExecutor: Send + Sync {
+    async fn execute_library_command(
+        &self,
+        library_id: LibraryId,
+        command: LibraryActorCommand,
+    ) -> Result<()>;
+}
+
 /// Supervises the lifetime of actors and queue workers inside a single
 /// process. This is deliberately conservative until we firm up scheduling and
 /// persistence behaviour.
@@ -342,6 +353,9 @@ where
             tokio::sync::mpsc::channel::<OrchestratorCommand>(1024);
         {
             let mut guard = self.mailbox_tx.lock().await;
+            if guard.is_some() {
+                return Ok(());
+            }
             *guard = Some(tx);
         }
 
@@ -1109,6 +1123,25 @@ where
         })
         .await
         .map_err(|e| MediaError::Internal(format!("mailbox send failed: {e}")))
+    }
+}
+
+#[async_trait::async_trait]
+impl<Q, E, B> LibraryCommandExecutor for OrchestratorRuntime<Q, E, B>
+where
+    Q: QueueService + LeaseExpiryScanner + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::domain::scan::orchestration::runtime::ScanEventStream
+        + 'static,
+    B: WorkloadBudget + 'static,
+{
+    async fn execute_library_command(
+        &self,
+        library_id: LibraryId,
+        command: LibraryActorCommand,
+    ) -> Result<()> {
+        self.submit_library_command(library_id, command).await
     }
 }
 

@@ -2219,6 +2219,232 @@ dependencies = [
 name = "ferrex-player"
 version = "0.1.2-alpha"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-app",
+ "ferrex-player-auth",
+ "futures",
+ "iced",
+ "iced_runtime",
+ "rand 0.9.3",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ferrex-player-api"
+version = "0.1.2-alpha"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "ferrex-contracts",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-foundation",
+ "log",
+ "parking_lot",
+ "reqwest",
+ "rkyv 0.8.15",
+ "serde",
+ "serde_json",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "ferrex-player-app"
+version = "0.1.2-alpha"
+dependencies = [
+ "chrono",
+ "env_logger",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-ui",
+ "iced",
+ "iced_aw",
+ "iced_test",
+ "iced_wgpu",
+ "log",
+ "lucide-icons",
+ "tokio",
+ "tracy-client",
+ "uuid",
+]
+
+[[package]]
+name = "ferrex-player-auth"
+version = "0.1.2-alpha"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "directories",
+ "ed25519-dalek",
+ "ferrex-core",
+ "ferrex-player-api",
+ "ferrex-player-foundation",
+ "getrandom 0.3.4",
+ "hkdf",
+ "log",
+ "mac_address",
+ "rand 0.9.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo 0.37.2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "ferrex-player-foundation"
+version = "0.1.2-alpha"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ferrex-player-library"
+version = "0.1.2-alpha"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "eventsource-stream",
+ "ferrex-contracts",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-api",
+ "ferrex-player-foundation",
+ "ferrex-player-repository",
+ "futures",
+ "log",
+ "parking_lot",
+ "reqwest",
+ "reqwest-eventsource",
+ "rkyv 0.8.15",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+ "yoke",
+]
+
+[[package]]
+name = "ferrex-player-media"
+version = "0.1.2-alpha"
+dependencies = [
+ "chrono",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-api",
+ "ferrex-player-foundation",
+ "ferrex-player-library",
+ "log",
+]
+
+[[package]]
+name = "ferrex-player-metadata"
+version = "0.1.2-alpha"
+
+[[package]]
+name = "ferrex-player-playback"
+version = "0.1.2-alpha"
+dependencies = [
+ "dirs",
+ "ferrex-core",
+ "ferrex-player-api",
+ "ferrex-player-foundation",
+ "iced",
+ "iced_wgpu",
+ "log",
+ "lucide-icons",
+ "profiling",
+ "serde_json",
+ "subwave_core",
+ "subwave_unified",
+ "tokio",
+ "url",
+ "urlencoding",
+]
+
+[[package]]
+name = "ferrex-player-repository"
+version = "0.1.2-alpha"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "cacache",
+ "directories",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-foundation",
+ "log",
+ "parking_lot",
+ "rancor",
+ "rkyv 0.8.15",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+ "yoke",
+]
+
+[[package]]
+name = "ferrex-player-search"
+version = "0.1.2-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-api",
+ "ferrex-player-foundation",
+ "ferrex-player-library",
+ "log",
+ "num_cpus",
+ "profiling",
+ "rkyv 0.8.15",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "ferrex-player-settings"
+version = "0.1.2-alpha"
+dependencies = [
+ "chrono",
+ "ferrex-core",
+ "ferrex-model",
+ "ferrex-player-api",
+ "ferrex-player-auth",
+ "ferrex-player-foundation",
+ "hsluv",
+ "iced_core",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "ferrex-player-ui"
+version = "0.1.2-alpha"
+dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
@@ -2236,6 +2462,17 @@ dependencies = [
  "ferrex-contracts",
  "ferrex-core",
  "ferrex-model",
+ "ferrex-player-api",
+ "ferrex-player-auth",
+ "ferrex-player-foundation",
+ "ferrex-player-library",
+ "ferrex-player-media",
+ "ferrex-player-metadata",
+ "ferrex-player-playback",
+ "ferrex-player-repository",
+ "ferrex-player-search",
+ "ferrex-player-settings",
+ "ferrex-player-user-admin",
  "filesize",
  "fontdue",
  "futures",
@@ -2286,6 +2523,15 @@ dependencies = [
  "uuid",
  "yoke",
  "zeroize",
+]
+
+[[package]]
+name = "ferrex-player-user-admin"
+version = "0.1.2-alpha"
+dependencies = [
+ "ferrex-core",
+ "ferrex-player-api",
+ "uuid",
 ]
 
 [[package]]

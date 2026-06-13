@@ -5,7 +5,7 @@ use ferrex_core::domain::users::auth::device::{
     AuthDeviceStatus, AuthenticatedDevice,
 };
 use ferrex_core::player_prelude::Platform;
-use ferrex_player::domains::ui::views::settings::device_management::UserDevice;
+use ferrex_player::domains::settings::sections::devices::state::UserDevice;
 use ferrex_player::infra::services::settings::SettingsService;
 use ferrex_player::state::State;
 use serde_json::json;

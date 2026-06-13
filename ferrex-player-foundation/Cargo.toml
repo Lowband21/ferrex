@@ -1,0 +1,27 @@
+[package]
+name = "ferrex-player-foundation"
+description = "Dependency-light player contracts and foundation primitives for Ferrex clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+publish = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }
+thiserror.workspace = true

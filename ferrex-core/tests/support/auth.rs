@@ -179,6 +179,9 @@ impl TestAuthHarness {
     }
 
     /// Set explicit last_activity for a device session to simulate inactivity windows.
+    ///
+    /// Clearing `trusted_until` keeps these tests on the legacy activity-window path
+    /// instead of the explicit trust-expiration path created when a PIN is set.
     pub async fn backdate_device_activity(
         &self,
         device_session_id: Uuid,
@@ -189,6 +192,7 @@ impl TestAuthHarness {
             UPDATE auth_device_sessions
             SET last_activity = $1,
                 last_seen_at = $1,
+                trusted_until = NULL,
                 updated_at = NOW()
             WHERE id = $2
             "#,

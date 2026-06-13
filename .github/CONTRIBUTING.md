@@ -75,6 +75,13 @@ cargo clippy --workspace --all-targets --all-features -- -W warnings
 cargo test --workspace --all-features --all-targets --no-fail-fast
 ```
 
+For player crate graph or UI/domain extraction changes, also run:
+
+```bash
+./scripts/check-player-crate-boundaries.sh
+cargo test -p ferrex-player-app --test ui_end_to_end
+```
+
 ## Database and SQLx
 
 Parts of the codebase use SQLx with offline metadata under `./.sqlx/`.
