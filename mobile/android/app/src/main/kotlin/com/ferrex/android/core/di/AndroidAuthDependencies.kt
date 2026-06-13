@@ -8,6 +8,10 @@ import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.api.TokenRefreshAuthenticator
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.EncryptedAuthStorage
+import com.ferrex.android.core.library.LibraryDiskCache
+import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.library.OkHttpLibrarySyncTransport
+import com.ferrex.android.core.library.ServerCacheScope
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -29,6 +33,13 @@ class AndroidAuthDependencies(
 
     private val storage = EncryptedAuthStorage(context)
     private val apiClient = FerrexApiClient(httpClient, serverConfig)
+    private val libraryCache = LibraryDiskCache.fromContext(context)
+    private val libraryTransport = OkHttpLibrarySyncTransport(httpClient, serverConfig)
+
+    val libraryRepository = LibraryRepository(
+        transport = libraryTransport,
+        cache = libraryCache,
+    )
 
     val authManager = AuthManager(
         api = apiClient,
@@ -38,5 +49,8 @@ class AndroidAuthDependencies(
         tokenRefreshAuthenticator = tokenRefreshAuthenticator,
         deviceName = deviceName,
         appVersion = BuildConfig.VERSION_NAME,
+        onResetConnectionCacheClear = { serverUrl, userId ->
+            libraryCache.clearAllForScope(ServerCacheScope.from(serverUrl, userId))
+        },
     )
 }

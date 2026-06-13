@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.navigation.FerrexRoutes
 import com.ferrex.android.tv.ui.TvHomeScreen
 import com.ferrex.android.tv.ui.TvLoadingScreen
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TvFerrexNavGraph(
     authManager: AuthManager,
+    libraryRepository: LibraryRepository? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -75,6 +77,7 @@ fun TvFerrexNavGraph(
             } else {
                 TvHomeScreen(
                     state = state,
+                    libraryRepository = libraryRepository,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
