@@ -34,8 +34,8 @@ use ferrex_core::domain::scan::orchestration::{
     lease::{DequeueRequest, JobLease},
     queue::QueueService,
     runtime::{
-        InProcJobEventBus, LibraryActorHandle, OrchestratorRuntime,
-        OrchestratorRuntimeBuilder,
+        InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
+        OrchestratorRuntime, OrchestratorRuntimeBuilder,
     },
     scheduler::ReadyCountEntry,
     series::{
@@ -127,21 +127,25 @@ impl ScanOrchestrator {
 
         let watch_cfg = config.watch.clone();
 
-        let runtime = OrchestratorRuntimeBuilder::new(config)
-            .with_queue(Arc::clone(&queue))
-            .with_events(Arc::clone(&events))
-            .with_budget(Arc::clone(&budget))
-            .with_dispatcher(dispatcher)
-            .with_correlations(correlations.clone())
-            .build()?;
+        let runtime = Arc::new(
+            OrchestratorRuntimeBuilder::new(config)
+                .with_queue(Arc::clone(&queue))
+                .with_events(Arc::clone(&events))
+                .with_budget(Arc::clone(&budget))
+                .with_dispatcher(dispatcher)
+                .with_correlations(correlations.clone())
+                .build()?,
+        );
 
+        let command_executor: Arc<dyn LibraryCommandExecutor> = runtime.clone();
         let watchers: Arc<FsWatchService> = Arc::new(FsWatchService::new(
             FsWatchConfig::from(watch_cfg),
             Arc::new(NoopFsWatchObserver),
+            command_executor,
         ));
 
         Ok(Self {
-            runtime: Arc::new(runtime),
+            runtime,
             actors,
             cursors,
             events,
@@ -219,8 +223,9 @@ impl ScanOrchestrator {
                 .enumerate()
                 .map(|(idx, path)| (LibraryRootsId(idx as u16), path.clone()))
                 .collect();
+            self.runtime.start_mailbox_runner().await?;
             self.watchers
-                .register_library(config.library.id, roots, actor)
+                .register_library(config.library.id, roots)
                 .await?;
         } else {
             debug!(library_id = %config.library.id, "skipping watcher registration (disabled)");
