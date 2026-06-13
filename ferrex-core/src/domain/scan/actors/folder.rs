@@ -41,6 +41,10 @@ pub struct FolderListingPlan {
     pub media_files: Vec<PathBuf>,
     pub ancillary_files: Vec<PathBuf>,
     pub generated_listing_hash: String,
+    /// True when the requested folder no longer exists or is no longer a directory.
+    /// Missing folders reconcile as recursive tombstones instead of dead-lettering.
+    #[serde(default)]
+    pub folder_missing: bool,
 }
 
 /// Captures state while the folder scan actor is running.
@@ -210,6 +214,45 @@ impl FolderScanActor for DefaultFolderScanActor {
     ) -> Result<FolderListingPlan> {
         let context = &job.context;
         let folder_path = PathBuf::from(context.folder_path_norm());
+        match fs::metadata(&folder_path).await {
+            Ok(metadata) if !metadata.is_dir() => {
+                tracing::warn!(
+                    target: "scan::jobs",
+                    path = %folder_path.display(),
+                    "folder scan path is no longer a directory; reconciling as deleted"
+                );
+                return Ok(FolderListingPlan {
+                    directories: Vec::new(),
+                    media_files: Vec::new(),
+                    ancillary_files: Vec::new(),
+                    generated_listing_hash: compute_listing_hash(&[]),
+                    folder_missing: true,
+                });
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!(
+                    target: "scan::jobs",
+                    path = %folder_path.display(),
+                    "folder scan path no longer exists; reconciling as deleted"
+                );
+                return Ok(FolderListingPlan {
+                    directories: Vec::new(),
+                    media_files: Vec::new(),
+                    ancillary_files: Vec::new(),
+                    generated_listing_hash: compute_listing_hash(&[]),
+                    folder_missing: true,
+                });
+            }
+            Err(err) => {
+                return Err(MediaError::Io(std::io::Error::other(format!(
+                    "Failed to stat directory {}: {}",
+                    folder_path.display(),
+                    err
+                ))));
+            }
+        }
+
         let entries = self.list_directory(&folder_path).await?;
 
         let mut directories = Vec::new();
@@ -280,6 +323,7 @@ impl FolderScanActor for DefaultFolderScanActor {
             media_files,
             ancillary_files,
             generated_listing_hash,
+            folder_missing: false,
         })
     }
 
@@ -479,5 +523,68 @@ impl FolderScanActor for DefaultFolderScanActor {
             listing_hash: plan.generated_listing_hash.clone(),
             completed_at: Utc::now(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::scan::context::{MovieFolderScanContext, MovieRootPath};
+    use crate::domain::scan::orchestration::job::ScanReason;
+    use crate::types::ids::LibraryId;
+
+    fn movie_scan_job(library_root: &Path, movie_path: &Path) -> FolderScanJob {
+        let library_root = library_root.to_string_lossy().to_string();
+        let movie_path = movie_path.to_string_lossy().to_string();
+        FolderScanJob {
+            context: FolderScanContext::Movie(MovieFolderScanContext {
+                library_id: LibraryId::new(),
+                movie_root_path: MovieRootPath::try_new_under_library_root(
+                    &library_root,
+                    movie_path,
+                )
+                .expect("movie path under library root"),
+            }),
+            scan_reason: ScanReason::MaintenanceSweep,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_folder_reconciles_as_deleted_plan() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing_movie = temp.path().join("Deleted Movie");
+        let actor = DefaultFolderScanActor::new();
+
+        let plan = actor
+            .plan_listing(&movie_scan_job(temp.path(), &missing_movie))
+            .await
+            .expect("missing folders should not fail planning");
+
+        assert!(plan.folder_missing);
+        assert!(plan.directories.is_empty());
+        assert!(plan.media_files.is_empty());
+        assert_eq!(plan.generated_listing_hash, compute_listing_hash(&[]));
+    }
+
+    #[tokio::test]
+    async fn file_at_folder_path_reconciles_as_deleted_plan() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let movie_path = temp.path().join("Not A Directory");
+        tokio::fs::write(&movie_path, b"not a directory")
+            .await
+            .expect("create file at scan path");
+        let actor = DefaultFolderScanActor::new();
+
+        let plan = actor
+            .plan_listing(&movie_scan_job(temp.path(), &movie_path))
+            .await
+            .expect("non-directory paths should not fail planning");
+
+        assert!(plan.folder_missing);
+        assert!(plan.directories.is_empty());
+        assert!(plan.media_files.is_empty());
+        assert_eq!(plan.generated_listing_hash, compute_listing_hash(&[]));
     }
 }

@@ -583,7 +583,7 @@ impl QueryRepository for PostgresQueryRepository {
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id
-            WHERE 1=1
+            WHERE mf.is_available = TRUE
             "#,
         );
 
@@ -692,7 +692,13 @@ impl QueryRepository for PostgresQueryRepository {
                     sm.overview
                 FROM series sr
                 LEFT JOIN series_metadata sm ON sr.id = sm.series_id
-                WHERE 1=1
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM episode_references er_visible
+                    JOIN media_files mf_visible ON mf_visible.id = er_visible.file_id
+                    WHERE er_visible.series_id = sr.id
+                      AND mf_visible.is_available = TRUE
+                )
             "#,
         );
 
@@ -770,9 +776,13 @@ impl QueryRepository for PostgresQueryRepository {
                 ORDER BY season_number
             ) sn ON true
             LEFT JOIN LATERAL (
-                SELECT * FROM episode_references
-                WHERE series_id = sd.id AND season_id = sn.id
-                ORDER BY season_number, episode_number
+                SELECT er.*
+                FROM episode_references er
+                JOIN media_files mf_visible ON mf_visible.id = er.file_id
+                WHERE er.series_id = sd.id
+                  AND er.season_id = sn.id
+                  AND mf_visible.is_available = TRUE
+                ORDER BY er.season_number, er.episode_number
             ) ep ON true
             LEFT JOIN media_files mf ON ep.file_id = mf.id
             "#,
