@@ -84,6 +84,7 @@ async fn resolve_watch_target(
         SELECT media_id, media_type::text AS media_type
         FROM media_files
         WHERE id = $1
+          AND is_available = TRUE
         "#,
     )
     .bind(media_id)

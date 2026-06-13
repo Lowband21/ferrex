@@ -204,9 +204,14 @@ BEGIN
                 ORDER BY (mf.technical_metadata->>'height')::INTEGER DESC NULLS LAST, mr.id DESC
             ) AS resolution_pos_desc
         FROM movie_references mr
-        JOIN media_files mf ON mf.id = mr.file_id
-        LEFT JOIN movie_metadata mm ON mm.movie_id = mr.id
+        JOIN media_files mf
+          ON mf.id = mr.file_id
+         AND mf.library_id = mr.library_id
+        LEFT JOIN movie_metadata mm
+          ON mm.movie_id = mr.id
+         AND mm.library_id = mr.library_id
         WHERE mr.library_id = p_library_id
+          AND mf.is_available = TRUE
     )
 	    INSERT INTO movie_sort_positions AS msp (
 	        movie_id, library_id, batch_id, title_pos, title_pos_desc,
@@ -262,10 +267,19 @@ BEGIN
         resolution_pos = EXCLUDED.resolution_pos,
         resolution_pos_desc = EXCLUDED.resolution_pos_desc,
         updated_at = NOW();
-    -- Remove rows for movies no longer in the library
+    -- Remove rows for movies no longer visible in the library
     DELETE FROM movie_sort_positions m
     WHERE m.library_id = p_library_id
-      AND NOT EXISTS (SELECT 1 FROM movie_references mr WHERE mr.id = m.movie_id);
+      AND NOT EXISTS (
+          SELECT 1
+          FROM movie_references mr
+          JOIN media_files mf
+            ON mf.id = mr.file_id
+           AND mf.library_id = mr.library_id
+          WHERE mr.id = m.movie_id
+            AND mr.library_id = m.library_id
+            AND mf.is_available = TRUE
+      );
 END;
 $$;
 
@@ -967,7 +981,15 @@ CREATE TYPE public.media_type AS ENUM ('movie', 'series', 'season', 'episode', '
      created_at timestamp with time zone DEFAULT now() NOT NULL,
      updated_at timestamp with time zone DEFAULT now() NOT NULL,
      technical_metadata jsonb,
-     parsed_info jsonb
+     parsed_info jsonb,
+     is_available boolean DEFAULT true NOT NULL,
+     tombstoned_at timestamp with time zone,
+     tombstone_reason text,
+     fingerprint_device_id text,
+     fingerprint_inode bigint,
+     fingerprint_size bigint,
+     fingerprint_mtime_ms bigint,
+     fingerprint_weak_hash text
  );
 
 -- Name: tmdb_image_variants; Type: TABLE; Schema: public; Owner: postgres
