@@ -188,6 +188,15 @@ pub trait ScanCursorRepository: Send + Sync {
     /// Delete cursors for a library.
     async fn delete_by_library(&self, library_id: LibraryId) -> Result<usize>;
 
+    /// Delete cursors whose folder path is the prefix itself or beneath it.
+    async fn delete_by_path_prefixes(
+        &self,
+        _library_id: LibraryId,
+        _prefixes: Vec<String>,
+    ) -> Result<usize> {
+        Ok(0)
+    }
+
     /// Get cursors that haven't been scanned recently.
     async fn list_stale(
         &self,

@@ -9,6 +9,7 @@ use std::{collections::HashMap, fmt, sync::Arc};
 use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
+use ferrex_core::database::repositories::media::PostgresMediaRepository;
 use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
 use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
@@ -119,8 +120,10 @@ impl ScanOrchestrator {
                 Arc::clone(&series_states),
             ));
 
-        let dispatcher: Arc<dyn JobDispatcher> =
-            Arc::new(DefaultJobDispatcher::new(
+        let delta_repo =
+            Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
+        let dispatcher: Arc<dyn JobDispatcher> = Arc::new(
+            DefaultJobDispatcher::new(
                 Arc::clone(&queue),
                 Arc::clone(&events),
                 Arc::clone(&cursors),
@@ -128,7 +131,9 @@ impl ScanOrchestrator {
                 Arc::clone(&series_resolver),
                 dispatcher_actors,
                 correlations.clone(),
-            ));
+            )
+            .with_delta_repository(delta_repo),
+        );
 
         let watch_cfg = config.watch.clone();
 
