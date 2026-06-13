@@ -138,6 +138,7 @@ tower = { workspace = true, features = ["util"] }
 serde_json.workspace = true
 flatbuffers.workspace = true
 rcgen = "^0.12"
+ed25519-dalek = { version = "2", default-features = false }
 
 [features]
 # Enable long-running external end-to-end HTTP tests

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::{AuthEventContext, map_domain_events};
 use crate::domain::users::auth::domain::aggregates::{
-    DeviceSession, DeviceStatus,
+    DeviceSession, DeviceSessionClientMetadata, DeviceStatus,
 };
 use crate::domain::users::auth::domain::events::AuthEvent;
 use crate::domain::users::auth::domain::repositories::{
@@ -84,6 +84,25 @@ impl DeviceTrustService {
         device_name: String,
         context: Option<AuthEventContext>,
     ) -> Result<DeviceSession, DeviceTrustError> {
+        self.register_device_with_metadata(
+            user_id,
+            fingerprint,
+            device_name,
+            DeviceSessionClientMetadata::default(),
+            context,
+        )
+        .await
+    }
+
+    /// Register or update a device and persist its client metadata atomically.
+    pub async fn register_device_with_metadata(
+        &self,
+        user_id: Uuid,
+        fingerprint: DeviceFingerprint,
+        device_name: String,
+        metadata: DeviceSessionClientMetadata,
+        context: Option<AuthEventContext>,
+    ) -> Result<DeviceSession, DeviceTrustError> {
         let ctx = context.unwrap_or_default();
         let user = self
             .user_repo
@@ -108,12 +127,18 @@ impl DeviceTrustService {
             if session.is_revoked() {
                 // Treat revoked sessions as fresh registrations.
                 return self
-                    .create_new_session(user_id, fingerprint, device_name, ctx)
+                    .create_new_session(
+                        user_id,
+                        fingerprint,
+                        device_name,
+                        metadata,
+                        ctx,
+                    )
                     .await;
             }
 
-            // Update last activity to reflect the device check-in.
-            session.update_activity();
+            // Update last activity and persisted metadata to reflect the device check-in.
+            session.apply_client_metadata(metadata);
             self.session_repo.save(&session).await?;
             Ok(session)
         } else {
@@ -129,8 +154,14 @@ impl DeviceTrustService {
                 return Err(DeviceTrustError::TooManyDevices { limit });
             }
 
-            self.create_new_session(user_id, fingerprint, device_name, ctx)
-                .await
+            self.create_new_session(
+                user_id,
+                fingerprint,
+                device_name,
+                metadata,
+                ctx,
+            )
+            .await
         }
     }
 
@@ -177,7 +208,7 @@ impl DeviceTrustService {
         Ok(self.get_device(user_id, fingerprint).await?.status())
     }
 
-    /// Return whether any session exists for the given fingerprint.
+    /// Return whether a currently trusted session exists for the given fingerprint.
     pub async fn is_known_device(
         &self,
         fingerprint: &DeviceFingerprint,
@@ -284,9 +315,15 @@ impl DeviceTrustService {
         user_id: Uuid,
         fingerprint: DeviceFingerprint,
         device_name: String,
+        metadata: DeviceSessionClientMetadata,
         context: AuthEventContext,
     ) -> Result<DeviceSession, DeviceTrustError> {
-        let mut session = DeviceSession::new(user_id, fingerprint, device_name);
+        let mut session = DeviceSession::new_with_metadata(
+            user_id,
+            fingerprint,
+            device_name,
+            metadata,
+        );
         let events = session.take_events();
         self.session_repo.save(&session).await?;
         self.publish_events(events, &context).await?;

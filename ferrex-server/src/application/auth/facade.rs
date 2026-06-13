@@ -6,7 +6,7 @@ use ferrex_core::{
     database::repository_ports::users::UsersRepository,
     domain::users::{
         auth::domain::{
-            aggregates::DeviceSession,
+            aggregates::{DeviceSession, DeviceSessionClientMetadata},
             repositories::AuthSessionRecord,
             services::{
                 AuthEventContext, AuthenticationError, AuthenticationService,
@@ -102,21 +102,28 @@ impl AuthApplicationFacade {
         password: &str,
         fingerprint: DeviceFingerprint,
         device_name: String,
+        metadata: DeviceSessionClientMetadata,
         context: AuthEventContext,
     ) -> Result<(TokenBundle, DeviceSession), AuthFacadeError> {
-        let bundle = self
+        let user = self
             .auth_service
-            .authenticate_with_password(username, password)
+            .authenticate_user(username, password)
             .await?;
 
         let session = self
             .device_trust_service
-            .register_device(
-                bundle.user_id,
+            .register_device_with_metadata(
+                user.user_id(),
                 fingerprint,
                 device_name,
+                metadata,
                 Some(context),
             )
+            .await?;
+
+        let (bundle, session) = self
+            .auth_service
+            .issue_device_password_session(user.user_id(), session.id())
             .await?;
 
         Ok((bundle, session))
@@ -196,30 +203,29 @@ impl AuthApplicationFacade {
         &self,
         fingerprint: &DeviceFingerprint,
     ) -> Result<(bool, Vec<User>, HashMap<Uuid, bool>), AuthFacadeError> {
-        let known = self
+        let pin_map: HashMap<Uuid, bool> = self
             .device_trust_service
-            .is_known_device(fingerprint)
-            .await?;
+            .pin_status_by_device(fingerprint)
+            .await?
+            .into_iter()
+            .map(|status| (status.user_id, status.has_pin))
+            .collect();
+
+        if pin_map.is_empty() {
+            return Ok((false, Vec::new(), HashMap::new()));
+        }
 
         let users = self
             .unit_of_work
             .users
             .get_all_users()
             .await
-            .map_err(|err| AuthFacadeError::Storage(err.into()))?;
+            .map_err(|err| AuthFacadeError::Storage(err.into()))?
+            .into_iter()
+            .filter(|user| pin_map.contains_key(&user.id))
+            .collect();
 
-        let pin_map = if known {
-            self.device_trust_service
-                .pin_status_by_device(fingerprint)
-                .await?
-                .into_iter()
-                .map(|status| (status.user_id, status.has_pin))
-                .collect()
-        } else {
-            HashMap::new()
-        };
-
-        Ok((known, users, pin_map))
+        Ok((true, users, pin_map))
     }
 
     pub async fn revoke_device(
