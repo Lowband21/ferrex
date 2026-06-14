@@ -47,14 +47,25 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.browse.LibraryBrowseModels
+import com.ferrex.android.core.detail.DetailCache
+import com.ferrex.android.core.detail.DetailLoadResult
+import com.ferrex.android.core.detail.DetailRouteContracts
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackRouteContract
+import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.ui.components.FerrexBrowseImageRail
+import com.ferrex.android.ui.player.PlayerChrome
+import com.ferrex.android.ui.player.PlayerScreen
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 @Composable
 fun TvLoadingScreen() {
@@ -259,17 +270,47 @@ fun TvHomeScreen(
     libraryRepository: LibraryRepository? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    playbackTicketTransport: PlaybackTicketTransport? = null,
+    playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
+    playbackProgressReporter: PlaybackProgressReporter? = null,
+    streamingHttpClient: OkHttpClient? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onPlaybackSessionInvalidated: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
     val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
     val repositoryState by libraryRepository?.state?.collectAsState() ?: emptyRepositoryState
     val coroutineScope = rememberCoroutineScope()
+    var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
+    var playbackNotice by remember { mutableStateOf<String?>(null) }
+    val firstPlaybackContract = remember(repositoryState) { firstTvPlaybackContract(repositoryState) }
+    val playbackReady = playbackTicketTransport != null && playbackStreamUrlFactory != null && streamingHttpClient != null
 
     LaunchedEffect(libraryRepository, scope) {
         libraryRepository?.refreshLibraries(scope)
+    }
+
+    val playbackContract = activePlaybackContract
+    if (playbackContract != null && playbackTicketTransport != null && playbackStreamUrlFactory != null && streamingHttpClient != null) {
+        PlayerScreen(
+            route = playbackContract,
+            ticketTransport = playbackTicketTransport,
+            streamUrlFactory = playbackStreamUrlFactory,
+            progressReporter = playbackProgressReporter,
+            streamingHttpClient = streamingHttpClient,
+            chrome = PlayerChrome.Tv,
+            onBack = { activePlaybackContract = null },
+            onSessionInvalidated = {
+                activePlaybackContract = null
+                onPlaybackSessionInvalidated()
+            },
+            onProgressCommitted = {},
+            onChangeServer = onChangeServer,
+            onSignOut = onSignOut,
+        )
+        return
     }
 
     TvSurface {
@@ -297,6 +338,18 @@ fun TvHomeScreen(
             },
             onClearAll = { libraryRepository?.clearAllCache(scope) },
         )
+        TvPlaybackEntry(
+            contract = firstPlaybackContract,
+            playbackNotice = playbackNotice,
+            onLaunch = { contract ->
+                if (!playbackReady) {
+                    playbackNotice = "Playback is unavailable because the ticketed Media3 substrate is not configured."
+                } else {
+                    playbackNotice = null
+                    activePlaybackContract = contract
+                }
+            },
+        )
         FerrexBrowseImageRail(
             modifier = Modifier.padding(top = 28.dp),
             repositoryState = repositoryState,
@@ -316,6 +369,49 @@ fun TvHomeScreen(
             onResetConnection = onResetConnection,
         )
     }
+}
+
+@Composable
+private fun TvPlaybackEntry(
+    contract: PlaybackRouteContract?,
+    playbackNotice: String?,
+    onLaunch: (PlaybackRouteContract) -> Unit,
+) {
+    Spacer(Modifier.height(18.dp))
+    val copy = when {
+        contract != null -> "Open the first cached playable item with TV D-pad controls and audio/subtitle pickers."
+        else -> "TV playback controls will become available after a cached playable movie or episode is present."
+    }
+    Text(copy, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    Button(
+        enabled = contract != null,
+        onClick = { contract?.let(onLaunch) },
+        modifier = Modifier.width(360.dp),
+    ) {
+        Text("Play first cached item")
+    }
+    playbackNotice?.let {
+        Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+    }
+}
+
+private fun firstTvPlaybackContract(state: LibraryRepositoryState?): PlaybackRouteContract? {
+    state ?: return null
+
+    state.movieLibraries
+        .asSequence()
+        .flatMap { LibraryBrowseModels.movieGridCards(it).asSequence() }
+        .mapNotNull { card -> DetailCache.resolve(state, card.route) as? DetailLoadResult.Movie }
+        .mapNotNull { detail -> DetailRouteContracts.movieStartOver(detail.detail, detail.route) }
+        .firstOrNull()
+        ?.let { return it }
+
+    return state.seriesLibraries
+        .asSequence()
+        .flatMap { LibraryBrowseModels.seriesGridCards(it).asSequence() }
+        .mapNotNull { card -> DetailCache.resolve(state, card.route) as? DetailLoadResult.Series }
+        .mapNotNull { detail -> DetailRouteContracts.seriesStartOver(detail.detail, detail.route) }
+        .firstOrNull()
 }
 
 @Composable
