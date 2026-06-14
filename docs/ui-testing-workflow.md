@@ -20,8 +20,10 @@ just screenshot-list
 ```
 
 The list is produced from the same preset registry used by the app and includes
-names such as `FirstRunAuth`, `DesktopLibraryHome`, `SettingsDevices`,
-`TenFootHome`, `TenFootDetail`, and `PlayerLoadingOverlay`.
+names such as `FirstRunAuth`, `DesktopLibraryHome`, `DesktopMovieDetail`,
+`DesktopSeriesDetail`, `DesktopSeasonDetail`, `DesktopEpisodeDetail`,
+`SettingsDevices`, `TenFootHome`, `TenFootDetail`, and
+`PlayerLoadingOverlay`.
 
 ## Capture a screenshot
 
@@ -103,6 +105,47 @@ For one-off captures, the generic wrapper forwards arguments to the CLI:
 ```bash
 just screenshot --preset TenFootDetail --viewport 1920x1080 \
   --scale-factor 1 --mode Immediate --output target/ui-screenshots/detail.png
+```
+
+## Adaptive detail QA matrix
+
+The adaptive detail routes have deterministic screenshot presets for the final
+QA pass:
+
+| Route | Preset | Primary viewport coverage |
+| --- | --- | --- |
+| Movie detail | `DesktopMovieDetail` | `480x900`, `640x480`, `800x600`, `1024x768`, `1280x720`, `1366x768`, `1920x1080`, `2560x1440`, `3440x1440`, `900x1600` |
+| Series detail | `DesktopSeriesDetail` | Same desktop matrix; verifies season rail, disabled/recovery states when rows are missing, and next-episode actions when rows exist. |
+| Season detail | `DesktopSeasonDetail` | Same desktop matrix; verifies episode rail sizing, primary play action, and Back/Home recovery actions. |
+| Episode detail | `DesktopEpisodeDetail` | Same desktop matrix; verifies responsive still artwork and playback/MPV actions. |
+| 10-foot detail | `TenFootDetail` | `1280x720`, `1280x800`, `1366x768`, `1920x1080`, `2560x1440`, `3440x1440` |
+
+Expected invariants for every detail capture:
+
+- Hero art stays inside the content stage; poster routes keep a poster aspect and
+  episode routes keep a 16:9 still aspect.
+- Title, metadata pills, and primary actions remain visible without horizontal
+  clipping; compact/tall portrait windows stack hero content vertically.
+- Backdrop/aspect controls align to the foreground detail plan and do not cover
+  primary actions.
+- Relationship rails keep bounded horizontal scrolling/virtualization; ultrawide
+  captures center the readable stage instead of stretching cards edge to edge.
+- Missing repository rows or missing artwork render designed notices or neutral
+  artwork panels with Back/Home recovery where applicable.
+- 10-foot detail preserves visible focus rings, D-pad/keyboard focus movement,
+  scroll-follow margins, and one- vs two-row panel windows according to the
+  solved viewport plan.
+
+Example matrix capture command:
+
+```bash
+for preset in DesktopMovieDetail DesktopSeriesDetail DesktopSeasonDetail DesktopEpisodeDetail; do
+  for viewport in 480x900 640x480 800x600 1024x768 1280x720 1366x768 1920x1080 2560x1440 3440x1440 900x1600; do
+    just screenshot --preset "$preset" --viewport "$viewport" \
+      --scale-factor 1 --mode Immediate --settle-ms 200 \
+      --output "target/ui-screenshots/${preset}-${viewport}.png"
+  done
+done
 ```
 
 ## Run UI tests and smoke tests

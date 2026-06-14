@@ -309,7 +309,7 @@ pub fn view_season_detail(
     let mut model =
         DetailPageModel::new(DetailContentKind::Season, title.clone())
             .with_eyebrow("Season Details")
-            .with_subtitle(format!("Series {}", series_id.to_uuid()))
+            .with_subtitle(series_detail_subtitle(state, series_id))
             .with_hero_art(DetailArtwork::tv_poster(
                 season_uuid,
                 poster_iid,
@@ -704,16 +704,16 @@ fn series_actions(
         vec![
             DetailAction::primary(
                 "play-next",
-                "Play next episode",
+                "Play next",
                 PlaybackMessage::PlaySeriesNextEpisode(series_id).into(),
             )
-            .with_subtitle("Use the local next-episode selector"),
+            .with_subtitle("Next local episode"),
             DetailAction::secondary(
                 "play-next-mpv",
-                "Play next in MPV",
+                "Play in MPV",
                 PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
             )
-            .with_subtitle("Use the external player route"),
+            .with_subtitle("External player"),
         ]
     } else {
         vec![
@@ -737,13 +737,13 @@ fn season_actions(
                 "Play season",
                 PlaybackMessage::PlayMediaWithId(media_id).into(),
             )
-            .with_subtitle("Start from the next local episode"),
+            .with_subtitle("Next local episode"),
             DetailAction::secondary(
                 "play-season-mpv",
                 "Play in MPV",
                 PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
             )
-            .with_subtitle("Open the selected episode externally"),
+            .with_subtitle("External player"),
         ]
     } else {
         vec![
@@ -863,6 +863,19 @@ fn carousel_key_id(key: &CarouselKey) -> String {
     format!("{key:?}")
 }
 
+fn series_detail_subtitle(state: &State, series_id: &SeriesID) -> String {
+    match state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get(&MediaID::Series(*series_id))
+    {
+        Ok(ferrex_model::Media::Series(series)) => series.title().to_string(),
+        Ok(_) | Err(_) => format!("Series {}", series_id.to_uuid()),
+    }
+}
+
 fn backdrop_control_label(state: &State) -> String {
     match state
         .domains
@@ -943,7 +956,7 @@ mod tests {
             .find(|action| action.id == "play-next-mpv")
             .expect("series actions should expose an MPV action");
 
-        assert_eq!(mpv_action.label, "Play next in MPV");
+        assert_eq!(mpv_action.label, "Play in MPV");
         match mpv_action.on_press.as_ref() {
             Some(UiMessage::Playback(
                 PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(
