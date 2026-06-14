@@ -47,6 +47,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -62,6 +63,7 @@ import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 @Stable
@@ -175,6 +177,7 @@ fun TvFocusableSurface(
     tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
     minHeight: Dp = FerrexDesignTokens.Focus.TvButtonMinHeight,
+    testTag: String? = null,
     onFocused: () -> Unit = {},
     content: @Composable RowScope.() -> Unit,
 ) {
@@ -196,6 +199,7 @@ fun TvFocusableSurface(
     Surface(
         modifier = modifier
             .heightIn(min = minHeight)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged {
                 focused = it.isFocused
@@ -241,6 +245,7 @@ fun TvFocusableButton(
     tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
     contentDescription: String = label,
+    testTag: String? = null,
     onFocused: () -> Unit = {},
     content: @Composable RowScope.() -> Unit = {
         Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -254,6 +259,7 @@ fun TvFocusableButton(
         style = style,
         tone = tone,
         focusRequester = focusRequester,
+        testTag = testTag,
         onFocused = onFocused,
         content = content,
     )
@@ -321,6 +327,7 @@ fun TvActionPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface(surfaceKey))
             .focusGroup(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
@@ -350,6 +357,7 @@ fun TvActionPanel(
                 contentDescription = action.contentDescription,
                 onClick = action.onSelect,
                 focusRequester = requesters[action.key],
+                testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
                 onFocused = { focusRestorer?.record(surface = surfaceKey, item = action.key) },
                 modifier = Modifier
                     .widthIn(max = buttonMaxWidth)

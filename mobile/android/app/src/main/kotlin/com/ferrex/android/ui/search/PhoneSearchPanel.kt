@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
@@ -45,6 +46,7 @@ import com.ferrex.android.ui.components.FerrexImageFallback
 import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
 
@@ -107,7 +109,11 @@ fun PhoneSearchPanel(
         retryNonce += 1
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.SearchPanel),
+    ) {
         Text(
             text = "Search cached media",
             style = MaterialTheme.typography.titleMedium,
@@ -122,6 +128,7 @@ fun PhoneSearchPanel(
         OutlinedTextField(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag(FerrexQaTags.Phone.SearchField)
                 .padding(top = 12.dp),
             value = query,
             onValueChange = { query = it },
@@ -207,7 +214,9 @@ private fun SearchOutcomeContent(
                 )
             }
             Column(
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .testTag(FerrexQaTags.Phone.SearchResults),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 outcome.rows.take(12).forEach { row ->
@@ -343,6 +352,7 @@ private fun SearchActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.SearchActions)
             .padding(top = FerrexDesignTokens.Space.Sm),
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
     ) {

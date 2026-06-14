@@ -25,6 +25,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
@@ -125,10 +128,15 @@ fun FerrexStatusCard(
     tone: FerrexStatusTone = FerrexStatusTone.Secondary,
     loading: Boolean = false,
     action: FerrexStatusAction? = null,
+    testTag: String? = null,
+    contentDescription: String? = null,
 ) {
     val colors = tone.colors()
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .withFerrexTestTag(testTag)
+            .withFerrexContentDescription(contentDescription),
         shape = FerrexDesignTokens.Shapes.RecoveryCard,
         colors = CardDefaults.cardColors(
             containerColor = colors.container,
@@ -178,17 +186,22 @@ fun FerrexActionButton(
     modifier: Modifier = Modifier,
     role: FerrexActionRole = FerrexActionRole.Primary,
     enabled: Boolean = true,
+    testTag: String? = null,
+    contentDescription: String = label,
     content: @Composable RowScope.() -> Unit = {
         Text(label, style = MaterialTheme.typography.labelLarge)
     },
 ) {
     val statusColors = role.statusTone().colors()
     val shape = FerrexDesignTokens.Shapes.Button
+    val actionModifier = modifier
+        .withFerrexTestTag(testTag)
+        .withFerrexContentDescription(contentDescription)
     when (role) {
         FerrexActionRole.Primary,
         FerrexActionRole.Retry -> Button(
             onClick = onClick,
-            modifier = modifier,
+            modifier = actionModifier,
             enabled = enabled,
             shape = shape,
             colors = ButtonDefaults.buttonColors(
@@ -202,7 +215,7 @@ fun FerrexActionButton(
         FerrexActionRole.DestructiveReset,
         FerrexActionRole.Error -> Button(
             onClick = onClick,
-            modifier = modifier,
+            modifier = actionModifier,
             enabled = enabled,
             shape = shape,
             colors = ButtonDefaults.buttonColors(
@@ -217,7 +230,7 @@ fun FerrexActionButton(
         FerrexActionRole.Cache,
         FerrexActionRole.StaleOffline -> OutlinedButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = actionModifier,
             enabled = enabled,
             shape = shape,
             border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, statusColors.border),
@@ -234,9 +247,14 @@ fun FerrexActionButton(
 fun FerrexPosterCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    testTag: String? = null,
+    contentDescription: String? = null,
     content: @Composable () -> Unit,
 ) {
-    val cardModifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier
+    val baseModifier = modifier
+        .withFerrexTestTag(testTag)
+        .withFerrexContentDescription(contentDescription)
+    val cardModifier = if (onClick != null) baseModifier.clickable(onClick = onClick) else baseModifier
     Card(
         modifier = cardModifier,
         shape = FerrexDesignTokens.Shapes.PosterCard,
@@ -276,4 +294,12 @@ fun FerrexSectionTitle(title: String, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
     )
+}
+
+private fun Modifier.withFerrexTestTag(tag: String?): Modifier = if (tag == null) this else testTag(tag)
+
+private fun Modifier.withFerrexContentDescription(description: String?): Modifier = if (description == null) {
+    this
+} else {
+    semantics(mergeDescendants = true) { contentDescription = description }
 }

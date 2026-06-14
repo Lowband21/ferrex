@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -127,6 +128,7 @@ import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.player.PlayerChrome
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import com.ferrex.android.ui.player.PlayerScreen
 import kotlinx.coroutines.delay
@@ -677,6 +679,7 @@ private fun TvHomeContent(
     val preferredSurface = lastHomeTarget?.surface?.takeIf { it in availableSurfaces } ?: initialTarget.surface
 
     TvScaffold(
+        modifier = Modifier.testTag(FerrexQaTags.Tv.Home),
         contentMaxWidth = FerrexDesignTokens.Tv.HomeMaxWidth,
         horizontalPadding = FerrexDesignTokens.Space.ScreenTvHorizontal,
         verticalPadding = FerrexDesignTokens.Space.ScreenTvVertical,
@@ -1329,7 +1332,9 @@ private fun TvPosterGrid(
     }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.TvGridMin),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface("grid-cards")),
         contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Md),
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -1344,6 +1349,7 @@ private fun TvPosterGrid(
                 onFocused = { focusRestorer.record("grid-cards", card.stableKey) },
                 onSelect = { onSelect(card) },
                 modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Tv.poster("grid-cards", card.stableKey),
             )
         }
     }
@@ -1401,7 +1407,9 @@ private fun TvSearchScreen(
 
     TvFullScreenSurface {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag(FerrexQaTags.Tv.Search),
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
         ) {
             Text("Search", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -1412,6 +1420,7 @@ private fun TvSearchScreen(
             OutlinedTextField(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag(FerrexQaTags.Tv.SearchField)
                     .focusRequester(focusRequester),
                 value = query,
                 onValueChange = { query = it },
@@ -1507,7 +1516,9 @@ private fun TvSearchOutcome(
                 )
             }
             LazyColumn(
-                modifier = modifier.fillMaxWidth(),
+                modifier = modifier
+                    .fillMaxWidth()
+                    .testTag(FerrexQaTags.Tv.SearchResults),
                 verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
                 contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Sm),
             ) {
@@ -1540,6 +1551,7 @@ private fun TvSearchResolvedRow(
         onClick = { onOpenResult(row.target) },
         semanticLabel = "Open ${row.title}",
         minHeight = FerrexDesignTokens.Tv.SearchResultMinHeight,
+        testTag = FerrexQaTags.Tv.action("search-results", row.searchStableKey()),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg), verticalAlignment = Alignment.CenterVertically) {
@@ -1623,6 +1635,7 @@ private fun TvMediaDetailScreen(
 ) {
     BackHandler(onBack = onBack)
     TvScaffold(
+        modifier = Modifier.testTag(FerrexQaTags.Tv.Detail),
         contentMaxWidth = FerrexDesignTokens.Tv.DetailMaxWidth,
         horizontalPadding = FerrexDesignTokens.Space.ScreenTvHorizontal,
         verticalPadding = FerrexDesignTokens.Tv.DetailVerticalPadding,
@@ -1990,7 +2003,10 @@ private fun TvPosterRow(
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
         contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Lg),
-        modifier = Modifier.fillMaxWidth().focusGroup(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface(surfaceKey))
+            .focusGroup(),
     ) {
         items(entries, key = { it.stableKey }) { entry ->
             TvPosterCard(
@@ -2002,6 +2018,7 @@ private fun TvPosterRow(
                 onFocused = { focusRestorer.record(surfaceKey, entry.stableKey) },
                 onSelect = { onSelect(entry) },
                 modifier = Modifier.width(FerrexDesignTokens.Poster.TvWidth),
+                testTag = FerrexQaTags.Tv.poster(surfaceKey, entry.stableKey),
             )
         }
     }
@@ -2017,6 +2034,7 @@ private fun TvPosterCard(
     onFocused: () -> Unit,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
+    testTag: String? = null,
 ) {
     TvFocusableSurface(
         onClick = onSelect,
@@ -2024,6 +2042,7 @@ private fun TvPosterCard(
         modifier = modifier,
         focusRequester = focusRequester,
         minHeight = FerrexDesignTokens.Poster.TvCardMinHeight,
+        testTag = testTag,
         onFocused = onFocused,
     ) {
         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
@@ -2104,7 +2123,12 @@ private fun TvButtonRow(
             runCatching { requesters[restoredKey]?.requestFocus() }
         }
     }
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface(surfaceKey)),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+    ) {
         title?.let { TvSectionHeader(it) }
         supportingText?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Row(
@@ -2123,6 +2147,7 @@ private fun TvButtonRow(
                     style = action.role.toFocusableStyle(),
                     tone = action.role.sharedActionRole.statusTone(),
                     focusRequester = requesters[action.key],
+                    testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
                     onFocused = { focusRestorer?.record(surfaceKey, action.key) },
                     modifier = Modifier.widthIn(
                         min = FerrexDesignTokens.Tv.ActionMinWidth,
