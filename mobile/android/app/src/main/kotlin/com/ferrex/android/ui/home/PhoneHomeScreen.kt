@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
@@ -104,6 +105,7 @@ import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.detail.PhoneDetailScreen
 import com.ferrex.android.ui.player.PlayerScreen
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.search.PhoneSearchPanel
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
@@ -423,7 +425,9 @@ fun PhoneHomeScreen(
     }
 
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.Shell),
         color = MaterialTheme.colorScheme.background,
     ) {
         val playbackContract = activePlaybackContract
@@ -576,15 +580,18 @@ private fun AuthenticatedPhoneShell(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.Shell),
         bottomBar = {
-            NavigationBar {
+            NavigationBar(modifier = Modifier.testTag(FerrexQaTags.Phone.ShellNav)) {
                 PhoneShellDestination.entries.forEach { destination ->
                     NavigationBarItem(
                         selected = selectedDestination == destination,
                         onClick = { onDestinationSelected(destination) },
                         icon = { Text(destination.navIcon(), style = MaterialTheme.typography.labelMedium) },
                         label = { Text(destination.label) },
+                        modifier = Modifier.testTag(FerrexQaTags.Phone.navItem(destination.name)),
                     )
                 }
             }
@@ -617,6 +624,7 @@ private fun HomeDestinationContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.Home)
             .padding(contentPadding)
             .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -715,6 +723,7 @@ private fun LibraryDestinationContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.Libraries)
             .padding(contentPadding)
             .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -784,6 +793,7 @@ private fun SearchDestinationContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.Search)
             .padding(contentPadding)
             .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -841,6 +851,7 @@ private fun AccountServerDestinationContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .testTag(FerrexQaTags.Phone.AccountServer)
             .padding(contentPadding)
             .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -897,7 +908,10 @@ private fun HomeHeader(
     connectionStatus: AuthenticatedConnectionUi,
     playbackNotice: String?,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.HomeHeader),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Text(
             text = FerrexShellCopy.MOBILE_TITLE,
             style = MaterialTheme.typography.headlineLarge,
@@ -932,7 +946,10 @@ private fun HomeEntrySection(
     onOpenLibraries: () -> Unit,
     onOpenSearch: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.BrowseFind),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+    ) {
         SectionTitle("Browse and find")
         StateCard(
             title = "Open Libraries",
@@ -957,7 +974,10 @@ private fun HomeUtilityPanel(
     onOpenAccountServer: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.ServerRecovery),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+    ) {
         SectionTitle("Server & recovery")
         if (connectionStatus.visible) {
             ConnectionRecoveryCard(
@@ -1017,7 +1037,10 @@ private fun AccountSummaryCard(
     onResetConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.AccountSummary),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+    ) {
         StateCard(
             title = "Signed in as ${state.user.displayName ?: state.user.username}",
             body = "Server: ${state.serverUrl}. ${if (connectionStatus.visible) connectionStatus.message else "Connection is online; recovery actions remain available."}",
@@ -1080,7 +1103,10 @@ private fun ContinueWatchingSection(
 ) {
     val heroCard = continueState.cards.firstOrNull()
     val remainingCards = continueState.cards.drop(1)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.ContinueWatching),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         SectionTitle("Resume")
         when (val status = continueState.status) {
             ContinueWatchingStatus.Idle,
@@ -1195,7 +1221,10 @@ private fun LibraryBrowseSection(
     onSelect: (LibraryMediaCard) -> Unit,
     onSyncSelected: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.LibraryTabs),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         SectionTitle("Library")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HomeLibraryTab.entries.forEach { tab ->
@@ -1368,7 +1397,9 @@ private fun LibraryChooser(
         return
     }
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = Modifier
+            .testTag(FerrexQaTags.Phone.LibraryChooser)
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         libraries.forEach { library ->
@@ -1453,6 +1484,7 @@ private fun MediaGrid(
         columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.PhoneGridMin),
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.LibraryGrid)
             .heightIn(min = 220.dp, max = 680.dp),
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
@@ -1636,7 +1668,10 @@ private fun LibraryRecoveryPanel(
     val status = LibraryBrowseModels.libraryStatusCopy(freshness)
     val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
     StateCard(title = status.title, body = status.detail, tone = freshness.statusTone())
-    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+    Column(
+        modifier = Modifier.testTag(FerrexQaTags.Phone.LibraryRecovery),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+    ) {
         if (actions.retry) {
             FerrexActionButton(
                 label = "Retry",
