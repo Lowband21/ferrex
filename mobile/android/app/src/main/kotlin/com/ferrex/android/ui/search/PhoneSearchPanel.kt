@@ -19,7 +19,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,21 +31,15 @@ import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
-import com.ferrex.android.core.library.CachedMediaLookupKey
-import com.ferrex.android.core.library.CachedMediaReference
-import com.ferrex.android.core.library.CachedMediaType
-import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.search.MediaSearchOutcome
 import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.search.SearchDetailTarget
 import com.ferrex.android.core.search.SearchFailureKind
-import com.ferrex.android.core.search.SearchMediaType
 import com.ferrex.android.core.search.SearchResultRow
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 private const val SEARCH_DEBOUNCE_MILLIS = 350L
 private const val PRODUCT_COPY_ALLOWS_PUBLIC_CDN_IMAGES = false
@@ -155,100 +148,6 @@ fun PhoneSearchPanel(
                 },
                 resolveImage = { key -> resolutions[key] },
             )
-        }
-    }
-}
-
-@Composable
-fun PhoneSearchDetailScreen(
-    scope: ServerCacheScope,
-    mediaType: SearchMediaType,
-    mediaId: String,
-    libraryId: String?,
-    libraryRepository: LibraryRepository?,
-    imageRepository: ImageRepository?,
-    imagePipeline: FerrexImagePipeline?,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var refreshNonce by remember(scope.directoryName, mediaType, mediaId) { mutableStateOf(0) }
-    val reference = remember(libraryRepository, scope.directoryName, mediaType, mediaId, refreshNonce) {
-        libraryRepository?.resolveCachedMedia(scope, CachedMediaLookupKey(mediaType.toCachedType(), mediaId))
-    }
-    val imageKey = reference?.imageKey
-    val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
-    var resolution by remember(scope.directoryName, imageKey, refreshNonce) { mutableStateOf<ImageResolution?>(null) }
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(imageRepository, scope.directoryName, imageKey, refreshNonce) {
-        resolution = if (imageRepository != null && imageKey != null) {
-            imageRepository.resolveImages(scope, listOf(imageKey))[imageKey]
-        } else {
-            null
-        }
-    }
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = reference?.title ?: "Media detail",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            modifier = Modifier.padding(top = 8.dp),
-            text = "Route: ${mediaType.routeSegment}/$mediaId${libraryId?.let { " in library $it" }.orEmpty()}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (reference != null) {
-            Text(
-                modifier = Modifier.padding(top = 14.dp),
-                text = reference.detailCopy(),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (imageLoader != null && imageKey != null) {
-                Box(modifier = Modifier.padding(top = 12.dp).width(180.dp)) {
-                    FerrexAsyncImage(
-                        resolution = resolution,
-                        imageLoader = imageLoader,
-                        contentDescription = reference.title,
-                        category = imageKey.category,
-                        fallback = if (resolution is ImageResolution.Pending || resolution is ImageResolution.Failed) {
-                            reference.runtimeFallback(scope.canonicalServerUrl)
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }
-        } else {
-            Text(
-                modifier = Modifier.padding(top = 14.dp),
-                text = "This detail route has media type, media id, and ${if (libraryId == null) "no known library id" else "library id $libraryId"}, but the scoped cache does not currently contain the referenced bundle. Retry sync here, or go back to search where sign-out, server change, and reset remain available.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(onClick = onBack, modifier = Modifier.weight(1f)) {
-                Text("Back")
-            }
-            TextButton(
-                onClick = {
-                    coroutineScope.launch {
-                        libraryRepository?.resyncCachedMediaForSearch(scope, CachedMediaLookupKey(mediaType.toCachedType(), mediaId))
-                        refreshNonce += 1
-                    }
-                },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Retry sync")
-            }
         }
     }
 }
@@ -451,26 +350,6 @@ private fun SearchCopy(message: String, error: Boolean = false) {
         color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
-
-private fun SearchMediaType.toCachedType(): CachedMediaType = when (this) {
-    SearchMediaType.Movie -> CachedMediaType.Movie
-    SearchMediaType.Series -> CachedMediaType.Series
-    SearchMediaType.Season -> CachedMediaType.Season
-    SearchMediaType.Episode -> CachedMediaType.Episode
-}
-
-private fun CachedMediaReference.detailCopy(): String = when (this) {
-    is CachedMediaReference.Movie -> "Cached movie from library $libraryId."
-    is CachedMediaReference.Series -> "Cached series from library $libraryId."
-    is CachedMediaReference.Season -> "Cached season $seasonNumber from library $libraryId; search routes this to series $seriesId."
-    is CachedMediaReference.Episode -> "Cached episode S$seasonNumber E$episodeNumber from library $libraryId; search routes this to series $seriesId."
-}
-
-private fun CachedMediaReference.runtimeFallback(serverUrl: String): FerrexImageFallback? = runtimeFallback(
-    serverUrl = serverUrl,
-    key = imageKey,
-    publicFallbackPath = publicFallbackPath,
-)
 
 private fun SearchResultRow.Resolved.runtimeFallback(serverUrl: String): FerrexImageFallback? = runtimeFallback(
     serverUrl = serverUrl,

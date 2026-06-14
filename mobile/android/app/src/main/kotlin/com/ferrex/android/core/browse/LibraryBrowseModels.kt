@@ -33,6 +33,7 @@ enum class BrowseSourceSurface(val routeValue: String) {
     HomeContinueWatching("home_continue_watching"),
     HomeShelf("home_shelf"),
     LibraryGrid("library_grid"),
+    Search("search"),
 }
 
 data class MediaRouteArgs(
