@@ -1,14 +1,10 @@
 package com.ferrex.android.ui.home
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -23,8 +19,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -93,11 +87,20 @@ import com.ferrex.android.core.watch.ContinueWatchingStatus
 import com.ferrex.android.core.watch.WatchRepository
 import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
+import com.ferrex.android.ui.components.FerrexActionButton
+import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
+import com.ferrex.android.ui.components.FerrexPosterCard
+import com.ferrex.android.ui.components.FerrexPosterPlaceholder
+import com.ferrex.android.ui.components.FerrexSectionTitle
+import com.ferrex.android.ui.components.FerrexStatusAction
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.detail.PhoneDetailScreen
 import com.ferrex.android.ui.player.PlayerScreen
 import com.ferrex.android.ui.search.PhoneSearchPanel
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -427,8 +430,8 @@ fun PhoneHomeScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                    .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
             ) {
             item {
                 HomeHeader(
@@ -632,6 +635,7 @@ private fun ContinueWatchingSection(
             is ContinueWatchingStatus.StaleOffline -> StateCard(
                 title = "Stale/offline Continue Watching",
                 body = "Showing ${status.itemCount} previous item(s): ${status.message}",
+                tone = FerrexStatusTone.StaleOffline,
                 action = "Retry" to onRetry,
             )
             is ContinueWatchingStatus.Fresh -> Text(
@@ -968,12 +972,12 @@ private fun MediaGrid(
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 148.dp),
+        columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.PhoneGridMin),
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 220.dp, max = 680.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
     ) {
         items(cards, key = { it.stableKey }) { card ->
             MediaCardView(
@@ -998,13 +1002,11 @@ private fun ContinueWatchingCardView(
     scope: ServerCacheScope,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .width(180.dp)
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    FerrexPosterCard(
+        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneWidth),
+        onClick = onClick,
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(FerrexDesignTokens.Space.Md), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
             Poster(
                 imageKey = card.imageKey,
                 title = card.title,
@@ -1031,12 +1033,11 @@ private fun MediaCardView(
     compact: Boolean,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .width(if (compact) 150.dp else 180.dp)
-            .clickable(onClick = onClick),
+    FerrexPosterCard(
+        modifier = Modifier.width(if (compact) FerrexDesignTokens.Poster.PhoneCompactWidth else FerrexDesignTokens.Poster.PhoneWidth),
+        onClick = onClick,
     ) {
-        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(FerrexDesignTokens.Space.Sm), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
             Poster(
                 imageKey = card.imageKey,
                 title = card.title,
@@ -1064,19 +1065,7 @@ private fun Poster(
     scope: ServerCacheScope,
 ) {
     if (imageKey == null || !imageLoaderAvailable || imageLoader == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(2f / 3f)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (imageKey == null) "No poster" else "Images unavailable",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        FerrexPosterPlaceholder(if (imageKey == null) "No poster" else "Images unavailable")
         return
     }
     val resolution = imageResolutions[imageKey]
@@ -1120,17 +1109,48 @@ private fun LibraryRecoveryPanel(
 ) {
     val status = LibraryBrowseModels.libraryStatusCopy(freshness)
     val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
-    StateCard(title = status.title, body = status.detail)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (actions.retry) Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
+    StateCard(title = status.title, body = status.detail, tone = freshness.statusTone())
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+        if (actions.retry) {
+            FerrexActionButton(
+                label = "Retry",
+                role = FerrexActionRole.Retry,
+                onClick = onRetry,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (actions.clearSelectedCache) {
-            TextButton(onClick = onClearSelected, modifier = Modifier.fillMaxWidth()) { Text("Clear selected cache") }
+            FerrexActionButton(
+                label = "Clear selected cache",
+                role = FerrexActionRole.Cache,
+                onClick = onClearSelected,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (actions.changeServer) TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) { Text("Change server") }
-            if (actions.resetConnection) TextButton(onClick = onResetConnection, modifier = Modifier.weight(1f)) { Text("Reset connection") }
+        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            if (actions.changeServer) {
+                FerrexActionButton(
+                    label = "Change server",
+                    role = FerrexActionRole.Secondary,
+                    onClick = onChangeServer,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (actions.resetConnection) {
+                FerrexActionButton(
+                    label = "Reset connection",
+                    role = FerrexActionRole.DestructiveReset,
+                    onClick = onResetConnection,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
-        OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
+        FerrexActionButton(
+            label = "Diagnostics / Export diagnostics",
+            role = FerrexActionRole.Secondary,
+            onClick = onOpenDiagnostics,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -1140,22 +1160,32 @@ private fun StateCard(
     body: String,
     loading: Boolean = false,
     action: Pair<String, () -> Unit>? = null,
+    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
+    actionRole: FerrexActionRole = FerrexActionRole.Retry,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (loading) CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            }
-            Text(body, style = MaterialTheme.typography.bodyMedium)
-            action?.let { (label, callback) -> Button(onClick = callback) { Text(label) } }
-        }
-    }
+    FerrexStatusCard(
+        title = title,
+        body = body,
+        loading = loading,
+        tone = tone,
+        action = action?.let { (label, callback) ->
+            FerrexStatusAction(label = label, role = actionRole, onClick = callback)
+        },
+    )
 }
 
 @Composable
 private fun SectionTitle(title: String) {
-    Text(text = title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+    FerrexSectionTitle(title)
+}
+
+private fun LibraryFreshness.statusTone(): FerrexStatusTone = when (this) {
+    LibraryFreshness.Empty,
+    LibraryFreshness.Syncing,
+    is LibraryFreshness.Fresh -> FerrexStatusTone.Secondary
+    is LibraryFreshness.StaleOffline -> FerrexStatusTone.StaleOffline
+    is LibraryFreshness.CorruptRebuilding -> FerrexStatusTone.Cache
+    is LibraryFreshness.ErrorRetryable -> FerrexStatusTone.Error
 }
 
 private sealed interface MovieIndexUiState {

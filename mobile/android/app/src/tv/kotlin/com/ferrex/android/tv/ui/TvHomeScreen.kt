@@ -49,8 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -126,7 +124,10 @@ import com.ferrex.android.tv.ui.foundation.TvTitle
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.player.PlayerChrome
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import com.ferrex.android.ui.player.PlayerScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -849,10 +850,10 @@ private fun ContinueWatchingSection(
             surfaceKey = TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING,
             autoFocus = autoFocus,
         )
-        is ContinueWatchingStatus.StaleOffline -> Text(
-            text = "Showing ${status.itemCount} stale/offline item(s): ${status.message}",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
+        is ContinueWatchingStatus.StaleOffline -> FerrexStatusCard(
+            title = "Stale/offline Continue Watching",
+            body = "Showing ${status.itemCount} stale/offline item(s): ${status.message}",
+            tone = FerrexStatusTone.StaleOffline,
         )
         is ContinueWatchingStatus.Fresh -> Text(
             text = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
@@ -2054,8 +2055,8 @@ private fun PosterPlaceholder(label: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(2f / 3f)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .aspectRatio(FerrexDesignTokens.Poster.AspectRatio)
+            .background(FerrexDesignTokens.Palette.PosterFallback, FerrexDesignTokens.Shapes.PosterImage),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
@@ -2112,19 +2113,16 @@ private fun TvButtonRow(
 
 @Composable
 private fun TvStateCopy(title: String, body: String, loading: Boolean = false) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (loading) CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-            }
-            Text(body, style = MaterialTheme.typography.titleMedium)
-        }
-    }
+    FerrexStatusCard(
+        title = title,
+        body = body,
+        loading = loading,
+        tone = if (title.contains("failed", ignoreCase = true) || title.contains("unavailable", ignoreCase = true)) {
+            FerrexStatusTone.Error
+        } else {
+            FerrexStatusTone.Secondary
+        },
+    )
 }
 
 @Composable
@@ -2135,19 +2133,15 @@ private fun TvSectionHeader(title: String) {
 @Composable
 private fun TvFullScreenSurface(content: @Composable BoxScope.() -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF070A12)),
+        modifier = Modifier.fillMaxSize().background(FerrexDesignTokens.Palette.SlateCanvas),
         color = MaterialTheme.colorScheme.background,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(Color(0xFF172554), Color(0xFF070A12), Color(0xFF020617)),
-                    ),
-                )
+                .background(FerrexDesignTokens.privateCinemaGradient())
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 56.dp, vertical = 36.dp),
+                .padding(horizontal = FerrexDesignTokens.Space.ScreenTvHorizontal, vertical = 36.dp),
             content = content,
         )
     }
