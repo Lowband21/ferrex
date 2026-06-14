@@ -116,6 +116,8 @@ import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.colors
+import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
@@ -193,7 +195,7 @@ fun PlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(FerrexDesignTokens.Palette.SlateBlack),
         contentAlignment = Alignment.Center,
     ) {
         when (val state = playerState) {
@@ -259,15 +261,22 @@ private fun PlaybackLoading(
         TvPlaybackActionPanel(
             title = "Preparing playback",
             supportingText = message,
+            tone = FerrexStatusTone.Secondary,
             actions = listOf(
                 TvPlaybackPanelAction(
                     key = "back",
                     label = "Back to details",
+                    role = FerrexActionRole.Secondary,
                     contentDescription = "Back to details while playback is loading",
                     onSelect = onBack,
                 ),
             ),
-            leading = { CircularProgressIndicator(color = Color.White) },
+            leading = {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
+                )
+            },
         )
         return
     }
@@ -338,12 +347,14 @@ private fun PlaybackErrorPanel(
                 append(failure.message)
                 failure.httpStatusCode?.let { append("\nHTTP $it") }
             },
+            tone = FerrexStatusTone.Error,
             actions = buildList {
                 if (actions.retry) {
                     add(
                         TvPlaybackPanelAction(
                             key = "retry",
                             label = "Retry playback",
+                            role = FerrexActionRole.Retry,
                             contentDescription = "Retry playback after ${failure.kind}",
                             onSelect = onRetry,
                         ),
@@ -353,6 +364,7 @@ private fun PlaybackErrorPanel(
                     TvPlaybackPanelAction(
                         key = "back",
                         label = "Back to details",
+                        role = FerrexActionRole.Secondary,
                         contentDescription = "Back to the previous TV screen",
                         onSelect = onBack,
                     ),
@@ -362,6 +374,7 @@ private fun PlaybackErrorPanel(
                         TvPlaybackPanelAction(
                             key = "change-server",
                             label = "Change server",
+                            role = FerrexActionRole.Secondary,
                             contentDescription = "Change Ferrex server after playback failed",
                             onSelect = onChangeServer,
                         ),
@@ -372,6 +385,7 @@ private fun PlaybackErrorPanel(
                         TvPlaybackPanelAction(
                             key = "sign-out",
                             label = "Sign out",
+                            role = FerrexActionRole.Secondary,
                             contentDescription = "Sign out after playback failed",
                             onSelect = onSignOut,
                         ),
@@ -382,6 +396,7 @@ private fun PlaybackErrorPanel(
                         TvPlaybackPanelAction(
                             key = "diagnostics",
                             label = "Diagnostics / Export diagnostics",
+                            role = FerrexActionRole.Cache,
                             contentDescription = "Open diagnostics after playback failed",
                             onSelect = it,
                         ),
@@ -464,6 +479,7 @@ private fun PlaybackErrorPanel(
 private data class TvPlaybackPanelAction(
     val key: String,
     val label: String,
+    val role: FerrexActionRole = FerrexActionRole.Secondary,
     val contentDescription: String = label,
     val enabled: Boolean = true,
     val onSelect: () -> Unit,
@@ -474,11 +490,13 @@ private fun TvPlaybackActionPanel(
     title: String,
     supportingText: String,
     actions: List<TvPlaybackPanelAction>,
+    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
     leading: (@Composable () -> Unit)? = null,
 ) {
     val keys = actions.map { it.key }
     val requesters = remember(keys) { actions.associate { it.key to FocusRequester() } }
     val firstEnabledKey = actions.firstOrNull { it.enabled }?.key
+    val panelColors = tone.colors()
 
     LaunchedEffect(keys, firstEnabledKey) {
         firstEnabledKey?.let { key -> runCatching { requesters[key]?.requestFocus() } }
@@ -487,38 +505,39 @@ private fun TvPlaybackActionPanel(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(40.dp)
-            .widthIn(max = 720.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = Color.Black.copy(alpha = 0.9f),
-        contentColor = Color.White,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
+            .padding(FerrexDesignTokens.Space.ScreenTvVertical)
+            .widthIn(max = FerrexDesignTokens.Tv.PlayerPanelMaxWidth),
+        shape = FerrexDesignTokens.Shapes.RecoveryCard,
+        color = panelColors.container,
+        contentColor = panelColors.content,
+        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, panelColors.border.copy(alpha = 0.72f)),
     ) {
         Column(
-            modifier = Modifier.padding(28.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxxl),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             leading?.invoke()
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
-                color = Color.White,
+                color = panelColors.accent,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )
             Text(
                 text = supportingText,
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.82f),
+                color = panelColors.content,
                 textAlign = TextAlign.Center,
             )
             actions.forEach { action ->
                 TvControlButton(
                     onClick = action.onSelect,
                     enabled = action.enabled,
+                    role = action.role,
                     modifier = Modifier
-                        .widthIn(max = 520.dp)
+                        .widthIn(max = FerrexDesignTokens.Tv.PlayerActionMaxWidth)
                         .fillMaxWidth()
                         .focusRequester(requesters.getValue(action.key))
                         .semantics { contentDescription = action.contentDescription },
@@ -703,12 +722,23 @@ private fun PlayerContent(
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 16.dp, start = 24.dp, end = 24.dp),
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.72f),
-                contentColor = Color.White,
+                    .padding(
+                        top = FerrexDesignTokens.Space.Lg,
+                        start = FerrexDesignTokens.Space.Xxl,
+                        end = FerrexDesignTokens.Space.Xxl,
+                    ),
+                shape = FerrexDesignTokens.Shapes.Button,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, MaterialTheme.colorScheme.outline.copy(alpha = 0.58f)),
             ) {
-                Text(warning, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                Text(
+                    warning,
+                    modifier = Modifier.padding(
+                        horizontal = FerrexDesignTokens.Space.Md,
+                        vertical = FerrexDesignTokens.Space.Sm,
+                    ),
+                )
             }
         }
 
@@ -922,9 +952,9 @@ private fun TvPlayerOverlay(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.62f),
+                                FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.62f),
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.78f),
+                                FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.78f),
                             ),
                         ),
                     ),
@@ -940,7 +970,10 @@ private fun TvPlayerOverlay(
             TvControlButton(
                 onClick = { dispatch(TvPlaybackOverlayEvent.Back) },
                 modifier = Modifier
-                    .padding(start = 32.dp, top = 32.dp)
+                    .padding(
+                        start = FerrexDesignTokens.Tv.PlayerChromeTopPadding,
+                        top = FerrexDesignTokens.Tv.PlayerChromeTopPadding,
+                    )
                     .semantics { contentDescription = "Back" },
             ) {
                 Text("Back")
@@ -954,13 +987,17 @@ private fun TvPlayerOverlay(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Column(
-                modifier = Modifier.padding(bottom = 48.dp, start = 48.dp, end = 48.dp),
+                modifier = Modifier.padding(
+                    bottom = FerrexDesignTokens.Tv.PlayerChromeBottomPadding,
+                    start = FerrexDesignTokens.Tv.PlayerChromeHorizontalPadding,
+                    end = FerrexDesignTokens.Tv.PlayerChromeHorizontalPadding,
+                ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 PlaybackProgressStrip(position = position, duration = duration)
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TvControlButton(
@@ -977,8 +1014,12 @@ private fun TvPlayerOverlay(
                             if (player.isPlaying) player.pause() else player.play()
                             interactionTick += 1
                         },
+                        role = FerrexActionRole.Primary,
                         modifier = Modifier
-                            .size(width = 112.dp, height = 58.dp)
+                            .size(
+                                width = FerrexDesignTokens.Tv.PlayerSafeButtonWidth,
+                                height = FerrexDesignTokens.Focus.TvButtonMinHeight,
+                            )
                             .focusRequester(safeControlFocusRequester)
                             .semantics { contentDescription = if (player.isPlaying) "Pause playback" else "Play playback" },
                     ) {
@@ -995,16 +1036,17 @@ private fun TvPlayerOverlay(
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(FerrexDesignTokens.Space.Lg))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TvControlButton(
                         onClick = { dispatch(TvPlaybackOverlayEvent.OpenAudioPicker) },
+                        role = FerrexActionRole.Cache,
                         modifier = Modifier
-                            .widthIn(max = 360.dp)
+                            .widthIn(max = FerrexDesignTokens.Tv.ActionMaxWidth)
                             .semantics { contentDescription = "Audio track picker. Current audio: $selectedAudioSummary" },
                     ) {
                         Text(
@@ -1015,8 +1057,9 @@ private fun TvPlayerOverlay(
                     }
                     TvControlButton(
                         onClick = { dispatch(TvPlaybackOverlayEvent.OpenSubtitlePicker) },
+                        role = FerrexActionRole.Cache,
                         modifier = Modifier
-                            .widthIn(max = 360.dp)
+                            .widthIn(max = FerrexDesignTokens.Tv.ActionMaxWidth)
                             .semantics { contentDescription = "Subtitle track picker. Current subtitles: $selectedSubtitleSummary" },
                     ) {
                         Text(
@@ -1052,24 +1095,24 @@ private fun PlaybackProgressStrip(position: Long, duration: Long) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .width(560.dp)
-                .height(8.dp)
-                .background(Color.White.copy(alpha = 0.28f), RoundedCornerShape(999.dp)),
+                .width(FerrexDesignTokens.Tv.PlayerProgressWidth)
+                .height(FerrexDesignTokens.Space.Sm)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f), FerrexDesignTokens.Shapes.Pill),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(progress)
-                    .background(Color.White, RoundedCornerShape(999.dp)),
+                    .background(MaterialTheme.colorScheme.primary, FerrexDesignTokens.Shapes.Pill),
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Sm))
         Row(
-            modifier = Modifier.width(560.dp),
+            modifier = Modifier.width(FerrexDesignTokens.Tv.PlayerProgressWidth),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(formatTime(position), color = Color.White.copy(alpha = 0.86f), style = MaterialTheme.typography.bodyMedium)
-            Text(formatTime(duration), color = Color.White.copy(alpha = 0.86f), style = MaterialTheme.typography.bodyMedium)
+            Text(formatTime(position), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), style = MaterialTheme.typography.bodyMedium)
+            Text(formatTime(duration), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -1096,6 +1139,7 @@ private fun TrackSelectionPanel(
         TvTrackPickerKind.Subtitles -> "No subtitle tracks have been reported yet. The Off option remains available."
     }
     val hasReportedTracks = options.any { !it.option.isOff }
+    val panelColors = FerrexStatusTone.Secondary.colors()
 
     LaunchedEffect(picker, initialFocusKey) {
         runCatching { initialFocusRequester.requestFocus() }
@@ -1104,22 +1148,25 @@ private fun TrackSelectionPanel(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.58f)),
+            .background(FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.58f)),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
             modifier = Modifier
-                .padding(horizontal = 64.dp, vertical = 40.dp)
-                .widthIn(max = 780.dp)
+                .padding(
+                    horizontal = FerrexDesignTokens.Space.ScreenTvHorizontal,
+                    vertical = FerrexDesignTokens.Space.ScreenTvVertical,
+                )
+                .widthIn(max = FerrexDesignTokens.Tv.PlayerPickerMaxWidth)
                 .focusGroup(),
-            shape = RoundedCornerShape(18.dp),
-            color = Color.Black.copy(alpha = 0.92f),
-            contentColor = Color.White,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+            shape = FerrexDesignTokens.Shapes.RecoveryCard,
+            color = panelColors.container,
+            contentColor = panelColors.content,
+            border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, panelColors.border.copy(alpha = 0.72f)),
         ) {
             Column(
-                modifier = Modifier.padding(28.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(FerrexDesignTokens.Space.Xxxl),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1127,10 +1174,15 @@ private fun TrackSelectionPanel(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                        Text(helperText, color = Color.White.copy(alpha = 0.74f), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = panelColors.accent,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(helperText, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Spacer(Modifier.width(24.dp))
+                    Spacer(Modifier.width(FerrexDesignTokens.Space.Xxl))
                     TvControlButton(
                         onClick = onDismiss,
                         modifier = (if (initialFocusKey == null) Modifier.focusRequester(initialFocusRequester) else Modifier)
@@ -1141,14 +1193,14 @@ private fun TrackSelectionPanel(
                 }
 
                 if (!hasReportedTracks) {
-                    Text(emptyMessage, color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodyMedium)
+                    Text(emptyMessage, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
                 }
 
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 380.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .heightIn(max = FerrexDesignTokens.Tv.TrackListMaxHeight),
+                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
                 ) {
                     items(options, key = { it.option.key }) { option ->
                         TrackOptionButton(
@@ -1175,16 +1227,18 @@ private fun TrackOptionButton(
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val enabled = option.option.selectable
+    val scheme = MaterialTheme.colorScheme
+    val shape = FerrexDesignTokens.Shapes.FocusSurface
     val containerColor = when {
-        option.option.selected -> Color.White.copy(alpha = 0.94f)
-        isFocused -> Color.White.copy(alpha = 0.2f)
-        else -> Color.White.copy(alpha = 0.08f)
+        option.option.selected -> scheme.primary
+        isFocused -> FerrexDesignTokens.Palette.FocusWash
+        else -> scheme.surfaceVariant.copy(alpha = 0.74f)
     }
-    val contentColor = if (option.option.selected) Color.Black else Color.White
+    val contentColor = if (option.option.selected) scheme.onPrimary else scheme.onSurface
     val detailColor = when {
-        !enabled -> Color.White.copy(alpha = 0.48f)
-        option.option.selected -> Color.Black.copy(alpha = 0.68f)
-        else -> Color.White.copy(alpha = 0.72f)
+        !enabled -> scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent)
+        option.option.selected -> scheme.onPrimary.copy(alpha = 0.68f)
+        else -> scheme.onSurfaceVariant
     }
 
     Button(
@@ -1204,20 +1258,20 @@ private fun TrackOptionButton(
             }
             .border(
                 width = when {
-                    isFocused -> 2.dp
-                    option.option.selected -> 1.dp
-                    else -> 0.dp
+                    isFocused -> FerrexDesignTokens.Focus.TvFocusedBorder
+                    option.option.selected -> FerrexDesignTokens.Focus.TvRestingBorder
+                    else -> FerrexDesignTokens.Space.None
                 },
-                color = if (isFocused) Color.White else Color.White.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(10.dp),
+                color = if (isFocused) scheme.primary else scheme.outline.copy(alpha = 0.52f),
+                shape = shape,
             ),
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
-            disabledContainerColor = Color.White.copy(alpha = 0.05f),
-            disabledContentColor = Color.White.copy(alpha = 0.44f),
+            disabledContainerColor = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContainer),
+            disabledContentColor = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent),
         ),
-        shape = RoundedCornerShape(10.dp),
+        shape = shape,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1225,7 +1279,7 @@ private fun TrackOptionButton(
         ) {
             Text(
                 text = if (option.option.selected) "✓" else "",
-                modifier = Modifier.width(28.dp),
+                modifier = Modifier.width(FerrexDesignTokens.Space.Xxxl),
                 fontWeight = FontWeight.Bold,
             )
             Column(modifier = Modifier.weight(1f)) {
@@ -1254,10 +1308,32 @@ private fun TvControlButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    role: FerrexActionRole = FerrexActionRole.Secondary,
     content: @Composable RowScope.() -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val buttonShape = RoundedCornerShape(8.dp)
+    val scheme = MaterialTheme.colorScheme
+    val statusColors = role.statusTone().colors()
+    val buttonShape = FerrexDesignTokens.Shapes.FocusSurface
+    val containerColor = when (role) {
+        FerrexActionRole.Primary,
+        FerrexActionRole.Retry -> if (isFocused && enabled) scheme.primary else statusColors.container.copy(alpha = 0.82f)
+        FerrexActionRole.DestructiveReset,
+        FerrexActionRole.Error -> if (isFocused && enabled) scheme.error else statusColors.container
+        FerrexActionRole.Secondary,
+        FerrexActionRole.Cache,
+        FerrexActionRole.StaleOffline -> if (isFocused && enabled) statusColors.container.copy(alpha = 0.92f) else statusColors.container
+    }
+    val contentColor = when {
+        !enabled -> scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent)
+        isFocused && (role == FerrexActionRole.Primary || role == FerrexActionRole.Retry) -> scheme.onPrimary
+        isFocused && (role == FerrexActionRole.DestructiveReset || role == FerrexActionRole.Error) -> scheme.onError
+        else -> statusColors.content
+    }
+    val border = BorderStroke(
+        width = if (isFocused && enabled) FerrexDesignTokens.Focus.TvFocusedBorder else FerrexDesignTokens.Focus.TvRestingBorder,
+        color = if (isFocused && enabled) statusColors.accent else statusColors.border.copy(alpha = 0.58f),
+    )
 
     Button(
         onClick = onClick,
@@ -1265,14 +1341,14 @@ private fun TvControlButton(
         modifier = modifier
             .tvRemoteActivation(enabled = enabled, onActivate = onClick)
             .onFocusChanged { isFocused = it.isFocused }
-            .scale(if (isFocused && enabled) 1.06f else 1f),
+            .scale(if (isFocused && enabled) FerrexDesignTokens.Focus.TvFocusedScale else FerrexDesignTokens.Focus.TvRestingScale),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Black.copy(alpha = 0.68f),
-            contentColor = Color.White,
-            disabledContainerColor = Color.Black.copy(alpha = 0.38f),
-            disabledContentColor = Color.White.copy(alpha = 0.44f),
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContainer),
+            disabledContentColor = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent),
         ),
-        border = if (isFocused && enabled) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
+        border = border,
         shape = buttonShape,
         content = content,
     )

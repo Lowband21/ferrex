@@ -56,11 +56,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.tvfocus.TvFocusKey
 import com.ferrex.android.core.tvfocus.TvFocusRestoreState
+import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.components.colors
+import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 @Stable
@@ -93,7 +94,7 @@ fun rememberTvFocusRestorer(screen: String): TvFocusRestorer = remember(screen) 
 @Composable
 fun TvScaffold(
     modifier: Modifier = Modifier,
-    contentMaxWidth: Dp = 920.dp,
+    contentMaxWidth: Dp = FerrexDesignTokens.Tv.FormActionMaxWidth,
     horizontalPadding: Dp = FerrexDesignTokens.Space.ScreenTvHorizontal,
     verticalPadding: Dp = FerrexDesignTokens.Space.ScreenTvVertical,
     verticalArrangement: Arrangement.Vertical = Arrangement.Center,
@@ -158,10 +159,10 @@ fun TvTitle(title: String, subtitle: String, modifier: Modifier = Modifier) {
     }
 }
 
-enum class TvFocusableStyle {
-    Primary,
-    Secondary,
-    Destructive,
+enum class TvFocusableStyle(val defaultActionRole: FerrexActionRole) {
+    Primary(FerrexActionRole.Primary),
+    Secondary(FerrexActionRole.Secondary),
+    Destructive(FerrexActionRole.DestructiveReset),
 }
 
 @Composable
@@ -171,6 +172,7 @@ fun TvFocusableSurface(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     style: TvFocusableStyle = TvFocusableStyle.Secondary,
+    tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
     minHeight: Dp = FerrexDesignTokens.Focus.TvButtonMinHeight,
     onFocused: () -> Unit = {},
@@ -183,10 +185,11 @@ fun TvFocusableSurface(
         label = "tvFocusableScale",
     )
     val shape = FerrexDesignTokens.Shapes.FocusSurface
-    val colors = tvFocusableColors(style = style, focused = focused, enabled = enabled)
+    val toneColors = tone.colors()
+    val colors = tvFocusableColors(style = style, tone = tone, focused = focused, enabled = enabled)
     val borderColor = when {
-        focused -> MaterialTheme.colorScheme.primary
-        enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)
+        focused -> toneColors.accent
+        enabled -> toneColors.border.copy(alpha = 0.58f)
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     }
 
@@ -235,6 +238,7 @@ fun TvFocusableButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     style: TvFocusableStyle = TvFocusableStyle.Secondary,
+    tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
     contentDescription: String = label,
     onFocused: () -> Unit = {},
@@ -248,20 +252,21 @@ fun TvFocusableButton(
         modifier = modifier,
         enabled = enabled,
         style = style,
+        tone = tone,
         focusRequester = focusRequester,
         onFocused = onFocused,
         content = content,
     )
 }
 
-enum class TvActionRole {
-    Primary,
-    Retry,
-    Back,
-    Cache,
-    Recovery,
-    SettingsExit,
-    Destructive,
+enum class TvActionRole(val sharedActionRole: FerrexActionRole) {
+    Primary(FerrexActionRole.Primary),
+    Retry(FerrexActionRole.Retry),
+    Back(FerrexActionRole.Secondary),
+    Cache(FerrexActionRole.Cache),
+    Recovery(FerrexActionRole.Secondary),
+    SettingsExit(FerrexActionRole.Secondary),
+    Destructive(FerrexActionRole.DestructiveReset),
 }
 
 data class TvActionPanelAction(
@@ -289,7 +294,7 @@ fun TvActionPanel(
     focusRestorer: TvFocusRestorer? = null,
     surfaceKey: String = "actions",
     autoFocus: Boolean = true,
-    buttonMaxWidth: Dp = 420.dp,
+    buttonMaxWidth: Dp = FerrexDesignTokens.Tv.ActionPanelMaxWidth,
 ) {
     if (actions.isEmpty()) return
 
@@ -336,10 +341,12 @@ fun TvActionPanel(
             )
         }
         actions.forEach { action ->
+            val actionTone = action.role.statusTone()
             TvFocusableButton(
                 label = action.label,
                 enabled = action.enabled && !action.busy,
                 style = action.role.focusableStyle(),
+                tone = actionTone,
                 contentDescription = action.contentDescription,
                 onClick = action.onSelect,
                 focusRequester = requesters[action.key],
@@ -353,7 +360,8 @@ fun TvActionPanel(
                         modifier = Modifier
                             .padding(end = FerrexDesignTokens.Space.Md)
                             .size(FerrexDesignTokens.Space.Xxl),
-                        strokeWidth = 2.dp,
+                        color = actionTone.colors().accent,
+                        strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
                     )
                 }
                 Text(action.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -370,6 +378,7 @@ private data class TvFocusableColors(
 @Composable
 private fun tvFocusableColors(
     style: TvFocusableStyle,
+    tone: FerrexStatusTone,
     focused: Boolean,
     enabled: Boolean,
 ): TvFocusableColors {
@@ -381,28 +390,24 @@ private fun tvFocusableColors(
         )
     }
 
-    val semanticColors = style.statusTone().colors()
+    val semanticColors = tone.colors()
     return when (style) {
         TvFocusableStyle.Primary -> TvFocusableColors(
-            container = if (focused) scheme.primary else scheme.primaryContainer,
-            content = if (focused) scheme.onPrimary else scheme.onPrimaryContainer,
+            container = if (focused) scheme.primary else semanticColors.container.copy(alpha = 0.82f),
+            content = if (focused) scheme.onPrimary else semanticColors.content,
         )
         TvFocusableStyle.Secondary -> TvFocusableColors(
-            container = if (focused) FerrexDesignTokens.Palette.FocusWash else semanticColors.container,
-            content = scheme.onSurface,
+            container = if (focused) semanticColors.container.copy(alpha = 0.92f) else semanticColors.container,
+            content = semanticColors.content,
         )
         TvFocusableStyle.Destructive -> TvFocusableColors(
-            container = if (focused) scheme.error else scheme.errorContainer,
-            content = if (focused) scheme.onError else scheme.onErrorContainer,
+            container = if (focused) scheme.error else semanticColors.container,
+            content = if (focused) scheme.onError else semanticColors.content,
         )
     }
 }
 
-private fun TvFocusableStyle.statusTone(): FerrexStatusTone = when (this) {
-    TvFocusableStyle.Primary -> FerrexStatusTone.Primary
-    TvFocusableStyle.Secondary -> FerrexStatusTone.Secondary
-    TvFocusableStyle.Destructive -> FerrexStatusTone.DestructiveReset
-}
+private fun TvActionRole.statusTone(): FerrexStatusTone = sharedActionRole.statusTone()
 
 private fun TvActionRole.focusableStyle(): TvFocusableStyle = when (this) {
     TvActionRole.Primary,

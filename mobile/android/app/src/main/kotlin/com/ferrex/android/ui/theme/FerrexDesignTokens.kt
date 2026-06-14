@@ -90,6 +90,34 @@ object FerrexDesignTokens {
         val TvCardMinHeight = 338.dp
     }
 
+    /** 10-foot layout and player-chrome dimensions that preserve TV ergonomics. */
+    object Tv {
+        val HomeMaxWidth = 1560.dp
+        val DetailMaxWidth = 1320.dp
+        val DiagnosticsMaxWidth = 1180.dp
+        val FormActionMaxWidth = 920.dp
+        val ActionPanelMaxWidth = 420.dp
+        val RecoveryActionMaxWidth = 560.dp
+        val DiagnosticsActionMaxWidth = 620.dp
+        val PlayerPanelMaxWidth = 720.dp
+        val PlayerPickerMaxWidth = 780.dp
+        val PlayerActionMaxWidth = 520.dp
+        val PlayerProgressWidth = 560.dp
+        val PlayerSafeButtonWidth = 112.dp
+        val SearchThumbnailWidth = 84.dp
+        val DetailArtworkMinHeight = 220.dp
+        val DetailArtworkMaxHeight = 340.dp
+        val TrackListMaxHeight = 380.dp
+        val ActionMinWidth = 180.dp
+        val ActionMaxWidth = 360.dp
+        val SearchResultMinHeight = 132.dp
+        val FullScreenVerticalPadding = 36.dp
+        val DetailVerticalPadding = 46.dp
+        val PlayerChromeTopPadding = 32.dp
+        val PlayerChromeBottomPadding = 48.dp
+        val PlayerChromeHorizontalPadding = 48.dp
+    }
+
     /** Status and recovery semantics used by shared action/status components. */
     object StatusAlpha {
         const val PrimaryContainer = 0.20f
