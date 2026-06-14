@@ -18,7 +18,9 @@ use crate::{
             shell_ui::Scope,
             tabs::{TabId, TabState},
             types::ViewState,
-            update_handlers::recompute_and_init_curated_carousels,
+            update_handlers::{
+                handle_view_movie_details, recompute_and_init_curated_carousels,
+            },
             views::tenfoot::{
                 detail::{TenFootDetailAction, TenFootDetailFocusId},
                 home::{
@@ -69,6 +71,8 @@ pub enum PlayerScenario {
     UserSelection,
     /// Desktop library home with seeded media and artwork.
     DesktopLibraryHome,
+    /// Desktop movie detail surface with seeded media and artwork.
+    DesktopMovieDetail,
     /// Authenticated settings/device-management surface.
     SettingsDevices,
     /// 10-foot home surface with seeded rails.
@@ -87,10 +91,11 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
+        Self::DesktopMovieDetail,
         Self::SettingsDevices,
         Self::TenFootHome,
         Self::TenFootDetail,
@@ -103,6 +108,7 @@ impl PlayerScenario {
             Self::FirstRunAuth => "FirstRunAuth",
             Self::UserSelection => "UserSelection",
             Self::DesktopLibraryHome => "DesktopLibraryHome",
+            Self::DesktopMovieDetail => "DesktopMovieDetail",
             Self::SettingsDevices => "SettingsDevices",
             Self::TenFootHome => "TenFootHome",
             Self::TenFootDetail => "TenFootDetail",
@@ -121,6 +127,9 @@ impl PlayerScenario {
             }
             Self::DesktopLibraryHome => {
                 "Desktop home/library surface with seeded movie and series rails"
+            }
+            Self::DesktopMovieDetail => {
+                "Desktop movie detail page for a seeded deterministic movie"
             }
             Self::SettingsDevices => {
                 "Authenticated settings surface showing deterministic devices"
@@ -160,6 +169,9 @@ impl PlayerScenario {
                 "authenticatedwithdevices" => Some(Self::SettingsDevices),
                 "adminsession" | "libraryloaded" | "libraryhome"
                 | "desktoplibrary" => Some(Self::DesktopLibraryHome),
+                "desktopmoviedetail" | "moviedetail" => {
+                    Some(Self::DesktopMovieDetail)
+                }
                 "playerloading" | "loadingoverlay" => {
                     Some(Self::PlayerLoadingOverlay)
                 }
@@ -181,6 +193,7 @@ impl PlayerScenario {
             Self::FirstRunAuth => first_run_state(config),
             Self::UserSelection => user_selection_state(config),
             Self::DesktopLibraryHome => desktop_library_home_state(config),
+            Self::DesktopMovieDetail => desktop_movie_detail_state(config),
             Self::SettingsDevices => settings_devices_state(config),
             Self::TenFootHome => tenfoot_home_state(config),
             Self::TenFootDetail => tenfoot_detail_state(config),
@@ -271,6 +284,16 @@ fn desktop_library_home_state(config: &AppConfig) -> State {
     state.domains.ui.state.scope = Scope::Home;
     state.domains.ui.state.current_library_id = None;
     state.tab_manager.set_active_tab(TabId::Home);
+    state.loading = false;
+    state
+}
+
+fn desktop_movie_detail_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+
+    let movie_id = seed_movie_id(0);
+    let _ = handle_view_movie_details(&mut state, movie_id);
     state.loading = false;
     state
 }
@@ -960,6 +983,11 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name == "DesktopMovieDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "TenFootDetail")
         );
         assert!(
@@ -1027,6 +1055,26 @@ mod tests {
         };
         assert!(!home.recent_movies.is_empty());
         assert!(!home.recent_series.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn desktop_movie_detail_scenario_selects_seeded_movie_detail() {
+        let state = PlayerScenario::DesktopMovieDetail.build(&test_config());
+
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+        assert!(matches!(
+            state.domains.ui.state.view,
+            ViewState::MovieDetail { movie_id, .. } if movie_id == seed_movie_id(0)
+        ));
+        assert!(
+            state
+                .domains
+                .ui
+                .state
+                .movie_yoke_cache
+                .peek(&seed_movie_id(0).to_uuid())
+                .is_some()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

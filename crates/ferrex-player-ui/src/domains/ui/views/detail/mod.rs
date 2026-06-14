@@ -28,10 +28,11 @@ pub use layout::{
     solve_detail_layout_from_runtime,
 };
 pub use model::{
-    DetailAction, DetailActionRole, DetailArtwork, DetailBackdrop,
-    DetailBackdropControl, DetailBackdropScrim, DetailCastMember,
-    DetailCastSection, DetailContentKind, DetailEmptyState, DetailFact,
-    DetailFactPanel, DetailMetadataPill, DetailNotice, DetailOverviewSection,
-    DetailPageModel, DetailRailItem, DetailRelationshipRail, DetailSection,
-    DetailTechnicalItem, DetailTechnicalSection, DetailTone,
+    DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,
+    DetailBackdrop, DetailBackdropControl, DetailBackdropScrim,
+    DetailCastMember, DetailCastSection, DetailContentKind, DetailEmptyState,
+    DetailFact, DetailFactPanel, DetailMetadataPill, DetailNotice,
+    DetailOverviewSection, DetailPageModel, DetailRailItem,
+    DetailRelationshipRail, DetailSection, DetailTechnicalItem,
+    DetailTechnicalSection, DetailTone,
 };
