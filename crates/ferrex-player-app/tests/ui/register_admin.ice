@@ -1,6 +1,6 @@
 viewport: 1280x900
 mode: Patient
-preset: FirstRun
+preset: FirstRunAuth
 -----
 click "Get Started"
 move (563.99, 219.30)

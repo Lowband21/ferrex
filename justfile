@@ -368,6 +368,31 @@ run-player-release:
 run-player-demo PROFILE="release":
     cargo run -p ferrex-player --profile {{ PROFILE }} --features demo -- --demo
 
+# Screenshot capture shortcuts write disposable artifacts under target/ui-screenshots by default.
+[no-cd]
+screenshot-list:
+    cargo run -p ferrex-player --profile priority -- screenshot list
+
+[no-cd]
+screenshot *args:
+    cargo run -p ferrex-player --profile priority -- screenshot {{ args }}
+
+[no-cd]
+screenshot-desktop-720 output="target/ui-screenshots/desktop-library-1280x720.png":
+    cargo run -p ferrex-player --profile priority -- screenshot --preset DesktopLibraryHome --viewport 1280x720 --scale-factor 1 --mode Immediate --settle-ms 200 --output {{ output }}
+
+[no-cd]
+screenshot-first-run-900 output="target/ui-screenshots/first-run-1280x900.png":
+    cargo run -p ferrex-player --profile priority -- screenshot --preset FirstRunAuth --viewport 1280x900 --scale-factor 1 --mode Patient --settle-ms 200 --output {{ output }}
+
+[no-cd]
+screenshot-tv-1080 output="target/ui-screenshots/tenfoot-home-1920x1080.png":
+    cargo run -p ferrex-player --profile priority -- screenshot --preset TenFootHome --viewport 1920x1080 --scale-factor 1 --mode Immediate --settle-ms 200 --output {{ output }}
+
+[no-cd]
+screenshot-tv-800p output="target/ui-screenshots/tenfoot-home-1280x800.png":
+    cargo run -p ferrex-player --profile priority -- screenshot --preset TenFootHome --viewport 1280x800 --scale-factor 1 --mode Immediate --settle-ms 200 --output {{ output }}
+
 [no-cd]
 run-server:
     cargo run -p ferrex-server

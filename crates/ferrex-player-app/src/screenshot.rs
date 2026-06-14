@@ -48,6 +48,15 @@ const DEFAULT_SCALE_FACTOR: f32 = 1.0;
 const DEFAULT_MODE: Mode = Mode::Immediate;
 const DEFAULT_SETTLE_MS: u64 = 100;
 
+const RENDERER_TROUBLESHOOTING_HINT: &str = "Try running with WGPU_BACKEND=vulkan, WGPU_BACKEND=gl, or WGPU_BACKEND=metal/dx12 on native platforms; on headless Linux, try LIBGL_ALWAYS_SOFTWARE=1 WGPU_ADAPTER_NAME=llvmpipe, and ensure Mesa/Vulkan software rendering libraries are available.";
+const RENDERER_UNAVAILABLE_SKIP_REASON: &str = "skipping iced renderer-dependent UI validation because the headless renderer is unavailable in this environment. Try running with WGPU_BACKEND=vulkan, WGPU_BACKEND=gl, or WGPU_BACKEND=metal/dx12 on native platforms; on headless Linux, try LIBGL_ALWAYS_SOFTWARE=1 WGPU_ADAPTER_NAME=llvmpipe, and ensure Mesa/Vulkan software rendering libraries are available.";
+
+/// Actionable skip reason used by renderer-dependent UI tests when WGPU cannot
+/// initialize a headless adapter in the current environment.
+pub fn renderer_unavailable_skip_reason() -> &'static str {
+    RENDERER_UNAVAILABLE_SKIP_REASON
+}
+
 /// Usage text for the `ferrex-player screenshot` command.
 pub const HELP: &str = r#"Capture a headless ferrex-player screenshot.
 
@@ -984,7 +993,7 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn renderer_suggestions() -> &'static str {
-    "Try running with WGPU_BACKEND=vulkan, WGPU_BACKEND=gl, or WGPU_BACKEND=metal/dx12 on native platforms; on headless Linux, try LIBGL_ALWAYS_SOFTWARE=1 WGPU_ADAPTER_NAME=llvmpipe, and ensure Mesa/Vulkan software rendering libraries are available."
+    RENDERER_TROUBLESHOOTING_HINT
 }
 
 fn trace_step(step: &str) {

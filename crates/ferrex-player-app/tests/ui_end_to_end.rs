@@ -1,6 +1,9 @@
 use std::{panic, path::PathBuf};
 
-use ferrex_player_app::app::{self, bootstrap::AppConfig};
+use ferrex_player_app::{
+    app::{self, bootstrap::AppConfig},
+    screenshot,
+};
 
 #[test]
 fn ui_end_to_end() -> Result<(), iced_test::Error> {
@@ -18,9 +21,7 @@ fn ui_end_to_end() -> Result<(), iced_test::Error> {
         Err(payload)
             if panic_message(&payload).contains("Create emulator renderer") =>
         {
-            eprintln!(
-                "skipping iced UI replay because the test renderer is unavailable in this environment"
-            );
+            eprintln!("{}", screenshot::renderer_unavailable_skip_reason());
             Ok(())
         }
         Err(payload) => panic::resume_unwind(payload),
