@@ -38,7 +38,7 @@ import com.ferrex.android.core.detail.DetailRouteContracts
 import com.ferrex.android.core.detail.EpisodeDetail
 import com.ferrex.android.core.detail.EpisodesAvailability
 import com.ferrex.android.core.detail.MovieDetail
-import com.ferrex.android.core.detail.PlaybackRouteContract
+import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.detail.SeriesBundleDetail
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey

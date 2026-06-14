@@ -61,8 +61,11 @@ import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
-import com.ferrex.android.core.detail.PlaybackRouteContract
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
+import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackRouteContract
+import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryFreshness
@@ -84,8 +87,10 @@ import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
 import com.ferrex.android.ui.detail.PhoneDetailScreen
+import com.ferrex.android.ui.player.PlayerScreen
 import com.ferrex.android.ui.search.PhoneSearchPanel
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 @Composable
 fun PhoneHomeScreen(
@@ -98,9 +103,14 @@ fun PhoneHomeScreen(
     continueWatchingRepository: ContinueWatchingRepository? = null,
     watchRepository: WatchRepository? = null,
     watchStateInvalidationBus: WatchStateInvalidationBus? = null,
+    playbackTicketTransport: PlaybackTicketTransport? = null,
+    playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
+    playbackProgressReporter: PlaybackProgressReporter? = null,
+    streamingHttpClient: OkHttpClient? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onPlaybackSessionInvalidated: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
     val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
@@ -117,7 +127,8 @@ fun PhoneHomeScreen(
     var movieFilter by remember { mutableStateOf(MovieFilterMode.All) }
     var movieIndexState by remember { mutableStateOf<MovieIndexUiState>(MovieIndexUiState.Idle) }
     var selectedDetailRoute by remember { mutableStateOf<MediaRouteArgs?>(null) }
-    var preparedPlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
+    var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
+    var playbackNotice by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(libraryRepository, scope) {
         libraryRepository?.refreshLibraries(scope)
@@ -131,7 +142,7 @@ fun PhoneHomeScreen(
         }
     }
     LaunchedEffect(selectedDetailRoute) {
-        preparedPlaybackContract = null
+        playbackNotice = null
     }
 
     val movieLibraries = repositoryState?.movieLibraries.orEmpty()
@@ -264,11 +275,47 @@ fun PhoneHomeScreen(
         }
     }
 
+    fun launchPlayback(contract: PlaybackRouteContract) {
+        if (playbackTicketTransport == null || playbackStreamUrlFactory == null || streamingHttpClient == null) {
+            playbackNotice = "Playback is unavailable because the ticketed Media3 substrate is not configured."
+            return
+        }
+        playbackNotice = null
+        activePlaybackContract = contract
+    }
+
+    fun refreshPlaybackProgress(contract: PlaybackRouteContract) {
+        watchStateInvalidationBus?.notifyWatchStateChanged("playback progress:${contract.logicalMediaId}")
+        coroutineScope.launch { watchRepository?.refreshMediaProgress(contract.logicalMediaId) }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        if (detailResult != null && selectedDetailRoute != null) {
+        val playbackContract = activePlaybackContract
+        if (
+            playbackContract != null &&
+            playbackTicketTransport != null &&
+            playbackStreamUrlFactory != null &&
+            streamingHttpClient != null
+        ) {
+            PlayerScreen(
+                route = playbackContract,
+                ticketTransport = playbackTicketTransport,
+                streamUrlFactory = playbackStreamUrlFactory,
+                progressReporter = playbackProgressReporter,
+                streamingHttpClient = streamingHttpClient,
+                onBack = { activePlaybackContract = null },
+                onSessionInvalidated = {
+                    activePlaybackContract = null
+                    onPlaybackSessionInvalidated()
+                },
+                onProgressCommitted = { refreshPlaybackProgress(playbackContract) },
+                onChangeServer = onChangeServer,
+                onSignOut = onSignOut,
+            )
+        } else if (detailResult != null && selectedDetailRoute != null) {
             PhoneDetailScreen(
                 detailResult = detailResult,
                 watchState = watchState,
@@ -276,7 +323,7 @@ fun PhoneHomeScreen(
                 imageLoaderAvailable = imageLoader != null,
                 imageLoader = imageLoader,
                 scope = scope,
-                preparedPlaybackContract = preparedPlaybackContract,
+                preparedPlaybackContract = null,
                 onBack = { selectedDetailRoute = null },
                 onRetryCacheSync = { retryDetailCacheSync(selectedDetailRoute) },
                 onClearSelectedCache = { selectedDetailRoute?.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
@@ -287,7 +334,7 @@ fun PhoneHomeScreen(
                 onMarkMovieWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markMovieWatched(mediaId, watched) } },
                 onMarkEpisodeWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markEpisodeWatched(mediaId, watched) } },
                 onMarkSeriesWatched = { tmdbId, watched -> coroutineScope.launch { watchRepository?.markSeriesWatched(tmdbId, watched) } },
-                onPlaybackContract = { preparedPlaybackContract = it },
+                onPlaybackContract = { launchPlayback(it) },
             )
         } else {
             LazyColumn(
@@ -299,7 +346,7 @@ fun PhoneHomeScreen(
             item {
                 HomeHeader(
                     state = state,
-                    selectedRoute = preparedPlaybackContract?.toDisplayString(),
+                    playbackNotice = playbackNotice,
                     onSignOut = onSignOut,
                 )
             }
@@ -409,7 +456,7 @@ fun PhoneHomeScreen(
 @Composable
 private fun HomeHeader(
     state: SessionState.Authenticated,
-    selectedRoute: String?,
+    playbackNotice: String?,
     onSignOut: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -431,11 +478,11 @@ private fun HomeHeader(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-        selectedRoute?.let {
+        playbackNotice?.let {
             Text(
-                text = "Prepared playback contract: $it",
+                text = it,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         TextButton(onClick = onSignOut) { Text("Sign out") }

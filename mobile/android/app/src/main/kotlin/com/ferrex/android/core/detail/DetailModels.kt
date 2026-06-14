@@ -9,6 +9,7 @@ import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.SeriesBundleAccessor
 import com.ferrex.android.core.library.toUuidString
+import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
 import ferrex.details.EnhancedMovieDetails
@@ -157,32 +158,6 @@ val MovieDetail.playbackTargetId: String?
 
 val EpisodeDetail.playbackTargetId: String?
     get() = fileId ?: id
-
-data class PlaybackRouteContract(
-    val targetMediaId: String,
-    val logicalMediaId: String,
-    val mediaType: BrowseMediaType,
-    val startPositionSeconds: Double?,
-    val startOver: Boolean,
-    val sourceDetailRoute: String,
-) {
-    fun toDisplayString(): String = buildString {
-        append(mediaType.routeValue)
-        append(" target=")
-        append(targetMediaId)
-        append(" logical=")
-        append(logicalMediaId)
-        if (startOver) {
-            append(" start-over")
-        } else {
-            append(" position=")
-            append(startPositionSeconds ?: 0.0)
-            append('s')
-        }
-        append(" source=")
-        append(sourceDetailRoute)
-    }
-}
 
 object DetailRouteContracts {
     fun movieResume(movie: MovieDetail, progress: WatchMediaProgress?, sourceRoute: MediaRouteArgs): PlaybackRouteContract? {

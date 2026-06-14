@@ -199,6 +199,10 @@ class AuthManager(
         _sessionState.value = SessionState.NoServer(NoServerReason.ResetConnection)
     }
 
+    fun invalidateSessionFromPlayback() {
+        invalidateLocalSession(LoginRequiredReason.SessionRevoked)
+    }
+
     private suspend fun validateSavedSession(serverUrl: String) {
         val savedAccessToken = storage.accessToken
         val savedRefreshToken = storage.refreshToken
