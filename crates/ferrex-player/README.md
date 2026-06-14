@@ -60,7 +60,7 @@ window:
 
 ```bash
 ferrex-player screenshot \
-  --preset FirstRun \
+  --preset FirstRunAuth \
   --viewport 1440x900 \
   --scale-factor 1 \
   --mode Immediate \
@@ -68,11 +68,12 @@ ferrex-player screenshot \
   --output ./artifacts/first-run.png
 ```
 
-The command supports `--ice <PATH>` to replay an existing `.ice` script before
-capture. When `.ice` metadata includes `preset`, `viewport`, or `mode`, explicit
-CLI values must match it. If headless renderer initialization fails, the command
-exits non-zero with suggested `WGPU_BACKEND`, `WGPU_ADAPTER_NAME`, and software
-rendering environment variables.
+Run `ferrex-player screenshot list` to print deterministic scenario names and
+short descriptions. The command supports `--ice <PATH>` to replay an existing
+`.ice` script before capture. When `.ice` metadata includes `preset`, `viewport`,
+or `mode`, explicit CLI values must match it. If headless renderer initialization
+fails, the command exits non-zero with suggested `WGPU_BACKEND`,
+`WGPU_ADAPTER_NAME`, and software rendering environment variables.
 
 ## Validation commands
 
