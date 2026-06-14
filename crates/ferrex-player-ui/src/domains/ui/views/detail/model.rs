@@ -1,5 +1,10 @@
-use crate::domains::ui::messages::UiMessage;
+use crate::{
+    domains::ui::messages::UiMessage,
+    infra::shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
+};
 
+use ferrex_model::ImageSize;
+use iced::Color;
 use lucide_icons::Icon;
 use uuid::Uuid;
 
@@ -93,6 +98,11 @@ pub enum DetailArtwork {
         image_id: Option<Uuid>,
         alt: String,
         placeholder: Icon,
+        request_size: ImageSize,
+        theme_color: Option<Color>,
+        animation: Option<AnimationBehavior>,
+        face: Option<PosterFace>,
+        rotation_y: Option<f32>,
     },
     Still {
         media_uuid: Uuid,
@@ -125,6 +135,11 @@ impl DetailArtwork {
             image_id,
             alt: alt.into(),
             placeholder: Icon::Film,
+            request_size: ImageSize::poster_large(),
+            theme_color: None,
+            animation: None,
+            face: None,
+            rotation_y: None,
         }
     }
 
@@ -138,6 +153,11 @@ impl DetailArtwork {
             image_id,
             alt: alt.into(),
             placeholder: Icon::Tv,
+            request_size: ImageSize::poster_large(),
+            theme_color: None,
+            animation: None,
+            face: None,
+            rotation_y: None,
         }
     }
 
@@ -151,6 +171,56 @@ impl DetailArtwork {
             image_id,
             alt: alt.into(),
         }
+    }
+
+    pub fn with_request_size(mut self, request_size: ImageSize) -> Self {
+        if let Self::Poster {
+            request_size: current,
+            ..
+        } = &mut self
+        {
+            *current = request_size;
+        }
+        self
+    }
+
+    pub fn with_theme_color(mut self, theme_color: Color) -> Self {
+        if let Self::Poster {
+            theme_color: current,
+            ..
+        } = &mut self
+        {
+            *current = Some(theme_color);
+        }
+        self
+    }
+
+    pub fn with_animation(mut self, animation: AnimationBehavior) -> Self {
+        if let Self::Poster {
+            animation: current, ..
+        } = &mut self
+        {
+            *current = Some(animation);
+        }
+        self
+    }
+
+    pub fn with_face(mut self, face: PosterFace) -> Self {
+        if let Self::Poster { face: current, .. } = &mut self {
+            *current = Some(face);
+        }
+        self
+    }
+
+    pub fn with_rotation_y(mut self, rotation_y: f32) -> Self {
+        if let Self::Poster {
+            rotation_y: current,
+            ..
+        } = &mut self
+        {
+            *current = Some(rotation_y);
+        }
+        self
     }
 
     pub fn label(&self) -> &str {
@@ -214,6 +284,7 @@ pub struct DetailAction {
     pub icon: Option<Icon>,
     pub role: DetailActionRole,
     pub on_press: Option<UiMessage>,
+    pub menu_items: Vec<DetailActionMenuItem>,
 }
 
 impl DetailAction {
@@ -229,6 +300,7 @@ impl DetailAction {
             icon: Some(Icon::Play),
             role: DetailActionRole::Primary,
             on_press: Some(on_press),
+            menu_items: Vec::new(),
         }
     }
 
@@ -244,6 +316,7 @@ impl DetailAction {
             icon: None,
             role: DetailActionRole::Secondary,
             on_press: Some(on_press),
+            menu_items: Vec::new(),
         }
     }
 
@@ -255,6 +328,23 @@ impl DetailAction {
             icon: None,
             role: DetailActionRole::Secondary,
             on_press: None,
+            menu_items: Vec::new(),
+        }
+    }
+
+    pub fn menu(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        menu_items: Vec<DetailActionMenuItem>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            subtitle: None,
+            icon: Some(Icon::Ellipsis),
+            role: DetailActionRole::Secondary,
+            on_press: None,
+            menu_items,
         }
     }
 
@@ -266,6 +356,21 @@ impl DetailAction {
     pub fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
         self
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DetailActionMenuItem {
+    pub label: String,
+    pub on_press: UiMessage,
+}
+
+impl DetailActionMenuItem {
+    pub fn new(label: impl Into<String>, on_press: UiMessage) -> Self {
+        Self {
+            label: label.into(),
+            on_press,
+        }
     }
 }
 

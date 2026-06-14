@@ -23,6 +23,7 @@ use iced::{
         text,
     },
 };
+use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
 
 /// Render a repository-free detail page model with a precomputed layout plan.
@@ -30,7 +31,7 @@ pub fn view_detail_page<'a>(
     model: &'a DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut body = Column::new()
         .spacing(plan.section_grid.gap)
         .padding([plan.page_padding_y, plan.page_padding_x])
@@ -75,11 +76,11 @@ pub fn view_detail_hero<'a>(
     model: &'a DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let art = view_hero_art(&model.hero_art, plan, sizes);
     let summary = view_summary(model, plan, sizes);
 
-    let hero: Element<'a, UiMessage> = match plan.composition {
+    let hero: Element<'static, UiMessage> = match plan.composition {
         DetailComposition::CompactPortrait => column![art, summary]
             .spacing(plan.hero_gap)
             .align_x(Alignment::Center)
@@ -103,7 +104,7 @@ pub fn view_hero_art<'a>(
     artwork: &'a DetailArtwork,
     plan: &DetailLayoutPlan,
     _sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     view_artwork(
         artwork,
         plan.hero_art,
@@ -116,7 +117,7 @@ pub fn view_hero_art<'a>(
 pub fn view_metadata_pills<'a>(
     metadata: &'a [DetailMetadataPill],
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut pills = Row::new().spacing(sizes.spacing.xs);
     for pill in metadata {
         pills = pills.push(
@@ -136,7 +137,7 @@ pub fn view_action_cluster<'a>(
     actions: &'a [DetailAction],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     match plan.action_cluster.axis {
         super::DetailAxis::Vertical => {
             let mut column = Column::new().spacing(plan.action_cluster.gap);
@@ -161,7 +162,7 @@ pub fn view_sections<'a>(
     sections: &'a [DetailSection],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     if sections.is_empty() {
         return Space::new().into();
     }
@@ -199,7 +200,7 @@ pub fn view_section<'a>(
     section: &'a DetailSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     match section {
         DetailSection::Overview(section) => {
             view_overview_section(section, plan, sizes)
@@ -221,7 +222,7 @@ pub fn view_overview_section<'a>(
     section: &'a DetailOverviewSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     view_panel(
         &section.title,
         text(section.body.clone())
@@ -238,7 +239,7 @@ pub fn view_fact_panel<'a>(
     section: &'a DetailFactPanel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut facts = Column::new().spacing(sizes.spacing.sm);
     for fact in &section.facts {
         facts = facts.push(view_fact(fact, sizes));
@@ -251,7 +252,7 @@ pub fn view_cast_section<'a>(
     section: &'a DetailCastSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     if section.members.is_empty() {
         return view_panel(
             &section.title,
@@ -271,9 +272,18 @@ pub fn view_cast_section<'a>(
         row = row.push(view_cast_member(member, plan, sizes));
     }
 
+    let image_width = (plan.rail.card_width * 0.68).max(72.0);
+    let cast_card_height = image_width * 1.5
+        + sizes.font.small
+        + sizes.font.micro
+        + sizes.spacing.lg;
+
     view_panel(
         &section.title,
-        horizontal_scroller(row, plan.rail.card_height + sizes.spacing.xl),
+        horizontal_scroller(
+            row,
+            cast_card_height.max(plan.rail.card_height + sizes.spacing.xl),
+        ),
         plan,
         sizes,
     )
@@ -283,7 +293,7 @@ pub fn view_technical_section<'a>(
     section: &'a DetailTechnicalSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     if section.items.is_empty() {
         return view_panel(
             &section.title,
@@ -303,14 +313,22 @@ pub fn view_technical_section<'a>(
         row = row.push(view_technical_item(item, sizes));
     }
 
-    view_panel(&section.title, row.into(), plan, sizes)
+    view_panel(
+        &section.title,
+        horizontal_scroller(
+            row,
+            plan.action_cluster.button_height + sizes.spacing.md,
+        ),
+        plan,
+        sizes,
+    )
 }
 
 pub fn view_relationship_rail<'a>(
     section: &'a DetailRelationshipRail,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     if section.items.is_empty() {
         return view_panel(
             &section.title,
@@ -341,7 +359,7 @@ pub fn view_relationship_rail<'a>(
 pub fn view_empty_state<'a>(
     empty: &'a DetailEmptyState,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut content = Column::new()
         .spacing(sizes.spacing.sm)
         .align_x(Alignment::Center);
@@ -377,11 +395,10 @@ pub fn view_backdrop_controls<'a>(
     controls: &'a [DetailBackdropControl],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut row = Row::new()
         .spacing(sizes.spacing.xs)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
+        .align_y(Alignment::Center);
 
     for control in controls {
         row = row.push(
@@ -403,7 +420,7 @@ fn view_summary<'a>(
     model: &'a DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut summary =
         Column::new().spacing(sizes.spacing.sm).width(Length::Fill);
 
@@ -450,7 +467,11 @@ fn view_action_button<'a>(
     action: &'a DetailAction,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
+    if !action.menu_items.is_empty() {
+        return view_action_menu(action, plan, sizes);
+    }
+
     let disabled = action.on_press.is_none();
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
@@ -486,10 +507,52 @@ fn view_action_button<'a>(
     button.into()
 }
 
+fn view_action_menu<'a>(
+    action: &'a DetailAction,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let mut label_row = Row::new()
+        .spacing(sizes.spacing.xs)
+        .align_y(Alignment::Center);
+    if let Some(icon) = action.icon {
+        label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
+    }
+    label_row =
+        label_row.push(text(action.label.clone()).size(sizes.font.body));
+
+    let trigger = button(label_row)
+        .padding([sizes.spacing.xs, sizes.spacing.md])
+        .width(Length::Fixed(plan.action_cluster.button_width))
+        .height(Length::Fixed(plan.action_cluster.button_height))
+        .style(detail_action_button_style(action.role, false));
+
+    let mut items: Vec<Item<'static, UiMessage, Theme, iced::Renderer>> =
+        Vec::new();
+    for item in &action.menu_items {
+        let item_button =
+            button(text(item.label.clone()).size(sizes.font.small))
+                .on_press(item.on_press.clone())
+                .style(theme::Button::HeaderMenuSecondary.style());
+        items.push(Item::new(item_button));
+    }
+
+    let menu = Menu::new(items)
+        .max_width(plan.action_cluster.button_width.max(220.0))
+        .spacing(0.0)
+        .offset(0.0);
+
+    MenuBar::new(vec![Item::with_menu(trigger, menu)])
+        .spacing(0.0)
+        .height(Length::Shrink)
+        .close_on_item_click(true)
+        .into()
+}
+
 fn view_fact<'a>(
     fact: &'a DetailFact,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     row![
         text(fact.label.clone())
             .size(sizes.font.small)
@@ -509,7 +572,7 @@ fn view_cast_member<'a>(
     member: &'a DetailCastMember,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let image_width = (plan.rail.card_width * 0.68).max(72.0);
     let image_height = image_width * 1.5;
     let image = view_artwork(
@@ -554,7 +617,7 @@ fn view_cast_member<'a>(
 fn view_technical_item<'a>(
     item: &'a DetailTechnicalItem,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let mut row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
@@ -583,7 +646,7 @@ fn view_rail_item<'a>(
     item: &'a DetailRailItem,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let image_height = plan.rail.card_width * 9.0 / 16.0;
     let image = view_artwork(
         &item.artwork,
@@ -632,7 +695,7 @@ fn view_rail_item<'a>(
 fn view_notice<'a>(
     notice: &'a DetailNotice,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let content = Column::new()
         .spacing(sizes.spacing.xs)
         .push(
@@ -653,12 +716,12 @@ fn view_notice<'a>(
         .into()
 }
 
-fn view_panel<'a>(
+fn view_panel(
     title: &str,
-    body: Element<'a, UiMessage>,
+    body: Element<'static, UiMessage>,
     _plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let content = Column::new()
         .spacing(sizes.spacing.sm)
         .push(
@@ -680,7 +743,7 @@ fn view_backdrop<'a>(
     backdrop: &'a DetailBackdrop,
     plan: &DetailLayoutPlan,
     _sizes: &SizeProvider,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     let image = view_artwork(
         &backdrop.artwork,
         DetailArtLayout {
@@ -717,24 +780,46 @@ fn view_artwork<'a>(
     priority: Priority,
     width: Length,
     height: Length,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     match artwork {
         DetailArtwork::Poster {
             media_uuid,
             image_id,
             placeholder,
+            request_size,
+            theme_color,
+            animation,
+            face,
+            rotation_y,
             ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::poster_large())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(*placeholder)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let mut image = image_for(*media_uuid)
+                .iid(*image_id)
+                .skip_request(image_id.is_none())
+                .request_size(*request_size)
+                .display_size(layout.width, layout.height)
+                .radius(layout.corner_radius)
+                .priority(priority)
+                .placeholder(*placeholder)
+                .tight_bounds();
+
+            if let Some(color) = theme_color {
+                image = image.theme_color(*color);
+            }
+            if let Some(animation) = animation {
+                image = image.animation_behavior(*animation);
+            } else {
+                image = image.no_animation();
+            }
+            if let Some(face) = face {
+                image = image.face(*face);
+            }
+            if let Some(rotation_y) = rotation_y {
+                image = image.rotation_y(*rotation_y);
+            }
+
+            image.into()
+        }
         DetailArtwork::Still {
             media_uuid,
             image_id,
@@ -794,10 +879,10 @@ fn view_artwork<'a>(
     }
 }
 
-fn horizontal_scroller<'a>(
-    row: Row<'a, UiMessage>,
+fn horizontal_scroller(
+    row: Row<'static, UiMessage>,
     height: f32,
-) -> Element<'a, UiMessage> {
+) -> Element<'static, UiMessage> {
     scrollable(row)
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::default().scroller_width(4).margin(2),
