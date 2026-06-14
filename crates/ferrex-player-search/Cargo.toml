@@ -1,0 +1,47 @@
+[package]
+name = "ferrex-player-search"
+description = "Search data domain and strategy calibration for the Ferrex player"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+publish = true
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "allow"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.rust]
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+
+[features]
+default = []
+profile-with-puffin = ["dep:profiling", "profiling/profile-with-puffin"]
+profile-with-tracy = ["dep:profiling"]
+profile-with-tracing = ["dep:profiling"]
+
+[dependencies]
+ferrex-core = { path = "../ferrex-core", default-features = false, features = ["rkyv"] }
+ferrex-model = { path = "../ferrex-model", features = ["serde", "rkyv", "chrono"] }
+ferrex-player-api = { workspace = true }
+ferrex-player-foundation = { workspace = true }
+ferrex-player-library = { workspace = true }
+
+anyhow.workspace = true
+chrono.workspace = true
+log.workspace = true
+num_cpus = "1"
+profiling = { version = "1.0", optional = true }
+rkyv.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }

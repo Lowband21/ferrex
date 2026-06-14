@@ -21,6 +21,8 @@ Thumbs.db
 .env
 .env.local
 config/
+!**/src/**/config/
+!**/src/**/config/**
 
 # Build artifacts
 dist/
@@ -80,7 +82,8 @@ tarpaulin-report.html
 
 # Cache
 cache/
-!*/src/*/cache/
+!**/src/**/cache/
+!**/src/**/cache/**
 
 # Scripts are tracked; avoid ignoring the whole directory.
 

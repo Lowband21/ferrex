@@ -1,7 +1,7 @@
 # Ferrex UI Tests
 
 Ferrex Player has headless app-shell UI flow tests recorded as `.ice` scripts
-under `ferrex-player-app/tests/ui/`.
+under `crates/ferrex-player-app/tests/ui/`.
 
 ## Run locally
 
@@ -9,7 +9,7 @@ under `ferrex-player-app/tests/ui/`.
 cargo test -p ferrex-player-app --test ui_end_to_end
 ```
 
-This test discovers and replays every `.ice` script in `ferrex-player-app/tests/ui/`
+This test discovers and replays every `.ice` script in `crates/ferrex-player-app/tests/ui/`
 via `iced_test`. The harness enables local test stubs to avoid network
 dependencies while exercising the same shell wiring used by the installed
 `ferrex-player` binary.

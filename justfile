@@ -114,13 +114,13 @@ rebuild-server profile="release" wild="1":
     need_build=1; \
     if command -v ferrexctl >/dev/null 2>&1; then \
         bin_path="$(command -v ferrexctl)"; \
-        src_mtime=$(find ferrexctl -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 | xargs -0 stat -c %Y | sort -nr | head -n1); \
+        src_mtime=$(find crates/ferrexctl -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -print0 | xargs -0 stat -c %Y | sort -nr | head -n1); \
         bin_mtime=$(stat -c %Y "$bin_path"); \
         if [ "$src_mtime" -le "$bin_mtime" ]; then need_build=0; fi; \
     fi; \
     if [ "$need_build" -eq 1 ]; then \
         echo "Installing/updating ferrexctl from workspace..."; \
-        cargo install --path ferrexctl --bin ferrexctl --force >/dev/null 2>&1 || cargo install --path ferrexctl --bin ferrexctl --force; \
+        cargo install --path crates/ferrexctl --bin ferrexctl --force >/dev/null 2>&1 || cargo install --path crates/ferrexctl --bin ferrexctl --force; \
     fi
 
 # Manual grey-box init/config validation (requires docker + local resources)
@@ -388,15 +388,15 @@ prepare $SQLX_OFFLINE="false":
 [confirm]
 [no-cd]
 migrate:
-    cd ferrex-core &&  DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx migrate run
+    cd crates/ferrex-core &&  DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx migrate run
 
 [no-cd]
 reset:
-    cd ferrex-core && DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx database reset
+    cd crates/ferrex-core && DATABASE_URL=$DATABASE_URL_ADMIN cargo sqlx database reset
 
 [no-cd]
 reset-demo:
-    cd ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DEMO_DATABASE_NAME}" cargo sqlx database reset
+    cd crates/ferrex-core && DATABASE_URL="postgresql://${DATABASE_ADMIN_USER}:${DATABASE_ADMIN_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DEMO_DATABASE_NAME}" cargo sqlx database reset
 
 # Git
 [no-cd]
@@ -424,8 +424,8 @@ wtadd relative-path branch:
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-INCR_FILE := "ferrex-core/src/lib.rs"
-LEAF_FILE := "ferrex-player/src/main.rs"
+INCR_FILE := "crates/ferrex-core/src/lib.rs"
+LEAF_FILE := "crates/ferrex-player/src/main.rs"
 RESULTS_DIR := "docs/bench_results"
 BASE := "env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER \
     -u CARGO_PROFILE_RELEASE_INCREMENTAL"

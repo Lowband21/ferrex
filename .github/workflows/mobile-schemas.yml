@@ -6,7 +6,7 @@ on:
     paths:
       - "Cargo.lock"
       - "Cargo.toml"
-      - "ferrex-flatbuffers/**"
+      - "crates/ferrex-flatbuffers/**"
       - "mobile/shared/codegen/generate-rust.sh"
       - "mobile/shared/schemas/**"
       - ".github/workflows/mobile-schemas.yml"
@@ -15,7 +15,7 @@ on:
     paths:
       - "Cargo.lock"
       - "Cargo.toml"
-      - "ferrex-flatbuffers/**"
+      - "crates/ferrex-flatbuffers/**"
       - "mobile/shared/codegen/generate-rust.sh"
       - "mobile/shared/schemas/**"
       - ".github/workflows/mobile-schemas.yml"

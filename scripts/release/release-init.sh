@@ -73,8 +73,8 @@ done
 
 want="$version"
 have="$(ferrexctl_version)"
-[[ -n $have ]] || die "failed to read ferrexctl version from ferrexctl/Cargo.toml"
-[[ $have == "$want" ]] || die "ferrexctl version mismatch: ferrexctl/Cargo.toml=$have requested=$want"
+[[ -n $have ]] || die "failed to read ferrexctl version from crates/ferrexctl/Cargo.toml"
+[[ $have == "$want" ]] || die "ferrexctl version mismatch: crates/ferrexctl/Cargo.toml=$have requested=$want"
 
 tag="ferrexctl-v${version}"
 

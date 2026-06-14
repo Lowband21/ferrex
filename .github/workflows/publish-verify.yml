@@ -42,7 +42,7 @@ jobs:
               in_pkg && $0 ~ /^version[[:space:]]*=/ {
                 sub(/^[^"]*"/,""); sub(/".*$/,""); print; exit
               }
-            ' ferrexctl/Cargo.toml
+            ' crates/ferrexctl/Cargo.toml
           }
 
           if [[ "$tag" == v* ]]; then
@@ -57,9 +57,9 @@ jobs:
           elif [[ "$tag" == ferrexctl-v* ]]; then
             want="${tag#ferrexctl-v}"
             have="$(ferrexctl_version)"
-            [[ -n "$have" ]] || { echo "error: failed to read ferrexctl version from ferrexctl/Cargo.toml" >&2; exit 1; }
+            [[ -n "$have" ]] || { echo "error: failed to read ferrexctl version from crates/ferrexctl/Cargo.toml" >&2; exit 1; }
             if [[ "$have" != "$want" ]]; then
-              echo "error: ferrexctl version mismatch: ferrexctl/Cargo.toml=$have tag=$want" >&2
+              echo "error: ferrexctl version mismatch: crates/ferrexctl/Cargo.toml=$have tag=$want" >&2
               exit 1
             fi
             echo "ok: ferrexctl version $have matches tag $tag"

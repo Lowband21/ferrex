@@ -116,7 +116,7 @@ See `ferrexctl --help` for all packaging options.
 
 - Linux / Wayland: primary target. Zero‑copy HDR pipeline via GStreamer (dev 1.27.x) and Wayland subsurfaces.
   - Tested environment: Arch Linux (Hyprland WM). Please report results for GNOME/KDE/wlroots compositors.
-  - Player specifics and platform notes: see [ferrex-player/README.md](ferrex-player/README.md).
+  - Player specifics and platform notes: see [crates/ferrex-player/README.md](crates/ferrex-player/README.md).
 
 - Other platforms: playback via the cross‑platform backend or "Open with MPV" from detail views.
 
