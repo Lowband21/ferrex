@@ -10,6 +10,7 @@ import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.api.TokenRefreshAuthenticator
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.EncryptedAuthStorage
+import com.ferrex.android.core.diagnostics.AndroidDiagnosticsCore
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageDiskCache
 import com.ferrex.android.core.image.ImageRepository
@@ -109,6 +110,15 @@ class AndroidAuthDependencies(
     val searchRepository = MediaSearchRepository(
         transport = searchTransport,
         cache = LibraryMediaSearchCache(libraryRepository),
+    )
+
+    val diagnostics = AndroidDiagnosticsCore(
+        context = context,
+        storage = storage,
+        serverConfig = serverConfig,
+        libraryCache = libraryCache,
+        imageCache = imageCache,
+        libraryRepository = libraryRepository,
     )
 
     val authManager = AuthManager(

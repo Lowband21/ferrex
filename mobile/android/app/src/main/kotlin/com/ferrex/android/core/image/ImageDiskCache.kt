@@ -93,10 +93,28 @@ class ImageDiskCache(
 
     fun coilDiskCacheDir(scope: ServerCacheScope): File {
         ensureScope(scope)
-        return File(imagesDir(scope), "coil-blobs")
+        return File(imagesDir(scope), "coil-blobs").also { it.mkdirs() }
     }
 
     fun debugManifestFile(scope: ServerCacheScope, key: ImageRequestKey): File = manifestFile(scope, key)
+
+    fun diagnosticSnapshot(scope: ServerCacheScope): ImageDiskCacheDiagnostics {
+        ensureScope(scope)
+        val images = imagesDir(scope)
+        val files = if (images.exists()) images.walkTopDown().filter { it.isFile }.toList() else emptyList()
+        val coilFiles = coilDiskCacheDir(scope).let { dir ->
+            if (dir.exists()) dir.walkTopDown().filter { it.isFile }.toList() else emptyList()
+        }
+        return ImageDiskCacheDiagnostics(
+            scopeDirectoryName = scope.directoryName,
+            relativeImagesPath = "library_cache/v1/scopes/${scope.directoryName}/images",
+            approximateBytes = files.sumOf { it.length() },
+            manifestEntryFiles = files.count { file -> file.extension == "properties" && file.parentFile?.name == "manifest" },
+            coilBlobBytes = coilFiles.sumOf { it.length() },
+            quarantineFileCount = files.count { file -> file.parentFile?.name == "quarantine" && !file.name.endsWith(".reason.properties") },
+            staleOfflineMarkerPresent = File(imagesDir(scope), "stale-offline.properties").exists(),
+        )
+    }
 
     fun quarantinedManifestFiles(scope: ServerCacheScope): List<File> {
         val dir = quarantineDir(scope)
@@ -208,6 +226,16 @@ class ImageDiskCache(
         fun fromContext(context: Context): ImageDiskCache = ImageDiskCache(File(context.filesDir, "library_cache"))
     }
 }
+
+data class ImageDiskCacheDiagnostics(
+    val scopeDirectoryName: String,
+    val relativeImagesPath: String,
+    val approximateBytes: Long,
+    val manifestEntryFiles: Int,
+    val coilBlobBytes: Long,
+    val quarantineFileCount: Int,
+    val staleOfflineMarkerPresent: Boolean,
+)
 
 sealed interface ManifestCacheRead {
     data class Valid(val record: ImageManifestRecord) : ManifestCacheRead

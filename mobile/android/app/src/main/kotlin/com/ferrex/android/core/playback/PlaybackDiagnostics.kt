@@ -1,15 +1,15 @@
 package com.ferrex.android.core.playback
 
-import java.util.concurrent.ConcurrentLinkedDeque
+import com.ferrex.android.core.diagnostics.DiagnosticLog
+import com.ferrex.android.core.diagnostics.DiagnosticsRedactor
 
 /**
- * Small in-process playback diagnostic buffer. All entries are redacted before
- * storage so stream tickets, session tokens, and bearer values are never kept in
- * crash/debug surfaces.
+ * Playback-facing adapter for the retained diagnostics core. Playback entries
+ * are redacted by the shared diagnostics redactor before storage/export so
+ * stream tickets, session tokens, bearer values, and URLs are never retained raw.
  */
 object PlaybackDiagnosticLog {
     private const val MAX_ENTRIES = 200
-    private val entries = ConcurrentLinkedDeque<Entry>()
 
     data class Entry(
         val timestampMs: Long,
@@ -26,36 +26,45 @@ object PlaybackDiagnosticLog {
     fun warn(tag: String, message: String, throwable: Throwable? = null) = record(Level.Warn, tag, message, throwable)
     fun error(tag: String, message: String, throwable: Throwable? = null) = record(Level.Error, tag, message, throwable)
 
-    fun recentEntries(limit: Int = MAX_ENTRIES): List<Entry> {
-        val snapshot = entries.toList()
-        return if (snapshot.size <= limit) snapshot else snapshot.takeLast(limit)
-    }
+    fun recentEntries(limit: Int = MAX_ENTRIES): List<Entry> = DiagnosticLog
+        .recentEntries(limit = limit, source = DiagnosticLog.Source.Playback)
+        .map { entry ->
+            Entry(
+                timestampMs = entry.timestampMs,
+                level = entry.level.toPlaybackLevel(),
+                tag = entry.tag,
+                message = entry.message,
+                throwable = entry.throwable,
+            )
+        }
 
     fun clearForTests() {
-        entries.clear()
+        DiagnosticLog.clear()
     }
 
-    fun redact(value: String): String = value
-        .replace(BEARER_PATTERN) { match -> "${match.groupValues[1]}<redacted>" }
-        .replace(QUERY_TOKEN_PATTERN) { match -> "${match.groupValues[1]}=<redacted>" }
-        .replace(JSON_TOKEN_PATTERN) { match -> "${match.groupValues[1]}<redacted>${match.groupValues[2]}" }
+    fun redact(value: String): String = DiagnosticsRedactor.redactText(value)
 
     private fun record(level: Level, tag: String, message: String, throwable: Throwable?) {
-        entries.addLast(
-            Entry(
-                timestampMs = System.currentTimeMillis(),
-                level = level,
-                tag = tag,
-                message = redact(message),
-                throwable = throwable?.stackTraceToString()?.take(2000)?.let(::redact),
-            ),
+        DiagnosticLog.record(
+            level = level.toDiagnosticLevel(),
+            tag = tag,
+            message = message,
+            throwable = throwable,
+            source = DiagnosticLog.Source.Playback,
         )
-        while (entries.size > MAX_ENTRIES) {
-            entries.pollFirst()
-        }
     }
 
-    private val BEARER_PATTERN = Regex("(?i)(\\bBearer\\s+)[^\\s,;]+")
-    private val QUERY_TOKEN_PATTERN = Regex("(?i)(\\b(?:access_token|refresh_token|token|ticket))=[^\\s&#]+")
-    private val JSON_TOKEN_PATTERN = Regex("(?i)(\\\"(?:access_token|refresh_token|token|ticket)\\\"\\s*:\\s*\\\")[^\\\"]+(\\\")")
+    private fun Level.toDiagnosticLevel(): DiagnosticLog.Level = when (this) {
+        Level.Debug -> DiagnosticLog.Level.Debug
+        Level.Info -> DiagnosticLog.Level.Info
+        Level.Warn -> DiagnosticLog.Level.Warn
+        Level.Error -> DiagnosticLog.Level.Error
+    }
+
+    private fun DiagnosticLog.Level.toPlaybackLevel(): Level = when (this) {
+        DiagnosticLog.Level.Debug -> Level.Debug
+        DiagnosticLog.Level.Info -> Level.Info
+        DiagnosticLog.Level.Warn -> Level.Warn
+        DiagnosticLog.Level.Error -> Level.Error
+    }
 }

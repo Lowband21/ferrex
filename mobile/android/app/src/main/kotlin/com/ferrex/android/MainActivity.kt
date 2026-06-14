@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.ferrex.android.core.di.AndroidAuthDependencies
+import com.ferrex.android.core.diagnostics.AndroidDisplayDiagnostics
 import com.ferrex.android.navigation.FerrexNavGraph
 import com.ferrex.android.ui.theme.FerrexTheme
 
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AndroidDisplayDiagnostics.logCurrentDisplay(this, window)
         setContent {
             FerrexTheme {
                 FerrexNavGraph(
