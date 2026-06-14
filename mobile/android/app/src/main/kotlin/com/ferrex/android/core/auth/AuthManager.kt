@@ -15,6 +15,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
+private val UUID_REGEX = Regex(
+    "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+)
+
 class AuthManager(
     private val api: FerrexApi,
     private val storage: AuthStorage,
@@ -315,14 +319,27 @@ class AuthManager(
     }
 
     private fun currentDeviceInfo(): DeviceInfo {
-        val localDeviceId = storage.localDeviceId?.takeIf { it.isNotBlank() }
-            ?: UUID.randomUUID().toString().also { storage.localDeviceId = it }
         return DeviceInfo(
-            deviceId = localDeviceId,
+            deviceId = currentLocalDeviceId(),
             deviceName = deviceName,
             appVersion = appVersion,
         )
     }
+
+    private fun currentLocalDeviceId(): String {
+        val storedDeviceId = storage.localDeviceId?.trim()
+        if (storedDeviceId?.isUuidShaped() == true) {
+            val normalizedDeviceId = UUID.fromString(storedDeviceId).toString()
+            if (storage.localDeviceId != normalizedDeviceId) {
+                storage.localDeviceId = normalizedDeviceId
+            }
+            return normalizedDeviceId
+        }
+
+        return UUID.randomUUID().toString().also { storage.localDeviceId = it }
+    }
+
+    private fun String.isUuidShaped(): Boolean = UUID_REGEX.matches(this)
 
     private fun configureTokenRefreshCallbacks() {
         tokenRefreshAuthenticator.refreshTokenProvider = { storage.refreshToken }
