@@ -49,8 +49,14 @@ import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.watch.WatchEpisodeState
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchRepositoryState
+import com.ferrex.android.ui.components.FerrexActionButton
+import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
+import com.ferrex.android.ui.components.FerrexStatusAction
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 @Composable
 fun PhoneDetailScreen(
@@ -453,15 +459,40 @@ private fun DetailRecoveryContent(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         StateCard(title = missing.title, body = missing.message)
-        Button(onClick = onRetryCacheSync, modifier = Modifier.fillMaxWidth()) { Text("Retry cache sync") }
+        FerrexActionButton(
+            label = "Retry cache sync",
+            role = FerrexActionRole.Retry,
+            onClick = onRetryCacheSync,
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (missing.selectedLibraryId != null) {
-            TextButton(onClick = onClearSelectedCache, modifier = Modifier.fillMaxWidth()) { Text("Clear selected cache") }
+            FerrexActionButton(
+                label = "Clear selected cache",
+                role = FerrexActionRole.Cache,
+                onClick = onClearSelectedCache,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) { Text("Change server") }
-            TextButton(onClick = onResetConnection, modifier = Modifier.weight(1f)) { Text("Reset connection") }
+        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            FerrexActionButton(
+                label = "Change server",
+                role = FerrexActionRole.Secondary,
+                onClick = onChangeServer,
+                modifier = Modifier.weight(1f),
+            )
+            FerrexActionButton(
+                label = "Reset connection",
+                role = FerrexActionRole.DestructiveReset,
+                onClick = onResetConnection,
+                modifier = Modifier.weight(1f),
+            )
         }
-        OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
+        FerrexActionButton(
+            label = "Diagnostics / Export diagnostics",
+            role = FerrexActionRole.Secondary,
+            onClick = onOpenDiagnostics,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -699,12 +730,19 @@ private fun StateCard(
     body: String,
     action: Pair<String, () -> Unit>? = null,
     actionEnabled: Boolean = true,
+    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            Text(body, style = MaterialTheme.typography.bodyMedium)
-            action?.let { (label, callback) -> Button(enabled = actionEnabled, onClick = callback) { Text(label) } }
-        }
-    }
+    FerrexStatusCard(
+        title = title,
+        body = body,
+        tone = tone,
+        action = action?.let { (label, callback) ->
+            FerrexStatusAction(
+                label = label,
+                role = FerrexActionRole.Retry,
+                enabled = actionEnabled,
+                onClick = callback,
+            )
+        },
+    )
 }
