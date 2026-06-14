@@ -66,15 +66,20 @@ pub async fn post_image_manifest_handler(
                 .iter()
                 .map(|result| fb_image::ImageManifestEntry {
                     iid: result.iid,
+                    category: image_size_to_category(result.imz),
                     status: match &result.status {
                         ImageManifestStatus::Ready { token, .. } => {
                             fb_image::ImageManifestEntryStatus::Ready { token }
                         }
-                        ImageManifestStatus::Pending { .. } => {
-                            fb_image::ImageManifestEntryStatus::Pending
+                        ImageManifestStatus::Pending { retry_after_ms } => {
+                            fb_image::ImageManifestEntryStatus::Pending {
+                                retry_after_ms: *retry_after_ms,
+                            }
                         }
-                        ImageManifestStatus::Missing { .. } => {
-                            fb_image::ImageManifestEntryStatus::Failed
+                        ImageManifestStatus::Missing { reason } => {
+                            fb_image::ImageManifestEntryStatus::Failed {
+                                reason: Some(reason),
+                            }
                         }
                     },
                 })
@@ -173,6 +178,15 @@ fn image_category_to_size(category: FbImageCategory) -> Option<ImageSize> {
         Some(ImageSize::thumbnail())
     } else {
         None
+    }
+}
+
+fn image_size_to_category(size: ImageSize) -> FbImageCategory {
+    match size {
+        ImageSize::Poster(_) => FbImageCategory::Poster,
+        ImageSize::Backdrop(_) => FbImageCategory::Backdrop,
+        ImageSize::Profile(_) => FbImageCategory::Profile,
+        ImageSize::Thumbnail(_) => FbImageCategory::Episode,
     }
 }
 

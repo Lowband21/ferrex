@@ -42,10 +42,13 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.image.FerrexImagePipeline
+import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.ui.components.FerrexBrowseImageRail
 import kotlinx.coroutines.launch
 
 @Composable
@@ -289,6 +292,8 @@ fun PhoneRecoverableScreen(
 fun PhoneHomeScreen(
     state: SessionState.Authenticated,
     libraryRepository: LibraryRepository? = null,
+    imageRepository: ImageRepository? = null,
+    imagePipeline: FerrexImagePipeline? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
@@ -343,6 +348,13 @@ fun PhoneHomeScreen(
                 libraryRepository?.clearSelectedCache(scope, libraryId)
             },
             onClearAll = { libraryRepository?.clearAllCache(scope) },
+        )
+        FerrexBrowseImageRail(
+            modifier = Modifier.padding(top = 24.dp),
+            repositoryState = repositoryState,
+            scope = scope,
+            imageRepository = imageRepository,
+            imagePipeline = imagePipeline,
         )
         RecoveryActions(
             includeRetry = false,

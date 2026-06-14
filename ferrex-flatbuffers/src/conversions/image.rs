@@ -13,18 +13,19 @@ pub struct ImageManifestQuery {
     pub category: common_fb::ImageCategory,
 }
 
-/// Minimal status carried by the FlatBuffers image manifest contract.
+/// Status carried by the FlatBuffers image manifest contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageManifestEntryStatus<'a> {
     Ready { token: &'a str },
-    Pending,
-    Failed,
+    Pending { retry_after_ms: u64 },
+    Failed { reason: Option<&'a str> },
 }
 
 /// Borrowed image manifest entry encoded as FlatBuffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageManifestEntry<'a> {
     pub iid: Uuid,
+    pub category: common_fb::ImageCategory,
     pub status: ImageManifestEntryStatus<'a>,
 }
 
@@ -54,17 +55,23 @@ fn build_image_manifest_entry<'a>(
     entry: &ImageManifestEntry<'_>,
 ) -> WIPOffset<image_fb::ImageManifestEntry<'a>> {
     let iid = uuid_to_fb(&entry.iid);
-    let (status, token) = match entry.status {
+    let (status, token, retry_after_millis, failure_reason) = match entry.status
+    {
         ImageManifestEntryStatus::Ready { token } => (
             image_fb::ImageStatus::Ready,
             Some(builder.create_string(token)),
+            0,
+            None,
         ),
-        ImageManifestEntryStatus::Pending => {
-            (image_fb::ImageStatus::Pending, None)
+        ImageManifestEntryStatus::Pending { retry_after_ms } => {
+            (image_fb::ImageStatus::Pending, None, retry_after_ms, None)
         }
-        ImageManifestEntryStatus::Failed => {
-            (image_fb::ImageStatus::Failed, None)
-        }
+        ImageManifestEntryStatus::Failed { reason } => (
+            image_fb::ImageStatus::Failed,
+            None,
+            0,
+            reason.map(|reason| builder.create_string(reason)),
+        ),
     };
 
     image_fb::ImageManifestEntry::create(
@@ -73,6 +80,9 @@ fn build_image_manifest_entry<'a>(
             iid: Some(&iid),
             status,
             token,
+            category: entry.category,
+            retry_after_millis,
+            failure_reason,
         },
     )
 }
