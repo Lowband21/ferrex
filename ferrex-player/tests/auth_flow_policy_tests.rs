@@ -1,16 +1,15 @@
-use ferrex_player::domains::auth::manager::{
-    DeviceAuthStatus, DeviceTrustPolicyResponse, PinPolicyResponse,
-};
-use ferrex_player::domains::auth::messages::AuthMessage;
-use ferrex_player::domains::auth::security::secure_credential::SecureCredential;
-use ferrex_player::domains::auth::types::{
-    AuthenticationFlow, CredentialType, SetupStep,
-};
 use ferrex_player::domains::auth::update::update_auth;
 use ferrex_player::domains::auth::update_handlers as auth_updates;
-use ferrex_player::state::State;
-
 use ferrex_player::infra::api_client::SetupStatus;
+use ferrex_player::state::State;
+use ferrex_player_auth::manager::{
+    DeviceAuthStatus, DeviceTrustPolicyResponse, PinPolicyResponse,
+};
+use ferrex_player_auth::messages::AuthMessage;
+use ferrex_player_auth::security::secure_credential::SecureCredential;
+use ferrex_player_auth::types::{
+    AuthenticationFlow, CredentialType, SetupStep,
+};
 
 fn make_user(
     id: uuid::Uuid,
@@ -158,6 +157,7 @@ async fn setup_status_threads_configured_policy_into_first_run_pin_entry() {
             pin_max_attempts: 7,
             ..Default::default()
         },
+        ..Default::default()
     };
 
     let _ = auth_updates::handle_setup_status_checked(&mut state, status);
@@ -243,7 +243,7 @@ async fn password_login_with_remember_prompts_for_pin_setup() {
 
     let _ = auth_updates::handle_auth_flow_auth_result(
         &mut state,
-        Ok(ferrex_player::domains::auth::manager::PlayerAuthResult {
+        Ok(ferrex_player_auth::PlayerAuthResult {
             user: user.clone(),
             permissions: make_permissions(user.id),
             device_has_pin: false,
@@ -288,7 +288,7 @@ async fn pin_login_success_completes_without_reprompting_for_pin_setup() {
 
     let _ = auth_updates::handle_auth_flow_auth_result(
         &mut state,
-        Ok(ferrex_player::domains::auth::manager::PlayerAuthResult {
+        Ok(ferrex_player_auth::PlayerAuthResult {
             user: user.clone(),
             permissions: make_permissions(user.id),
             device_has_pin: true,

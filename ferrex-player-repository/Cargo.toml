@@ -1,0 +1,56 @@
+[package]
+name = "ferrex-player-repository"
+description = "Player media repository and disk cache for Ferrex clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+publish = true
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "allow"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.rust]
+# Repository APIs were extracted from the player monolith; allow detailed public docs to land incrementally.
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+ferrex-core = { path = "../ferrex-core", default-features = false, features = [
+  "rkyv",
+] }
+ferrex-model = { path = "../ferrex-model", features = [
+  "serde",
+  "rkyv",
+  "chrono",
+] }
+ferrex-player-foundation = { workspace = true }
+
+anyhow.workspace = true
+base64.workspace = true
+cacache.workspace = true
+directories = "6"
+log.workspace = true
+parking_lot = "0.12"
+rancor.workspace = true
+rkyv.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+uuid.workspace = true
+yoke = "0.8.1"
