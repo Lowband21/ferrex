@@ -3,6 +3,19 @@ members = [
   "ferrex-server",
   "ferrex-core",
   "ferrex-player",
+  "ferrex-player-app",
+  "ferrex-player-ui",
+  "ferrex-player-api",
+  "ferrex-player-auth",
+  "ferrex-player-foundation",
+  "ferrex-player-repository",
+  "ferrex-player-library",
+  "ferrex-player-media",
+  "ferrex-player-metadata",
+  "ferrex-player-playback",
+  "ferrex-player-search",
+  "ferrex-player-settings",
+  "ferrex-player-user-admin",
   "ferrex-model",
   "ferrex-contracts",
   "ferrex-flatbuffers",
@@ -55,6 +68,58 @@ version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-contracts]
 path = "ferrex-contracts"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-api]
+path = "ferrex-player-api"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-auth]
+path = "ferrex-player-auth"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-foundation]
+path = "ferrex-player-foundation"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-repository]
+path = "ferrex-player-repository"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-library]
+path = "ferrex-player-library"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-media]
+path = "ferrex-player-media"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-metadata]
+path = "ferrex-player-metadata"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-playback]
+path = "ferrex-player-playback"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-search]
+path = "ferrex-player-search"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-settings]
+path = "ferrex-player-settings"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-user-admin]
+path = "ferrex-player-user-admin"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-app]
+path = "ferrex-player-app"
+version = "0.1.2-alpha"
+
+[workspace.dependencies.ferrex-player-ui]
+path = "ferrex-player-ui"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrexctl]
@@ -222,6 +287,9 @@ argon2 = "0.5"
 [profile.dev.package.ferrex-player]
 opt-level = 1
 
+[profile.dev.package.ferrex-player-app]
+opt-level = 1
+
 [profile.priority]
 inherits = "dev"
 opt-level = 3
@@ -238,6 +306,9 @@ opt-level = 1
 opt-level = 1
 
 [profile.priority.package.ferrex-player]
+opt-level = 1
+
+[profile.priority.package.ferrex-player-app]
 opt-level = 1
 
 [profile.release]
@@ -261,6 +332,9 @@ opt-level = 2
 opt-level = 2
 
 [profile.release-lite.package.ferrex-player]
+opt-level = 2
+
+[profile.release-lite.package.ferrex-player-app]
 opt-level = 2
 
 # The profile that 'dist' will build with

@@ -204,9 +204,14 @@ BEGIN
                 ORDER BY (mf.technical_metadata->>'height')::INTEGER DESC NULLS LAST, mr.id DESC
             ) AS resolution_pos_desc
         FROM movie_references mr
-        JOIN media_files mf ON mf.id = mr.file_id
-        LEFT JOIN movie_metadata mm ON mm.movie_id = mr.id
+        JOIN media_files mf
+          ON mf.id = mr.file_id
+         AND mf.library_id = mr.library_id
+        LEFT JOIN movie_metadata mm
+          ON mm.movie_id = mr.id
+         AND mm.library_id = mr.library_id
         WHERE mr.library_id = p_library_id
+          AND mf.is_available = TRUE
     )
 	    INSERT INTO movie_sort_positions AS msp (
 	        movie_id, library_id, batch_id, title_pos, title_pos_desc,
@@ -262,10 +267,19 @@ BEGIN
         resolution_pos = EXCLUDED.resolution_pos,
         resolution_pos_desc = EXCLUDED.resolution_pos_desc,
         updated_at = NOW();
-    -- Remove rows for movies no longer in the library
+    -- Remove rows for movies no longer visible in the library
     DELETE FROM movie_sort_positions m
     WHERE m.library_id = p_library_id
-      AND NOT EXISTS (SELECT 1 FROM movie_references mr WHERE mr.id = m.movie_id);
+      AND NOT EXISTS (
+          SELECT 1
+          FROM movie_references mr
+          JOIN media_files mf
+            ON mf.id = mr.file_id
+           AND mf.library_id = mr.library_id
+          WHERE mr.id = m.movie_id
+            AND mr.library_id = m.library_id
+            AND mf.is_available = TRUE
+      );
 END;
 $$;
 
@@ -863,19 +877,27 @@ CREATE TABLE public.episode_videos (
 -- Name: file_watch_events; Type: TABLE; Schema: public; Owner: postgres
 CREATE TABLE public.file_watch_events (
     id uuid DEFAULT uuidv7() NOT NULL,
+    event_version integer DEFAULT 1 NOT NULL,
     library_id uuid NOT NULL,
+    library_root_id integer DEFAULT 0 NOT NULL,
+    root_path text NOT NULL,
     event_type character varying(20) NOT NULL,
     file_path text NOT NULL,
+    path_key text NOT NULL,
     old_path text,
+    fingerprint text,
     file_size bigint,
+    file_modified_at timestamp with time zone,
+    correlation_id uuid,
+    idempotency_key text NOT NULL,
     detected_at timestamp with time zone DEFAULT now() NOT NULL,
     processed boolean DEFAULT false NOT NULL,
     processed_at timestamp with time zone,
     processing_attempts integer DEFAULT 0 NOT NULL,
     last_error text,
     CONSTRAINT file_watch_events_pkey PRIMARY KEY (id),
-    CONSTRAINT file_watch_events_event_type_check CHECK (((event_type)::text = ANY ((ARRAY['created'::character varying, 'modified'::character varying, 'deleted'::character varying, 'moved'::character varying])::text[]))),
-    CONSTRAINT valid_move_event CHECK (((((event_type)::text = 'moved'::text) AND (old_path IS NOT NULL)) OR (((event_type)::text <> 'moved'::text) AND (old_path IS NULL))))
+    CONSTRAINT file_watch_events_event_type_check CHECK (((event_type)::text = ANY ((ARRAY['created'::character varying, 'modified'::character varying, 'deleted'::character varying, 'moved'::character varying, 'overflow'::character varying])::text[]))),
+    CONSTRAINT file_watch_events_library_root_id_check CHECK (library_root_id >= 0)
 );
 
 -- Name: TABLE file_watch_events; Type: COMMENT; Schema: public; Owner: postgres
@@ -959,7 +981,15 @@ CREATE TYPE public.media_type AS ENUM ('movie', 'series', 'season', 'episode', '
      created_at timestamp with time zone DEFAULT now() NOT NULL,
      updated_at timestamp with time zone DEFAULT now() NOT NULL,
      technical_metadata jsonb,
-     parsed_info jsonb
+     parsed_info jsonb,
+     is_available boolean DEFAULT true NOT NULL,
+     tombstoned_at timestamp with time zone,
+     tombstone_reason text,
+     fingerprint_device_id text,
+     fingerprint_inode bigint,
+     fingerprint_size bigint,
+     fingerprint_mtime_ms bigint,
+     fingerprint_weak_hash text
  );
 
 -- Name: tmdb_image_variants; Type: TABLE; Schema: public; Owner: postgres
@@ -2528,11 +2558,20 @@ CREATE INDEX idx_file_watch_events_detected_at ON public.file_watch_events USING
 -- Name: idx_file_watch_events_file_path; Type: INDEX; Schema: public; Owner: postgres
 CREATE INDEX idx_file_watch_events_file_path ON public.file_watch_events USING btree (file_path);
 
+-- Name: idx_file_watch_events_path_key; Type: INDEX; Schema: public; Owner: postgres
+CREATE INDEX idx_file_watch_events_path_key ON public.file_watch_events USING btree (path_key);
+
+-- Name: idx_file_watch_events_idempotency_key; Type: INDEX; Schema: public; Owner: postgres
+CREATE UNIQUE INDEX idx_file_watch_events_idempotency_key ON public.file_watch_events USING btree (idempotency_key);
+
 -- Name: idx_file_watch_events_library_id; Type: INDEX; Schema: public; Owner: postgres
 CREATE INDEX idx_file_watch_events_library_id ON public.file_watch_events USING btree (library_id);
 
 -- Name: idx_file_watch_events_unprocessed; Type: INDEX; Schema: public; Owner: postgres
-CREATE INDEX idx_file_watch_events_unprocessed ON public.file_watch_events USING btree (library_id, detected_at) WHERE (processed = false);
+CREATE INDEX idx_file_watch_events_unprocessed ON public.file_watch_events USING btree (library_id, detected_at ASC, id ASC) WHERE (processed = false);
+
+-- Composite index to support cursor-based streaming by library, root, and time, with id tiebreaker
+CREATE INDEX idx_fwe_library_root_detected ON public.file_watch_events USING btree (library_id, library_root_id, detected_at ASC, id ASC);
 
 -- Composite index to support cursor-based streaming by library and time, with id tiebreaker
 CREATE INDEX idx_fwe_library_detected ON public.file_watch_events USING btree (library_id, detected_at ASC, id ASC);

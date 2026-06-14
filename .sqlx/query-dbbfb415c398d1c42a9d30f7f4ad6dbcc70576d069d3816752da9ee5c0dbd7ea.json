@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE public.media_files\n           SET is_available = FALSE,\n               tombstoned_at = NOW(),\n               tombstone_reason = 'test tombstone'\n         WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dbbfb415c398d1c42a9d30f7f4ad6dbcc70576d069d3816752da9ee5c0dbd7ea"
+}

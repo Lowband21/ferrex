@@ -98,27 +98,27 @@ impl TestAuthHarness {
             .hash_password(password)
             .context("failed to hash test password")?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO users (id, username, display_name)
             VALUES ($1, $2, $3)
             "#,
+            user_id,
+            username,
+            display_name
         )
-        .bind(user_id)
-        .bind(username)
-        .bind(display_name)
         .execute(self.pool())
         .await
         .context("failed to insert test user")?;
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             INSERT INTO user_credentials (user_id, password_hash)
             VALUES ($1, $2)
             "#,
+            user_id,
+            password_hash
         )
-        .bind(user_id)
-        .bind(password_hash)
         .execute(self.pool())
         .await
         .context("failed to insert test user credentials")?;
@@ -155,10 +155,10 @@ impl TestAuthHarness {
             .await
             .context("failed to register test device")?;
 
-        let (last_activity,): (DateTime<Utc>,) = sqlx::query_as(
+        let last_activity: DateTime<Utc> = sqlx::query_scalar!(
             "SELECT last_activity FROM auth_device_sessions WHERE id = $1",
+            registered.id()
         )
-        .bind(registered.id())
         .fetch_one(self.pool())
         .await
         .context("failed to inspect device session prior to pin set")?;
@@ -179,22 +179,26 @@ impl TestAuthHarness {
     }
 
     /// Set explicit last_activity for a device session to simulate inactivity windows.
+    ///
+    /// Clearing `trusted_until` keeps these tests on the legacy activity-window path
+    /// instead of the explicit trust-expiration path created when a PIN is set.
     pub async fn backdate_device_activity(
         &self,
         device_session_id: Uuid,
         timestamp: DateTime<Utc>,
     ) -> Result<()> {
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE auth_device_sessions
             SET last_activity = $1,
                 last_seen_at = $1,
+                trusted_until = NULL,
                 updated_at = NOW()
             WHERE id = $2
             "#,
+            timestamp,
+            device_session_id
         )
-        .bind(timestamp)
-        .bind(device_session_id)
         .execute(self.pool())
         .await
         .context("failed to backdate device activity for test")?;

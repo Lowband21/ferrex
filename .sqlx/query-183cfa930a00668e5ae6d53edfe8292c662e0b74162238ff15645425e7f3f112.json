@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM season_references\n            WHERE library_id = $1\n              AND NOT EXISTS (\n                SELECT 1\n                FROM episode_references er\n                WHERE er.season_id = season_references.id\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "183cfa930a00668e5ae6d53edfe8292c662e0b74162238ff15645425e7f3f112"
+}

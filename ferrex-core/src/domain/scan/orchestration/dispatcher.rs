@@ -18,6 +18,11 @@ use crate::domain::scan::actors::{
 use crate::domain::scan::orchestration::{
     context::{FolderScanContext, SeriesLink, SeriesRef},
     correlation::CorrelationCache,
+    delta::{
+        FolderDeltaRepository, NoopFolderDeltaRepository,
+        fingerprints_equivalent, reconcile_direct_media,
+        removed_child_prefixes,
+    },
     events::{
         JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
     },
@@ -34,6 +39,10 @@ use crate::domain::scan::orchestration::{
     series_state::{SeriesScanStateRepository, SeriesScanStatus},
 };
 use crate::error::{MediaError, Result};
+
+async fn path_exists(path: &str) -> bool {
+    tokio::fs::try_exists(path).await.unwrap_or(false)
+}
 
 fn priority_for_reason(reason: &ScanReason) -> JobPriority {
     match reason {
@@ -115,6 +124,7 @@ where
     correlations: CorrelationCache,
     series_states: Arc<Box<dyn SeriesScanStateRepository>>,
     series_resolver: Arc<dyn SeriesResolverPort>,
+    deltas: Arc<dyn FolderDeltaRepository>,
 }
 
 impl<Q, E, C> fmt::Debug for DefaultJobDispatcher<Q, E, C>
@@ -132,6 +142,7 @@ where
             .field("correlations", &self.correlations)
             .field("series_states", &"SeriesScanStateRepository")
             .field("series_resolver", &"SeriesResolverPort")
+            .field("deltas", &"FolderDeltaRepository")
             .finish()
     }
 }
@@ -159,7 +170,16 @@ where
             correlations,
             series_states,
             series_resolver,
+            deltas: Arc::new(NoopFolderDeltaRepository),
         }
+    }
+
+    pub fn with_delta_repository(
+        mut self,
+        deltas: Arc<dyn FolderDeltaRepository>,
+    ) -> Self {
+        self.deltas = deltas;
+        self
     }
 
     fn handle_media_error(&self, err: MediaError) -> DispatchStatus {
@@ -336,6 +356,192 @@ where
         }
     }
 
+    async fn cleanup_deleted_prefixes(
+        &self,
+        library_id: crate::types::ids::LibraryId,
+        prefixes: Vec<String>,
+        reason: &str,
+    ) -> DispatchStatus {
+        if prefixes.is_empty() {
+            return DispatchStatus::Success;
+        }
+
+        if let Err(err) = self
+            .deltas
+            .mark_unavailable_by_prefixes(library_id, prefixes.clone(), reason)
+            .await
+        {
+            return self.handle_media_error(err);
+        }
+        if let Err(err) = self
+            .deltas
+            .delete_folder_inventory_by_prefixes(library_id, prefixes.clone())
+            .await
+        {
+            return self.handle_media_error(err);
+        }
+        if let Err(err) = self
+            .cursors
+            .delete_by_path_prefixes(library_id, prefixes)
+            .await
+        {
+            return self.handle_media_error(err);
+        }
+
+        DispatchStatus::Success
+    }
+
+    async fn reconcile_folder_delta(
+        &self,
+        context: &FolderScanContext,
+        plan: &crate::domain::scan::actors::folder::FolderListingPlan,
+        discovered: Vec<
+            crate::domain::scan::actors::messages::MediaFileDiscovered,
+        >,
+        children: &[FolderScanContext],
+    ) -> std::result::Result<
+        Vec<crate::domain::scan::actors::messages::MediaFileDiscovered>,
+        DispatchStatus,
+    > {
+        let library_id = context.library_id();
+        let folder_path = context.folder_path_norm().to_string();
+
+        let stored = self
+            .deltas
+            .list_media_directly_under(library_id, &folder_path)
+            .await
+            .map_err(|err| self.handle_media_error(err))?;
+        let mut delta = reconcile_direct_media(stored, discovered);
+
+        for move_delta in &delta.moves {
+            self.deltas
+                .move_media_by_path(
+                    library_id,
+                    &move_delta.old_path_norm,
+                    &move_delta.new_path_norm,
+                    &move_delta.fingerprint,
+                )
+                .await
+                .map_err(|err| self.handle_media_error(err))?;
+        }
+
+        let mut additions_requiring_pipeline = Vec::new();
+        for media in delta.additions.into_iter() {
+            let candidates = self
+                .deltas
+                .find_available_media_by_fingerprint(
+                    library_id,
+                    &media.fingerprint,
+                    &media.path_norm,
+                )
+                .await
+                .map_err(|err| self.handle_media_error(err))?;
+
+            let matching_candidates: Vec<_> = candidates
+                .into_iter()
+                .filter(|candidate| {
+                    fingerprints_equivalent(
+                        &candidate.fingerprint,
+                        &media.fingerprint,
+                    )
+                })
+                .collect();
+
+            if let [candidate] = matching_candidates.as_slice()
+                && !path_exists(&candidate.path_norm).await
+            {
+                self.deltas
+                    .move_media_by_path(
+                        library_id,
+                        &candidate.path_norm,
+                        &media.path_norm,
+                        &media.fingerprint,
+                    )
+                    .await
+                    .map_err(|err| self.handle_media_error(err))?;
+                continue;
+            }
+
+            additions_requiring_pipeline.push(media);
+        }
+        delta.additions = additions_requiring_pipeline;
+
+        if !delta.removals.is_empty() {
+            let removed_paths = delta
+                .removals
+                .iter()
+                .map(|media| media.path_norm.clone())
+                .collect();
+            self.deltas
+                .mark_unavailable_by_paths(
+                    library_id,
+                    removed_paths,
+                    "folder_delta_file_missing",
+                )
+                .await
+                .map_err(|err| self.handle_media_error(err))?;
+        }
+
+        let known_cursor_paths = self
+            .cursors
+            .list_by_library(library_id)
+            .await
+            .map_err(|err| self.handle_media_error(err))?
+            .into_iter()
+            .map(|cursor| cursor.folder_path_norm);
+        let current_child_paths = children
+            .iter()
+            .map(|child| child.folder_path_norm().to_string());
+        let removed_prefixes = removed_child_prefixes(
+            &folder_path,
+            current_child_paths,
+            known_cursor_paths,
+        );
+        if !removed_prefixes.is_empty() {
+            match self
+                .cleanup_deleted_prefixes(
+                    library_id,
+                    removed_prefixes,
+                    "folder_delta_child_folder_missing",
+                )
+                .await
+            {
+                DispatchStatus::Success => {}
+                status => return Err(status),
+            }
+        }
+
+        let _ = plan;
+        Ok(delta.media_requiring_pipeline())
+    }
+
+    async fn handle_missing_folder(
+        &self,
+        context: &FolderScanContext,
+        plan: &crate::domain::scan::actors::folder::FolderListingPlan,
+    ) -> DispatchStatus {
+        let summary = match self.actors.folder.finalize(context, plan, &[], &[])
+        {
+            Ok(summary) => summary,
+            Err(err) => return self.handle_media_error(err),
+        };
+
+        if let Err(err) = self
+            .events
+            .publish_scan_event(ScanEvent::FolderScanCompleted(summary))
+            .await
+        {
+            return self.handle_media_error(err);
+        }
+
+        self.cleanup_deleted_prefixes(
+            context.library_id(),
+            vec![context.folder_path_norm().to_string()],
+            "folder_delta_folder_missing",
+        )
+        .await
+    }
+
     async fn handle_folder_scan(
         &self,
         lease: &JobLease,
@@ -353,6 +559,10 @@ where
                 Ok(plan) => plan,
                 Err(err) => return self.handle_media_error(err),
             };
+
+            if plan.folder_missing {
+                return self.handle_missing_folder(&context, &plan).await;
+            }
 
             // Check cursor to short-circuit unchanged listings
             let cursor_id = ScanCursorId::new(
@@ -379,68 +589,19 @@ where
                 // downstream consumers (scan progress, bundle finalization trackers, etc.)
                 // can treat this folder scan as a completed unit of work.
                 //
-                // We intentionally do *not* publish MediaFileDiscovered / FolderDiscovered
-                // here to preserve the short-circuit behavior (no downstream pipeline
-                // fan-out when nothing changed).
-                let discovered = match self.actors.folder.discover_media(&plan, job).await {
-                    Ok(files) => files,
-                    Err(err) => return self.handle_media_error(err),
-                };
-
+                // We intentionally do *not* discover media, publish FolderDiscovered,
+                // or enqueue series/analyze/metadata/index follow-ups here. An unchanged
+                // listing only refreshes the cursor timestamp and emits folder completion
+                // for progress accounting.
                 let summary = match self.actors.folder.finalize(
                     &context,
                     &plan,
-                    &discovered,
+                    &[],
                     &[],
                 ) {
                     Ok(summary) => summary,
                     Err(err) => return self.handle_media_error(err),
                 };
-
-                if let FolderScanContext::Series(series_ctx) = &context {
-                    let folder_name = std::path::Path::new(
-                        series_ctx.series_root_path.as_str(),
-                    )
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.to_string())
-                    .unwrap_or_else(|| {
-                        series_ctx.series_root_path.as_str().to_string()
-                    });
-
-                    let state = match self
-                        .series_states
-                        .mark_discovered(
-                            series_ctx.library_id,
-                            series_ctx.series_root_path.clone(),
-                            None,
-                        )
-                        .await
-                    {
-                        Ok(state) => state,
-                        Err(err) => return self.handle_media_error(err),
-                    };
-
-                    if !matches!(state.status, SeriesScanStatus::Resolved) {
-                        let series_job = SeriesResolveJob {
-                            library_id: series_ctx.library_id,
-                            series_root_path: series_ctx.series_root_path.clone(),
-                            hint: None,
-                            folder_name,
-                            scan_reason: job.scan_reason,
-                        };
-                        let priority = priority_for_reason(&job.scan_reason)
-                            .elevate(JobPriority::P0);
-                        let req = EnqueueRequest::new(
-                            priority,
-                            JobPayload::SeriesResolve(series_job),
-                        );
-                        match self.enqueue_follow_up(req).await {
-                            DispatchStatus::Success => {}
-                            status => return status,
-                        }
-                    }
-                }
 
                 if let Err(err) = self
                     .events
@@ -483,6 +644,14 @@ where
             {
                 Ok(children) => children,
                 Err(err) => return self.handle_media_error(err),
+            };
+
+            let discovered = match self
+                .reconcile_folder_delta(&context, &plan, discovered, &children)
+                .await
+            {
+                Ok(discovered) => discovered,
+                Err(status) => return status,
             };
 
             let summary = match self.actors.folder.finalize(
@@ -1470,13 +1639,13 @@ mod tests {
         .await
         .expect("seed library row");
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM orchestrator_jobs
             WHERE library_id = $1
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(pool)
         .await
         .expect("clear fixture jobs");
@@ -1505,6 +1674,7 @@ mod tests {
                 media_files: vec![PathBuf::from("/library/movie/movie.mkv")],
                 ancillary_files: vec![],
                 generated_listing_hash: unique_hash.clone(),
+                folder_missing: false,
             },
             discovered: vec![MediaFileDiscovered {
                 library_id,

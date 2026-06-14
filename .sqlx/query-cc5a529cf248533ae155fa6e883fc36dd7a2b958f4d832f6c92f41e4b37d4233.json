@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE media_files\n            SET file_path = $3,\n                filename = $4,\n                file_size = CASE WHEN $5::bigint > 0 THEN $5 ELSE file_size END,\n                is_available = TRUE,\n                tombstoned_at = NULL,\n                tombstone_reason = NULL,\n                fingerprint_device_id = $6,\n                fingerprint_inode = $7,\n                fingerprint_size = CASE WHEN $5::bigint > 0 THEN $5 ELSE fingerprint_size END,\n                fingerprint_mtime_ms = CASE WHEN $8::bigint > 0 THEN $8 ELSE fingerprint_mtime_ms END,\n                fingerprint_weak_hash = $9,\n                updated_at = NOW()\n            WHERE library_id = $1 AND file_path = $2\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cc5a529cf248533ae155fa6e883fc36dd7a2b958f4d832f6c92f41e4b37d4233"
+}

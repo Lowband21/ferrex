@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH stale AS (\n                SELECT sc.library_id, sc.last_scan_at\n                FROM scan_cursors sc\n                JOIN libraries l ON l.id = sc.library_id\n                WHERE l.enabled = true\n                  AND l.auto_scan = true\n                  AND sc.last_scan_at < NOW() - (\n                      GREATEST(l.scan_interval_minutes, 1)::text || ' minutes'\n                  )::interval\n            )\n            SELECT\n                COUNT(*)::bigint AS \"stale_cursors!\",\n                COUNT(DISTINCT library_id)::bigint AS \"stale_cursor_libraries!\",\n                (EXTRACT(EPOCH FROM (NOW() - MIN(last_scan_at))) * 1000)::bigint AS oldest_cursor_staleness_ms\n            FROM stale\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stale_cursors!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "stale_cursor_libraries!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "oldest_cursor_staleness_ms",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e441f7de6dee33dfb3e8965980e8634fc7f1bf0df5065821804ad6c77c25fdde"
+}

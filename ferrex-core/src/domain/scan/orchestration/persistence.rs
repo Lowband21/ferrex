@@ -1601,6 +1601,40 @@ impl ScanCursorRepository for PostgresCursorRepository {
         Ok(result.rows_affected() as usize)
     }
 
+    async fn delete_by_path_prefixes(
+        &self,
+        library_id: LibraryId,
+        prefixes: Vec<String>,
+    ) -> Result<usize> {
+        if prefixes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+            "DELETE FROM scan_cursors WHERE library_id = ",
+        );
+        builder.push_bind(library_id.0);
+        builder.push(" AND (");
+
+        for (idx, prefix) in prefixes.iter().enumerate() {
+            if idx > 0 {
+                builder.push(" OR ");
+            }
+            let root = prefix.trim_end_matches('/');
+            let mut child_prefix = root.to_string();
+            child_prefix.push('/');
+            builder.push("(folder_path_norm = ");
+            builder.push_bind(root);
+            builder.push(" OR folder_path_norm LIKE ");
+            builder.push_bind(format!("{}%", child_prefix));
+            builder.push(")");
+        }
+        builder.push(")");
+
+        let result = builder.build().execute(&self.pool).await?;
+        Ok(result.rows_affected() as usize)
+    }
+
     async fn list_stale(
         &self,
         library_id: LibraryId,

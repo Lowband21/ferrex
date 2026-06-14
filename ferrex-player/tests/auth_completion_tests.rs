@@ -3,8 +3,8 @@
 use chrono::Utc;
 use ferrex_core::player_prelude::{User, UserPermissions};
 use ferrex_player::common::messages::DomainUpdateResult;
-use ferrex_player::domains::auth::messages as auth_msgs;
 use ferrex_player::state::State;
+use ferrex_player_auth::messages as auth_msgs;
 use uuid::Uuid;
 
 fn make_user() -> User {

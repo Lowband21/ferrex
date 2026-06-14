@@ -21,6 +21,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +42,10 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.library.LibraryFreshness
+import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.library.LibraryRepositoryState
+import com.ferrex.android.core.library.ServerCacheScope
 import kotlinx.coroutines.launch
 
 @Composable
@@ -282,10 +288,20 @@ fun PhoneRecoverableScreen(
 @Composable
 fun PhoneHomeScreen(
     state: SessionState.Authenticated,
+    libraryRepository: LibraryRepository? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
 ) {
+    val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
+    val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
+    val repositoryState by libraryRepository?.state?.collectAsState() ?: emptyRepositoryState
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(libraryRepository, scope) {
+        libraryRepository?.refreshLibraries(scope)
+    }
+
     PhoneSurface {
         Text(
             text = FerrexShellCopy.MOBILE_TITLE,
@@ -315,6 +331,19 @@ fun PhoneHomeScreen(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+        PhoneLibraryCacheStatus(
+            freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+            selectedLibraryName = repositoryState?.libraries?.firstOrNull { it.id == repositoryState?.selectedLibraryId }?.name,
+            selectedLibraryId = repositoryState?.selectedLibraryId,
+            movieCount = repositoryState?.movieAccessor?.movieCount,
+            seriesBundleCount = repositoryState?.seriesAccessor?.bundleCount,
+            onRetry = { coroutineScope.launch { libraryRepository?.refreshLibraries(scope, repositoryState?.selectedLibraryId) } },
+            onClearSelected = {
+                val libraryId = repositoryState?.selectedLibraryId ?: return@PhoneLibraryCacheStatus
+                libraryRepository?.clearSelectedCache(scope, libraryId)
+            },
+            onClearAll = { libraryRepository?.clearAllCache(scope) },
+        )
         RecoveryActions(
             includeRetry = false,
             onRetry = {},
@@ -322,6 +351,76 @@ fun PhoneHomeScreen(
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
         )
+    }
+}
+
+@Composable
+private fun PhoneLibraryCacheStatus(
+    freshness: LibraryFreshness,
+    selectedLibraryName: String?,
+    selectedLibraryId: String?,
+    movieCount: Int?,
+    seriesBundleCount: Int?,
+    onRetry: () -> Unit,
+    onClearSelected: () -> Unit,
+    onClearAll: () -> Unit,
+) {
+    Text(
+        modifier = Modifier.padding(top = 28.dp),
+        text = "Library cache: ${freshness.label}",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    selectedLibraryName?.let {
+        Text(
+            modifier = Modifier.padding(top = 8.dp),
+            text = "Selected library: $it",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+    val countCopy = when {
+        movieCount != null -> "Cached movies visible across all batches: $movieCount"
+        seriesBundleCount != null -> "Cached series bundles: $seriesBundleCount"
+        else -> "No cached library payloads yet."
+    }
+    Text(
+        modifier = Modifier.padding(top = 8.dp),
+        text = countCopy,
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    val detail = when (freshness) {
+        LibraryFreshness.Empty -> "Browse/search/detail cache will build after a reachable library sync."
+        is LibraryFreshness.Fresh -> "Cache is fresh and scoped to this server and user."
+        LibraryFreshness.Syncing -> "Syncing library metadata and payload versions…"
+        is LibraryFreshness.StaleOffline -> "Offline/stale cache is being shown: ${freshness.message}"
+        is LibraryFreshness.CorruptRebuilding -> freshness.message
+        is LibraryFreshness.ErrorRetryable -> "Cache sync can be retried: ${freshness.message}"
+    }
+    Text(
+        modifier = Modifier.padding(top = 8.dp),
+        text = detail,
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Button(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        onClick = onRetry,
+    ) {
+        Text("Retry cache sync")
+    }
+    TextButton(
+        modifier = Modifier.fillMaxWidth(),
+        enabled = selectedLibraryId != null,
+        onClick = onClearSelected,
+    ) {
+        Text("Clear selected cache")
+    }
+    TextButton(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClearAll,
+    ) {
+        Text("Clear all server cache")
     }
 }
 

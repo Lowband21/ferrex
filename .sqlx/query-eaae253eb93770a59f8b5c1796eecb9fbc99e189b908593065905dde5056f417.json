@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT mr.batch_id AS \"batch_id!\"\n            FROM movie_references mr\n            JOIN media_files mf ON mf.id = mr.file_id\n            WHERE mr.library_id = $1\n              AND mf.is_available = TRUE\n            ORDER BY mr.batch_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eaae253eb93770a59f8b5c1796eecb9fbc99e189b908593065905dde5056f417"
+}

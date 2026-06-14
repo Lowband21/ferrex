@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM information_schema.columns\n                WHERE table_schema = 'public'\n                  AND table_name = 'file_watch_events'\n                  AND column_name = 'idempotency_key'\n            ) AS \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e9d9713f94e84f6b73f71db1ef3c5f5a0594a00ac7bb90cbe6c8401ad1649ed1"
+}

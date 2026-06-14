@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.ui.recovery.PhoneHomeScreen
 import com.ferrex.android.ui.recovery.PhoneLoadingScreen
 import com.ferrex.android.ui.recovery.PhoneLoginScreen
@@ -29,6 +30,7 @@ object FerrexRoutes {
 @Composable
 fun FerrexNavGraph(
     authManager: AuthManager,
+    libraryRepository: LibraryRepository? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -82,6 +84,7 @@ fun FerrexNavGraph(
             } else {
                 PhoneHomeScreen(
                     state = state,
+                    libraryRepository = libraryRepository,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,

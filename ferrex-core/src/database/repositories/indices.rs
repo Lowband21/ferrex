@@ -64,13 +64,32 @@ impl IndicesRepository for PostgresIndicesRepository {
         let (order_column, direction) = map_sort_to_column(sort, order);
 
         let mut qb = QueryBuilder::new(
-            "SELECT (msp.title_pos - 1)::INT4 AS idx \
-             FROM movie_sort_positions msp \
-             LEFT JOIN movie_metadata mm ON mm.movie_id = msp.movie_id \
-             WHERE msp.library_id = ",
+            "WITH available_movie_positions AS ( \
+                 SELECT msp.*, \
+                        (ROW_NUMBER() OVER ( \
+                            PARTITION BY msp.library_id \
+                            ORDER BY msp.title_pos, msp.movie_id \
+                        ) - 1)::INT4 AS compact_title_idx \
+                   FROM movie_sort_positions msp \
+                   JOIN movie_references mr \
+                     ON mr.id = msp.movie_id \
+                    AND mr.library_id = msp.library_id \
+                   JOIN media_files mf \
+                     ON mf.id = mr.file_id \
+                    AND mf.library_id = mr.library_id \
+                  WHERE mf.is_available = TRUE \
+                    AND msp.library_id = ",
         );
         qb.push_bind(library_id.as_uuid());
-        qb.push(" ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ");
+        qb.push(
+            ") \
+             SELECT msp.compact_title_idx AS idx \
+               FROM available_movie_positions msp \
+               LEFT JOIN movie_metadata mm \
+                 ON mm.movie_id = msp.movie_id \
+                AND mm.library_id = msp.library_id \
+              ORDER BY CASE WHEN COALESCE(mm.poster_path, '') = '' THEN 1 ELSE 0 END, ",
+        );
         qb.push(order_column);
         qb.push(" ");
         qb.push(direction);
@@ -170,11 +189,40 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
         let order = spec.order.unwrap_or(SortOrder::Ascending);
 
         let mut qb = QueryBuilder::new(
-            "SELECT (msp.title_pos - 1)::INT4 AS idx \
-             FROM movie_references mr \
-             JOIN media_files mf ON mr.file_id = mf.id \
-             LEFT JOIN movie_metadata mm ON mr.id = mm.movie_id \
-             JOIN movie_sort_positions msp ON msp.movie_id = mr.id",
+            "WITH available_movie_positions AS ( \
+                 SELECT msp.movie_id, \
+                        msp.library_id, \
+                        (ROW_NUMBER() OVER ( \
+                            PARTITION BY msp.library_id \
+                            ORDER BY msp.title_pos, msp.movie_id \
+                        ) - 1)::INT4 AS compact_title_idx \
+                   FROM movie_sort_positions msp \
+                   JOIN movie_references base_mr \
+                     ON base_mr.id = msp.movie_id \
+                    AND base_mr.library_id = msp.library_id \
+                   JOIN media_files base_mf \
+                     ON base_mf.id = base_mr.file_id \
+                    AND base_mf.library_id = base_mr.library_id \
+                  WHERE base_mf.is_available = TRUE \
+                    AND msp.library_id = ",
+        );
+        qb.push_bind(library_id);
+        qb.push(
+            ") \
+             SELECT amp.compact_title_idx AS idx \
+               FROM movie_references mr \
+               JOIN media_files mf \
+                 ON mr.file_id = mf.id \
+                AND mf.library_id = mr.library_id \
+               LEFT JOIN movie_metadata mm \
+                 ON mr.id = mm.movie_id \
+                AND mm.library_id = mr.library_id \
+               JOIN movie_sort_positions msp \
+                 ON msp.movie_id = mr.id \
+                AND msp.library_id = mr.library_id \
+               JOIN available_movie_positions amp \
+                 ON amp.movie_id = mr.id \
+                AND amp.library_id = mr.library_id",
         );
 
         let mut needs_watch_progress =
@@ -224,7 +272,7 @@ impl<'a> FilteredMovieIndexBuilder<'a> {
             }
         }
 
-        qb.push(" WHERE mr.library_id = ");
+        qb.push(" WHERE mf.is_available = TRUE AND mr.library_id = ");
         qb.push_bind(library_id);
         qb.push(" AND msp.library_id = ");
         qb.push_bind(library_id);

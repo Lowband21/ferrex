@@ -75,16 +75,25 @@ pub enum FileWatchEventType {
     Modified,
     Deleted,
     Moved,
+    Overflow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWatchEvent {
     pub id: Uuid,
+    pub event_version: i32,
     pub library_id: LibraryId,
+    pub library_root_id: i32,
+    pub root_path: String,
     pub event_type: FileWatchEventType,
     pub file_path: String,
+    pub path_key: String,
     pub old_path: Option<String>,
+    pub fingerprint: Option<String>,
     pub file_size: Option<i64>,
+    pub file_modified_at: Option<DateTime<Utc>>,
+    pub correlation_id: Option<Uuid>,
+    pub idempotency_key: String,
     pub detected_at: DateTime<Utc>,
     pub processed: bool,
     pub processed_at: Option<DateTime<Utc>>,

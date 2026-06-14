@@ -139,9 +139,11 @@ class AuthManagerTest {
     }
 
     @Test
-    fun resetConnectionClearsServerTokensAndInterceptor() = runTest {
-        val fixture = Fixture()
+    fun resetConnectionClearsServerTokensInterceptorAndServerScopedCache() = runTest {
+        val clearedScopes = mutableListOf<Pair<String, String?>>()
+        val fixture = Fixture(resetClears = clearedScopes)
         fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.userId = "user-1"
         fixture.storage.accessToken = "access"
         fixture.storage.refreshToken = "refresh"
         fixture.storage.localDeviceId = "device-id"
@@ -155,9 +157,12 @@ class AuthManagerTest {
         assertNull(fixture.storage.refreshToken)
         assertNull(fixture.storage.localDeviceId)
         assertNull(fixture.interceptor.accessToken)
+        assertEquals(listOf("http://ferrex.local" to "user-1"), clearedScopes)
     }
 
-    private class Fixture {
+    private class Fixture(
+        val resetClears: MutableList<Pair<String, String?>> = mutableListOf(),
+    ) {
         val api = FakeFerrexApi()
         val storage = InMemoryAuthStorage()
         val serverConfig = ServerConfig()
@@ -171,6 +176,7 @@ class AuthManagerTest {
             tokenRefreshAuthenticator = authenticator,
             deviceName = "Test Android",
             appVersion = "test",
+            onResetConnectionCacheClear = { serverUrl, userId -> resetClears += serverUrl to userId },
         )
     }
 

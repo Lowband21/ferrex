@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{FromRow, PgPool};
+use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
@@ -83,6 +83,7 @@ fn event_type_to_str(kind: &FileWatchEventType) -> &'static str {
         FileWatchEventType::Modified => "modified",
         FileWatchEventType::Deleted => "deleted",
         FileWatchEventType::Moved => "moved",
+        FileWatchEventType::Overflow => "overflow",
     }
 }
 
@@ -92,18 +93,27 @@ fn str_to_event_type(raw: &str) -> Option<FileWatchEventType> {
         "modified" => Some(FileWatchEventType::Modified),
         "deleted" => Some(FileWatchEventType::Deleted),
         "moved" => Some(FileWatchEventType::Moved),
+        "overflow" => Some(FileWatchEventType::Overflow),
         _ => None,
     }
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug)]
 struct FileWatchEventRow {
     id: Uuid,
+    event_version: i32,
     library_id: Uuid,
+    library_root_id: i32,
+    root_path: String,
     event_type: String,
     file_path: String,
+    path_key: String,
     old_path: Option<String>,
+    fingerprint: Option<String>,
     file_size: Option<i64>,
+    file_modified_at: Option<DateTime<Utc>>,
+    correlation_id: Option<Uuid>,
+    idempotency_key: String,
     detected_at: DateTime<Utc>,
     processed: bool,
     processed_at: Option<DateTime<Utc>>,
@@ -111,23 +121,32 @@ struct FileWatchEventRow {
     last_error: Option<String>,
 }
 
-impl FileWatchEventRow {
-    fn into_event(self) -> Option<FileWatchEvent> {
-        let event_type = str_to_event_type(&self.event_type)?;
-        Some(FileWatchEvent {
-            id: self.id,
-            library_id: LibraryId(self.library_id),
-            event_type,
-            file_path: self.file_path,
-            old_path: self.old_path,
-            file_size: self.file_size,
-            detected_at: self.detected_at,
-            processed: self.processed,
-            processed_at: self.processed_at,
-            processing_attempts: self.processing_attempts,
-            last_error: self.last_error,
-        })
-    }
+fn decode_row(row: FileWatchEventRow) -> Result<Option<FileWatchEvent>> {
+    let Some(event_type) = str_to_event_type(&row.event_type) else {
+        return Ok(None);
+    };
+
+    Ok(Some(FileWatchEvent {
+        id: row.id,
+        event_version: row.event_version,
+        library_id: LibraryId(row.library_id),
+        library_root_id: row.library_root_id,
+        root_path: row.root_path,
+        event_type,
+        file_path: row.file_path,
+        path_key: row.path_key,
+        old_path: row.old_path,
+        fingerprint: row.fingerprint,
+        file_size: row.file_size,
+        file_modified_at: row.file_modified_at,
+        correlation_id: row.correlation_id,
+        idempotency_key: row.idempotency_key,
+        detected_at: row.detected_at,
+        processed: row.processed,
+        processed_at: row.processed_at,
+        processing_attempts: row.processing_attempts,
+        last_error: row.last_error,
+    }))
 }
 
 async fn fetch_events_after(
@@ -142,11 +161,19 @@ async fn fetch_events_after(
         r#"
         SELECT
             id,
+            event_version,
             library_id,
+            library_root_id,
+            root_path,
             event_type,
             file_path,
+            path_key,
             old_path,
+            fingerprint,
             file_size,
+            file_modified_at,
+            correlation_id,
+            idempotency_key,
             detected_at,
             processed,
             processed_at,
@@ -177,7 +204,7 @@ async fn fetch_events_after(
 
     let mut events = Vec::with_capacity(rows.len());
     for row in rows {
-        if let Some(event) = row.into_event() {
+        if let Some(event) = decode_row(row)? {
             events.push(event);
         } else {
             warn!("skipping file watch event with unknown type");
@@ -191,7 +218,7 @@ async fn fetch_event(
     pool: &PgPool,
     event_id: Uuid,
 ) -> Result<Option<(LibraryId, DateTime<Utc>)>> {
-    let result = sqlx::query!(
+    let row = sqlx::query!(
         "SELECT library_id, detected_at FROM file_watch_events WHERE id = $1",
         event_id
     )
@@ -203,7 +230,7 @@ async fn fetch_event(
         ))
     })?;
 
-    Ok(result.map(|row| (LibraryId(row.library_id), row.detected_at)))
+    Ok(row.map(|row| (LibraryId(row.library_id), row.detected_at)))
 }
 
 async fn upsert_cursor(pool: &PgPool, cursor: &FileChangeCursor) -> Result<()> {
@@ -291,9 +318,11 @@ async fn cleanup_old_events(pool: &PgPool, days_to_keep: i32) -> Result<u32> {
     let affected = sqlx::query!(
         r#"
         DELETE FROM file_watch_events
-        WHERE detected_at < NOW() - ($1 || ' days')::interval
+        WHERE processed = true
+          AND processed_at IS NOT NULL
+          AND processed_at < NOW() - ($1::integer * INTERVAL '1 day')
         "#,
-        days_to_keep.to_string()
+        days_to_keep
     )
     .execute(pool)
     .await
@@ -309,29 +338,46 @@ async fn cleanup_old_events(pool: &PgPool, days_to_keep: i32) -> Result<u32> {
 
 #[async_trait]
 impl FileChangeEventBus for PostgresFileChangeEventBus {
-    async fn publish(&self, event: FileWatchEvent) -> Result<()> {
-        sqlx::query!(
+    async fn publish(&self, event: FileWatchEvent) -> Result<bool> {
+        let result = sqlx::query!(
             r#"
             INSERT INTO file_watch_events (
                 id,
+                event_version,
                 library_id,
+                library_root_id,
+                root_path,
                 event_type,
                 file_path,
+                path_key,
                 old_path,
+                fingerprint,
                 file_size,
+                file_modified_at,
+                correlation_id,
+                idempotency_key,
                 detected_at,
                 processed,
                 processed_at,
                 processing_attempts,
                 last_error
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            ON CONFLICT (idempotency_key) DO NOTHING
             "#,
             event.id,
+            event.event_version,
             event.library_id.as_uuid(),
+            event.library_root_id,
+            &event.root_path,
             event_type_to_str(&event.event_type),
             &event.file_path,
+            &event.path_key,
             event.old_path.as_deref(),
+            event.fingerprint.as_deref(),
             event.file_size,
+            event.file_modified_at,
+            event.correlation_id,
+            &event.idempotency_key,
             event.detected_at,
             event.processed,
             event.processed_at,
@@ -346,7 +392,7 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
             ))
         })?;
 
-        Ok(())
+        Ok(result.rows_affected() == 1)
     }
 
     async fn subscribe(
@@ -452,11 +498,19 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
             r#"
             SELECT
                 id,
+                event_version,
                 library_id,
+                library_root_id,
+                root_path,
                 event_type,
                 file_path,
+                path_key,
                 old_path,
+                fingerprint,
                 file_size,
+                file_modified_at,
+                correlation_id,
+                idempotency_key,
                 detected_at,
                 processed,
                 processed_at,
@@ -464,7 +518,7 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
                 last_error
             FROM file_watch_events
             WHERE library_id = $1 AND processed = false
-            ORDER BY detected_at ASC
+            ORDER BY detected_at ASC, id ASC
             LIMIT $2
             "#,
             library_id.as_uuid(),
@@ -480,7 +534,7 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
 
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Some(event) = row.into_event() {
+            if let Some(event) = decode_row(row)? {
                 events.push(event);
             } else {
                 warn!("skipping file watch event with unknown type");
@@ -496,5 +550,191 @@ impl FileChangeEventBus for PostgresFileChangeEventBus {
 
     async fn cleanup_retention(&self, days_to_keep: i32) -> Result<u32> {
         cleanup_old_events(self.pool(), days_to_keep).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MIGRATOR;
+    use futures::StreamExt;
+
+    async fn maybe_pool() -> Option<PgPool> {
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping Postgres file-watch event-bus test; DATABASE_URL is not set"
+                );
+                return None;
+            }
+        };
+
+        let pool = match PgPool::connect(&database_url).await {
+            Ok(pool) => pool,
+            Err(err) => {
+                eprintln!(
+                    "skipping Postgres file-watch event-bus test; connect failed: {err}"
+                );
+                return None;
+            }
+        };
+
+        if let Err(err) = MIGRATOR.run(&pool).await {
+            eprintln!(
+                "skipping Postgres file-watch event-bus test; migrations failed: {err}"
+            );
+            return None;
+        }
+
+        let has_idempotency_key = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'file_watch_events'
+                  AND column_name = 'idempotency_key'
+            ) AS "exists!"
+            "#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(false);
+
+        if !has_idempotency_key {
+            eprintln!(
+                "skipping Postgres file-watch event-bus test; durable schema columns are unavailable"
+            );
+            return None;
+        }
+
+        Some(pool)
+    }
+
+    async fn insert_library(
+        pool: &PgPool,
+        library_id: LibraryId,
+    ) -> Result<()> {
+        let library_name = format!("file-watch-test-{library_id}");
+        let paths = vec!["/tmp/ferrex-watch-test".to_string()];
+        sqlx::query!(
+            r#"
+            INSERT INTO libraries (id, name, library_type, paths)
+            VALUES ($1, $2, 'movies', $3)
+            ON CONFLICT (id) DO NOTHING
+            "#,
+            library_id.as_uuid(),
+            library_name,
+            &paths
+        )
+        .execute(pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "failed to insert test library: {err}"
+            ))
+        })?;
+        Ok(())
+    }
+
+    fn event(
+        library_id: LibraryId,
+        event_type: FileWatchEventType,
+        suffix: &str,
+    ) -> FileWatchEvent {
+        let id = Uuid::now_v7();
+        FileWatchEvent {
+            id,
+            event_version: 1,
+            library_id,
+            library_root_id: 0,
+            root_path: "/tmp/ferrex-watch-test".into(),
+            event_type,
+            file_path: format!("/tmp/ferrex-watch-test/{suffix}"),
+            path_key: format!("/tmp/ferrex-watch-test/{suffix}"),
+            old_path: None,
+            fingerprint: Some(format!("fingerprint-{suffix}")),
+            file_size: Some(12),
+            file_modified_at: Some(Utc::now()),
+            correlation_id: Some(Uuid::now_v7()),
+            idempotency_key: format!("test-{library_id}-{suffix}"),
+            detected_at: Utc::now(),
+            processed: false,
+            processed_at: None,
+            processing_attempts: 0,
+            last_error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn postgres_event_bus_publish_replay_ack_duplicate_and_cleanup()
+    -> Result<()> {
+        let Some(pool) = maybe_pool().await else {
+            return Ok(());
+        };
+        let library_id = LibraryId::new();
+        insert_library(&pool, library_id).await?;
+        let bus = PostgresFileChangeEventBus::with_config(
+            pool.clone(),
+            PostgresFileChangeEventBusConfig {
+                fetch_limit: 8,
+                channel_capacity: 8,
+                poll_interval: Duration::from_millis(10),
+            },
+        );
+
+        let created = event(library_id, FileWatchEventType::Created, "a.mkv");
+        assert!(bus.publish(created.clone()).await?);
+        assert!(!bus.publish(created.clone()).await?);
+
+        let overflow = event(library_id, FileWatchEventType::Overflow, "root");
+        assert!(bus.publish(overflow.clone()).await?);
+
+        let replay = bus.get_unprocessed_events(library_id, 8).await?;
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[0].id, created.id);
+        assert_eq!(replay[1].event_type, FileWatchEventType::Overflow);
+
+        let mut stream = bus.subscribe("scan-watch-test", library_id).await?;
+        let streamed =
+            tokio::time::timeout(Duration::from_secs(2), stream.next())
+                .await
+                .expect("streamed event")
+                .expect("stream item");
+        assert_eq!(streamed.id, created.id);
+
+        bus.ack("scan-watch-test", created.id).await?;
+        let cursor = bus
+            .get_cursor("scan-watch-test", library_id)
+            .await?
+            .expect("cursor");
+        assert_eq!(cursor.last_event_id, Some(created.id));
+
+        let old = FileWatchEvent {
+            id: Uuid::now_v7(),
+            idempotency_key: format!("old-{library_id}"),
+            detected_at: Utc::now() - chrono::Duration::days(3),
+            processed: true,
+            processed_at: Some(Utc::now() - chrono::Duration::days(2)),
+            ..event(library_id, FileWatchEventType::Modified, "old.mkv")
+        };
+        assert!(bus.publish(old.clone()).await?);
+        let removed = bus.cleanup_retention(1).await?;
+        assert!(removed >= 1);
+
+        sqlx::query!(
+            "DELETE FROM libraries WHERE id = $1",
+            library_id.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .map_err(|err| {
+            MediaError::Internal(format!(
+                "failed to clean up test library: {err}"
+            ))
+        })?;
+
+        Ok(())
     }
 }

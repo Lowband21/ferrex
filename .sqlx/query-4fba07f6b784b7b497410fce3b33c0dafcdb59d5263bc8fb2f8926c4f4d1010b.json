@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT movie_id, title_pos\n          FROM public.movie_sort_positions\n         WHERE library_id = $1\n         ORDER BY title_pos\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "movie_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title_pos",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4fba07f6b784b7b497410fce3b33c0dafcdb59d5263bc8fb2f8926c4f4d1010b"
+}

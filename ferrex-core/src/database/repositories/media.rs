@@ -13,6 +13,10 @@ use crate::database::repository_ports::media_files::{
     MediaFilesWritePort, Page, SortDirection, UpsertOutcome,
 };
 use crate::database::traits::{MediaFilters, MediaStats};
+use crate::domain::scan::orchestration::delta::{
+    FolderDeltaRepository, StoredMediaFile, is_direct_child_file,
+};
+use crate::domain::scan::orchestration::job::MediaFingerprint;
 use crate::error::{MediaError, Result};
 use crate::types::files::{MediaFile, MediaFileMetadata};
 use crate::types::ids::LibraryId;
@@ -98,6 +102,31 @@ impl MediaFilesWritePort for PostgresMediaRepository {
     ) -> Result<()> {
         self.update_technical_metadata_by_id(id, metadata).await
     }
+
+    async fn mark_available_with_fingerprint(
+        &self,
+        library_id: LibraryId,
+        path: &str,
+        fingerprint: &MediaFingerprint,
+    ) -> Result<()> {
+        self.mark_available_with_fingerprint_impl(library_id, path, fingerprint)
+            .await
+    }
+
+    async fn move_by_path(
+        &self,
+        library_id: LibraryId,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<Uuid> {
+        self.move_media_by_path_impl(
+            library_id,
+            old_path,
+            new_path,
+            &MediaFingerprint::default(),
+        )
+        .await
+    }
 }
 
 impl PostgresMediaRepository {
@@ -111,6 +140,32 @@ impl PostgresMediaRepository {
 
     fn default_sort() -> MediaFileSort {
         MediaFileSort::descending(MediaFileSortField::DiscoveredAt)
+    }
+
+    fn media_id_from_parts(id: Uuid, media_type: &str) -> Result<MediaID> {
+        match media_type {
+            "movie" => Ok(MediaID::Movie(crate::types::ids::MovieID(id))),
+            "episode" => Ok(MediaID::Episode(crate::types::ids::EpisodeID(id))),
+            other => Err(MediaError::Internal(format!(
+                "Unsupported media_files.media_type for scan delta: {other}"
+            ))),
+        }
+    }
+
+    async fn is_media_file_available(&self, id: Uuid) -> Result<bool> {
+        let available = sqlx::query_scalar!(
+            "SELECT is_available FROM media_files WHERE id = $1",
+            id
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to check media availability: {e}"
+            ))
+        })?;
+
+        Ok(available.unwrap_or(false))
     }
 
     fn map_sort_field(field: MediaFileSortField) -> &'static str {
@@ -184,6 +239,8 @@ impl PostgresMediaRepository {
         builder: &mut QueryBuilder<Postgres>,
         filter: &MediaFileFilter,
     ) {
+        builder.push(" AND is_available = TRUE");
+
         if let Some(library) = filter.library_id {
             builder.push(" AND library_id = ");
             builder.push_bind(library.to_uuid());
@@ -351,6 +408,9 @@ impl PostgresMediaRepository {
         let Some(row) = row else {
             return Ok(None);
         };
+        if !self.is_media_file_available(row.id).await? {
+            return Ok(None);
+        }
 
         let media_file_metadata = row
             .technical_metadata
@@ -400,6 +460,9 @@ impl PostgresMediaRepository {
         let Some(row) = row else {
             return Ok(None);
         };
+        if !self.is_media_file_available(row.id).await? {
+            return Ok(None);
+        }
 
         let media_file_metadata = row
             .technical_metadata
@@ -452,6 +515,9 @@ impl PostgresMediaRepository {
         let Some(row) = row else {
             return Ok(None);
         };
+        if !self.is_media_file_available(row.id).await? {
+            return Ok(None);
+        }
 
         let media_file_metadata = row
             .technical_metadata
@@ -581,7 +647,7 @@ impl PostgresMediaRepository {
 
     pub async fn file_exists(&self, path: &str) -> Result<bool> {
         let count = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM media_files WHERE file_path = $1",
+            r#"SELECT COUNT(*)::bigint AS "count!" FROM media_files WHERE file_path = $1 AND is_available = TRUE"#,
             path
         )
         .fetch_one(self.pool())
@@ -590,7 +656,7 @@ impl PostgresMediaRepository {
             MediaError::Internal(format!("Database query failed: {}", e))
         })?;
 
-        Ok(count.unwrap_or(0) > 0)
+        Ok(count > 0)
     }
 
     pub async fn delete_media_by_id(&self, id: Uuid) -> Result<()> {
@@ -804,9 +870,398 @@ impl PostgresMediaRepository {
             );
         }
 
+        sqlx::query!(
+            r#"
+            UPDATE media_files
+            SET is_available = TRUE,
+                tombstoned_at = NULL,
+                tombstone_reason = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+            "#,
+            actual_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to mark media file available after upsert: {}",
+                e
+            ))
+        })?;
+
         Ok(UpsertOutcome {
             id: actual_id,
             created,
         })
+    }
+
+    pub async fn mark_available_with_fingerprint_impl(
+        &self,
+        library_id: LibraryId,
+        path: &str,
+        fingerprint: &MediaFingerprint,
+    ) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE media_files
+            SET is_available = TRUE,
+                tombstoned_at = NULL,
+                tombstone_reason = NULL,
+                fingerprint_device_id = $3,
+                fingerprint_inode = $4,
+                fingerprint_size = $5,
+                fingerprint_mtime_ms = $6,
+                fingerprint_weak_hash = $7,
+                updated_at = NOW()
+            WHERE library_id = $1 AND file_path = $2
+            "#,
+            library_id.as_uuid(),
+            path,
+            fingerprint.device_id.as_deref(),
+            fingerprint.inode.map(|value| value as i64),
+            fingerprint.size as i64,
+            fingerprint.mtime,
+            fingerprint.weak_hash.as_deref()
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to update media file fingerprint for {}: {}",
+                path, e
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn move_media_by_path_impl(
+        &self,
+        library_id: LibraryId,
+        old_path: &str,
+        new_path: &str,
+        fingerprint: &MediaFingerprint,
+    ) -> Result<Uuid> {
+        let filename = PathBuf::from(new_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                MediaError::InvalidMedia(format!(
+                    "Cannot move media to path without filename: {new_path}"
+                ))
+            })?;
+
+        let row = sqlx::query!(
+            r#"
+            UPDATE media_files
+            SET file_path = $3,
+                filename = $4,
+                file_size = CASE WHEN $5::bigint > 0 THEN $5 ELSE file_size END,
+                is_available = TRUE,
+                tombstoned_at = NULL,
+                tombstone_reason = NULL,
+                fingerprint_device_id = $6,
+                fingerprint_inode = $7,
+                fingerprint_size = CASE WHEN $5::bigint > 0 THEN $5 ELSE fingerprint_size END,
+                fingerprint_mtime_ms = CASE WHEN $8::bigint > 0 THEN $8 ELSE fingerprint_mtime_ms END,
+                fingerprint_weak_hash = $9,
+                updated_at = NOW()
+            WHERE library_id = $1 AND file_path = $2
+            RETURNING id
+            "#,
+            library_id.as_uuid(),
+            old_path,
+            new_path,
+            filename.as_str(),
+            fingerprint.size as i64,
+            fingerprint.device_id.as_deref(),
+            fingerprint.inode.map(|value| value as i64),
+            fingerprint.mtime,
+            fingerprint.weak_hash.as_deref()
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to move media from {} to {}: {}",
+                old_path, new_path, e
+            ))
+        })?;
+
+        let Some(row) = row else {
+            return Err(MediaError::NotFound(format!(
+                "Media path not found for move: {}",
+                old_path
+            )));
+        };
+
+        Ok(row.id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stored_media_from_parts(
+        id: Uuid,
+        media_uuid: Uuid,
+        media_type: String,
+        file_path: String,
+        file_size: i64,
+        is_available: bool,
+        fingerprint_device_id: Option<String>,
+        fingerprint_inode: Option<i64>,
+        fingerprint_size: Option<i64>,
+        fingerprint_mtime_ms: Option<i64>,
+        fingerprint_weak_hash: Option<String>,
+    ) -> Result<StoredMediaFile> {
+        let media_id = Self::media_id_from_parts(media_uuid, &media_type)?;
+        let fingerprint = MediaFingerprint {
+            device_id: fingerprint_device_id,
+            inode: fingerprint_inode.map(|value| value as u64),
+            size: fingerprint_size.unwrap_or(file_size) as u64,
+            mtime: fingerprint_mtime_ms.unwrap_or_default(),
+            weak_hash: fingerprint_weak_hash,
+        };
+
+        Ok(StoredMediaFile {
+            id,
+            media_id,
+            path_norm: file_path,
+            fingerprint,
+            is_available,
+        })
+    }
+
+    fn stored_media_from_row(
+        row: sqlx::postgres::PgRow,
+    ) -> Result<StoredMediaFile> {
+        Self::stored_media_from_parts(
+            row.try_get("id")?,
+            row.try_get("media_id")?,
+            row.try_get("media_type")?,
+            row.try_get("file_path")?,
+            row.try_get("file_size")?,
+            row.try_get("is_available")?,
+            row.try_get("fingerprint_device_id")?,
+            row.try_get("fingerprint_inode")?,
+            row.try_get("fingerprint_size")?,
+            row.try_get("fingerprint_mtime_ms")?,
+            row.try_get("fingerprint_weak_hash")?,
+        )
+    }
+}
+
+#[async_trait]
+impl FolderDeltaRepository for PostgresMediaRepository {
+    async fn list_media_directly_under(
+        &self,
+        library_id: LibraryId,
+        folder_path_norm: &str,
+    ) -> Result<Vec<StoredMediaFile>> {
+        let root = folder_path_norm.trim_end_matches('/');
+        let child_prefix = format!("{root}/%");
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, media_id, media_type::text AS "media_type!", file_path, file_size,
+                   is_available, fingerprint_device_id, fingerprint_inode,
+                   fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash
+            FROM media_files
+            WHERE library_id = $1
+              AND file_path LIKE $2
+            "#,
+            library_id.as_uuid(),
+            child_prefix
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to list media under {}: {}",
+                folder_path_norm, e
+            ))
+        })?;
+
+        rows.into_iter()
+            .map(|row| {
+                Self::stored_media_from_parts(
+                    row.id,
+                    row.media_id,
+                    row.media_type,
+                    row.file_path,
+                    row.file_size,
+                    row.is_available,
+                    row.fingerprint_device_id,
+                    row.fingerprint_inode,
+                    row.fingerprint_size,
+                    row.fingerprint_mtime_ms,
+                    row.fingerprint_weak_hash,
+                )
+            })
+            .filter_map(|result| match result {
+                Ok(media)
+                    if is_direct_child_file(
+                        folder_path_norm,
+                        &media.path_norm,
+                    ) =>
+                {
+                    Some(Ok(media))
+                }
+                Ok(_) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .collect()
+    }
+
+    async fn find_available_media_by_fingerprint(
+        &self,
+        library_id: LibraryId,
+        fingerprint: &MediaFingerprint,
+        excluding_path_norm: &str,
+    ) -> Result<Vec<StoredMediaFile>> {
+        if fingerprint.size == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut builder = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT id, media_id, media_type::text AS media_type, file_path, file_size,
+                   is_available, fingerprint_device_id, fingerprint_inode,
+                   fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash
+            FROM media_files
+            WHERE library_id = 
+            "#,
+        );
+        builder.push_bind(library_id.as_uuid());
+        builder.push(" AND is_available = TRUE AND file_path <> ");
+        builder.push_bind(excluding_path_norm);
+        builder.push(" AND COALESCE(fingerprint_size, file_size) = ");
+        builder.push_bind(fingerprint.size as i64);
+        if fingerprint.mtime > 0 {
+            builder.push(" AND fingerprint_mtime_ms = ");
+            builder.push_bind(fingerprint.mtime);
+        }
+        if let Some(weak_hash) = fingerprint.weak_hash.as_deref() {
+            builder.push(" AND fingerprint_weak_hash = ");
+            builder.push_bind(weak_hash);
+        }
+        builder.push(" ORDER BY updated_at DESC LIMIT 2");
+
+        let rows =
+            builder.build().fetch_all(self.pool()).await.map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to find media move candidates for {}: {}",
+                    excluding_path_norm, e
+                ))
+            })?;
+
+        rows.into_iter().map(Self::stored_media_from_row).collect()
+    }
+
+    async fn move_media_by_path(
+        &self,
+        library_id: LibraryId,
+        old_path_norm: &str,
+        new_path_norm: &str,
+        fingerprint: &MediaFingerprint,
+    ) -> Result<Uuid> {
+        self.move_media_by_path_impl(
+            library_id,
+            old_path_norm,
+            new_path_norm,
+            fingerprint,
+        )
+        .await
+    }
+
+    async fn mark_unavailable_by_paths(
+        &self,
+        library_id: LibraryId,
+        paths: Vec<String>,
+        reason: &str,
+    ) -> Result<u64> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE media_files
+            SET is_available = FALSE,
+                tombstoned_at = COALESCE(tombstoned_at, NOW()),
+                tombstone_reason = $3,
+                updated_at = NOW()
+            WHERE library_id = $1
+              AND file_path = ANY($2)
+              AND is_available = TRUE
+            "#,
+            library_id.as_uuid(),
+            &paths,
+            reason
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to tombstone media paths for library {}: {}",
+                library_id, e
+            ))
+        })?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn mark_unavailable_by_prefixes(
+        &self,
+        library_id: LibraryId,
+        prefixes: Vec<String>,
+        reason: &str,
+    ) -> Result<u64> {
+        if prefixes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder = QueryBuilder::<Postgres>::new(
+            "UPDATE media_files SET is_available = FALSE, tombstoned_at = COALESCE(tombstoned_at, NOW()), tombstone_reason = ",
+        );
+        builder.push_bind(reason);
+        builder.push(", updated_at = NOW() WHERE library_id = ");
+        builder.push_bind(library_id.as_uuid());
+        builder.push(" AND is_available = TRUE AND (");
+
+        for (idx, prefix) in prefixes.iter().enumerate() {
+            if idx > 0 {
+                builder.push(" OR ");
+            }
+            let root = prefix.trim_end_matches('/');
+            let child_prefix = format!("{root}/%");
+            builder.push("(file_path = ");
+            builder.push_bind(root);
+            builder.push(" OR file_path LIKE ");
+            builder.push_bind(child_prefix);
+            builder.push(")");
+        }
+        builder.push(")");
+
+        let result =
+            builder.build().execute(self.pool()).await.map_err(|e| {
+                MediaError::Internal(format!(
+                    "Failed to tombstone media prefixes for library {}: {}",
+                    library_id, e
+                ))
+            })?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn delete_folder_inventory_by_prefixes(
+        &self,
+        library_id: LibraryId,
+        prefixes: Vec<String>,
+    ) -> Result<u64> {
+        crate::database::repositories::folder_inventory::PostgresFolderInventoryRepository::new(
+            self.pool().clone(),
+        )
+        .delete_by_path_prefixes_impl(library_id, prefixes)
+        .await
     }
 }

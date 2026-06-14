@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -41,6 +42,10 @@ pub struct FolderListingPlan {
     pub media_files: Vec<PathBuf>,
     pub ancillary_files: Vec<PathBuf>,
     pub generated_listing_hash: String,
+    /// True when the requested folder no longer exists or is no longer a directory.
+    /// Missing folders reconcile as recursive tombstones instead of dead-lettering.
+    #[serde(default)]
+    pub folder_missing: bool,
 }
 
 /// Captures state while the folder scan actor is running.
@@ -102,35 +107,89 @@ pub trait FolderScanActor: Send + Sync {
     ) -> Result<FolderScanSummary>;
 }
 
-/// Stateless `FolderScanActor` that performs filesystem operations for one folder per job.
+/// Extension policy applied when classifying files during folder scans.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScannerFileFilterPolicy {
+    media_extensions: BTreeSet<String>,
+    ignored_extensions: BTreeSet<String>,
+}
+
+impl ScannerFileFilterPolicy {
+    pub fn new(
+        media_extensions: impl IntoIterator<Item = String>,
+        ignored_extensions: impl IntoIterator<Item = String>,
+    ) -> Self {
+        let media_extensions = media_extensions
+            .into_iter()
+            .filter_map(|ext| normalize_extension(&ext))
+            .collect();
+        let ignored_extensions = ignored_extensions
+            .into_iter()
+            .filter_map(|ext| normalize_extension(&ext))
+            .collect();
+
+        Self {
+            media_extensions,
+            ignored_extensions,
+        }
+    }
+
+    pub fn media_extensions(&self) -> impl Iterator<Item = &str> {
+        self.media_extensions.iter().map(String::as_str)
+    }
+
+    pub fn ignored_extensions(&self) -> impl Iterator<Item = &str> {
+        self.ignored_extensions.iter().map(String::as_str)
+    }
+
+    pub fn is_supported_media_ext(&self, ext: &str) -> bool {
+        let Some(ext) = normalize_extension(ext) else {
+            return false;
+        };
+        self.media_extensions.contains(&ext)
+            && !self.ignored_extensions.contains(&ext)
+    }
+
+    pub fn is_media_file_path(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|ext| self.is_supported_media_ext(ext))
+            .unwrap_or(false)
+    }
+}
+
+impl Default for ScannerFileFilterPolicy {
+    fn default() -> Self {
+        Self::new(
+            crate::domain::scan::scanner::settings::default_video_file_extensions_vec(),
+            Vec::<String>::new(),
+        )
+    }
+}
+
+fn normalize_extension(ext: &str) -> Option<String> {
+    let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    (!normalized.is_empty()
+        && !normalized.contains('/')
+        && !normalized.contains('\\')
+        && !normalized.contains('*'))
+    .then_some(normalized)
+}
+
+/// Folder scan actor that performs filesystem operations for one folder per job.
 #[derive(Debug)]
-pub struct DefaultFolderScanActor;
+pub struct DefaultFolderScanActor {
+    filters: ScannerFileFilterPolicy,
+}
 
 /// Shared helper so other actors (e.g., LibraryActor) can apply the
 /// same definition of what constitutes a media file.
 pub fn is_supported_media_ext(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "mkv"
-            | "mp4"
-            | "avi"
-            | "mov"
-            | "webm"
-            | "flv"
-            | "wmv"
-            | "mpg"
-            | "mpeg"
-            | "m4v"
-            | "3gp"
-            | "ts"
-    )
+    ScannerFileFilterPolicy::default().is_supported_media_ext(ext)
 }
 
 pub fn is_media_file_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(is_supported_media_ext)
-        .unwrap_or(false)
+    ScannerFileFilterPolicy::default().is_media_file_path(path)
 }
 
 impl Default for DefaultFolderScanActor {
@@ -141,11 +200,17 @@ impl Default for DefaultFolderScanActor {
 
 impl DefaultFolderScanActor {
     pub fn new() -> Self {
-        Self
+        Self {
+            filters: ScannerFileFilterPolicy::default(),
+        }
+    }
+
+    pub fn with_filter_policy(filters: ScannerFileFilterPolicy) -> Self {
+        Self { filters }
     }
 
     fn is_media_file(&self, path: &Path) -> bool {
-        is_media_file_path(path)
+        self.filters.is_media_file_path(path)
     }
 
     async fn list_directory(&self, path: &Path) -> Result<Vec<ListingEntry>> {
@@ -210,6 +275,45 @@ impl FolderScanActor for DefaultFolderScanActor {
     ) -> Result<FolderListingPlan> {
         let context = &job.context;
         let folder_path = PathBuf::from(context.folder_path_norm());
+        match fs::metadata(&folder_path).await {
+            Ok(metadata) if !metadata.is_dir() => {
+                tracing::warn!(
+                    target: "scan::jobs",
+                    path = %folder_path.display(),
+                    "folder scan path is no longer a directory; reconciling as deleted"
+                );
+                return Ok(FolderListingPlan {
+                    directories: Vec::new(),
+                    media_files: Vec::new(),
+                    ancillary_files: Vec::new(),
+                    generated_listing_hash: compute_listing_hash(&[]),
+                    folder_missing: true,
+                });
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!(
+                    target: "scan::jobs",
+                    path = %folder_path.display(),
+                    "folder scan path no longer exists; reconciling as deleted"
+                );
+                return Ok(FolderListingPlan {
+                    directories: Vec::new(),
+                    media_files: Vec::new(),
+                    ancillary_files: Vec::new(),
+                    generated_listing_hash: compute_listing_hash(&[]),
+                    folder_missing: true,
+                });
+            }
+            Err(err) => {
+                return Err(MediaError::Io(std::io::Error::other(format!(
+                    "Failed to stat directory {}: {}",
+                    folder_path.display(),
+                    err
+                ))));
+            }
+        }
+
         let entries = self.list_directory(&folder_path).await?;
 
         let mut directories = Vec::new();
@@ -280,6 +384,7 @@ impl FolderScanActor for DefaultFolderScanActor {
             media_files,
             ancillary_files,
             generated_listing_hash,
+            folder_missing: false,
         })
     }
 
@@ -479,5 +584,81 @@ impl FolderScanActor for DefaultFolderScanActor {
             listing_hash: plan.generated_listing_hash.clone(),
             completed_at: Utc::now(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::scan::context::{MovieFolderScanContext, MovieRootPath};
+    use crate::domain::scan::orchestration::job::ScanReason;
+    use crate::types::ids::LibraryId;
+
+    fn movie_scan_job(library_root: &Path, movie_path: &Path) -> FolderScanJob {
+        let library_root = library_root.to_string_lossy().to_string();
+        let movie_path = movie_path.to_string_lossy().to_string();
+        FolderScanJob {
+            context: FolderScanContext::Movie(MovieFolderScanContext {
+                library_id: LibraryId::new(),
+                movie_root_path: MovieRootPath::try_new_under_library_root(
+                    &library_root,
+                    movie_path,
+                )
+                .expect("movie path under library root"),
+            }),
+            scan_reason: ScanReason::MaintenanceSweep,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        }
+    }
+
+    #[test]
+    fn filter_policy_preserves_media_allow_and_ignore_lists() {
+        let filters = ScannerFileFilterPolicy::new(
+            vec![".MKV".to_string(), "mp4".to_string()],
+            vec!["tmp".to_string()],
+        );
+
+        assert!(filters.is_media_file_path(Path::new("movie.mkv")));
+        assert!(filters.is_media_file_path(Path::new("movie.MP4")));
+        assert!(!filters.is_media_file_path(Path::new("movie.avi")));
+        assert!(!filters.is_media_file_path(Path::new("partial.tmp")));
+    }
+
+    #[tokio::test]
+    async fn missing_folder_reconciles_as_deleted_plan() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing_movie = temp.path().join("Deleted Movie");
+        let actor = DefaultFolderScanActor::new();
+
+        let plan = actor
+            .plan_listing(&movie_scan_job(temp.path(), &missing_movie))
+            .await
+            .expect("missing folders should not fail planning");
+
+        assert!(plan.folder_missing);
+        assert!(plan.directories.is_empty());
+        assert!(plan.media_files.is_empty());
+        assert_eq!(plan.generated_listing_hash, compute_listing_hash(&[]));
+    }
+
+    #[tokio::test]
+    async fn file_at_folder_path_reconciles_as_deleted_plan() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let movie_path = temp.path().join("Not A Directory");
+        tokio::fs::write(&movie_path, b"not a directory")
+            .await
+            .expect("create file at scan path");
+        let actor = DefaultFolderScanActor::new();
+
+        let plan = actor
+            .plan_listing(&movie_scan_job(temp.path(), &movie_path))
+            .await
+            .expect("non-directory paths should not fail planning");
+
+        assert!(plan.folder_missing);
+        assert!(plan.directories.is_empty());
+        assert!(plan.media_files.is_empty());
+        assert_eq!(plan.generated_listing_hash, compute_listing_hash(&[]));
     }
 }

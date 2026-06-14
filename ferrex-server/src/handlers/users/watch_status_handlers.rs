@@ -15,7 +15,6 @@ use ferrex_core::{
 };
 use ferrex_model::VideoMediaType;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
@@ -79,14 +78,15 @@ async fn resolve_watch_target(
     let postgres = state.postgres();
     let pool = postgres.pool();
 
-    if let Some(row) = sqlx::query(
+    if let Some(row) = sqlx::query!(
         r#"
-        SELECT media_id, media_type::text AS media_type
+        SELECT media_id, media_type::text AS "media_type!"
         FROM media_files
         WHERE id = $1
+          AND is_available = TRUE
         "#,
+        media_id
     )
-    .bind(media_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -95,17 +95,8 @@ async fn resolve_watch_target(
             format!("Failed to resolve playable media id: {e}"),
         )
     })? {
-        let logical_media_id =
-            row.try_get::<Uuid, _>("media_id").map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decode resolved media id: {e}"),
-                )
-            })?;
-        let resolved_media_type = row
-            .try_get::<String, _>("media_type")
-            .ok()
-            .and_then(|value| parse_media_type_label(&value))
+        let logical_media_id = row.media_id;
+        let resolved_media_type = parse_media_type_label(&row.media_type)
             .ok_or_else(|| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -141,10 +132,10 @@ async fn resolve_watch_target(
         });
     }
 
-    if sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM movie_references WHERE id = $1)",
+    if sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM movie_references WHERE id = $1) AS "exists!""#,
+        media_id
     )
-    .bind(media_id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -160,10 +151,10 @@ async fn resolve_watch_target(
         });
     }
 
-    if sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM episode_references WHERE id = $1)",
+    if sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM episode_references WHERE id = $1) AS "exists!""#,
+        media_id
     )
-    .bind(media_id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -233,14 +224,14 @@ async fn resolve_episode_key_for_logical_media(
     logical_media_id: Uuid,
 ) -> Result<EpisodeKey, (StatusCode, String)> {
     let postgres = state.postgres();
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
         SELECT tmdb_series_id, season_number, episode_number
         FROM episode_references
         WHERE id = $1
         "#,
+        logical_media_id
     )
-    .bind(logical_media_id)
     .fetch_optional(postgres.pool())
     .await
     .map_err(|e| {
@@ -260,28 +251,9 @@ async fn resolve_episode_key_for_logical_media(
     })?;
 
     Ok(EpisodeKey {
-        tmdb_series_id: row.try_get::<i64, _>("tmdb_series_id").map_err(
-            |e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decode tmdb_series_id: {e}"),
-                )
-            },
-        )? as u64,
-        season_number: row.try_get::<i16, _>("season_number").map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decode season_number: {e}"),
-            )
-        })? as u16,
-        episode_number: row.try_get::<i16, _>("episode_number").map_err(
-            |e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decode episode_number: {e}"),
-                )
-            },
-        )? as u16,
+        tmdb_series_id: row.tmdb_series_id as u64,
+        season_number: row.season_number as u16,
+        episode_number: row.episode_number as u16,
     })
 }
 

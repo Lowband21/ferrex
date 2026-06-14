@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::domain::scan::orchestration::job::MediaFingerprint;
 use crate::types::files::MediaFile;
 use crate::types::ids::LibraryId;
 use ferrex_model::MediaID;
@@ -128,6 +129,14 @@ pub trait MediaFilesWritePort: Send + Sync {
         id: Uuid,
         metadata: &MediaFileMetadata,
     ) -> Result<()>;
+    async fn mark_available_with_fingerprint(
+        &self,
+        _library_id: LibraryId,
+        _path: &str,
+        _fingerprint: &MediaFingerprint,
+    ) -> Result<()> {
+        Ok(())
+    }
     async fn move_by_path(
         &self,
         _library_id: LibraryId,

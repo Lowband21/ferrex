@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::scan::actors::LibraryActor;
@@ -33,6 +33,17 @@ use crate::{
 };
 
 pub type LibraryActorHandle = Arc<Mutex<Box<dyn LibraryActor>>>;
+
+/// Orchestrator-owned command executor used by producers that should share the
+/// normal library actor mailbox and enqueue/event publication path.
+#[async_trait::async_trait]
+pub trait LibraryCommandExecutor: Send + Sync {
+    async fn execute_library_command(
+        &self,
+        library_id: LibraryId,
+        command: LibraryActorCommand,
+    ) -> Result<()>;
+}
 
 /// Supervises the lifetime of actors and queue workers inside a single
 /// process. This is deliberately conservative until we firm up scheduling and
@@ -246,11 +257,12 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum OrchestratorCommand {
     Library {
         library_id: LibraryId,
         command: LibraryActorCommand,
+        completion: Option<oneshot::Sender<Result<()>>>,
     },
 }
 
@@ -342,6 +354,9 @@ where
             tokio::sync::mpsc::channel::<OrchestratorCommand>(1024);
         {
             let mut guard = self.mailbox_tx.lock().await;
+            if guard.is_some() {
+                return Ok(());
+            }
             *guard = Some(tx);
         }
 
@@ -358,152 +373,151 @@ where
                     OrchestratorCommand::Library {
                         library_id,
                         command,
+                        completion,
                     } => {
-                        let actor_handle_opt = {
-                            let guard = handle.library_actors.read().await;
-                            guard.get(&library_id).cloned()
-                        };
-                        if let Some(actor_handle) = actor_handle_opt {
+                        let result: Result<()> = async {
+                            let actor_handle = {
+                                let guard = handle.library_actors.read().await;
+                                guard.get(&library_id).cloned()
+                            }
+                            .ok_or_else(|| {
+                                MediaError::Internal(format!(
+                                    "library actor not registered for {library_id}"
+                                ))
+                            })?;
+
                             let mut actor = actor_handle.lock().await;
-                            match actor.handle_command(command.clone()).await {
-                                Ok(events) => {
-                                    drop(actor);
-                                    // Process actor-emitted events (e.g., enqueue requests)
-                                    // Batch EnqueueFolderScan events for transactional enqueue
-                                    let mut batch: Vec<(
-                                        JobPayload,
-                                        EnqueueRequest,
-                                    )> = Vec::new();
-                                    for evt in events {
-                                        match evt {
-                                            crate::domain::scan::actors::LibraryActorEvent::EnqueueFolderScan { context, priority, reason, correlation_id } => {
-                                                let job = FolderScanJob {
-                                                    context: *context.clone(),
-                                                    scan_reason: reason,
-                                                    enqueue_time: chrono::Utc::now(),
-                                                    device_id: None,
-                                                };
-                                                let payload = JobPayload::FolderScan(job);
-                                                let mut request = EnqueueRequest::new(priority, payload.clone());
-                                                request.correlation_id = correlation_id;
-                                                batch.push((payload, request));
-                                            }
-                                            crate::domain::scan::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {
-                                                let payload = JobPayload::MetadataEnrich(*job);
-                                                let mut request = EnqueueRequest::new(priority, payload.clone());
-                                                request.correlation_id = correlation_id;
-                                                batch.push((payload, request));
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-
-                                    if !batch.is_empty() {
-                                        // Preserve correlation_ids for event publication
-                                        let payloads: Vec<JobPayload> = batch
-                                            .iter()
-                                            .map(|(p, _)| p.clone())
-                                            .collect();
-                                        let corrs: Vec<Option<uuid::Uuid>> =
-                                            batch
-                                                .iter()
-                                                .map(|(_, r)| r.correlation_id)
-                                                .collect();
-                                        let requests: Vec<EnqueueRequest> =
-                                            batch
-                                                .into_iter()
-                                                .map(|(_, r)| r)
-                                                .collect();
-                                        match q.enqueue_many(requests).await {
-                                            Ok(handles) => {
-                                                for (idx, handle) in handles
-                                                    .into_iter()
-                                                    .enumerate()
-                                                {
-                                                    let payload =
-                                                        &payloads[idx];
-                                                    let path_key =
-                                                        stable_path_key(
-                                                            payload,
-                                                        );
-                                                    let correlation_id =
-                                                        corrs[idx];
-
-                                                    let event_payload =
-                                                        if handle.accepted {
-                                                            JobEventPayload::Enqueued {
-                                                                job_id: handle.job_id,
-                                                                kind: handle.kind,
-                                                                priority: handle.priority,
-                                                            }
-                                                        } else if let Some(
-                                                            existing_job_id,
-                                                        ) =
-                                                            handle.merged_into
-                                                        {
-                                                            JobEventPayload::Merged {
-                                                                existing_job_id,
-                                                                merged_job_id: handle.job_id,
-                                                                kind: handle.kind,
-                                                                priority: handle.priority,
-                                                            }
-                                                        } else {
-                                                            JobEventPayload::Enqueued {
-                                                                job_id: handle.job_id,
-                                                                kind: handle.kind,
-                                                                priority: handle.priority,
-                                                            }
-                                                        };
-
-                                                    let event =
-                                                        JobEvent::from_handle(
-                                                            &handle,
-                                                            correlation_id,
-                                                            event_payload,
-                                                            path_key,
-                                                        );
-                                                    // Remember correlation for job. If it's None here, correlator will backfill when first seen elsewhere.
-                                                    if handle.accepted {
-                                                        correlations
-                                                            .remember(
-                                                                handle.job_id,
-                                                                event.meta.correlation_id,
-                                                            )
-                                                            .await;
-                                                    } else {
-                                                        correlations
-                                                            .remember_if_absent(
-                                                                handle.job_id,
-                                                                event.meta.correlation_id,
-                                                            )
-                                                            .await;
-                                                    }
-
-                                                    if let Err(err) =
-                                                        e.publish(event).await
-                                                    {
-                                                        tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish enqueue event");
-                                                    }
-                                                }
-                                            }
-                                            Err(err) => {
-                                                tracing::warn!(target: "scan::mailbox", error = %err, "failed to enqueue folder scan batch from actor request");
-                                            }
-                                        }
-                                    }
-                                    continue;
-                                }
-                                Err(err) => {
+                            let events = actor
+                                .handle_command(command.clone())
+                                .await
+                                .map_err(|err| {
                                     tracing::warn!(
                                         "library actor command failed: {err}"
                                     );
+                                    err
+                                })?;
+                            drop(actor);
+
+                            // Process actor-emitted events (e.g., enqueue requests)
+                            // Batch EnqueueFolderScan events for transactional enqueue.
+                            let mut batch: Vec<(JobPayload, EnqueueRequest)> =
+                                Vec::new();
+                            for evt in events {
+                                match evt {
+                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueFolderScan { context, priority, reason, correlation_id } => {
+                                        let job = FolderScanJob {
+                                            context: *context.clone(),
+                                            scan_reason: reason,
+                                            enqueue_time: chrono::Utc::now(),
+                                            device_id: None,
+                                        };
+                                        let payload = JobPayload::FolderScan(job);
+                                        let mut request = EnqueueRequest::new(priority, payload.clone());
+                                        request.correlation_id = correlation_id;
+                                        batch.push((payload, request));
+                                    }
+                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {
+                                        let payload = JobPayload::MetadataEnrich(*job);
+                                        let mut request = EnqueueRequest::new(priority, payload.clone());
+                                        request.correlation_id = correlation_id;
+                                        batch.push((payload, request));
+                                    }
+                                    _ => {}
                                 }
                             }
-                        } else {
-                            tracing::warn!(
-                                "library actor not registered for {:?}",
-                                library_id
-                            );
+
+                            if !batch.is_empty() {
+                                // Preserve correlation_ids for event publication.
+                                let payloads: Vec<JobPayload> = batch
+                                    .iter()
+                                    .map(|(p, _)| p.clone())
+                                    .collect();
+                                let corrs: Vec<Option<uuid::Uuid>> = batch
+                                    .iter()
+                                    .map(|(_, r)| r.correlation_id)
+                                    .collect();
+                                let requests: Vec<EnqueueRequest> = batch
+                                    .into_iter()
+                                    .map(|(_, r)| r)
+                                    .collect();
+
+                                let handles = q.enqueue_many(requests).await.map_err(
+                                    |err| {
+                                        tracing::warn!(target: "scan::mailbox", error = %err, "failed to enqueue scan batch from actor request");
+                                        err
+                                    },
+                                )?;
+
+                                for (idx, handle) in handles
+                                    .into_iter()
+                                    .enumerate()
+                                {
+                                    let payload = &payloads[idx];
+                                    let path_key = stable_path_key(payload);
+                                    let correlation_id = corrs[idx];
+
+                                    let event_payload = if handle.accepted {
+                                        JobEventPayload::Enqueued {
+                                            job_id: handle.job_id,
+                                            kind: handle.kind,
+                                            priority: handle.priority,
+                                        }
+                                    } else if let Some(existing_job_id) =
+                                        handle.merged_into
+                                    {
+                                        JobEventPayload::Merged {
+                                            existing_job_id,
+                                            merged_job_id: handle.job_id,
+                                            kind: handle.kind,
+                                            priority: handle.priority,
+                                        }
+                                    } else {
+                                        JobEventPayload::Enqueued {
+                                            job_id: handle.job_id,
+                                            kind: handle.kind,
+                                            priority: handle.priority,
+                                        }
+                                    };
+
+                                    let event = JobEvent::from_handle(
+                                        &handle,
+                                        correlation_id,
+                                        event_payload,
+                                        path_key,
+                                    );
+                                    // Remember correlation for job. If it's None here, correlator will backfill when first seen elsewhere.
+                                    if handle.accepted {
+                                        correlations
+                                            .remember(
+                                                handle.job_id,
+                                                event.meta.correlation_id,
+                                            )
+                                            .await;
+                                    } else {
+                                        correlations
+                                            .remember_if_absent(
+                                                handle.job_id,
+                                                event.meta.correlation_id,
+                                            )
+                                            .await;
+                                    }
+
+                                    if let Err(err) = e.publish(event).await {
+                                        tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish enqueue event");
+                                    }
+                                }
+                            }
+
+                            Ok(())
+                        }
+                        .await;
+
+                        if let Err(err) = &result {
+                            tracing::warn!(target: "scan::mailbox", error = %err, "library actor command did not complete");
+                        }
+
+                        if let Some(completion) = completion {
+                            let _ = completion.send(result);
                         }
                     }
                 }
@@ -952,6 +966,7 @@ where
                                         .send(OrchestratorCommand::Library {
                                             library_id,
                                             command,
+                                            completion: None,
                                         })
                                         .await
                                 {
@@ -1106,9 +1121,57 @@ where
         tx.send(OrchestratorCommand::Library {
             library_id,
             command,
+            completion: None,
         })
         .await
         .map_err(|e| MediaError::Internal(format!("mailbox send failed: {e}")))
+    }
+
+    pub async fn submit_library_command_and_wait(
+        &self,
+        library_id: LibraryId,
+        command: LibraryActorCommand,
+    ) -> Result<()> {
+        let tx = {
+            let guard = self.mailbox_tx.lock().await;
+            guard.clone().ok_or_else(|| {
+                MediaError::Internal("mailbox not started".into())
+            })?
+        };
+        let (completion_tx, completion_rx) = oneshot::channel();
+        tx.send(OrchestratorCommand::Library {
+            library_id,
+            command,
+            completion: Some(completion_tx),
+        })
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("mailbox send failed: {e}"))
+        })?;
+
+        completion_rx.await.map_err(|err| {
+            MediaError::Internal(format!("mailbox response dropped: {err}"))
+        })?
+    }
+}
+
+#[async_trait::async_trait]
+impl<Q, E, B> LibraryCommandExecutor for OrchestratorRuntime<Q, E, B>
+where
+    Q: QueueService + LeaseExpiryScanner + 'static,
+    E: ScanEventBus
+        + JobEventStream
+        + crate::domain::scan::orchestration::runtime::ScanEventStream
+        + 'static,
+    B: WorkloadBudget + 'static,
+{
+    async fn execute_library_command(
+        &self,
+        library_id: LibraryId,
+        command: LibraryActorCommand,
+    ) -> Result<()> {
+        self.submit_library_command_and_wait(library_id, command)
+            .await
     }
 }
 

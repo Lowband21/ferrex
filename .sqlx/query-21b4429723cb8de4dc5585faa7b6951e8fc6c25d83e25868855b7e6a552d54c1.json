@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT payload\n        FROM orchestrator_jobs\n        WHERE library_id = $1 AND kind = $2 AND state = 'ready'\n        ORDER BY created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "21b4429723cb8de4dc5585faa7b6951e8fc6c25d83e25868855b7e6a552d54c1"
+}
