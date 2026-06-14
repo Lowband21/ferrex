@@ -17,6 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.UUID
 
 class AuthManagerTest {
     @Test
@@ -160,6 +161,73 @@ class AuthManagerTest {
         assertEquals(listOf("http://ferrex.local" to "user-1"), clearedScopes)
     }
 
+    @Test
+    fun passwordLoginStoresTokensAfterCurrentUserValidation() = runTest {
+        val fixture = Fixture()
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.localDeviceId = "018f5f8d-0000-7000-8000-000000000001"
+        fixture.api.loginResults += ApiResult.Success(
+            AuthTokens(
+                accessToken = "login-access",
+                refreshToken = "login-refresh",
+                sessionId = "session-1",
+                deviceSessionId = "device-session-1",
+                userId = "token-user",
+                requiresPinSetup = true,
+            ),
+        )
+        fixture.api.currentUserResults += ApiResult.Success(testUser)
+
+        val result = fixture.manager.loginWithPassword(" grayson ", "correct-password")
+
+        assertTrue(result is LoginResult.Success)
+        assertTrue((result as LoginResult.Success).requiresPinSetup)
+        assertEquals("login-access", fixture.storage.accessToken)
+        assertEquals("login-refresh", fixture.storage.refreshToken)
+        assertEquals("session-1", fixture.storage.sessionId)
+        assertEquals("device-session-1", fixture.storage.deviceSessionId)
+        assertEquals(testUser.username, fixture.storage.username)
+        assertEquals(testUser.id, fixture.storage.userId)
+        assertEquals("login-access", fixture.interceptor.accessToken)
+        assertEquals(1, fixture.api.currentUserCalls)
+        val loginCall = fixture.api.loginCalls.single()
+        assertEquals("grayson", loginCall.username)
+        assertEquals("correct-password", loginCall.password)
+        assertEquals(false, loginCall.rememberDevice)
+    }
+
+    @Test
+    fun passwordLoginRegeneratesBlankLocalDeviceId() = runTest {
+        assertPasswordLoginRegeneratesLocalDeviceId("   ")
+    }
+
+    @Test
+    fun passwordLoginRegeneratesMalformedLocalDeviceId() = runTest {
+        assertPasswordLoginRegeneratesLocalDeviceId("device-id")
+    }
+
+    private suspend fun assertPasswordLoginRegeneratesLocalDeviceId(initialDeviceId: String) {
+        val fixture = Fixture()
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.localDeviceId = initialDeviceId
+        fixture.api.loginResults += ApiResult.Success(
+            AuthTokens(
+                accessToken = "login-access",
+                refreshToken = "login-refresh",
+                userId = testUser.id,
+            ),
+        )
+        fixture.api.currentUserResults += ApiResult.Success(testUser)
+
+        val result = fixture.manager.loginWithPassword("grayson", "password")
+
+        assertTrue(result is LoginResult.Success)
+        val storedDeviceId = fixture.storage.localDeviceId.orEmpty()
+        assertEquals(storedDeviceId, UUID.fromString(storedDeviceId).toString())
+        assertTrue("Expected a regenerated UUID", storedDeviceId != initialDeviceId.trim())
+        assertEquals(storedDeviceId, fixture.api.loginCalls.single().deviceInfo.deviceId)
+    }
+
     private class Fixture(
         val resetClears: MutableList<Pair<String, String?>> = mutableListOf(),
     ) {
@@ -182,9 +250,12 @@ class AuthManagerTest {
 
     private class FakeFerrexApi : FerrexApi {
         val setupResults = ArrayDeque<ApiResult<SetupStatus>>()
+        val loginResults = ArrayDeque<ApiResult<AuthTokens>>()
         val refreshResults = ArrayDeque<ApiResult<AuthTokens>>()
         val currentUserResults = ArrayDeque<ApiResult<CurrentUser>>()
+        val loginCalls = mutableListOf<PasswordLoginCall>()
         var refreshCalls = 0
+        var currentUserCalls = 0
 
         override suspend fun getSetupStatus(serverUrl: String): ApiResult<SetupStatus> = setupResults.removeFirst()
 
@@ -196,9 +267,16 @@ class AuthManagerTest {
             password: String,
             deviceInfo: DeviceInfo,
             rememberDevice: Boolean,
-        ): ApiResult<AuthTokens> = ApiResult.Success(
-            AuthTokens(accessToken = "login-access", refreshToken = "login-refresh", userId = testUser.id),
-        )
+        ): ApiResult<AuthTokens> {
+            loginCalls += PasswordLoginCall(username, password, deviceInfo, rememberDevice)
+            return if (loginResults.isEmpty()) {
+                ApiResult.Success(
+                    AuthTokens(accessToken = "login-access", refreshToken = "login-refresh", userId = testUser.id),
+                )
+            } else {
+                loginResults.removeFirst()
+            }
+        }
 
         override suspend fun requestPinChallenge(deviceId: String): ApiResult<PinChallengeResponse> =
             ApiResult.NetworkError("not used")
@@ -211,8 +289,18 @@ class AuthManagerTest {
             return refreshResults.removeFirst()
         }
 
-        override suspend fun currentUser(): ApiResult<CurrentUser> = currentUserResults.removeFirst()
+        override suspend fun currentUser(): ApiResult<CurrentUser> {
+            currentUserCalls += 1
+            return currentUserResults.removeFirst()
+        }
     }
+
+    private data class PasswordLoginCall(
+        val username: String,
+        val password: String,
+        val deviceInfo: DeviceInfo,
+        val rememberDevice: Boolean,
+    )
 
     private class InMemoryAuthStorage : AuthStorage {
         override var serverUrl: String? = null

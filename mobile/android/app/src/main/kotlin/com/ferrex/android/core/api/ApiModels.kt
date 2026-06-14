@@ -1,5 +1,7 @@
 package com.ferrex.android.core.api
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -41,11 +43,12 @@ data class DeviceTrustPolicy(
     @SerialName("admin_pin_unlock_enabled") val adminPinUnlockEnabled: Boolean = false,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class DeviceInfo(
     @SerialName("device_id") val deviceId: String,
     @SerialName("device_name") val deviceName: String,
-    val platform: String = "android",
+    @EncodeDefault val platform: String = "android",
     @SerialName("app_version") val appVersion: String,
     @SerialName("hardware_id") val hardwareId: String? = null,
 )
