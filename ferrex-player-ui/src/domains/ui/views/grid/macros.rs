@@ -479,6 +479,7 @@ macro_rules! media_card {
                 }).unwrap_or(lucide_icons::Icon::Image))
                 .priority(priority)
                 .is_hovered(is_hovered)
+                .hover_scale_enabled(false)
                 .on_play($play_msg)
                 .on_click($click_msg);
 

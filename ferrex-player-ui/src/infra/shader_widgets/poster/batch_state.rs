@@ -174,6 +174,7 @@ pub struct PendingPrimitive {
     pub theme_color: Color,
     pub animated_bounds: Option<AnimatedPosterBounds>,
     pub is_hovered: bool,
+    pub hover_scale_enabled: bool,
     pub mouse_position: Option<Point>,
     pub progress: Option<f32>,
     pub progress_color: Color,
@@ -1053,12 +1054,16 @@ impl PrimitiveBatchState for PosterBatchState {
                     .map(|b| b.hover_scale_down_delay_ms)
                     .unwrap_or(DEFAULT_HOVER_SCALE_DOWN_DELAY_MS);
 
-                let hover_progress = self.compute_hover_progress(
-                    pending.id,
-                    pending.is_hovered,
-                    hover_transition_ms,
-                    hover_scale_down_delay_ms,
-                );
+                let hover_progress = if pending.hover_scale_enabled {
+                    self.compute_hover_progress(
+                        pending.id,
+                        pending.is_hovered,
+                        hover_transition_ms,
+                        hover_scale_down_delay_ms,
+                    )
+                } else {
+                    0.0
+                };
 
                 let instance = create_batch_instance(
                     Some(region),
@@ -1071,6 +1076,7 @@ impl PrimitiveBatchState for PosterBatchState {
                     pending.animated_bounds.as_ref(),
                     pending.is_hovered,
                     hover_progress,
+                    pending.hover_scale_enabled,
                     pending.mouse_position,
                     pending.progress,
                     pending.progress_color,

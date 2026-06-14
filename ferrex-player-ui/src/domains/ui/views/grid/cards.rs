@@ -200,6 +200,7 @@ pub fn movie_reference_card_with_state<'a>(
                             Priority::Preload
                         })
                         .is_hovered(is_hovered)
+                        .hover_scale_enabled(false)
                         .on_click(
                             UiShellMessage::ViewMovieDetails(movie_id).into(),
                         );
@@ -273,6 +274,7 @@ pub fn movie_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Film)
         .priority(priority)
         .is_hovered(is_hovered)
+        .hover_scale_enabled(false)
         .on_play(PlaybackMessage::PlayMediaWithId(media_id).into())
         .on_click(UiShellMessage::ViewMovieDetails(movie_id).into());
 
@@ -453,6 +455,7 @@ pub fn series_reference_card_with_state<'a>(
                             Priority::Preload
                         })
                         .is_hovered(is_hovered)
+                        .hover_scale_enabled(false)
                         .on_click(UiShellMessage::ViewTvShow(series_id).into());
                     if let Some(key) = carousel_key {
                         placeholder_widget =
@@ -521,6 +524,7 @@ pub fn series_reference_card_with_state<'a>(
         .placeholder(lucide_icons::Icon::Tv)
         .priority(priority)
         .is_hovered(is_hovered)
+        .hover_scale_enabled(false)
         .on_play(PlaybackMessage::PlaySeriesNextEpisode(series_id).into())
         .on_click(UiShellMessage::ViewTvShow(series_id).into());
 

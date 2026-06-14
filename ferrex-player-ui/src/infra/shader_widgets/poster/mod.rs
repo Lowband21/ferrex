@@ -53,6 +53,7 @@ pub struct Poster {
     theme_color: Color,
     bounds: Option<animation::AnimatedPosterBounds>,
     is_hovered: bool,
+    hover_scale_enabled: bool,
     on_play: Option<UiMessage>,
     on_edit: Option<UiMessage>,
     on_options: Option<UiMessage>,
@@ -86,6 +87,7 @@ impl std::fmt::Debug for Poster {
                 &self.bounds.as_ref().map(|_| "<AnimatedPosterBounds>"),
             )
             .field("is_hovered", &self.is_hovered)
+            .field("hover_scale_enabled", &self.hover_scale_enabled)
             .field("on_play", &self.on_play.as_ref().map(|_| "<UiMessage>"))
             .field("on_edit", &self.on_edit.as_ref().map(|_| "<UiMessage>"))
             .field(
@@ -123,6 +125,7 @@ impl Poster {
             theme_color: Color::from_rgb(0.1, 0.1, 0.1), // Default dark gray
             bounds: None,
             is_hovered: false,
+            hover_scale_enabled: true,
             on_play: None,
             on_edit: None,
             on_options: None,
@@ -212,6 +215,12 @@ impl Poster {
     /// Sets the hover state
     pub fn is_hovered(mut self, hovered: bool) -> Self {
         self.is_hovered = hovered;
+        self
+    }
+
+    /// Sets whether hover contributes poster scale.
+    pub fn hover_scale_enabled(mut self, enabled: bool) -> Self {
+        self.hover_scale_enabled = enabled;
         self
     }
 
@@ -358,6 +367,7 @@ impl<'a> From<Poster> for Element<'a, UiMessage> {
             theme_color: image.theme_color,
             bounds: image.bounds,
             is_hovered: image.is_hovered,
+            hover_scale_enabled: image.hover_scale_enabled,
             progress: image.progress,
             progress_color: image.progress_color,
             on_play: image.on_play,

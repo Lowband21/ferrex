@@ -33,6 +33,7 @@ pub struct PosterPrimitive {
     pub theme_color: Color,
     pub animated_bounds: Option<AnimatedPosterBounds>,
     pub is_hovered: bool,
+    pub hover_scale_enabled: bool,
     pub mouse_position: Option<Point>, // Mouse position relative to widget
     pub progress: Option<f32>,
     pub progress_color: Color,
@@ -107,6 +108,7 @@ impl BatchPrimitive for PosterPrimitive {
             theme_color: self.theme_color,
             animated_bounds: self.animated_bounds,
             is_hovered: self.is_hovered,
+            hover_scale_enabled: self.hover_scale_enabled,
             mouse_position: self.mouse_position,
             progress: self.progress,
             progress_color: self.progress_color,
