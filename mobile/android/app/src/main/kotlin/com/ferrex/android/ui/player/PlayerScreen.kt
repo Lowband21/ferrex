@@ -191,13 +191,19 @@ fun PlayerScreen(
         contentAlignment = Alignment.Center,
     ) {
         when (val state = playerState) {
-            PlaybackPlayerState.Idle -> PlaybackLoading(message = "Preparing playback…")
+            PlaybackPlayerState.Idle -> PlaybackLoading(
+                message = "Preparing playback…",
+                chrome = chrome,
+                onBack = onBack,
+            )
             is PlaybackPlayerState.Loading -> PlaybackLoading(
                 message = if (state.retryAttempt > 0) {
                     "${state.message} (${state.retryAttempt}/${state.maxRetryAttempts})"
                 } else {
                     state.message
                 },
+                chrome = chrome,
+                onBack = onBack,
             )
             is PlaybackPlayerState.Ready -> PlayerContent(
                 streamUrl = state.prepared.streamUrl,
@@ -210,6 +216,7 @@ fun PlayerScreen(
             is PlaybackPlayerState.Error -> PlaybackErrorPanel(
                 failure = state.failure,
                 actions = state.actions,
+                chrome = chrome,
                 onRetry = controller::retry,
                 onBack = onBack,
                 onChangeServer = onChangeServer,
@@ -218,6 +225,7 @@ fun PlayerScreen(
             is PlaybackPlayerState.SessionInvalidated -> PlaybackErrorPanel(
                 failure = state.failure.copy(message = "Playback authorization could not be recovered. Sign in again to continue."),
                 actions = PlaybackRecoveryActions(retry = false, changeServer = true, signOut = true),
+                chrome = chrome,
                 onRetry = controller::retry,
                 onBack = onBack,
                 onChangeServer = onChangeServer,
@@ -228,7 +236,28 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PlaybackLoading(message: String) {
+private fun PlaybackLoading(
+    message: String,
+    chrome: PlayerChrome,
+    onBack: () -> Unit,
+) {
+    if (chrome == PlayerChrome.Tv) {
+        TvPlaybackActionPanel(
+            title = "Preparing playback",
+            supportingText = message,
+            actions = listOf(
+                TvPlaybackPanelAction(
+                    key = "back",
+                    label = "Back to details",
+                    contentDescription = "Back to details while playback is loading",
+                    onSelect = onBack,
+                ),
+            ),
+            leading = { CircularProgressIndicator(color = Color.White) },
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -250,11 +279,63 @@ private fun PlaybackLoading(message: String) {
 private fun PlaybackErrorPanel(
     failure: PlaybackFailure,
     actions: PlaybackRecoveryActions,
+    chrome: PlayerChrome,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     onChangeServer: () -> Unit,
     onSignOut: () -> Unit,
 ) {
+    if (chrome == PlayerChrome.Tv) {
+        TvPlaybackActionPanel(
+            title = failure.tvPanelTitle(),
+            supportingText = buildString {
+                append(failure.message)
+                failure.httpStatusCode?.let { append("\nHTTP $it") }
+            },
+            actions = buildList {
+                if (actions.retry) {
+                    add(
+                        TvPlaybackPanelAction(
+                            key = "retry",
+                            label = "Retry playback",
+                            contentDescription = "Retry playback after ${failure.kind}",
+                            onSelect = onRetry,
+                        ),
+                    )
+                }
+                add(
+                    TvPlaybackPanelAction(
+                        key = "back",
+                        label = "Back to details",
+                        contentDescription = "Back to the previous TV screen",
+                        onSelect = onBack,
+                    ),
+                )
+                if (actions.changeServer) {
+                    add(
+                        TvPlaybackPanelAction(
+                            key = "change-server",
+                            label = "Change server",
+                            contentDescription = "Change Ferrex server after playback failed",
+                            onSelect = onChangeServer,
+                        ),
+                    )
+                }
+                if (actions.signOut) {
+                    add(
+                        TvPlaybackPanelAction(
+                            key = "sign-out",
+                            label = "Sign out",
+                            contentDescription = "Sign out after playback failed",
+                            onSelect = onSignOut,
+                        ),
+                    )
+                }
+            },
+        )
+        return
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -283,6 +364,88 @@ private fun PlaybackErrorPanel(
             }
         }
     }
+}
+
+private data class TvPlaybackPanelAction(
+    val key: String,
+    val label: String,
+    val contentDescription: String = label,
+    val enabled: Boolean = true,
+    val onSelect: () -> Unit,
+)
+
+@Composable
+private fun TvPlaybackActionPanel(
+    title: String,
+    supportingText: String,
+    actions: List<TvPlaybackPanelAction>,
+    leading: (@Composable () -> Unit)? = null,
+) {
+    val keys = actions.map { it.key }
+    val requesters = remember(keys) { actions.associate { it.key to FocusRequester() } }
+    val firstEnabledKey = actions.firstOrNull { it.enabled }?.key
+
+    LaunchedEffect(keys, firstEnabledKey) {
+        firstEnabledKey?.let { key -> runCatching { requesters[key]?.requestFocus() } }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(40.dp)
+            .widthIn(max = 720.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.Black.copy(alpha = 0.9f),
+        contentColor = Color.White,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            leading?.invoke()
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White.copy(alpha = 0.82f),
+                textAlign = TextAlign.Center,
+            )
+            actions.forEach { action ->
+                TvControlButton(
+                    onClick = action.onSelect,
+                    enabled = action.enabled,
+                    modifier = Modifier
+                        .widthIn(max = 520.dp)
+                        .fillMaxWidth()
+                        .focusRequester(requesters.getValue(action.key))
+                        .semantics { contentDescription = action.contentDescription },
+                ) {
+                    Text(action.label, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+private fun PlaybackFailure.tvPanelTitle(): String = when (kind) {
+    PlaybackFailureKind.UnsupportedFormat,
+    PlaybackFailureKind.Decoder -> "Unsupported media"
+    PlaybackFailureKind.Network,
+    PlaybackFailureKind.Timeout,
+    PlaybackFailureKind.Server,
+    PlaybackFailureKind.LibraryOffline -> "Playback interrupted"
+    PlaybackFailureKind.Unauthorized,
+    PlaybackFailureKind.Forbidden -> "Playback authorization required"
+    PlaybackFailureKind.MissingFile -> "Media unavailable"
+    PlaybackFailureKind.Unknown -> "Playback unavailable"
 }
 
 @Composable
@@ -615,7 +778,7 @@ private fun TvPlayerOverlay(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
-                    Key.DirectionCenter, Key.Enter -> {
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                         if (!overlayState.controlsVisible && overlayState.picker == null) {
                             dispatch(TvPlaybackOverlayEvent.DpadCenter)
                             true
@@ -709,6 +872,7 @@ private fun TvPlayerOverlay(
                             player.seekTo((player.currentPosition - SEEK_BACK_MS).coerceAtLeast(0L))
                             interactionTick += 1
                         },
+                        modifier = Modifier.semantics { contentDescription = "Seek back 10 seconds" },
                     ) {
                         Text("−10s")
                     }
@@ -719,7 +883,8 @@ private fun TvPlayerOverlay(
                         },
                         modifier = Modifier
                             .size(width = 112.dp, height = 58.dp)
-                            .focusRequester(safeControlFocusRequester),
+                            .focusRequester(safeControlFocusRequester)
+                            .semantics { contentDescription = if (player.isPlaying) "Pause playback" else "Play playback" },
                     ) {
                         Text(if (player.isPlaying) "Pause" else "Play")
                     }
@@ -728,6 +893,7 @@ private fun TvPlayerOverlay(
                             player.seekTo((player.currentPosition + SEEK_FORWARD_MS).coerceAtMost(player.duration.safeDurationMs()))
                             interactionTick += 1
                         },
+                        modifier = Modifier.semantics { contentDescription = "Seek forward 30 seconds" },
                     ) {
                         Text("+30s")
                     }
@@ -741,7 +907,9 @@ private fun TvPlayerOverlay(
                 ) {
                     TvControlButton(
                         onClick = { dispatch(TvPlaybackOverlayEvent.OpenAudioPicker) },
-                        modifier = Modifier.widthIn(max = 360.dp),
+                        modifier = Modifier
+                            .widthIn(max = 360.dp)
+                            .semantics { contentDescription = "Audio track picker. Current audio: $selectedAudioSummary" },
                     ) {
                         Text(
                             text = "Audio: $selectedAudioSummary",
@@ -751,7 +919,9 @@ private fun TvPlayerOverlay(
                     }
                     TvControlButton(
                         onClick = { dispatch(TvPlaybackOverlayEvent.OpenSubtitlePicker) },
-                        modifier = Modifier.widthIn(max = 360.dp),
+                        modifier = Modifier
+                            .widthIn(max = 360.dp)
+                            .semantics { contentDescription = "Subtitle track picker. Current subtitles: $selectedSubtitleSummary" },
                     ) {
                         Text(
                             text = "Subtitles: $selectedSubtitleSummary",
@@ -867,7 +1037,8 @@ private fun TrackSelectionPanel(
                     Spacer(Modifier.width(24.dp))
                     TvControlButton(
                         onClick = onDismiss,
-                        modifier = if (initialFocusKey == null) Modifier.focusRequester(initialFocusRequester) else Modifier,
+                        modifier = (if (initialFocusKey == null) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                            .semantics { contentDescription = "Close track picker" },
                     ) {
                         Text("Close")
                     }
@@ -925,7 +1096,16 @@ private fun TrackOptionButton(
         enabled = enabled,
         modifier = modifier
             .fillMaxWidth()
+            .tvRemoteActivation(enabled = enabled, onActivate = onClick)
             .onFocusChanged { isFocused = it.isFocused }
+            .semantics {
+                contentDescription = buildString {
+                    append(option.option.title)
+                    option.option.details?.let { append(", ").append(it) }
+                    if (option.option.selected) append(", selected")
+                    if (!enabled) append(", unavailable")
+                }
+            }
             .border(
                 width = when {
                     isFocused -> 2.dp
@@ -977,6 +1157,7 @@ private fun TrackOptionButton(
 private fun TvControlButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -984,14 +1165,18 @@ private fun TvControlButton(
 
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier
+            .tvRemoteActivation(enabled = enabled, onActivate = onClick)
             .onFocusChanged { isFocused = it.isFocused }
-            .scale(if (isFocused) 1.06f else 1f),
+            .scale(if (isFocused && enabled) 1.06f else 1f),
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Black.copy(alpha = 0.68f),
             contentColor = Color.White,
+            disabledContainerColor = Color.Black.copy(alpha = 0.38f),
+            disabledContentColor = Color.White.copy(alpha = 0.44f),
         ),
-        border = if (isFocused) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
+        border = if (isFocused && enabled) BorderStroke(2.dp, Color.White) else BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
         shape = buttonShape,
         content = content,
     )
@@ -1128,6 +1313,27 @@ private fun trackTypeLabel(trackType: Int): String = when (trackType) {
     C.TRACK_TYPE_TEXT -> "subtitle"
     else -> "media"
 }
+
+private fun Modifier.tvRemoteActivation(
+    enabled: Boolean,
+    onActivate: () -> Unit,
+): Modifier = if (!enabled) {
+    this
+} else {
+    onPreviewKeyEvent { event ->
+        if (!event.key.isTvActivationKey()) return@onPreviewKeyEvent false
+        when (event.type) {
+            KeyEventType.KeyDown -> true
+            KeyEventType.KeyUp -> {
+                onActivate()
+                true
+            }
+            else -> false
+        }
+    }
+}
+
+private fun Key.isTvActivationKey(): Boolean = this == Key.DirectionCenter || this == Key.Enter || this == Key.NumPadEnter
 
 private fun PlaybackException.toPlaybackFailure(): PlaybackFailure {
     val httpError = findCause<HttpDataSource.InvalidResponseCodeException>()

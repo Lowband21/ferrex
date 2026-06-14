@@ -12,6 +12,7 @@ import com.ferrex.android.core.library.toUuidString
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
+import com.ferrex.android.core.watch.WatchRepositoryState
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
 import ferrex.details.EpisodeDetails
@@ -160,6 +161,19 @@ val EpisodeDetail.playbackTargetId: String?
     get() = fileId ?: id
 
 object DetailRouteContracts {
+    fun continuePlayback(result: DetailLoadResult, watchState: WatchRepositoryState): PlaybackRouteContract? = when (result) {
+        is DetailLoadResult.Movie -> movieResume(result.detail, watchState.mediaProgress(result.detail.id), result.route)
+            ?: movieServerResume(result.detail, result.route)
+        is DetailLoadResult.Episode -> episodeResume(result.detail, watchState.mediaProgress(result.detail.id), result.route)
+            ?: episodeServerResume(result.detail, result.route)
+        is DetailLoadResult.Series -> seriesNext(
+            series = result.detail,
+            nextEpisode = result.detail.series.tmdbId?.let { watchState.seriesStatus(it)?.nextEpisode ?: watchState.nextEpisodes[it] },
+            sourceRoute = result.route,
+        ) ?: seriesStartOver(result.detail, result.route)
+        is DetailLoadResult.Missing -> null
+    }
+
     fun movieResume(movie: MovieDetail, progress: WatchMediaProgress?, sourceRoute: MediaRouteArgs): PlaybackRouteContract? {
         if (progress == null || progress.isCompleted || progress.positionSeconds <= 0.0) return null
         return movie.playbackTargetId?.let { target ->
@@ -185,6 +199,17 @@ object DetailRouteContracts {
         )
     }
 
+    private fun movieServerResume(movie: MovieDetail, sourceRoute: MediaRouteArgs): PlaybackRouteContract? = movie.playbackTargetId?.let { target ->
+        PlaybackRouteContract(
+            targetMediaId = target,
+            logicalMediaId = movie.id,
+            mediaType = BrowseMediaType.Movie,
+            startPositionSeconds = null,
+            startOver = false,
+            sourceDetailRoute = sourceRoute.toRouteString(),
+        )
+    }
+
     fun episodeResume(episode: EpisodeDetail, progress: WatchMediaProgress?, sourceRoute: MediaRouteArgs): PlaybackRouteContract? {
         if (progress == null || progress.isCompleted || progress.positionSeconds <= 0.0) return null
         return episode.playbackTargetId?.let { target ->
@@ -206,6 +231,17 @@ object DetailRouteContracts {
             mediaType = BrowseMediaType.Episode,
             startPositionSeconds = null,
             startOver = true,
+            sourceDetailRoute = sourceRoute.toRouteString(),
+        )
+    }
+
+    private fun episodeServerResume(episode: EpisodeDetail, sourceRoute: MediaRouteArgs): PlaybackRouteContract? = episode.playbackTargetId?.let { target ->
+        PlaybackRouteContract(
+            targetMediaId = target,
+            logicalMediaId = episode.id,
+            mediaType = BrowseMediaType.Episode,
+            startPositionSeconds = null,
+            startOver = false,
             sourceDetailRoute = sourceRoute.toRouteString(),
         )
     }
