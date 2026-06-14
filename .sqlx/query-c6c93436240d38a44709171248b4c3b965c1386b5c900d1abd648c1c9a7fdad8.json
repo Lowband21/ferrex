@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE auth_device_sessions\n            SET last_activity = $1,\n                last_seen_at = $1,\n                trusted_until = NULL,\n                updated_at = NOW()\n            WHERE id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6c93436240d38a44709171248b4c3b965c1386b5c900d1abd648c1c9a7fdad8"
+}

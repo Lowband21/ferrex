@@ -56,7 +56,7 @@ use notify::event::{
     CreateKind, DataChange, EventKind, ModifyKind, RemoveKind, RenameMode,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{PgPool, Row};
+use sqlx::{Executor, PgPool};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use url::Url;
@@ -192,10 +192,10 @@ async fn local_library_events_queue_jobs_and_reconcile_read_models()
             "moved".to_owned(),
         ])
     );
-    let unprocessed: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM file_watch_events WHERE library_id = $1 AND processed = false",
+    let unprocessed = sqlx::query_scalar!(
+        r#"SELECT COUNT(*)::bigint AS "count!" FROM file_watch_events WHERE library_id = $1 AND processed = false"#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(unprocessed, 0, "watch events must be acked after handoff");
@@ -249,11 +249,11 @@ async fn local_library_events_queue_jobs_and_reconcile_read_models()
     let moved_row =
         media_file_row(&db.pool, library_id, &moved_new_file).await?;
     assert_eq!(moved_row.is_available, Some(true));
-    let old_moved_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM media_files WHERE library_id = $1 AND file_path = $2",
+    let old_moved_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*)::bigint AS "count!" FROM media_files WHERE library_id = $1 AND file_path = $2"#,
+        library_id.0,
+        normalize_path(&moved_old_file)?
     )
-    .bind(library_id.0)
-    .bind(normalize_path(&moved_old_file)?)
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(
@@ -319,10 +319,10 @@ async fn durable_replay_delivers_unacked_events_once() -> Result<()> {
 
     let queued = wait_for_folder_jobs(&db.pool, library_id, 1).await?;
     assert_eq!(queued, BTreeSet::from([normalize_path(&movie_dir)?]));
-    let processed: bool = sqlx::query_scalar(
+    let processed = sqlx::query_scalar!(
         "SELECT processed FROM file_watch_events WHERE id = $1",
+        event.id
     )
-    .bind(event.id)
     .fetch_one(&db.pool)
     .await?;
     assert!(processed, "replayed event should be acked");
@@ -347,11 +347,11 @@ async fn durable_replay_delivers_unacked_events_once() -> Result<()> {
         .await?;
     sleep(Duration::from_millis(100)).await;
 
-    let job_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM orchestrator_jobs WHERE library_id = $1 AND kind = $2",
+    let job_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*)::bigint AS "count!" FROM orchestrator_jobs WHERE library_id = $1 AND kind = $2"#,
+        library_id.0,
+        JobKind::FolderScan as i16
     )
-    .bind(library_id.0)
-    .bind(JobKind::FolderScan as i16)
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(
@@ -405,10 +405,10 @@ async fn forced_poll_strategy_discovers_changes_without_native_notify()
         queued.contains(&normalize_path(&movie_dir)?),
         "forced polling watcher should enqueue the changed top-level folder without native notify"
     );
-    let events_seen: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM file_watch_events WHERE library_id = $1",
+    let events_seen = sqlx::query_scalar!(
+        r#"SELECT COUNT(*)::bigint AS "count!" FROM file_watch_events WHERE library_id = $1"#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_one(&db.pool)
     .await?;
     assert!(
@@ -790,20 +790,16 @@ async fn wait_for_file_watch_types(
     expected_count: usize,
 ) -> Result<BTreeSet<String>> {
     wait_until(WAIT_TIMEOUT, || async {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             "SELECT event_type FROM file_watch_events WHERE library_id = $1",
+            library_id.0
         )
-        .bind(library_id.0)
         .fetch_all(pool)
         .await?;
         if rows.len() < expected_count {
             return Ok(None);
         }
-        Ok(Some(
-            rows.into_iter()
-                .map(|row| row.get::<String, _>("event_type"))
-                .collect(),
-        ))
+        Ok(Some(rows.into_iter().map(|row| row.event_type).collect()))
     })
     .await
 }
@@ -830,23 +826,22 @@ async fn ready_job_paths(
     library_id: LibraryId,
     kind: JobKind,
 ) -> Result<BTreeSet<String>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT payload
         FROM orchestrator_jobs
         WHERE library_id = $1 AND kind = $2 AND state = 'ready'
         ORDER BY created_at ASC
         "#,
+        library_id.0,
+        kind as i16
     )
-    .bind(library_id.0)
-    .bind(kind as i16)
     .fetch_all(pool)
     .await?;
 
     let mut paths = BTreeSet::new();
     for row in rows {
-        let payload_value: serde_json::Value = row.get("payload");
-        let payload: JobPayload = serde_json::from_value(payload_value)?;
+        let payload: JobPayload = serde_json::from_value(row.payload)?;
         match payload {
             JobPayload::FolderScan(job) => {
                 paths.insert(job.context.folder_path_norm().to_owned());
@@ -873,11 +868,11 @@ async fn count_jobs_by_kind(
     library_id: LibraryId,
     kind: JobKind,
 ) -> Result<i64> {
-    let count = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM orchestrator_jobs WHERE library_id = $1 AND kind = $2",
+    let count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*)::bigint AS "count!" FROM orchestrator_jobs WHERE library_id = $1 AND kind = $2"#,
+        library_id.0,
+        kind as i16
     )
-    .bind(library_id.0)
-    .bind(kind as i16)
     .fetch_one(pool)
     .await?;
     Ok(count)
@@ -887,10 +882,12 @@ async fn clear_jobs_for_library(
     pool: &PgPool,
     library_id: LibraryId,
 ) -> Result<()> {
-    sqlx::query("DELETE FROM orchestrator_jobs WHERE library_id = $1")
-        .bind(library_id.0)
-        .execute(pool)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM orchestrator_jobs WHERE library_id = $1",
+        library_id.0
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -979,15 +976,17 @@ async fn seed_movie_library(
     library_id: LibraryId,
     root: &Path,
 ) -> Result<()> {
-    sqlx::query(
+    let library_name = format!("Incremental Scan Acceptance {library_id}");
+    let paths = vec![normalize_path(root)?];
+    sqlx::query!(
         r#"
         INSERT INTO libraries (id, name, library_type, paths)
         VALUES ($1, $2, 'movies', $3)
         "#,
+        library_id.0,
+        library_name,
+        &paths
     )
-    .bind(library_id.0)
-    .bind(format!("Incremental Scan Acceptance {library_id}"))
-    .bind(vec![normalize_path(root)?])
     .execute(pool)
     .await?;
     Ok(())
@@ -1014,7 +1013,10 @@ async fn seed_media_file_with_path(
     fingerprint: &MediaFingerprint,
     filename: &str,
 ) -> Result<()> {
-    sqlx::query(
+    let media_id = MediaID::new(VideoMediaType::Movie);
+    let media_uuid = media_id.as_uuid();
+    let path_norm = normalize_path(path)?;
+    sqlx::query!(
         r#"
         INSERT INTO media_files (
             id, library_id, media_id, media_type, file_path, filename, file_size,
@@ -1023,18 +1025,18 @@ async fn seed_media_file_with_path(
         )
         VALUES ($1, $2, $3, 'movie', $4, $5, $6, $7, $8, $9, $10, $11)
         "#,
+        Uuid::now_v7(),
+        library_id.0,
+        media_uuid,
+        path_norm,
+        filename,
+        fingerprint.size as i64,
+        fingerprint.device_id.as_deref(),
+        fingerprint.inode.map(|value| value as i64),
+        fingerprint.size as i64,
+        fingerprint.mtime,
+        fingerprint.weak_hash.as_deref()
     )
-    .bind(Uuid::now_v7())
-    .bind(library_id.0)
-    .bind(MediaID::new(VideoMediaType::Movie).as_uuid())
-    .bind(normalize_path(path)?)
-    .bind(filename)
-    .bind(fingerprint.size as i64)
-    .bind(fingerprint.device_id.as_deref())
-    .bind(fingerprint.inode.map(|value| value as i64))
-    .bind(fingerprint.size as i64)
-    .bind(fingerprint.mtime)
-    .bind(fingerprint.weak_hash.as_deref())
     .execute(pool)
     .await?;
     Ok(())
@@ -1050,16 +1052,16 @@ async fn media_file_row(
     library_id: LibraryId,
     path: &Path,
 ) -> Result<MediaFileRow> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT is_available, tombstone_reason FROM media_files WHERE library_id = $1 AND file_path = $2",
+        library_id.0,
+        normalize_path(path)?
     )
-    .bind(library_id.0)
-    .bind(normalize_path(path)?)
     .fetch_one(pool)
     .await?;
     Ok(MediaFileRow {
-        is_available: row.get("is_available"),
-        tombstone_reason: row.get("tombstone_reason"),
+        is_available: Some(row.is_available),
+        tombstone_reason: row.tombstone_reason,
     })
 }
 
@@ -1150,15 +1152,14 @@ impl TestDatabase {
                         display_database_url(&admin_database_url)
                     )
                 })?;
-        sqlx::query(&format!(
-            "CREATE DATABASE {}",
-            quote_ident(&database_name)
-        ))
-        .execute(&admin_pool)
-        .await
-        .with_context(|| {
-            format!("failed to create test database {database_name}")
-        })?;
+        let create_database_sql =
+            format!("CREATE DATABASE {}", quote_ident(&database_name));
+        admin_pool
+            .execute(create_database_sql.as_str())
+            .await
+            .with_context(|| {
+                format!("failed to create test database {database_name}")
+            })?;
         admin_pool.close().await;
 
         let database_url =
@@ -1197,15 +1198,16 @@ impl TestDatabase {
                 display_database_url(&self.admin_database_url)
             )
         })?;
-        sqlx::query(&format!(
+        let drop_database_sql = format!(
             "DROP DATABASE IF EXISTS {} WITH (FORCE)",
             quote_ident(&self.database_name)
-        ))
-        .execute(&admin_pool)
-        .await
-        .with_context(|| {
-            format!("failed to drop test database {}", self.database_name)
-        })?;
+        );
+        admin_pool
+            .execute(drop_database_sql.as_str())
+            .await
+            .with_context(|| {
+                format!("failed to drop test database {}", self.database_name)
+            })?;
         admin_pool.close().await;
         Ok(())
     }

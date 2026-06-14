@@ -2924,7 +2924,7 @@ async fn store_media_file(
         MediaError::Internal(format!("Failed to upsert media file: {}", e))
     })?;
 
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE media_files
         SET is_available = TRUE,
@@ -2933,8 +2933,8 @@ async fn store_media_file(
             updated_at = NOW()
         WHERE id = $1
         "#,
+        actual_id
     )
-    .bind(actual_id)
     .execute(&mut **tx)
     .await
     .map_err(|e| {

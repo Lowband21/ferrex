@@ -153,10 +153,10 @@ impl PostgresMediaRepository {
     }
 
     async fn is_media_file_available(&self, id: Uuid) -> Result<bool> {
-        let available: Option<bool> = sqlx::query_scalar(
+        let available = sqlx::query_scalar!(
             "SELECT is_available FROM media_files WHERE id = $1",
+            id
         )
-        .bind(id)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -646,10 +646,10 @@ impl PostgresMediaRepository {
     }
 
     pub async fn file_exists(&self, path: &str) -> Result<bool> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM media_files WHERE file_path = $1 AND is_available = TRUE",
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*)::bigint AS "count!" FROM media_files WHERE file_path = $1 AND is_available = TRUE"#,
+            path
         )
-        .bind(path)
         .fetch_one(self.pool())
         .await
         .map_err(|e| {
@@ -870,7 +870,7 @@ impl PostgresMediaRepository {
             );
         }
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE media_files
             SET is_available = TRUE,
@@ -879,8 +879,8 @@ impl PostgresMediaRepository {
                 updated_at = NOW()
             WHERE id = $1
             "#,
+            actual_id
         )
-        .bind(actual_id)
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -902,7 +902,7 @@ impl PostgresMediaRepository {
         path: &str,
         fingerprint: &MediaFingerprint,
     ) -> Result<()> {
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE media_files
             SET is_available = TRUE,
@@ -916,14 +916,14 @@ impl PostgresMediaRepository {
                 updated_at = NOW()
             WHERE library_id = $1 AND file_path = $2
             "#,
+            library_id.as_uuid(),
+            path,
+            fingerprint.device_id.as_deref(),
+            fingerprint.inode.map(|value| value as i64),
+            fingerprint.size as i64,
+            fingerprint.mtime,
+            fingerprint.weak_hash.as_deref()
         )
-        .bind(library_id.as_uuid())
-        .bind(path)
-        .bind(fingerprint.device_id.as_deref())
-        .bind(fingerprint.inode.map(|value| value as i64))
-        .bind(fingerprint.size as i64)
-        .bind(fingerprint.mtime)
-        .bind(fingerprint.weak_hash.as_deref())
         .execute(self.pool())
         .await
         .map_err(|e| {
@@ -953,7 +953,7 @@ impl PostgresMediaRepository {
                 ))
             })?;
 
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             UPDATE media_files
             SET file_path = $3,
@@ -971,16 +971,16 @@ impl PostgresMediaRepository {
             WHERE library_id = $1 AND file_path = $2
             RETURNING id
             "#,
+            library_id.as_uuid(),
+            old_path,
+            new_path,
+            filename.as_str(),
+            fingerprint.size as i64,
+            fingerprint.device_id.as_deref(),
+            fingerprint.inode.map(|value| value as i64),
+            fingerprint.mtime,
+            fingerprint.weak_hash.as_deref()
         )
-        .bind(library_id.as_uuid())
-        .bind(old_path)
-        .bind(new_path)
-        .bind(filename)
-        .bind(fingerprint.size as i64)
-        .bind(fingerprint.device_id.as_deref())
-        .bind(fingerprint.inode.map(|value| value as i64))
-        .bind(fingerprint.mtime)
-        .bind(fingerprint.weak_hash.as_deref())
         .fetch_optional(self.pool())
         .await
         .map_err(|e| {
@@ -997,43 +997,57 @@ impl PostgresMediaRepository {
             )));
         };
 
-        row.try_get("id").map_err(|e| {
-            MediaError::Internal(format!(
-                "Failed to read moved media id for {}: {}",
-                new_path, e
-            ))
+        Ok(row.id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stored_media_from_parts(
+        id: Uuid,
+        media_uuid: Uuid,
+        media_type: String,
+        file_path: String,
+        file_size: i64,
+        is_available: bool,
+        fingerprint_device_id: Option<String>,
+        fingerprint_inode: Option<i64>,
+        fingerprint_size: Option<i64>,
+        fingerprint_mtime_ms: Option<i64>,
+        fingerprint_weak_hash: Option<String>,
+    ) -> Result<StoredMediaFile> {
+        let media_id = Self::media_id_from_parts(media_uuid, &media_type)?;
+        let fingerprint = MediaFingerprint {
+            device_id: fingerprint_device_id,
+            inode: fingerprint_inode.map(|value| value as u64),
+            size: fingerprint_size.unwrap_or(file_size) as u64,
+            mtime: fingerprint_mtime_ms.unwrap_or_default(),
+            weak_hash: fingerprint_weak_hash,
+        };
+
+        Ok(StoredMediaFile {
+            id,
+            media_id,
+            path_norm: file_path,
+            fingerprint,
+            is_available,
         })
     }
 
     fn stored_media_from_row(
         row: sqlx::postgres::PgRow,
     ) -> Result<StoredMediaFile> {
-        let media_uuid: Uuid = row.try_get("media_id")?;
-        let media_type: String = row.try_get("media_type")?;
-        let media_id = Self::media_id_from_parts(media_uuid, &media_type)?;
-        let fingerprint = MediaFingerprint {
-            device_id: row.try_get("fingerprint_device_id")?,
-            inode: row
-                .try_get::<Option<i64>, _>("fingerprint_inode")?
-                .map(|value| value as u64),
-            size: row
-                .try_get::<Option<i64>, _>("fingerprint_size")?
-                .unwrap_or_else(|| {
-                    row.try_get::<i64, _>("file_size").unwrap_or(0)
-                }) as u64,
-            mtime: row
-                .try_get::<Option<i64>, _>("fingerprint_mtime_ms")?
-                .unwrap_or_default(),
-            weak_hash: row.try_get("fingerprint_weak_hash")?,
-        };
-
-        Ok(StoredMediaFile {
-            id: row.try_get("id")?,
-            media_id,
-            path_norm: row.try_get("file_path")?,
-            fingerprint,
-            is_available: row.try_get("is_available")?,
-        })
+        Self::stored_media_from_parts(
+            row.try_get("id")?,
+            row.try_get("media_id")?,
+            row.try_get("media_type")?,
+            row.try_get("file_path")?,
+            row.try_get("file_size")?,
+            row.try_get("is_available")?,
+            row.try_get("fingerprint_device_id")?,
+            row.try_get("fingerprint_inode")?,
+            row.try_get("fingerprint_size")?,
+            row.try_get("fingerprint_mtime_ms")?,
+            row.try_get("fingerprint_weak_hash")?,
+        )
     }
 }
 
@@ -1046,18 +1060,18 @@ impl FolderDeltaRepository for PostgresMediaRepository {
     ) -> Result<Vec<StoredMediaFile>> {
         let root = folder_path_norm.trim_end_matches('/');
         let child_prefix = format!("{root}/%");
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT id, media_id, media_type::text AS media_type, file_path, file_size,
+            SELECT id, media_id, media_type::text AS "media_type!", file_path, file_size,
                    is_available, fingerprint_device_id, fingerprint_inode,
                    fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash
             FROM media_files
             WHERE library_id = $1
               AND file_path LIKE $2
             "#,
+            library_id.as_uuid(),
+            child_prefix
         )
-        .bind(library_id.as_uuid())
-        .bind(child_prefix)
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -1068,7 +1082,21 @@ impl FolderDeltaRepository for PostgresMediaRepository {
         })?;
 
         rows.into_iter()
-            .map(Self::stored_media_from_row)
+            .map(|row| {
+                Self::stored_media_from_parts(
+                    row.id,
+                    row.media_id,
+                    row.media_type,
+                    row.file_path,
+                    row.file_size,
+                    row.is_available,
+                    row.fingerprint_device_id,
+                    row.fingerprint_inode,
+                    row.fingerprint_size,
+                    row.fingerprint_mtime_ms,
+                    row.fingerprint_weak_hash,
+                )
+            })
             .filter_map(|result| match result {
                 Ok(media)
                     if is_direct_child_file(
@@ -1155,7 +1183,7 @@ impl FolderDeltaRepository for PostgresMediaRepository {
             return Ok(0);
         }
 
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             UPDATE media_files
             SET is_available = FALSE,
@@ -1166,10 +1194,10 @@ impl FolderDeltaRepository for PostgresMediaRepository {
               AND file_path = ANY($2)
               AND is_available = TRUE
             "#,
+            library_id.as_uuid(),
+            &paths,
+            reason
         )
-        .bind(library_id.as_uuid())
-        .bind(&paths)
-        .bind(reason)
         .execute(self.pool())
         .await
         .map_err(|e| {

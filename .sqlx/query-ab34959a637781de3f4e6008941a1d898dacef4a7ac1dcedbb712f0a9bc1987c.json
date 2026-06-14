@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COUNT(*) FILTER (WHERE processed = false)::bigint AS \"replay_pending_events!\",\n                COUNT(*) FILTER (WHERE event_type = 'overflow')::bigint AS \"overflow_events!\",\n                (EXTRACT(EPOCH FROM (\n                    NOW() - (MIN(detected_at) FILTER (WHERE processed = false))\n                )) * 1000)::bigint AS replay_lag_ms\n            FROM file_watch_events\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "replay_pending_events!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "overflow_events!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "replay_lag_ms",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ab34959a637781de3f4e6008941a1d898dacef4a7ac1dcedbb712f0a9bc1987c"
+}

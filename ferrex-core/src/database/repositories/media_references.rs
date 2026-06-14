@@ -27,7 +27,7 @@ use ferrex_model::{MediaID, MovieBatchId};
 use num_bigint::BigUint;
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
 use sqlx::{
-    PgPool, Row,
+    PgPool,
     types::{BigDecimal, Uuid},
 };
 use tracing::{error, info};
@@ -46,7 +46,8 @@ impl PostgresMediaReferencesRepository {
     pub async fn get_movie(&self, id: &MovieID) -> Result<MovieReference> {
         let movie_uuid = id.to_uuid();
 
-        let row = sqlx::query_as::<_, MovieReferenceRow>(
+        let row = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -59,16 +60,16 @@ impl PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.id = $1
               AND mf.is_available = TRUE
             "#,
+            movie_uuid
         )
-        .bind(movie_uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -100,7 +101,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         match library_type {
             LibraryType::Movies => {
                 let repository = TmdbMetadataRepository::new(&self.pool);
-                let rows = sqlx::query_as::<_, MovieReferenceRow>(
+                let rows = sqlx::query_as!(
+                    MovieReferenceRow,
                     r#"
                     SELECT
                         mr.id,
@@ -113,8 +115,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                         mf.file_path,
                         mf.filename,
                         mf.file_size,
-                        mf.discovered_at AS file_discovered_at,
-                        mf.created_at AS file_created_at,
+                        mf.discovered_at AS "file_discovered_at!",
+                        mf.created_at AS "file_created_at!",
                         mf.technical_metadata
                     FROM movie_references mr
                     JOIN media_files mf ON mr.file_id = mf.id
@@ -122,8 +124,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                       AND mf.is_available = TRUE
                     ORDER BY mr.title
                     "#,
+                    library_id.as_uuid()
                 )
-                .bind(library_id.as_uuid())
                 .fetch_all(&self.pool)
                 .await
                 .map_err(|e| {
@@ -188,7 +190,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         path: &str,
     ) -> Result<Option<MovieReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
-        let row = sqlx::query_as::<_, MovieReferenceRow>(
+        let row = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -201,8 +204,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -210,8 +213,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             LIMIT 1
             "#,
+            path
         )
-        .bind(path)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -239,7 +242,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         let uuids: Vec<Uuid> = ids.iter().map(|id| id.to_uuid()).collect();
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, MovieReferenceRow>(
+        let rows = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -252,16 +256,16 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.id = ANY($1)
               AND mf.is_available = TRUE
             "#,
+            uuids.as_slice()
         )
-        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -342,7 +346,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: &LibraryId,
     ) -> Result<Vec<SeriesID>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
             SELECT DISTINCT s.id
             FROM episode_references er
@@ -352,8 +356,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             ORDER BY s.id
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -363,10 +367,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
             ))
         })?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| row.try_get::<Uuid, _>("id").map(SeriesID))
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+        Ok(rows.into_iter().map(|row| SeriesID(row.id)).collect())
     }
 
     async fn list_finalized_series_bundle_versions(
@@ -495,7 +496,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, EpisodeReferenceRow>(
+        let rows = sqlx::query_as!(
+            EpisodeReferenceRow,
             r#"
             SELECT
                 er.id,
@@ -511,16 +513,16 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.id = ANY($1)
               AND mf.is_available = TRUE
             "#,
+            uuids.as_slice()
         )
-        .bind(uuids.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -536,7 +538,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<EpisodeReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, EpisodeReferenceRow>(
+        let rows = sqlx::query_as!(
+            EpisodeReferenceRow,
             r#"
             SELECT
                 er.id,
@@ -552,8 +555,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN series sr ON sr.id = er.series_id AND sr.library_id = $1
@@ -561,8 +564,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
             WHERE mf.is_available = TRUE
             ORDER BY er.series_id ASC, er.season_number ASC, er.episode_number ASC
             "#,
+            library_id.as_uuid()
         )
-            .bind(library_id.as_uuid())
             .fetch_all(&self.pool)
             .await
             .map_err(|e| MediaError::Internal(format!("Failed to get episodes: {}", e)))?;
@@ -576,7 +579,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<EpisodeReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, EpisodeReferenceRow>(
+        let rows = sqlx::query_as!(
+            EpisodeReferenceRow,
             r#"
             SELECT
                 er.id,
@@ -592,8 +596,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
@@ -601,8 +605,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             ORDER BY er.season_number ASC, er.episode_number ASC
             "#,
+            series_id.to_uuid()
         )
-        .bind(series_id.to_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -753,7 +757,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<EpisodeReference> {
         let episode_uuid = id.to_uuid();
 
-        let row = sqlx::query_as::<_, EpisodeReferenceRow>(
+        let row = sqlx::query_as!(
+            EpisodeReferenceRow,
             r#"
             SELECT
                 er.id,
@@ -769,16 +774,16 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.id = $1
               AND mf.is_available = TRUE
             "#,
+            episode_uuid
         )
-        .bind(episode_uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
@@ -932,7 +937,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     async fn get_all_movie_references(&self) -> Result<Vec<MovieReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, MovieReferenceRow>(
+        let rows = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -944,15 +950,15 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata,
                 mf.library_id
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mf.is_available = TRUE
             ORDER BY mr.title
-            "#,
+            "#
         )
         .fetch_all(&self.pool)
         .await
@@ -970,7 +976,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<MovieReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, MovieReferenceRow>(
+        let rows = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -983,8 +990,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -993,9 +1000,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             ORDER BY mr.id
             "#,
+            library_id.as_uuid(),
+            batch_id.as_u32() as i64
         )
-        .bind(library_id.as_uuid())
-        .bind(batch_id.as_u32() as i64)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1024,7 +1031,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         let batch_ids: Vec<i64> =
             batch_ids.iter().map(|id| id.as_i64()).collect();
 
-        let rows = sqlx::query_as::<_, MovieReferenceRow>(
+        let rows = sqlx::query_as!(
+            MovieReferenceRow,
             r#"
             SELECT
                 mr.id,
@@ -1037,8 +1045,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
@@ -1047,9 +1055,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             ORDER BY mr.batch_id, mr.id
             "#,
+            library_id.as_uuid(),
+            &batch_ids
         )
-        .bind(library_id.as_uuid())
-        .bind(&batch_ids)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1255,17 +1263,17 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: &LibraryId,
     ) -> Result<Vec<crate::types::ids::MovieBatchId>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT DISTINCT mr.batch_id
+            SELECT DISTINCT mr.batch_id AS "batch_id!"
             FROM movie_references mr
             JOIN media_files mf ON mf.id = mr.file_id
             WHERE mr.library_id = $1
               AND mf.is_available = TRUE
             ORDER BY mr.batch_id
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1277,7 +1285,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut batch_ids = Vec::with_capacity(rows.len());
         for row in rows {
-            let row_batch_id: i64 = row.try_get("batch_id")?;
+            let row_batch_id = row.batch_id;
             let batch_id =
                 crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
@@ -1296,9 +1304,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: &LibraryId,
     ) -> Result<Vec<MovieBatchVersionRecord>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT b.batch_id, b.version
+            SELECT b.batch_id AS "batch_id!", b.version AS "version!"
             FROM movie_reference_batches b
             WHERE b.library_id = $1
               AND EXISTS (
@@ -1311,8 +1319,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               )
             ORDER BY b.batch_id
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1324,8 +1332,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let row_batch_id: i64 = row.try_get("batch_id")?;
-            let row_version: i64 = row.try_get("version")?;
+            let row_batch_id = row.batch_id;
+            let row_version = row.version;
             let batch_id =
                 crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
@@ -1352,9 +1360,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: &LibraryId,
     ) -> Result<Vec<MovieBatchManifestRecord>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-            SELECT b.batch_id, b.version, b.batch_hash
+            SELECT b.batch_id AS "batch_id!", b.version AS "version!", b.batch_hash
             FROM movie_reference_batches b
             WHERE b.library_id = $1
               AND EXISTS (
@@ -1367,8 +1375,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               )
             ORDER BY b.batch_id
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1380,8 +1388,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let row_batch_id: i64 = row.try_get("batch_id")?;
-            let row_version: i64 = row.try_get("version")?;
+            let row_batch_id = row.batch_id;
+            let row_version = row.version;
             let batch_id =
                 crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
@@ -1398,9 +1406,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 ))
             })?;
 
-            let row_batch_hash: Option<BigDecimal> =
-                row.try_get("batch_hash")?;
-            let content_hash = match row_batch_hash {
+            let content_hash = match row.batch_hash {
                 None => None,
                 Some(hash) => {
                     let (bigint, exponent) = hash.as_bigint_and_exponent();
@@ -1533,7 +1539,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<EpisodeReference>> {
         let repository = TmdbMetadataRepository::new(&self.pool);
 
-        let rows = sqlx::query_as::<_, EpisodeReferenceRow>(
+        let rows = sqlx::query_as!(
+            EpisodeReferenceRow,
             r#"
             SELECT
                 er.id,
@@ -1549,8 +1556,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
@@ -1558,8 +1565,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
               AND mf.is_available = TRUE
             ORDER BY er.episode_number
             "#,
+            season_id.to_uuid()
         )
-        .bind(season_id.to_uuid())
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -1654,7 +1661,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: LibraryId,
     ) -> Result<TvReferenceOrphanCleanup> {
-        let deleted_seasons = sqlx::query(
+        let deleted_seasons = sqlx::query!(
             r#"
             DELETE FROM season_references
             WHERE library_id = $1
@@ -1664,8 +1671,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 WHERE er.season_id = season_references.id
               )
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -1676,7 +1683,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         })?
         .rows_affected();
 
-        let deleted_series = sqlx::query(
+        let deleted_series = sqlx::query!(
             r#"
             DELETE FROM series
             WHERE library_id = $1
@@ -1691,8 +1698,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 WHERE er.series_id = series.id
               )
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(&self.pool)
         .await
         .map_err(|e| {

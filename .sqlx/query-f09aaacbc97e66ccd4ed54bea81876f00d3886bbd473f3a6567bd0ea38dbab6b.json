@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM orchestrator_jobs\n            WHERE library_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f09aaacbc97e66ccd4ed54bea81876f00d3886bbd473f3a6567bd0ea38dbab6b"
+}

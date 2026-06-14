@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT b.batch_id AS \"batch_id!\", b.version AS \"version!\"\n            FROM movie_reference_batches b\n            WHERE b.library_id = $1\n              AND EXISTS (\n                SELECT 1\n                FROM movie_references mr\n                JOIN media_files mf ON mf.id = mr.file_id\n                WHERE mr.library_id = $1\n                  AND mr.batch_id = b.batch_id\n                  AND mf.is_available = TRUE\n              )\n            ORDER BY b.batch_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "batch_id!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "version!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9f39496cadd602e8329f379ae6e72b81ce3fadf9b770ad5d5550466acfd3ca18"
+}

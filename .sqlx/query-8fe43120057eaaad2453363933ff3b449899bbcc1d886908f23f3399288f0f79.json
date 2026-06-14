@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO media_files (\n            id, library_id, media_id, media_type, file_path, filename, file_size,\n            fingerprint_device_id, fingerprint_inode, fingerprint_size,\n            fingerprint_mtime_ms, fingerprint_weak_hash\n        )\n        VALUES ($1, $2, $3, 'movie', $4, $5, $6, $7, $8, $9, $10, $11)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8fe43120057eaaad2453363933ff3b449899bbcc1d886908f23f3399288f0f79"
+}

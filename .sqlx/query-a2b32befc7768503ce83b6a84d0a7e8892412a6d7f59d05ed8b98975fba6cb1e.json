@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO libraries (id, name, library_type, paths)\n        VALUES ($1, $2, 'movies', $3)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a2b32befc7768503ce83b6a84d0a7e8892412a6d7f59d05ed8b98975fba6cb1e"
+}

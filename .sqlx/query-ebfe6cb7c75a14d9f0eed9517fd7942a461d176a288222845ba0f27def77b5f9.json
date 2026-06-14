@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT is_available, tombstone_reason FROM media_files WHERE library_id = $1 AND file_path = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_available",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "tombstone_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "ebfe6cb7c75a14d9f0eed9517fd7942a461d176a288222845ba0f27def77b5f9"
+}

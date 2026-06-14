@@ -1639,13 +1639,13 @@ mod tests {
         .await
         .expect("seed library row");
 
-        sqlx::query(
+        sqlx::query!(
             r#"
             DELETE FROM orchestrator_jobs
             WHERE library_id = $1
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(pool)
         .await
         .expect("clear fixture jobs");

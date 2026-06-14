@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use sqlx::{PgPool, Row, postgres::PgRow};
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::database::repository_ports::file_watch::FileWatchEventRepository;
@@ -43,141 +44,61 @@ fn str_to_event_type(raw: &str) -> Option<FileWatchEventType> {
     }
 }
 
-fn row_to_event(row: PgRow) -> Result<Option<FileWatchEvent>> {
-    let event_type_raw: String = row.try_get("event_type").map_err(|err| {
-        MediaError::Internal(format!(
-            "Failed to decode file watch event type: {err}"
-        ))
-    })?;
-    let Some(event_type) = str_to_event_type(&event_type_raw) else {
+#[derive(Debug)]
+struct FileWatchEventRow {
+    id: Uuid,
+    event_version: i32,
+    library_id: Uuid,
+    library_root_id: i32,
+    root_path: String,
+    event_type: String,
+    file_path: String,
+    path_key: String,
+    old_path: Option<String>,
+    fingerprint: Option<String>,
+    file_size: Option<i64>,
+    file_modified_at: Option<DateTime<Utc>>,
+    correlation_id: Option<Uuid>,
+    idempotency_key: String,
+    detected_at: DateTime<Utc>,
+    processed: bool,
+    processed_at: Option<DateTime<Utc>>,
+    processing_attempts: i32,
+    last_error: Option<String>,
+}
+
+fn row_to_event(row: FileWatchEventRow) -> Result<Option<FileWatchEvent>> {
+    let Some(event_type) = str_to_event_type(&row.event_type) else {
         return Ok(None);
     };
 
     Ok(Some(FileWatchEvent {
-        id: row.try_get("id").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch event id: {err}"
-            ))
-        })?,
-        event_version: row.try_get("event_version").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch event version: {err}"
-            ))
-        })?,
-        library_id: LibraryId(row.try_get("library_id").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch library id: {err}"
-            ))
-        })?),
-        library_root_id: row.try_get("library_root_id").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch root id: {err}"
-            ))
-        })?,
-        root_path: row.try_get("root_path").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch root path: {err}"
-            ))
-        })?,
+        id: row.id,
+        event_version: row.event_version,
+        library_id: LibraryId(row.library_id),
+        library_root_id: row.library_root_id,
+        root_path: row.root_path,
         event_type,
-        file_path: row.try_get("file_path").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch file path: {err}"
-            ))
-        })?,
-        path_key: row.try_get("path_key").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch path key: {err}"
-            ))
-        })?,
-        old_path: row.try_get("old_path").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch old path: {err}"
-            ))
-        })?,
-        fingerprint: row.try_get("fingerprint").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch fingerprint: {err}"
-            ))
-        })?,
-        file_size: row.try_get("file_size").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch file size: {err}"
-            ))
-        })?,
-        file_modified_at: row.try_get("file_modified_at").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch modified time: {err}"
-            ))
-        })?,
-        correlation_id: row.try_get("correlation_id").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch correlation id: {err}"
-            ))
-        })?,
-        idempotency_key: row.try_get("idempotency_key").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch idempotency key: {err}"
-            ))
-        })?,
-        detected_at: row.try_get("detected_at").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch detected timestamp: {err}"
-            ))
-        })?,
-        processed: row.try_get("processed").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch processed flag: {err}"
-            ))
-        })?,
-        processed_at: row.try_get("processed_at").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch processed timestamp: {err}"
-            ))
-        })?,
-        processing_attempts: row.try_get("processing_attempts").map_err(
-            |err| {
-                MediaError::Internal(format!(
-                    "Failed to decode file watch attempts: {err}"
-                ))
-            },
-        )?,
-        last_error: row.try_get("last_error").map_err(|err| {
-            MediaError::Internal(format!(
-                "Failed to decode file watch last error: {err}"
-            ))
-        })?,
+        file_path: row.file_path,
+        path_key: row.path_key,
+        old_path: row.old_path,
+        fingerprint: row.fingerprint,
+        file_size: row.file_size,
+        file_modified_at: row.file_modified_at,
+        correlation_id: row.correlation_id,
+        idempotency_key: row.idempotency_key,
+        detected_at: row.detected_at,
+        processed: row.processed,
+        processed_at: row.processed_at,
+        processing_attempts: row.processing_attempts,
+        last_error: row.last_error,
     }))
 }
-
-const FILE_WATCH_SELECT: &str = r#"
-    SELECT
-        id,
-        event_version,
-        library_id,
-        library_root_id,
-        root_path,
-        event_type,
-        file_path,
-        path_key,
-        old_path,
-        fingerprint,
-        file_size,
-        file_modified_at,
-        correlation_id,
-        idempotency_key,
-        detected_at,
-        processed,
-        processed_at,
-        processing_attempts,
-        last_error
-    FROM file_watch_events
-"#;
 
 #[async_trait]
 impl FileWatchEventRepository for PostgresFileWatchRepository {
     async fn create_event(&self, event: &FileWatchEvent) -> Result<bool> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             INSERT INTO file_watch_events (
                 id,
@@ -203,26 +124,26 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ON CONFLICT (idempotency_key) DO NOTHING
             "#,
+            event.id,
+            event.event_version,
+            event.library_id.as_uuid(),
+            event.library_root_id,
+            &event.root_path,
+            event_type_to_str(&event.event_type),
+            &event.file_path,
+            &event.path_key,
+            event.old_path.as_deref(),
+            event.fingerprint.as_deref(),
+            event.file_size,
+            event.file_modified_at,
+            event.correlation_id,
+            &event.idempotency_key,
+            event.detected_at,
+            event.processed,
+            event.processed_at,
+            event.processing_attempts,
+            event.last_error.as_deref()
         )
-        .bind(event.id)
-        .bind(event.event_version)
-        .bind(event.library_id.as_uuid())
-        .bind(event.library_root_id)
-        .bind(&event.root_path)
-        .bind(event_type_to_str(&event.event_type))
-        .bind(&event.file_path)
-        .bind(&event.path_key)
-        .bind(event.old_path.as_deref())
-        .bind(event.fingerprint.as_deref())
-        .bind(event.file_size)
-        .bind(event.file_modified_at)
-        .bind(event.correlation_id)
-        .bind(&event.idempotency_key)
-        .bind(event.detected_at)
-        .bind(event.processed)
-        .bind(event.processed_at)
-        .bind(event.processing_attempts)
-        .bind(event.last_error.as_deref())
         .execute(self.pool())
         .await
         .map_err(|e| {
@@ -240,20 +161,45 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
         library_id: LibraryId,
         limit: i32,
     ) -> Result<Vec<FileWatchEvent>> {
-        let sql = format!(
-            "{FILE_WATCH_SELECT} WHERE library_id = $1 AND processed = false ORDER BY detected_at ASC, id ASC LIMIT $2"
-        );
-        let rows = sqlx::query(&sql)
-            .bind(library_id.as_uuid())
-            .bind(limit as i64)
-            .fetch_all(self.pool())
-            .await
-            .map_err(|e| {
-                MediaError::Internal(format!(
-                    "Failed to get unprocessed events: {}",
-                    e
-                ))
-            })?;
+        let rows = sqlx::query_as!(
+            FileWatchEventRow,
+            r#"
+            SELECT
+                id,
+                event_version,
+                library_id,
+                library_root_id,
+                root_path,
+                event_type,
+                file_path,
+                path_key,
+                old_path,
+                fingerprint,
+                file_size,
+                file_modified_at,
+                correlation_id,
+                idempotency_key,
+                detected_at,
+                processed,
+                processed_at,
+                processing_attempts,
+                last_error
+            FROM file_watch_events
+            WHERE library_id = $1 AND processed = false
+            ORDER BY detected_at ASC, id ASC
+            LIMIT $2
+            "#,
+            library_id.as_uuid(),
+            limit as i64
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Failed to get unprocessed events: {}",
+                e
+            ))
+        })?;
 
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
@@ -266,14 +212,14 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
     }
 
     async fn mark_processed(&self, event_id: Uuid) -> Result<()> {
-        sqlx::query(
+        sqlx::query!(
             r#"
             UPDATE file_watch_events
             SET processed = true, processed_at = NOW()
             WHERE id = $1
             "#,
+            event_id
         )
-        .bind(event_id)
         .execute(self.pool())
         .await
         .map_err(|e| {
@@ -287,14 +233,14 @@ impl FileWatchEventRepository for PostgresFileWatchRepository {
     }
 
     async fn cleanup_processed(&self, days_to_keep: i32) -> Result<u32> {
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             DELETE FROM file_watch_events
             WHERE processed = true
-              AND processed_at < NOW() - CAST($1 || ' days' AS INTERVAL)
+              AND processed_at < NOW() - ($1::integer * INTERVAL '1 day')
             "#,
+            days_to_keep
         )
-        .bind(days_to_keep.to_string())
         .execute(self.pool())
         .await
         .map_err(|e| {

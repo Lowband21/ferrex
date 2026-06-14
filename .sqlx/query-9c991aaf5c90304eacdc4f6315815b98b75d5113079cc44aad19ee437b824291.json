@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE media_files\n            SET is_available = TRUE,\n                tombstoned_at = NULL,\n                tombstone_reason = NULL,\n                updated_at = NOW()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9c991aaf5c90304eacdc4f6315815b98b75d5113079cc44aad19ee437b824291"
+}

@@ -61,7 +61,6 @@ use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
 };
 use ferrex_core::types::LibraryId;
-use sqlx::Row;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
@@ -349,16 +348,16 @@ impl ScanOrchestrator {
 
     async fn file_watch_health(&self) -> Result<FileWatchHealth> {
         let queue = self.runtime.queue();
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             SELECT
-                COUNT(*) FILTER (WHERE processed = false)::bigint AS replay_pending_events,
-                COUNT(*) FILTER (WHERE event_type = 'overflow')::bigint AS overflow_events,
+                COUNT(*) FILTER (WHERE processed = false)::bigint AS "replay_pending_events!",
+                COUNT(*) FILTER (WHERE event_type = 'overflow')::bigint AS "overflow_events!",
                 (EXTRACT(EPOCH FROM (
                     NOW() - (MIN(detected_at) FILTER (WHERE processed = false))
                 )) * 1000)::bigint AS replay_lag_ms
             FROM file_watch_events
-            "#,
+            "#
         )
         .fetch_one(queue.pool())
         .await
@@ -368,35 +367,16 @@ impl ScanOrchestrator {
             ))
         })?;
 
-        let replay_pending_events: i64 =
-            row.try_get("replay_pending_events").map_err(|err| {
-                MediaError::Internal(format!(
-                    "file watch health decode failed: {err}"
-                ))
-            })?;
-        let overflow_events: i64 =
-            row.try_get("overflow_events").map_err(|err| {
-                MediaError::Internal(format!(
-                    "file watch health decode failed: {err}"
-                ))
-            })?;
-        let replay_lag_ms: Option<i64> =
-            row.try_get("replay_lag_ms").map_err(|err| {
-                MediaError::Internal(format!(
-                    "file watch health decode failed: {err}"
-                ))
-            })?;
-
         Ok(FileWatchHealth {
-            replay_pending_events: replay_pending_events.max(0) as u64,
-            replay_lag_ms: replay_lag_ms.map(|value| value.max(0) as u64),
-            overflow_events: overflow_events.max(0) as u64,
+            replay_pending_events: row.replay_pending_events.max(0) as u64,
+            replay_lag_ms: row.replay_lag_ms.map(|value| value.max(0) as u64),
+            overflow_events: row.overflow_events.max(0) as u64,
         })
     }
 
     async fn cursor_health(&self) -> Result<CursorHealth> {
         let queue = self.runtime.queue();
-        let row = sqlx::query(
+        let row = sqlx::query!(
             r#"
             WITH stale AS (
                 SELECT sc.library_id, sc.last_scan_at
@@ -409,11 +389,11 @@ impl ScanOrchestrator {
                   )::interval
             )
             SELECT
-                COUNT(*)::bigint AS stale_cursors,
-                COUNT(DISTINCT library_id)::bigint AS stale_cursor_libraries,
+                COUNT(*)::bigint AS "stale_cursors!",
+                COUNT(DISTINCT library_id)::bigint AS "stale_cursor_libraries!",
                 (EXTRACT(EPOCH FROM (NOW() - MIN(last_scan_at))) * 1000)::bigint AS oldest_cursor_staleness_ms
             FROM stale
-            "#,
+            "#
         )
         .fetch_one(queue.pool())
         .await
@@ -421,29 +401,11 @@ impl ScanOrchestrator {
             MediaError::Internal(format!("cursor health query failed: {err}"))
         })?;
 
-        let stale_cursors: i64 =
-            row.try_get("stale_cursors").map_err(|err| {
-                MediaError::Internal(format!(
-                    "cursor health decode failed: {err}"
-                ))
-            })?;
-        let stale_cursor_libraries: i64 =
-            row.try_get("stale_cursor_libraries").map_err(|err| {
-                MediaError::Internal(format!(
-                    "cursor health decode failed: {err}"
-                ))
-            })?;
-        let oldest_cursor_staleness_ms: Option<i64> =
-            row.try_get("oldest_cursor_staleness_ms").map_err(|err| {
-                MediaError::Internal(format!(
-                    "cursor health decode failed: {err}"
-                ))
-            })?;
-
         Ok(CursorHealth {
-            stale_cursor_libraries: stale_cursor_libraries.max(0) as u64,
-            stale_cursors: stale_cursors.max(0) as u64,
-            oldest_cursor_staleness_ms: oldest_cursor_staleness_ms
+            stale_cursor_libraries: row.stale_cursor_libraries.max(0) as u64,
+            stale_cursors: row.stale_cursors.max(0) as u64,
+            oldest_cursor_staleness_ms: row
+                .oldest_cursor_staleness_ms
                 .map(|value| value.max(0) as u64),
         })
     }
