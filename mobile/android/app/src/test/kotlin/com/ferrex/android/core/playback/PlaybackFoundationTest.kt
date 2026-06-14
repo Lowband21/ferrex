@@ -78,6 +78,60 @@ class PlaybackFoundationTest {
 
     @Test
     @OptIn(ExperimentalCoroutinesApi::class)
+    fun serverUnreachableDuringTicketFetchRetriesThenShowsRecoveryActions() = runTest {
+        val transport = FakeTicketTransport { ApiResult.NetworkError("server unreachable") }
+        val invalidations = mutableListOf<PlaybackFailure>()
+        val controller = playbackController(
+            scope = this,
+            transport = transport,
+            maxRetries = 1,
+            onSessionInvalidated = { invalidations += it },
+        )
+
+        controller.prepare()
+        advanceUntilIdle()
+
+        val error = controller.state.value as PlaybackPlayerState.Error
+        assertEquals(2, transport.fetchCount)
+        assertEquals(PlaybackFailureKind.Network, error.failure.kind)
+        assertTrue(error.actions.retry)
+        assertTrue(error.actions.changeServer)
+        assertTrue(error.actions.signOut)
+        assertTrue(invalidations.isEmpty())
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun missingFileAndOfflineLibraryExposeUserRecoveryWithoutInvalidatingSession() = runTest {
+        listOf(
+            404 to PlaybackFailureKind.MissingFile,
+            503 to PlaybackFailureKind.LibraryOffline,
+        ).forEach { (statusCode, expectedKind) ->
+            val transport = FakeTicketTransport { ApiResult.HttpError(statusCode, "HTTP $statusCode") }
+            val invalidations = mutableListOf<PlaybackFailure>()
+            val controller = playbackController(
+                scope = this,
+                transport = transport,
+                maxRetries = 0,
+                onSessionInvalidated = { invalidations += it },
+            )
+
+            controller.prepare()
+            advanceUntilIdle()
+
+            val error = controller.state.value as PlaybackPlayerState.Error
+            assertEquals(1, transport.fetchCount)
+            assertEquals(expectedKind, error.failure.kind)
+            assertEquals(statusCode, error.failure.httpStatusCode)
+            assertTrue(error.actions.retry)
+            assertTrue(error.actions.changeServer)
+            assertTrue(error.actions.signOut)
+            assertTrue(invalidations.isEmpty())
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun streamAuthFailureRetriesWithFreshTicketsThenInvalidatesAtLimit() = runTest {
         val transport = FakeTicketTransport { ApiResult.Success(PlaybackTicket("ticket-${it}", 60)) }
         val invalidations = mutableListOf<PlaybackFailure>()
@@ -145,6 +199,30 @@ class PlaybackFoundationTest {
         assertEquals(42_500L, ready.prepared.startPositionMs)
         assertEquals(listOf("logical-media-id"), resumeProvider.requests)
         assertEquals(1, transport.fetchCount)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun resumeAuthFailureInvalidatesSessionBeforeFetchingTicket() = runTest {
+        val transport = FakeTicketTransport { ApiResult.Success(PlaybackTicket("ticket", 60)) }
+        val resumeProvider = FakeResumeProgressProvider(ApiResult.HttpError(401, "expired"))
+        val invalidations = mutableListOf<PlaybackFailure>()
+        val controller = playbackController(
+            scope = this,
+            transport = transport,
+            maxRetries = 0,
+            onSessionInvalidated = { invalidations += it },
+            route = playbackRoute(startOver = false),
+            resumeProgressProvider = resumeProvider,
+        )
+
+        controller.prepare()
+        advanceUntilIdle()
+
+        assertEquals(listOf("logical-media-id"), resumeProvider.requests)
+        assertEquals(0, transport.fetchCount)
+        assertEquals(PlaybackFailureKind.Unauthorized, invalidations.single().kind)
+        assertTrue(controller.state.value is PlaybackPlayerState.SessionInvalidated)
     }
 
     @Test

@@ -33,6 +33,16 @@ class TvPlaybackOverlayReducerTest {
     }
 
     @Test
+    fun verticalDpadShowsControlsAndRestoresSafeFocus() {
+        val hidden = TvPlaybackOverlayUiState(controlsVisible = false, isPlaying = true)
+
+        val (shown, effect) = TvPlaybackOverlayReducer.reduce(hidden, TvPlaybackOverlayEvent.DpadVertical)
+
+        assertEquals(true, shown.controlsVisible)
+        assertEquals(TvPlaybackOverlayEffect.RestoreSafeFocus, effect)
+    }
+
+    @Test
     fun pickerBackAndSelectionClosePickerAndRestoreFocus() {
         val pickerOpen = TvPlaybackOverlayUiState(
             controlsVisible = true,
@@ -48,6 +58,22 @@ class TvPlaybackOverlayReducerTest {
         assertEquals(TvPlaybackOverlayEffect.RestoreSafeFocus, dismissEffect)
         assertEquals(null, selected.picker)
         assertEquals(TvPlaybackOverlayEffect.RestoreSafeFocus, selectEffect)
+    }
+
+    @Test
+    fun playbackStoppedKeepsControlsVisibleAndClosesPickerForRecovery() {
+        val pickerOpen = TvPlaybackOverlayUiState(
+            controlsVisible = true,
+            picker = TvTrackPickerKind.Audio,
+            isPlaying = true,
+        )
+
+        val (stopped, effect) = TvPlaybackOverlayReducer.reduce(pickerOpen, TvPlaybackOverlayEvent.PlaybackStopped)
+
+        assertEquals(false, stopped.isPlaying)
+        assertEquals(true, stopped.controlsVisible)
+        assertEquals(null, stopped.picker)
+        assertEquals(TvPlaybackOverlayEffect.RestoreSafeFocus, effect)
     }
 
     @Test

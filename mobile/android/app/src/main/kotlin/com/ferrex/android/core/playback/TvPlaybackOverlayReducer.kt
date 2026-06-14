@@ -93,6 +93,10 @@ object TvPlaybackOverlayReducer {
         ) to TvPlaybackOverlayEffect.RestoreSafeFocus
 
         TvPlaybackOverlayEvent.PlaybackStarted -> state.copy(isPlaying = true) to TvPlaybackOverlayEffect.None
-        TvPlaybackOverlayEvent.PlaybackStopped -> state.copy(isPlaying = false, controlsVisible = true) to TvPlaybackOverlayEffect.RestoreSafeFocus
+        TvPlaybackOverlayEvent.PlaybackStopped -> state.copy(
+            isPlaying = false,
+            controlsVisible = true,
+            picker = null,
+        ) to TvPlaybackOverlayEffect.RestoreSafeFocus
     }
 }

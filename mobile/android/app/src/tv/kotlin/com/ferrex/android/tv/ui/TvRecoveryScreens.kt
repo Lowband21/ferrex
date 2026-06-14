@@ -299,6 +299,7 @@ fun TvHomeScreen(
             ticketTransport = playbackTicketTransport,
             streamUrlFactory = playbackStreamUrlFactory,
             progressReporter = playbackProgressReporter,
+            resumeProgressProvider = null,
             streamingHttpClient = streamingHttpClient,
             chrome = PlayerChrome.Tv,
             onBack = { activePlaybackContract = null },
