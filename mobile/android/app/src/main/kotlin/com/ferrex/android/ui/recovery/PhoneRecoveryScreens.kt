@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -150,6 +151,7 @@ fun PhoneLoginScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val isFatal = state.reason == LoginRequiredReason.SetupRequired ||
         state.reason == LoginRequiredReason.RegistrationClosed
@@ -234,6 +236,7 @@ fun PhoneLoginScreen(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
         message?.let {
             Text(
@@ -252,6 +255,7 @@ fun PhoneRecoverableScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     PhoneSurface {
         Text(
@@ -274,6 +278,7 @@ fun PhoneRecoverableScreen(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
     }
 }
@@ -303,6 +308,7 @@ private fun RecoveryActions(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     Spacer(Modifier.height(28.dp))
     if (includeRetry) {
@@ -325,6 +331,9 @@ private fun RecoveryActions(
     }
     TextButton(onClick = onResetConnection, modifier = Modifier.fillMaxWidth()) {
         Text("Reset connection")
+    }
+    OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
+        Text("Diagnostics / Export diagnostics")
     }
 }
 

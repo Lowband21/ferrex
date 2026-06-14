@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
                     playbackProgressReporter = dependencies.playbackProgressReporter,
                     playbackResumeProgressProvider = dependencies.playbackResumeProgressProvider,
                     streamingHttpClient = dependencies.streamingHttpClient,
+                    diagnostics = dependencies.diagnostics,
                 )
             }
         }

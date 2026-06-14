@@ -104,6 +104,16 @@ class TvFocusRestoreModelTest {
             ),
         )
         assertEquals(
+            TvFocusKey("home", "home-actions", TvHomeFocusPolicy.ITEM_DIAGNOSTICS),
+            TvHomeFocusPolicy.initialHomeTarget(
+                continueWatchingKeys = emptyList(),
+                searchAvailable = false,
+                libraryActionKeys = listOf("browse-movies"),
+                recoveryActionKeys = listOf("retry-cache-sync"),
+                homeActionKeys = listOf(TvHomeFocusPolicy.ITEM_DIAGNOSTICS),
+            ),
+        )
+        assertEquals(
             TvFocusKey("home", "library-actions", "browse-series"),
             TvHomeFocusPolicy.initialHomeTarget(
                 continueWatchingKeys = emptyList(),

@@ -153,6 +153,7 @@ fun TvHomeScreen(
     onResetConnection: () -> Unit,
     onRetryConnection: () -> Unit,
     onPlaybackSessionInvalidated: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
     val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
@@ -433,6 +434,7 @@ fun TvHomeScreen(
             onProgressCommitted = { refreshPlaybackProgress(playbackContract) },
             onChangeServer = onChangeServer,
             onSignOut = onSignOut,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
         return
     }
@@ -447,6 +449,7 @@ fun TvHomeScreen(
                 target.toMediaRouteArgs()?.let { openDetail(it, TvReturnTarget.Search) }
             },
             onBack = { childScreen = null },
+            onOpenDiagnostics = onOpenDiagnostics,
         )
         is TvHomeChild.Grid -> TvLibraryGridScreen(
             tab = screen.tab,
@@ -501,6 +504,7 @@ fun TvHomeScreen(
             onClearAll = { libraryRepository?.clearAllCache(scope) },
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
             onBack = { childScreen = null },
         )
         is TvHomeChild.Detail -> TvMediaDetailScreen(
@@ -523,6 +527,7 @@ fun TvHomeScreen(
             onMarkEpisodeWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markEpisodeWatched(mediaId, watched) } },
             onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
             onPlaybackContract = { launchPlayback(it) },
+            onOpenDiagnostics = onOpenDiagnostics,
         )
         null -> TvHomeContent(
             state = state,
@@ -580,6 +585,7 @@ fun TvHomeScreen(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
     }
 }
@@ -621,6 +627,7 @@ private fun TvHomeContent(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val continueEntries = remember(continueState.cards) { continueState.cards.map { it.toPosterEntry() } }
     val cachedIds = when (selectedTab) {
@@ -643,15 +650,21 @@ private fun TvHomeContent(
         add("change-server")
         add("reset-connection")
     }
+    val homeActionKeys = buildList {
+        if (connectionStatus.visible) add("retry-connection")
+        if (searchAvailable) add(TvHomeFocusPolicy.ITEM_SEARCH)
+        add(TvHomeFocusPolicy.ITEM_DIAGNOSTICS)
+    }
     val initialTarget = TvHomeFocusPolicy.initialHomeTarget(
         continueWatchingKeys = continueEntries.map { it.stableKey },
         searchAvailable = searchAvailable,
         libraryActionKeys = libraryActionKeys,
         recoveryActionKeys = recoveryActionKeys,
+        homeActionKeys = homeActionKeys,
     )
     val availableSurfaces = buildSet {
         if (continueEntries.isNotEmpty()) add(TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING)
-        if (searchAvailable) add(TvHomeFocusPolicy.SURFACE_HOME_ACTIONS)
+        if (homeActionKeys.isNotEmpty()) add(TvHomeFocusPolicy.SURFACE_HOME_ACTIONS)
         if (movieLibraryInfos.isNotEmpty() || seriesLibraryInfos.isNotEmpty()) add("library-tabs")
         if (selectedTab == HomeLibraryTab.Movies && (movieLibraryInfos.isNotEmpty() || movieLibraries.isNotEmpty())) add("library-chooser")
         if (selectedTab == HomeLibraryTab.Series && (seriesLibraryInfos.isNotEmpty() || seriesLibraries.isNotEmpty())) add("library-chooser")
@@ -717,6 +730,14 @@ private fun TvHomeContent(
                         ),
                     )
                 }
+                add(
+                    TvButtonAction(
+                        key = TvHomeFocusPolicy.ITEM_DIAGNOSTICS,
+                        label = "Settings & Diagnostics",
+                        role = TvActionRole.SettingsExit,
+                        onSelect = onOpenDiagnostics,
+                    ),
+                )
             },
             focusRestorer = focusRestorer,
             surfaceKey = TvHomeFocusPolicy.SURFACE_HOME_ACTIONS,
@@ -783,6 +804,7 @@ private fun TvHomeContent(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
     }
 }
@@ -991,6 +1013,7 @@ private fun TvLibraryRecoveryPanel(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val status = LibraryBrowseModels.libraryStatusCopy(freshness)
     val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
@@ -1012,6 +1035,7 @@ private fun TvLibraryRecoveryPanel(
             if (actions.resetConnection) {
                 add(TvActionPanelAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection))
             }
+            add(TvActionPanelAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics))
         },
         focusRestorer = focusRestorer,
         surfaceKey = TvHomeFocusPolicy.SURFACE_RECOVERY_ACTIONS,
@@ -1054,6 +1078,7 @@ private fun TvLibraryGridScreen(
     onClearAll: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -1165,6 +1190,7 @@ private fun TvLibraryGridScreen(
                     TvButtonAction("clear-all-cache", "Clear all cache", TvActionRole.Destructive, onSelect = onClearAll),
                     TvButtonAction("change-server", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
                     TvButtonAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
+                    TvButtonAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
                 ),
                 focusRestorer = focusRestorer,
                 surfaceKey = "grid-recovery-actions",
@@ -1178,6 +1204,7 @@ private fun TvLibraryGridScreen(
                         TvActionPanelAction("sync-selected-empty", "Retry selected library", TvActionRole.Retry, onSelect = onSyncSelected),
                         TvActionPanelAction("change-server-empty", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
                         TvActionPanelAction("reset-connection-empty", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
+                        TvActionPanelAction("diagnostics-empty", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
                     ),
                     focusRestorer = focusRestorer,
                     surfaceKey = "grid-empty-actions",
@@ -1321,6 +1348,7 @@ private fun TvSearchScreen(
     imagePipeline: FerrexImagePipeline?,
     onOpenResult: (SearchDetailTarget) -> Unit,
     onBack: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     var query by remember(scope.directoryName) { mutableStateOf("") }
@@ -1406,6 +1434,7 @@ private fun TvSearchScreen(
                     resolutions = resolutions,
                     onOpenResult = onOpenResult,
                     onRetry = { retryNonce += 1 },
+                    onOpenDiagnostics = onOpenDiagnostics,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1422,6 +1451,7 @@ private fun TvSearchOutcome(
     resolutions: Map<ImageRequestKey, ImageResolution>,
     onOpenResult: (SearchDetailTarget) -> Unit,
     onRetry: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (outcome) {
@@ -1442,7 +1472,10 @@ private fun TvSearchOutcome(
             TvActionPanel(
                 title = "Search failed",
                 supportingText = prefix + outcome.message,
-                actions = listOf(TvActionPanelAction("retry", "Retry", TvActionRole.Retry, enabled = outcome.retryable, onSelect = onRetry)),
+                actions = listOf(
+                    TvActionPanelAction("retry", "Retry", TvActionRole.Retry, enabled = outcome.retryable, onSelect = onRetry),
+                    TvActionPanelAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
+                ),
                 autoFocus = false,
             )
         }
@@ -1475,7 +1508,7 @@ private fun TvSearchOutcome(
                             scope = scope,
                             onOpenResult = onOpenResult,
                         )
-                        is SearchResultRow.CacheMiss -> TvSearchCacheMissRow(row = row, onRetry = onRetry)
+                        is SearchResultRow.CacheMiss -> TvSearchCacheMissRow(row = row, onRetry = onRetry, onOpenDiagnostics = onOpenDiagnostics)
                     }
                 }
             }
@@ -1511,11 +1544,18 @@ private fun TvSearchResolvedRow(
 }
 
 @Composable
-private fun TvSearchCacheMissRow(row: SearchResultRow.CacheMiss, onRetry: () -> Unit) {
+private fun TvSearchCacheMissRow(
+    row: SearchResultRow.CacheMiss,
+    onRetry: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
     TvActionPanel(
         title = row.title,
         supportingText = row.message,
-        actions = listOf(TvActionPanelAction("retry-${row.searchStableKey()}", "Retry sync / search", TvActionRole.Retry, enabled = row.retryable, onSelect = onRetry)),
+        actions = listOf(
+            TvActionPanelAction("retry-${row.searchStableKey()}", "Retry sync / search", TvActionRole.Retry, enabled = row.retryable, onSelect = onRetry),
+            TvActionPanelAction("diagnostics-${row.searchStableKey()}", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
+        ),
         autoFocus = false,
         buttonMaxWidth = 520.dp,
     )
@@ -1567,6 +1607,7 @@ private fun TvMediaDetailScreen(
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onMarkSeriesWatched: (Long, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     TvScaffold(
@@ -1647,6 +1688,7 @@ private fun TvMediaDetailScreen(
                 onClearSelectedCache = onClearSelectedCache,
                 onChangeServer = onChangeServer,
                 onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
             null -> TvActionPanel(
                 title = "Details loading",
@@ -1845,6 +1887,7 @@ private fun TvDetailRecovery(
     onClearSelectedCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     TvActionPanel(
         title = title,
@@ -1856,6 +1899,7 @@ private fun TvDetailRecovery(
             }
             add(TvActionPanelAction("change-server", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer))
             add(TvActionPanelAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection))
+            add(TvActionPanelAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics))
         },
         autoFocus = false,
     )

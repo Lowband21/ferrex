@@ -52,6 +52,7 @@ fun PhoneSearchPanel(
     imagePipeline: FerrexImagePipeline?,
     onOpenResult: (SearchDetailTarget) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDiagnostics: (() -> Unit)? = null,
 ) {
     var query by remember(scope.directoryName) { mutableStateOf("") }
     var retryNonce by remember(scope.directoryName) { mutableStateOf(0) }
@@ -147,6 +148,7 @@ fun PhoneSearchPanel(
                     uiState = PhoneSearchUiState.Idle
                 },
                 resolveImage = { key -> resolutions[key] },
+                onOpenDiagnostics = onOpenDiagnostics,
             )
         }
     }
@@ -161,6 +163,7 @@ private fun SearchOutcomeContent(
     onRetry: () -> Unit,
     onClear: () -> Unit,
     resolveImage: (ImageRequestKey) -> ImageResolution?,
+    onOpenDiagnostics: (() -> Unit)?,
 ) {
     when (outcome) {
         MediaSearchOutcome.Idle -> SearchCopy("Enter at least two characters to search the current server.")
@@ -176,7 +179,7 @@ private fun SearchOutcomeContent(
                 SearchFailureKind.InvalidResponse -> "Search response changed. "
             }
             SearchCopy(prefix + outcome.message, error = true)
-            SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = outcome.retryable)
+            SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = outcome.retryable, onOpenDiagnostics = onOpenDiagnostics)
         }
         is MediaSearchOutcome.Results -> {
             if (outcome.staleCache) {
@@ -198,7 +201,7 @@ private fun SearchOutcomeContent(
                             imageLoader = imageLoader,
                             onOpenResult = onOpenResult,
                         )
-                        is SearchResultRow.CacheMiss -> CacheMissRow(row = row, onRetry = onRetry, onClear = onClear)
+                        is SearchResultRow.CacheMiss -> CacheMissRow(row = row, onRetry = onRetry, onClear = onClear, onOpenDiagnostics = onOpenDiagnostics)
                     }
                 }
                 if (outcome.rows.size > 12) {
@@ -286,6 +289,7 @@ private fun CacheMissRow(
     row: SearchResultRow.CacheMiss,
     onRetry: () -> Unit,
     onClear: () -> Unit,
+    onOpenDiagnostics: (() -> Unit)?,
 ) {
     Column(
         modifier = Modifier
@@ -304,7 +308,7 @@ private fun CacheMissRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
         )
-        SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = row.retryable)
+        SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = row.retryable, onOpenDiagnostics = onOpenDiagnostics)
     }
 }
 
@@ -313,6 +317,7 @@ private fun SearchActionRow(
     onRetry: () -> Unit,
     onClear: () -> Unit,
     retryEnabled: Boolean = true,
+    onOpenDiagnostics: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -325,6 +330,11 @@ private fun SearchActionRow(
         }
         TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
             Text("Clear search")
+        }
+        onOpenDiagnostics?.let {
+            TextButton(onClick = it, modifier = Modifier.weight(1f)) {
+                Text("Diagnostics")
+            }
         }
     }
 }

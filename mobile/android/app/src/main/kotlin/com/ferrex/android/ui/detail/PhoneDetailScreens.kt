@@ -76,6 +76,7 @@ fun PhoneDetailScreen(
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onMarkSeriesWatched: (Long, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -177,6 +178,7 @@ fun PhoneDetailScreen(
                         onClearSelectedCache = onClearSelectedCache,
                         onChangeServer = onChangeServer,
                         onResetConnection = onResetConnection,
+                        onOpenDiagnostics = onOpenDiagnostics,
                     )
                 }
             }
@@ -447,6 +449,7 @@ private fun DetailRecoveryContent(
     onClearSelectedCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         StateCard(title = missing.title, body = missing.message)
@@ -458,6 +461,7 @@ private fun DetailRecoveryContent(
             TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) { Text("Change server") }
             TextButton(onClick = onResetConnection, modifier = Modifier.weight(1f)) { Text("Reset connection") }
         }
+        OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
     }
 }
 

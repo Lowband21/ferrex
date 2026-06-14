@@ -122,6 +122,7 @@ fun PhoneHomeScreen(
     onResetConnection: () -> Unit,
     onRetryConnection: () -> Unit,
     onPlaybackSessionInvalidated: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
     val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
@@ -394,6 +395,7 @@ fun PhoneHomeScreen(
                 onProgressCommitted = { refreshPlaybackProgress(playbackContract) },
                 onChangeServer = onChangeServer,
                 onSignOut = onSignOut,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
         } else if (detailResult != null && selectedDetailRoute != null) {
             PhoneDetailScreen(
@@ -419,6 +421,7 @@ fun PhoneHomeScreen(
                 onMarkEpisodeWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markEpisodeWatched(mediaId, watched) } },
                 onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
                 onPlaybackContract = { launchPlayback(it) },
+                onOpenDiagnostics = onOpenDiagnostics,
             )
         } else {
             LazyColumn(
@@ -434,6 +437,7 @@ fun PhoneHomeScreen(
                     playbackNotice = playbackNotice,
                     onRetryConnection = onRetryConnection,
                     onSignOut = onSignOut,
+                    onOpenDiagnostics = onOpenDiagnostics,
                 )
             }
             item {
@@ -454,6 +458,7 @@ fun PhoneHomeScreen(
                     imageRepository = imageRepository,
                     imagePipeline = imagePipeline,
                     onOpenResult = { target -> target.toMediaRouteArgs()?.let { selectedDetailRoute = it } },
+                    onOpenDiagnostics = onOpenDiagnostics,
                 )
             }
             if (shelves.isNotEmpty()) {
@@ -532,6 +537,7 @@ fun PhoneHomeScreen(
                     },
                     onChangeServer = onChangeServer,
                     onResetConnection = onResetConnection,
+                    onOpenDiagnostics = onOpenDiagnostics,
                 )
             }
         }
@@ -546,6 +552,7 @@ private fun HomeHeader(
     playbackNotice: String?,
     onRetryConnection: () -> Unit,
     onSignOut: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -586,7 +593,10 @@ private fun HomeHeader(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-        TextButton(onClick = onSignOut) { Text("Sign out") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.weight(1f)) { Text("Settings & Diagnostics") }
+            TextButton(onClick = onSignOut, modifier = Modifier.weight(1f)) { Text("Sign out") }
+        }
     }
 }
 
@@ -1106,6 +1116,7 @@ private fun LibraryRecoveryPanel(
     onClearSelected: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val status = LibraryBrowseModels.libraryStatusCopy(freshness)
     val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
@@ -1119,6 +1130,7 @@ private fun LibraryRecoveryPanel(
             if (actions.changeServer) TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) { Text("Change server") }
             if (actions.resetConnection) TextButton(onClick = onResetConnection, modifier = Modifier.weight(1f)) { Text("Reset connection") }
         }
+        OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
     }
 }
 

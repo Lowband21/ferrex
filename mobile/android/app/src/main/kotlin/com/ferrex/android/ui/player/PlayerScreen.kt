@@ -155,6 +155,7 @@ fun PlayerScreen(
     onChangeServer: () -> Unit,
     onSignOut: () -> Unit,
     chrome: PlayerChrome = PlayerChrome.Phone,
+    onOpenDiagnostics: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val currentSessionInvalidated by rememberUpdatedState(onSessionInvalidated)
@@ -221,6 +222,7 @@ fun PlayerScreen(
                 onBack = onBack,
                 onChangeServer = onChangeServer,
                 onSignOut = onSignOut,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
             is PlaybackPlayerState.SessionInvalidated -> PlaybackErrorPanel(
                 failure = state.failure.copy(message = "Playback authorization could not be recovered. Sign in again to continue."),
@@ -230,6 +232,7 @@ fun PlayerScreen(
                 onBack = onBack,
                 onChangeServer = onChangeServer,
                 onSignOut = onSignOut,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
         }
     }
@@ -284,6 +287,7 @@ private fun PlaybackErrorPanel(
     onBack: () -> Unit,
     onChangeServer: () -> Unit,
     onSignOut: () -> Unit,
+    onOpenDiagnostics: (() -> Unit)?,
 ) {
     if (chrome == PlayerChrome.Tv) {
         TvPlaybackActionPanel(
@@ -331,6 +335,16 @@ private fun PlaybackErrorPanel(
                         ),
                     )
                 }
+                onOpenDiagnostics?.let {
+                    add(
+                        TvPlaybackPanelAction(
+                            key = "diagnostics",
+                            label = "Diagnostics / Export diagnostics",
+                            contentDescription = "Open diagnostics after playback failed",
+                            onSelect = it,
+                        ),
+                    )
+                }
             },
         )
         return
@@ -361,6 +375,9 @@ private fun PlaybackErrorPanel(
                 if (actions.signOut) {
                     TextButton(onClick = onSignOut, modifier = Modifier.weight(1f)) { Text("Sign out") }
                 }
+            }
+            onOpenDiagnostics?.let {
+                OutlinedButton(onClick = it, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
             }
         }
     }

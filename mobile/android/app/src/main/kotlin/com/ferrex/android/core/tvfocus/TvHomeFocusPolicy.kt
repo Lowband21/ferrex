@@ -13,15 +13,20 @@ object TvHomeFocusPolicy {
     const val SURFACE_LIBRARY_ACTIONS = "library-actions"
     const val SURFACE_RECOVERY_ACTIONS = "recovery-actions"
     const val ITEM_SEARCH = "search"
+    const val ITEM_DIAGNOSTICS = "settings-diagnostics"
 
     fun initialHomeTarget(
         continueWatchingKeys: List<String>,
         searchAvailable: Boolean,
         libraryActionKeys: List<String>,
         recoveryActionKeys: List<String>,
+        homeActionKeys: List<String> = emptyList(),
     ): TvFocusKey {
         continueWatchingKeys.firstOrNull()?.let { key ->
             return TvFocusKey(SCREEN_HOME, SURFACE_CONTINUE_WATCHING, key)
+        }
+        homeActionKeys.firstOrNull()?.let { key ->
+            return TvFocusKey(SCREEN_HOME, SURFACE_HOME_ACTIONS, key)
         }
         if (searchAvailable) {
             return TvFocusKey(SCREEN_HOME, SURFACE_HOME_ACTIONS, ITEM_SEARCH)
