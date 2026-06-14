@@ -26,13 +26,20 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    app::{self, bootstrap::AppConfig},
+    app::{
+        self,
+        bootstrap::AppConfig,
+        presets::{self, PlayerScenario},
+    },
     common::messages::DomainMessage,
     domains::ui::{shell_ui::UiShellMessage, window_ui::WindowUiMessage},
     state::State,
 };
 
-const DEFAULT_PRESET: ScreenshotPreset = ScreenshotPreset::FirstRun;
+/// Screenshot preset names are the deterministic player scenarios exposed by the app.
+pub type ScreenshotPreset = PlayerScenario;
+
+const DEFAULT_PRESET: ScreenshotPreset = ScreenshotPreset::FirstRunAuth;
 const DEFAULT_VIEWPORT: Viewport = Viewport {
     width: 1280,
     height: 720,
@@ -45,12 +52,13 @@ const DEFAULT_SETTLE_MS: u64 = 100;
 pub const HELP: &str = r#"Capture a headless ferrex-player screenshot.
 
 USAGE:
-    ferrex-player screenshot --preset FirstRun --viewport 1280x720 --output ./first-run.png [OPTIONS]
+    ferrex-player screenshot --preset FirstRunAuth --viewport 1280x720 --output ./first-run.png [OPTIONS]
+    ferrex-player screenshot list
 
 OPTIONS:
-    -p, --preset <NAME>         Named app preset to render. Available: FirstRun, UserSelection,
-                                AdminSession, AuthenticatedWithDevices, LibraryLoaded.
-                                Defaults to FirstRun, or to .ice metadata when --ice is provided.
+    -p, --preset <NAME>         Named app preset to render. Run `ferrex-player screenshot list`
+                                for names and descriptions. Defaults to FirstRunAuth, or to
+                                .ice metadata when --ice is provided.
     -v, --viewport <WxH>        Logical viewport, for example 1280x720. Defaults to 1280x720,
                                 or to .ice metadata when --ice is provided.
     -s, --scale-factor <N>      Physical scale factor used for the PNG. Defaults to 1.0.
@@ -63,7 +71,7 @@ OPTIONS:
     -h, --help                  Print this help text.
 
 EXAMPLE:
-    ferrex-player screenshot --preset FirstRun --viewport 1440x900 \
+    ferrex-player screenshot --preset FirstRunAuth --viewport 1440x900 \
         --scale-factor 1 --mode Immediate --settle-ms 200 \
         --output ./artifacts/first-run.png
 "#;
@@ -75,6 +83,8 @@ pub enum CommandOutcome {
     NotScreenshot,
     /// Help was requested and printed by the caller.
     HelpRequested,
+    /// Scenario metadata was requested for agent discovery.
+    ListedScenarios(Vec<presets::ScenarioInfo>),
     /// A screenshot was captured.
     Captured(CaptureOutput),
 }
@@ -141,81 +151,6 @@ impl Viewport {
 impl fmt::Display for Viewport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}x{}", self.width, self.height)
-    }
-}
-
-/// Named screenshot presets exposed by the Ferrex app shell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ScreenshotPreset {
-    /// First-run setup flow.
-    FirstRun,
-    /// User selection flow.
-    UserSelection,
-    /// Admin session state.
-    AdminSession,
-    /// Authenticated settings/device-management state.
-    AuthenticatedWithDevices,
-    /// Authenticated library state.
-    LibraryLoaded,
-}
-
-impl ScreenshotPreset {
-    /// Names accepted by the capture harness.
-    pub const ALL: [Self; 5] = [
-        Self::FirstRun,
-        Self::UserSelection,
-        Self::AdminSession,
-        Self::AuthenticatedWithDevices,
-        Self::LibraryLoaded,
-    ];
-
-    fn parse(value: &str) -> Result<Self, ScreenshotError> {
-        let normalized = value
-            .trim()
-            .chars()
-            .filter(|ch| *ch != '-' && *ch != '_')
-            .collect::<String>()
-            .to_ascii_lowercase();
-
-        Self::ALL
-            .into_iter()
-            .find(|preset| {
-                preset
-                    .as_str()
-                    .chars()
-                    .filter(|ch| *ch != '-' && *ch != '_')
-                    .collect::<String>()
-                    .to_ascii_lowercase()
-                    == normalized
-            })
-            .ok_or_else(|| ScreenshotError::InvalidPreset {
-                name: value.to_string(),
-                available: Self::available_names(),
-            })
-    }
-
-    /// Return the exact Iced preset name.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::FirstRun => "FirstRun",
-            Self::UserSelection => "UserSelection",
-            Self::AdminSession => "AdminSession",
-            Self::AuthenticatedWithDevices => "AuthenticatedWithDevices",
-            Self::LibraryLoaded => "LibraryLoaded",
-        }
-    }
-
-    fn available_names() -> Vec<String> {
-        Self::ALL
-            .into_iter()
-            .map(|preset| preset.as_str().to_string())
-            .collect()
-    }
-}
-
-impl fmt::Display for ScreenshotPreset {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
@@ -339,7 +274,7 @@ impl RawScreenshotArgs {
                 "-h" | "--help" => raw.help = true,
                 "-p" | "--preset" => {
                     let value = next_value(&mut args, &arg)?;
-                    raw.preset = Some(ScreenshotPreset::parse(&value)?);
+                    raw.preset = Some(parse_preset(&value)?);
                 }
                 "-v" | "--viewport" => {
                     let value = next_value(&mut args, &arg)?;
@@ -367,7 +302,7 @@ impl RawScreenshotArgs {
                 }
                 value if value.starts_with("--preset=") => {
                     let value = value.trim_start_matches("--preset=");
-                    raw.preset = Some(ScreenshotPreset::parse(value)?);
+                    raw.preset = Some(parse_preset(value)?);
                 }
                 value if value.starts_with("--viewport=") => {
                     let value = value.trim_start_matches("--viewport=");
@@ -449,6 +384,15 @@ impl RawScreenshotArgs {
     }
 }
 
+fn parse_preset(value: &str) -> Result<ScreenshotPreset, ScreenshotError> {
+    ScreenshotPreset::parse(value).ok_or_else(|| {
+        ScreenshotError::InvalidPreset {
+            name: value.to_string(),
+            available: ScreenshotPreset::available_names(),
+        }
+    })
+}
+
 fn next_value<I>(
     args: &mut std::iter::Peekable<I>,
     flag: &str,
@@ -525,11 +469,7 @@ impl IceMetadata {
             }
         })?;
 
-        let preset = ice
-            .preset
-            .as_deref()
-            .map(ScreenshotPreset::parse)
-            .transpose()?;
+        let preset = ice.preset.as_deref().map(parse_preset).transpose()?;
 
         Ok(Self {
             viewport: Viewport::from_size(ice.viewport)?,
@@ -553,11 +493,7 @@ impl IceMetadata {
             }
         })?;
 
-        let preset = ice
-            .preset
-            .as_deref()
-            .map(ScreenshotPreset::parse)
-            .transpose()?;
+        let preset = ice.preset.as_deref().map(parse_preset).transpose()?;
 
         Ok(Self {
             viewport: Viewport::from_size(ice.viewport)?,
@@ -985,6 +921,11 @@ pub fn metadata_path_for_output(output: &Path) -> PathBuf {
     path
 }
 
+/// Return deterministic screenshot scenario names and descriptions.
+pub fn available_scenarios() -> Vec<presets::ScenarioInfo> {
+    presets::available_scenarios()
+}
+
 /// Run the screenshot command from argv. The first argument must be the binary name.
 pub fn run_command_from_args<I, S>(
     args: I,
@@ -1011,10 +952,21 @@ where
     if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
         return Ok(CommandOutcome::HelpRequested);
     }
+    if is_list_request(&rest) {
+        return Ok(CommandOutcome::ListedScenarios(available_scenarios()));
+    }
 
     let spec = ScreenshotSpec::parse_cli_args_with_ice(rest)?;
     let output = capture(&spec)?;
     Ok(CommandOutcome::Captured(output))
+}
+
+fn is_list_request(args: &[String]) -> bool {
+    matches!(
+        args,
+        [command]
+            if matches!(command.as_str(), "list" | "ls" | "--list")
+    )
 }
 
 fn display_path(path: &PathBuf) -> String {
@@ -1189,7 +1141,7 @@ mod tests {
     fn parses_screenshot_spec_from_cli_args() {
         let spec = ScreenshotSpec::parse_cli_args([
             "--preset",
-            "FirstRun",
+            "FirstRunAuth",
             "--viewport",
             "1920x1080",
             "--scale-factor",
@@ -1203,7 +1155,7 @@ mod tests {
         ])
         .expect("valid spec should parse");
 
-        assert_eq!(spec.preset, ScreenshotPreset::FirstRun);
+        assert_eq!(spec.preset, ScreenshotPreset::FirstRunAuth);
         assert_eq!(
             spec.viewport,
             Viewport {
@@ -1233,7 +1185,7 @@ mod tests {
         match error {
             ScreenshotError::InvalidPreset { name, available } => {
                 assert_eq!(name, "Nope");
-                assert!(available.contains(&"FirstRun".to_string()));
+                assert!(available.contains(&"FirstRunAuth".to_string()));
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -1254,7 +1206,7 @@ mod tests {
     #[test]
     fn metadata_sidecar_generation_records_capture_fields() {
         let spec = ScreenshotSpec {
-            preset: ScreenshotPreset::FirstRun,
+            preset: ScreenshotPreset::FirstRunAuth,
             viewport: Viewport {
                 width: 800,
                 height: 600,
@@ -1270,7 +1222,7 @@ mod tests {
                     height: 600,
                 },
                 mode: Mode::Immediate,
-                preset: Some(ScreenshotPreset::FirstRun),
+                preset: Some(ScreenshotPreset::FirstRunAuth),
             }),
         };
         let screenshot = window::Screenshot::new(
@@ -1281,7 +1233,7 @@ mod tests {
 
         let metadata = CaptureMetadata::new(&spec, &screenshot);
 
-        assert_eq!(metadata.preset, "FirstRun");
+        assert_eq!(metadata.preset, "FirstRunAuth");
         assert_eq!(metadata.viewport.width, 800);
         assert_eq!(metadata.scale_factor, 1.5);
         assert_eq!(metadata.physical_width, 1);
@@ -1291,7 +1243,7 @@ mod tests {
                 .ice_metadata
                 .as_ref()
                 .and_then(|ice| ice.preset.as_deref()),
-            Some("FirstRun")
+            Some("FirstRunAuth")
         );
     }
 
@@ -1323,11 +1275,11 @@ mod tests {
     #[test]
     fn ice_metadata_mismatch_is_rejected() {
         let metadata = IceMetadata::parse_str(
-            "viewport: 800x600\nmode: Immediate\npreset: FirstRun\n-----\n",
+            "viewport: 800x600\nmode: Immediate\npreset: FirstRunAuth\n-----\n",
         )
         .expect("ice metadata should parse");
         let raw = RawScreenshotArgs {
-            preset: Some(ScreenshotPreset::LibraryLoaded),
+            preset: Some(ScreenshotPreset::DesktopLibraryHome),
             viewport: Some(Viewport {
                 width: 800,
                 height: 600,
@@ -1353,7 +1305,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let output = temp_dir.path().join("first-run.png");
         let spec = ScreenshotSpec {
-            preset: ScreenshotPreset::FirstRun,
+            preset: ScreenshotPreset::FirstRunAuth,
             viewport: Viewport {
                 width: 1,
                 height: 1,
@@ -1376,6 +1328,26 @@ mod tests {
         assert_eq!(written.png_path, output);
         assert!(written.png_path.exists());
         assert!(written.metadata_path.exists());
+    }
+
+    #[test]
+    fn screenshot_list_command_returns_scenario_descriptions() {
+        let outcome =
+            run_command_from_args(["ferrex-player", "screenshot", "list"])
+                .expect("list command");
+
+        match outcome {
+            CommandOutcome::ListedScenarios(scenarios) => {
+                assert!(scenarios.iter().any(|scenario| {
+                    scenario.name == "DesktopLibraryHome"
+                        && scenario.description.contains("seeded")
+                }));
+                assert!(scenarios.iter().any(|scenario| {
+                    scenario.name == "PlayerLoadingOverlay"
+                }));
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
     }
 
     #[test]

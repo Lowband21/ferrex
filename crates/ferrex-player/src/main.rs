@@ -8,6 +8,15 @@ fn main() -> ferrex_player::Result {
             println!("{}", ferrex_player::screenshot::HELP);
             Ok(())
         }
+        Ok(ferrex_player::screenshot::CommandOutcome::ListedScenarios(
+            scenarios,
+        )) => {
+            println!("available screenshot scenarios:");
+            for scenario in scenarios {
+                println!("  {:<24} {}", scenario.name, scenario.description);
+            }
+            Ok(())
+        }
         Ok(ferrex_player::screenshot::CommandOutcome::Captured(output)) => {
             println!(
                 "captured screenshot: {} (metadata: {})",
