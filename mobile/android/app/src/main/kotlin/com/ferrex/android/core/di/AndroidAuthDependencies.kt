@@ -17,8 +17,14 @@ import com.ferrex.android.core.library.LibraryDiskCache
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.OkHttpLibrarySyncTransport
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.search.LibraryMediaSearchCache
+import com.ferrex.android.core.search.MediaSearchRepository
+import com.ferrex.android.core.search.OkHttpMediaSearchTransport
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.OkHttpContinueWatchingTransport
+import com.ferrex.android.core.watch.OkHttpWatchStateTransport
+import com.ferrex.android.core.watch.WatchRepository
+import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -44,12 +50,20 @@ class AndroidAuthDependencies(
     private val imageCache = ImageDiskCache.fromContext(context)
     private val libraryTransport = OkHttpLibrarySyncTransport(httpClient, serverConfig)
     private val imageTransport = OkHttpImageManifestTransport(httpClient, serverConfig)
+    private val searchTransport = OkHttpMediaSearchTransport(httpClient, serverConfig)
     private val continueWatchingTransport = OkHttpContinueWatchingTransport(httpClient, serverConfig)
+    private val watchStateTransport = OkHttpWatchStateTransport(httpClient, serverConfig)
 
     val libraryIndexTransport = OkHttpLibraryIndexTransport(httpClient, serverConfig)
+    val watchStateInvalidationBus = WatchStateInvalidationBus()
 
     val continueWatchingRepository = ContinueWatchingRepository(
         transport = continueWatchingTransport,
+    )
+
+    val watchRepository = WatchRepository(
+        transport = watchStateTransport,
+        invalidationBus = watchStateInvalidationBus,
     )
 
     val imageRepository = ImageRepository(
@@ -67,6 +81,11 @@ class AndroidAuthDependencies(
         transport = libraryTransport,
         cache = libraryCache,
         imageCacheClearer = imageRepository,
+    )
+
+    val searchRepository = MediaSearchRepository(
+        transport = searchTransport,
+        cache = LibraryMediaSearchCache(libraryRepository),
     )
 
     val authManager = AuthManager(

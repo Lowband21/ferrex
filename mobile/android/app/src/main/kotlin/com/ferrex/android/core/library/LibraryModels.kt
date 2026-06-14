@@ -41,6 +41,70 @@ data class CachedSeriesLibrary(
     val accessor: SeriesLibraryAccessor,
 )
 
+
+enum class CachedMediaType {
+    Movie,
+    Series,
+    Season,
+    Episode,
+}
+
+data class CachedMediaLookupKey(
+    val type: CachedMediaType,
+    val id: String,
+)
+
+sealed interface CachedMediaReference {
+    val id: String
+    val libraryId: String
+    val title: String
+    val imageKey: com.ferrex.android.core.image.ImageRequestKey?
+    val publicFallbackPath: String?
+
+    data class Movie(
+        override val id: String,
+        override val libraryId: String,
+        override val title: String,
+        override val imageKey: com.ferrex.android.core.image.ImageRequestKey?,
+        override val publicFallbackPath: String?,
+    ) : CachedMediaReference
+
+    data class Series(
+        override val id: String,
+        override val libraryId: String,
+        override val title: String,
+        override val imageKey: com.ferrex.android.core.image.ImageRequestKey?,
+        override val publicFallbackPath: String?,
+    ) : CachedMediaReference
+
+    data class Season(
+        override val id: String,
+        override val libraryId: String,
+        override val title: String,
+        override val imageKey: com.ferrex.android.core.image.ImageRequestKey?,
+        override val publicFallbackPath: String?,
+        val seriesId: String,
+        val seasonNumber: Int,
+    ) : CachedMediaReference
+
+    data class Episode(
+        override val id: String,
+        override val libraryId: String,
+        override val title: String,
+        override val imageKey: com.ferrex.android.core.image.ImageRequestKey?,
+        override val publicFallbackPath: String?,
+        val seriesId: String,
+        val seasonId: String,
+        val seasonNumber: Int,
+        val episodeNumber: Int,
+    ) : CachedMediaReference
+}
+
+data class CachedMediaResyncSummary(
+    val attemptedLibraryIds: List<String>,
+    val bounded: Boolean,
+)
+
 sealed interface LibraryFreshness {
     val label: String
 

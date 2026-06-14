@@ -15,7 +15,10 @@ import com.ferrex.android.core.browse.LibraryIndexTransport
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.watch.ContinueWatchingRepository
+import com.ferrex.android.core.watch.WatchRepository
+import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.ui.home.PhoneHomeScreen
 import com.ferrex.android.ui.recovery.PhoneLoadingScreen
 import com.ferrex.android.ui.recovery.PhoneLoginScreen
@@ -38,7 +41,10 @@ fun FerrexNavGraph(
     libraryIndexTransport: LibraryIndexTransport? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    searchRepository: MediaSearchRepository? = null,
     continueWatchingRepository: ContinueWatchingRepository? = null,
+    watchRepository: WatchRepository? = null,
+    watchStateInvalidationBus: WatchStateInvalidationBus? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -96,7 +102,10 @@ fun FerrexNavGraph(
                     libraryIndexTransport = libraryIndexTransport,
                     imageRepository = imageRepository,
                     imagePipeline = imagePipeline,
+                    searchRepository = searchRepository,
                     continueWatchingRepository = continueWatchingRepository,
+                    watchRepository = watchRepository,
+                    watchStateInvalidationBus = watchStateInvalidationBus,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
