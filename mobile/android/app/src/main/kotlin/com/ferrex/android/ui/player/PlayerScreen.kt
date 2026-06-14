@@ -112,6 +112,11 @@ import com.ferrex.android.core.playback.TvPlaybackOverlayReducer
 import com.ferrex.android.core.playback.TvPlaybackOverlayUiState
 import com.ferrex.android.core.playback.TvTrackPickerKind
 import com.ferrex.android.core.playback.toPlaybackTrackGroupSnapshots
+import com.ferrex.android.ui.components.FerrexActionButton
+import com.ferrex.android.ui.components.FerrexActionRole
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 
@@ -196,6 +201,8 @@ fun PlayerScreen(
                 message = "Preparing playback…",
                 chrome = chrome,
                 onBack = onBack,
+                onChangeServer = onChangeServer,
+                onSignOut = onSignOut,
             )
             is PlaybackPlayerState.Loading -> PlaybackLoading(
                 message = if (state.retryAttempt > 0) {
@@ -205,6 +212,8 @@ fun PlayerScreen(
                 },
                 chrome = chrome,
                 onBack = onBack,
+                onChangeServer = onChangeServer,
+                onSignOut = onSignOut,
             )
             is PlaybackPlayerState.Ready -> PlayerContent(
                 streamUrl = state.prepared.streamUrl,
@@ -243,6 +252,8 @@ private fun PlaybackLoading(
     message: String,
     chrome: PlayerChrome,
     onBack: () -> Unit,
+    onChangeServer: () -> Unit,
+    onSignOut: () -> Unit,
 ) {
     if (chrome == PlayerChrome.Tv) {
         TvPlaybackActionPanel(
@@ -261,20 +272,51 @@ private fun PlaybackLoading(
         return
     }
 
-    Column(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        shape = FerrexDesignTokens.Shapes.RecoveryCard,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        CircularProgressIndicator(color = Color.White)
-        Text(
-            text = message,
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center,
-        )
+        Column(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+        ) {
+            CircularProgressIndicator()
+            Text(
+                text = "Preparing playback",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+            FerrexActionButton(
+                label = "Back to details",
+                role = FerrexActionRole.Secondary,
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                FerrexActionButton(
+                    label = "Change server",
+                    role = FerrexActionRole.Secondary,
+                    onClick = onChangeServer,
+                    modifier = Modifier.weight(1f),
+                )
+                FerrexActionButton(
+                    label = "Sign out",
+                    role = FerrexActionRole.Secondary,
+                    onClick = onSignOut,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
 }
 
@@ -354,30 +396,66 @@ private fun PlaybackErrorPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(32.dp),
+        shape = FerrexDesignTokens.Shapes.RecoveryCard,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxl),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Playback unavailable", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
-            Text(failure.message, textAlign = TextAlign.Center)
-            failure.httpStatusCode?.let { Text("HTTP $it", style = MaterialTheme.typography.bodySmall) }
+            FerrexStatusCard(
+                title = failure.tvPanelTitle(),
+                body = buildString {
+                    append(failure.message)
+                    failure.httpStatusCode?.let { append("\nHTTP $it") }
+                    if (failure.isAuthFailure) {
+                        append("\nChange server and Sign out remain available if session recovery cannot refresh credentials.")
+                    }
+                },
+                tone = FerrexStatusTone.Error,
+            )
             if (actions.retry) {
-                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Retry playback") }
+                FerrexActionButton(
+                    label = "Retry playback",
+                    role = FerrexActionRole.Retry,
+                    onClick = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back to details") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (actions.changeServer) {
-                    TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) { Text("Change server") }
-                }
-                if (actions.signOut) {
-                    TextButton(onClick = onSignOut, modifier = Modifier.weight(1f)) { Text("Sign out") }
+            FerrexActionButton(
+                label = "Back to details",
+                role = FerrexActionRole.Secondary,
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (actions.changeServer || actions.signOut) {
+                Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                    if (actions.changeServer) {
+                        FerrexActionButton(
+                            label = "Change server",
+                            role = FerrexActionRole.Secondary,
+                            onClick = onChangeServer,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (actions.signOut) {
+                        FerrexActionButton(
+                            label = "Sign out",
+                            role = FerrexActionRole.Secondary,
+                            onClick = onSignOut,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
             onOpenDiagnostics?.let {
-                OutlinedButton(onClick = it, modifier = Modifier.fillMaxWidth()) { Text("Diagnostics / Export diagnostics") }
+                FerrexActionButton(
+                    label = "Diagnostics / Export diagnostics",
+                    role = FerrexActionRole.Secondary,
+                    onClick = it,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
