@@ -30,7 +30,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.auth.ConnectResult
 import com.ferrex.android.core.auth.LoginRequiredReason
 import com.ferrex.android.core.auth.LoginResult
@@ -48,13 +47,14 @@ import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
 import com.ferrex.android.tv.ui.foundation.TvScaffold
 import com.ferrex.android.tv.ui.foundation.TvTitle
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
 
 @Composable
 fun TvLoadingScreen() {
     TvScaffold {
         CircularProgressIndicator()
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xxl))
         Text(
             text = "Checking Ferrex session…",
             style = MaterialTheme.typography.headlineSmall,
@@ -109,7 +109,7 @@ fun TvServerConnectScreen(
     TvScaffold {
         TvTitle("Connect to Ferrex", serverSubcopy(state.reason))
         state.previousServerUrl?.let { Text("Current server: $it", style = MaterialTheme.typography.bodyLarge) }
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xxxl))
         OutlinedTextField(
             modifier = Modifier
                 .fillMaxWidth()
@@ -127,7 +127,7 @@ fun TvServerConnectScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { connect() }),
         )
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
         TvActionPanel(
             actions = listOf(
                 TvActionPanelAction(
@@ -148,7 +148,7 @@ fun TvServerConnectScreen(
             focusRestorer = actionFocus,
             surfaceKey = "server-actions",
             autoFocus = false,
-            buttonMaxWidth = 920.dp,
+            buttonMaxWidth = FerrexDesignTokens.Tv.FormActionMaxWidth,
         )
         TvMessage(message)
     }
@@ -222,7 +222,7 @@ fun TvLoginScreen(
             text = if (isFatal) setupCopy(state.reason) else "Use Ferrex device password sign-in. PIN requirements are reported without showing fake setup routes.",
             style = MaterialTheme.typography.titleLarge,
         )
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xxxl))
         if (!isFatal) {
             OutlinedTextField(
                 modifier = Modifier
@@ -241,7 +241,7 @@ fun TvLoginScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 keyboardActions = KeyboardActions(onNext = { passwordFocus.safeRequestFocus() }),
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(FerrexDesignTokens.Space.Lg))
             OutlinedTextField(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -260,7 +260,7 @@ fun TvLoginScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { login() }),
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
             TvFocusableButton(
                 label = "Sign in",
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
@@ -271,9 +271,9 @@ fun TvLoginScreen(
                 if (busy) {
                     CircularProgressIndicator(
                         modifier = Modifier
-                            .padding(end = 8.dp)
-                            .size(22.dp),
-                        strokeWidth = 2.dp,
+                            .padding(end = FerrexDesignTokens.Space.Sm)
+                            .size(FerrexDesignTokens.Space.Xxl),
+                        strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
                     )
                 }
                 Text("Sign in", style = MaterialTheme.typography.titleMedium)
@@ -331,7 +331,7 @@ private fun TvRecoveryActions(
     onOpenDiagnostics: () -> Unit,
 ) {
     val restorer = focusRestorer ?: rememberTvFocusRestorer(screenKey)
-    Spacer(Modifier.height(32.dp))
+    Spacer(Modifier.height(FerrexDesignTokens.Space.ScreenTvVertical))
     TvActionPanel(
         title = "Recovery actions",
         actions = buildList {
@@ -387,7 +387,7 @@ private fun TvRecoveryActions(
 @Composable
 private fun TvMessage(message: String?) {
     message?.let {
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
         Text(
             text = it,
             style = MaterialTheme.typography.titleMedium,
