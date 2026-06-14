@@ -227,8 +227,13 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
     let action_cluster =
         action_cluster_layout(composition, content_width, scale);
     let section_grid = section_grid_layout(composition, content_width, scale);
-    let rail =
-        rail_layout(composition, content_width, scale, input.scaled_poster_gap);
+    let rail = rail_layout(
+        composition,
+        content_width,
+        available_height,
+        scale,
+        input.scaled_poster_gap,
+    );
 
     DetailLayoutPlan {
         composition,
@@ -534,6 +539,7 @@ fn section_grid_layout(
 fn rail_layout(
     composition: DetailComposition,
     content_width: f32,
+    available_height: f32,
     scale: f32,
     scaled_poster_gap: f32,
 ) -> DetailRailLayout {
@@ -559,16 +565,18 @@ fn rail_layout(
         DetailComposition::TenFoot => card_width * 0.50,
         _ => card_width / STILL_ASPECT + 64.0 * scale,
     };
+    let gap = scaled_poster_gap.max(grid::EFFECTIVE_SPACING * scale * 0.75);
+    let visible_rows = match composition {
+        DetailComposition::TenFoot if available_height < 700.0 * scale => 1,
+        DetailComposition::TenFoot => 2,
+        _ => 1,
+    };
 
     DetailRailLayout {
         card_width,
         card_height,
-        gap: scaled_poster_gap.max(grid::EFFECTIVE_SPACING * scale * 0.75),
-        visible_rows: if composition == DetailComposition::TenFoot {
-            2
-        } else {
-            1
-        },
+        gap,
+        visible_rows,
     }
 }
 
@@ -702,19 +710,30 @@ mod tests {
 
     #[test]
     fn detail_layout_tenfoot_respects_header_height_and_focus_rows() {
-        let plan = solve_detail_layout(input(
+        let short_scaled = solve_detail_layout(input(
             1_280.0,
             720.0,
             1.5,
             96.0,
             DetailInterfaceMode::TenFoot,
         ));
+        let full_hd = solve_detail_layout(input(
+            1_920.0,
+            1_080.0,
+            1.0,
+            0.0,
+            DetailInterfaceMode::TenFoot,
+        ));
 
-        assert_eq!(plan.composition, DetailComposition::TenFoot);
-        assert!((plan.available_height - 624.0).abs() < 0.01);
-        assert_eq!(plan.rail.visible_rows, 2);
-        assert_eq!(plan.action_cluster.axis, DetailAxis::Horizontal);
-        assert!(plan.backdrop.height <= plan.available_height * 0.52 + 0.01);
+        assert_eq!(short_scaled.composition, DetailComposition::TenFoot);
+        assert!((short_scaled.available_height - 624.0).abs() < 0.01);
+        assert_eq!(short_scaled.rail.visible_rows, 1);
+        assert_eq!(short_scaled.action_cluster.axis, DetailAxis::Horizontal);
+        assert!(
+            short_scaled.backdrop.height
+                <= short_scaled.available_height * 0.52 + 0.01
+        );
+        assert_eq!(full_hd.rail.visible_rows, 2);
     }
 
     #[test]
