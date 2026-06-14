@@ -19,8 +19,8 @@ Ferrex is a Rust workspace with these primary crates:
 - `ferrex-contracts` – API contracts and schema glue.
 
 Related docs:
-- Scan/orchestration runtime details: `ferrex-core/src/domain/scan/orchestration/runtime/README.md`
-- Player specifics and platform notes: `ferrex-player/README.md`
+- Scan/orchestration runtime details: `crates/ferrex-core/src/domain/scan/orchestration/runtime/README.md`
+- Player specifics and platform notes: `crates/ferrex-player/README.md`
 - Player crate dependency boundaries: `docs/player-dependency-boundaries.md`
 - Demo mode: `docs/demo-mode.md`
 - UI testing workflow: `docs/ui-testing-workflow.md`
@@ -62,7 +62,7 @@ nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
   - Worker pools per JobKind; jobs leased with TTL and renewed pre‑expiry.
   - Expired leases are resurrected by housekeeping.
   - Queue invariants: `state = 'ready'` and `available_at <= NOW()` gate eligibility; partial unique index on `dedupe_key` enforces de‑dup across relevant states.
-  - See `ferrex-core/src/domain/scan/orchestration/runtime/README.md` for specifics.
+  - See `crates/ferrex-core/src/domain/scan/orchestration/runtime/README.md` for specifics.
 
 ### Player (`ferrex-player` + `ferrex-player-app` + `ferrex-player-ui`)
 - Binary/facade: `ferrex-player` keeps the installed command name and historical `ferrex_player::*` imports by delegating to `ferrex-player-app`.

@@ -33,7 +33,7 @@ body:
     attributes:
       label: Link(s) to source
       description: File path(s) or URLs to the content to change.
-      placeholder: e.g., docs/faq.md or ferrex-player/README.md
+      placeholder: e.g., docs/faq.md or crates/ferrex-player/README.md
 
   - type: textarea
     id: current

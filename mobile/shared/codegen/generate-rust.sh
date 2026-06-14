@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA_DIR="$SCRIPT_DIR/../schemas"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-OUT_DIR="$REPO_ROOT/ferrex-flatbuffers/src/generated"
+OUT_DIR="$REPO_ROOT/crates/ferrex-flatbuffers/src/generated"
 
 if ! command -v flatc >/dev/null 2>&1; then
   echo "ERROR: flatc not found in PATH." >&2

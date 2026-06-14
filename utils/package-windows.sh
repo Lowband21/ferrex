@@ -73,7 +73,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ -d ferrex-player ]] || die "Run from repo root; ferrex-player/ not found"
+[[ -d crates/ferrex-player ]] || die "Run from repo root; crates/ferrex-player/ not found"
 
 # Locate GStreamer root
 FLAVOR=""

@@ -76,8 +76,8 @@ check_sources_with_allowlist() {
 }
 
 for crate in "${non_ui_crates[@]}"; do
-  manifest="$repo_root/$crate/Cargo.toml"
-  src_dir="$repo_root/$crate/src"
+  manifest="$repo_root/crates/$crate/Cargo.toml"
+  src_dir="$repo_root/crates/$crate/src"
 
   check_manifest \
     "$manifest" \
@@ -97,8 +97,8 @@ for crate in "${non_ui_crates[@]}"; do
     "$crate imports the player facade/app/UI layer; lower crates must not depend upward"
 done
 
-settings_manifest="$repo_root/ferrex-player-settings/Cargo.toml"
-settings_src_dir="$repo_root/ferrex-player-settings/src"
+settings_manifest="$repo_root/crates/ferrex-player-settings/Cargo.toml"
+settings_src_dir="$repo_root/crates/ferrex-player-settings/src"
 settings_iced_core_manifest_allow='^[[:digit:]]+:[[:space:]]*iced_core[[:space:]]*='
 settings_iced_core_source_allow='^[^:]+:[[:digit:]]+:[[:space:]]*((pub[[:space:]]+)?use[[:space:]]+iced_core\b|extern[[:space:]]+crate[[:space:]]+iced_core\b)|^[^:]+:[[:digit:]]+:.*\biced_core::'
 
@@ -122,11 +122,11 @@ check_sources \
   "ferrex-player-settings imports the player facade/app/UI layer; lower crates must not depend upward"
 
 check_manifest \
-  "$repo_root/ferrex-player-foundation/Cargo.toml" \
+  "$repo_root/crates/ferrex-player-foundation/Cargo.toml" \
   "$foundation_dependency_pattern" \
   "ferrex-player-foundation has a banned direct dependency"
 check_sources \
-  "$repo_root/ferrex-player-foundation/src" \
+  "$repo_root/crates/ferrex-player-foundation/src" \
   "$foundation_source_pattern" \
   "ferrex-player-foundation imports a banned crate/layer"
 

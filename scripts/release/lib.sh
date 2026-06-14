@@ -46,7 +46,7 @@ ferrexctl_version() {
     in_pkg && $0 ~ /^version[[:space:]]*=/ {
       sub(/^[^"]*"/,""); sub(/".*$/,""); print; exit
     }
-  ' ferrexctl/Cargo.toml
+  ' crates/ferrexctl/Cargo.toml
 }
 
 ensure_clean_tree() {

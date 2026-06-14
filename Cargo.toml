@@ -1,27 +1,27 @@
 [workspace]
 members = [
-  "ferrex-server",
-  "ferrex-core",
-  "ferrex-player",
-  "ferrex-player-app",
-  "ferrex-player-ui",
-  "ferrex-player-api",
-  "ferrex-player-auth",
-  "ferrex-player-foundation",
-  "ferrex-player-repository",
-  "ferrex-player-library",
-  "ferrex-player-media",
-  "ferrex-player-metadata",
-  "ferrex-player-playback",
-  "ferrex-player-search",
-  "ferrex-player-settings",
-  "ferrex-player-user-admin",
-  "ferrex-model",
-  "ferrex-contracts",
-  "ferrex-flatbuffers",
-  "ferrexctl",
+  "crates/ferrex-server",
+  "crates/ferrex-core",
+  "crates/ferrex-player",
+  "crates/ferrex-player-app",
+  "crates/ferrex-player-ui",
+  "crates/ferrex-player-api",
+  "crates/ferrex-player-auth",
+  "crates/ferrex-player-foundation",
+  "crates/ferrex-player-repository",
+  "crates/ferrex-player-library",
+  "crates/ferrex-player-media",
+  "crates/ferrex-player-metadata",
+  "crates/ferrex-player-playback",
+  "crates/ferrex-player-search",
+  "crates/ferrex-player-settings",
+  "crates/ferrex-player-user-admin",
+  "crates/ferrex-model",
+  "crates/ferrex-contracts",
+  "crates/ferrex-flatbuffers",
+  "crates/ferrexctl",
 ]
-default-members = ["ferrex-server", "ferrex-core"]
+default-members = ["crates/ferrex-server", "crates/ferrex-core"]
 resolver = "3"
 
 [workspace.package]
@@ -63,67 +63,67 @@ missing_debug_implementations = "warn"
 
 
 [workspace.dependencies.ferrex-model]
-path = "ferrex-model"
+path = "crates/ferrex-model"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-contracts]
-path = "ferrex-contracts"
+path = "crates/ferrex-contracts"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-api]
-path = "ferrex-player-api"
+path = "crates/ferrex-player-api"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-auth]
-path = "ferrex-player-auth"
+path = "crates/ferrex-player-auth"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-foundation]
-path = "ferrex-player-foundation"
+path = "crates/ferrex-player-foundation"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-repository]
-path = "ferrex-player-repository"
+path = "crates/ferrex-player-repository"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-library]
-path = "ferrex-player-library"
+path = "crates/ferrex-player-library"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-media]
-path = "ferrex-player-media"
+path = "crates/ferrex-player-media"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-metadata]
-path = "ferrex-player-metadata"
+path = "crates/ferrex-player-metadata"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-playback]
-path = "ferrex-player-playback"
+path = "crates/ferrex-player-playback"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-search]
-path = "ferrex-player-search"
+path = "crates/ferrex-player-search"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-settings]
-path = "ferrex-player-settings"
+path = "crates/ferrex-player-settings"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-user-admin]
-path = "ferrex-player-user-admin"
+path = "crates/ferrex-player-user-admin"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-app]
-path = "ferrex-player-app"
+path = "crates/ferrex-player-app"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrex-player-ui]
-path = "ferrex-player-ui"
+path = "crates/ferrex-player-ui"
 version = "0.1.2-alpha"
 
 [workspace.dependencies.ferrexctl]
-path = "ferrexctl"
+path = "crates/ferrexctl"
 
 [workspace.dependencies]
 # Async runtime

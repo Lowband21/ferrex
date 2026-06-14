@@ -7,20 +7,20 @@ on:
       - "v*"
     paths:
       - 'flatpak/**'
-      - 'ferrex-player/**'
-      - 'ferrex-core/**'
-      - 'ferrex-model/**'
-      - 'ferrex-contracts/**'
+      - 'crates/ferrex-player/**'
+      - 'crates/ferrex-core/**'
+      - 'crates/ferrex-model/**'
+      - 'crates/ferrex-contracts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
   pull_request:
     branches: [main]
     paths:
       - 'flatpak/**'
-      - 'ferrex-player/**'
-      - 'ferrex-core/**'
-      - 'ferrex-model/**'
-      - 'ferrex-contracts/**'
+      - 'crates/ferrex-player/**'
+      - 'crates/ferrex-core/**'
+      - 'crates/ferrex-model/**'
+      - 'crates/ferrex-contracts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
   workflow_dispatch: {}
