@@ -9,9 +9,16 @@ import com.ferrex.android.core.api.FerrexApi
 import com.ferrex.android.core.api.KnownDeviceProfilesResponse
 import com.ferrex.android.core.api.PinChallengeResponse
 import com.ferrex.android.core.api.PinLoginRequest
+import com.ferrex.android.core.api.RefreshInvalidationReason
 import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.api.SetupStatus
 import com.ferrex.android.core.api.TokenRefreshAuthenticator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -19,6 +26,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class AuthManagerTest {
     @Test
     fun restoredSessionValidatesCurrentUserBeforeAuthenticated() = runTest {
@@ -34,6 +42,37 @@ class AuthManagerTest {
         assertTrue(state is SessionState.Authenticated)
         assertEquals("saved-access", fixture.interceptor.accessToken)
         assertEquals("http://ferrex.local", (state as SessionState.Authenticated).serverUrl)
+        assertEquals(AuthConnectionHealth.Online, state.connectionHealth)
+    }
+
+    @Test
+    fun restoredSessionLaunchesAuthenticatedOfflineWhenCurrentUserUnreachableWithCachedIdentity() = runTest {
+        val fixture = Fixture(
+            reconnectScope = backgroundScope,
+            reconnectBackoffDelaysMillis = listOf(1_000L),
+        )
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.accessToken = "saved-access"
+        fixture.storage.refreshToken = "saved-refresh"
+        fixture.storage.username = testUser.username
+        fixture.storage.userId = testUser.id
+        fixture.storage.userDisplayName = testUser.displayName
+        fixture.api.currentUserResults += ApiResult.NetworkError("offline")
+
+        fixture.manager.initialize()
+
+        val state = fixture.manager.sessionState.value
+        assertTrue(state is SessionState.Authenticated)
+        state as SessionState.Authenticated
+        assertEquals(AuthConnectionHealth.Offline, state.connectionHealth)
+        assertEquals(RecoverableFailureReason.ServerUnreachable, state.offlineReason)
+        assertEquals(testUser.id, state.user.id)
+        assertEquals(testUser.displayName, state.user.displayName)
+        assertEquals("saved-access", fixture.storage.accessToken)
+        assertEquals("saved-refresh", fixture.storage.refreshToken)
+        assertEquals("http://ferrex.local", fixture.storage.serverUrl)
+        assertEquals("saved-access", fixture.interceptor.accessToken)
+        assertTrue(fixture.resetClears.isEmpty())
     }
 
     @Test
@@ -74,6 +113,83 @@ class AuthManagerTest {
         assertNull(fixture.storage.accessToken)
         assertNull(fixture.storage.refreshToken)
         assertNull(fixture.interceptor.accessToken)
+    }
+
+    @Test
+    fun invalidRefreshResponseFromAuthenticatorClearsTokensAndRequiresLogin() = runTest {
+        val fixture = Fixture()
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.accessToken = "saved-access"
+        fixture.storage.refreshToken = "saved-refresh"
+        fixture.storage.username = testUser.username
+        fixture.storage.userId = testUser.id
+        fixture.api.currentUserResults += ApiResult.Success(testUser)
+        fixture.manager.initialize()
+
+        fixture.authenticator.onSessionInvalidated?.invoke(RefreshInvalidationReason.InvalidRefreshResponse)
+
+        val state = fixture.manager.sessionState.value
+        assertTrue(state is SessionState.NeedsLogin)
+        assertEquals(LoginRequiredReason.SessionRevoked, (state as SessionState.NeedsLogin).reason)
+        assertNull(fixture.storage.accessToken)
+        assertNull(fixture.storage.refreshToken)
+        assertNull(fixture.interceptor.accessToken)
+    }
+
+    @Test
+    fun temporaryRefreshFailureKeepsHomeAuthenticatedOfflineAndPreservesTokens() = runTest {
+        val fixture = Fixture(
+            reconnectScope = backgroundScope,
+            reconnectBackoffDelaysMillis = listOf(1_000L),
+        )
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.accessToken = "saved-access"
+        fixture.storage.refreshToken = "saved-refresh"
+        fixture.storage.username = testUser.username
+        fixture.storage.userId = testUser.id
+        fixture.api.currentUserResults += ApiResult.Success(testUser)
+        fixture.manager.initialize()
+
+        fixture.authenticator.onRefreshTemporarilyUnavailable?.invoke()
+
+        val state = fixture.manager.sessionState.value
+        assertTrue(state is SessionState.Authenticated)
+        state as SessionState.Authenticated
+        assertEquals(AuthConnectionHealth.Offline, state.connectionHealth)
+        assertEquals(RecoverableFailureReason.RefreshUnavailable, state.offlineReason)
+        assertEquals("saved-access", fixture.storage.accessToken)
+        assertEquals("saved-refresh", fixture.storage.refreshToken)
+        assertEquals("saved-access", fixture.interceptor.accessToken)
+        assertTrue(fixture.resetClears.isEmpty())
+    }
+
+    @Test
+    fun backoffReconnectReturnsAuthenticatedSessionOnlineAfterCurrentUserSuccess() = runTest {
+        val fixture = Fixture(
+            reconnectScope = backgroundScope,
+            reconnectBackoffDelaysMillis = listOf(100L),
+        )
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.accessToken = "saved-access"
+        fixture.storage.refreshToken = "saved-refresh"
+        fixture.storage.username = testUser.username
+        fixture.storage.userId = testUser.id
+        fixture.api.currentUserResults += ApiResult.NetworkError("offline")
+
+        fixture.manager.initialize()
+        fixture.api.currentUserResults += ApiResult.Success(testUser.copy(displayName = "Fresh User"))
+        advanceTimeBy(100L)
+        runCurrent()
+
+        val state = fixture.manager.sessionState.value
+        assertTrue(state is SessionState.Authenticated)
+        state as SessionState.Authenticated
+        assertEquals(AuthConnectionHealth.Online, state.connectionHealth)
+        assertEquals("Fresh User", state.user.displayName)
+        assertEquals("saved-access", fixture.storage.accessToken)
+        assertEquals("saved-refresh", fixture.storage.refreshToken)
+        assertEquals("saved-access", fixture.interceptor.accessToken)
+        assertEquals(2, fixture.api.currentUserCalls)
     }
 
     @Test
@@ -230,6 +346,8 @@ class AuthManagerTest {
 
     private class Fixture(
         val resetClears: MutableList<Pair<String, String?>> = mutableListOf(),
+        reconnectScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        reconnectBackoffDelaysMillis: List<Long> = AuthReconnectCoordinator.DEFAULT_BACKOFF_DELAYS_MILLIS,
     ) {
         val api = FakeFerrexApi()
         val storage = InMemoryAuthStorage()
@@ -245,6 +363,8 @@ class AuthManagerTest {
             deviceName = "Test Android",
             appVersion = "test",
             onResetConnectionCacheClear = { serverUrl, userId -> resetClears += serverUrl to userId },
+            reconnectScope = reconnectScope,
+            reconnectBackoffDelaysMillis = reconnectBackoffDelaysMillis,
         )
     }
 
@@ -308,6 +428,8 @@ class AuthManagerTest {
         override var refreshToken: String? = null
         override var username: String? = null
         override var userId: String? = null
+        override var userDisplayName: String? = null
+        override var userAvatarUrl: String? = null
         override var sessionId: String? = null
         override var deviceSessionId: String? = null
         override var localDeviceId: String? = null

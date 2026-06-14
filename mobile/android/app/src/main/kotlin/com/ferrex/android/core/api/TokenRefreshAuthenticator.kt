@@ -24,6 +24,9 @@ class TokenRefreshAuthenticator(
     @Volatile
     var onSessionInvalidated: ((RefreshInvalidationReason) -> Unit)? = null
 
+    @Volatile
+    var onRefreshTemporarilyUnavailable: (() -> Unit)? = null
+
     private val lock = Any()
     private val json = FerrexApiClient.DefaultJson
 
@@ -91,13 +94,13 @@ class TokenRefreshAuthenticator(
         return try {
             refreshClient.newCall(refreshRequest).execute().use { refreshResponse ->
                 if (!refreshResponse.isSuccessful) {
-                    invalidate(
-                        if (refreshResponse.code == 401 || refreshResponse.code == 403) {
-                            RefreshInvalidationReason.RefreshRejected
-                        } else {
-                            RefreshInvalidationReason.RefreshFailed
-                        },
-                    )
+                    when {
+                        refreshResponse.code == 401 || refreshResponse.code == 403 -> {
+                            invalidate(RefreshInvalidationReason.RefreshRejected)
+                        }
+                        refreshResponse.code.isTemporaryRefreshFailure() -> markTemporaryRefreshUnavailable()
+                        else -> invalidate(RefreshInvalidationReason.RefreshRejected)
+                    }
                     return null
                 }
 
@@ -129,18 +132,24 @@ class TokenRefreshAuthenticator(
                 tokens
             }
         } catch (e: IOException) {
-            invalidate(RefreshInvalidationReason.RefreshFailed)
+            markTemporaryRefreshUnavailable()
             null
         } catch (e: IllegalArgumentException) {
-            invalidate(RefreshInvalidationReason.RefreshFailed)
+            markTemporaryRefreshUnavailable()
             null
         }
+    }
+
+    private fun markTemporaryRefreshUnavailable() {
+        onRefreshTemporarilyUnavailable?.invoke()
     }
 
     private fun invalidate(reason: RefreshInvalidationReason) {
         authInterceptor.clearAccessToken()
         onSessionInvalidated?.invoke(reason)
     }
+
+    private fun Int.isTemporaryRefreshFailure(): Boolean = this == 408 || this == 429 || this >= 500
 
     companion object {
         const val RETRY_HEADER = "X-Ferrex-Retry-With-Refresh"
