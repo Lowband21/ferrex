@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,10 +22,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,6 +58,8 @@ import com.ferrex.android.core.browse.LibraryMediaCard
 import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.browse.MovieFilterMode
 import com.ferrex.android.core.browse.MovieSortMode
+import com.ferrex.android.core.browse.PhoneExplicitBackAction
+import com.ferrex.android.core.browse.PhoneShellDestination
 import com.ferrex.android.core.browse.PhoneSystemBackAction
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
@@ -135,6 +140,7 @@ fun PhoneHomeScreen(
     val emptyWatchState = remember { mutableStateOf(WatchRepositoryState()) }
     val watchState by watchRepository?.state?.collectAsState() ?: emptyWatchState
     val coroutineScope = rememberCoroutineScope()
+    var selectedDestination by remember { mutableStateOf(PhoneShellDestination.Home) }
     var selectedTab by remember { mutableStateOf(HomeLibraryTab.Movies) }
     var selectedMovieLibraryId by remember { mutableStateOf<String?>(null) }
     var selectedSeriesLibraryId by remember { mutableStateOf<String?>(null) }
@@ -184,8 +190,8 @@ fun PhoneHomeScreen(
     val selectedMovieInfo = selectedMovieLibrary?.library ?: movieLibraryInfos.firstOrNull { it.id == selectedMovieLibraryId }
     val selectedSeriesInfo = selectedSeriesLibrary?.library ?: seriesLibraryInfos.firstOrNull { it.id == selectedSeriesLibraryId }
 
-    LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
-        if (selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
+    LaunchedEffect(selectedDestination, selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
+        if (selectedDestination != PhoneShellDestination.Libraries || selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
             movieIndexState = MovieIndexUiState.Idle
             return@LaunchedEffect
         }
@@ -256,12 +262,14 @@ fun PhoneHomeScreen(
             }
         }
     }
-    val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab, detailResult) {
+    val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab, selectedDestination, detailResult) {
         buildList {
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
-            val gridCards = if (selectedTab == HomeLibraryTab.Movies) indexedMovieCards.cards else selectedSeriesCards
-            gridCards.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
+            if (selectedDestination == PhoneShellDestination.Libraries) {
+                val gridCards = if (selectedTab == HomeLibraryTab.Movies) indexedMovieCards.cards else selectedSeriesCards
+                gridCards.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
+            }
             DetailCache.imageKeys(detailResult).forEach(::add)
         }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT).toSet()
     }
@@ -360,14 +368,56 @@ fun PhoneHomeScreen(
         coroutineScope.launch { watchRepository?.refreshMediaProgress(contract.logicalMediaId) }
     }
 
+    val selectedBrowseLibraryId = when (selectedTab) {
+        HomeLibraryTab.Movies -> selectedMovieInfo?.id
+        HomeLibraryTab.Series -> selectedSeriesInfo?.id
+    }
+
+    fun syncSelectedLibrary() {
+        coroutineScope.launch {
+            when (selectedTab) {
+                HomeLibraryTab.Movies -> selectedMovieInfo?.let {
+                    libraryRepository?.syncMovieLibrary(scope, it, repositoryState?.libraries.orEmpty())
+                } ?: libraryRepository?.refreshLibraries(scope)
+                HomeLibraryTab.Series -> selectedSeriesInfo?.let {
+                    libraryRepository?.syncSeriesLibrary(scope, it, repositoryState?.libraries.orEmpty())
+                } ?: libraryRepository?.refreshLibraries(scope)
+            }
+        }
+    }
+
+    fun retryLibrary() {
+        coroutineScope.launch {
+            libraryRepository?.refreshLibraries(scope, selectedBrowseLibraryId ?: repositoryState?.selectedLibraryId)
+        }
+    }
+
+    fun clearSelectedLibraryCache() {
+        selectedBrowseLibraryId?.let { libraryRepository?.clearSelectedCache(scope, it) }
+    }
+
+    fun openSearchResult(target: SearchDetailTarget) {
+        target.toMediaRouteArgs()?.let { selectedDetailRoute = it }
+    }
+
+    fun handleExplicitBack() {
+        when (AuthenticatedHomeBackPolicy.phoneExplicitBackAction(activePlaybackContract != null, selectedDetailRoute != null)) {
+            PhoneExplicitBackAction.ClosePlayback -> activePlaybackContract = null
+            PhoneExplicitBackAction.CloseDetail -> selectedDetailRoute = null
+            PhoneExplicitBackAction.StayOnSurface -> Unit
+        }
+    }
+
     val phoneBackAction = AuthenticatedHomeBackPolicy.phoneSystemBackAction(
         hasActivePlayback = activePlaybackContract != null,
         hasSelectedDetail = selectedDetailRoute != null,
+        currentDestination = selectedDestination,
     )
     BackHandler(enabled = phoneBackAction != PhoneSystemBackAction.ExitApp) {
         when (phoneBackAction) {
             PhoneSystemBackAction.ClosePlayback -> activePlaybackContract = null
             PhoneSystemBackAction.CloseDetail -> selectedDetailRoute = null
+            PhoneSystemBackAction.ReturnHome -> selectedDestination = PhoneShellDestination.Home
             PhoneSystemBackAction.ExitApp -> Unit
         }
     }
@@ -390,7 +440,7 @@ fun PhoneHomeScreen(
                 progressReporter = playbackProgressReporter,
                 resumeProgressProvider = playbackResumeProgressProvider,
                 streamingHttpClient = streamingHttpClient,
-                onBack = { activePlaybackContract = null },
+                onBack = { handleExplicitBack() },
                 onSessionInvalidated = {
                     activePlaybackContract = null
                     onPlaybackSessionInvalidated()
@@ -411,7 +461,7 @@ fun PhoneHomeScreen(
                 preparedPlaybackContract = null,
                 connectionStatus = detailConnectionUi,
                 actionNotice = playbackNotice,
-                onBack = { selectedDetailRoute = null },
+                onBack = { handleExplicitBack() },
                 onRetryConnection = onRetryConnection,
                 onRetryCacheSync = { retryDetailCacheSync(selectedDetailRoute) },
                 onClearSelectedCache = { selectedDetailRoute?.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
@@ -427,124 +477,417 @@ fun PhoneHomeScreen(
                 onOpenDiagnostics = onOpenDiagnostics,
             )
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
-            ) {
-            item {
-                HomeHeader(
-                    state = state,
-                    connectionStatus = homeConnectionUi,
-                    playbackNotice = playbackNotice,
-                    onRetryConnection = onRetryConnection,
-                    onSignOut = onSignOut,
-                    onOpenDiagnostics = onOpenDiagnostics,
-                )
-            }
-            item {
-                ContinueWatchingSection(
-                    continueState = continueState,
-                    imageResolutions = imageResolutions,
-                    imageLoaderAvailable = imageLoader != null,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                    onRetry = { coroutineScope.launch { continueWatchingRepository?.refresh() } },
-                    onSelect = { selectedDetailRoute = it.route },
-                )
-            }
-            item {
-                PhoneSearchPanel(
-                    scope = scope,
-                    searchRepository = searchRepository,
-                    imageRepository = imageRepository,
-                    imagePipeline = imagePipeline,
-                    onOpenResult = { target -> target.toMediaRouteArgs()?.let { selectedDetailRoute = it } },
-                    onOpenDiagnostics = onOpenDiagnostics,
-                )
-            }
-            if (shelves.isNotEmpty()) {
-                items(shelves, key = { it.title }) { shelf ->
-                    HomeShelfSection(
-                        shelf = shelf,
+            AuthenticatedPhoneShell(
+                selectedDestination = selectedDestination,
+                onDestinationSelected = { selectedDestination = it },
+            ) { contentPadding ->
+                when (selectedDestination) {
+                    PhoneShellDestination.Home -> HomeDestinationContent(
+                        contentPadding = contentPadding,
+                        state = state,
+                        connectionStatus = homeConnectionUi,
+                        playbackNotice = playbackNotice,
+                        continueState = continueState,
                         imageResolutions = imageResolutions,
                         imageLoaderAvailable = imageLoader != null,
                         imageLoader = imageLoader,
                         scope = scope,
-                        onSelect = { selectedDetailRoute = it.route },
+                        shelves = shelves,
+                        onRetryContinue = { coroutineScope.launch { continueWatchingRepository?.refresh() } },
+                        onSelectContinue = { selectedDetailRoute = it.route },
+                        onSelectShelf = { selectedDetailRoute = it.route },
+                        onOpenLibraries = { selectedDestination = PhoneShellDestination.Libraries },
+                        onOpenSearch = { selectedDestination = PhoneShellDestination.Search },
+                        onOpenAccountServer = { selectedDestination = PhoneShellDestination.AccountServer },
+                        onRetryConnection = onRetryConnection,
+                        onOpenDiagnostics = onOpenDiagnostics,
                     )
-                }
-            } else {
-                item {
-                    StateCard(
-                        title = "Local shelves are waiting for cached datasets",
-                        body = "Home shelves are built only from cached complete movie batches and series bundles; no backend discovery shelves are shown here.",
+                    PhoneShellDestination.Libraries -> LibraryDestinationContent(
+                        contentPadding = contentPadding,
+                        selectedTab = selectedTab,
+                        onSelectedTab = { selectedTab = it },
+                        movieLibraries = movieLibraries,
+                        seriesLibraries = seriesLibraries,
+                        movieLibraryInfos = movieLibraryInfos,
+                        seriesLibraryInfos = seriesLibraryInfos,
+                        selectedMovieLibraryId = selectedMovieLibraryId,
+                        selectedSeriesLibraryId = selectedSeriesLibraryId,
+                        onSelectedMovieLibrary = { selectedMovieLibraryId = it },
+                        onSelectedSeriesLibrary = { selectedSeriesLibraryId = it },
+                        selectedMovieInfo = selectedMovieInfo,
+                        selectedSeriesInfo = selectedSeriesInfo,
+                        movieSort = movieSort,
+                        movieFilter = movieFilter,
+                        onMovieSort = { movieSort = it },
+                        onMovieFilter = { movieFilter = it },
+                        movieIndexState = movieIndexState,
+                        indexedMovieCards = indexedMovieCards,
+                        selectedSeriesCards = selectedSeriesCards,
+                        imageResolutions = imageResolutions,
+                        imageLoaderAvailable = imageLoader != null,
+                        imageLoader = imageLoader,
+                        scope = scope,
+                        freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+                        selectedLibraryId = selectedBrowseLibraryId,
+                        onSelect = { selectedDetailRoute = it.route },
+                        onSyncSelected = { syncSelectedLibrary() },
+                        onRetry = { retryLibrary() },
+                        onClearSelected = { clearSelectedLibraryCache() },
+                        onChangeServer = onChangeServer,
+                        onResetConnection = onResetConnection,
+                        onOpenDiagnostics = onOpenDiagnostics,
+                    )
+                    PhoneShellDestination.Search -> SearchDestinationContent(
+                        contentPadding = contentPadding,
+                        scope = scope,
+                        searchRepository = searchRepository,
+                        imageRepository = imageRepository,
+                        imagePipeline = imagePipeline,
+                        connectionStatus = homeConnectionUi,
+                        onOpenResult = { openSearchResult(it) },
+                        onRetryConnection = onRetryConnection,
+                        onOpenAccountServer = { selectedDestination = PhoneShellDestination.AccountServer },
+                        onOpenDiagnostics = onOpenDiagnostics,
+                    )
+                    PhoneShellDestination.AccountServer -> AccountServerDestinationContent(
+                        contentPadding = contentPadding,
+                        state = state,
+                        connectionStatus = homeConnectionUi,
+                        freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+                        selectedLibraryId = selectedBrowseLibraryId,
+                        onRetryConnection = onRetryConnection,
+                        onRetryLibrary = { retryLibrary() },
+                        onClearSelected = { clearSelectedLibraryCache() },
+                        onSignOut = onSignOut,
+                        onChangeServer = onChangeServer,
+                        onResetConnection = onResetConnection,
+                        onOpenDiagnostics = onOpenDiagnostics,
                     )
                 }
             }
-            item {
-                LibraryBrowseSection(
-                    selectedTab = selectedTab,
-                    onSelectedTab = { selectedTab = it },
-                    movieLibraries = movieLibraries,
-                    seriesLibraries = seriesLibraries,
-                    movieLibraryInfos = movieLibraryInfos,
-                    seriesLibraryInfos = seriesLibraryInfos,
-                    selectedMovieLibraryId = selectedMovieLibraryId,
-                    selectedSeriesLibraryId = selectedSeriesLibraryId,
-                    onSelectedMovieLibrary = { selectedMovieLibraryId = it },
-                    onSelectedSeriesLibrary = { selectedSeriesLibraryId = it },
-                    selectedMovieInfo = selectedMovieInfo,
-                    selectedSeriesInfo = selectedSeriesInfo,
-                    movieSort = movieSort,
-                    movieFilter = movieFilter,
-                    onMovieSort = { movieSort = it },
-                    onMovieFilter = { movieFilter = it },
-                    movieIndexState = movieIndexState,
-                    indexedMovieCards = indexedMovieCards,
-                    selectedSeriesCards = selectedSeriesCards,
+        }
+    }
+}
+
+@Composable
+private fun AuthenticatedPhoneShell(
+    selectedDestination: PhoneShellDestination,
+    onDestinationSelected: (PhoneShellDestination) -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        bottomBar = {
+            NavigationBar {
+                PhoneShellDestination.entries.forEach { destination ->
+                    NavigationBarItem(
+                        selected = selectedDestination == destination,
+                        onClick = { onDestinationSelected(destination) },
+                        icon = { Text(destination.navIcon(), style = MaterialTheme.typography.labelMedium) },
+                        label = { Text(destination.label) },
+                    )
+                }
+            }
+        },
+        content = content,
+    )
+}
+
+@Composable
+private fun HomeDestinationContent(
+    contentPadding: PaddingValues,
+    state: SessionState.Authenticated,
+    connectionStatus: AuthenticatedConnectionUi,
+    playbackNotice: String?,
+    continueState: ContinueWatchingState,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoaderAvailable: Boolean,
+    imageLoader: coil.ImageLoader?,
+    scope: ServerCacheScope,
+    shelves: List<com.ferrex.android.core.browse.HomeShelf>,
+    onRetryContinue: () -> Unit,
+    onSelectContinue: (ContinueWatchingCard) -> Unit,
+    onSelectShelf: (LibraryMediaCard) -> Unit,
+    onOpenLibraries: () -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenAccountServer: () -> Unit,
+    onRetryConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+    ) {
+        item {
+            HomeHeader(
+                state = state,
+                connectionStatus = connectionStatus,
+                playbackNotice = playbackNotice,
+            )
+        }
+        item {
+            ContinueWatchingSection(
+                continueState = continueState,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoaderAvailable,
+                imageLoader = imageLoader,
+                scope = scope,
+                onRetry = onRetryContinue,
+                onSelect = onSelectContinue,
+            )
+        }
+        if (shelves.isNotEmpty()) {
+            items(shelves, key = { it.title }) { shelf ->
+                HomeShelfSection(
+                    shelf = shelf,
                     imageResolutions = imageResolutions,
-                    imageLoaderAvailable = imageLoader != null,
+                    imageLoaderAvailable = imageLoaderAvailable,
                     imageLoader = imageLoader,
                     scope = scope,
-                    onSelect = { selectedDetailRoute = it.route },
-                    onSyncSelected = {
-                        coroutineScope.launch {
-                            when (selectedTab) {
-                                HomeLibraryTab.Movies -> selectedMovieInfo?.let {
-                                    libraryRepository?.syncMovieLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                                } ?: libraryRepository?.refreshLibraries(scope)
-                                HomeLibraryTab.Series -> selectedSeriesInfo?.let {
-                                    libraryRepository?.syncSeriesLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                                } ?: libraryRepository?.refreshLibraries(scope)
-                            }
-                        }
-                    },
+                    onSelect = onSelectShelf,
                 )
             }
+        } else {
             item {
-                LibraryRecoveryPanel(
-                    freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
-                    selectedLibraryId = when (selectedTab) {
-                        HomeLibraryTab.Movies -> selectedMovieInfo?.id
-                        HomeLibraryTab.Series -> selectedSeriesInfo?.id
-                    },
-                    onRetry = { coroutineScope.launch { libraryRepository?.refreshLibraries(scope, repositoryState?.selectedLibraryId) } },
-                    onClearSelected = {
-                        val libraryId = when (selectedTab) {
-                            HomeLibraryTab.Movies -> selectedMovieInfo?.id
-                            HomeLibraryTab.Series -> selectedSeriesInfo?.id
-                        } ?: return@LibraryRecoveryPanel
-                        libraryRepository?.clearSelectedCache(scope, libraryId)
-                    },
-                    onChangeServer = onChangeServer,
-                    onResetConnection = onResetConnection,
-                    onOpenDiagnostics = onOpenDiagnostics,
+                StateCard(
+                    title = "Local shelves are waiting for cached datasets",
+                    body = "Home shelves are built only from cached complete movie batches and series bundles; no backend discovery shelves are shown here.",
                 )
             }
         }
+        item {
+            HomeEntrySection(
+                onOpenLibraries = onOpenLibraries,
+                onOpenSearch = onOpenSearch,
+            )
         }
+        item {
+            HomeUtilityPanel(
+                state = state,
+                connectionStatus = connectionStatus,
+                onRetryConnection = onRetryConnection,
+                onOpenAccountServer = onOpenAccountServer,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryDestinationContent(
+    contentPadding: PaddingValues,
+    selectedTab: HomeLibraryTab,
+    onSelectedTab: (HomeLibraryTab) -> Unit,
+    movieLibraries: List<CachedMovieLibrary>,
+    seriesLibraries: List<CachedSeriesLibrary>,
+    movieLibraryInfos: List<LibraryInfo>,
+    seriesLibraryInfos: List<LibraryInfo>,
+    selectedMovieLibraryId: String?,
+    selectedSeriesLibraryId: String?,
+    onSelectedMovieLibrary: (String) -> Unit,
+    onSelectedSeriesLibrary: (String) -> Unit,
+    selectedMovieInfo: LibraryInfo?,
+    selectedSeriesInfo: LibraryInfo?,
+    movieSort: MovieSortMode,
+    movieFilter: MovieFilterMode,
+    onMovieSort: (MovieSortMode) -> Unit,
+    onMovieFilter: (MovieFilterMode) -> Unit,
+    movieIndexState: MovieIndexUiState,
+    indexedMovieCards: com.ferrex.android.core.browse.IndexedMovieCards,
+    selectedSeriesCards: List<LibraryMediaCard>,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoaderAvailable: Boolean,
+    imageLoader: coil.ImageLoader?,
+    scope: ServerCacheScope,
+    freshness: LibraryFreshness,
+    selectedLibraryId: String?,
+    onSelect: (LibraryMediaCard) -> Unit,
+    onSyncSelected: () -> Unit,
+    onRetry: () -> Unit,
+    onClearSelected: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+    ) {
+        item {
+            DestinationHeader(
+                title = "Libraries",
+                body = "Browse full cached movie and series libraries here instead of burying the complete grids in Home.",
+            )
+        }
+        item {
+            LibraryBrowseSection(
+                selectedTab = selectedTab,
+                onSelectedTab = onSelectedTab,
+                movieLibraries = movieLibraries,
+                seriesLibraries = seriesLibraries,
+                movieLibraryInfos = movieLibraryInfos,
+                seriesLibraryInfos = seriesLibraryInfos,
+                selectedMovieLibraryId = selectedMovieLibraryId,
+                selectedSeriesLibraryId = selectedSeriesLibraryId,
+                onSelectedMovieLibrary = onSelectedMovieLibrary,
+                onSelectedSeriesLibrary = onSelectedSeriesLibrary,
+                selectedMovieInfo = selectedMovieInfo,
+                selectedSeriesInfo = selectedSeriesInfo,
+                movieSort = movieSort,
+                movieFilter = movieFilter,
+                onMovieSort = onMovieSort,
+                onMovieFilter = onMovieFilter,
+                movieIndexState = movieIndexState,
+                indexedMovieCards = indexedMovieCards,
+                selectedSeriesCards = selectedSeriesCards,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoaderAvailable,
+                imageLoader = imageLoader,
+                scope = scope,
+                onSelect = onSelect,
+                onSyncSelected = onSyncSelected,
+            )
+        }
+        item {
+            LibraryRecoveryPanel(
+                freshness = freshness,
+                selectedLibraryId = selectedLibraryId,
+                onRetry = onRetry,
+                onClearSelected = onClearSelected,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchDestinationContent(
+    contentPadding: PaddingValues,
+    scope: ServerCacheScope,
+    searchRepository: MediaSearchRepository?,
+    imageRepository: ImageRepository?,
+    imagePipeline: FerrexImagePipeline?,
+    connectionStatus: AuthenticatedConnectionUi,
+    onOpenResult: (SearchDetailTarget) -> Unit,
+    onRetryConnection: () -> Unit,
+    onOpenAccountServer: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+    ) {
+        item {
+            DestinationHeader(
+                title = "Search",
+                body = "Search is a dedicated surface that uses the real media query contract and scoped cache; cache misses stay visible with retry.",
+            )
+        }
+        if (connectionStatus.visible) {
+            item {
+                ConnectionRecoveryCard(
+                    connectionStatus = connectionStatus,
+                    onRetryConnection = onRetryConnection,
+                )
+            }
+        }
+        item {
+            PhoneSearchPanel(
+                scope = scope,
+                searchRepository = searchRepository,
+                imageRepository = imageRepository,
+                imagePipeline = imagePipeline,
+                onOpenResult = onOpenResult,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
+        }
+        item {
+            StateCard(
+                title = "Need account or server recovery?",
+                body = "Use Account for sign out, change server, reset connection, diagnostics, and cache recovery without wiping app data.",
+                action = "Open Account" to onOpenAccountServer,
+                actionRole = FerrexActionRole.Secondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountServerDestinationContent(
+    contentPadding: PaddingValues,
+    state: SessionState.Authenticated,
+    connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+    selectedLibraryId: String?,
+    onRetryConnection: () -> Unit,
+    onRetryLibrary: () -> Unit,
+    onClearSelected: () -> Unit,
+    onSignOut: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+    ) {
+        item {
+            DestinationHeader(
+                title = "Account & Server",
+                body = "No-wipe recovery exits stay in one place: sign out, change server, retry, reset connection, diagnostics, and cache repair.",
+            )
+        }
+        item {
+            AccountSummaryCard(
+                state = state,
+                connectionStatus = connectionStatus,
+                onRetryConnection = onRetryConnection,
+                onSignOut = onSignOut,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
+        }
+        item {
+            LibraryRecoveryPanel(
+                freshness = freshness,
+                selectedLibraryId = selectedLibraryId,
+                onRetry = onRetryLibrary,
+                onClearSelected = onClearSelected,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DestinationHeader(
+    title: String,
+    body: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(body, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -553,9 +896,6 @@ private fun HomeHeader(
     state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
     playbackNotice: String?,
-    onRetryConnection: () -> Unit,
-    onSignOut: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -563,24 +903,12 @@ private fun HomeHeader(
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.primary,
         )
+        Text(text = FerrexShellCopy.MOBILE_SUBTITLE, style = MaterialTheme.typography.titleMedium)
         Text(
-            text = "Signed in as ${state.user.displayName ?: state.user.username}",
-            style = MaterialTheme.typography.titleMedium,
+            text = "Signed in as ${state.user.displayName ?: state.user.username} • ${connectionStatus.title} • ${state.serverUrl}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(text = "Server: ${state.serverUrl}", style = MaterialTheme.typography.bodyMedium)
-        if (connectionStatus.visible) {
-            Text(
-                text = connectionStatus.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            OutlinedButton(
-                onClick = onRetryConnection,
-                enabled = connectionStatus.retryEnabled,
-            ) {
-                Text(connectionStatus.retryLabel)
-            }
-        }
         Text(text = FerrexShellCopy.MOBILE_BODY, style = MaterialTheme.typography.bodyLarge)
         if (state.requiresPinSetup) {
             Text(
@@ -596,11 +924,148 @@ private fun HomeHeader(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.weight(1f)) { Text("Settings & Diagnostics") }
-            TextButton(onClick = onSignOut, modifier = Modifier.weight(1f)) { Text("Sign out") }
+    }
+}
+
+@Composable
+private fun HomeEntrySection(
+    onOpenLibraries: () -> Unit,
+    onOpenSearch: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+        SectionTitle("Browse and find")
+        StateCard(
+            title = "Open Libraries",
+            body = "Full movie and series grids live on the Libraries tab with sorting, filtering, sync, and cache recovery controls.",
+            action = "Browse libraries" to onOpenLibraries,
+            actionRole = FerrexActionRole.Primary,
+        )
+        StateCard(
+            title = "Search media",
+            body = "Use a dedicated search surface instead of an always-expanded Home panel.",
+            action = "Search" to onOpenSearch,
+            actionRole = FerrexActionRole.Secondary,
+        )
+    }
+}
+
+@Composable
+private fun HomeUtilityPanel(
+    state: SessionState.Authenticated,
+    connectionStatus: AuthenticatedConnectionUi,
+    onRetryConnection: () -> Unit,
+    onOpenAccountServer: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+        SectionTitle("Server & recovery")
+        if (connectionStatus.visible) {
+            ConnectionRecoveryCard(
+                connectionStatus = connectionStatus,
+                onRetryConnection = onRetryConnection,
+            )
+        } else {
+            StateCard(
+                title = "Recovery exits are ready",
+                body = "${state.user.displayName ?: state.user.username} is signed in. Account keeps sign out, change server, reset connection, diagnostics, and cache repair visible without wiping app data.",
+                action = "Account & Server" to onOpenAccountServer,
+                actionRole = FerrexActionRole.Secondary,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            FerrexActionButton(
+                label = "Account & Server",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenAccountServer,
+                modifier = Modifier.weight(1f),
+            )
+            FerrexActionButton(
+                label = "Diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
+}
+
+@Composable
+private fun ConnectionRecoveryCard(
+    connectionStatus: AuthenticatedConnectionUi,
+    onRetryConnection: () -> Unit,
+) {
+    FerrexStatusCard(
+        title = connectionStatus.title,
+        body = connectionStatus.message,
+        tone = if (connectionStatus.retryEnabled) FerrexStatusTone.Retry else FerrexStatusTone.StaleOffline,
+        action = FerrexStatusAction(
+            label = connectionStatus.retryLabel,
+            role = FerrexActionRole.Retry,
+            enabled = connectionStatus.retryEnabled,
+            onClick = onRetryConnection,
+        ),
+    )
+}
+
+@Composable
+private fun AccountSummaryCard(
+    state: SessionState.Authenticated,
+    connectionStatus: AuthenticatedConnectionUi,
+    onRetryConnection: () -> Unit,
+    onSignOut: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+        StateCard(
+            title = "Signed in as ${state.user.displayName ?: state.user.username}",
+            body = "Server: ${state.serverUrl}. ${if (connectionStatus.visible) connectionStatus.message else "Connection is online; recovery actions remain available."}",
+            tone = if (connectionStatus.visible) FerrexStatusTone.StaleOffline else FerrexStatusTone.Secondary,
+        )
+        if (connectionStatus.visible) {
+            FerrexActionButton(
+                label = connectionStatus.retryLabel,
+                role = FerrexActionRole.Retry,
+                enabled = connectionStatus.retryEnabled,
+                onClick = onRetryConnection,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            FerrexActionButton(
+                label = "Change server",
+                role = FerrexActionRole.Secondary,
+                onClick = onChangeServer,
+                modifier = Modifier.weight(1f),
+            )
+            FerrexActionButton(
+                label = "Sign out",
+                role = FerrexActionRole.Secondary,
+                onClick = onSignOut,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        FerrexActionButton(
+            label = "Reset connection",
+            role = FerrexActionRole.DestructiveReset,
+            onClick = onResetConnection,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        FerrexActionButton(
+            label = "Diagnostics / Export diagnostics",
+            role = FerrexActionRole.Secondary,
+            onClick = onOpenDiagnostics,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun PhoneShellDestination.navIcon(): String = when (this) {
+    PhoneShellDestination.Home -> "H"
+    PhoneShellDestination.Libraries -> "L"
+    PhoneShellDestination.Search -> "S"
+    PhoneShellDestination.AccountServer -> "A"
 }
 
 @Composable
@@ -613,8 +1078,10 @@ private fun ContinueWatchingSection(
     onRetry: () -> Unit,
     onSelect: (ContinueWatchingCard) -> Unit,
 ) {
+    val heroCard = continueState.cards.firstOrNull()
+    val remainingCards = continueState.cards.drop(1)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionTitle("Continue Watching")
+        SectionTitle("Resume")
         when (val status = continueState.status) {
             ContinueWatchingStatus.Idle,
             ContinueWatchingStatus.Loading -> StateCard(
@@ -643,9 +1110,20 @@ private fun ContinueWatchingSection(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (continueState.cards.isNotEmpty()) {
+        heroCard?.let { card ->
+            ContinueWatchingHeroCard(
+                card = card,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoaderAvailable,
+                imageLoader = imageLoader,
+                scope = scope,
+                onClick = { onSelect(card) },
+            )
+        }
+        if (remainingCards.isNotEmpty()) {
+            Text("More in progress", style = MaterialTheme.typography.titleSmall)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(continueState.cards, key = { it.stableKey }) { card ->
+                items(remainingCards, key = { it.stableKey }) { card ->
                     ContinueWatchingCardView(
                         card = card,
                         imageResolutions = imageResolutions,
@@ -994,6 +1472,52 @@ private fun MediaGrid(
 }
 
 @Composable
+private fun ContinueWatchingHeroCard(
+    card: ContinueWatchingCard,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoaderAvailable: Boolean,
+    imageLoader: coil.ImageLoader?,
+    scope: ServerCacheScope,
+    onClick: () -> Unit,
+) {
+    FerrexPosterCard(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Poster(
+                imageKey = card.imageKey,
+                title = card.title,
+                fallbackPath = null,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoaderAvailable,
+                imageLoader = imageLoader,
+                scope = scope,
+                modifier = Modifier.width(132.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                Text("Continue Watching", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(card.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(card.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(card.progressLabel, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                FerrexActionButton(
+                    label = "Open",
+                    role = FerrexActionRole.Primary,
+                    onClick = onClick,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ContinueWatchingCardView(
     card: ContinueWatchingCard,
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
@@ -1063,9 +1587,10 @@ private fun Poster(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    modifier: Modifier = Modifier,
 ) {
     if (imageKey == null || !imageLoaderAvailable || imageLoader == null) {
-        FerrexPosterPlaceholder(if (imageKey == null) "No poster" else "Images unavailable")
+        FerrexPosterPlaceholder(if (imageKey == null) "No poster" else "Images unavailable", modifier = modifier)
         return
     }
     val resolution = imageResolutions[imageKey]
@@ -1083,6 +1608,7 @@ private fun Poster(
         resolution = resolution,
         imageLoader = imageLoader,
         contentDescription = title,
+        modifier = modifier,
         category = imageKey.category,
         fallback = fallback,
     )
