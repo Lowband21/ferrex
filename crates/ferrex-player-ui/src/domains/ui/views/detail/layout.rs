@@ -7,6 +7,8 @@ use crate::{
 };
 
 const COMPACT_PORTRAIT_MAX_WIDTH: f32 = 720.0;
+const TALL_PORTRAIT_MAX_WIDTH: f32 = 960.0;
+const TALL_PORTRAIT_MIN_ASPECT: f32 = 1.25;
 const COMPACT_LANDSCAPE_MAX_WIDTH: f32 = 960.0;
 const COMPACT_LANDSCAPE_MAX_HEIGHT: f32 = 560.0;
 const CINEMATIC_MIN_WIDTH: f32 = 1_440.0;
@@ -46,6 +48,7 @@ pub struct DetailLayoutInput {
     pub scaled_poster_width: f32,
     pub scaled_poster_height: f32,
     pub scaled_poster_gap: f32,
+    pub hero_art_aspect: DetailArtAspect,
 }
 
 impl DetailLayoutInput {
@@ -66,7 +69,13 @@ impl DetailLayoutInput {
             scaled_poster_width: scaled_layout.poster_width,
             scaled_poster_height: scaled_layout.poster_height,
             scaled_poster_gap: scaled_layout.poster_gap(),
+            hero_art_aspect: DetailArtAspect::Poster,
         }
+    }
+
+    pub fn with_hero_art_aspect(mut self, aspect: DetailArtAspect) -> Self {
+        self.hero_art_aspect = aspect;
+        self
     }
 }
 
@@ -171,11 +180,14 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
     let header_height = input.header_height.max(0.0).min(viewport_height);
     let available_height = (viewport_height - header_height).max(1.0);
     let aspect = viewport_width / viewport_height.max(1.0);
+    let is_portrait = viewport_height >= viewport_width;
+    let is_tall_portrait =
+        viewport_height / viewport_width.max(1.0) >= TALL_PORTRAIT_MIN_ASPECT;
 
     let composition = if input.interface_mode == DetailInterfaceMode::TenFoot {
         DetailComposition::TenFoot
-    } else if viewport_width <= COMPACT_PORTRAIT_MAX_WIDTH
-        && viewport_height >= viewport_width
+    } else if (viewport_width <= COMPACT_PORTRAIT_MAX_WIDTH && is_portrait)
+        || (viewport_width <= TALL_PORTRAIT_MAX_WIDTH && is_tall_portrait)
     {
         DetailComposition::CompactPortrait
     } else if viewport_width <= COMPACT_LANDSCAPE_MAX_WIDTH
@@ -214,6 +226,7 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
         scale,
         input.scaled_poster_width,
         input.scaled_poster_height,
+        input.hero_art_aspect,
     );
     let backdrop = backdrop_layout(composition, available_height, scale);
     let action_cluster =
@@ -314,7 +327,17 @@ fn hero_art_layout(
     scale: f32,
     scaled_poster_width: f32,
     scaled_poster_height: f32,
+    art_aspect: DetailArtAspect,
 ) -> DetailArtLayout {
+    if art_aspect == DetailArtAspect::Still {
+        return still_hero_art_layout(
+            composition,
+            content_width,
+            available_height,
+            scale,
+        );
+    }
+
     let poster_width = scaled_poster_width.max(1.0);
     let poster_height = scaled_poster_height.max(1.0);
     let (desired_height, min_height, max_height, cap_height, aspect) =
@@ -370,6 +393,49 @@ fn hero_art_layout(
         height,
         corner_radius: clamp_scaled(14.0, 8.0, 28.0, scale),
         aspect,
+    }
+}
+
+fn still_hero_art_layout(
+    composition: DetailComposition,
+    content_width: f32,
+    available_height: f32,
+    scale: f32,
+) -> DetailArtLayout {
+    let desired_width = match composition {
+        DetailComposition::CompactPortrait => content_width * 0.92,
+        DetailComposition::CompactLandscape => content_width * 0.44,
+        DetailComposition::BalancedDesktop => content_width * 0.46,
+        DetailComposition::CinematicWide => content_width * 0.52,
+        DetailComposition::TenFoot => content_width * 0.48,
+    };
+    let max_width = match composition {
+        DetailComposition::CompactPortrait => content_width * 0.96,
+        DetailComposition::CompactLandscape => 560.0 * scale,
+        DetailComposition::BalancedDesktop => 660.0 * scale,
+        DetailComposition::CinematicWide => 840.0 * scale,
+        DetailComposition::TenFoot => 940.0 * scale,
+    };
+    let cap_height = match composition {
+        DetailComposition::CompactPortrait => available_height * 0.40,
+        DetailComposition::CompactLandscape => available_height * 0.62,
+        DetailComposition::BalancedDesktop => available_height * 0.58,
+        DetailComposition::CinematicWide => available_height * 0.66,
+        DetailComposition::TenFoot => available_height * 0.62,
+    };
+    let width = clamp_to_available(
+        desired_width,
+        220.0 * scale,
+        max_width,
+        cap_height * STILL_ASPECT,
+    )
+    .min(content_width);
+
+    DetailArtLayout {
+        width,
+        height: width / STILL_ASPECT,
+        corner_radius: clamp_scaled(14.0, 8.0, 28.0, scale),
+        aspect: DetailArtAspect::Still,
     }
 }
 
@@ -439,9 +505,9 @@ fn action_cluster_layout(
         button_height: clamp_scaled(
             match composition {
                 DetailComposition::TenFoot => 66.0,
-                _ => 44.0,
+                _ => 54.0,
             },
-            38.0,
+            44.0,
             76.0,
             scale,
         ),
@@ -673,5 +739,73 @@ mod tests {
                 <= short_scaled.available_height * 0.52 + 0.01
         );
         assert_eq!(full_hd.rail.visible_rows, 2);
+    }
+
+    #[test]
+    fn detail_layout_uses_responsive_still_hero_aspect() {
+        let plan = solve_detail_layout(
+            input(1_280.0, 720.0, 1.0, 50.0, DetailInterfaceMode::Desktop)
+                .with_hero_art_aspect(DetailArtAspect::Still),
+        );
+
+        assert_eq!(plan.hero_art.aspect, DetailArtAspect::Still);
+        assert!(
+            (plan.hero_art.width / plan.hero_art.height - STILL_ASPECT).abs()
+                < 0.01
+        );
+        assert!(plan.hero_art.width <= plan.content_width);
+        assert!(plan.hero_art.height <= plan.available_height * 0.58 + 0.01);
+    }
+
+    #[test]
+    fn detail_layout_viewport_matrix_keeps_art_actions_and_rails_bounded() {
+        let matrix = [
+            (480.0, 900.0, DetailComposition::CompactPortrait),
+            (640.0, 480.0, DetailComposition::CompactLandscape),
+            (800.0, 600.0, DetailComposition::CompactLandscape),
+            (1_024.0, 768.0, DetailComposition::BalancedDesktop),
+            (1_280.0, 720.0, DetailComposition::BalancedDesktop),
+            (1_366.0, 768.0, DetailComposition::BalancedDesktop),
+            (1_920.0, 1_080.0, DetailComposition::CinematicWide),
+            (2_560.0, 1_440.0, DetailComposition::CinematicWide),
+            (3_440.0, 1_440.0, DetailComposition::CinematicWide),
+            (900.0, 1_600.0, DetailComposition::CompactPortrait),
+        ];
+
+        for (width, height, expected) in matrix {
+            for aspect in [DetailArtAspect::Poster, DetailArtAspect::Still] {
+                let plan = solve_detail_layout(
+                    input(
+                        width,
+                        height,
+                        1.0,
+                        50.0,
+                        DetailInterfaceMode::Desktop,
+                    )
+                    .with_hero_art_aspect(aspect),
+                );
+
+                assert_eq!(
+                    plan.composition, expected,
+                    "{width}x{height} should choose {expected:?}"
+                );
+                assert!(plan.content_width <= plan.content_max_width);
+                assert!(plan.content_width <= plan.viewport_width);
+                assert!(plan.page_padding_x * 2.0 < plan.viewport_width);
+                assert!(plan.page_padding_y * 2.0 < plan.available_height);
+                assert!(plan.hero_art.width <= plan.content_width + 0.01);
+                assert!(plan.hero_art.height <= plan.available_height + 0.01);
+                assert!(
+                    plan.action_cluster.button_width <= plan.content_width,
+                    "action button should stay inside content at {width}x{height}"
+                );
+                assert!(plan.action_cluster.button_height > 0.0);
+                assert!(plan.section_grid.columns >= 1);
+                assert!(plan.section_grid.columns <= 3);
+                assert!(plan.rail.card_width <= plan.content_width + 0.01);
+                assert!(plan.rail.card_height > 0.0);
+                assert!(plan.backdrop.height <= plan.available_height + 0.01);
+            }
+        }
     }
 }

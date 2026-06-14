@@ -1,5 +1,7 @@
 use crate::{
-    domains::ui::messages::UiMessage,
+    domains::ui::{
+        messages::UiMessage, views::virtual_carousel::types::CarouselKey,
+    },
     infra::shader_widgets::poster::{PosterFace, animation::AnimationBehavior},
 };
 
@@ -479,6 +481,7 @@ pub struct DetailTechnicalItem {
 #[derive(Debug, Clone)]
 pub struct DetailRelationshipRail {
     pub id: String,
+    pub carousel_key: Option<CarouselKey>,
     pub title: String,
     pub items: Vec<DetailRailItem>,
     pub empty_message: Option<String>,
@@ -511,4 +514,69 @@ pub struct DetailNotice {
 pub struct DetailBackdropControl {
     pub label: String,
     pub on_press: UiMessage,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uuid(value: u128) -> Uuid {
+        Uuid::from_u128(value)
+    }
+
+    #[test]
+    fn detail_page_model_empty_state_tracks_renderable_content() {
+        let mut model =
+            DetailPageModel::new(DetailContentKind::Series, "Signal Grove");
+        assert!(model.is_empty());
+
+        model.metadata.push(DetailMetadataPill::neutral("2024"));
+        assert!(!model.is_empty());
+
+        model.empty_state = Some(DetailEmptyState {
+            title: "No rows".to_string(),
+            message: "Refresh the library and retry.".to_string(),
+            icon: None,
+        });
+        assert!(model.is_empty());
+    }
+
+    #[test]
+    fn detail_artwork_builders_preserve_route_specific_image_requests() {
+        let poster =
+            DetailArtwork::poster(uuid(1), Some(uuid(2)), "Movie poster")
+                .with_request_size(ImageSize::Poster(
+                    ferrex_model::PosterSize::W342,
+                ))
+                .with_face(PosterFace::Back)
+                .with_rotation_y(std::f32::consts::PI)
+                .with_animation(AnimationBehavior::flip_then_fade());
+        let still =
+            DetailArtwork::still(uuid(3), Some(uuid(4)), "Episode still");
+
+        match poster {
+            DetailArtwork::Poster {
+                media_uuid,
+                image_id,
+                request_size,
+                face,
+                rotation_y,
+                animation,
+                ..
+            } => {
+                assert_eq!(media_uuid, uuid(1));
+                assert_eq!(image_id, Some(uuid(2)));
+                assert_eq!(
+                    request_size,
+                    ImageSize::Poster(ferrex_model::PosterSize::W342)
+                );
+                assert_eq!(face, Some(PosterFace::Back));
+                assert_eq!(rotation_y, Some(std::f32::consts::PI));
+                assert!(animation.is_some());
+            }
+            other => panic!("expected poster artwork, got {other:?}"),
+        }
+
+        assert_eq!(still.label(), "Episode still");
+    }
 }
