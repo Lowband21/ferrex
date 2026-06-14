@@ -13,12 +13,11 @@ use crate::{
 
 use super::{
     DetailAction, DetailActionRole, DetailArtLayout, DetailArtwork,
-    DetailBackdrop, DetailBackdropControl, DetailBackdropScrim,
-    DetailCastMember, DetailCastSection, DetailComposition, DetailEmptyState,
-    DetailFact, DetailFactPanel, DetailLayoutPlan, DetailMetadataPill,
-    DetailNotice, DetailOverviewSection, DetailPageModel, DetailRailItem,
-    DetailRelationshipRail, DetailSection, DetailTechnicalItem,
-    DetailTechnicalSection, DetailTone,
+    DetailBackdropControl, DetailCastMember, DetailCastSection,
+    DetailComposition, DetailEmptyState, DetailFact, DetailFactPanel,
+    DetailLayoutPlan, DetailMetadataPill, DetailNotice, DetailOverviewSection,
+    DetailPageModel, DetailRailItem, DetailRelationshipRail, DetailSection,
+    DetailTechnicalItem, DetailTechnicalSection, DetailTone,
 };
 use ferrex_core::player_prelude::Priority;
 use ferrex_model::ImageSize;
@@ -26,56 +25,12 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
     Vector,
     widget::{
-        Column, Row, Space, Stack, button, column, container, mouse_area, row,
+        Column, Row, Space, button, column, container, mouse_area, row,
         scrollable, text,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
-
-/// Render a repository-free detail page model with a precomputed layout plan.
-pub fn view_detail_page(
-    model: &DetailPageModel,
-    plan: &DetailLayoutPlan,
-    sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    let mut body = Column::new()
-        .spacing(plan.section_grid.gap)
-        .padding([plan.page_padding_y, plan.page_padding_x])
-        .width(Length::Fill)
-        .max_width(plan.content_width);
-
-    if let Some(empty) = model.empty_state.as_ref().filter(|_| model.is_empty())
-    {
-        body = body.push(view_empty_state(empty, sizes));
-    } else {
-        body = body.push(view_detail_hero(model, plan, sizes));
-        body = body.push(view_sections(&model.sections, plan, sizes));
-    }
-
-    if !model.backdrop_controls.is_empty() {
-        body = body.push(view_backdrop_controls(
-            &model.backdrop_controls,
-            plan,
-            sizes,
-        ));
-    }
-
-    let content =
-        container(scrollable(body).width(Length::Fill).height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center);
-
-    if let Some(backdrop) = &model.backdrop {
-        Stack::new()
-            .push(view_backdrop(backdrop, plan, sizes))
-            .push(content)
-            .into()
-    } else {
-        content.into()
-    }
-}
 
 /// Render the hero block shared by desktop, compact, cinematic, and ten-foot
 /// detail pages.
@@ -701,9 +656,7 @@ fn rail_art_layout(
             plan.rail.card_width / (2.0 / 3.0),
             super::DetailArtAspect::Poster,
         ),
-        DetailArtwork::Still { .. }
-        | DetailArtwork::Backdrop { .. }
-        | DetailArtwork::None { .. } => (
+        DetailArtwork::Still { .. } | DetailArtwork::None { .. } => (
             plan.rail.card_width * 9.0 / 16.0,
             super::DetailArtAspect::Still,
         ),
@@ -809,41 +762,6 @@ fn view_panel(
         .into()
 }
 
-fn view_backdrop(
-    backdrop: &DetailBackdrop,
-    plan: &DetailLayoutPlan,
-    _sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    let image = view_artwork(
-        &backdrop.artwork,
-        DetailArtLayout {
-            width: plan.viewport_width,
-            height: plan.backdrop.height,
-            corner_radius: 0.0,
-            aspect: super::DetailArtAspect::Still,
-        },
-        Priority::Visible,
-        Length::Fixed(plan.viewport_width),
-        Length::Fixed(plan.backdrop.height),
-    );
-
-    let scrim_opacity = match backdrop.scrim {
-        DetailBackdropScrim::None => 0.0,
-        DetailBackdropScrim::Light => plan.backdrop.scrim_opacity * 0.65,
-        DetailBackdropScrim::Heavy => plan.backdrop.scrim_opacity,
-    };
-
-    Stack::new()
-        .push(image)
-        .push(
-            container(Space::new())
-                .width(Length::Fill)
-                .height(Length::Fixed(plan.backdrop.height))
-                .style(backdrop_scrim_style(scrim_opacity)),
-        )
-        .into()
-}
-
 fn view_artwork(
     artwork: &DetailArtwork,
     layout: DetailArtLayout,
@@ -902,21 +820,6 @@ fn view_artwork(
             .radius(layout.corner_radius)
             .priority(priority)
             .placeholder(Icon::Clapperboard)
-            .tight_bounds()
-            .no_animation()
-            .into(),
-        DetailArtwork::Backdrop {
-            media_uuid,
-            image_id,
-            ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::backdrop())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(Icon::Image)
             .tight_bounds()
             .no_animation()
             .into(),
@@ -1167,22 +1070,5 @@ fn detail_action_button_style(
             },
             snap: false,
         }
-    }
-}
-
-fn backdrop_scrim_style(
-    opacity: f32,
-) -> impl Fn(&Theme) -> container::Style + Clone {
-    move |_| container::Style {
-        text_color: None,
-        background: Some(Background::Color(Color::from_rgba(
-            0.0,
-            0.0,
-            0.0,
-            opacity.clamp(0.0, 1.0),
-        ))),
-        border: Border::default(),
-        shadow: Shadow::default(),
-        snap: false,
     }
 }

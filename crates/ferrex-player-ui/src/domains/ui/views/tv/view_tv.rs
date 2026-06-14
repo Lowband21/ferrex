@@ -574,9 +574,7 @@ fn detail_layout_for_model(
     state: &State,
 ) -> crate::domains::ui::views::detail::DetailLayoutPlan {
     let aspect = match model.hero_art {
-        DetailArtwork::Still { .. } | DetailArtwork::Backdrop { .. } => {
-            DetailArtAspect::Still
-        }
+        DetailArtwork::Still { .. } => DetailArtAspect::Still,
         DetailArtwork::Poster { .. }
         | DetailArtwork::Profile { .. }
         | DetailArtwork::None { .. } => DetailArtAspect::Poster,

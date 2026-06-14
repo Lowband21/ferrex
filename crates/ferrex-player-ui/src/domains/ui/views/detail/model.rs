@@ -22,7 +22,6 @@ pub struct DetailPageModel {
     pub subtitle: Option<String>,
     pub eyebrow: Option<String>,
     pub hero_art: DetailArtwork,
-    pub backdrop: Option<DetailBackdrop>,
     pub metadata: Vec<DetailMetadataPill>,
     pub actions: Vec<DetailAction>,
     pub sections: Vec<DetailSection>,
@@ -43,7 +42,6 @@ impl DetailPageModel {
             hero_art: DetailArtwork::None {
                 label: "No artwork".to_string(),
             },
-            backdrop: None,
             metadata: Vec::new(),
             actions: Vec::new(),
             sections: Vec::new(),
@@ -67,11 +65,6 @@ impl DetailPageModel {
         self
     }
 
-    pub fn with_backdrop(mut self, backdrop: DetailBackdrop) -> Self {
-        self.backdrop = Some(backdrop);
-        self
-    }
-
     pub fn is_empty(&self) -> bool {
         self.empty_state.is_some()
             || (self.metadata.is_empty()
@@ -87,9 +80,6 @@ pub enum DetailContentKind {
     Series,
     Season,
     Episode,
-    /// 10-foot detail content uses the same model but typically pairs with the
-    /// TenFoot layout composition and focus-aware route messages.
-    TenFoot,
 }
 
 /// Artwork used by the hero, rails, cast cards, and empty states.
@@ -107,11 +97,6 @@ pub enum DetailArtwork {
         rotation_y: Option<f32>,
     },
     Still {
-        media_uuid: Uuid,
-        image_id: Option<Uuid>,
-        alt: String,
-    },
-    Backdrop {
         media_uuid: Uuid,
         image_id: Option<Uuid>,
         alt: String,
@@ -229,25 +214,10 @@ impl DetailArtwork {
         match self {
             Self::Poster { alt, .. }
             | Self::Still { alt, .. }
-            | Self::Backdrop { alt, .. }
             | Self::Profile { alt, .. } => alt,
             Self::None { label } => label,
         }
     }
-}
-
-/// Optional page backdrop metadata and controls target.
-#[derive(Debug, Clone)]
-pub struct DetailBackdrop {
-    pub artwork: DetailArtwork,
-    pub scrim: DetailBackdropScrim,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DetailBackdropScrim {
-    None,
-    Light,
-    Heavy,
 }
 
 /// A compact metadata value displayed near the title.

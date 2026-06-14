@@ -7,13 +7,13 @@ use crate::{
         views::{
             detail::{
                 DetailAction, DetailActionMenuItem, DetailArtwork,
-                DetailBackdrop, DetailBackdropControl, DetailBackdropScrim,
-                DetailCastMember, DetailCastSection, DetailContentKind,
-                DetailFact, DetailFactPanel, DetailLayoutPlan,
-                DetailMetadataPill, DetailOverviewSection, DetailPageModel,
-                DetailSection, DetailTechnicalItem, DetailTechnicalSection,
-                DetailTone, solve_detail_layout_from_runtime,
-                view_backdrop_controls, view_detail_hero, view_sections,
+                DetailBackdropControl, DetailCastMember, DetailCastSection,
+                DetailContentKind, DetailFact, DetailFactPanel,
+                DetailLayoutPlan, DetailMetadataPill, DetailOverviewSection,
+                DetailPageModel, DetailSection, DetailTechnicalItem,
+                DetailTechnicalSection, DetailTone,
+                solve_detail_layout_from_runtime, view_backdrop_controls,
+                view_detail_hero, view_sections,
             },
             grid::macros::parse_hex_color,
         },
@@ -213,17 +213,6 @@ fn build_movie_detail_model(
     let mut model =
         DetailPageModel::new(DetailContentKind::Movie, title.clone())
             .with_hero_art(hero_art);
-
-    if let Some(backdrop_iid) = movie_details.primary_backdrop_iid {
-        model = model.with_backdrop(DetailBackdrop {
-            artwork: DetailArtwork::Backdrop {
-                media_uuid,
-                image_id: Some(backdrop_iid),
-                alt: format!("{title} backdrop"),
-            },
-            scrim: DetailBackdropScrim::Heavy,
-        });
-    }
 
     let directors = movie_details
         .crew
