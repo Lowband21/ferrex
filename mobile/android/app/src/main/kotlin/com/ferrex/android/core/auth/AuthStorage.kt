@@ -8,6 +8,8 @@ interface AuthStorage {
     var refreshToken: String?
     var username: String?
     var userId: String?
+    var userDisplayName: String?
+    var userAvatarUrl: String?
     var sessionId: String?
     var deviceSessionId: String?
     var localDeviceId: String?
@@ -28,6 +30,8 @@ interface AuthStorage {
         refreshToken = null
         username = null
         userId = null
+        userDisplayName = null
+        userAvatarUrl = null
         sessionId = null
         deviceSessionId = null
         requiresPinSetup = false

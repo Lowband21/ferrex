@@ -1,6 +1,8 @@
 package com.ferrex.android.core.di
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import com.ferrex.android.BuildConfig
 import com.ferrex.android.core.api.AuthInterceptor
 import com.ferrex.android.core.api.FerrexApiClient
@@ -29,6 +31,9 @@ import com.ferrex.android.core.watch.OkHttpContinueWatchingTransport
 import com.ferrex.android.core.watch.OkHttpWatchStateTransport
 import com.ferrex.android.core.watch.WatchRepository
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -39,6 +44,8 @@ class AndroidAuthDependencies(
     val serverConfig = ServerConfig()
     val authInterceptor = AuthInterceptor()
     val tokenRefreshAuthenticator = TokenRefreshAuthenticator(serverConfig, authInterceptor)
+
+    private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -117,5 +124,17 @@ class AndroidAuthDependencies(
             libraryCache.clearAllForScope(scope)
             imageRepository.clearAllImages(scope)
         },
+        reconnectScope = authScope,
     )
+
+    private val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
+    private val reconnectNetworkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            authManager.notifyConnectivityAvailable()
+        }
+    }
+
+    init {
+        connectivityManager?.registerDefaultNetworkCallback(reconnectNetworkCallback)
+    }
 }

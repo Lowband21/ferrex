@@ -42,6 +42,14 @@ class EncryptedAuthStorage(context: Context) : AuthStorage {
         get() = prefs.getString(KEY_USER_ID, null)
         set(value) = putNullable(KEY_USER_ID, value)
 
+    override var userDisplayName: String?
+        get() = prefs.getString(KEY_USER_DISPLAY_NAME, null)
+        set(value) = putNullable(KEY_USER_DISPLAY_NAME, value)
+
+    override var userAvatarUrl: String?
+        get() = prefs.getString(KEY_USER_AVATAR_URL, null)
+        set(value) = putNullable(KEY_USER_AVATAR_URL, value)
+
     override var sessionId: String?
         get() = prefs.getString(KEY_SESSION_ID, null)
         set(value) = putNullable(KEY_SESSION_ID, value)
@@ -64,6 +72,8 @@ class EncryptedAuthStorage(context: Context) : AuthStorage {
             .remove(KEY_REFRESH_TOKEN)
             .remove(KEY_USERNAME)
             .remove(KEY_USER_ID)
+            .remove(KEY_USER_DISPLAY_NAME)
+            .remove(KEY_USER_AVATAR_URL)
             .remove(KEY_SESSION_ID)
             .remove(KEY_DEVICE_SESSION_ID)
             .remove(KEY_REQUIRES_PIN_SETUP)
@@ -77,6 +87,8 @@ class EncryptedAuthStorage(context: Context) : AuthStorage {
             .remove(KEY_REFRESH_TOKEN)
             .remove(KEY_USERNAME)
             .remove(KEY_USER_ID)
+            .remove(KEY_USER_DISPLAY_NAME)
+            .remove(KEY_USER_AVATAR_URL)
             .remove(KEY_SESSION_ID)
             .remove(KEY_DEVICE_SESSION_ID)
             .remove(KEY_LOCAL_DEVICE_ID)
@@ -97,6 +109,8 @@ class EncryptedAuthStorage(context: Context) : AuthStorage {
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_USERNAME = "username"
         private const val KEY_USER_ID = "user_id"
+        private const val KEY_USER_DISPLAY_NAME = "user_display_name"
+        private const val KEY_USER_AVATAR_URL = "user_avatar_url"
         private const val KEY_SESSION_ID = "session_id"
         private const val KEY_DEVICE_SESSION_ID = "device_session_id"
         private const val KEY_LOCAL_DEVICE_ID = "local_device_id"

@@ -69,6 +69,31 @@ class TokenRefreshAuthenticatorTest {
     }
 
     @Test
+    fun refreshServerFailureReportsTemporaryUnavailableWithoutClearingAccessToken() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(503).setBody("unavailable"))
+            server.start()
+
+            val interceptor = AuthInterceptor()
+            interceptor.setAccessToken("old-access")
+            val config = ServerConfig().apply { setUrl(server.url("/").toString()) }
+            val authenticator = TokenRefreshAuthenticator(config, interceptor)
+            val invalidations = mutableListOf<RefreshInvalidationReason>()
+            var temporaryFailures = 0
+            authenticator.refreshTokenProvider = { "refresh" }
+            authenticator.onSessionInvalidated = { invalidations += it }
+            authenticator.onRefreshTemporarilyUnavailable = { temporaryFailures += 1 }
+
+            assertNull(authenticator.authenticate(null, unauthorizedResponse(authorizedUserRequest("old-access"))))
+
+            assertEquals("/api/v1/auth/refresh", server.takeRequest().path)
+            assertTrue(invalidations.isEmpty())
+            assertEquals(1, temporaryFailures)
+            assertEquals("old-access", interceptor.accessToken)
+        }
+    }
+
+    @Test
     fun emptyRefreshResponseInvalidatesWithoutRetry() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(200).setBody(""))

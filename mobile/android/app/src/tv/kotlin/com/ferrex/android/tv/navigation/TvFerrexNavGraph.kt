@@ -97,6 +97,7 @@ fun TvFerrexNavGraph(
             onSignOut = authManager::signOut,
             onChangeServer = authManager::changeServer,
             onResetConnection = authManager::resetConnection,
+            onRetryConnection = authManager::retryAuthenticatedConnection,
             onPlaybackSessionInvalidated = authManager::invalidateSessionFromPlayback,
         )
     }

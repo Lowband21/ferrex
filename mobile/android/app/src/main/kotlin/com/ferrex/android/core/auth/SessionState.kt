@@ -26,7 +26,15 @@ sealed interface SessionState {
         val serverUrl: String,
         val user: CurrentUser,
         val requiresPinSetup: Boolean,
+        val connectionHealth: AuthConnectionHealth = AuthConnectionHealth.Online,
+        val offlineReason: RecoverableFailureReason? = null,
     ) : SessionState
+}
+
+enum class AuthConnectionHealth {
+    Offline,
+    Probing,
+    Online,
 }
 
 enum class NoServerReason {

@@ -58,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import com.ferrex.android.FerrexShellCopy
+import com.ferrex.android.core.auth.AuthConnectionHealth
+import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
@@ -144,6 +146,7 @@ fun TvHomeScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onRetryConnection: () -> Unit,
     onPlaybackSessionInvalidated: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
@@ -491,6 +494,7 @@ fun TvHomeScreen(
             searchAvailable = searchRepository != null,
             playbackNotice = playbackNotice,
             onRetryContinueWatching = { coroutineScope.launch { continueWatchingRepository?.refresh() } },
+            onRetryConnection = onRetryConnection,
             onOpenSearch = { childScreen = TvHomeChild.Search },
             onOpenGrid = {
                 selectedTab = it
@@ -550,6 +554,7 @@ private fun TvHomeContent(
     searchAvailable: Boolean,
     playbackNotice: String?,
     onRetryContinueWatching: () -> Unit,
+    onRetryConnection: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenGrid: (HomeLibraryTab) -> Unit,
     onOpenDetail: (MediaRouteArgs) -> Unit,
@@ -611,6 +616,14 @@ private fun TvHomeContent(
         TvTitle(FerrexShellCopy.TV_TITLE, FerrexShellCopy.TV_SUBTITLE)
         Text("Signed in as ${state.user.displayName ?: state.user.username}", style = MaterialTheme.typography.headlineSmall)
         Text("Server: ${state.serverUrl}", style = MaterialTheme.typography.titleMedium)
+        if (state.connectionHealth != AuthConnectionHealth.Online) {
+            Text(
+                authenticatedConnectionCopy(state),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+            )
+        }
         Text(FerrexShellCopy.TV_BODY, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
         if (state.requiresPinSetup) {
             Text(
@@ -627,6 +640,17 @@ private fun TvHomeContent(
         TvButtonRow(
             title = "Home actions",
             actions = buildList {
+                if (state.connectionHealth != AuthConnectionHealth.Online) {
+                    add(
+                        TvButtonAction(
+                            key = "retry-connection",
+                            label = if (state.connectionHealth == AuthConnectionHealth.Probing) "Checking connection…" else "Retry connection",
+                            role = TvActionRole.Retry,
+                            enabled = state.connectionHealth != AuthConnectionHealth.Probing,
+                            onSelect = onRetryConnection,
+                        ),
+                    )
+                }
                 if (searchAvailable) {
                     add(
                         TvButtonAction(
@@ -704,6 +728,21 @@ private fun TvHomeContent(
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
         )
+    }
+}
+
+private fun authenticatedConnectionCopy(state: SessionState.Authenticated): String {
+    val reason = when (state.offlineReason) {
+        RecoverableFailureReason.ServerUnreachable -> "the server is unreachable"
+        RecoverableFailureReason.ValidationUnavailable -> "session validation is unavailable"
+        RecoverableFailureReason.RefreshUnavailable -> "token refresh is temporarily unavailable"
+        RecoverableFailureReason.InvalidServerResponse -> "the server response was not understood"
+        null -> "the connection is temporarily unavailable"
+    }
+    return when (state.connectionHealth) {
+        AuthConnectionHealth.Offline -> "Offline — showing cached Home while $reason. Ferrex will retry automatically."
+        AuthConnectionHealth.Probing -> "Checking the saved session… Home stays available while Ferrex reconnects."
+        AuthConnectionHealth.Online -> "Online"
     }
 }
 

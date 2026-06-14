@@ -43,6 +43,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
+import com.ferrex.android.core.auth.AuthConnectionHealth
+import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
@@ -112,6 +114,7 @@ fun PhoneHomeScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onRetryConnection: () -> Unit,
     onPlaybackSessionInvalidated: () -> Unit = {},
 ) {
     val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
@@ -362,6 +365,7 @@ fun PhoneHomeScreen(
                 HomeHeader(
                     state = state,
                     playbackNotice = playbackNotice,
+                    onRetryConnection = onRetryConnection,
                     onSignOut = onSignOut,
                 )
             }
@@ -472,6 +476,7 @@ fun PhoneHomeScreen(
 private fun HomeHeader(
     state: SessionState.Authenticated,
     playbackNotice: String?,
+    onRetryConnection: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -485,6 +490,19 @@ private fun HomeHeader(
             style = MaterialTheme.typography.titleMedium,
         )
         Text(text = "Server: ${state.serverUrl}", style = MaterialTheme.typography.bodyMedium)
+        if (state.connectionHealth != AuthConnectionHealth.Online) {
+            Text(
+                text = authenticatedConnectionCopy(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            OutlinedButton(
+                onClick = onRetryConnection,
+                enabled = state.connectionHealth != AuthConnectionHealth.Probing,
+            ) {
+                Text(if (state.connectionHealth == AuthConnectionHealth.Probing) "Checking connection…" else "Retry connection")
+            }
+        }
         Text(text = FerrexShellCopy.MOBILE_BODY, style = MaterialTheme.typography.bodyLarge)
         if (state.requiresPinSetup) {
             Text(
@@ -501,6 +519,21 @@ private fun HomeHeader(
             )
         }
         TextButton(onClick = onSignOut) { Text("Sign out") }
+    }
+}
+
+private fun authenticatedConnectionCopy(state: SessionState.Authenticated): String {
+    val reason = when (state.offlineReason) {
+        RecoverableFailureReason.ServerUnreachable -> "the server is unreachable"
+        RecoverableFailureReason.ValidationUnavailable -> "session validation is unavailable"
+        RecoverableFailureReason.RefreshUnavailable -> "token refresh is temporarily unavailable"
+        RecoverableFailureReason.InvalidServerResponse -> "the server response was not understood"
+        null -> "the connection is temporarily unavailable"
+    }
+    return when (state.connectionHealth) {
+        AuthConnectionHealth.Offline -> "Offline — showing cached Home while $reason. Ferrex will retry automatically."
+        AuthConnectionHealth.Probing -> "Checking the saved session… Home stays available while Ferrex reconnects."
+        AuthConnectionHealth.Online -> "Online"
     }
 }
 
