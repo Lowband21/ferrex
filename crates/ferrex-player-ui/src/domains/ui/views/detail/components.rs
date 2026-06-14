@@ -1,6 +1,13 @@
 use crate::{
     common::ui_utils::icon_text_with_size,
-    domains::ui::{messages::UiMessage, theme, widgets::image_for::image_for},
+    domains::ui::{
+        messages::UiMessage,
+        theme,
+        views::virtual_carousel::{
+            CarouselKey, VirtualCarouselMessage, VirtualCarouselState,
+        },
+        widgets::image_for::image_for,
+    },
     infra::design_tokens::SizeProvider,
 };
 
@@ -19,16 +26,16 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
     Vector,
     widget::{
-        Column, Row, Space, Stack, button, column, container, row, scrollable,
-        text,
+        Column, Row, Space, Stack, button, column, container, mouse_area, row,
+        scrollable, text,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
 
 /// Render a repository-free detail page model with a precomputed layout plan.
-pub fn view_detail_page<'a>(
-    model: &'a DetailPageModel,
+pub fn view_detail_page(
+    model: &DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -72,8 +79,8 @@ pub fn view_detail_page<'a>(
 
 /// Render the hero block shared by desktop, compact, cinematic, and ten-foot
 /// detail pages.
-pub fn view_detail_hero<'a>(
-    model: &'a DetailPageModel,
+pub fn view_detail_hero(
+    model: &DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -100,8 +107,8 @@ pub fn view_detail_hero<'a>(
         .into()
 }
 
-pub fn view_hero_art<'a>(
-    artwork: &'a DetailArtwork,
+pub fn view_hero_art(
+    artwork: &DetailArtwork,
     plan: &DetailLayoutPlan,
     _sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -114,8 +121,8 @@ pub fn view_hero_art<'a>(
     )
 }
 
-pub fn view_metadata_pills<'a>(
-    metadata: &'a [DetailMetadataPill],
+pub fn view_metadata_pills(
+    metadata: &[DetailMetadataPill],
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     let mut pills = Row::new().spacing(sizes.spacing.xs);
@@ -130,11 +137,12 @@ pub fn view_metadata_pills<'a>(
             .style(pill_style(pill.tone)),
         );
     }
-    pills.into()
+
+    horizontal_scroller(pills, sizes.font.small + sizes.spacing.lg)
 }
 
-pub fn view_action_cluster<'a>(
-    actions: &'a [DetailAction],
+pub fn view_action_cluster(
+    actions: &[DetailAction],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -158,8 +166,8 @@ pub fn view_action_cluster<'a>(
     }
 }
 
-pub fn view_sections<'a>(
-    sections: &'a [DetailSection],
+pub fn view_sections(
+    sections: &[DetailSection],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -196,8 +204,8 @@ pub fn view_sections<'a>(
     outer.into()
 }
 
-pub fn view_section<'a>(
-    section: &'a DetailSection,
+pub fn view_section(
+    section: &DetailSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -218,8 +226,8 @@ pub fn view_section<'a>(
     }
 }
 
-pub fn view_overview_section<'a>(
-    section: &'a DetailOverviewSection,
+pub fn view_overview_section(
+    section: &DetailOverviewSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -235,8 +243,8 @@ pub fn view_overview_section<'a>(
     )
 }
 
-pub fn view_fact_panel<'a>(
-    section: &'a DetailFactPanel,
+pub fn view_fact_panel(
+    section: &DetailFactPanel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -248,8 +256,8 @@ pub fn view_fact_panel<'a>(
     view_panel(&section.title, facts.into(), plan, sizes)
 }
 
-pub fn view_cast_section<'a>(
-    section: &'a DetailCastSection,
+pub fn view_cast_section(
+    section: &DetailCastSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -289,8 +297,8 @@ pub fn view_cast_section<'a>(
     )
 }
 
-pub fn view_technical_section<'a>(
-    section: &'a DetailTechnicalSection,
+pub fn view_technical_section(
+    section: &DetailTechnicalSection,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -324,8 +332,8 @@ pub fn view_technical_section<'a>(
     )
 }
 
-pub fn view_relationship_rail<'a>(
-    section: &'a DetailRelationshipRail,
+pub fn view_relationship_rail(
+    section: &DetailRelationshipRail,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -350,14 +358,41 @@ pub fn view_relationship_rail<'a>(
 
     view_panel(
         &section.title,
-        horizontal_scroller(row, plan.rail.card_height + sizes.spacing.xl),
+        horizontal_scroller(row, rail_scroll_height(section, plan, sizes)),
         plan,
         sizes,
     )
 }
 
-pub fn view_empty_state<'a>(
-    empty: &'a DetailEmptyState,
+pub fn view_registered_relationship_rail(
+    section: &DetailRelationshipRail,
+    key: CarouselKey,
+    carousel_state: &VirtualCarouselState,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    if section.items.is_empty() {
+        return view_relationship_rail(section, plan, sizes);
+    }
+
+    let row =
+        registered_relationship_rail_row(section, carousel_state, plan, sizes);
+
+    view_panel(
+        &section.title,
+        registered_horizontal_scroller(
+            row,
+            rail_scroll_height(section, plan, sizes),
+            key,
+            carousel_state,
+        ),
+        plan,
+        sizes,
+    )
+}
+
+pub fn view_empty_state(
+    empty: &DetailEmptyState,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     let mut content = Column::new()
@@ -391,8 +426,8 @@ pub fn view_empty_state<'a>(
         .into()
 }
 
-pub fn view_backdrop_controls<'a>(
-    controls: &'a [DetailBackdropControl],
+pub fn view_backdrop_controls(
+    controls: &[DetailBackdropControl],
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -416,8 +451,8 @@ pub fn view_backdrop_controls<'a>(
         .into()
 }
 
-fn view_summary<'a>(
-    model: &'a DetailPageModel,
+fn view_summary(
+    model: &DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -463,8 +498,8 @@ fn view_summary<'a>(
     summary.into()
 }
 
-fn view_action_button<'a>(
-    action: &'a DetailAction,
+fn view_action_button(
+    action: &DetailAction,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -507,8 +542,8 @@ fn view_action_button<'a>(
     button.into()
 }
 
-fn view_action_menu<'a>(
-    action: &'a DetailAction,
+fn view_action_menu(
+    action: &DetailAction,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -549,8 +584,8 @@ fn view_action_menu<'a>(
         .into()
 }
 
-fn view_fact<'a>(
-    fact: &'a DetailFact,
+fn view_fact(
+    fact: &DetailFact,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     row![
@@ -568,8 +603,8 @@ fn view_fact<'a>(
     .into()
 }
 
-fn view_cast_member<'a>(
-    member: &'a DetailCastMember,
+fn view_cast_member(
+    member: &DetailCastMember,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -614,8 +649,8 @@ fn view_cast_member<'a>(
     content.into()
 }
 
-fn view_technical_item<'a>(
-    item: &'a DetailTechnicalItem,
+fn view_technical_item(
+    item: &DetailTechnicalItem,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     let mut row = Row::new()
@@ -642,23 +677,58 @@ fn view_technical_item<'a>(
         .into()
 }
 
-fn view_rail_item<'a>(
-    item: &'a DetailRailItem,
+fn rail_scroll_height(
+    section: &DetailRelationshipRail,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    let max_image_height = section
+        .items
+        .iter()
+        .map(|item| rail_art_layout(&item.artwork, plan, sizes).height)
+        .fold(plan.rail.card_height, f32::max);
+
+    max_image_height + sizes.font.caption + sizes.font.small + sizes.spacing.xl
+}
+
+fn rail_art_layout(
+    artwork: &DetailArtwork,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> DetailArtLayout {
+    let (height, aspect) = match artwork {
+        DetailArtwork::Poster { .. } | DetailArtwork::Profile { .. } => (
+            plan.rail.card_width / (2.0 / 3.0),
+            super::DetailArtAspect::Poster,
+        ),
+        DetailArtwork::Still { .. }
+        | DetailArtwork::Backdrop { .. }
+        | DetailArtwork::None { .. } => (
+            plan.rail.card_width * 9.0 / 16.0,
+            super::DetailArtAspect::Still,
+        ),
+    };
+
+    DetailArtLayout {
+        width: plan.rail.card_width,
+        height,
+        corner_radius: sizes.scale(10.0),
+        aspect,
+    }
+}
+
+fn view_rail_item(
+    item: &DetailRailItem,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    let image_height = plan.rail.card_width * 9.0 / 16.0;
+    let image_layout = rail_art_layout(&item.artwork, plan, sizes);
     let image = view_artwork(
         &item.artwork,
-        DetailArtLayout {
-            width: plan.rail.card_width,
-            height: image_height,
-            corner_radius: sizes.scale(10.0),
-            aspect: super::DetailArtAspect::Still,
-        },
+        image_layout,
         Priority::Preload,
-        Length::Fixed(plan.rail.card_width),
-        Length::Fixed(image_height),
+        Length::Fixed(image_layout.width),
+        Length::Fixed(image_layout.height),
     );
 
     let content = Column::new()
@@ -692,8 +762,8 @@ fn view_rail_item<'a>(
     }
 }
 
-fn view_notice<'a>(
-    notice: &'a DetailNotice,
+fn view_notice(
+    notice: &DetailNotice,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     let content = Column::new()
@@ -739,8 +809,8 @@ fn view_panel(
         .into()
 }
 
-fn view_backdrop<'a>(
-    backdrop: &'a DetailBackdrop,
+fn view_backdrop(
+    backdrop: &DetailBackdrop,
     plan: &DetailLayoutPlan,
     _sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
@@ -774,8 +844,8 @@ fn view_backdrop<'a>(
         .into()
 }
 
-fn view_artwork<'a>(
-    artwork: &'a DetailArtwork,
+fn view_artwork(
+    artwork: &DetailArtwork,
     layout: DetailArtLayout,
     priority: Priority,
     width: Length,
@@ -879,6 +949,98 @@ fn view_artwork<'a>(
     }
 }
 
+fn registered_relationship_rail_row(
+    section: &DetailRelationshipRail,
+    carousel_state: &VirtualCarouselState,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Row<'static, UiMessage> {
+    let item_width = carousel_state.item_width.max(plan.rail.card_width);
+    let stride = (item_width + carousel_state.item_spacing).max(1.0);
+    let fallback_end = section.items.len().min(
+        carousel_state
+            .items_per_page
+            .saturating_add(carousel_state.overscan_after)
+            .max(1),
+    );
+    let visible_range = if carousel_state.visible_range.is_empty()
+        && !section.items.is_empty()
+    {
+        0..fallback_end
+    } else {
+        carousel_state.visible_range.clone()
+    };
+
+    let mut item_row = Row::new().spacing(0);
+
+    if visible_range.start > 0 {
+        item_row = item_row.push(
+            Space::new()
+                .width(Length::Fixed(visible_range.start as f32 * stride)),
+        );
+    }
+
+    let mut first_item = true;
+    for idx in visible_range.clone() {
+        if idx < section.items.len() {
+            if !first_item {
+                item_row = item_row.push(
+                    Space::new()
+                        .width(Length::Fixed(carousel_state.item_spacing)),
+                );
+            }
+            item_row = item_row.push(
+                container(view_rail_item(&section.items[idx], plan, sizes))
+                    .width(Length::Fixed(item_width))
+                    .align_x(iced::alignment::Horizontal::Center),
+            );
+            first_item = false;
+        }
+    }
+
+    if visible_range.end < section.items.len() {
+        let remaining = section.items.len() - visible_range.end;
+        item_row = item_row
+            .push(Space::new().width(Length::Fixed(remaining as f32 * stride)));
+    }
+
+    item_row
+}
+
+fn registered_horizontal_scroller(
+    row: Row<'static, UiMessage>,
+    height: f32,
+    key: CarouselKey,
+    carousel_state: &VirtualCarouselState,
+) -> Element<'static, UiMessage> {
+    let key_for_scroll = key.clone();
+    let key_for_enter = key.clone();
+    let key_for_exit = key;
+
+    let scroll = scrollable(row)
+        .id(carousel_state.scrollable_id.clone())
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default().scroller_width(4).margin(2),
+        ))
+        .on_scroll(move |viewport| {
+            UiMessage::VirtualCarousel(VirtualCarouselMessage::ViewportChanged(
+                key_for_scroll.clone(),
+                viewport,
+            ))
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(height));
+
+    mouse_area(scroll)
+        .on_enter(UiMessage::VirtualCarousel(
+            VirtualCarouselMessage::FocusKey(key_for_enter),
+        ))
+        .on_exit(UiMessage::VirtualCarousel(VirtualCarouselMessage::BlurKey(
+            key_for_exit,
+        )))
+        .into()
+}
+
 fn horizontal_scroller(
     row: Row<'static, UiMessage>,
     height: f32,
@@ -887,6 +1049,7 @@ fn horizontal_scroller(
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::default().scroller_width(4).margin(2),
         ))
+        .width(Length::Fill)
         .height(Length::Fixed(height))
         .into()
 }

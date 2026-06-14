@@ -17,8 +17,8 @@ pub use components::{
     view_action_cluster, view_backdrop_controls, view_cast_section,
     view_detail_hero, view_detail_page, view_empty_state, view_fact_panel,
     view_hero_art, view_metadata_pills, view_overview_section,
-    view_relationship_rail, view_section, view_sections,
-    view_technical_section,
+    view_registered_relationship_rail, view_relationship_rail, view_section,
+    view_sections, view_technical_section,
 };
 pub use layout::{
     DetailActionClusterLayout, DetailArtAspect, DetailArtLayout, DetailAxis,
