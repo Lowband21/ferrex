@@ -6,7 +6,7 @@ This evidence packet covers the Android TV focus, D-pad, OK, Back, recovery, and
 
 | Area | Result | Evidence |
 | --- | --- | --- |
-| Android build/unit/lint gate | Pass | `assembleMobileDebug`, `assembleTvDebug`, `testMobileDebugUnitTest`, `testTvDebugUnitTest`, `lintMobileDebug`, and `lintTvDebug` completed with `BUILD SUCCESSFUL`. Unit XML totals: mobile `141 tests, 0 failures, 0 errors, 0 skipped`; TV `141 tests, 0 failures, 0 errors, 0 skipped`. |
+| Android build/unit/lint gate | Pass | `assembleMobileDebug`, `assembleTvDebug`, `testMobileDebugUnitTest`, `testTvDebugUnitTest`, `lintMobileDebug`, and `lintTvDebug` completed with `BUILD SUCCESSFUL`. Unit XML totals: mobile `147 tests, 0 failures, 0 errors, 0 skipped`; TV `147 tests, 0 failures, 0 errors, 0 skipped`. |
 | Focused TV stack unit tests | Pass | `TvAuthRecoveryPolicyTest` `3/3`, `TvFocusRestoreModelTest` `6/6`, and `TvPlaybackOverlayReducerTest` `6/6` passed under `:app:testTvDebugUnitTest`. |
 | Emulator D-pad run | Blocked in this workspace | Device/API/resolution: not available because `adb devices -l` returned an empty device list. `adb shell input keyevent KEYCODE_DPAD_CENTER` returned `adb: no devices/emulators found`. The installed SDK only reports `system-images;android-35;google_apis_playstore;x86_64`; no Android TV/Google TV AVD is configured, and the SDK emulator binary cannot start directly on this NixOS workspace due to the dynamic-loader stub-ld error. |
 | Physical Android TV remote run | Release-readiness follow-up | No physical Android TV or remote target was attached (`adb devices -l` empty). This matrix must be re-run on hardware before promoting Android TV beyond `dev`. |
