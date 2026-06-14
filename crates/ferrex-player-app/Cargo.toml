@@ -63,6 +63,12 @@ env_logger = "0.11"
 log.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rkyv.workspace = true
+thiserror.workspace = true
+png = "0.18"
+iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
 tracy-client = { version = "0.18", default-features = false, optional = true }
 
 [features]
@@ -84,5 +90,5 @@ profiling-stats = ["ferrex-player-ui/profiling-stats"]
 
 [dev-dependencies]
 ferrex-player-ui = { workspace = true, features = ["iced_tester"] }
-iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
+tempfile.workspace = true
 tokio.workspace = true

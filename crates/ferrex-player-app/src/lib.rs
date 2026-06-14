@@ -9,6 +9,7 @@
 //! a compatibility facade for historical `ferrex_player::*` imports.
 
 pub mod app;
+pub mod screenshot;
 pub mod subscriptions;
 pub mod update;
 pub mod view;
