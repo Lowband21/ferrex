@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
+import com.ferrex.android.core.auth.AuthenticatedConnectionUi
 import com.ferrex.android.core.detail.DetailImageSet
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.detail.DetailRouteContracts
@@ -60,7 +61,10 @@ fun PhoneDetailScreen(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     preparedPlaybackContract: PlaybackRouteContract?,
+    connectionStatus: AuthenticatedConnectionUi,
+    actionNotice: String?,
     onBack: () -> Unit,
+    onRetryConnection: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
     onChangeServer: () -> Unit,
@@ -84,7 +88,13 @@ fun PhoneDetailScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item {
-                DetailTopBar(onBack = onBack, preparedPlaybackContract = preparedPlaybackContract)
+                DetailTopBar(
+                    onBack = onBack,
+                    preparedPlaybackContract = preparedPlaybackContract,
+                    connectionStatus = connectionStatus,
+                    actionNotice = actionNotice,
+                    onRetryConnection = onRetryConnection,
+                )
             }
             when (detailResult) {
                 is DetailLoadResult.Movie -> item {
@@ -96,6 +106,8 @@ fun PhoneDetailScreen(
                         imageLoaderAvailable = imageLoaderAvailable,
                         imageLoader = imageLoader,
                         scope = scope,
+                        networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                        networkActionMessage = connectionStatus.networkActionMessage,
                         onRetryWatch = onRetryWatch,
                         onClearProgress = onClearProgress,
                         onMarkMovieWatched = onMarkMovieWatched,
@@ -112,6 +124,8 @@ fun PhoneDetailScreen(
                             imageLoaderAvailable = imageLoaderAvailable,
                             imageLoader = imageLoader,
                             scope = scope,
+                            networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                            networkActionMessage = connectionStatus.networkActionMessage,
                             onRetryWatch = onRetryWatch,
                             onRetryEpisodes = onRetryEpisodes,
                             onMarkSeriesWatched = onMarkSeriesWatched,
@@ -131,6 +145,7 @@ fun PhoneDetailScreen(
                                 imageLoaderAvailable = imageLoaderAvailable,
                                 imageLoader = imageLoader,
                                 scope = scope,
+                                networkActionsEnabled = connectionStatus.networkActionsEnabled,
                                 onClearProgress = onClearProgress,
                                 onMarkEpisodeWatched = onMarkEpisodeWatched,
                                 onPlaybackContract = onPlaybackContract,
@@ -148,6 +163,8 @@ fun PhoneDetailScreen(
                         imageLoaderAvailable = imageLoaderAvailable,
                         imageLoader = imageLoader,
                         scope = scope,
+                        networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                        networkActionMessage = connectionStatus.networkActionMessage,
                         onClearProgress = onClearProgress,
                         onMarkEpisodeWatched = onMarkEpisodeWatched,
                         onPlaybackContract = onPlaybackContract,
@@ -171,9 +188,23 @@ fun PhoneDetailScreen(
 private fun DetailTopBar(
     onBack: () -> Unit,
     preparedPlaybackContract: PlaybackRouteContract?,
+    connectionStatus: AuthenticatedConnectionUi,
+    actionNotice: String?,
+    onRetryConnection: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(onClick = onBack) { Text("Back") }
+        if (connectionStatus.visible) {
+            StateCard(
+                title = connectionStatus.title,
+                body = connectionStatus.message,
+                action = connectionStatus.retryLabel to onRetryConnection,
+                actionEnabled = connectionStatus.retryEnabled,
+            )
+        }
+        actionNotice?.let {
+            StateCard(title = "Action unavailable", body = it)
+        }
         preparedPlaybackContract?.let {
             StateCard(
                 title = "Prepared playback contract",
@@ -192,6 +223,8 @@ private fun MovieDetailContent(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onRetryWatch: () -> Unit,
     onClearProgress: (String) -> Unit,
     onMarkMovieWatched: (String, Boolean) -> Unit,
@@ -215,17 +248,19 @@ private fun MovieDetailContent(
             watched = progress?.isCompleted == true,
             onRetryWatch = onRetryWatch,
         )
+        NetworkActionStatus(networkActionsEnabled, networkActionMessage)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DetailRouteContracts.movieResume(movie, progress, route)?.let { contract ->
-                Button(onClick = { onPlaybackContract(contract) }) { Text("Resume") }
+                Button(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Resume") }
             }
             DetailRouteContracts.movieStartOver(movie, route)?.let { contract ->
-                OutlinedButton(onClick = { onPlaybackContract(contract) }) { Text("Start over") }
+                OutlinedButton(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Start over") }
             }
         }
         WatchMutationButtons(
             watched = progress?.isCompleted == true,
             pending = progress?.pendingMutation == true,
+            networkActionsEnabled = networkActionsEnabled,
             showClearProgress = progress?.hasServerState == true,
             onClearProgress = { onClearProgress(movie.id) },
             onSetWatched = { onMarkMovieWatched(movie.id, it) },
@@ -243,6 +278,8 @@ private fun SeriesDetailContent(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onRetryWatch: () -> Unit,
     onRetryEpisodes: () -> Unit,
     onMarkSeriesWatched: (Long, Boolean) -> Unit,
@@ -275,18 +312,20 @@ private fun SeriesDetailContent(
             )
         }
         SeriesWatchCard(seriesStatus = seriesStatus, lastError = watchState.lastError, onRetryWatch = onRetryWatch)
+        NetworkActionStatus(networkActionsEnabled, networkActionMessage)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DetailRouteContracts.seriesNext(detail, seriesStatus?.nextEpisode ?: series.tmdbId?.let { watchState.nextEpisodes[it] }, route)?.let { contract ->
-                Button(onClick = { onPlaybackContract(contract) }) { Text("Play next") }
+                Button(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Play next") }
             }
             DetailRouteContracts.seriesStartOver(detail, route)?.let { contract ->
-                OutlinedButton(onClick = { onPlaybackContract(contract) }) { Text("Start over") }
+                OutlinedButton(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Start over") }
             }
         }
         series.tmdbId?.let { tmdbId ->
             WatchMutationButtons(
                 watched = seriesStatus?.isCompleted == true,
                 pending = seriesStatus?.pendingMutation == true,
+                networkActionsEnabled = networkActionsEnabled,
                 onSetWatched = { onMarkSeriesWatched(tmdbId, it) },
             )
         }
@@ -304,6 +343,7 @@ private fun EpisodeRow(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
     onClearProgress: (String) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
@@ -332,15 +372,16 @@ private fun EpisodeRow(
                 DeterminateProgressBar(progress = ratio, label = "${episode.title} watch progress")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DetailRouteContracts.episodeResume(episode, progress, route)?.let { contract ->
-                        Button(onClick = { onPlaybackContract(contract) }) { Text("Resume") }
+                        Button(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Resume") }
                     }
                     DetailRouteContracts.episodeStartOver(episode, route)?.let { contract ->
-                        OutlinedButton(onClick = { onPlaybackContract(contract) }) { Text("Start") }
+                        OutlinedButton(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Start") }
                     }
                 }
                 WatchMutationButtons(
                     watched = watched,
                     pending = progress?.pendingMutation == true,
+                    networkActionsEnabled = networkActionsEnabled,
                     showClearProgress = progress?.hasServerState == true,
                     onClearProgress = { onClearProgress(episode.id) },
                     onSetWatched = { onMarkEpisodeWatched(episode.id, it) },
@@ -360,6 +401,8 @@ private fun EpisodeStandaloneContent(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onClearProgress: (String) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
@@ -377,17 +420,19 @@ private fun EpisodeStandaloneContent(
             watched = progress?.isCompleted == true,
             onRetryWatch = {},
         )
+        NetworkActionStatus(networkActionsEnabled, networkActionMessage)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DetailRouteContracts.episodeResume(episode, progress, route)?.let { contract ->
-                Button(onClick = { onPlaybackContract(contract) }) { Text("Resume") }
+                Button(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Resume") }
             }
             DetailRouteContracts.episodeStartOver(episode, route)?.let { contract ->
-                OutlinedButton(onClick = { onPlaybackContract(contract) }) { Text("Start over") }
+                OutlinedButton(enabled = networkActionsEnabled, onClick = { onPlaybackContract(contract) }) { Text("Start over") }
             }
         }
         WatchMutationButtons(
             watched = progress?.isCompleted == true,
             pending = progress?.pendingMutation == true,
+            networkActionsEnabled = networkActionsEnabled,
             showClearProgress = progress?.hasServerState == true,
             onClearProgress = { onClearProgress(episode.id) },
             onSetWatched = { onMarkEpisodeWatched(episode.id, it) },
@@ -459,21 +504,36 @@ private fun SeriesWatchCard(
 }
 
 @Composable
+private fun NetworkActionStatus(
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
+) {
+    if (!networkActionsEnabled && networkActionMessage != null) {
+        StateCard(
+            title = "Playback and watch updates paused",
+            body = networkActionMessage,
+        )
+    }
+}
+
+@Composable
 private fun WatchMutationButtons(
     watched: Boolean,
     pending: Boolean,
+    networkActionsEnabled: Boolean,
     showClearProgress: Boolean = false,
     onClearProgress: (() -> Unit)? = null,
     onSetWatched: (Boolean) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val enabled = !pending && networkActionsEnabled
         if (watched) {
-            OutlinedButton(enabled = !pending, onClick = { onSetWatched(false) }) { Text(if (pending) "Updating…" else "Mark unwatched") }
+            OutlinedButton(enabled = enabled, onClick = { onSetWatched(false) }) { Text(if (pending) "Updating…" else "Mark unwatched") }
         } else {
-            Button(enabled = !pending, onClick = { onSetWatched(true) }) { Text(if (pending) "Updating…" else "Mark watched") }
+            Button(enabled = enabled, onClick = { onSetWatched(true) }) { Text(if (pending) "Updating…" else "Mark watched") }
         }
         if (showClearProgress && onClearProgress != null) {
-            TextButton(enabled = !pending, onClick = onClearProgress) { Text("Clear progress") }
+            TextButton(enabled = enabled, onClick = onClearProgress) { Text("Clear progress") }
         }
     }
 }
@@ -634,12 +694,13 @@ private fun StateCard(
     title: String,
     body: String,
     action: Pair<String, () -> Unit>? = null,
+    actionEnabled: Boolean = true,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Text(body, style = MaterialTheme.typography.bodyMedium)
-            action?.let { (label, callback) -> Button(onClick = callback) { Text(label) } }
+            action?.let { (label, callback) -> Button(enabled = actionEnabled, onClick = callback) { Text(label) } }
         }
     }
 }

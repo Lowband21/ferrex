@@ -59,8 +59,13 @@ import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
-import com.ferrex.android.core.auth.RecoverableFailureReason
+import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
+import com.ferrex.android.core.auth.AuthenticatedConnectionUi
+import com.ferrex.android.core.auth.ConnectionRecoveryRefreshGate
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.auth.connectionRecoveryUi
+import com.ferrex.android.core.browse.AuthenticatedDetailBackDestination
+import com.ferrex.android.core.browse.AuthenticatedHomeBackPolicy
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
 import com.ferrex.android.core.browse.HomeLibraryTab
@@ -169,6 +174,9 @@ fun TvHomeScreen(
     var movieIndexState by remember { mutableStateOf<MovieIndexUiState>(MovieIndexUiState.Idle) }
     var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
     var playbackNotice by remember { mutableStateOf<String?>(null) }
+    val homeConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Home)
+    val detailConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Detail)
+    val recoveryRefreshGate = remember(scope.directoryName) { ConnectionRecoveryRefreshGate(state.connectionHealth) }
 
     LaunchedEffect(libraryRepository, scope) {
         libraryRepository?.refreshLibraries(scope)
@@ -207,9 +215,15 @@ fun TvHomeScreen(
     val selectedMovieInfo = selectedMovieLibrary?.library ?: movieLibraryInfos.firstOrNull { it.id == selectedMovieLibraryId }
     val selectedSeriesInfo = selectedSeriesLibrary?.library ?: seriesLibraryInfos.firstOrNull { it.id == selectedSeriesLibraryId }
 
-    LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport) {
+    LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
         if (selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
             movieIndexState = MovieIndexUiState.Idle
+            return@LaunchedEffect
+        }
+        if (state.connectionHealth != AuthConnectionHealth.Online) {
+            movieIndexState = MovieIndexUiState.Unavailable(
+                "Movie sorting and filters are paused until Ferrex reconnects; showing uncapped cached order.",
+            )
             return@LaunchedEffect
         }
         if (libraryIndexTransport == null) {
@@ -344,7 +358,45 @@ fun TvHomeScreen(
         }
     }
 
+    fun runNetworkAction(action: suspend () -> Unit) {
+        if (!detailConnectionUi.networkActionsEnabled) {
+            playbackNotice = detailConnectionUi.networkActionMessage
+            return
+        }
+        coroutineScope.launch { action() }
+    }
+
+    suspend fun refreshVisibleWatchState(detail: DetailLoadResult?) {
+        when (detail) {
+            is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Missing,
+            null -> Unit
+        }
+    }
+
+    LaunchedEffect(state.connectionHealth, scope.directoryName) {
+        if (recoveryRefreshGate.consumeOnlineRecoveryRefresh(state.connectionHealth)) {
+            playbackNotice = null
+            val selectedLibraryId = when (selectedTab) {
+                HomeLibraryTab.Movies -> selectedMovieInfo?.id
+                HomeLibraryTab.Series -> selectedSeriesInfo?.id
+            }
+            libraryRepository?.refreshLibraries(scope, selectedLibraryId)
+            if (imageRepository != null && imageKeys.isNotEmpty()) {
+                imageResolutions = imageRepository.retryPendingOrFailed(scope, imageKeys)
+            }
+            continueWatchingRepository?.refresh()
+            refreshVisibleWatchState(detailResult)
+        }
+    }
+
     fun launchPlayback(contract: PlaybackRouteContract) {
+        if (!detailConnectionUi.networkActionsEnabled) {
+            playbackNotice = detailConnectionUi.networkActionMessage
+            return
+        }
         if (playbackTicketTransport == null || playbackStreamUrlFactory == null || streamingHttpClient == null) {
             playbackNotice = "Playback is unavailable because the ticketed Media3 substrate is not configured."
             return
@@ -458,16 +510,18 @@ fun TvHomeScreen(
             imageLoader = imageLoader,
             scope = scope,
             playbackNotice = playbackNotice,
-            onBack = { childScreen = screen.returnTo.toChild() },
+            connectionStatus = detailConnectionUi,
+            onBack = { childScreen = screen.returnTo.toChild(state.connectionHealth) },
+            onRetryConnection = onRetryConnection,
             onRetryCacheSync = { retryDetailCacheSync(screen.route) },
             onClearSelectedCache = { screen.route.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
             onRetryWatch = { retryDetailWatch(detailResult) },
-            onClearProgress = { mediaId -> coroutineScope.launch { watchRepository?.clearProgress(mediaId) } },
-            onMarkMovieWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markMovieWatched(mediaId, watched) } },
-            onMarkEpisodeWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markEpisodeWatched(mediaId, watched) } },
-            onMarkSeriesWatched = { tmdbId, watched -> coroutineScope.launch { watchRepository?.markSeriesWatched(tmdbId, watched) } },
+            onClearProgress = { mediaId -> runNetworkAction { watchRepository?.clearProgress(mediaId) } },
+            onMarkMovieWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markMovieWatched(mediaId, watched) } },
+            onMarkEpisodeWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markEpisodeWatched(mediaId, watched) } },
+            onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
             onPlaybackContract = { launchPlayback(it) },
         )
         null -> TvHomeContent(
@@ -493,6 +547,7 @@ fun TvHomeScreen(
             focusRestorer = homeFocusRestorer,
             searchAvailable = searchRepository != null,
             playbackNotice = playbackNotice,
+            connectionStatus = homeConnectionUi,
             onRetryContinueWatching = { coroutineScope.launch { continueWatchingRepository?.refresh() } },
             onRetryConnection = onRetryConnection,
             onOpenSearch = { childScreen = TvHomeChild.Search },
@@ -553,6 +608,7 @@ private fun TvHomeContent(
     focusRestorer: TvFocusRestorer,
     searchAvailable: Boolean,
     playbackNotice: String?,
+    connectionStatus: AuthenticatedConnectionUi,
     onRetryContinueWatching: () -> Unit,
     onRetryConnection: () -> Unit,
     onOpenSearch: () -> Unit,
@@ -616,9 +672,9 @@ private fun TvHomeContent(
         TvTitle(FerrexShellCopy.TV_TITLE, FerrexShellCopy.TV_SUBTITLE)
         Text("Signed in as ${state.user.displayName ?: state.user.username}", style = MaterialTheme.typography.headlineSmall)
         Text("Server: ${state.serverUrl}", style = MaterialTheme.typography.titleMedium)
-        if (state.connectionHealth != AuthConnectionHealth.Online) {
+        if (connectionStatus.visible) {
             Text(
-                authenticatedConnectionCopy(state),
+                connectionStatus.message,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
@@ -640,13 +696,13 @@ private fun TvHomeContent(
         TvButtonRow(
             title = "Home actions",
             actions = buildList {
-                if (state.connectionHealth != AuthConnectionHealth.Online) {
+                if (connectionStatus.visible) {
                     add(
                         TvButtonAction(
                             key = "retry-connection",
-                            label = if (state.connectionHealth == AuthConnectionHealth.Probing) "Checking connection…" else "Retry connection",
+                            label = connectionStatus.retryLabel,
                             role = TvActionRole.Retry,
-                            enabled = state.connectionHealth != AuthConnectionHealth.Probing,
+                            enabled = connectionStatus.retryEnabled,
                             onSelect = onRetryConnection,
                         ),
                     )
@@ -728,21 +784,6 @@ private fun TvHomeContent(
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
         )
-    }
-}
-
-private fun authenticatedConnectionCopy(state: SessionState.Authenticated): String {
-    val reason = when (state.offlineReason) {
-        RecoverableFailureReason.ServerUnreachable -> "the server is unreachable"
-        RecoverableFailureReason.ValidationUnavailable -> "session validation is unavailable"
-        RecoverableFailureReason.RefreshUnavailable -> "token refresh is temporarily unavailable"
-        RecoverableFailureReason.InvalidServerResponse -> "the server response was not understood"
-        null -> "the connection is temporarily unavailable"
-    }
-    return when (state.connectionHealth) {
-        AuthConnectionHealth.Offline -> "Offline — showing cached Home while $reason. Ferrex will retry automatically."
-        AuthConnectionHealth.Probing -> "Checking the saved session… Home stays available while Ferrex reconnects."
-        AuthConnectionHealth.Online -> "Online"
     }
 }
 
@@ -1513,7 +1554,9 @@ private fun TvMediaDetailScreen(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     playbackNotice: String?,
+    connectionStatus: AuthenticatedConnectionUi,
     onBack: () -> Unit,
+    onRetryConnection: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
     onChangeServer: () -> Unit,
@@ -1534,10 +1577,26 @@ private fun TvMediaDetailScreen(
         scrollable = true,
     ) {
         TvButtonRow(
-            actions = listOf(TvButtonAction("back", "Back", TvActionRole.Back, onSelect = onBack)),
+            actions = buildList {
+                add(TvButtonAction("back", "Back", TvActionRole.Back, onSelect = onBack))
+                if (connectionStatus.visible) {
+                    add(
+                        TvButtonAction(
+                            key = "retry-connection",
+                            label = connectionStatus.retryLabel,
+                            role = TvActionRole.Retry,
+                            enabled = connectionStatus.retryEnabled,
+                            onSelect = onRetryConnection,
+                        ),
+                    )
+                }
+            },
             surfaceKey = "detail-back",
             autoFocus = true,
         )
+        if (connectionStatus.visible) {
+            TvStateCopy(connectionStatus.title, connectionStatus.message)
+        }
         playbackNotice?.let {
             Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
         }
@@ -1549,6 +1608,8 @@ private fun TvMediaDetailScreen(
                 imageResolutions = imageResolutions,
                 imageLoader = imageLoader,
                 scope = scope,
+                networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                networkActionMessage = connectionStatus.networkActionMessage,
                 onRetryWatch = onRetryWatch,
                 onClearProgress = onClearProgress,
                 onMarkMovieWatched = onMarkMovieWatched,
@@ -1560,6 +1621,8 @@ private fun TvMediaDetailScreen(
                 imageResolutions = imageResolutions,
                 imageLoader = imageLoader,
                 scope = scope,
+                networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                networkActionMessage = connectionStatus.networkActionMessage,
                 onRetryWatch = onRetryWatch,
                 onMarkSeriesWatched = onMarkSeriesWatched,
                 onPlaybackContract = onPlaybackContract,
@@ -1570,6 +1633,8 @@ private fun TvMediaDetailScreen(
                 imageResolutions = imageResolutions,
                 imageLoader = imageLoader,
                 scope = scope,
+                networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                networkActionMessage = connectionStatus.networkActionMessage,
                 onClearProgress = onClearProgress,
                 onMarkEpisodeWatched = onMarkEpisodeWatched,
                 onPlaybackContract = onPlaybackContract,
@@ -1600,6 +1665,8 @@ private fun TvMovieDetail(
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onRetryWatch: () -> Unit,
     onClearProgress: (String) -> Unit,
     onMarkMovieWatched: (String, Boolean) -> Unit,
@@ -1610,25 +1677,26 @@ private fun TvMovieDetail(
     TvDetailArtwork(movie.images.backdrop ?: movie.images.poster, movie.title, imageResolutions, imageLoader, scope)
     TvDetailTitle(movie.title, listOfNotNull(movie.releaseDate?.take(4), movie.runtimeMinutes?.let { "$it min" }, movie.contentRating, movie.voteAverage?.let { "★ ${"%.1f".format(it)}" }).joinToString(" • "), movie.overview)
     TvStateCopy("Movie watch state", progress?.let { if (it.isCompleted) "Watched" else if (it.isStarted) "${(it.progressRatio * 100).toInt()}% watched" else "Unwatched" } ?: (watchState.lastError ?: "Watch state has not loaded yet."))
+    TvNetworkActionStatus(networkActionsEnabled, networkActionMessage)
     TvActionPanel(
         title = "Playback and watch actions",
         actions = buildList {
             DetailRouteContracts.movieResume(movie, progress, result.route)?.let { contract ->
-                add(TvActionPanelAction("resume", "Resume", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("resume", "Resume", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
             DetailRouteContracts.movieStartOver(movie, result.route)?.let { contract ->
-                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
-            add(TvActionPanelAction("retry-watch", "Retry watch state", TvActionRole.Retry, onSelect = onRetryWatch))
+            add(TvActionPanelAction("retry-watch", "Retry watch state", TvActionRole.Retry, enabled = networkActionsEnabled, onSelect = onRetryWatch))
             if (progress?.hasServerState == true) {
-                add(TvActionPanelAction("clear-progress", "Clear progress", TvActionRole.Cache, enabled = progress.pendingMutation.not(), onSelect = { onClearProgress(movie.id) }))
+                add(TvActionPanelAction("clear-progress", "Clear progress", TvActionRole.Cache, enabled = progress.pendingMutation.not() && networkActionsEnabled, onSelect = { onClearProgress(movie.id) }))
             }
             add(
                 TvActionPanelAction(
                     key = "toggle-watched",
                     label = if (progress?.isCompleted == true) "Mark unwatched" else "Mark watched",
                     role = TvActionRole.Cache,
-                    enabled = progress?.pendingMutation != true,
+                    enabled = progress?.pendingMutation != true && networkActionsEnabled,
                     onSelect = { onMarkMovieWatched(movie.id, progress?.isCompleted != true) },
                 ),
             )
@@ -1644,6 +1712,8 @@ private fun TvSeriesDetail(
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onRetryWatch: () -> Unit,
     onMarkSeriesWatched: (Long, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
@@ -1666,23 +1736,24 @@ private fun TvSeriesDetail(
         body = seriesStatus?.let { "${it.watched} of ${it.totalEpisodes} watched; ${it.inProgress} in progress." }
             ?: (watchState.lastError ?: "Retry to load series watch state and next episode."),
     )
+    TvNetworkActionStatus(networkActionsEnabled, networkActionMessage)
     TvActionPanel(
         title = "Playback and watch actions",
         actions = buildList {
             DetailRouteContracts.seriesNext(detail, seriesStatus?.nextEpisode ?: series.tmdbId?.let { watchState.nextEpisodes[it] }, result.route)?.let { contract ->
-                add(TvActionPanelAction("play-next", "Play next", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("play-next", "Play next", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
             DetailRouteContracts.seriesStartOver(detail, result.route)?.let { contract ->
-                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
-            add(TvActionPanelAction("retry-watch", "Retry watch state", TvActionRole.Retry, onSelect = onRetryWatch))
+            add(TvActionPanelAction("retry-watch", "Retry watch state", TvActionRole.Retry, enabled = networkActionsEnabled, onSelect = onRetryWatch))
             series.tmdbId?.let { tmdbId ->
                 add(
                     TvActionPanelAction(
                         key = "toggle-series-watched",
                         label = if (seriesStatus?.isCompleted == true) "Mark series unwatched" else "Mark series watched",
                         role = TvActionRole.Cache,
-                        enabled = seriesStatus?.pendingMutation != true,
+                        enabled = seriesStatus?.pendingMutation != true && networkActionsEnabled,
                         onSelect = { onMarkSeriesWatched(tmdbId, seriesStatus?.isCompleted != true) },
                     ),
                 )
@@ -1713,6 +1784,8 @@ private fun TvEpisodeDetail(
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
     onClearProgress: (String) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
@@ -1726,30 +1799,41 @@ private fun TvEpisodeDetail(
         body = episode.overview,
     )
     TvStateCopy("Episode watch state", progress?.let { if (it.isCompleted) "Watched" else if (it.isStarted) "${(it.progressRatio * 100).toInt()}% watched" else "Unwatched" } ?: (watchState.lastError ?: "Watch state has not loaded yet."))
+    TvNetworkActionStatus(networkActionsEnabled, networkActionMessage)
     TvActionPanel(
         title = "Playback and watch actions",
         actions = buildList {
             DetailRouteContracts.episodeResume(episode, progress, result.route)?.let { contract ->
-                add(TvActionPanelAction("resume", "Resume", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("resume", "Resume", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
             DetailRouteContracts.episodeStartOver(episode, result.route)?.let { contract ->
-                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, onSelect = { onPlaybackContract(contract) }))
+                add(TvActionPanelAction("start-over", "Start over", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
             }
             if (progress?.hasServerState == true) {
-                add(TvActionPanelAction("clear-progress", "Clear progress", TvActionRole.Cache, enabled = progress.pendingMutation.not(), onSelect = { onClearProgress(episode.id) }))
+                add(TvActionPanelAction("clear-progress", "Clear progress", TvActionRole.Cache, enabled = progress.pendingMutation.not() && networkActionsEnabled, onSelect = { onClearProgress(episode.id) }))
             }
             add(
                 TvActionPanelAction(
                     key = "toggle-watched",
                     label = if (progress?.isCompleted == true) "Mark unwatched" else "Mark watched",
                     role = TvActionRole.Cache,
-                    enabled = progress?.pendingMutation != true,
+                    enabled = progress?.pendingMutation != true && networkActionsEnabled,
                     onSelect = { onMarkEpisodeWatched(episode.id, progress?.isCompleted != true) },
                 ),
             )
         },
         autoFocus = false,
     )
+}
+
+@Composable
+private fun TvNetworkActionStatus(
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
+) {
+    if (!networkActionsEnabled && networkActionMessage != null) {
+        TvStateCopy("Playback and watch updates paused", networkActionMessage)
+    }
 }
 
 @Composable
@@ -2025,10 +2109,22 @@ private fun TvFullScreenSurface(content: @Composable BoxScope.() -> Unit) {
     }
 }
 
-private fun TvReturnTarget.toChild(): TvHomeChild? = when (this) {
-    TvReturnTarget.Home -> null
-    TvReturnTarget.Search -> TvHomeChild.Search
-    is TvReturnTarget.Grid -> TvHomeChild.Grid(tab)
+private fun TvReturnTarget.toChild(connectionHealth: AuthConnectionHealth): TvHomeChild? = when (
+    AuthenticatedHomeBackPolicy.detailBackDestination(connectionHealth, toDetailBackDestination())
+) {
+    AuthenticatedDetailBackDestination.Home -> null
+    AuthenticatedDetailBackDestination.Search -> TvHomeChild.Search
+    AuthenticatedDetailBackDestination.MovieGrid -> TvHomeChild.Grid(HomeLibraryTab.Movies)
+    AuthenticatedDetailBackDestination.SeriesGrid -> TvHomeChild.Grid(HomeLibraryTab.Series)
+}
+
+private fun TvReturnTarget.toDetailBackDestination(): AuthenticatedDetailBackDestination = when (this) {
+    TvReturnTarget.Home -> AuthenticatedDetailBackDestination.Home
+    TvReturnTarget.Search -> AuthenticatedDetailBackDestination.Search
+    is TvReturnTarget.Grid -> when (tab) {
+        HomeLibraryTab.Movies -> AuthenticatedDetailBackDestination.MovieGrid
+        HomeLibraryTab.Series -> AuthenticatedDetailBackDestination.SeriesGrid
+    }
 }
 
 private fun TvActionRole.toFocusableStyle(): TvFocusableStyle = when (this) {
