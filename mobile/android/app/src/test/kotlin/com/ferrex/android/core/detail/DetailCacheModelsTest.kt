@@ -16,6 +16,7 @@ import com.ferrex.android.core.library.toFlatBufferUuid
 import com.ferrex.android.core.watch.WatchEpisodeKey
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
+import com.ferrex.android.core.watch.WatchRepositoryState
 import com.google.flatbuffers.FlatBufferBuilder
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
@@ -70,6 +71,39 @@ class DetailCacheModelsTest {
         assertEquals(120.0, resume.startPositionSeconds!!, 0.0)
         assertFalse(resume.startOver)
         assertTrue(startOver.startOver)
+    }
+
+    @Test
+    fun continuePlaybackUsesContinueSourceAndServerResumeFallback() {
+        val ids = Ids()
+        val library = LibraryInfo(ids.movieLibrary.toString(), "Movies", LibraryKind.Movies)
+        val state = LibraryRepositoryState(
+            movieLibraries = listOf(CachedMovieLibrary(library, MovieLibraryAccessor(moviePayload(ids)))),
+        )
+        val route = MediaRouteArgs(BrowseMediaType.Movie, ids.movie.toString(), null, BrowseSourceSurface.HomeContinueWatching)
+        val result = DetailCache.resolve(state, route)
+
+        val serverResume = DetailRouteContracts.continuePlayback(result, WatchRepositoryState())!!
+        val localResume = DetailRouteContracts.continuePlayback(
+            result,
+            WatchRepositoryState(
+                media = mapOf(
+                    ids.movie.toString() to WatchMediaProgress(
+                        mediaId = ids.movie.toString(),
+                        positionSeconds = 45.0,
+                        durationSeconds = 1_200.0,
+                    ),
+                ),
+            ),
+        )!!
+
+        assertEquals(ids.movieFile.toString(), serverResume.targetMediaId)
+        assertEquals(ids.movie.toString(), serverResume.logicalMediaId)
+        assertFalse(serverResume.startOver)
+        assertNull(serverResume.startPositionSeconds)
+        assertEquals("media/movie/${ids.movie}?source=home_continue_watching", serverResume.sourceDetailRoute)
+        assertEquals(45.0, localResume.startPositionSeconds!!, 0.0)
+        assertFalse(localResume.startOver)
     }
 
     @Test

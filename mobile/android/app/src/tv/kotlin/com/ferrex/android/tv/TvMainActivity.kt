@@ -22,11 +22,17 @@ class TvMainActivity : ComponentActivity() {
                 TvFerrexNavGraph(
                     authManager = dependencies.authManager,
                     libraryRepository = dependencies.libraryRepository,
+                    libraryIndexTransport = dependencies.libraryIndexTransport,
                     imageRepository = dependencies.imageRepository,
                     imagePipeline = dependencies.imagePipeline,
+                    searchRepository = dependencies.searchRepository,
+                    continueWatchingRepository = dependencies.continueWatchingRepository,
+                    watchRepository = dependencies.watchRepository,
+                    watchStateInvalidationBus = dependencies.watchStateInvalidationBus,
                     playbackTicketTransport = dependencies.playbackTicketTransport,
                     playbackStreamUrlFactory = dependencies.playbackStreamUrlFactory,
                     playbackProgressReporter = dependencies.playbackProgressReporter,
+                    playbackResumeProgressProvider = dependencies.playbackResumeProgressProvider,
                     streamingHttpClient = dependencies.streamingHttpClient,
                 )
             }
