@@ -83,6 +83,7 @@ pub struct ImageFor {
     animation: AnimationBehavior,
     theme_color: Option<Color>,
     is_hovered: bool,
+    hover_scale_enabled: bool,
     on_play: Option<UiMessage>,
     on_click: Option<UiMessage>,
     progress: Option<f32>,
@@ -133,6 +134,7 @@ impl ImageFor {
             animation: AnimationBehavior::fade_slow_then_quick(),
             theme_color: Some(fallback_theme_color_for(media_id)),
             is_hovered: false,
+            hover_scale_enabled: true,
             on_play: None,
             on_click: None,
             progress: None,
@@ -284,6 +286,15 @@ impl ImageFor {
         self
     }
 
+    /// Set whether hover contributes poster scale.
+    ///
+    /// Hover state still drives overlays, pointer handling, and image priority;
+    /// disabling this only suppresses the render-time hover enlargement.
+    pub fn hover_scale_enabled(mut self, enabled: bool) -> Self {
+        self.hover_scale_enabled = enabled;
+        self
+    }
+
     /// Set the play button callback
     pub fn on_play(mut self, message: UiMessage) -> Self {
         self.on_play = Some(message);
@@ -356,6 +367,21 @@ impl ImageFor {
 /// Helper function to create an image widget
 pub fn image_for(media_id: Uuid) -> ImageFor {
     ImageFor::new(media_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hover_scale_policy_defaults_enabled_and_can_be_disabled() {
+        let image = ImageFor::new(Uuid::nil());
+        assert!(image.hover_scale_enabled);
+
+        let image = image.is_hovered(true).hover_scale_enabled(false);
+        assert!(image.is_hovered);
+        assert!(!image.hover_scale_enabled);
+    }
 }
 
 // Note: From implementations for MediaID types are handled in api_types module
@@ -501,6 +527,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         image.layout_bounds,
                     )
                     .is_hovered(image.is_hovered)
+                    .hover_scale_enabled(image.hover_scale_enabled)
                     .menu_target(instance_key)
                     .face(image.face.unwrap_or(PosterFace::Front))
                     .selected_menu_button(image.selected_menu_button);
@@ -682,6 +709,7 @@ fn create_shader_from_cached<'a>(
         image.layout_bounds,
     )
     .is_hovered(image.is_hovered)
+    .hover_scale_enabled(image.hover_scale_enabled)
     .menu_target(instance_key)
     .face(image.face.unwrap_or(PosterFace::Front))
     .selected_menu_button(image.selected_menu_button);

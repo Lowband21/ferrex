@@ -329,6 +329,7 @@ pub(crate) fn create_batch_instance(
     animated_bounds: Option<&animation::AnimatedPosterBounds>,
     is_hovered: bool,
     hover_progress: f32,
+    hover_scale_enabled: bool,
     mouse_position: Option<Point>,
     progress: Option<f32>,
     progress_color: Color,
@@ -464,6 +465,11 @@ pub(crate) fn create_batch_instance(
     // Apply hover scale with smooth transition
     // Hover scale should be independent of flip animation state
     let hover_scale = animated_bounds.map(|b| b.hover_scale).unwrap_or(1.05);
+    let hover_progress = if hover_scale_enabled {
+        hover_progress
+    } else {
+        0.0
+    };
     let hover_contribution = 1.0 + (hover_scale - 1.0) * hover_progress;
 
     let effective_scale = if animation_complete {
@@ -698,6 +704,7 @@ mod tests {
             None,
             false,
             0.0,
+            true,
             None,
             None,
             Color::WHITE,
@@ -729,6 +736,7 @@ mod tests {
             None,
             false,
             0.0,
+            true,
             None,
             None,
             Color::WHITE,
@@ -747,5 +755,84 @@ mod tests {
         assert_eq!(instance.radius_opacity_rotation_anim[3], 0.0);
         assert_eq!(instance.theme_color_zdepth[3], -10.0);
         assert!(instance.atlas_uvs.iter().all(|uv| *uv < 0.0));
+    }
+
+    #[test]
+    fn hover_scale_can_be_disabled_while_hover_overlay_stays_active() {
+        let config = animation::AnimationConfig {
+            hover_scale: 1.2,
+            ..animation::AnimationConfig::default()
+        };
+        let animated_bounds = animation::AnimatedPosterBounds::new_with_config(
+            100.0, 150.0, &config,
+        );
+
+        let instance = create_batch_instance(
+            Some(atlas_region()),
+            &bounds(),
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            true,
+            1.0,
+            false,
+            Some(Point::new(50.0, 75.0)),
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            None,
+            None,
+        );
+
+        assert!((instance.scale_shadow_glow_type[0] - 1.0).abs() < 0.0001);
+        assert_eq!(instance.hover_overlay_border_progress[0], 1.0);
+        assert_eq!(instance.hover_overlay_border_progress[1], 1.0);
+        assert_eq!(instance.mouse_pos_and_padding[0], 0.5);
+        assert_eq!(instance.mouse_pos_and_padding[1], 0.5);
+    }
+
+    #[test]
+    fn hover_scale_enabled_uses_hover_progress() {
+        let config = animation::AnimationConfig {
+            hover_scale: 1.2,
+            ..animation::AnimationConfig::default()
+        };
+        let animated_bounds = animation::AnimatedPosterBounds::new_with_config(
+            100.0, 150.0, &config,
+        );
+
+        let instance = create_batch_instance(
+            Some(atlas_region()),
+            &bounds(),
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            true,
+            1.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            (instance.scale_shadow_glow_type[0] - config.hover_scale).abs()
+                < 0.0001
+        );
+        assert_eq!(instance.hover_overlay_border_progress[0], 1.0);
+        assert_eq!(instance.hover_overlay_border_progress[1], 1.0);
     }
 }
