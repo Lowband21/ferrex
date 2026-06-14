@@ -10,8 +10,8 @@ import com.ferrex.android.ui.theme.FerrexTheme
 
 internal object FerrexShellCopy {
     const val MOBILE_TITLE = "Ferrex Mobile"
-    const val MOBILE_SUBTITLE = "Recovery-first Android auth"
-    const val MOBILE_BODY = "Protected media features stay closed until Ferrex validates the saved session."
+    const val MOBILE_SUBTITLE = "Media-first phone shell"
+    const val MOBILE_BODY = "Resume, shelves, libraries, search, and recovery exits use real server data with no-wipe account controls."
 
     const val TV_TITLE = "Ferrex TV"
     const val TV_SUBTITLE = "D-pad recovery-first auth"
