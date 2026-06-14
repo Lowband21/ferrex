@@ -102,18 +102,10 @@ class Media3PlaybackDiagnostics : AnalyticsListener {
     }
 
     private fun Tracks.describeForDiagnostics(): String {
-        val mediaGroups = groups.filter { group ->
+        val mediaGroups = toPlaybackTrackGroupSnapshots().filter { group ->
             group.type == C.TRACK_TYPE_AUDIO || group.type == C.TRACK_TYPE_TEXT || group.type == C.TRACK_TYPE_VIDEO
         }
-        if (mediaGroups.isEmpty()) return "Tracks changed: no audio/text/video groups discovered"
-
-        val audioTrackCount = mediaGroups.filter { it.type == C.TRACK_TYPE_AUDIO }.sumOf { it.length }
-        val supportedAudioTrackCount = mediaGroups.filter { it.type == C.TRACK_TYPE_AUDIO }
-            .sumOf { group -> (0 until group.length).count { group.isTrackSupported(it) } }
-        val textTrackCount = mediaGroups.filter { it.type == C.TRACK_TYPE_TEXT }.sumOf { it.length }
-        val videoTrackCount = mediaGroups.filter { it.type == C.TRACK_TYPE_VIDEO }.sumOf { it.length }
-
-        return "Tracks changed: groups=${mediaGroups.size} audio=$supportedAudioTrackCount/$audioTrackCount supported text=$textTrackCount video=$videoTrackCount"
+        return PlaybackTrackOptions.describeTracksForDiagnostics(mediaGroups)
     }
 
     private fun Int.dataTypeName(): String = when (this) {
