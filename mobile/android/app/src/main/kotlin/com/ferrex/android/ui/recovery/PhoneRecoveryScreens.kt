@@ -33,7 +33,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.ConnectResult
 import com.ferrex.android.core.auth.LoginRequiredReason
 import com.ferrex.android.core.auth.LoginResult
@@ -272,52 +271,6 @@ fun PhoneRecoverableScreen(
         )
         RecoveryActions(
             onRetry = onRetry,
-            onSignOut = onSignOut,
-            onChangeServer = onChangeServer,
-            onResetConnection = onResetConnection,
-        )
-    }
-}
-
-@Composable
-fun PhoneHomeScreen(
-    state: SessionState.Authenticated,
-    onSignOut: () -> Unit,
-    onChangeServer: () -> Unit,
-    onResetConnection: () -> Unit,
-) {
-    PhoneSurface {
-        Text(
-            text = FerrexShellCopy.MOBILE_TITLE,
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            modifier = Modifier.padding(top = 12.dp),
-            text = "Signed in as ${state.user.displayName ?: state.user.username}",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            modifier = Modifier.padding(top = 12.dp),
-            text = "Server: ${state.serverUrl}",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            modifier = Modifier.padding(top = 24.dp),
-            text = FerrexShellCopy.MOBILE_BODY,
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        if (state.requiresPinSetup) {
-            Text(
-                modifier = Modifier.padding(top = 20.dp),
-                text = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server; this app will not show a fake PIN setup flow.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        RecoveryActions(
-            includeRetry = false,
-            onRetry = {},
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,

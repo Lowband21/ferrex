@@ -4,6 +4,7 @@ kotlin = "2.1.0"
 activity-compose = "1.9.3"
 compose-bom = "2024.12.01"
 coroutines = "1.9.0"
+coil = "2.7.0"
 flatbuffers = "25.2.10"
 junit = "4.13.2"
 kotlinx-serialization-json = "1.7.3"
@@ -21,6 +22,7 @@ compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 flatbuffers-java = { group = "com.google.flatbuffers", name = "flatbuffers-java", version.ref = "flatbuffers" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

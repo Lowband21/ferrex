@@ -23,6 +23,7 @@ class AuthManager(
     private val tokenRefreshAuthenticator: TokenRefreshAuthenticator,
     private val deviceName: String,
     private val appVersion: String,
+    private val onResetConnectionCacheClear: (serverUrl: String, userId: String?) -> Unit = { _, _ -> },
 ) {
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.Loading)
     val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
@@ -187,9 +188,14 @@ class AuthManager(
     }
 
     fun resetConnection() {
+        val previousServerUrl = storage.serverUrl?.let(ServerConfig::normalize)
+        val previousUserId = storage.userId
         storage.clearConnectionData()
         serverConfig.clear()
         authInterceptor.clearAccessToken()
+        if (!previousServerUrl.isNullOrBlank()) {
+            onResetConnectionCacheClear(previousServerUrl, previousUserId)
+        }
         _sessionState.value = SessionState.NoServer(NoServerReason.ResetConnection)
     }
 

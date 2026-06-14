@@ -19,7 +19,12 @@ class TvMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             FerrexTheme(tv = true) {
-                TvFerrexNavGraph(authManager = dependencies.authManager)
+                TvFerrexNavGraph(
+                    authManager = dependencies.authManager,
+                    libraryRepository = dependencies.libraryRepository,
+                    imageRepository = dependencies.imageRepository,
+                    imagePipeline = dependencies.imagePipeline,
+                )
             }
         }
     }

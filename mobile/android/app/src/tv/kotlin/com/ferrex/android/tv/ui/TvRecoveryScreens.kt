@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,13 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.image.FerrexImagePipeline
+import com.ferrex.android.core.image.ImageRepository
+import com.ferrex.android.core.library.LibraryFreshness
+import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.library.LibraryRepositoryState
+import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.ui.components.FerrexBrowseImageRail
 import kotlinx.coroutines.launch
 
 @Composable
@@ -248,10 +256,22 @@ fun TvRecoverableScreen(
 @Composable
 fun TvHomeScreen(
     state: SessionState.Authenticated,
+    libraryRepository: LibraryRepository? = null,
+    imageRepository: ImageRepository? = null,
+    imagePipeline: FerrexImagePipeline? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
 ) {
+    val scope = remember(state.serverUrl, state.user.id) { ServerCacheScope.from(state.serverUrl, state.user.id) }
+    val emptyRepositoryState = remember { mutableStateOf<LibraryRepositoryState?>(null) }
+    val repositoryState by libraryRepository?.state?.collectAsState() ?: emptyRepositoryState
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(libraryRepository, scope) {
+        libraryRepository?.refreshLibraries(scope)
+    }
+
     TvSurface {
         TvTitle(FerrexShellCopy.TV_TITLE, FerrexShellCopy.TV_SUBTITLE)
         Text("Signed in as ${state.user.displayName ?: state.user.username}", style = MaterialTheme.typography.headlineSmall)
@@ -264,6 +284,29 @@ fun TvHomeScreen(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+        TvLibraryCacheStatus(
+            freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+            selectedLibraryName = repositoryState?.libraries?.firstOrNull { it.id == repositoryState?.selectedLibraryId }?.name,
+            selectedLibraryId = repositoryState?.selectedLibraryId,
+            movieCount = repositoryState?.movieAccessor?.movieCount,
+            seriesBundleCount = repositoryState?.seriesAccessor?.bundleCount,
+            onRetry = { coroutineScope.launch { libraryRepository?.refreshLibraries(scope, repositoryState?.selectedLibraryId) } },
+            onClearSelected = {
+                val libraryId = repositoryState?.selectedLibraryId ?: return@TvLibraryCacheStatus
+                libraryRepository?.clearSelectedCache(scope, libraryId)
+            },
+            onClearAll = { libraryRepository?.clearAllCache(scope) },
+        )
+        FerrexBrowseImageRail(
+            modifier = Modifier.padding(top = 28.dp),
+            repositoryState = repositoryState,
+            scope = scope,
+            imageRepository = imageRepository,
+            imagePipeline = imagePipeline,
+            maxImages = 10,
+            itemWidth = 180.dp,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        )
         TvRecoveryActions(
             includeRetry = false,
             firstFocusRequester = null,
@@ -273,6 +316,49 @@ fun TvHomeScreen(
             onResetConnection = onResetConnection,
         )
     }
+}
+
+@Composable
+private fun TvLibraryCacheStatus(
+    freshness: LibraryFreshness,
+    selectedLibraryName: String?,
+    selectedLibraryId: String?,
+    movieCount: Int?,
+    seriesBundleCount: Int?,
+    onRetry: () -> Unit,
+    onClearSelected: () -> Unit,
+    onClearAll: () -> Unit,
+) {
+    Text(
+        text = "Library cache: ${freshness.label}",
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.primary,
+        textAlign = TextAlign.Center,
+    )
+    selectedLibraryName?.let { Text("Selected library: $it", style = MaterialTheme.typography.titleMedium) }
+    val countCopy = when {
+        movieCount != null -> "Movies cached across all batches: $movieCount"
+        seriesBundleCount != null -> "Series bundles cached: $seriesBundleCount"
+        else -> "No cached library payloads yet."
+    }
+    Text(countCopy, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    val detail = when (freshness) {
+        LibraryFreshness.Empty -> "Cache will build after a reachable library sync."
+        is LibraryFreshness.Fresh -> "Fresh for this server and user."
+        LibraryFreshness.Syncing -> "Syncing library payloads…"
+        is LibraryFreshness.StaleOffline -> "Showing stale/offline cache: ${freshness.message}"
+        is LibraryFreshness.CorruptRebuilding -> freshness.message
+        is LibraryFreshness.ErrorRetryable -> "Retryable cache sync issue: ${freshness.message}"
+    }
+    Text(detail, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    Spacer(Modifier.height(18.dp))
+    Button(onClick = onRetry, modifier = Modifier.width(360.dp)) { Text("Retry cache sync") }
+    TextButton(
+        enabled = selectedLibraryId != null,
+        onClick = onClearSelected,
+        modifier = Modifier.width(360.dp),
+    ) { Text("Clear selected cache") }
+    TextButton(onClick = onClearAll, modifier = Modifier.width(360.dp)) { Text("Clear all server cache") }
 }
 
 @Composable

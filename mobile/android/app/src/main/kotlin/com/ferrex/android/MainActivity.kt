@@ -29,7 +29,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             FerrexTheme {
-                FerrexNavGraph(authManager = dependencies.authManager)
+                FerrexNavGraph(
+                    authManager = dependencies.authManager,
+                    libraryRepository = dependencies.libraryRepository,
+                    libraryIndexTransport = dependencies.libraryIndexTransport,
+                    imageRepository = dependencies.imageRepository,
+                    imagePipeline = dependencies.imagePipeline,
+                    continueWatchingRepository = dependencies.continueWatchingRepository,
+                    watchRepository = dependencies.watchRepository,
+                    watchStateInvalidationBus = dependencies.watchStateInvalidationBus,
+                    searchRepository = dependencies.searchRepository,
+                )
             }
         }
     }
