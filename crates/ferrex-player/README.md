@@ -53,6 +53,27 @@ just run-player
 
 The player connects to `FERREX_SERVER_URL` (defaults to `http://localhost:3000`).
 
+## Headless screenshots
+
+Capture a preset UI state to a PNG and JSON sidecar without opening a desktop
+window:
+
+```bash
+ferrex-player screenshot \
+  --preset FirstRun \
+  --viewport 1440x900 \
+  --scale-factor 1 \
+  --mode Immediate \
+  --settle-ms 200 \
+  --output ./artifacts/first-run.png
+```
+
+The command supports `--ice <PATH>` to replay an existing `.ice` script before
+capture. When `.ice` metadata includes `preset`, `viewport`, or `mode`, explicit
+CLI values must match it. If headless renderer initialization fails, the command
+exits non-zero with suggested `WGPU_BACKEND`, `WGPU_ADAPTER_NAME`, and software
+rendering environment variables.
+
 ## Validation commands
 
 Use these commands after player crate graph or UI/app changes:
