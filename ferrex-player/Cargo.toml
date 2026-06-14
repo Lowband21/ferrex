@@ -8,7 +8,7 @@ homepage.workspace = true
 readme = "../README.md"
 keywords.workspace = true
 categories.workspace = true
-description = "Cross-platform desktop player for Ferrex with a focus on performance, cutting edge features, and media compatibility"
+description = "Cross-platform desktop player binary and compatibility facade for Ferrex"
 
 [lints.rustdoc]
 broken_intra_doc_links = "warn"
@@ -20,11 +20,34 @@ invalid_rust_codeblocks = "warn"
 bare_urls = "warn"
 
 [lints.rust]
-# Player exposes many internal modules publicly today; allow during 0.1.0-alpha
+# The facade preserves historical public imports during the extraction stack.
 missing_docs = "allow"
 missing_debug_implementations = "warn"
 
 [dependencies]
+ferrex-player-app = { workspace = true }
+
+[features]
+default = []
+legacy-settings = ["ferrex-player-app/legacy-settings"]
+iced_tester = ["ferrex-player-app/iced_tester"]
+hot = ["ferrex-player-app/hot"]
+debug = ["ferrex-player-app/debug"]
+demo = ["ferrex-player-app/demo"]
+gpu-tests = ["ferrex-player-app/gpu-tests"]
+debug-cache-overlay = ["ferrex-player-app/debug-cache-overlay"]
+# For compiling out features that have not been fully implemented
+unimplemented = ["ferrex-player-app/unimplemented"]
+
+profile-with-puffin = ["ferrex-player-app/profile-with-puffin"]
+profile-with-tracy = ["ferrex-player-app/profile-with-tracy"]
+profile-with-tracing = ["ferrex-player-app/profile-with-tracing"]
+profiling-stats = ["ferrex-player-app/profiling-stats"]
+
+[dev-dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
 ferrex-core = { path = "../ferrex-core", default-features = false, features = [
   "rkyv",
 ] }
@@ -33,13 +56,8 @@ ferrex-model = { path = "../ferrex-model", features = [
   "rkyv",
   "chrono",
 ] }
-ferrex-contracts = { path = "../ferrex-contracts", features = [
-  "serde",
-  "rkyv",
-  "chrono",
-] }
-
-# Iced
+ferrex-player-auth = { workspace = true }
+futures.workspace = true
 iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
   "tokio",
   "image",
@@ -51,179 +69,8 @@ iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features 
   "lazy",
   "crisp",
 ] }
-iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
-  "image",
-  "batch",
-] }
-
-iced_aw = { git = "https://github.com/Lowband21/iced_aw_ferrex.git", default-features = false, features = [
-  "menu",
-  "sidebar",
-  "number_input",
-  "slide_bar",
-  "drop_down",
-  "color_picker",
-] }
-
-# iced_toasts = { git = "https://github.com/Gomango999/iced-toasts.git" }
-
-
-# Icons
-lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git", features = [
-  "iced",
-] }
-
-# Unified video abstraction based on subwave
-# subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
-# subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
-
-subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
-subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
-
-# Async runtime
-tokio.workspace = true
-async-trait.workspace = true
-
-# Concurrency utilities
-once_cell = "1.21"
-
-# Serialization
-serde.workspace = true
-serde_json.workspace = true
-rkyv = { workspace = true }
-rancor.workspace = true
-
-# HTTP client for media server
-reqwest.workspace = true
-reqwest-eventsource = "0.6"
-eventsource-stream = "0.2"
-futures.workspace = true
-
-# URL handling
-url = "2"
-urlencoding = "2"
-
-# Logging
-log = { workspace = true }
-env_logger = "0.11"
-
-# File dialogs
-#rfd = "0.13"
-
-# Regular expressions
-regex.workspace = true
-
-# Image handling for thumbnails
-image.workspace = true
-
-# Directories
-## Pretty sure these are redundant
-dirs = "6"
-directories = "6"
-
-# Time handling
-chrono.workspace = true
-
-# Lazy statics for profiling
-lazy_static = "1.5.0"
-
-# Error handling
-thiserror.workspace = true
-anyhow.workspace = true
-uuid.workspace = true
-
-# GPU utilities
-bytemuck = { version = "1.24", features = ["derive"] }
-
-# Font rendering for SDF atlas generation
-fontdue = "0.9"
-
-# Color space conversions (HSLuv for perceptually uniform colors)
-hsluv = "0.3"
-
-# Advanced caching and concurrency
-dashmap.workspace = true
-cacache.workspace = true
-priority-queue = "2.7.0"
-rand.workspace = true
-base64 = "0.22"
-ed25519-dalek = { version = "2", default-features = false, features = [
-  "rand_core",
-] }
-getrandom = "0.3"
-num_cpus = "1"
-rand_core = "0.9"
-
-# Encryption for local auth storage
-aes-gcm.workspace = true
-sha2.workspace = true
-hkdf = "0.12"
-
-# JWT parsing for token validation
-# jsonwebtoken = { workspace = true }
-argon2.workspace = true
-
-# Hardware fingerprinting
-sysinfo = "0.37"
-mac_address = "1.1"
-
-# Memory zeroization for secure credentials
-zeroize.workspace = true
-tempfile.workspace = true
-
-# Performance profiling (feature-gated)
-profiling = { version = "1.0", optional = true }
-puffin = { version = "0.19", optional = true }
-puffin_http = { version = "0.16", optional = true }
-tracy-client = { version = "0.18", default-features = false, optional = true }
-hdrhistogram = { version = "7.5", optional = true }
-parking_lot = { version = "0.12" }
-memory-stats = { version = "1.2", optional = true }
-yoke = "0.8.1"
-filesize = "0.2.0"
-libc = "0.2"
-normpath = "1.5.0"
-num-bigint = "0.4.6"
-
-# Not sure if this is worth the added dep
-# tap = "1.0.1"
-
-[features]
-default = []
-legacy-settings = []
-iced_tester = ["iced/tester"]
-hot = ["iced/hot"]
-debug = ["iced/debug"]
-demo = ["ferrex-core/demo"]
-gpu-tests = []
-debug-cache-overlay = ["iced/sysinfo"]
-# For compiling out features that have not been fully implemented
-unimplemented = []
-
-profile-with-puffin = [
-  "dep:profiling",
-  "profiling/profile-with-puffin",
-  "dep:puffin",
-  "dep:puffin_http",
-]
-profile-with-tracy = [
-  "dep:profiling",
-  #"profiling/profile-with-tracy",
-  #"dep:tracy-client",
-]
-profile-with-tracing = ["dep:profiling"] #"profiling/profile-with-tracing"]
-
-profiling-stats = ["dep:hdrhistogram"]
-
-[dev-dependencies]
-# Testing framework
-rand.workspace = true
-iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
 iced_runtime = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_runtime" }
-
-# Performance benchmarking
-# criterion = { version = "^0.7", features = ["html_reports"] }
-
-#[[bench]]
-#name = "grid_rendering_bench"
-#harness = false
+rand.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true

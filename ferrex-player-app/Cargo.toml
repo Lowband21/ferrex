@@ -1,0 +1,88 @@
+[package]
+name = "ferrex-player-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "Ferrex desktop player application shell and runtime bootstrap"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "allow"
+private_doc_tests = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_rust_codeblocks = "warn"
+bare_urls = "warn"
+
+[lints.rust]
+# The app shell re-exports historical player modules while the extraction stack continues.
+missing_docs = "allow"
+missing_debug_implementations = "warn"
+
+[dependencies]
+ferrex-core = { path = "../ferrex-core", default-features = false, features = [
+  "rkyv",
+] }
+ferrex-model = { workspace = true }
+ferrex-player-ui = { workspace = true }
+
+# Runtime application shell
+iced = { git = "https://github.com/Lowband21/iced-ferrex.git", default-features = false, features = [
+  "tokio",
+  "image",
+  "canvas",
+  "advanced",
+  "wgpu",
+  "wayland",
+  "batch",
+  "lazy",
+  "crisp",
+] }
+iced_wgpu = { git = "https://github.com/Lowband21/iced-ferrex.git", features = [
+  "image",
+  "batch",
+] }
+iced_aw = { git = "https://github.com/Lowband21/iced_aw_ferrex.git", default-features = false, features = [
+  "menu",
+  "sidebar",
+  "number_input",
+  "slide_bar",
+  "drop_down",
+  "color_picker",
+] }
+lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git", features = [
+  "iced",
+] }
+
+env_logger = "0.11"
+log.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracy-client = { version = "0.18", default-features = false, optional = true }
+
+[features]
+default = []
+legacy-settings = ["ferrex-player-ui/legacy-settings"]
+iced_tester = ["iced/tester", "ferrex-player-ui/iced_tester"]
+hot = ["iced/hot", "ferrex-player-ui/hot"]
+debug = ["iced/debug", "ferrex-player-ui/debug"]
+demo = ["ferrex-player-ui/demo"]
+gpu-tests = ["ferrex-player-ui/gpu-tests"]
+debug-cache-overlay = ["iced/sysinfo", "ferrex-player-ui/debug-cache-overlay"]
+# For compiling out features that have not been fully implemented
+unimplemented = ["ferrex-player-ui/unimplemented"]
+
+profile-with-puffin = ["ferrex-player-ui/profile-with-puffin"]
+profile-with-tracy = ["dep:tracy-client", "ferrex-player-ui/profile-with-tracy"]
+profile-with-tracing = ["ferrex-player-ui/profile-with-tracing"]
+profiling-stats = ["ferrex-player-ui/profiling-stats"]
+
+[dev-dependencies]
+ferrex-player-ui = { workspace = true, features = ["iced_tester"] }
+iced_test = { git = "https://github.com/Lowband21/iced-ferrex.git", package = "iced_test", default-features = false }
+tokio.workspace = true

@@ -7,7 +7,13 @@ This document gives a bird’s‑eye view of Ferrex’s components and how they 
 Ferrex is a Rust workspace with these primary crates:
 
 - `ferrex-server` – HTTP/WS API, scanning/orchestration, persistence (Axum + Postgres + Redis).
-- `ferrex-player` – Desktop client (Iced + subwave video backend; GStreamer or mpv hand‑off).
+- `ferrex-player` – Desktop client binary/facade that keeps the installed `ferrex-player` command name and historical imports.
+- `ferrex-player-app` – Desktop application shell (bootstrap/config, state composition, root update/view/subscription wiring, Iced daemon/application construction, presets, and runtime hooks).
+- `ferrex-player-ui` – Desktop UI/presentation crate (Iced views/widgets, Iced subscription/task adapters, design tokens, shader widgets/WGSL assets, and 10-foot surfaces).
+- `ferrex-player-api` – Player-facing API adapters, service traits, and DTO re-exports used by desktop and future clients.
+- `ferrex-player-auth`, `ferrex-player-repository`, `ferrex-player-library`, `ferrex-player-media`, `ferrex-player-metadata`, `ferrex-player-search`, `ferrex-player-settings`, and `ferrex-player-user-admin` – Extracted player data/domain crates. These crates avoid Iced/subwave runtime code (settings only shares `iced_core` color/point DTOs) and expose dependency-light state machines, selectors, streams, or contracts for the UI crate to adapt.
+- `ferrex-player-playback` – Extracted playback/video domain crate that owns Subwave/MPV playback state, controls, and overlay helpers behind explicit UI-shell ports.
+- `ferrex-player-foundation` – Dependency-light player primitives and contracts that must not depend on UI/video/domain crates.
 - `ferrex-core` – Shared domain types, services, and orchestration runtime.
 - `ferrex-model` – Shared data models and DTOs.
 - `ferrex-contracts` – API contracts and schema glue.
@@ -15,15 +21,25 @@ Ferrex is a Rust workspace with these primary crates:
 Related docs:
 - Scan/orchestration runtime details: `ferrex-core/src/domain/scan/orchestration/runtime/README.md`
 - Player specifics and platform notes: `ferrex-player/README.md`
+- Player crate dependency boundaries: `docs/player-dependency-boundaries.md`
 - Demo mode: `docs/demo-mode.md`
 - UI testing workflow: `docs/ui-testing-workflow.md`
+
+Crate-boundary and baseline validation commands:
+
+```bash
+./scripts/check-player-crate-boundaries.sh
+cargo fmt --all --check
+nix develop .#ferrex-player --command cargo check --workspace --all-targets
+nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
+```
 
 ## High‑Level Diagram
 
 ```
    +------------------------+            HTTP/WS             +------------------------+
    |     ferrex-player      |   <----------------------->    |     ferrex-server      |
-   |    (Iced + subwave)    |                                |   (Axum + Postgres)    |
+   | (app shell + Iced UI)  |                                |   (Axum + Postgres)    |
    |                        |  watch stat, metadata, images  |                        |
    +-+--------------+-------+          +------+              +------+----------+------+
      |              |                  |      |                     |          |
@@ -48,8 +64,12 @@ Related docs:
   - Queue invariants: `state = 'ready'` and `available_at <= NOW()` gate eligibility; partial unique index on `dedupe_key` enforces de‑dup across relevant states.
   - See `ferrex-core/src/domain/scan/orchestration/runtime/README.md` for specifics.
 
-### Player (`ferrex-player`)
-- UI: Iced (custom fork pinned in workspace).
+### Player (`ferrex-player` + `ferrex-player-app` + `ferrex-player-ui`)
+- Binary/facade: `ferrex-player` keeps the installed command name and historical `ferrex_player::*` imports by delegating to `ferrex-player-app`.
+- App shell: `ferrex-player-app` owns runtime bootstrap/config, state/domain composition, cross-domain routing surfaces, root update/view/subscription wiring, Iced daemon/application construction, presets, and logger/profiling hooks.
+- UI/presentation: `ferrex-player-ui` owns the Iced views/widgets, Iced task/subscription adapters, design tokens, shader widgets, WGSL assets, and 10-foot surfaces.
+- Data/API crates: `ferrex-player-auth`, `ferrex-player-repository`, `ferrex-player-library`, `ferrex-player-media`, `ferrex-player-metadata`, `ferrex-player-search`, `ferrex-player-settings`, `ferrex-player-user-admin`, and `ferrex-player-api` own player data-domain behavior and service contracts without pulling in Iced/subwave runtime code; settings only shares `iced_core` color/point DTOs. Async work crosses this boundary through `ferrex-player-foundation` domain tasks or dependency-light streams that the UI crate wraps.
+- Playback/video: `ferrex-player-playback` owns Subwave/MPV playback state, controls, subscriptions, and overlay helpers behind explicit ports that `ferrex-player-ui` adapts.
 - Video: subwave backend with platform‑optimized paths.
   - Wayland/HDR: GStreamer path with subsurfaces enables zero‑copy HDR output.
   - Other platforms: cross‑platform backend or mpv hand‑off with watch status tracking.
