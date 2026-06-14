@@ -61,6 +61,7 @@ import com.ferrex.android.core.playback.PlaybackFailureKind
 import com.ferrex.android.core.playback.PlaybackPlayerState
 import com.ferrex.android.core.playback.PlaybackProgressReporter
 import com.ferrex.android.core.playback.PlaybackRecoveryActions
+import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
@@ -90,6 +91,7 @@ fun PlayerScreen(
     ticketTransport: PlaybackTicketTransport,
     streamUrlFactory: PlaybackStreamUrlFactory,
     progressReporter: PlaybackProgressReporter?,
+    resumeProgressProvider: PlaybackResumeProgressProvider?,
     streamingHttpClient: OkHttpClient,
     onBack: () -> Unit,
     onSessionInvalidated: (PlaybackFailure) -> Unit,
@@ -100,12 +102,13 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
     val currentSessionInvalidated by rememberUpdatedState(onSessionInvalidated)
     val currentProgressCommitted by rememberUpdatedState(onProgressCommitted)
-    val controller = remember(route, ticketTransport, streamUrlFactory, progressReporter, scope) {
+    val controller = remember(route, ticketTransport, streamUrlFactory, progressReporter, resumeProgressProvider, scope) {
         PlaybackController(
             route = route,
             ticketTransport = ticketTransport,
             streamUrlFactory = streamUrlFactory,
             progressReporter = progressReporter,
+            resumeProgressProvider = resumeProgressProvider,
             scope = scope,
             onSessionInvalidated = { currentSessionInvalidated(it) },
             onProgressCommitted = { currentProgressCommitted() },

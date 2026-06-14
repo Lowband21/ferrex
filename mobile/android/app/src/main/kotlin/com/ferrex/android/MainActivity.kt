@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
                     playbackTicketTransport = dependencies.playbackTicketTransport,
                     playbackStreamUrlFactory = dependencies.playbackStreamUrlFactory,
                     playbackProgressReporter = dependencies.playbackProgressReporter,
+                    playbackResumeProgressProvider = dependencies.playbackResumeProgressProvider,
                     streamingHttpClient = dependencies.streamingHttpClient,
                 )
             }

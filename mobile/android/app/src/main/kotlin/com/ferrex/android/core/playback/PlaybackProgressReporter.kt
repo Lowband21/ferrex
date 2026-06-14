@@ -2,6 +2,7 @@ package com.ferrex.android.core.playback
 
 import com.ferrex.android.core.api.ApiResult
 import com.ferrex.android.core.api.FerrexApiClient
+import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.api.ServerConfig
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -39,9 +40,9 @@ class OkHttpPlaybackProgressReporter(
 
         val request = try {
             val body = PlaybackProgressBody(
-                mediaId = route.targetMediaId,
-                mediaType = route.mediaType.routeValue,
-                position = positionSeconds.coerceAtLeast(0.0),
+                mediaId = route.logicalMediaId,
+                mediaType = route.mediaType.watchApiValue(),
+                position = positionSeconds.coerceIn(0.0, durationSeconds),
                 duration = durationSeconds.coerceAtLeast(0.0),
                 lastMediaUuid = route.targetMediaId,
             )
@@ -78,6 +79,13 @@ class OkHttpPlaybackProgressReporter(
         private const val JSON_MIME = "application/json"
         private val JSON_MEDIA_TYPE = JSON_MIME.toMediaType()
     }
+}
+
+private fun BrowseMediaType.watchApiValue(): String = when (this) {
+    BrowseMediaType.Movie -> "Movie"
+    BrowseMediaType.Series -> "Series"
+    BrowseMediaType.Episode -> "Episode"
+    BrowseMediaType.Unknown -> "Movie"
 }
 
 @Serializable

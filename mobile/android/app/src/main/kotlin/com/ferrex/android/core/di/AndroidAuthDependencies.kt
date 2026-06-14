@@ -20,6 +20,7 @@ import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.playback.OkHttpPlaybackProgressReporter
 import com.ferrex.android.core.playback.OkHttpPlaybackTicketTransport
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.WatchStatePlaybackResumeProgressProvider
 import com.ferrex.android.core.search.LibraryMediaSearchCache
 import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.search.OkHttpMediaSearchTransport
@@ -67,6 +68,7 @@ class AndroidAuthDependencies(
     val playbackTicketTransport = OkHttpPlaybackTicketTransport(httpClient, serverConfig)
     val playbackStreamUrlFactory = PlaybackStreamUrlFactory(serverConfig)
     val playbackProgressReporter = OkHttpPlaybackProgressReporter(httpClient, serverConfig)
+    val playbackResumeProgressProvider = WatchStatePlaybackResumeProgressProvider(watchStateTransport)
 
     val libraryIndexTransport = OkHttpLibraryIndexTransport(httpClient, serverConfig)
     val watchStateInvalidationBus = WatchStateInvalidationBus()

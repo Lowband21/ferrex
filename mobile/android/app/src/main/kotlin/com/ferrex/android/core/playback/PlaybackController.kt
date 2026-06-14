@@ -21,6 +21,7 @@ class PlaybackController(
     private val ticketTransport: PlaybackTicketTransport,
     private val streamUrlFactory: PlaybackStreamUrlFactory,
     private val progressReporter: PlaybackProgressReporter?,
+    private val resumeProgressProvider: PlaybackResumeProgressProvider? = null,
     private val scope: CoroutineScope,
     private val retryPolicy: PlaybackRetryPolicy = PlaybackRetryPolicy(),
     private val onSessionInvalidated: (PlaybackFailure) -> Unit,
@@ -37,7 +38,7 @@ class PlaybackController(
     fun prepare() {
         autoRetryCount = 0
         invalidatedSession = false
-        prepareFrom(lastKnownPositionMs)
+        prepareInitial()
     }
 
     fun retry() {
@@ -98,10 +99,70 @@ class PlaybackController(
         reportProgress(lastKnownPositionMs, durationMs)
     }
 
+    private fun prepareInitial() {
+        workJob?.cancel()
+        workJob = scope.launch {
+            val positionMs = resolveInitialStartPosition() ?: return@launch
+            fetchTicketAndPublish(positionMs)
+        }
+    }
+
     private fun prepareFrom(positionMs: Long) {
         workJob?.cancel()
         workJob = scope.launch {
             fetchTicketAndPublish(positionMs.coerceAtLeast(0L))
+        }
+    }
+
+    private suspend fun resolveInitialStartPosition(): Long? {
+        if (!PlaybackStartPositionResolver.requiresServerResume(route)) {
+            lastKnownPositionMs = route.initialStartPositionMs
+            return lastKnownPositionMs
+        }
+
+        _state.value = PlaybackPlayerState.Loading(
+            message = "Checking resume position…",
+            retryAttempt = autoRetryCount,
+            maxRetryAttempts = retryPolicy.maxAutoRetries,
+        )
+
+        val result = resumeProgressProvider?.fetchResumeProgress(route.logicalMediaId)
+        if (result == null) {
+            lastKnownPositionMs = 0L
+            return lastKnownPositionMs
+        }
+
+        return when (result) {
+            is ApiResult.Success -> {
+                lastKnownPositionMs = PlaybackStartPositionResolver.fromServerProgress(result.data)
+                PlaybackDiagnosticLog.info(
+                    PLAYBACK_CONTROLLER_TAG,
+                    "Resolved server resume media=${route.logicalMediaId} positionMs=$lastKnownPositionMs",
+                )
+                lastKnownPositionMs
+            }
+            is ApiResult.HttpError -> {
+                val failure = PlaybackFailureMapper.fromHttpStatus(result.code, result.message)
+                if (failure.isAuthFailure) {
+                    invalidateSession(failure)
+                    null
+                } else {
+                    PlaybackDiagnosticLog.warn(
+                        PLAYBACK_CONTROLLER_TAG,
+                        "Resume lookup failed with HTTP ${result.code}; starting at 0",
+                    )
+                    lastKnownPositionMs = 0L
+                    lastKnownPositionMs
+                }
+            }
+            else -> {
+                PlaybackDiagnosticLog.warn(
+                    PLAYBACK_CONTROLLER_TAG,
+                    "Resume lookup failed: ${PlaybackFailureMapper.fromApiResult(result).kind}; starting at 0",
+                )
+                lastKnownPositionMs = 0L
+                lastKnownPositionMs
+            }
         }
     }
 

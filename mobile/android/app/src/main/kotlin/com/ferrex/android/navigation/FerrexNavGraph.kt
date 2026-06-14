@@ -16,6 +16,7 @@ import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.core.search.MediaSearchRepository
@@ -52,6 +53,7 @@ fun FerrexNavGraph(
     playbackTicketTransport: PlaybackTicketTransport? = null,
     playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
     playbackProgressReporter: PlaybackProgressReporter? = null,
+    playbackResumeProgressProvider: PlaybackResumeProgressProvider? = null,
     streamingHttpClient: OkHttpClient? = null,
     navController: NavHostController = rememberNavController(),
 ) {
@@ -117,6 +119,7 @@ fun FerrexNavGraph(
                     playbackTicketTransport = playbackTicketTransport,
                     playbackStreamUrlFactory = playbackStreamUrlFactory,
                     playbackProgressReporter = playbackProgressReporter,
+                    playbackResumeProgressProvider = playbackResumeProgressProvider,
                     streamingHttpClient = streamingHttpClient,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,

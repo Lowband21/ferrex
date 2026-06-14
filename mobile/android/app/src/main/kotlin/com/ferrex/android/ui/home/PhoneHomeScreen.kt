@@ -63,6 +63,7 @@ import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
@@ -106,6 +107,7 @@ fun PhoneHomeScreen(
     playbackTicketTransport: PlaybackTicketTransport? = null,
     playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
     playbackProgressReporter: PlaybackProgressReporter? = null,
+    playbackResumeProgressProvider: PlaybackResumeProgressProvider? = null,
     streamingHttpClient: OkHttpClient? = null,
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
@@ -223,6 +225,17 @@ fun PhoneHomeScreen(
             null -> Unit
         }
     }
+    LaunchedEffect(watchStateInvalidationBus, watchRepository, detailResult) {
+        watchStateInvalidationBus?.events?.collect {
+            when (val detail = detailResult) {
+                is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
+                is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
+                is DetailLoadResult.Missing,
+                null -> Unit
+            }
+        }
+    }
     val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab, detailResult) {
         buildList {
             continueState.cards.mapNotNullTo(this) { it.imageKey }
@@ -305,6 +318,7 @@ fun PhoneHomeScreen(
                 ticketTransport = playbackTicketTransport,
                 streamUrlFactory = playbackStreamUrlFactory,
                 progressReporter = playbackProgressReporter,
+                resumeProgressProvider = playbackResumeProgressProvider,
                 streamingHttpClient = streamingHttpClient,
                 onBack = { activePlaybackContract = null },
                 onSessionInvalidated = {
@@ -331,6 +345,7 @@ fun PhoneHomeScreen(
                 onResetConnection = onResetConnection,
                 onRetryWatch = { retryDetailWatch(detailResult) },
                 onRetryEpisodes = { retryDetailCacheSync(selectedDetailRoute) },
+                onClearProgress = { mediaId -> coroutineScope.launch { watchRepository?.clearProgress(mediaId) } },
                 onMarkMovieWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markMovieWatched(mediaId, watched) } },
                 onMarkEpisodeWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markEpisodeWatched(mediaId, watched) } },
                 onMarkSeriesWatched = { tmdbId, watched -> coroutineScope.launch { watchRepository?.markSeriesWatched(tmdbId, watched) } },

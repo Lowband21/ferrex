@@ -218,7 +218,21 @@ object DetailRouteContracts {
                 it.seasonNumber == key.seasonNumber && it.episodeNumber == key.episodeNumber
             }
         } ?: series.firstPlayableEpisode
-        return episode?.let { episodeStartOver(it, sourceRoute) }
+        val shouldResumeServerProgress = nextEpisode?.reason.equals("resume_in_progress", ignoreCase = true)
+        return if (shouldResumeServerProgress) {
+            episode?.playbackTargetId?.let { target ->
+                PlaybackRouteContract(
+                    targetMediaId = target,
+                    logicalMediaId = episode.id,
+                    mediaType = BrowseMediaType.Episode,
+                    startPositionSeconds = null,
+                    startOver = false,
+                    sourceDetailRoute = sourceRoute.toRouteString(),
+                )
+            }
+        } else {
+            episode?.let { episodeStartOver(it, sourceRoute) }
+        }
     }
 
     fun seriesStartOver(series: SeriesBundleDetail, sourceRoute: MediaRouteArgs): PlaybackRouteContract? =

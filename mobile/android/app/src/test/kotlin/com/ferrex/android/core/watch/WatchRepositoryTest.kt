@@ -33,6 +33,28 @@ class WatchRepositoryTest {
     }
 
     @Test
+    fun successfulClearProgressCommitsUnwatchedStateAndInvalidatesWatchState() = runTest {
+        val transport = FakeWatchStateTransport()
+        val bus = WatchStateInvalidationBus()
+        val repository = WatchRepository(transport, bus, UnconfinedTestDispatcher(testScheduler))
+        val events = mutableListOf<WatchStateInvalidation>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            bus.events.take(1).toList(events)
+        }
+        transport.mediaProgress = ApiResult.Success(WatchMediaProgress("movie-id", positionSeconds = 30.0, durationSeconds = 300.0))
+        repository.refreshMediaProgress("movie-id")
+
+        val result = repository.clearProgress("movie-id")
+
+        assertTrue(result is ApiResult.Success)
+        val progress = repository.state.value.media["movie-id"]!!
+        assertFalse(progress.isStarted)
+        assertFalse(progress.isCompleted)
+        assertFalse(progress.pendingMutation)
+        assertEquals("progress cleared:movie-id", events.single().reason)
+    }
+
+    @Test
     fun successfulEpisodeMutationCommitsOptimisticStateAndInvalidatesWatchState() = runTest {
         val transport = FakeWatchStateTransport()
         val bus = WatchStateInvalidationBus()
@@ -94,6 +116,7 @@ class WatchRepositoryTest {
             WatchSeriesStatus(0, 0, 0, 0, emptyMap(), null),
         )
         var nextEpisode: ApiResult<WatchNextEpisode?> = ApiResult.Success(null)
+        var clearProgressMutation: ApiResult<Unit> = ApiResult.Success(Unit)
         var movieMutation: ApiResult<Unit> = ApiResult.Success(Unit)
         var episodeMutation: ApiResult<Unit> = ApiResult.Success(Unit)
         var seriesMutation: ApiResult<Unit> = ApiResult.Success(Unit)
@@ -102,6 +125,7 @@ class WatchRepositoryTest {
         override suspend fun fetchWatchState(): ApiResult<WatchStateSnapshot> = watchState
         override suspend fun fetchSeriesWatchStatus(tmdbSeriesId: Long): ApiResult<WatchSeriesStatus> = seriesStatus
         override suspend fun fetchSeriesNextEpisode(tmdbSeriesId: Long): ApiResult<WatchNextEpisode?> = nextEpisode
+        override suspend fun clearProgress(mediaId: String): ApiResult<Unit> = clearProgressMutation
         override suspend fun markMovieWatched(mediaId: String, watched: Boolean): ApiResult<Unit> = movieMutation
         override suspend fun markEpisodeWatched(mediaId: String, watched: Boolean): ApiResult<Unit> = episodeMutation
         override suspend fun markSeriesWatched(tmdbSeriesId: Long, watched: Boolean): ApiResult<Unit> = seriesMutation
