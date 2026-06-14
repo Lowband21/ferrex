@@ -4,7 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -12,6 +15,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ferrex.android.core.auth.AuthManager
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.browse.LibraryIndexTransport
+import com.ferrex.android.core.diagnostics.AndroidDiagnosticsCore
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
@@ -23,6 +27,7 @@ import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.WatchRepository
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
+import com.ferrex.android.ui.diagnostics.PhoneDiagnosticsScreen
 import com.ferrex.android.ui.home.PhoneHomeScreen
 import com.ferrex.android.ui.recovery.PhoneLoadingScreen
 import com.ferrex.android.ui.recovery.PhoneLoginScreen
@@ -55,12 +60,22 @@ fun FerrexNavGraph(
     playbackProgressReporter: PlaybackProgressReporter? = null,
     playbackResumeProgressProvider: PlaybackResumeProgressProvider? = null,
     streamingHttpClient: OkHttpClient? = null,
+    diagnostics: AndroidDiagnosticsCore? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
     val retryScope = rememberCoroutineScope()
+    var diagnosticsOpen by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         authManager.initialize()
+    }
+
+    if (diagnosticsOpen) {
+        PhoneDiagnosticsScreen(
+            diagnostics = diagnostics,
+            onBack = { diagnosticsOpen = false },
+        )
+        return
     }
 
     NavHost(navController = navController, startDestination = FerrexRoutes.LOADING) {
@@ -84,6 +99,7 @@ fun FerrexNavGraph(
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
+                    onOpenDiagnostics = { diagnosticsOpen = true },
                 )
             }
         }
@@ -98,6 +114,7 @@ fun FerrexNavGraph(
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
+                    onOpenDiagnostics = { diagnosticsOpen = true },
                 )
             }
         }
@@ -126,6 +143,7 @@ fun FerrexNavGraph(
                     onResetConnection = authManager::resetConnection,
                     onRetryConnection = authManager::retryAuthenticatedConnection,
                     onPlaybackSessionInvalidated = authManager::invalidateSessionFromPlayback,
+                    onOpenDiagnostics = { diagnosticsOpen = true },
                 )
             }
         }

@@ -162,6 +162,7 @@ fun TvLoginScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val isFatal = state.reason == LoginRequiredReason.SetupRequired ||
         state.reason == LoginRequiredReason.RegistrationClosed
@@ -286,6 +287,7 @@ fun TvLoginScreen(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
         TvMessage(message)
     }
@@ -298,6 +300,7 @@ fun TvRecoverableScreen(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     TvScaffold {
         TvTitle(recoverableTitle(state.reason), "Current server: ${state.serverUrl}")
@@ -310,6 +313,7 @@ fun TvRecoverableScreen(
             onSignOut = onSignOut,
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
     }
 }
@@ -324,6 +328,7 @@ private fun TvRecoveryActions(
     onSignOut: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val restorer = focusRestorer ?: rememberTvFocusRestorer(screenKey)
     Spacer(Modifier.height(32.dp))
@@ -362,6 +367,14 @@ private fun TvRecoveryActions(
                     label = "Reset connection",
                     role = TvActionRole.Destructive,
                     onSelect = onResetConnection,
+                ),
+            )
+            add(
+                TvActionPanelAction(
+                    key = "diagnostics",
+                    label = "Diagnostics / Export diagnostics",
+                    role = TvActionRole.SettingsExit,
+                    onSelect = onOpenDiagnostics,
                 ),
             )
         },

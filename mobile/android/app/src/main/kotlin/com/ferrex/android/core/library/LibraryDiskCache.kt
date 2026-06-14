@@ -162,6 +162,25 @@ class LibraryDiskCache(
         return scopeDir(scope)
     }
 
+    fun diagnosticSnapshot(scope: ServerCacheScope): LibraryDiskCacheDiagnostics {
+        ensureScope(scope)
+        val scoped = scopeDir(scope)
+        val files = scoped.walkTopDown().filter { it.isFile }.toList()
+        val libraryRoot = librariesDir(scope)
+        val libraryDirectories = libraryRoot.listFiles { file -> file.isDirectory }?.size ?: 0
+        return LibraryDiskCacheDiagnostics(
+            scopeDirectoryName = scope.directoryName,
+            relativeScopePath = "library_cache/v1/scopes/${scope.directoryName}",
+            approximateBytes = files.sumOf { it.length() },
+            libraryListPresent = libraryListFile(scope).exists(),
+            libraryDirectoryCount = libraryDirectories,
+            cachedMovieBatchFiles = files.count { file -> file.extension == "fb" && file.parentFile?.name == "batches" },
+            cachedSeriesBundleFiles = files.count { file -> file.extension == "fb" && file.parentFile?.name == "bundles" },
+            quarantineFileCount = files.count { file -> file.extension == "fb" && file.parentFile?.name == "quarantine" },
+            staleOfflineMarkerPresent = staleOfflineFile(scope).exists(),
+        )
+    }
+
     fun quarantinedFiles(scope: ServerCacheScope): List<File> {
         val dir = quarantineDir(scope)
         return dir.listFiles { file -> file.isFile && file.extension == "fb" }?.toList().orEmpty()
@@ -302,6 +321,18 @@ class LibraryDiskCache(
         fun fromContext(context: Context): LibraryDiskCache = LibraryDiskCache(File(context.filesDir, "library_cache"))
     }
 }
+
+data class LibraryDiskCacheDiagnostics(
+    val scopeDirectoryName: String,
+    val relativeScopePath: String,
+    val approximateBytes: Long,
+    val libraryListPresent: Boolean,
+    val libraryDirectoryCount: Int,
+    val cachedMovieBatchFiles: Int,
+    val cachedSeriesBundleFiles: Int,
+    val quarantineFileCount: Int,
+    val staleOfflineMarkerPresent: Boolean,
+)
 
 data class CachedPayload<T>(
     val id: T,

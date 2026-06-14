@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.ferrex.android.core.di.AndroidAuthDependencies
+import com.ferrex.android.core.diagnostics.AndroidDisplayDiagnostics
 import com.ferrex.android.tv.navigation.TvFerrexNavGraph
 import com.ferrex.android.ui.theme.FerrexTheme
 
@@ -17,6 +18,7 @@ class TvMainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AndroidDisplayDiagnostics.logCurrentDisplay(this, window)
         setContent {
             FerrexTheme(tv = true) {
                 TvFerrexNavGraph(
@@ -34,6 +36,7 @@ class TvMainActivity : ComponentActivity() {
                     playbackProgressReporter = dependencies.playbackProgressReporter,
                     playbackResumeProgressProvider = dependencies.playbackResumeProgressProvider,
                     streamingHttpClient = dependencies.streamingHttpClient,
+                    diagnostics = dependencies.diagnostics,
                 )
             }
         }
