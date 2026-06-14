@@ -1,21 +1,185 @@
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
-    response::Response,
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use chrono::Utc;
 use ferrex_core::api::types::ApiResponse;
+use ferrex_core::database::repository_ports::media_files::PlaybackMediaSource;
 use ferrex_core::domain::users::auth::domain::value_objects::SessionScope;
 use ferrex_core::domain::{users::user::User, watch::UpdateProgressRequest};
 use ferrex_model::VideoMediaType;
 use serde::Deserialize;
 use serde::Serialize;
+use std::io::ErrorKind;
+
 use tokio_util::io::ReaderStream;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::infra::app_state::AppState;
+
+const MEDIA_ERROR_HEADER: HeaderName = HeaderName::from_static("x-media-error");
+const CACHE_CONTROL_PRIVATE_NO_STORE: HeaderValue =
+    HeaderValue::from_static("private, no-store");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaybackHttpError {
+    status: StatusCode,
+    media_error: Option<&'static str>,
+    message: &'static str,
+}
+
+impl PlaybackHttpError {
+    const fn typed(
+        status: StatusCode,
+        media_error: &'static str,
+        message: &'static str,
+    ) -> Self {
+        Self {
+            status,
+            media_error: Some(media_error),
+            message,
+        }
+    }
+
+    const fn plain(status: StatusCode, message: &'static str) -> Self {
+        Self {
+            status,
+            media_error: None,
+            message,
+        }
+    }
+
+    const fn missing_token() -> Self {
+        Self::plain(StatusCode::UNAUTHORIZED, "Missing token")
+    }
+
+    const fn invalid_token() -> Self {
+        Self::plain(StatusCode::UNAUTHORIZED, "Invalid token")
+    }
+
+    const fn media_not_found() -> Self {
+        Self::typed(
+            StatusCode::NOT_FOUND,
+            "media-not-found",
+            "Media not found.",
+        )
+    }
+
+    const fn media_unavailable() -> Self {
+        Self::typed(
+            StatusCode::GONE,
+            "media-unavailable",
+            "This media file is no longer available in the library.",
+        )
+    }
+
+    const fn library_offline() -> Self {
+        Self::typed(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "library-offline",
+            "The media library root is offline.",
+        )
+    }
+
+    const fn file_missing() -> Self {
+        Self::typed(
+            StatusCode::NOT_FOUND,
+            "file-missing",
+            "The media file is missing on disk.",
+        )
+    }
+
+    const fn file_inaccessible() -> Self {
+        Self::typed(
+            StatusCode::FORBIDDEN,
+            "file-inaccessible",
+            "The media file exists but is not accessible.",
+        )
+    }
+
+    const fn internal() -> Self {
+        Self::typed(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "Ferrex could not prepare playback for this media.",
+        )
+    }
+
+    fn from_open_error(error: &std::io::Error) -> Self {
+        match error.kind() {
+            ErrorKind::NotFound => Self::file_missing(),
+            ErrorKind::PermissionDenied => Self::file_inaccessible(),
+            _ => Self::typed(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "file-inaccessible",
+                "The media file could not be opened for streaming.",
+            ),
+        }
+    }
+}
+
+impl IntoResponse for PlaybackHttpError {
+    fn into_response(self) -> Response {
+        let mut response = (
+            self.status,
+            Json(ApiResponse::<()>::error(self.message.to_string())),
+        )
+            .into_response();
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, CACHE_CONTROL_PRIVATE_NO_STORE);
+        if let Some(media_error) = self.media_error {
+            response.headers_mut().insert(
+                MEDIA_ERROR_HEADER,
+                HeaderValue::from_static(media_error),
+            );
+        }
+        response
+    }
+}
+
+async fn load_playback_source(
+    state: &AppState,
+    media_id: Uuid,
+) -> Result<PlaybackMediaSource, PlaybackHttpError> {
+    state
+        .unit_of_work()
+        .media_files_read
+        .get_playback_source_by_id(&media_id)
+        .await
+        .map_err(|err| {
+            error!(?err, %media_id, "failed to load playback media source");
+            PlaybackHttpError::internal()
+        })?
+        .ok_or_else(PlaybackHttpError::media_not_found)
+}
+
+fn ensure_playback_source_available(
+    state: &AppState,
+    source: &PlaybackMediaSource,
+) -> Result<(), PlaybackHttpError> {
+    if !source.is_available {
+        warn!(media_id = %source.id, "playback requested unavailable media file");
+        return Err(PlaybackHttpError::media_unavailable());
+    }
+
+    if !source.path.exists() {
+        warn!(media_id = %source.id, path = ?source.path, "playback file not found on disk");
+        if let Some(media_root) = state.config().media.root.as_ref()
+            && !media_root.exists()
+        {
+            warn!(media_root = ?media_root, "media library root is offline");
+            return Err(PlaybackHttpError::library_offline());
+        }
+
+        return Err(PlaybackHttpError::file_missing());
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ProgressReport {
@@ -35,7 +199,7 @@ pub async fn stream_with_progress_handler(
     Path(media_id): Path<Uuid>,
     headers: HeaderMap,
     Query(query): Query<StreamAuthQuery>,
-) -> Result<Response, (StatusCode, String)> {
+) -> Result<Response, PlaybackHttpError> {
     debug!("stream request");
     debug!("Requested media ID: {}", media_id);
 
@@ -56,54 +220,19 @@ pub async fn stream_with_progress_handler(
             },
             Err(err) => {
                 warn!("Stream token validation failed: {:?}", err);
-                return Err((StatusCode::UNAUTHORIZED, "Invalid token".into()));
+                return Err(PlaybackHttpError::invalid_token());
             }
         }
     } else {
-        return Err((StatusCode::UNAUTHORIZED, "Missing token".into()));
+        return Err(PlaybackHttpError::missing_token());
     }
 
-    // Fetch media metadata
-    let media_file = state
-        .unit_of_work()
-        .media_files_read
-        .get_by_id(&media_id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error retrieving media {}: {}", media_id, e),
-            )
-        })?
-        .ok_or_else(|| {
-            (StatusCode::NOT_FOUND, "Media not found".to_string())
-        })?;
-
+    let media_file = load_playback_source(&state, media_id).await?;
     debug!(
-        "Found media file: {:?} (path: {:?})",
+        "Found playback source: {:?} (path: {:?})",
         media_file.filename, media_file.path
     );
-
-    if !media_file.path.exists() {
-        warn!("Media file not found on disk: {:?}", media_file.path);
-
-        if let Some(media_root) = state.config().media.root.as_ref()
-            && !media_root.exists()
-        {
-            warn!("Media library root is offline: {:?}", media_root);
-            return Ok(Response::builder()
-                .status(StatusCode::SERVICE_UNAVAILABLE)
-                .header("X-Media-Error", "library-offline")
-                .body(axum::body::Body::empty())
-                .expect("failed to build SERVICE_UNAVAILABLE response"));
-        }
-
-        return Ok(Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header("X-Media-Error", "file-missing")
-            .body(axum::body::Body::empty())
-            .expect("failed to build NOT_FOUND response"));
-    }
+    ensure_playback_source_available(&state, &media_file)?;
 
     let file_size = media_file.size;
     let extension = media_file.path.extension().and_then(|ext| ext.to_str());
@@ -127,10 +256,7 @@ pub async fn stream_with_progress_handler(
 
     let file = tokio::fs::File::open(&media_file.path).await.map_err(|e| {
         warn!("Failed to open file {:?}: {}", media_file.path, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Media file not accessible".to_string(),
-        )
+        PlaybackHttpError::from_open_error(&e)
     })?;
 
     if let Some(range_header) = headers.get(header::RANGE)
@@ -143,10 +269,7 @@ pub async fn stream_with_progress_handler(
         let mut file = file;
         if let Err(e) = file.seek(std::io::SeekFrom::Start(range.start)).await {
             warn!("Failed to seek in file: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to seek in media file".to_string(),
-            ));
+            return Err(PlaybackHttpError::internal());
         }
 
         let content_length = range.end - range.start + 1;
@@ -202,26 +325,21 @@ pub async fn playback_ticket_handler(
     Extension(user): Extension<User>,
     Extension(device_session_id): Extension<Option<Uuid>>,
     Path(media_id): Path<Uuid>,
-) -> Result<axum::Json<ApiResponse<PlaybackTicketResponse>>, (StatusCode, String)>
+) -> Result<axum::Json<ApiResponse<PlaybackTicketResponse>>, PlaybackHttpError>
 {
-    // Optionally ensure the requested media exists to avoid issuing tokens for unknown items
-    if state
-        .unit_of_work()
-        .media_files_read
-        .get_by_id(&media_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .is_none()
-    {
-        return Err((StatusCode::NOT_FOUND, "Media not found".into()));
-    }
+    let media_file = load_playback_source(&state, media_id).await?;
+    ensure_playback_source_available(&state, &media_file)?;
+
     // Lifetime: 6 hours — long enough for extended playback/seeks
     let lifetime = chrono::Duration::hours(6);
     let token = state
         .auth_service()
         .issue_playback_session(user.id, device_session_id, lifetime)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|err| {
+            error!(?err, %media_id, user_id = %user.id, "failed to issue playback ticket");
+            PlaybackHttpError::internal()
+        })?;
 
     let expires_in = (token.expires_at() - Utc::now()).num_seconds().max(0);
     let body = PlaybackTicketResponse {
