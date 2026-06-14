@@ -15,6 +15,10 @@ import com.ferrex.android.core.browse.LibraryIndexTransport
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
+import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.WatchRepository
@@ -25,6 +29,7 @@ import com.ferrex.android.ui.recovery.PhoneLoginScreen
 import com.ferrex.android.ui.recovery.PhoneRecoverableScreen
 import com.ferrex.android.ui.recovery.PhoneServerConnectScreen
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 object FerrexRoutes {
     const val LOADING = "loading"
@@ -45,6 +50,11 @@ fun FerrexNavGraph(
     continueWatchingRepository: ContinueWatchingRepository? = null,
     watchRepository: WatchRepository? = null,
     watchStateInvalidationBus: WatchStateInvalidationBus? = null,
+    playbackTicketTransport: PlaybackTicketTransport? = null,
+    playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
+    playbackProgressReporter: PlaybackProgressReporter? = null,
+    playbackResumeProgressProvider: PlaybackResumeProgressProvider? = null,
+    streamingHttpClient: OkHttpClient? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -106,9 +116,15 @@ fun FerrexNavGraph(
                     continueWatchingRepository = continueWatchingRepository,
                     watchRepository = watchRepository,
                     watchStateInvalidationBus = watchStateInvalidationBus,
+                    playbackTicketTransport = playbackTicketTransport,
+                    playbackStreamUrlFactory = playbackStreamUrlFactory,
+                    playbackProgressReporter = playbackProgressReporter,
+                    playbackResumeProgressProvider = playbackResumeProgressProvider,
+                    streamingHttpClient = streamingHttpClient,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
+                    onPlaybackSessionInvalidated = authManager::invalidateSessionFromPlayback,
                 )
             }
         }

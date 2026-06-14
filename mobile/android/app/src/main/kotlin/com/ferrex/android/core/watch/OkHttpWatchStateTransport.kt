@@ -50,6 +50,10 @@ class OkHttpWatchStateTransport(
         Routes.seriesNext(tmdbSeriesId),
     ).mapSuccessNullable { it?.toDomain() }
 
+    override suspend fun clearProgress(mediaId: String): ApiResult<Unit> = delete(
+        path = Routes.clearProgress(mediaId),
+    )
+
     override suspend fun markMovieWatched(mediaId: String, watched: Boolean): ApiResult<Unit> = mutate(
         path = Routes.movieWatched(mediaId),
         watched = watched,
@@ -80,7 +84,15 @@ class OkHttpWatchStateTransport(
         } else {
             builder.delete().build()
         }
-        try {
+        executeUnit(request)
+    }
+
+    private suspend fun delete(path: String): ApiResult<Unit> = withContext(ioDispatcher) {
+        executeUnit(requestBuilder(path).delete().build())
+    }
+
+    private fun executeUnit(request: Request): ApiResult<Unit> {
+        return try {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     ApiResult.HttpError(response.code, response.message.ifBlank { "HTTP ${response.code}" })
@@ -138,6 +150,7 @@ class OkHttpWatchStateTransport(
     object Routes {
         const val WATCH_STATE = "/api/v1/watch/state"
         fun mediaProgress(mediaId: String): String = "/api/v1/media/$mediaId/progress"
+        fun clearProgress(mediaId: String): String = "/api/v1/watch/progress/$mediaId"
         fun movieWatched(mediaId: String): String = "/api/v1/watch/movies/$mediaId/watched"
         fun episodeWatched(mediaId: String): String = "/api/v1/watch/episodes/$mediaId/watched"
         fun seriesWatched(tmdbSeriesId: Long): String = "/api/v1/watch/series/$tmdbSeriesId/watched"

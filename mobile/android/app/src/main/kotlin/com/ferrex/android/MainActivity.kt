@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
                     watchRepository = dependencies.watchRepository,
                     watchStateInvalidationBus = dependencies.watchStateInvalidationBus,
                     searchRepository = dependencies.searchRepository,
+                    playbackTicketTransport = dependencies.playbackTicketTransport,
+                    playbackStreamUrlFactory = dependencies.playbackStreamUrlFactory,
+                    playbackProgressReporter = dependencies.playbackProgressReporter,
+                    playbackResumeProgressProvider = dependencies.playbackResumeProgressProvider,
+                    streamingHttpClient = dependencies.streamingHttpClient,
                 )
             }
         }

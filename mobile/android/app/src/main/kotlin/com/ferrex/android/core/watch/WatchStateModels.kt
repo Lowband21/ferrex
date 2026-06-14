@@ -44,6 +44,7 @@ data class WatchMediaProgress(
     }
 
     val isStarted: Boolean = progressRatio > 0f && !isCompleted
+    val hasServerState: Boolean = isStarted || isCompleted || positionSeconds > 0.0 || percentage > 0.0
 
     companion object {
         fun unwatched(mediaId: String, pendingMutation: Boolean = false): WatchMediaProgress = WatchMediaProgress(
@@ -175,6 +176,7 @@ interface WatchStateTransport {
     suspend fun fetchWatchState(): ApiResult<WatchStateSnapshot>
     suspend fun fetchSeriesWatchStatus(tmdbSeriesId: Long): ApiResult<WatchSeriesStatus>
     suspend fun fetchSeriesNextEpisode(tmdbSeriesId: Long): ApiResult<WatchNextEpisode?>
+    suspend fun clearProgress(mediaId: String): ApiResult<Unit>
     suspend fun markMovieWatched(mediaId: String, watched: Boolean): ApiResult<Unit>
     suspend fun markEpisodeWatched(mediaId: String, watched: Boolean): ApiResult<Unit>
     suspend fun markSeriesWatched(tmdbSeriesId: Long, watched: Boolean): ApiResult<Unit>
@@ -226,6 +228,10 @@ class WatchRepository(
         publish(nextUpdated)
     }
 
+    suspend fun clearProgress(mediaId: String): ApiResult<Unit> = mutateMediaProgressClear(mediaId) {
+        transport.clearProgress(mediaId)
+    }
+
     suspend fun markMovieWatched(mediaId: String, watched: Boolean): ApiResult<Unit> = mutateMedia(
         mediaId = mediaId,
         watched = watched,
@@ -256,6 +262,31 @@ class WatchRepository(
             }
             else -> {
                 publish(previous.copy(lastError = result.messageOrFallback("Unable to update series watch state")))
+                result
+            }
+        }
+    }
+
+    private suspend fun mutateMediaProgressClear(
+        mediaId: String,
+        call: suspend () -> ApiResult<Unit>,
+    ): ApiResult<Unit> = withContext(ioDispatcher) {
+        val previous = _state.value
+        val optimistic = WatchMediaProgress.unwatched(mediaId, pendingMutation = true)
+        publish(previous.copy(media = previous.media + (mediaId to optimistic), lastError = null))
+        when (val result = call()) {
+            is ApiResult.Success -> {
+                publish(
+                    _state.value.copy(
+                        media = _state.value.media + (mediaId to optimistic.copy(pendingMutation = false)),
+                        lastError = null,
+                    ),
+                )
+                invalidationBus.notifyWatchStateChanged("progress cleared:$mediaId")
+                result
+            }
+            else -> {
+                publish(previous.copy(lastError = result.messageOrFallback("Unable to clear watch progress")))
                 result
             }
         }

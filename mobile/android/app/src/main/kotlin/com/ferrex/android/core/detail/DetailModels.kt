@@ -9,6 +9,7 @@ import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.SeriesBundleAccessor
 import com.ferrex.android.core.library.toUuidString
+import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
 import ferrex.details.EnhancedMovieDetails
@@ -158,32 +159,6 @@ val MovieDetail.playbackTargetId: String?
 val EpisodeDetail.playbackTargetId: String?
     get() = fileId ?: id
 
-data class PlaybackRouteContract(
-    val targetMediaId: String,
-    val logicalMediaId: String,
-    val mediaType: BrowseMediaType,
-    val startPositionSeconds: Double?,
-    val startOver: Boolean,
-    val sourceDetailRoute: String,
-) {
-    fun toDisplayString(): String = buildString {
-        append(mediaType.routeValue)
-        append(" target=")
-        append(targetMediaId)
-        append(" logical=")
-        append(logicalMediaId)
-        if (startOver) {
-            append(" start-over")
-        } else {
-            append(" position=")
-            append(startPositionSeconds ?: 0.0)
-            append('s')
-        }
-        append(" source=")
-        append(sourceDetailRoute)
-    }
-}
-
 object DetailRouteContracts {
     fun movieResume(movie: MovieDetail, progress: WatchMediaProgress?, sourceRoute: MediaRouteArgs): PlaybackRouteContract? {
         if (progress == null || progress.isCompleted || progress.positionSeconds <= 0.0) return null
@@ -243,7 +218,21 @@ object DetailRouteContracts {
                 it.seasonNumber == key.seasonNumber && it.episodeNumber == key.episodeNumber
             }
         } ?: series.firstPlayableEpisode
-        return episode?.let { episodeStartOver(it, sourceRoute) }
+        val shouldResumeServerProgress = nextEpisode?.reason.equals("resume_in_progress", ignoreCase = true)
+        return if (shouldResumeServerProgress) {
+            episode?.playbackTargetId?.let { target ->
+                PlaybackRouteContract(
+                    targetMediaId = target,
+                    logicalMediaId = episode.id,
+                    mediaType = BrowseMediaType.Episode,
+                    startPositionSeconds = null,
+                    startOver = false,
+                    sourceDetailRoute = sourceRoute.toRouteString(),
+                )
+            }
+        } else {
+            episode?.let { episodeStartOver(it, sourceRoute) }
+        }
     }
 
     fun seriesStartOver(series: SeriesBundleDetail, sourceRoute: MediaRouteArgs): PlaybackRouteContract? =

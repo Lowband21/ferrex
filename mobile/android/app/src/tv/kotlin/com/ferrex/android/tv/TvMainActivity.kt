@@ -24,6 +24,10 @@ class TvMainActivity : ComponentActivity() {
                     libraryRepository = dependencies.libraryRepository,
                     imageRepository = dependencies.imageRepository,
                     imagePipeline = dependencies.imagePipeline,
+                    playbackTicketTransport = dependencies.playbackTicketTransport,
+                    playbackStreamUrlFactory = dependencies.playbackStreamUrlFactory,
+                    playbackProgressReporter = dependencies.playbackProgressReporter,
+                    streamingHttpClient = dependencies.streamingHttpClient,
                 )
             }
         }

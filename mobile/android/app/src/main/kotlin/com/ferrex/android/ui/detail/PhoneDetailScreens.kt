@@ -38,7 +38,7 @@ import com.ferrex.android.core.detail.DetailRouteContracts
 import com.ferrex.android.core.detail.EpisodeDetail
 import com.ferrex.android.core.detail.EpisodesAvailability
 import com.ferrex.android.core.detail.MovieDetail
-import com.ferrex.android.core.detail.PlaybackRouteContract
+import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.detail.SeriesBundleDetail
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
@@ -67,6 +67,7 @@ fun PhoneDetailScreen(
     onResetConnection: () -> Unit,
     onRetryWatch: () -> Unit,
     onRetryEpisodes: () -> Unit,
+    onClearProgress: (String) -> Unit,
     onMarkMovieWatched: (String, Boolean) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onMarkSeriesWatched: (Long, Boolean) -> Unit,
@@ -96,6 +97,7 @@ fun PhoneDetailScreen(
                         imageLoader = imageLoader,
                         scope = scope,
                         onRetryWatch = onRetryWatch,
+                        onClearProgress = onClearProgress,
                         onMarkMovieWatched = onMarkMovieWatched,
                         onPlaybackContract = onPlaybackContract,
                     )
@@ -129,6 +131,7 @@ fun PhoneDetailScreen(
                                 imageLoaderAvailable = imageLoaderAvailable,
                                 imageLoader = imageLoader,
                                 scope = scope,
+                                onClearProgress = onClearProgress,
                                 onMarkEpisodeWatched = onMarkEpisodeWatched,
                                 onPlaybackContract = onPlaybackContract,
                             )
@@ -145,6 +148,7 @@ fun PhoneDetailScreen(
                         imageLoaderAvailable = imageLoaderAvailable,
                         imageLoader = imageLoader,
                         scope = scope,
+                        onClearProgress = onClearProgress,
                         onMarkEpisodeWatched = onMarkEpisodeWatched,
                         onPlaybackContract = onPlaybackContract,
                     )
@@ -189,6 +193,7 @@ private fun MovieDetailContent(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     onRetryWatch: () -> Unit,
+    onClearProgress: (String) -> Unit,
     onMarkMovieWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
 ) {
@@ -221,6 +226,8 @@ private fun MovieDetailContent(
         WatchMutationButtons(
             watched = progress?.isCompleted == true,
             pending = progress?.pendingMutation == true,
+            showClearProgress = progress?.hasServerState == true,
+            onClearProgress = { onClearProgress(movie.id) },
             onSetWatched = { onMarkMovieWatched(movie.id, it) },
         )
         movie.fileName?.let { Text("Target file: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -297,6 +304,7 @@ private fun EpisodeRow(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    onClearProgress: (String) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
 ) {
@@ -333,6 +341,8 @@ private fun EpisodeRow(
                 WatchMutationButtons(
                     watched = watched,
                     pending = progress?.pendingMutation == true,
+                    showClearProgress = progress?.hasServerState == true,
+                    onClearProgress = { onClearProgress(episode.id) },
                     onSetWatched = { onMarkEpisodeWatched(episode.id, it) },
                 )
             }
@@ -350,6 +360,7 @@ private fun EpisodeStandaloneContent(
     imageLoaderAvailable: Boolean,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    onClearProgress: (String) -> Unit,
     onMarkEpisodeWatched: (String, Boolean) -> Unit,
     onPlaybackContract: (PlaybackRouteContract) -> Unit,
 ) {
@@ -377,6 +388,8 @@ private fun EpisodeStandaloneContent(
         WatchMutationButtons(
             watched = progress?.isCompleted == true,
             pending = progress?.pendingMutation == true,
+            showClearProgress = progress?.hasServerState == true,
+            onClearProgress = { onClearProgress(episode.id) },
             onSetWatched = { onMarkEpisodeWatched(episode.id, it) },
         )
     }
@@ -449,6 +462,8 @@ private fun SeriesWatchCard(
 private fun WatchMutationButtons(
     watched: Boolean,
     pending: Boolean,
+    showClearProgress: Boolean = false,
+    onClearProgress: (() -> Unit)? = null,
     onSetWatched: (Boolean) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -456,6 +471,9 @@ private fun WatchMutationButtons(
             OutlinedButton(enabled = !pending, onClick = { onSetWatched(false) }) { Text(if (pending) "Updating…" else "Mark unwatched") }
         } else {
             Button(enabled = !pending, onClick = { onSetWatched(true) }) { Text(if (pending) "Updating…" else "Mark watched") }
+        }
+        if (showClearProgress && onClearProgress != null) {
+            TextButton(enabled = !pending, onClick = onClearProgress) { Text("Clear progress") }
         }
     }
 }

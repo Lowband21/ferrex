@@ -14,6 +14,9 @@ import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.library.LibraryRepository
+import com.ferrex.android.core.playback.PlaybackProgressReporter
+import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.navigation.FerrexRoutes
 import com.ferrex.android.tv.ui.TvHomeScreen
 import com.ferrex.android.tv.ui.TvLoadingScreen
@@ -21,6 +24,7 @@ import com.ferrex.android.tv.ui.TvLoginScreen
 import com.ferrex.android.tv.ui.TvRecoverableScreen
 import com.ferrex.android.tv.ui.TvServerConnectScreen
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 @Composable
 fun TvFerrexNavGraph(
@@ -28,6 +32,10 @@ fun TvFerrexNavGraph(
     libraryRepository: LibraryRepository? = null,
     imageRepository: ImageRepository? = null,
     imagePipeline: FerrexImagePipeline? = null,
+    playbackTicketTransport: PlaybackTicketTransport? = null,
+    playbackStreamUrlFactory: PlaybackStreamUrlFactory? = null,
+    playbackProgressReporter: PlaybackProgressReporter? = null,
+    streamingHttpClient: OkHttpClient? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val sessionState by authManager.sessionState.collectAsState()
@@ -84,9 +92,14 @@ fun TvFerrexNavGraph(
                     libraryRepository = libraryRepository,
                     imageRepository = imageRepository,
                     imagePipeline = imagePipeline,
+                    playbackTicketTransport = playbackTicketTransport,
+                    playbackStreamUrlFactory = playbackStreamUrlFactory,
+                    playbackProgressReporter = playbackProgressReporter,
+                    streamingHttpClient = streamingHttpClient,
                     onSignOut = authManager::signOut,
                     onChangeServer = authManager::changeServer,
                     onResetConnection = authManager::resetConnection,
+                    onPlaybackSessionInvalidated = authManager::invalidateSessionFromPlayback,
                 )
             }
         }

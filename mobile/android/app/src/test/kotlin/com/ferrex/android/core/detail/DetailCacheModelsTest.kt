@@ -13,7 +13,9 @@ import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.MovieLibraryAccessor
 import com.ferrex.android.core.library.SeriesLibraryAccessor
 import com.ferrex.android.core.library.toFlatBufferUuid
+import com.ferrex.android.core.watch.WatchEpisodeKey
 import com.ferrex.android.core.watch.WatchMediaProgress
+import com.ferrex.android.core.watch.WatchNextEpisode
 import com.google.flatbuffers.FlatBufferBuilder
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
@@ -30,6 +32,7 @@ import ferrex.media.SeasonReference
 import ferrex.media.SeriesReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -82,6 +85,32 @@ class DetailCacheModelsTest {
         assertTrue(actions.clearSelectedCache)
         assertTrue(actions.changeServer)
         assertTrue(actions.resetConnection)
+    }
+
+    @Test
+    fun seriesNextResumeReasonBuildsServerResumeContract() {
+        val ids = Ids()
+        val library = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
+        val state = LibraryRepositoryState(
+            seriesLibraries = listOf(CachedSeriesLibrary(library, SeriesLibraryAccessor(seriesPayload(ids, includeEpisode = true)))),
+        )
+        val route = MediaRouteArgs(BrowseMediaType.Series, ids.series.toString(), library.id, BrowseSourceSurface.LibraryGrid)
+        val result = DetailCache.resolve(state, route) as DetailLoadResult.Series
+
+        val contract = DetailRouteContracts.seriesNext(
+            series = result.detail,
+            nextEpisode = WatchNextEpisode(
+                key = WatchEpisodeKey(tmdbSeriesId = 1234, seasonNumber = 1, episodeNumber = 1),
+                playableMediaId = ids.episodeFile.toString(),
+                reason = "resume_in_progress",
+            ),
+            sourceRoute = route,
+        )!!
+
+        assertEquals(ids.episodeFile.toString(), contract.targetMediaId)
+        assertEquals(ids.episode.toString(), contract.logicalMediaId)
+        assertFalse(contract.startOver)
+        assertNull(contract.startPositionSeconds)
     }
 
     @Test

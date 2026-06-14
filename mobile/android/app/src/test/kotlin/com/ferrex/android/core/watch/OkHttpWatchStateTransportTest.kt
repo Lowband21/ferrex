@@ -64,12 +64,17 @@ class OkHttpWatchStateTransportTest {
             server.enqueue(MockResponse().setResponseCode(204))
             server.enqueue(MockResponse().setResponseCode(204))
             server.enqueue(MockResponse().setResponseCode(204))
+            server.enqueue(MockResponse().setResponseCode(204))
             val transport = transport(server)
 
+            assertTrue(transport.clearProgress("movie-id") is ApiResult.Success)
             assertTrue(transport.markMovieWatched("movie-id", watched = true) is ApiResult.Success)
             assertTrue(transport.markEpisodeWatched("episode-id", watched = false) is ApiResult.Success)
             assertTrue(transport.markSeriesWatched(1234, watched = true) is ApiResult.Success)
 
+            val clear = server.takeRequest()
+            assertEquals("DELETE", clear.method)
+            assertEquals("/api/v1/watch/progress/movie-id", clear.path)
             val movie = server.takeRequest()
             assertEquals("POST", movie.method)
             assertEquals("/api/v1/watch/movies/movie-id/watched", movie.path)
@@ -80,6 +85,23 @@ class OkHttpWatchStateTransportTest {
             assertEquals("POST", series.method)
             assertEquals("/api/v1/watch/series/1234/watched", series.path)
             assertFalse(movie.getHeader("Accept").orEmpty().contains("flatbuffers", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun authFailuresMapToHttpErrorsAfterAuthenticatorRecoveryIsExhausted() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(401).setBody("unauthorized"))
+            server.enqueue(MockResponse().setResponseCode(403).setBody("forbidden"))
+            val transport = transport(server)
+
+            val progress = transport.fetchMediaProgress("movie-id")
+            val mutation = transport.clearProgress("movie-id")
+
+            assertTrue(progress is ApiResult.HttpError)
+            assertEquals(401, (progress as ApiResult.HttpError).code)
+            assertTrue(mutation is ApiResult.HttpError)
+            assertEquals(403, (mutation as ApiResult.HttpError).code)
         }
     }
 
