@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO libraries (id, name, library_type, paths)\n            VALUES ($1, $2, 'movies', $3)\n            ON CONFLICT (id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b4861ef21ffc2c1338d267424e5868c98bc486ce6b30504ba781f7775e44c423"
+}

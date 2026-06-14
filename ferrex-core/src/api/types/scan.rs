@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use std::fmt;
 use uuid::Uuid;
 
+use crate::api::scan::IncrementalScanStatusView;
 use crate::types::ids::LibraryId;
 use crate::types::media_events::ScanProgressEvent;
 
@@ -80,6 +81,8 @@ impl fmt::Debug for ScanSnapshotDto {
 pub struct ActiveScansResponse {
     pub scans: Vec<ScanSnapshotDto>,
     pub count: usize,
+    #[serde(default)]
+    pub incremental: IncrementalScanStatusView,
 }
 
 /// Response for `/scans/latest-progress` endpoint

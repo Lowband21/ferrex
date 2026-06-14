@@ -262,9 +262,10 @@ impl ApiService for TestApiService {
             paths,
             scan_interval_minutes,
             enabled,
+            auto_scan,
+            watch_for_changes,
             movie_ref_batch_size,
-            start_scan,
-            ..
+            start_scan: _,
         } = request;
 
         let mut guard = self.inner.write().expect("lock poisoned");
@@ -276,8 +277,8 @@ impl ApiService for TestApiService {
             scan_interval_minutes,
             last_scan: None,
             enabled,
-            auto_scan: start_scan,
-            watch_for_changes: false,
+            auto_scan,
+            watch_for_changes,
             analyze_on_scan: false,
             max_retry_attempts: 3,
             movie_ref_batch_size: ferrex_model::MovieReferenceBatchSize::new(
@@ -304,6 +305,21 @@ impl ApiService for TestApiService {
         {
             if let Some(name) = request.name {
                 library.name = name;
+            }
+            if let Some(paths) = request.paths {
+                library.paths = paths.into_iter().map(PathBuf::from).collect();
+            }
+            if let Some(scan_interval_minutes) = request.scan_interval_minutes {
+                library.scan_interval_minutes = scan_interval_minutes;
+            }
+            if let Some(enabled) = request.enabled {
+                library.enabled = enabled;
+            }
+            if let Some(auto_scan) = request.auto_scan {
+                library.auto_scan = auto_scan;
+            }
+            if let Some(watch_for_changes) = request.watch_for_changes {
+                library.watch_for_changes = watch_for_changes;
             }
             if let Some(size) = request.movie_ref_batch_size {
                 library.movie_ref_batch_size =

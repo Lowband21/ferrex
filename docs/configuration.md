@@ -83,6 +83,65 @@ just start --mode tailscale
 
 `just start --mode tailscale` automatically overrides the container endpoints to `127.0.0.1` for Postgres and Redis inside the shared Tailnet namespace while keeping your base `.env` intact.
 
+## Scanner / Incremental Scans
+
+Scanner settings can be supplied in `scanner.toml`, `scanner.json`, `config/scanner.toml`, `config/scanner.json`, `SCANNER_CONFIG_PATH`, or inline JSON via `SCANNER_CONFIG_JSON`. Existing installs that do not provide a scanner config keep safe defaults: libraries auto-scan every 60 minutes, filesystem watching is enabled per library, and the watcher uses `auto` strategy with native notifications falling back to polling.
+
+Library create/update API payloads can override per-library policy:
+
+```json
+{
+  "name": "Movies",
+  "library_type": "Movies",
+  "paths": ["/media/movies"],
+  "scan_interval_minutes": 60,
+  "auto_scan": true,
+  "watch_for_changes": true
+}
+```
+
+Local filesystem example (low latency native watching):
+
+```toml
+video_extensions = ["mkv", "mp4", "avi", "mov", "webm", "m4v"]
+ignored_extensions = ["tmp", "part"]
+
+[orchestrator.watch]
+strategy = "auto"          # auto | native | poll
+debounce_window_ms = 250
+max_batch_events = 8192
+poll_interval_ms = 30000
+
+[orchestrator.maintenance]
+enabled = true
+tick_interval_ms = 60000
+max_jobs_per_library = 128
+max_root_entries_per_library = 512
+```
+
+Network/container mount example (prefer bounded polling over unreliable native events):
+
+```toml
+video_extensions = ["mkv", "mp4", "mpeg", "ts"]
+ignored_extensions = ["tmp", "part", "download"]
+ignored_path_patterns = ["**/.staging/**"]
+
+[orchestrator.watch]
+strategy = "poll"
+poll_interval_ms = 120000
+debounce_window_ms = 1000
+max_batch_events = 2048
+poll_backoff_max_ms = 600000
+
+[orchestrator.maintenance]
+enabled = true
+tick_interval_ms = 300000
+max_jobs_per_library = 64
+max_root_entries_per_library = 256
+```
+
+Invalid scanner config fails during startup with the field path in the error (for example, `scanner.orchestrator.watch.poll_interval_ms must be greater than 0`). Operators can inspect the effective policy and health counters via the scan config/metrics/status endpoints; these report watch strategy, poll/debounce/batch settings, maintenance sweep policy, media/ignore filters, watcher registrations, replay lag, stale cursor counts, and overflow events.
+
 ## Logging
 
 Control server verbosity via `--rust-log`:

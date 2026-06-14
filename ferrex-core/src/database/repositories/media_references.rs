@@ -20,6 +20,8 @@ use crate::{
     },
 };
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use ferrex_model::{MediaID, MovieBatchId};
 use num_bigint::BigUint;
@@ -58,12 +60,13 @@ impl PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.id = $1
+              AND mf.is_available = TRUE
             "#,
             movie_uuid
         )
@@ -112,12 +115,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                         mf.file_path,
                         mf.filename,
                         mf.file_size,
-                        mf.discovered_at AS file_discovered_at,
-                        mf.created_at AS file_created_at,
+                        mf.discovered_at AS "file_discovered_at!",
+                        mf.created_at AS "file_created_at!",
                         mf.technical_metadata
                     FROM movie_references mr
                     JOIN media_files mf ON mr.file_id = mf.id
                     WHERE mf.library_id = $1
+                      AND mf.is_available = TRUE
                     ORDER BY mr.title
                     "#,
                     library_id.as_uuid()
@@ -140,12 +144,19 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 );
             }
             LibraryType::Series => {
-                // Execute bulk queries in parallel using tokio::join!
-                let (series_result, seasons_result, episodes_result) = tokio::join!(
-                    self.get_library_series(&library_id),
-                    self.get_library_seasons(&library_id),
-                    self.get_library_episodes(&library_id)
+                let episodes = self.get_library_episodes(&library_id).await?;
+                let series_ids: HashSet<SeriesID> =
+                    episodes.iter().map(|episode| episode.series_id).collect();
+                let season_ids: HashSet<SeasonID> =
+                    episodes.iter().map(|episode| episode.season_id).collect();
+
+                let series_refs: Vec<&SeriesID> = series_ids.iter().collect();
+                let season_refs: Vec<&SeasonID> = season_ids.iter().collect();
+                let (series_result, seasons_result) = tokio::join!(
+                    self.get_series_bulk(&series_refs),
+                    self.get_season_references_bulk(&season_refs)
                 );
+
                 match series_result {
                     Ok(series) => media.par_extend(
                         series
@@ -164,18 +175,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                         error!("Failed to get season with error: {}", e)
                     }
                 }
-                match episodes_result {
-                    Ok(episode) => {
-                        media.par_extend(episode.into_par_iter().map(
-                            |sref: EpisodeReference| {
-                                Media::Episode(Box::new(sref))
-                            },
-                        ))
-                    }
-                    Err(e) => {
-                        error!("Failed to get episode with error: {}", e)
-                    }
-                }
+                media.par_extend(episodes.into_par_iter().map(
+                    |sref: EpisodeReference| Media::Episode(Box::new(sref)),
+                ));
             }
         }
 
@@ -202,12 +204,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mf.file_path = $1
+              AND mf.is_available = TRUE
             LIMIT 1
             "#,
             path
@@ -253,12 +256,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.id = ANY($1)
+              AND mf.is_available = TRUE
             "#,
             uuids.as_slice()
         )
@@ -347,7 +351,9 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
             SELECT DISTINCT s.id
             FROM episode_references er
             INNER JOIN series s ON s.id = er.series_id
+            INNER JOIN media_files mf ON mf.id = er.file_id
             WHERE s.library_id = $1
+              AND mf.is_available = TRUE
             ORDER BY s.id
             "#,
             library_id.as_uuid()
@@ -507,12 +513,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.id = ANY($1)
+              AND mf.is_available = TRUE
             "#,
             uuids.as_slice()
         )
@@ -548,12 +555,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN series sr ON sr.id = er.series_id AND sr.library_id = $1
             JOIN media_files mf ON er.file_id = mf.id
+            WHERE mf.is_available = TRUE
             ORDER BY er.series_id ASC, er.season_number ASC, er.episode_number ASC
             "#,
             library_id.as_uuid()
@@ -588,12 +596,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.series_id = $1
+              AND mf.is_available = TRUE
             ORDER BY er.season_number ASC, er.episode_number ASC
             "#,
             series_id.to_uuid()
@@ -765,12 +774,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.id = $1
+              AND mf.is_available = TRUE
             "#,
             episode_uuid
         )
@@ -940,14 +950,15 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata,
                 mf.library_id
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
+            WHERE mf.is_available = TRUE
             ORDER BY mr.title
-            "#,
+            "#
         )
         .fetch_all(&self.pool)
         .await
@@ -979,17 +990,18 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.library_id = $1
               AND mr.batch_id = $2
+              AND mf.is_available = TRUE
             ORDER BY mr.id
             "#,
             library_id.as_uuid(),
-            batch_id.as_u32() as i64,
+            batch_id.as_u32() as i64
         )
         .fetch_all(&self.pool)
         .await
@@ -1033,17 +1045,18 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM movie_references mr
             JOIN media_files mf ON mr.file_id = mf.id
             WHERE mr.library_id = $1
               AND mr.batch_id = ANY($2)
+              AND mf.is_available = TRUE
             ORDER BY mr.batch_id, mr.id
             "#,
             library_id.as_uuid(),
-            &batch_ids,
+            &batch_ids
         )
         .fetch_all(&self.pool)
         .await
@@ -1252,9 +1265,11 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<crate::types::ids::MovieBatchId>> {
         let rows = sqlx::query!(
             r#"
-            SELECT DISTINCT mr.batch_id
+            SELECT DISTINCT mr.batch_id AS "batch_id!"
             FROM movie_references mr
+            JOIN media_files mf ON mf.id = mr.file_id
             WHERE mr.library_id = $1
+              AND mf.is_available = TRUE
             ORDER BY mr.batch_id
             "#,
             library_id.as_uuid()
@@ -1270,12 +1285,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut batch_ids = Vec::with_capacity(rows.len());
         for row in rows {
+            let row_batch_id = row.batch_id;
             let batch_id =
-                crate::types::ids::MovieBatchId::new(row.batch_id as u32)
+                crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
                         MediaError::Internal(format!(
                             "Invalid batch id {} in database: {}",
-                            row.batch_id, e
+                            row_batch_id, e
                         ))
                     })?;
             batch_ids.push(batch_id);
@@ -1290,14 +1306,16 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<MovieBatchVersionRecord>> {
         let rows = sqlx::query!(
             r#"
-            SELECT b.batch_id, b.version
+            SELECT b.batch_id AS "batch_id!", b.version AS "version!"
             FROM movie_reference_batches b
             WHERE b.library_id = $1
               AND EXISTS (
                 SELECT 1
                 FROM movie_references mr
+                JOIN media_files mf ON mf.id = mr.file_id
                 WHERE mr.library_id = $1
                   AND mr.batch_id = b.batch_id
+                  AND mf.is_available = TRUE
               )
             ORDER BY b.batch_id
             "#,
@@ -1314,19 +1332,21 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
+            let row_batch_id = row.batch_id;
+            let row_version = row.version;
             let batch_id =
-                crate::types::ids::MovieBatchId::new(row.batch_id as u32)
+                crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
                         MediaError::Internal(format!(
                             "Invalid batch id {} in database: {}",
-                            row.batch_id, e
+                            row_batch_id, e
                         ))
                     })?;
 
-            let version = u64::try_from(row.version).map_err(|_| {
+            let version = u64::try_from(row_version).map_err(|_| {
                 MediaError::Internal(format!(
                     "Invalid batch version {} for library {} batch {}",
-                    row.version, library_id, batch_id
+                    row_version, library_id, batch_id
                 ))
             })?;
 
@@ -1342,14 +1362,16 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
     ) -> Result<Vec<MovieBatchManifestRecord>> {
         let rows = sqlx::query!(
             r#"
-            SELECT b.batch_id, b.version, b.batch_hash
+            SELECT b.batch_id AS "batch_id!", b.version AS "version!", b.batch_hash
             FROM movie_reference_batches b
             WHERE b.library_id = $1
               AND EXISTS (
                 SELECT 1
                 FROM movie_references mr
+                JOIN media_files mf ON mf.id = mr.file_id
                 WHERE mr.library_id = $1
                   AND mr.batch_id = b.batch_id
+                  AND mf.is_available = TRUE
               )
             ORDER BY b.batch_id
             "#,
@@ -1366,19 +1388,21 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
+            let row_batch_id = row.batch_id;
+            let row_version = row.version;
             let batch_id =
-                crate::types::ids::MovieBatchId::new(row.batch_id as u32)
+                crate::types::ids::MovieBatchId::new(row_batch_id as u32)
                     .map_err(|e| {
                         MediaError::Internal(format!(
                             "Invalid batch id {} in database: {}",
-                            row.batch_id, e
+                            row_batch_id, e
                         ))
                     })?;
 
-            let version = u64::try_from(row.version).map_err(|_| {
+            let version = u64::try_from(row_version).map_err(|_| {
                 MediaError::Internal(format!(
                     "Invalid batch version {} for library {} batch {}",
-                    row.version, library_id, batch_id
+                    row_version, library_id, batch_id
                 ))
             })?;
 
@@ -1532,12 +1556,13 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 mf.file_path,
                 mf.filename,
                 mf.file_size,
-                mf.discovered_at AS file_discovered_at,
-                mf.created_at AS file_created_at,
+                mf.discovered_at AS "file_discovered_at!",
+                mf.created_at AS "file_created_at!",
                 mf.technical_metadata
             FROM episode_references er
             JOIN media_files mf ON er.file_id = mf.id
             WHERE er.season_id = $1
+              AND mf.is_available = TRUE
             ORDER BY er.episode_number
             "#,
             season_id.to_uuid()
@@ -1636,7 +1661,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         &self,
         library_id: LibraryId,
     ) -> Result<TvReferenceOrphanCleanup> {
-        let deleted_seasons = sqlx::query(
+        let deleted_seasons = sqlx::query!(
             r#"
             DELETE FROM season_references
             WHERE library_id = $1
@@ -1646,8 +1671,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 WHERE er.season_id = season_references.id
               )
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -1658,7 +1683,7 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
         })?
         .rows_affected();
 
-        let deleted_series = sqlx::query(
+        let deleted_series = sqlx::query!(
             r#"
             DELETE FROM series
             WHERE library_id = $1
@@ -1673,8 +1698,8 @@ impl MediaReferencesRepository for PostgresMediaReferencesRepository {
                 WHERE er.series_id = series.id
               )
             "#,
+            library_id.as_uuid()
         )
-        .bind(library_id.as_uuid())
         .execute(&self.pool)
         .await
         .map_err(|e| {

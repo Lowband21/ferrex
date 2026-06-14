@@ -1,0 +1,133 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            event_version,\n            library_id,\n            library_root_id,\n            root_path,\n            event_type,\n            file_path,\n            path_key,\n            old_path,\n            fingerprint,\n            file_size,\n            file_modified_at,\n            correlation_id,\n            idempotency_key,\n            detected_at,\n            processed,\n            processed_at,\n            processing_attempts,\n            last_error\n        FROM file_watch_events\n        WHERE library_id = $1\n          AND (\n                $2::timestamptz IS NULL\n                OR detected_at > $2\n                OR (detected_at = $2 AND id > $3)\n          )\n        ORDER BY detected_at ASC, id ASC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "library_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "library_root_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "root_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "event_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "path_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "old_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "file_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "file_modified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "correlation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "idempotency_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "detected_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "processed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "processed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "processing_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "last_error",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "7bcfe5164d77bb34b1f2e8e3524272de757219b0e6ecdfa515e976c4594b8c3d"
+}

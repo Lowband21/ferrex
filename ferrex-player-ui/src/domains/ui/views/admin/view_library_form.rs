@@ -209,7 +209,7 @@ pub fn view_library_form<'a>(
             text("Automatic Scan Interval (minutes)")
                 .size(14)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            text("Set to 0 to disable automatic scanning")
+            text("Minimum 1 minute; disable automatic sweeps with the checkbox below")
                 .size(12)
                 .color(theme::MediaServerTheme::TEXT_DIMMED),
             text_input("60", &form_data.scan_interval_minutes)
@@ -228,6 +228,26 @@ pub fn view_library_form<'a>(
         checkbox(form_data.enabled)
             .on_toggle(|_| SettingsUiMessage::ToggleLibraryFormEnabled.into())
             .label("Enabled")
+            .style(theme::Checkbox::style())
+            .spacing(8)
+            .text_size(16),
+    );
+
+    form_content = form_content.push(
+        checkbox(form_data.auto_scan)
+            .on_toggle(|_| SettingsUiMessage::ToggleLibraryFormAutoScan.into())
+            .label("Run automatic maintenance scans")
+            .style(theme::Checkbox::style())
+            .spacing(8)
+            .text_size(16),
+    );
+
+    form_content = form_content.push(
+        checkbox(form_data.watch_for_changes)
+            .on_toggle(|_| {
+                SettingsUiMessage::ToggleLibraryFormWatchForChanges.into()
+            })
+            .label("Watch for filesystem changes")
             .style(theme::Checkbox::style())
             .spacing(8)
             .text_size(16),

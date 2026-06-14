@@ -1431,6 +1431,7 @@ impl TmdbMetadataActor {
                         &command.analyzed.path_norm,
                         metadata.as_ref(),
                         tmdb_id,
+                        &command.analyzed.fingerprint,
                     )
                     .await
                 {
@@ -1553,6 +1554,7 @@ impl TmdbMetadataActor {
         path_norm: &str,
         metadata: Option<&MediaFileMetadata>,
         tmdb_id: u64,
+        fingerprint: &MediaFingerprint,
     ) -> Result<MovieReference> {
         // TODO: Passthrough language and region preference
         let tmdb_details =
@@ -1727,6 +1729,9 @@ impl TmdbMetadataActor {
         let upsert = self.media_files_write.upsert(media_file.clone()).await?;
         let actual_file_id = upsert.id;
         media_file.id = actual_file_id;
+        self.media_files_write
+            .mark_available_with_fingerprint(library_id, path_norm, fingerprint)
+            .await?;
 
         let mut cast = credits.as_ref().map(Self::map_cast).unwrap_or_default();
         let mut crew = credits.as_ref().map(Self::map_crew).unwrap_or_default();
@@ -2767,6 +2772,13 @@ impl TmdbMetadataActor {
         let upsert = self.media_files_write.upsert(media_file.clone()).await?;
         let actual_file_id = upsert.id;
         media_file.id = actual_file_id;
+        self.media_files_write
+            .mark_available_with_fingerprint(
+                command.analyzed.library_id,
+                &command.analyzed.path_norm,
+                &command.analyzed.fingerprint,
+            )
+            .await?;
 
         // let (episode_details, tmdb_episode_id) = if series_ref.tmdb_id > 0 {
         let (mut details, tmdb_episode_id) = {

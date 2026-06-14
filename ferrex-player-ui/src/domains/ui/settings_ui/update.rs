@@ -396,6 +396,16 @@ pub fn update_settings_ui(
                 LibraryMessage::ToggleLibraryFormEnabled,
             )))
         }
+        SettingsUiMessage::ToggleLibraryFormAutoScan => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::ToggleLibraryFormAutoScan,
+            )))
+        }
+        SettingsUiMessage::ToggleLibraryFormWatchForChanges => {
+            DomainUpdateResult::task(Task::done(DomainMessage::Library(
+                LibraryMessage::ToggleLibraryFormWatchForChanges,
+            )))
+        }
         SettingsUiMessage::ToggleLibraryFormStartScan => {
             DomainUpdateResult::task(Task::done(DomainMessage::Library(
                 LibraryMessage::ToggleLibraryFormStartScan,

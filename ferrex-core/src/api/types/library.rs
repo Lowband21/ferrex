@@ -169,6 +169,10 @@ pub struct CreateLibraryRequest {
     pub scan_interval_minutes: u32,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_enabled")]
+    pub auto_scan: bool,
+    #[serde(default = "default_enabled")]
+    pub watch_for_changes: bool,
     #[serde(default = "default_movie_ref_batch_size")]
     pub movie_ref_batch_size: u32,
     #[serde(default = "default_start_scan")]
@@ -182,6 +186,8 @@ pub struct UpdateLibraryRequest {
     pub paths: Option<Vec<String>>,
     pub scan_interval_minutes: Option<u32>,
     pub enabled: Option<bool>,
+    pub auto_scan: Option<bool>,
+    pub watch_for_changes: Option<bool>,
     pub movie_ref_batch_size: Option<u32>,
 }
 
@@ -199,4 +205,58 @@ fn default_start_scan() -> bool {
 
 fn default_movie_ref_batch_size() -> u32 {
     250
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_library_defaults_incremental_policy_to_enabled() {
+        let request: CreateLibraryRequest = serde_json::from_str(
+            r#"{
+                "name": "Movies",
+                "library_type": "Movies",
+                "paths": ["/media/movies"]
+            }"#,
+        )
+        .expect("create request should deserialize");
+
+        assert!(request.auto_scan);
+        assert!(request.watch_for_changes);
+        assert_eq!(request.scan_interval_minutes, 60);
+    }
+
+    #[test]
+    fn create_library_preserves_explicit_incremental_policy() {
+        let request: CreateLibraryRequest = serde_json::from_str(
+            r#"{
+                "name": "Network Movies",
+                "library_type": "Movies",
+                "paths": ["/mnt/nas/movies"],
+                "auto_scan": false,
+                "watch_for_changes": false,
+                "scan_interval_minutes": 240
+            }"#,
+        )
+        .expect("create request should deserialize");
+
+        assert!(!request.auto_scan);
+        assert!(!request.watch_for_changes);
+        assert_eq!(request.scan_interval_minutes, 240);
+    }
+
+    #[test]
+    fn update_library_preserves_false_incremental_policy() {
+        let request: UpdateLibraryRequest = serde_json::from_str(
+            r#"{
+                "auto_scan": false,
+                "watch_for_changes": false
+            }"#,
+        )
+        .expect("update request should deserialize");
+
+        assert_eq!(request.auto_scan, Some(false));
+        assert_eq!(request.watch_for_changes, Some(false));
+    }
 }

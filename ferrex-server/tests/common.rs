@@ -188,6 +188,7 @@ pub async fn build_test_app_with_hooks<H: StartupHooks>(
             queue_service.clone(),
             cursor_repository,
             budget,
+            ferrex_core::domain::scan::actors::folder::ScannerFileFilterPolicy::default(),
         )
         .map_err(|err| {
             anyhow!("failed to initialise scan orchestrator: {err}")

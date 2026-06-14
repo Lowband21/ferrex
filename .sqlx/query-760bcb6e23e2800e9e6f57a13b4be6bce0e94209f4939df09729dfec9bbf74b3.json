@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE media_files\n            SET is_available = TRUE,\n                tombstoned_at = NULL,\n                tombstone_reason = NULL,\n                fingerprint_device_id = $3,\n                fingerprint_inode = $4,\n                fingerprint_size = $5,\n                fingerprint_mtime_ms = $6,\n                fingerprint_weak_hash = $7,\n                updated_at = NOW()\n            WHERE library_id = $1 AND file_path = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "760bcb6e23e2800e9e6f57a13b4be6bce0e94209f4939df09729dfec9bbf74b3"
+}

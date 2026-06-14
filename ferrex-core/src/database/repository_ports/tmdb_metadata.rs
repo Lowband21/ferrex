@@ -53,7 +53,7 @@ impl<'a> fmt::Debug for TmdbMetadataRepository<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct MovieReferenceRow {
     pub id: Uuid,
     pub tmdb_id: i64,
@@ -70,7 +70,7 @@ pub struct MovieReferenceRow {
     pub technical_metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct SeriesReferenceRow {
     pub id: Uuid,
     pub library_id: Uuid,
@@ -81,7 +81,7 @@ pub struct SeriesReferenceRow {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct SeasonReferenceRow {
     pub id: Uuid,
     pub series_id: Uuid,
@@ -93,7 +93,7 @@ pub struct SeasonReferenceRow {
     pub theme_color: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct EpisodeReferenceRow {
     pub id: Uuid,
     pub episode_number: i16,
@@ -2922,6 +2922,26 @@ async fn store_media_file(
     .await
     .map_err(|e| {
         MediaError::Internal(format!("Failed to upsert media file: {}", e))
+    })?;
+
+    sqlx::query!(
+        r#"
+        UPDATE media_files
+        SET is_available = TRUE,
+            tombstoned_at = NULL,
+            tombstone_reason = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+        actual_id
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        MediaError::Internal(format!(
+            "Failed to mark media file available after upsert: {}",
+            e
+        ))
     })?;
 
     Ok(actual_id)

@@ -14,6 +14,8 @@ pub struct LibraryFormData {
     pub paths: String, // comma-separated paths as entered by user
     pub scan_interval_minutes: String,
     pub enabled: bool,
+    pub auto_scan: bool,
+    pub watch_for_changes: bool,
     pub editing: bool, // true if editing existing library, false if creating new
     pub start_scan: bool,
 }

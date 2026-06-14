@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO public.movie_references (\n            id,\n            library_id,\n            file_id,\n            tmdb_id,\n            title,\n            batch_id,\n            theme_color\n        )\n        VALUES ($1, $2, $3, $4, $5, 1, '#000000')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "27baeb052c00f3eb6fcc839d294daf3b45c42e09a02cb3c9f317a40ead6a1c5d"
+}

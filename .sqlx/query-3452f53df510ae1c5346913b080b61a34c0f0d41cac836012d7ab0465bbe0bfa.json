@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE media_files\n            SET is_available = FALSE,\n                tombstoned_at = COALESCE(tombstoned_at, NOW()),\n                tombstone_reason = $3,\n                updated_at = NOW()\n            WHERE library_id = $1\n              AND file_path = ANY($2)\n              AND is_available = TRUE\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3452f53df510ae1c5346913b080b61a34c0f0d41cac836012d7ab0465bbe0bfa"
+}
