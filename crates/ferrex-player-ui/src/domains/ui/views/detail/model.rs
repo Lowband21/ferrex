@@ -1,4 +1,6 @@
-use crate::domains::ui::messages::UiMessage;
+use crate::domains::ui::{
+    messages::UiMessage, views::virtual_carousel::types::CarouselKey,
+};
 
 use lucide_icons::Icon;
 use uuid::Uuid;
@@ -374,6 +376,7 @@ pub struct DetailTechnicalItem {
 #[derive(Debug, Clone)]
 pub struct DetailRelationshipRail {
     pub id: String,
+    pub carousel_key: Option<CarouselKey>,
     pub title: String,
     pub items: Vec<DetailRailItem>,
     pub empty_message: Option<String>,
