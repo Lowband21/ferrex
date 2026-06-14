@@ -122,6 +122,52 @@ class DetailCacheModelsTest {
     }
 
     @Test
+    fun playbackContractsRequireMediaFileIdsAndKeepCacheRecoveryAvailable() {
+        val ids = Ids()
+        val movieLibrary = LibraryInfo(ids.movieLibrary.toString(), "Movies", LibraryKind.Movies)
+        val seriesLibrary = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
+        val state = LibraryRepositoryState(
+            movieLibraries = listOf(CachedMovieLibrary(movieLibrary, MovieLibraryAccessor(moviePayload(ids, includeFile = false)))),
+            seriesLibraries = listOf(CachedSeriesLibrary(seriesLibrary, SeriesLibraryAccessor(seriesPayload(ids, includeEpisode = true, includeEpisodeFile = false)))),
+        )
+        val movieRoute = MediaRouteArgs(BrowseMediaType.Movie, ids.movie.toString(), movieLibrary.id, BrowseSourceSurface.LibraryGrid)
+        val seriesRoute = MediaRouteArgs(BrowseMediaType.Series, ids.series.toString(), seriesLibrary.id, BrowseSourceSurface.LibraryGrid)
+
+        val movieResult = DetailCache.resolve(state, movieRoute) as DetailLoadResult.Movie
+        val seriesResult = DetailCache.resolve(state, seriesRoute) as DetailLoadResult.Series
+        val episode = seriesResult.detail.episodes.single()
+
+        assertNull(movieResult.detail.fileId)
+        assertNull(DetailRouteContracts.movieStartOver(movieResult.detail, movieRoute))
+        assertNull(
+            DetailRouteContracts.movieResume(
+                movieResult.detail,
+                WatchMediaProgress(movieResult.detail.id, positionSeconds = 10.0, durationSeconds = 100.0),
+                movieRoute,
+            ),
+        )
+        assertTrue(DetailCache.recoveryActions(movieRoute).retryCacheSync)
+        assertTrue(DetailCache.recoveryActions(movieRoute).changeServer)
+
+        assertNull(episode.fileId)
+        assertNull(seriesResult.detail.firstPlayableEpisode)
+        assertNull(DetailRouteContracts.episodeStartOver(episode, seriesRoute))
+        assertNull(DetailRouteContracts.seriesStartOver(seriesResult.detail, seriesRoute))
+        assertNull(
+            DetailRouteContracts.seriesNext(
+                series = seriesResult.detail,
+                nextEpisode = WatchNextEpisode(
+                    key = WatchEpisodeKey(tmdbSeriesId = 1234, seasonNumber = 1, episodeNumber = 1),
+                    playableMediaId = ids.episode.toString(),
+                    reason = "resume_in_progress",
+                ),
+                sourceRoute = seriesRoute,
+            ),
+        )
+        assertTrue(DetailCache.recoveryActions(seriesRoute).retryCacheSync)
+    }
+
+    @Test
     fun seriesNextResumeReasonBuildsServerResumeContract() {
         val ids = Ids()
         val library = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
@@ -208,17 +254,17 @@ class DetailCacheModelsTest {
         val still: UUID = uuid(32)
     }
 
-    private fun moviePayload(ids: Ids): List<com.ferrex.android.core.library.ParsedMovieBatch> {
+    private fun moviePayload(ids: Ids, includeFile: Boolean = true): List<com.ferrex.android.core.library.ParsedMovieBatch> {
         val builder = FlatBufferBuilder(1024)
         val details = movieDetails(builder, ids)
-        val file = mediaFile(builder, ids.movieFile, "movie.mkv")
+        val file = if (includeFile) mediaFile(builder, ids.movieFile, "movie.mkv") else null
         val title = builder.createString("Cache Movie")
         MovieReference.startMovieReference(builder)
         MovieReference.addBatchId(builder, 1u)
         MovieReference.addTmdbId(builder, 100UL)
         MovieReference.addTitle(builder, title)
         MovieReference.addDetails(builder, details)
-        MovieReference.addFile(builder, file)
+        file?.let { MovieReference.addFile(builder, it) }
         MovieReference.addLibraryId(builder, ids.movieLibrary.toFlatBufferUuid(builder))
         MovieReference.addId(builder, ids.movie.toFlatBufferUuid(builder))
         val movie = MovieReference.endMovieReference(builder)
@@ -229,12 +275,16 @@ class DetailCacheModelsTest {
         return LibraryFlatBuffers.parseMoviePayload(builder.sizedByteArray().wrap(), expectedBatchId = 1).getOrThrow()
     }
 
-    private fun seriesPayload(ids: Ids, includeEpisode: Boolean): List<com.ferrex.android.core.library.ParsedSeriesBundle> {
+    private fun seriesPayload(
+        ids: Ids,
+        includeEpisode: Boolean,
+        includeEpisodeFile: Boolean = true,
+    ): List<com.ferrex.android.core.library.ParsedSeriesBundle> {
         val builder = FlatBufferBuilder(2048)
         val media = buildList {
             add(seriesReference(builder, ids))
             add(seasonReference(builder, ids))
-            if (includeEpisode) add(episodeReference(builder, ids))
+            if (includeEpisode) add(episodeReference(builder, ids, includeFile = includeEpisodeFile))
         }.toIntArray()
         val items = SeriesBundleData.createItemsVector(builder, media)
         SeriesBundleData.startSeriesBundleData(builder)
@@ -320,15 +370,15 @@ class DetailCacheModelsTest {
         return Media.createMedia(builder, MediaVariant.SeasonReference, season)
     }
 
-    private fun episodeReference(builder: FlatBufferBuilder, ids: Ids): Int {
+    private fun episodeReference(builder: FlatBufferBuilder, ids: Ids, includeFile: Boolean = true): Int {
         val details = episodeDetails(builder, ids)
-        val file = mediaFile(builder, ids.episodeFile, "episode.mkv")
+        val file = if (includeFile) mediaFile(builder, ids.episodeFile, "episode.mkv") else null
         EpisodeReference.startEpisodeReference(builder)
         EpisodeReference.addSeasonNumber(builder, 1.toUShort())
         EpisodeReference.addEpisodeNumber(builder, 1.toUShort())
         EpisodeReference.addTmdbSeriesId(builder, 1234UL)
         EpisodeReference.addDetails(builder, details)
-        EpisodeReference.addFile(builder, file)
+        file?.let { EpisodeReference.addFile(builder, it) }
         EpisodeReference.addLibraryId(builder, ids.seriesLibrary.toFlatBufferUuid(builder))
         EpisodeReference.addSeasonId(builder, ids.season.toFlatBufferUuid(builder))
         EpisodeReference.addSeriesId(builder, ids.series.toFlatBufferUuid(builder))

@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::database::repository_ports::media_files::{
     MediaFileFilter, MediaFileSort, MediaFileSortField, MediaFilesReadPort,
-    MediaFilesWritePort, Page, SortDirection, UpsertOutcome,
+    MediaFilesWritePort, Page, PlaybackMediaSource, SortDirection,
+    UpsertOutcome,
 };
 use crate::database::traits::{MediaFilters, MediaStats};
 use crate::domain::scan::orchestration::delta::{
@@ -30,6 +31,13 @@ pub struct PostgresMediaRepository {
 impl MediaFilesReadPort for PostgresMediaRepository {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<MediaFile>> {
         self.get_media(id).await
+    }
+
+    async fn get_playback_source_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<PlaybackMediaSource>> {
+        self.get_playback_source(id).await
     }
 
     async fn get_by_media_id(
@@ -387,6 +395,37 @@ impl PostgresMediaRepository {
     ) -> Result<Vec<Uuid>> {
         let outcomes = self.upsert_media_batch(media_files).await?;
         Ok(outcomes.into_iter().map(|outcome| outcome.id).collect())
+    }
+
+    pub async fn get_playback_source(
+        &self,
+        uuid: &Uuid,
+    ) -> Result<Option<PlaybackMediaSource>> {
+        let row = sqlx::query_as::<_, (Uuid, String, String, i64, bool)>(
+            r#"
+            SELECT id, file_path, filename, file_size, is_available
+            FROM media_files
+            WHERE id = $1
+            "#,
+        )
+        .bind(*uuid)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "Database query failed for playback source: {e}"
+            ))
+        })?;
+
+        Ok(row.map(|(id, path, filename, size, is_available)| {
+            PlaybackMediaSource {
+                id,
+                path: PathBuf::from(path),
+                filename,
+                size: size as u64,
+                is_available,
+            }
+        }))
     }
 
     pub async fn get_media(&self, uuid: &Uuid) -> Result<Option<MediaFile>> {

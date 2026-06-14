@@ -461,7 +461,8 @@ private fun PlaybackFailure.tvPanelTitle(): String = when (kind) {
     PlaybackFailureKind.LibraryOffline -> "Playback interrupted"
     PlaybackFailureKind.Unauthorized,
     PlaybackFailureKind.Forbidden -> "Playback authorization required"
-    PlaybackFailureKind.MissingFile -> "Media unavailable"
+    PlaybackFailureKind.MissingFile,
+    PlaybackFailureKind.Unavailable -> "Media unavailable"
     PlaybackFailureKind.Unknown -> "Playback unavailable"
 }
 

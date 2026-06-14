@@ -102,9 +102,10 @@ class PlaybackFoundationTest {
 
     @Test
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun missingFileAndOfflineLibraryExposeUserRecoveryWithoutInvalidatingSession() = runTest {
+    fun missingFileUnavailableAndOfflineLibraryExposeUserRecoveryWithoutInvalidatingSession() = runTest {
         listOf(
             404 to PlaybackFailureKind.MissingFile,
+            410 to PlaybackFailureKind.Unavailable,
             503 to PlaybackFailureKind.LibraryOffline,
         ).forEach { (statusCode, expectedKind) ->
             val transport = FakeTicketTransport { ApiResult.HttpError(statusCode, "HTTP $statusCode") }
@@ -174,6 +175,19 @@ class PlaybackFoundationTest {
         assertTrue(forbidden.isAuthFailure)
         assertTrue(unauthorized.autoRetryable)
         assertTrue(forbidden.autoRetryable)
+    }
+
+    @Test
+    fun serverPlaybackFailuresUseSanitizedRecoveryCopy() {
+        val failure = PlaybackFailureMapper.fromHttpStatus(500, "Internal Server Error")
+
+        assertEquals(PlaybackFailureKind.Server, failure.kind)
+        assertEquals(500, failure.httpStatusCode)
+        assertFalse(failure.message.contains("Internal Server Error"))
+        assertTrue(failure.message.contains("Retry playback"))
+        assertTrue(failure.message.contains("change server", ignoreCase = true))
+        assertTrue(failure.message.contains("sign out", ignoreCase = true))
+        assertTrue(failure.message.contains("diagnostics", ignoreCase = true))
     }
 
     @Test

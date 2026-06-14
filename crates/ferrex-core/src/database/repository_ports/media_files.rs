@@ -5,6 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::domain::scan::orchestration::job::MediaFingerprint;
@@ -82,9 +83,22 @@ pub struct UpsertOutcome {
     pub created: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackMediaSource {
+    pub id: Uuid,
+    pub path: PathBuf,
+    pub filename: String,
+    pub size: u64,
+    pub is_available: bool,
+}
+
 #[async_trait]
 pub trait MediaFilesReadPort: Send + Sync {
     async fn get_by_id(&self, id: &Uuid) -> Result<Option<MediaFile>>;
+    async fn get_playback_source_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<PlaybackMediaSource>>;
     async fn get_by_media_id(
         &self,
         media_id: &MediaID,

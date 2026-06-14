@@ -63,6 +63,7 @@ enum class PlaybackFailureKind {
     Unauthorized,
     Forbidden,
     MissingFile,
+    Unavailable,
     LibraryOffline,
     Network,
     Timeout,
@@ -123,6 +124,12 @@ object PlaybackFailureMapper {
             httpStatusCode = statusCode,
             autoRetryable = false,
         )
+        410 -> PlaybackFailure(
+            kind = PlaybackFailureKind.Unavailable,
+            message = "This media is no longer available on the server. Retry after the library cache refreshes, change server, or sign out.",
+            httpStatusCode = statusCode,
+            autoRetryable = false,
+        )
         408, 429 -> PlaybackFailure(
             kind = PlaybackFailureKind.Timeout,
             message = "The stream timed out before playback could continue.",
@@ -137,7 +144,7 @@ object PlaybackFailureMapper {
         )
         in 500..599 -> PlaybackFailure(
             kind = PlaybackFailureKind.Server,
-            message = message?.takeIf { it.isNotBlank() } ?: "The server could not stream this media.",
+            message = "Ferrex could not stream this media. Retry playback, change server, sign out, or export diagnostics if it keeps failing.",
             httpStatusCode = statusCode,
             autoRetryable = true,
         )

@@ -155,10 +155,10 @@ sealed interface EpisodesAvailability {
 }
 
 val MovieDetail.playbackTargetId: String?
-    get() = fileId ?: id
+    get() = fileId
 
 val EpisodeDetail.playbackTargetId: String?
-    get() = fileId ?: id
+    get() = fileId
 
 object DetailRouteContracts {
     fun continuePlayback(result: DetailLoadResult, watchState: WatchRepositoryState): PlaybackRouteContract? = when (result) {
