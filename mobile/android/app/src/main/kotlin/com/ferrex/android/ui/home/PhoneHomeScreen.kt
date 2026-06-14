@@ -1,5 +1,6 @@
 package com.ferrex.android.ui.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -44,8 +45,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
-import com.ferrex.android.core.auth.RecoverableFailureReason
+import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
+import com.ferrex.android.core.auth.AuthenticatedConnectionUi
+import com.ferrex.android.core.auth.ConnectionRecoveryRefreshGate
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.auth.connectionRecoveryUi
+import com.ferrex.android.core.browse.AuthenticatedHomeBackPolicy
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
 import com.ferrex.android.core.browse.HomeLibraryTab
@@ -56,6 +61,7 @@ import com.ferrex.android.core.browse.LibraryMediaCard
 import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.browse.MovieFilterMode
 import com.ferrex.android.core.browse.MovieSortMode
+import com.ferrex.android.core.browse.PhoneSystemBackAction
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
@@ -134,6 +140,9 @@ fun PhoneHomeScreen(
     var selectedDetailRoute by remember { mutableStateOf<MediaRouteArgs?>(null) }
     var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
     var playbackNotice by remember { mutableStateOf<String?>(null) }
+    val homeConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Home)
+    val detailConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Detail)
+    val recoveryRefreshGate = remember(scope.directoryName) { ConnectionRecoveryRefreshGate(state.connectionHealth) }
 
     LaunchedEffect(libraryRepository, scope) {
         libraryRepository?.refreshLibraries(scope)
@@ -171,9 +180,13 @@ fun PhoneHomeScreen(
     val selectedMovieInfo = selectedMovieLibrary?.library ?: movieLibraryInfos.firstOrNull { it.id == selectedMovieLibraryId }
     val selectedSeriesInfo = selectedSeriesLibrary?.library ?: seriesLibraryInfos.firstOrNull { it.id == selectedSeriesLibraryId }
 
-    LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport) {
+    LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
         if (selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
             movieIndexState = MovieIndexUiState.Idle
+            return@LaunchedEffect
+        }
+        if (state.connectionHealth != AuthConnectionHealth.Online) {
+            movieIndexState = MovieIndexUiState.Unavailable("Movie sorting and filters are paused until Ferrex reconnects; showing uncapped cached order.")
             return@LaunchedEffect
         }
         if (libraryIndexTransport == null) {
@@ -291,7 +304,45 @@ fun PhoneHomeScreen(
         }
     }
 
+    fun runNetworkAction(action: suspend () -> Unit) {
+        if (!detailConnectionUi.networkActionsEnabled) {
+            playbackNotice = detailConnectionUi.networkActionMessage
+            return
+        }
+        coroutineScope.launch { action() }
+    }
+
+    suspend fun refreshVisibleWatchState(detail: DetailLoadResult?) {
+        when (detail) {
+            is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
+            is DetailLoadResult.Missing,
+            null -> Unit
+        }
+    }
+
+    LaunchedEffect(state.connectionHealth, scope.directoryName) {
+        if (recoveryRefreshGate.consumeOnlineRecoveryRefresh(state.connectionHealth)) {
+            playbackNotice = null
+            val selectedLibraryId = when (selectedTab) {
+                HomeLibraryTab.Movies -> selectedMovieInfo?.id
+                HomeLibraryTab.Series -> selectedSeriesInfo?.id
+            }
+            libraryRepository?.refreshLibraries(scope, selectedLibraryId)
+            if (imageRepository != null && imageKeys.isNotEmpty()) {
+                imageResolutions = imageRepository.retryPendingOrFailed(scope, imageKeys)
+            }
+            continueWatchingRepository?.refresh()
+            refreshVisibleWatchState(detailResult)
+        }
+    }
+
     fun launchPlayback(contract: PlaybackRouteContract) {
+        if (!detailConnectionUi.networkActionsEnabled) {
+            playbackNotice = detailConnectionUi.networkActionMessage
+            return
+        }
         if (playbackTicketTransport == null || playbackStreamUrlFactory == null || streamingHttpClient == null) {
             playbackNotice = "Playback is unavailable because the ticketed Media3 substrate is not configured."
             return
@@ -303,6 +354,18 @@ fun PhoneHomeScreen(
     fun refreshPlaybackProgress(contract: PlaybackRouteContract) {
         watchStateInvalidationBus?.notifyWatchStateChanged("playback progress:${contract.logicalMediaId}")
         coroutineScope.launch { watchRepository?.refreshMediaProgress(contract.logicalMediaId) }
+    }
+
+    val phoneBackAction = AuthenticatedHomeBackPolicy.phoneSystemBackAction(
+        hasActivePlayback = activePlaybackContract != null,
+        hasSelectedDetail = selectedDetailRoute != null,
+    )
+    BackHandler(enabled = phoneBackAction != PhoneSystemBackAction.ExitApp) {
+        when (phoneBackAction) {
+            PhoneSystemBackAction.ClosePlayback -> activePlaybackContract = null
+            PhoneSystemBackAction.CloseDetail -> selectedDetailRoute = null
+            PhoneSystemBackAction.ExitApp -> Unit
+        }
     }
 
     Surface(
@@ -341,17 +404,20 @@ fun PhoneHomeScreen(
                 imageLoader = imageLoader,
                 scope = scope,
                 preparedPlaybackContract = null,
+                connectionStatus = detailConnectionUi,
+                actionNotice = playbackNotice,
                 onBack = { selectedDetailRoute = null },
+                onRetryConnection = onRetryConnection,
                 onRetryCacheSync = { retryDetailCacheSync(selectedDetailRoute) },
                 onClearSelectedCache = { selectedDetailRoute?.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
                 onChangeServer = onChangeServer,
                 onResetConnection = onResetConnection,
                 onRetryWatch = { retryDetailWatch(detailResult) },
                 onRetryEpisodes = { retryDetailCacheSync(selectedDetailRoute) },
-                onClearProgress = { mediaId -> coroutineScope.launch { watchRepository?.clearProgress(mediaId) } },
-                onMarkMovieWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markMovieWatched(mediaId, watched) } },
-                onMarkEpisodeWatched = { mediaId, watched -> coroutineScope.launch { watchRepository?.markEpisodeWatched(mediaId, watched) } },
-                onMarkSeriesWatched = { tmdbId, watched -> coroutineScope.launch { watchRepository?.markSeriesWatched(tmdbId, watched) } },
+                onClearProgress = { mediaId -> runNetworkAction { watchRepository?.clearProgress(mediaId) } },
+                onMarkMovieWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markMovieWatched(mediaId, watched) } },
+                onMarkEpisodeWatched = { mediaId, watched -> runNetworkAction { watchRepository?.markEpisodeWatched(mediaId, watched) } },
+                onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
                 onPlaybackContract = { launchPlayback(it) },
             )
         } else {
@@ -364,6 +430,7 @@ fun PhoneHomeScreen(
             item {
                 HomeHeader(
                     state = state,
+                    connectionStatus = homeConnectionUi,
                     playbackNotice = playbackNotice,
                     onRetryConnection = onRetryConnection,
                     onSignOut = onSignOut,
@@ -475,6 +542,7 @@ fun PhoneHomeScreen(
 @Composable
 private fun HomeHeader(
     state: SessionState.Authenticated,
+    connectionStatus: AuthenticatedConnectionUi,
     playbackNotice: String?,
     onRetryConnection: () -> Unit,
     onSignOut: () -> Unit,
@@ -490,17 +558,17 @@ private fun HomeHeader(
             style = MaterialTheme.typography.titleMedium,
         )
         Text(text = "Server: ${state.serverUrl}", style = MaterialTheme.typography.bodyMedium)
-        if (state.connectionHealth != AuthConnectionHealth.Online) {
+        if (connectionStatus.visible) {
             Text(
-                text = authenticatedConnectionCopy(state),
+                text = connectionStatus.message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
             OutlinedButton(
                 onClick = onRetryConnection,
-                enabled = state.connectionHealth != AuthConnectionHealth.Probing,
+                enabled = connectionStatus.retryEnabled,
             ) {
-                Text(if (state.connectionHealth == AuthConnectionHealth.Probing) "Checking connection…" else "Retry connection")
+                Text(connectionStatus.retryLabel)
             }
         }
         Text(text = FerrexShellCopy.MOBILE_BODY, style = MaterialTheme.typography.bodyLarge)
@@ -519,21 +587,6 @@ private fun HomeHeader(
             )
         }
         TextButton(onClick = onSignOut) { Text("Sign out") }
-    }
-}
-
-private fun authenticatedConnectionCopy(state: SessionState.Authenticated): String {
-    val reason = when (state.offlineReason) {
-        RecoverableFailureReason.ServerUnreachable -> "the server is unreachable"
-        RecoverableFailureReason.ValidationUnavailable -> "session validation is unavailable"
-        RecoverableFailureReason.RefreshUnavailable -> "token refresh is temporarily unavailable"
-        RecoverableFailureReason.InvalidServerResponse -> "the server response was not understood"
-        null -> "the connection is temporarily unavailable"
-    }
-    return when (state.connectionHealth) {
-        AuthConnectionHealth.Offline -> "Offline — showing cached Home while $reason. Ferrex will retry automatically."
-        AuthConnectionHealth.Probing -> "Checking the saved session… Home stays available while Ferrex reconnects."
-        AuthConnectionHealth.Online -> "Online"
     }
 }
 
