@@ -1,6 +1,6 @@
 package com.ferrex.android.ui.search
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,7 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -37,8 +38,14 @@ import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.search.SearchDetailTarget
 import com.ferrex.android.core.search.SearchFailureKind
 import com.ferrex.android.core.search.SearchResultRow
+import com.ferrex.android.ui.components.FerrexActionButton
+import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
+import com.ferrex.android.ui.components.FerrexPosterPlaceholder
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
 
 private const val SEARCH_DEBOUNCE_MILLIS = 350L
@@ -168,25 +175,36 @@ private fun SearchOutcomeContent(
     when (outcome) {
         MediaSearchOutcome.Idle -> SearchCopy("Enter at least two characters to search the current server.")
         is MediaSearchOutcome.NoResults -> {
-            SearchCopy("No results for “${outcome.query}”. Try a shorter title or alternate spelling.")
+            SearchStatusCard(
+                title = "No results",
+                body = "No cached media matched “${outcome.query}”. Try a shorter title or alternate spelling, then retry sync if the item should be cached.",
+            )
             SearchActionRow(onRetry = onRetry, onClear = onClear)
         }
         is MediaSearchOutcome.Failure -> {
-            val prefix = when (outcome.kind) {
-                SearchFailureKind.NetworkOffline -> "Search is offline. "
-                SearchFailureKind.Http -> "Search HTTP error. "
-                SearchFailureKind.Server -> "Server search error. "
-                SearchFailureKind.InvalidResponse -> "Search response changed. "
+            val title = when (outcome.kind) {
+                SearchFailureKind.NetworkOffline -> "Search is offline"
+                SearchFailureKind.Http -> "Search HTTP error"
+                SearchFailureKind.Server -> "Server search error"
+                SearchFailureKind.InvalidResponse -> "Search response changed"
             }
-            SearchCopy(prefix + outcome.message, error = true)
+            SearchStatusCard(title = title, body = outcome.message, tone = FerrexStatusTone.Error)
             SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = outcome.retryable, onOpenDiagnostics = onOpenDiagnostics)
         }
         is MediaSearchOutcome.Results -> {
             if (outcome.staleCache) {
-                SearchCopy("Cache is stale or retryable; resolved rows use the current scoped cache and misses can be repaired with Retry sync.")
+                SearchStatusCard(
+                    title = "Cache needs retry",
+                    body = "Resolved rows use the current scoped cache. Cache misses stay visible and can be repaired with Retry sync.",
+                    tone = FerrexStatusTone.StaleOffline,
+                )
             }
             if (imageLoader == null && outcome.rows.any { it is SearchResultRow.Resolved && it.imageKey != null }) {
-                SearchCopy("Image pipeline unavailable; showing image placeholders.")
+                SearchStatusCard(
+                    title = "Images unavailable",
+                    body = "The image pipeline is unavailable; search keeps poster slots visible with placeholders instead of dropping results.",
+                    tone = FerrexStatusTone.StaleOffline,
+                )
             }
             Column(
                 modifier = Modifier.padding(top = 12.dp),
@@ -224,62 +242,69 @@ private fun ResolvedSearchRow(
     imageLoader: ImageLoader?,
     onOpenResult: (SearchDetailTarget) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = FerrexDesignTokens.Shapes.Card,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
     ) {
-        val imageKey = row.imageKey
-        if (imageLoader != null && imageKey != null) {
-            Box(modifier = Modifier.width(72.dp)) {
-                FerrexAsyncImage(
-                    resolution = resolution,
-                    imageLoader = imageLoader,
-                    contentDescription = row.title,
-                    category = imageKey.category,
-                    fallback = if (resolution is ImageResolution.Pending || resolution is ImageResolution.Failed) {
-                        row.runtimeFallback(scope.canonicalServerUrl)
-                    } else {
-                        null
-                    },
+        Row(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Md),
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val imageKey = row.imageKey
+            if (imageLoader != null && imageKey != null) {
+                Box(modifier = Modifier.width(76.dp)) {
+                    FerrexAsyncImage(
+                        resolution = resolution,
+                        imageLoader = imageLoader,
+                        contentDescription = row.title,
+                        category = imageKey.category,
+                        fallback = if (resolution !is ImageResolution.Ready) {
+                            row.runtimeFallback(scope.canonicalServerUrl)
+                        } else {
+                            null
+                        },
+                    )
+                }
+            } else {
+                FerrexPosterPlaceholder(
+                    label = if (imageKey == null) "No poster" else "Images unavailable",
+                    modifier = Modifier.width(76.dp),
                 )
             }
-        } else {
-            Box(
-                modifier = Modifier
-                    .width(72.dp)
-                    .background(MaterialTheme.colorScheme.surface),
-                contentAlignment = Alignment.Center,
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
             ) {
                 Text(
-                    modifier = Modifier.padding(8.dp),
-                    text = "Image unavailable",
+                    text = row.sourceId.type.jsonVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = row.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = row.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "Image ${resolution?.label ?: "queued"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = row.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                modifier = Modifier.padding(top = 4.dp),
-                text = "${row.subtitle} • image ${resolution?.label ?: "queued"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        TextButton(onClick = { onOpenResult(row.target) }) {
-            Text("Open")
+            TextButton(onClick = { onOpenResult(row.target) }) {
+                Text("Open")
+            }
         }
     }
 }
@@ -291,22 +316,18 @@ private fun CacheMissRow(
     onClear: () -> Unit,
     onOpenDiagnostics: (() -> Unit)?,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(10.dp),
-    ) {
-        Text(
-            text = row.title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-        )
-        Text(
-            modifier = Modifier.padding(top = 4.dp),
-            text = row.message,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onErrorContainer,
+    Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+        FerrexStatusCard(
+            title = row.title,
+            body = buildString {
+                append(row.message)
+                if (row.attemptedLibraryIds.isNotEmpty()) {
+                    append(" Attempted ")
+                    append(row.attemptedLibraryIds.size)
+                    append(" cached library root(s).")
+                }
+            },
+            tone = FerrexStatusTone.Error,
         )
         SearchActionRow(onRetry = onRetry, onClear = onClear, retryEnabled = row.retryable, onOpenDiagnostics = onOpenDiagnostics)
     }
@@ -322,19 +343,29 @@ private fun SearchActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(top = FerrexDesignTokens.Space.Sm),
+        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
     ) {
-        Button(onClick = onRetry, enabled = retryEnabled, modifier = Modifier.weight(1f)) {
-            Text("Retry sync / search")
-        }
-        TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
-            Text("Clear search")
-        }
+        FerrexActionButton(
+            label = "Retry sync / search",
+            role = FerrexActionRole.Retry,
+            enabled = retryEnabled,
+            onClick = onRetry,
+            modifier = Modifier.weight(1f),
+        )
+        FerrexActionButton(
+            label = "Clear search",
+            role = FerrexActionRole.Secondary,
+            onClick = onClear,
+            modifier = Modifier.weight(1f),
+        )
         onOpenDiagnostics?.let {
-            TextButton(onClick = it, modifier = Modifier.weight(1f)) {
-                Text("Diagnostics")
-            }
+            FerrexActionButton(
+                label = "Diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = it,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -349,6 +380,20 @@ private fun SearchLoading(query: String) {
         CircularProgressIndicator()
         Text("Searching “$query”…", style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+private fun SearchStatusCard(
+    title: String,
+    body: String,
+    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
+) {
+    FerrexStatusCard(
+        modifier = Modifier.padding(top = FerrexDesignTokens.Space.Md),
+        title = title,
+        body = body,
+        tone = tone,
+    )
 }
 
 @Composable
