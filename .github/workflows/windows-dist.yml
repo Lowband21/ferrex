@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       gstreamer_version:
-        description: "GStreamer version (MSVC)"
-        default: "1.26.6"
+        description: "GStreamer version (MSVC; newest official installer is 1.28.3)"
+        default: "1.28.3"
         required: true
       profile:
         description: "Cargo profile"
@@ -35,7 +35,9 @@ jobs:
       - name: Setup GStreamer (Windows)
         uses: marcpabst/setup-gstreamer@v.1.5.3
         with:
-          version: "${{ github.event.inputs.gstreamer_version || '1.26.6' }}"
+          # Official MSVC installers currently stop at 1.28.3, so Windows
+          # bundles intentionally trail the 1.28.4 source/Nix/Flatpak pin.
+          version: "${{ github.event.inputs.gstreamer_version || '1.28.3' }}"
           arch: x86_64
 
       - name: Show pkg-config

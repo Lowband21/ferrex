@@ -17,11 +17,11 @@
       # GStreamer pin for Linux player builds.
       #
       # We keep this as an overlay so both devShells and packages can share it.
-      # 1.28.1 is the current stable release (bug-fix on top of 1.28.0).
-      gstOverlay_1_28_1 =
+      # 1.28.4 is the current stable release (bug-fix on top of 1.28.x).
+      gstOverlay_1_28_4 =
         final: prev:
         let
-          version = "1.28.1";
+          version = "1.28.4";
 
           gstSet = prev.gst_all_1.overrideScope (
             gstFinal: gstPrev: {
@@ -29,7 +29,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-${version}.tar.xz";
-                  hash = "sha256-tl4v+jW9v4eYy3XCP/w9BeSE5ING/3VGhEuoUhdmRQQ=";
+                  hash = "sha256-9a3H6PRIwQJgs7JaoQHJ1UBnTI2aVMK3eobQTys7UN0=";
                 };
               });
 
@@ -37,7 +37,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-${version}.tar.xz";
-                  hash = "sha256-FEakwqkv9deNiOhaWZ8AOEQdUzMyNvDHLXLyGpwTJJc=";
+                  hash = "sha256-qJiv1XZhcrAEnmeBVY4GiQmL+HudgrhGxlLlccAdYNg=";
                 };
               });
 
@@ -45,7 +45,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-${version}.tar.xz";
-                  hash = "sha256-c44mruQbemIFDkC4GtwBehEKfzLR7En6agMAhGxENo0=";
+                  hash = "sha256-yCXqc3xZzqDkoMQdojiARf9d0y0WIiCsk6eoLuSgTmE=";
                 };
               });
 
@@ -53,7 +53,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-${version}.tar.xz";
-                  hash = "sha256-VsFZN4f4tVUIk9WeT/Kea8zPNJczFvpV40zkk+BDE6I=";
+                  hash = "sha256-MytzIPMMYPLVlBRG0DudBeN4HywlYb776IcYvXd/Dkc=";
                 };
                 buildInputs = (old.buildInputs or [ ]) ++ [
                   prev.libdrm
@@ -99,7 +99,7 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-${version}.tar.xz";
-                  hash = "sha256-QILzywY/zMP/wE5asIVLr96C0bNz6zyeqigRXdP5Wng=";
+                  hash = "sha256-VIbNFFxa9DJZ/TfKylnQSOKmfdsHCC6o9Q7w8CqF+KU=";
                 };
                 mesonFlags =
                   (old.mesonFlags or [ ])
@@ -112,15 +112,14 @@
                 inherit version;
                 src = prev.fetchurl {
                   url = "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-${version}.tar.xz";
-                  # Will fail on first build — Nix will print the correct hash.
-                  hash = "sha256-v6karKOND9it3N1VnjW3VB4/MqX0EBlOxLoYBA3v7ps=";
+                  hash = "sha256-vRel3yh0p6WLy697lAIjN5rZYTYk246teD2wPnS7kEs=";
                 };
               });
             }
           );
         in
         {
-          gst_1_28_1 = gstSet;
+          gst_1_28_4 = gstSet;
         };
 
       workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
@@ -128,7 +127,7 @@
 
     in
     {
-      overlays.gst_1_28_1 = gstOverlay_1_28_1;
+      overlays.gst_1_28_4 = gstOverlay_1_28_4;
 
       packages = forAllSystems (
         system:
@@ -136,12 +135,12 @@
           pkgsPlayer = import nixpkgs {
             inherit system;
             overlays = [
-              self.overlays.gst_1_28_1
+              self.overlays.gst_1_28_4
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
           };
-          gst = pkgsPlayer.gst_1_28_1;
+          gst = pkgsPlayer.gst_1_28_4;
           ffmpegPkgPlayer =
             if pkgsPlayer ? ffmpeg-full then pkgsPlayer.ffmpeg-full else pkgsPlayer.ffmpeg;
           libclang = pkgsPlayer.llvmPackages.libclang;
@@ -272,17 +271,17 @@
           });
         in
         {
-          gstreamer_1_28_1 = gst.gstreamer;
-          gst_plugins_base_1_28_1 = gst.gst-plugins-base;
-          gst_plugins_good_1_28_1 = gst.gst-plugins-good;
-          gst_plugins_bad_1_28_1 = gst.gst-plugins-bad;
-          gst_plugins_ugly_1_28_1 = gst.gst-plugins-ugly;
-          gst_libav_1_28_1 = gst.gst-libav;
+          gstreamer_1_28_4 = gst.gstreamer;
+          gst_plugins_base_1_28_4 = gst.gst-plugins-base;
+          gst_plugins_good_1_28_4 = gst.gst-plugins-good;
+          gst_plugins_bad_1_28_4 = gst.gst-plugins-bad;
+          gst_plugins_ugly_1_28_4 = gst.gst-plugins-ugly;
+          gst_libav_1_28_4 = gst.gst-libav;
 
           ferrex-player-bin = ferrexPlayerBin;
 
           # Nix-friendly wrapper:
-          # - forces plugin discovery to the pinned GStreamer 1.28.1 set
+          # - forces plugin discovery to the pinned GStreamer 1.28.4 set
           # - sets LD_LIBRARY_PATH for dlopen-loaded Wayland/X11/Vulkan libs
           ferrex-player = pkgsPlayer.runCommand "ferrex-player-${workspaceVersion}" {
             nativeBuildInputs = [ pkgsPlayer.makeWrapper ];
@@ -358,12 +357,12 @@
           pkgsPlayer = import nixpkgs {
             inherit system;
             overlays = [
-              self.overlays.gst_1_28_1
+              self.overlays.gst_1_28_4
               rust-overlay.overlays.default
             ];
             config.allowUnfree = true;
           };
-          gst = pkgsPlayer.gst_1_28_1;
+          gst = pkgsPlayer.gst_1_28_4;
 
           rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
 
