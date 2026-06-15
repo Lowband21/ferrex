@@ -98,9 +98,9 @@ cargo test -p ferrex-player-repository -p ferrex-player-library \
 
 ## Wayland HDR note
 
-Ferrex’s Wayland HDR path relies on the GStreamer 1.27.x development series.
-Pinned to **GStreamer 1.27.2** for now (newer 1.27.x builds have known regressions
-that haven’t been addressed yet).
+Ferrex’s Wayland HDR path relies on the GStreamer 1.28 stable series. The Nix
+and Flatpak packaging pin **GStreamer 1.28.4**; when building outside those
+environments, use matching GStreamer and plugin development headers.
 
 ## Windows MPV override
 

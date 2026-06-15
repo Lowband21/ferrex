@@ -14,7 +14,7 @@
     </p>
     <p>Features:</p>
     <ul>
-      <li>Zero-copy HDR playback via GStreamer 1.27.x on Wayland</li>
+      <li>Zero-copy HDR playback via GStreamer 1.28 stable on Wayland</li>
       <li>Animated poster grids with GPU acceleration</li>
       <li>Keyboard-driven navigation with smooth scrolling</li>
       <li>MPV hand-off support for maximum compatibility</li>
@@ -59,7 +59,7 @@
       <description>
         <p>Initial alpha release featuring:</p>
         <ul>
-          <li>Zero-copy HDR playback on Wayland via GStreamer 1.27.x</li>
+          <li>Zero-copy HDR playback on Wayland via GStreamer 1.28 stable</li>
           <li>Animated poster grid UI with GPU-accelerated rendering</li>
           <li>Keyboard navigation and smooth scrolling</li>
           <li>MPV hand-off for cross-platform playback</li>

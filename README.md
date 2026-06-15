@@ -24,7 +24,7 @@
 A Rust‑native media server and player focused on delivering a smooth and low latency experience with hardware‑accelerated playback. Ferrex isn’t a cloud service or web app—it’s a tightly integrated native server + desktop player optimized for high‑refresh UI, zero‑copy video, and smooth animated poster grids.
 
 - Feels local, because it is: batched rendering of custom UI primitives keeps latency spikes in check as you fling through high‑DPI posters.
-- Zero‑copy HDR on Wayland: a Wayland‑subsurface path makes use of bleeding edge GStreamer HDR developments to preserve metadata and avoid expensive copies.
+- Zero‑copy HDR on Wayland: a Wayland‑subsurface path uses current GStreamer stable HDR support to preserve metadata and avoid expensive copies.
 - Pragmatic elsewhere: on other platforms, Ferrex can hand off to mpv.
 
 Status: pre-alpha (0.1.0-alpha). Expect rapid changes while core surfaces continue to stabilize.
@@ -35,7 +35,7 @@ Existing home media tools are flexible but often not fast in the ways that feel 
 
 ## Who it’s for
 
-Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.27.x development series for correct HDR metadata passthrough (tested with **GStreamer 1.27.2**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
+Self‑hosters and performance‑minded enthusiasts who value a fluid desktop experience and want to make use of their hardware efficiently—especially on Wayland, where full HDR zero‑copy playback relies on the GStreamer 1.28 stable series for correct HDR metadata passthrough (tested with **GStreamer 1.28.4**). Windows and macOS may utilize mpv hand‑off or the alternate player backend that does not include any HDR passthrough or tone-mapping.
 
 ## Highlights
 
@@ -114,7 +114,7 @@ See `ferrexctl --help` for all packaging options.
 
 ## Platform Support
 
-- Linux / Wayland: primary target. Zero‑copy HDR pipeline via GStreamer (dev 1.27.x) and Wayland subsurfaces.
+- Linux / Wayland: primary target. Zero‑copy HDR pipeline via GStreamer 1.28 stable and Wayland subsurfaces.
   - Tested environment: Arch Linux (Hyprland WM). Please report results for GNOME/KDE/wlroots compositors.
   - Player specifics and platform notes: see [crates/ferrex-player/README.md](crates/ferrex-player/README.md).
 
@@ -124,7 +124,7 @@ See `ferrexctl --help` for all packaging options.
 
 | Platform          | Playback path              | HDR passthrough | Zero‑copy | Status             |
 |-------------------|----------------------------|-----------------|-----------|--------------------|
-| Linux (Wayland)   | GStreamer + subsurface     | Yes (1.27.x)    | Yes       | Primary, supported |
+| Linux (Wayland)   | GStreamer + subsurface     | Yes (1.28.x)    | Yes       | Primary, supported |
 | Linux (Xorg)      | Alt backend / mpv hand‑off | No              | No        | Works, less ideal  |
 | Windows           | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |
 | macOS             | Alt backend / mpv hand‑off | No (today)      | No        | Experimental       |

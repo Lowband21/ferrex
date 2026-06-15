@@ -50,10 +50,12 @@ jobs:
       # On Windows leverage GitHub action to install official MSVC GStreamer runtime + devel packages
       - name: Setup GStreamer (Windows)
         if: runner.os == 'Windows'
-        # v.1.5.3 not v1.5.3
+        # v.1.5.3 not v1.5.3. Official MSVC installers currently stop at
+        # 1.28.3, so Windows CI intentionally trails the 1.28.4
+        # source/Nix/Flatpak pin.
         uses: marcpabst/setup-gstreamer@v.1.5.3
         with:
-          version: '1.26.6'
+          version: '1.28.3'
           arch: x86_64
 
       - uses: moonrepo/setup-rust@v1
