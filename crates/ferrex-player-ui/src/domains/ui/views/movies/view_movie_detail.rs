@@ -108,14 +108,6 @@ fn view_movie_detail_model(
     let sizes = &state.domains.ui.state.size_provider;
     let window_width = state.window_size.width;
     let window_height = state.window_size.height;
-    let content_offset = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_content_offset_height(window_width, window_height)
-        .max(0.0);
-
     let mut body = Column::new()
         .spacing(plan.section_grid.gap)
         .padding([plan.page_padding_y, plan.page_padding_x])
@@ -127,15 +119,9 @@ fn view_movie_detail_model(
         body = body.push(view_sections(&model.sections, plan, sizes));
     }
 
-    let content = column![
-        Space::new().height(Length::Fixed(content_offset)),
-        container(body)
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-    ]
-    .width(Length::Fill);
-
-    let content_container = container(content).width(Length::Fill);
+    let content_container = container(body)
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center);
     let mut layered = Stack::new().push(content_container);
 
     if !model.backdrop_controls.is_empty() {

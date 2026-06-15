@@ -520,7 +520,25 @@ fn view_tv_sections(
         .align_y(iced::Alignment::Start);
     let mut count = 0usize;
 
-    for section in sections {
+    for section in sections
+        .iter()
+        .filter(|section| !matches!(section, DetailSection::Overview(_)))
+    {
+        if matches!(section, DetailSection::Cast(_)) {
+            if count > 0 {
+                let completed = std::mem::replace(
+                    &mut current,
+                    Row::new()
+                        .spacing(plan.section_grid.gap)
+                        .align_y(iced::Alignment::Start),
+                );
+                outer = outer.push(completed);
+                count = 0;
+            }
+            outer = outer.push(view_tv_section(section, plan, sizes, state));
+            continue;
+        }
+
         current = current.push(view_tv_section(section, plan, sizes, state));
         count += 1;
         if count == columns {

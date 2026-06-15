@@ -8,7 +8,7 @@ use crate::{
         },
         widgets::image_for::image_for,
     },
-    infra::design_tokens::SizeProvider,
+    infra::{design_tokens::SizeProvider, service_registry},
 };
 
 use super::{
@@ -19,14 +19,14 @@ use super::{
     DetailPageModel, DetailRailItem, DetailRelationshipRail, DetailSection,
     DetailTechnicalItem, DetailTechnicalSection, DetailTone,
 };
-use ferrex_core::player_prelude::Priority;
+use ferrex_core::player_prelude::{ImageRequest, Priority};
 use ferrex_model::ImageSize;
 use iced::{
-    Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
-    Vector,
+    Alignment, Background, Border, Color, ContentFit, Element, Length, Shadow,
+    Theme, Vector,
     widget::{
-        Column, Row, Space, button, column, container, mouse_area, row,
-        scrollable, text,
+        Column, Row, Space, button, column, container, image as iced_image,
+        mouse_area, row, scrollable, text,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
@@ -50,7 +50,7 @@ pub fn view_detail_hero(
             .into(),
         _ => row![art, summary]
             .spacing(plan.hero_gap)
-            .align_y(Alignment::Center)
+            .align_y(Alignment::End)
             .width(Length::Fill)
             .into(),
     };
@@ -58,7 +58,7 @@ pub fn view_detail_hero(
     container(hero)
         .padding(sizes.spacing.lg)
         .width(Length::Fill)
-        .style(detail_panel_style(DetailTone::Neutral))
+        .style(theater_hero_scrim_style())
         .into()
 }
 
@@ -137,7 +137,25 @@ pub fn view_sections(
         .align_y(Alignment::Start);
     let mut count = 0usize;
 
-    for section in sections {
+    for section in sections
+        .iter()
+        .filter(|section| !matches!(section, DetailSection::Overview(_)))
+    {
+        if matches!(section, DetailSection::Cast(_)) {
+            if count > 0 {
+                let completed = std::mem::replace(
+                    &mut current,
+                    Row::new()
+                        .spacing(plan.section_grid.gap)
+                        .align_y(Alignment::Start),
+                );
+                outer = outer.push(completed);
+                count = 0;
+            }
+            outer = outer.push(view_section(section, plan, sizes));
+            continue;
+        }
+
         current = current.push(view_section(section, plan, sizes));
         count += 1;
         if count == columns {
@@ -230,23 +248,20 @@ pub fn view_cast_section(
         );
     }
 
-    let mut row = Row::new().spacing(plan.rail.gap);
+    let mut row = Row::new().spacing(plan.rail.gap).align_y(Alignment::Start);
     for member in &section.members {
         row = row.push(view_cast_member(member, plan, sizes));
     }
 
-    let image_width = (plan.rail.card_width * 0.68).max(72.0);
+    let image_width = (cast_card_width(plan) * 0.72).clamp(72.0, 180.0);
     let cast_card_height = image_width * 1.5
         + sizes.font.small
         + sizes.font.micro
-        + sizes.spacing.lg;
+        + sizes.spacing.xl;
 
     view_panel(
         &section.title,
-        horizontal_scroller(
-            row,
-            cast_card_height.max(plan.rail.card_height + sizes.spacing.xl),
-        ),
+        horizontal_scroller(row, cast_card_height),
         plan,
         sizes,
     )
@@ -445,12 +460,32 @@ fn view_summary(
         summary = summary.push(view_metadata_pills(&model.metadata, sizes));
     }
 
+    if let Some(overview) = hero_overview(model) {
+        summary = summary.push(
+            text(overview.to_string())
+                .size(match plan.composition {
+                    DetailComposition::TenFoot => sizes.font.body * 1.12,
+                    DetailComposition::CinematicWide => sizes.font.body * 1.05,
+                    _ => sizes.font.body,
+                })
+                .color(theme::MediaServerTheme::TEXT_PRIMARY)
+                .width(Length::Fill),
+        );
+    }
+
     if !model.actions.is_empty() {
         summary =
             summary.push(view_action_cluster(&model.actions, plan, sizes));
     }
 
     summary.into()
+}
+
+fn hero_overview(model: &DetailPageModel) -> Option<&str> {
+    model.sections.iter().find_map(|section| match section {
+        DetailSection::Overview(overview) => Some(overview.body.as_str()),
+        _ => None,
+    })
 }
 
 fn view_action_button(
@@ -558,30 +593,92 @@ fn view_fact(
     .into()
 }
 
+fn cast_card_width(plan: &DetailLayoutPlan) -> f32 {
+    match plan.composition {
+        DetailComposition::CompactPortrait => (plan.content_width * 0.46)
+            .min(plan.rail.card_width)
+            .max(112.0),
+        DetailComposition::CompactLandscape => plan.rail.card_width.max(140.0),
+        DetailComposition::BalancedDesktop => plan.rail.card_width.max(170.0),
+        DetailComposition::CinematicWide => plan.rail.card_width.max(200.0),
+        DetailComposition::TenFoot => plan.rail.card_width.max(220.0),
+    }
+}
+
+fn view_cast_profile_image(
+    artwork: &DetailArtwork,
+    width: f32,
+    height: f32,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    if let DetailArtwork::Profile { image_id, alt, .. } = artwork
+        && let Some(iid) = image_id
+    {
+        let request = ImageRequest::new(*iid, ImageSize::profile())
+            .with_priority(Priority::Preload);
+        if let Some(service) = service_registry::get_image_service() {
+            if let Some(handle) = service.get(&request) {
+                return iced_image(handle)
+                    .width(Length::Fixed(width))
+                    .height(Length::Fixed(height))
+                    .content_fit(ContentFit::Cover)
+                    .border_radius(sizes.scale(3.0))
+                    .into();
+            }
+            service.request_image(request);
+        }
+
+        return cast_profile_placeholder(alt, width, height, sizes);
+    }
+
+    cast_profile_placeholder(artwork.label(), width, height, sizes)
+}
+
+fn cast_profile_placeholder(
+    label: &str,
+    width: f32,
+    height: f32,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    container(
+        column![
+            icon_text_with_size(Icon::User, sizes.icon.lg)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            text(label.to_string())
+                .size(sizes.font.micro)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        ]
+        .spacing(sizes.spacing.xs)
+        .align_x(Alignment::Center),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(height))
+    .align_x(iced::alignment::Horizontal::Center)
+    .align_y(iced::alignment::Vertical::Center)
+    .clip(true)
+    .style(detail_panel_style(DetailTone::Muted))
+    .into()
+}
+
 fn view_cast_member(
     member: &DetailCastMember,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    let image_width = (plan.rail.card_width * 0.68).max(72.0);
+    let card_width = cast_card_width(plan);
+    let image_width = (card_width * 0.72).clamp(72.0, 180.0);
     let image_height = image_width * 1.5;
-    let image = view_artwork(
+    let image = view_cast_profile_image(
         &member.artwork,
-        DetailArtLayout {
-            width: image_width,
-            height: image_height,
-            corner_radius: sizes.scale(10.0),
-            aspect: super::DetailArtAspect::Poster,
-        },
-        Priority::Preload,
-        Length::Fixed(image_width),
-        Length::Fixed(image_height),
+        image_width,
+        image_height,
+        sizes,
     );
 
     let mut content = Column::new()
         .spacing(sizes.spacing.xs)
         .align_x(Alignment::Center)
-        .width(Length::Fixed(plan.rail.card_width))
+        .width(Length::Fixed(card_width))
         .push(image)
         .push(
             text(member.name.clone())
@@ -758,6 +855,7 @@ fn view_panel(
         .width(Length::Fill)
         .height(Length::Shrink)
         .padding(sizes.spacing.md)
+        .clip(true)
         .style(detail_panel_style(DetailTone::Neutral))
         .into()
 }
@@ -968,6 +1066,22 @@ fn tone_text_color(tone: DetailTone) -> Color {
     }
 }
 
+fn theater_hero_scrim_style() -> impl Fn(&Theme) -> container::Style + Clone {
+    |_| container::Style {
+        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
+        background: Some(Background::Color(Color::from_rgba(
+            0.0, 0.0, 0.0, 0.46,
+        ))),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: false,
+    }
+}
+
 fn detail_panel_style(
     tone: DetailTone,
 ) -> impl Fn(&Theme) -> container::Style + Clone {
@@ -978,18 +1092,18 @@ fn detail_panel_style(
             DetailTone::Warning => theme::MediaServerTheme::WARNING,
             DetailTone::Danger => theme::MediaServerTheme::ERROR,
             DetailTone::Muted | DetailTone::Neutral => {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+                Color::from_rgba(1.0, 1.0, 1.0, 0.14)
             }
         };
         container::Style {
             text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
             background: Some(Background::Color(Color::from_rgba(
-                0.06, 0.055, 0.075, 0.86,
+                0.015, 0.014, 0.02, 0.58,
             ))),
             border: Border {
                 color: border_color,
                 width: 1.0,
-                radius: 18.0.into(),
+                radius: 0.0.into(),
             },
             shadow: Shadow::default(),
             snap: false,
@@ -1001,12 +1115,12 @@ fn pill_style(tone: DetailTone) -> impl Fn(&Theme) -> container::Style + Clone {
     move |_| container::Style {
         text_color: Some(tone_text_color(tone)),
         background: Some(Background::Color(Color::from_rgba(
-            1.0, 1.0, 1.0, 0.09,
+            1.0, 1.0, 1.0, 0.11,
         ))),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.14),
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.18),
             width: 1.0,
-            radius: 999.0.into(),
+            radius: 3.0.into(),
         },
         shadow: Shadow::default(),
         snap: false,
@@ -1057,7 +1171,7 @@ fn detail_action_button_style(
                     accent
                 },
                 width: 1.0,
-                radius: 14.0.into(),
+                radius: 4.0.into(),
             },
             shadow: if role == DetailActionRole::Primary && !disabled {
                 Shadow {

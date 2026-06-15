@@ -314,9 +314,11 @@ fn content_max_width(composition: DetailComposition, scale: f32) -> f32 {
     match composition {
         DetailComposition::CompactPortrait
         | DetailComposition::CompactLandscape => f32::INFINITY,
-        DetailComposition::BalancedDesktop => 1_180.0 * scale,
-        DetailComposition::CinematicWide => 1_560.0 * scale,
-        DetailComposition::TenFoot => 1_760.0 * scale,
+        DetailComposition::BalancedDesktop => 1_220.0 * scale,
+        // Fill common 16:9 screens instead of centering a web-app-width card,
+        // while still bounding ultrawide stages to a readable theater shelf.
+        DetailComposition::CinematicWide => 1_920.0 * scale,
+        DetailComposition::TenFoot => 2_220.0 * scale,
     }
 }
 
@@ -352,7 +354,7 @@ fn hero_art_layout(
                 return DetailArtLayout {
                     width,
                     height: width / POSTER_ASPECT,
-                    corner_radius: clamp_scaled(12.0, 8.0, 24.0, scale),
+                    corner_radius: clamp_scaled(3.0, 0.0, 6.0, scale),
                     aspect: DetailArtAspect::Poster,
                 };
             }
@@ -364,24 +366,24 @@ fn hero_art_layout(
                 DetailArtAspect::Poster,
             ),
             DetailComposition::BalancedDesktop => (
-                poster_height * 1.08,
-                300.0 * scale,
-                500.0 * scale,
-                available_height * 0.66,
+                poster_height * 1.20,
+                320.0 * scale,
+                520.0 * scale,
+                available_height * 0.68,
                 DetailArtAspect::Poster,
             ),
             DetailComposition::CinematicWide => (
-                poster_height * 1.18,
-                360.0 * scale,
-                580.0 * scale,
-                available_height * 0.74,
+                poster_height * 1.45,
+                420.0 * scale,
+                620.0 * scale,
+                available_height * 0.76,
                 DetailArtAspect::Poster,
             ),
             DetailComposition::TenFoot => (
-                poster_height * 1.28,
-                360.0 * scale,
-                620.0 * scale,
-                available_height * 0.70,
+                poster_height * 1.45,
+                400.0 * scale,
+                640.0 * scale,
+                available_height * 0.72,
                 DetailArtAspect::Poster,
             ),
         };
@@ -391,7 +393,7 @@ fn hero_art_layout(
     DetailArtLayout {
         width: height * POSTER_ASPECT,
         height,
-        corner_radius: clamp_scaled(14.0, 8.0, 28.0, scale),
+        corner_radius: clamp_scaled(3.0, 0.0, 6.0, scale),
         aspect,
     }
 }
@@ -434,7 +436,7 @@ fn still_hero_art_layout(
     DetailArtLayout {
         width,
         height: width / STILL_ASPECT,
-        corner_radius: clamp_scaled(14.0, 8.0, 28.0, scale),
+        corner_radius: clamp_scaled(3.0, 0.0, 6.0, scale),
         aspect: DetailArtAspect::Still,
     }
 }
@@ -708,7 +710,7 @@ mod tests {
         ));
 
         assert_eq!(plan.composition, DetailComposition::CinematicWide);
-        assert!((plan.content_width - 1_560.0).abs() < 0.01);
+        assert!((plan.content_width - 1_920.0).abs() < 0.01);
         assert_eq!(plan.section_grid.columns, 3);
         assert!(plan.rail.card_width <= 330.0);
     }

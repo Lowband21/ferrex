@@ -8,7 +8,7 @@ use crate::{
         widgets::{BackgroundEffect, DepthLayout, background_shader},
     },
     infra::{
-        constants::layout::{backdrop, detail, header},
+        constants::layout::{backdrop, header},
         shader_widgets::background::{
             BackgroundShader, ContentOffsetPx, DepthRegion, EdgeTransition,
             transitions::{
@@ -198,30 +198,23 @@ impl BackgroundShaderState {
             | ViewState::SeriesDetail { .. }
             | ViewState::SeasonDetail { .. }
             | ViewState::EpisodeDetail { .. } => {
-                // Account for scroll offset
-                let scroll_offset = self.scroll_offset;
-                // Use centralized backdrop dimensions calculation
+                // Detail foreground layout is now adaptive and poster-driven. The
+                // old shader regions assumed a fixed 300×450 poster at x=0 and
+                // produced a stale sunken trough after the redesign moved the
+                // poster. Keep only a flat backdrop region here; foreground
+                // scrims and poster depth are rendered by the actual detail UI.
+                let scroll_offset = self.scroll_offset.max(0.0);
                 let backdrop_dims = self
                     .calculate_backdrop_dimensions(window_width, window_height);
-                let backdrop_height = backdrop_dims.height;
-                // Content top is backdrop height minus scroll offset
-                let content_top = backdrop_dims.content_start_y - scroll_offset;
-                let poster_width = detail::POSTER_WIDTH;
-                let poster_height = detail::POSTER_HEIGHT;
-                let poster_padding = detail::POSTER_PADDING;
-                let poster_left = 0.0;
-                let poster_right =
-                    poster_left + poster_width + detail::POSTER_METADATA_GAP;
-                let poster_bottom =
-                    content_top + poster_height + poster_padding;
+                let backdrop_height =
+                    (backdrop_dims.height - scroll_offset).max(0.0);
 
-                // Backdrop region (flat, no shadows)
                 self.depth_layout.regions.push(DepthRegion {
                     bounds: iced::Rectangle {
                         x: 0.0,
-                        y: 0.0, // Now starts at top since header is outside scrollable
+                        y: 0.0,
                         width: window_width,
-                        height: backdrop_height - scroll_offset,
+                        height: backdrop_height,
                     },
                     depth: 0.0,
                     edge_transition: EdgeTransition::Sharp,
@@ -232,45 +225,9 @@ impl BackgroundShaderState {
                     border: None,
                 });
 
-                // Poster region (sunken)
-                self.depth_layout.regions.push(DepthRegion {
-                    bounds: iced::Rectangle {
-                        x: poster_left,
-                        y: content_top,
-                        width: poster_right,
-                        height: poster_height + 30.0,
-                    },
-                    depth: -2.0,
-                    edge_transition: EdgeTransition::Sharp,
-                    edge_overrides: Default::default(),
-                    shadow_enabled: true,
-                    shadow_intensity: 1.0,
-                    z_order: 2,
-                    border: None,
-                });
-
-                // Content region (flat)
-                self.depth_layout.regions.push(DepthRegion {
-                    bounds: iced::Rectangle {
-                        x: 0.0,
-                        y: content_top,
-                        width: window_width,
-                        height: poster_height + 30.0,
-                    },
-                    depth: 0.0,
-                    edge_transition: EdgeTransition::Sharp,
-                    edge_overrides: Default::default(),
-                    shadow_enabled: true,
-                    shadow_intensity: 1.0,
-                    z_order: 1,
-                    border: None,
-                });
-
                 log::debug!(
-                    "Added detail view regions - backdrop_height: {}, content_top: {}, poster_bottom: {}",
-                    backdrop_height,
-                    content_top,
-                    poster_bottom
+                    "Added detail backdrop region - backdrop_height: {}",
+                    backdrop_height
                 );
             }
             _ => {
