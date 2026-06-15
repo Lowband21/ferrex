@@ -19,6 +19,9 @@ use crate::{
             widgets::image_for,
         },
     },
+    infra::shader_widgets::poster::{
+        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+    },
     state::State,
 };
 
@@ -1490,12 +1493,12 @@ fn view_hero<'a>(
     container(
         row![image, text_column]
             .spacing(plan.hero_gap)
-            .align_y(iced::Alignment::Center),
+            .align_y(iced::Alignment::End),
     )
     .height(Length::Fixed(hero_height(plan)))
     .width(Length::Fill)
     .padding(hero_padding(plan))
-    .style(tenfoot_panel_style(false))
+    .style(tenfoot_hero_scrim_style())
     .into()
 }
 
@@ -1728,23 +1731,32 @@ fn view_detail_image<'a>(
             media_uuid,
             iid,
             placeholder,
-        } => image_for(*media_uuid)
-            .iid(*iid)
-            .skip_request(iid.is_none())
-            .request_size(ImageSize::Poster(
-                state.domains.settings.display.detail_poster_quality,
-            ))
-            .display_size(width, height)
-            .radius(plan.hero_art.corner_radius)
-            .priority(if priority_visible {
-                Priority::Visible
-            } else {
-                Priority::Preload
-            })
-            .placeholder(*placeholder)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let (face, rotation_y) = poster_menu_face(state, *media_uuid);
+            let mut poster = image_for(*media_uuid)
+                .iid(*iid)
+                .skip_request(iid.is_none())
+                .request_size(ImageSize::Poster(
+                    state.domains.settings.display.detail_poster_quality,
+                ))
+                .display_size(width, height)
+                .radius(plan.hero_art.corner_radius)
+                .priority(if priority_visible {
+                    Priority::Visible
+                } else {
+                    Priority::Preload
+                })
+                .placeholder(*placeholder)
+                .tight_bounds()
+                .animation_behavior(AnimationBehavior::flip_then_fade())
+                .face(face);
+
+            if let Some(rotation_y) = rotation_y {
+                poster = poster.rotation_y(rotation_y);
+            }
+
+            poster.into()
+        }
         DetailImage::Still { media_uuid, iid } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
@@ -1781,7 +1793,7 @@ fn view_panel_item_image<'a>(
     focused: bool,
 ) -> Element<'a, UiMessage> {
     let (width, height) = panel_image_size(image, plan);
-    let radius = (plan.hero_art.corner_radius * 0.55).clamp(8.0, 14.0);
+    let radius = (plan.hero_art.corner_radius * 0.55).clamp(2.0, 6.0);
     match image {
         DetailImage::Poster {
             media_uuid,
@@ -1823,6 +1835,24 @@ fn view_panel_item_image<'a>(
             .width(Length::Fixed(width))
             .height(Length::Fixed(height))
             .into(),
+    }
+}
+
+fn poster_menu_face(
+    state: &State,
+    poster_id: Uuid,
+) -> (PosterFace, Option<f32>) {
+    let instance_key = PosterInstanceKey::standalone(poster_id);
+    if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
+    {
+        (menu_state.face_from_angle(), Some(menu_state.angle))
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
+        (PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (PosterFace::Front, None)
     }
 }
 
@@ -2116,9 +2146,25 @@ fn tenfoot_detail_page_style() -> impl Fn(&Theme) -> container::Style + Clone {
     |_| container::Style {
         text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
         background: Some(Background::Color(Color::from_rgba(
-            0.015, 0.014, 0.02, 0.82,
+            0.015, 0.014, 0.02, 0.22,
         ))),
         border: Border::default(),
+        shadow: Shadow::default(),
+        snap: false,
+    }
+}
+
+fn tenfoot_hero_scrim_style() -> impl Fn(&Theme) -> container::Style + Clone {
+    |_| container::Style {
+        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
+        background: Some(Background::Color(Color::from_rgba(
+            0.0, 0.0, 0.0, 0.48,
+        ))),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -2141,7 +2187,7 @@ fn tenfoot_panel_style(
                 Color::from_rgba(1.0, 1.0, 1.0, 0.10)
             },
             width: if focused { 3.0 } else { 1.0 },
-            radius: 24.0.into(),
+            radius: 3.0.into(),
         },
         shadow: if focused {
             Shadow {
@@ -2165,7 +2211,7 @@ fn metadata_pill_style() -> impl Fn(&Theme) -> container::Style + Clone {
         border: Border {
             color: Color::from_rgba(1.0, 1.0, 1.0, 0.14),
             width: 1.0,
-            radius: 18.0.into(),
+            radius: 3.0.into(),
         },
         shadow: Shadow::default(),
         snap: false,
@@ -2181,7 +2227,7 @@ fn notice_style() -> impl Fn(&Theme) -> container::Style + Clone {
         border: Border {
             color: Color::from_rgba(1.0, 0.85, 0.30, 0.35),
             width: 1.0,
-            radius: 16.0.into(),
+            radius: 2.0.into(),
         },
         shadow: Shadow::default(),
         snap: false,
@@ -2215,7 +2261,7 @@ fn tenfoot_button_style(
             border: Border {
                 color: border_color,
                 width: if focused { 3.0 } else { 1.0 },
-                radius: 22.0.into(),
+                radius: 4.0.into(),
             },
             shadow: if focused {
                 Shadow {

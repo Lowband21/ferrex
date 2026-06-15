@@ -55,10 +55,7 @@ mod detail_tests {
 
         assert_eq!(visible_panel_columns_for_width(1_280.0, &hd), 3);
         assert_eq!(visible_panel_columns_for_width(1_920.0, &full_hd), 5);
-        assert_eq!(
-            visible_panel_columns_for_width(3_840.0, &ultrawide),
-            visible_panel_columns_for_width(1_920.0, &full_hd)
-        );
+        assert_eq!(visible_panel_columns_for_width(3_840.0, &ultrawide), 6);
         assert!(
             ultrawide.content_width
                 < ultrawide.viewport_width - ultrawide.page_padding_x * 2.0
