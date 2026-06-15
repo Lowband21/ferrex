@@ -6,7 +6,7 @@ This evidence packet covers the Android TV focus, D-pad, OK, Back, recovery, and
 
 | Area | Result | Evidence |
 | --- | --- | --- |
-| Android build/unit/lint gate | Pass | `assembleMobileDebug`, `assembleTvDebug`, `testMobileDebugUnitTest`, `testTvDebugUnitTest`, `lintMobileDebug`, and `lintTvDebug` completed with `BUILD SUCCESSFUL`. Unit XML totals: mobile `113 tests, 0 failures, 0 errors, 0 skipped`; TV `113 tests, 0 failures, 0 errors, 0 skipped`. |
+| Android build/unit/lint gate | Pass | `assembleMobileDebug`, `assembleTvDebug`, `testMobileDebugUnitTest`, `testTvDebugUnitTest`, `lintMobileDebug`, and `lintTvDebug` completed with `BUILD SUCCESSFUL`. Unit XML totals: mobile `147 tests, 0 failures, 0 errors, 0 skipped`; TV `147 tests, 0 failures, 0 errors, 0 skipped`. |
 | Focused TV stack unit tests | Pass | `TvAuthRecoveryPolicyTest` `3/3`, `TvFocusRestoreModelTest` `6/6`, and `TvPlaybackOverlayReducerTest` `6/6` passed under `:app:testTvDebugUnitTest`. |
 | Emulator D-pad run | Blocked in this workspace | Device/API/resolution: not available because `adb devices -l` returned an empty device list. `adb shell input keyevent KEYCODE_DPAD_CENTER` returned `adb: no devices/emulators found`. The installed SDK only reports `system-images;android-35;google_apis_playstore;x86_64`; no Android TV/Google TV AVD is configured, and the SDK emulator binary cannot start directly on this NixOS workspace due to the dynamic-loader stub-ld error. |
 | Physical Android TV remote run | Release-readiness follow-up | No physical Android TV or remote target was attached (`adb devices -l` empty). This matrix must be re-run on hardware before promoting Android TV beyond `dev`. |
@@ -18,13 +18,13 @@ This evidence packet covers the Android TV focus, D-pad, OK, Back, recovery, and
 cd mobile/android && ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:testTvDebugUnitTest --tests 'com.ferrex.android.core.tvfocus.TvAuthRecoveryPolicyTest' --tests 'com.ferrex.android.core.tvfocus.TvFocusRestoreModelTest' --tests 'com.ferrex.android.core.playback.TvPlaybackOverlayReducerTest' --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
 ```
 
-Result: `BUILD SUCCESSFUL in 6s`; focused TV evidence totals: `15 tests, 0 failures, 0 errors`.
+Result: `BUILD SUCCESSFUL in 11s`; focused TV evidence totals: `15 tests, 0 failures, 0 errors`.
 
 ```bash
 cd mobile/android && ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:assembleMobileDebug :app:assembleTvDebug :app:testMobileDebugUnitTest :app:testTvDebugUnitTest :app:lintMobileDebug :app:lintTvDebug --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
 ```
 
-Result: `BUILD SUCCESSFUL in 8s`; `105 actionable tasks: 42 executed, 40 from cache, 23 up-to-date`. Lint reports were generated at `mobile/android/app/build/reports/lint-results-mobileDebug.html` and `mobile/android/app/build/reports/lint-results-tvDebug.html`.
+Result: `BUILD SUCCESSFUL in 34s`; `105 actionable tasks: 57 executed, 25 from cache, 23 up-to-date`. Lint reports were generated at `mobile/android/app/build/reports/lint-results-mobileDebug.html` and `mobile/android/app/build/reports/lint-results-tvDebug.html`.
 
 Device/emulator commands run:
 
@@ -36,6 +36,14 @@ adb shell input keyevent KEYCODE_DPAD_CENTER
 ```
 
 Results: no ADB devices, so device/API/resolution were not available; the D-pad keyevent failed with no device, only a non-TV Android 35 Play Store x86_64 system image is installed, and the SDK emulator binary reports the NixOS stub-ld dynamic executable error.
+
+## Shared Ferrex visual pass criteria (LOW-393)
+
+- TV scaffold and full-screen surfaces use the shared Ferrex private-cinema gradient, slate background, and TV spacing tokens; screens should read as the same dark slate / signal cyan / private violet identity as phone without shrinking 10-foot layouts.
+- D-pad focus on TV buttons, poster cards, search rows, playback controls, and track rows must use shared focus scale, border width, elevation, and semantic role colors: primary/retry = signal cyan, cache/secondary = violet/slate, destructive/error = rose.
+- Home rails and full grids should keep TV poster dimensions (`190dp` rail/grid width, `338dp` card minimum height) with shared poster shape/fallback treatments and no legacy standalone TV cyan/orange card treatments.
+- Recovery, diagnostics, stale/offline, search miss, detail error, and playback error panels should use shared status-card/action-panel tones while preserving all existing Retry, Back, Sign out, Change server, Reset connection, cache clear, and diagnostics exits.
+- Playback overlay controls and track pickers should use the same Ferrex status/focus tokens, while retaining the current reducer-defined hidden-controls, Back, and picker focus behavior.
 
 ## Manual matrix
 

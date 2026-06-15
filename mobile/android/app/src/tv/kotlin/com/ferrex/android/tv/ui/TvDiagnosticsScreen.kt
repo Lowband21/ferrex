@@ -3,6 +3,7 @@ package com.ferrex.android.tv.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.diagnostics.AndroidDiagnosticsCore
 import com.ferrex.android.core.diagnostics.AndroidDisplayDiagnostics
 import com.ferrex.android.core.diagnostics.DiagnosticsActionStatus
@@ -41,6 +41,9 @@ import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvScaffold
 import com.ferrex.android.tv.ui.foundation.TvTitle
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
+import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.colors
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -130,9 +133,9 @@ fun TvDiagnosticsScreen(
     BackHandler(onBack = onBack)
 
     TvScaffold(
-        contentMaxWidth = 1180.dp,
-        horizontalPadding = 72.dp,
-        verticalPadding = 42.dp,
+        contentMaxWidth = FerrexDesignTokens.Tv.DiagnosticsMaxWidth,
+        horizontalPadding = FerrexDesignTokens.Space.ScreenTvHorizontal,
+        verticalPadding = FerrexDesignTokens.Space.ScreenTvVertical,
         verticalArrangement = Arrangement.Top,
         scrollable = true,
     ) {
@@ -142,7 +145,7 @@ fun TvDiagnosticsScreen(
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xxl))
         DiagnosticsStatusCard(panelState.exportStatus)
         DiagnosticsStatusCard(panelState.clearStatus)
         if (diagnostics == null) {
@@ -166,7 +169,7 @@ fun TvDiagnosticsScreen(
                 DiagnosticsRowCard(row)
             }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
         if (panelState.clearConfirmationVisible) {
             TvActionPanel(
                 title = "Clear diagnostics/logs?",
@@ -179,7 +182,7 @@ fun TvDiagnosticsScreen(
                 focusRestorer = focusRestorer,
                 surfaceKey = "clear-confirmation",
                 autoFocus = true,
-                buttonMaxWidth = 620.dp,
+                buttonMaxWidth = FerrexDesignTokens.Tv.DiagnosticsActionMaxWidth,
             )
         } else {
             val busy = panelState.exportStatus is DiagnosticsActionStatus.Running || panelState.clearStatus is DiagnosticsActionStatus.Running
@@ -208,7 +211,7 @@ fun TvDiagnosticsScreen(
                 focusRestorer = focusRestorer,
                 surfaceKey = "diagnostics-actions",
                 autoFocus = true,
-                buttonMaxWidth = 620.dp,
+                buttonMaxWidth = FerrexDesignTokens.Tv.DiagnosticsActionMaxWidth,
             )
         }
     }
@@ -239,20 +242,27 @@ private fun DiagnosticsRowCard(
     row: DiagnosticsSummaryRow,
     error: Boolean = false,
 ) {
+    val tone = if (error) FerrexStatusTone.Error else FerrexStatusTone.Secondary
+    val colors = tone.colors()
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 10.dp),
+            .padding(bottom = FerrexDesignTokens.Space.Md),
+        shape = FerrexDesignTokens.Shapes.RecoveryCard,
         colors = CardDefaults.cardColors(
-            containerColor = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.76f),
-            contentColor = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+            containerColor = colors.container,
+            contentColor = colors.content,
         ),
+        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, colors.border.copy(alpha = 0.72f)),
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        ) {
             Text(
                 text = row.label,
                 style = MaterialTheme.typography.titleLarge,
-                color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary,
+                color = colors.accent,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(row.value, style = MaterialTheme.typography.titleMedium)

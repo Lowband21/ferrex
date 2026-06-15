@@ -13,14 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.auth.ConnectResult
 import com.ferrex.android.core.auth.LoginRequiredReason
@@ -40,6 +36,11 @@ import com.ferrex.android.core.auth.LoginResult
 import com.ferrex.android.core.auth.NoServerReason
 import com.ferrex.android.core.auth.RecoverableFailureReason
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.ui.components.FerrexActionButton
+import com.ferrex.android.ui.components.FerrexActionRole
+import com.ferrex.android.ui.components.FerrexStatusCard
+import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
 
 @Composable
@@ -47,7 +48,7 @@ fun PhoneLoadingScreen() {
     PhoneSurface {
         CircularProgressIndicator()
         Text(
-            modifier = Modifier.padding(top = 20.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Xl),
             text = "Checking your Ferrex connection…",
             style = MaterialTheme.typography.titleMedium,
         )
@@ -90,7 +91,7 @@ fun PhoneServerConnectScreen(
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Md),
             text = when (state.reason) {
                 NoServerReason.FirstInstall -> "Enter your server URL to start."
                 NoServerReason.ResetConnection -> "Connection data was reset. Enter a server URL to continue."
@@ -100,7 +101,7 @@ fun PhoneServerConnectScreen(
         )
         state.previousServerUrl?.let {
             Text(
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier.padding(top = FerrexDesignTokens.Space.Md),
                 text = "Current server: $it",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -108,7 +109,7 @@ fun PhoneServerConnectScreen(
         OutlinedTextField(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 28.dp),
+                .padding(top = FerrexDesignTokens.Space.Xxxl),
             value = serverUrl,
             onValueChange = { serverUrl = it },
             label = { Text("Server URL, such as http://192.168.1.100:3000") },
@@ -117,27 +118,32 @@ fun PhoneServerConnectScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { connect() }),
         )
-        Button(
+        FerrexActionButton(
+            label = "Retry / Connect",
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 20.dp),
+                .padding(top = FerrexDesignTokens.Space.Xl),
+            role = FerrexActionRole.Retry,
             enabled = !busy && serverUrl.isNotBlank(),
             onClick = { connect() },
         ) {
-            if (busy) CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+            if (busy) CircularProgressIndicator(modifier = Modifier.padding(end = FerrexDesignTokens.Space.Md))
             Text("Retry / Connect")
         }
-        TextButton(
-            modifier = Modifier.padding(top = 8.dp),
+        FerrexActionButton(
+            label = "Reset connection",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = FerrexDesignTokens.Space.Sm),
+            role = FerrexActionRole.DestructiveReset,
             onClick = onResetConnection,
-        ) {
-            Text("Reset connection")
-        }
+        )
         message?.let {
-            Text(
-                modifier = Modifier.padding(top = 20.dp),
-                text = it,
-                color = MaterialTheme.colorScheme.primary,
+            FerrexStatusCard(
+                modifier = Modifier.padding(top = FerrexDesignTokens.Space.Xl),
+                title = "Connection status",
+                body = it,
+                tone = FerrexStatusTone.Primary,
             )
         }
     }
@@ -186,12 +192,12 @@ fun PhoneLoginScreen(
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Md),
             text = "Current server: ${state.serverUrl}",
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Lg),
             text = if (isFatal) setupCopy(state.reason) else "Use device password sign-in for the current Ferrex auth API. PIN setup is reported honestly when the server requires it.",
             style = MaterialTheme.typography.bodyLarge,
         )
@@ -199,7 +205,7 @@ fun PhoneLoginScreen(
             OutlinedTextField(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 28.dp),
+                    .padding(top = FerrexDesignTokens.Space.Xxxl),
                 value = username,
                 onValueChange = { username = it },
                 label = { Text("Username") },
@@ -210,7 +216,7 @@ fun PhoneLoginScreen(
             OutlinedTextField(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 14.dp),
+                    .padding(top = FerrexDesignTokens.Space.Md),
                 value = password,
                 onValueChange = { password = it },
                 label = { Text("Password") },
@@ -220,14 +226,16 @@ fun PhoneLoginScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { login() }),
             )
-            Button(
+            FerrexActionButton(
+                label = "Sign in",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 20.dp),
+                    .padding(top = FerrexDesignTokens.Space.Xl),
+                role = FerrexActionRole.Primary,
                 enabled = !busy && username.isNotBlank() && password.isNotBlank(),
                 onClick = { login() },
             ) {
-                if (busy) CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+                if (busy) CircularProgressIndicator(modifier = Modifier.padding(end = FerrexDesignTokens.Space.Md))
                 Text("Sign in")
             }
         }
@@ -239,10 +247,11 @@ fun PhoneLoginScreen(
             onOpenDiagnostics = onOpenDiagnostics,
         )
         message?.let {
-            Text(
-                modifier = Modifier.padding(top = 20.dp),
-                text = it,
-                color = MaterialTheme.colorScheme.primary,
+            FerrexStatusCard(
+                modifier = Modifier.padding(top = FerrexDesignTokens.Space.Xl),
+                title = "Sign-in status",
+                body = it,
+                tone = if (isFatal) FerrexStatusTone.Error else FerrexStatusTone.Secondary,
             )
         }
     }
@@ -264,12 +273,12 @@ fun PhoneRecoverableScreen(
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Md),
             text = "Current server: ${state.serverUrl}",
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = FerrexDesignTokens.Space.Lg),
             text = recoverableCopy(state.reason),
             style = MaterialTheme.typography.bodyLarge,
         )
@@ -293,7 +302,7 @@ private fun PhoneSurface(content: @Composable ColumnScope.() -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 28.dp, vertical = 44.dp),
+                .padding(horizontal = FerrexDesignTokens.Space.Xxxl, vertical = 44.dp),
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.Center,
             content = content,
@@ -310,31 +319,46 @@ private fun RecoveryActions(
     onResetConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    Spacer(Modifier.height(28.dp))
+    Spacer(Modifier.height(FerrexDesignTokens.Space.Xxxl))
     if (includeRetry) {
-        Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-            Text("Retry")
-        }
+        FerrexActionButton(
+            label = "Retry",
+            role = FerrexActionRole.Retry,
+            onClick = onRetry,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(top = FerrexDesignTokens.Space.Sm),
+        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
     ) {
-        TextButton(onClick = onSignOut, modifier = Modifier.weight(1f)) {
-            Text("Sign out", textAlign = TextAlign.Center)
-        }
-        TextButton(onClick = onChangeServer, modifier = Modifier.weight(1f)) {
-            Text("Change server", textAlign = TextAlign.Center)
-        }
+        FerrexActionButton(
+            label = "Sign out",
+            role = FerrexActionRole.Secondary,
+            onClick = onSignOut,
+            modifier = Modifier.weight(1f),
+        )
+        FerrexActionButton(
+            label = "Change server",
+            role = FerrexActionRole.Secondary,
+            onClick = onChangeServer,
+            modifier = Modifier.weight(1f),
+        )
     }
-    TextButton(onClick = onResetConnection, modifier = Modifier.fillMaxWidth()) {
-        Text("Reset connection")
-    }
-    OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
-        Text("Diagnostics / Export diagnostics")
-    }
+    FerrexActionButton(
+        label = "Reset connection",
+        role = FerrexActionRole.DestructiveReset,
+        onClick = onResetConnection,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    FerrexActionButton(
+        label = "Diagnostics / Export diagnostics",
+        role = FerrexActionRole.Secondary,
+        onClick = onOpenDiagnostics,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 private fun loginReasonCopy(reason: LoginRequiredReason): String? = when (reason) {

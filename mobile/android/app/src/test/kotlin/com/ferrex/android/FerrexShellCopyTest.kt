@@ -12,8 +12,8 @@ class FerrexShellCopyTest {
     }
 
     @Test
-    fun shellCopyNamesRecoveryFirstBehavior() {
-        assertTrue(FerrexShellCopy.MOBILE_BODY.contains("validates"))
+    fun shellCopyNamesRecoveryExits() {
+        assertTrue(FerrexShellCopy.MOBILE_BODY.contains("recovery exits"))
         assertTrue(FerrexShellCopy.TV_BODY.contains("recovery actions"))
     }
 }
