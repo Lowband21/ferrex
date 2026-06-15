@@ -1,43 +1,43 @@
-use std::f32::consts::PI;
-
 use crate::{
     domains::{
         media::selectors,
         ui::{
-            components,
+            background_ui::BackgroundMessage,
             messages::UiMessage,
             playback_ui::PlaybackMessage,
             shell_ui::UiShellMessage,
-            theme,
+            types::BackdropAspectMode,
             views::{
-                grid::macros::{ThemeColorAccess, parse_hex_color},
-                virtual_carousel::{self, types::CarouselKey},
+                detail::{
+                    DetailAction, DetailArtAspect, DetailArtwork,
+                    DetailBackdropControl, DetailContentKind,
+                    DetailLayoutInput, DetailLayoutPlan, DetailMetadataPill,
+                    DetailNotice, DetailOverviewSection, DetailPageModel,
+                    DetailRailItem, DetailRelationshipRail, DetailSection,
+                    DetailTone, solve_detail_layout, view_backdrop_controls,
+                    view_detail_hero, view_empty_state,
+                    view_registered_relationship_rail, view_relationship_rail,
+                    view_section,
+                },
+                virtual_carousel::types::CarouselKey,
             },
-            widgets::image_for::image_for,
         },
     },
-    infra::shader_widgets::poster::{
-        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
-    },
-    infra::theme::accent,
-    media_card,
     state::State,
 };
 
 use ferrex_core::player_prelude::{
     MediaIDLike, SeasonLike, SeriesDetailsLike, SeriesLike,
 };
-
 use ferrex_model::{
-    EpisodeID, ImageSize, MediaID, Priority, SeasonID, SeasonReference,
-    SeriesID,
+    EpisodeID, EpisodeReference, MediaID, SeasonID, SeasonReference, SeriesID,
 };
-use rkyv::option::ArchivedOption;
-
 use iced::{
     Element, Length,
-    widget::{Space, Stack, column, container, row, text},
+    widget::{Column, Row, Space, container},
 };
+use rkyv::option::ArchivedOption;
+use uuid::Uuid;
 
 #[cfg_attr(
     any(
@@ -47,18 +47,10 @@ use iced::{
     ),
     profiling::function
 )]
-pub fn view_series_detail<'a>(
-    state: &'a State,
+pub fn view_series_detail(
+    state: &State,
     series_id: SeriesID,
-) -> Element<'a, UiMessage> {
-    let fonts = &state.domains.ui.state.size_provider.font;
-    let scaled_layout = &state.domains.ui.state.scaled_layout;
-    let detail_poster_quality =
-        state.domains.settings.display.detail_poster_quality;
-    let library_poster_quality =
-        state.domains.settings.display.library_poster_quality;
-
-    // Resolve series yoke via UI cache with lazy fetch (interior mutable cache)
+) -> Element<'static, UiMessage> {
     let series_uuid = series_id.to_uuid();
     let series_yoke_arc = match state
         .domains
@@ -68,323 +60,157 @@ pub fn view_series_detail<'a>(
         .peek_ref(&series_uuid)
     {
         Some(arc) => arc,
-        _ => {
-            match state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get_series_yoke(&MediaID::Series(series_id))
-            {
-                Ok(yoke) => {
-                    let arc = std::sync::Arc::new(yoke);
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .series_yoke_cache
-                        .insert(series_uuid, arc.clone());
-                    arc
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[TV] Failed to fetch series yoke for {}: {:?}",
-                        series_uuid,
-                        e
-                    );
-                    // Render minimal error content
-                    return container(
-                        column![
-                            text("Media Not Found")
-                                .size(fonts.title)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                            Space::new().height(10),
-                            text("Repository error:")
-                                .size(fonts.body)
-                                .color(theme::MediaServerTheme::TEXT_SUBDUED),
-                        ]
-                        .spacing(10)
-                        .align_x(iced::Alignment::Center),
-                    )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                    .into();
-                }
+        _ => match state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_series_yoke(&MediaID::Series(series_id))
+        {
+            Ok(yoke) => {
+                let arc = std::sync::Arc::new(yoke);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .series_yoke_cache
+                    .insert(series_uuid, arc.clone());
+                arc
             }
-        }
+            Err(error) => {
+                log::warn!(
+                    "[TV] Failed to fetch series yoke for {}: {:?}",
+                    series_uuid,
+                    error
+                );
+                return view_repository_unavailable(
+                    state,
+                    DetailContentKind::Series,
+                    "Series unavailable",
+                    format!(
+                        "Series {series_uuid} is not available from the local repository. Use Back or Home, then retry after the library has refreshed."
+                    ),
+                );
+            }
+        },
     };
+
     let series = series_yoke_arc.get();
-    //let season = season.get();
-    let media_id = series_id.to_media_id();
-
-    //let media_id = MediaID::Series(SeriesID(series_id.to_uuid()));
-
-    let mut content = column![];
-
-    // Add dynamic spacing at the top based on backdrop dimensions
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let content_offset = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_content_offset_height(window_width, window_height);
-    content = content.push(Space::new().height(Length::Fixed(content_offset)));
-
-    // Details column
-    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-    // Title
-    details = details.push(
-        text(series.title().to_string())
-            .size(fonts.display)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-    );
-
     let series_details = series.details();
+    let media_uuid = series_id.to_uuid();
+    let poster_iid = archived_uuid(&series_details.primary_poster_iid);
 
-    let series_poster_iid = match &series_details.primary_poster_iid {
-        ArchivedOption::Some(iid) => Some(*iid),
-        ArchivedOption::None => None,
-    };
-
-    // Apply theme color to poster if present
-    let mut poster = image_for(media_id.to_uuid())
-        .iid(series_poster_iid)
-        .skip_request(series_poster_iid.is_none())
-        .request_size(ImageSize::Poster(detail_poster_quality))
-        .display_size(300.0, 450.0)
-        .priority(Priority::Visible)
-        .animation_behavior(AnimationBehavior::flip_then_fade());
-
-    if let Some(hex) = series.theme_color()
-        && let Ok(color) = parse_hex_color(hex)
-    {
-        poster = poster.theme_color(color);
-    }
-    let poster_id = media_id.to_uuid();
-    let instance_key = PosterInstanceKey::standalone(poster_id);
-    let (face, rotation_override) = if let Some(menu_state) =
-        state.domains.ui.state.poster_menu_states.get(&instance_key)
-    {
-        (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open.as_ref()
-        == Some(&instance_key)
-    {
-        (PosterFace::Back, Some(PI))
-    } else {
-        (PosterFace::Front, None)
-    };
-    poster = poster.face(face);
-    if let Some(rot) = rotation_override {
-        poster = poster.rotation_y(rot);
-    }
-    let poster_element: Element<UiMessage> = poster.into();
-
-    // Fetch seasons for this series
-    let seasons: Vec<SeasonReference> = match state
+    let seasons_result = state
         .domains
         .ui
         .state
         .repo_accessor
-        .get_series_seasons(&series_id)
-    {
-        Ok(s) => s,
-        Err(e) => {
+        .get_series_seasons(&series_id);
+    let (seasons, seasons_error) = match seasons_result {
+        Ok(seasons) => (seasons, None),
+        Err(error) => {
             log::warn!(
                 "[TV] Failed to fetch seasons for series {}: {:?}",
                 series_id,
-                e
+                error
             );
-            Vec::new()
+            (Vec::new(), Some(format!("{error:?}")))
         }
     };
 
-    // Extract details from the series reference
-    let (series_details, description, rating, _total_episodes) = (
-        Some(series_details),
-        series_details.overview.as_ref(),
-        series_details.vote_average.as_ref(),
-        series_details.number_of_episodes.as_ref(),
-    );
+    let next_episode =
+        selectors::select_next_episode_for_series(state, series_id);
+    let genres = series_details.genres().join(", ");
+    let subtitle = if genres.is_empty() {
+        "Series".to_string()
+    } else {
+        format!("Series • {genres}")
+    };
 
-    /*
-    // Stats - use the seasons we already fetched
-    let season_count = seasons.len();
-    if season_count > 0 {
-        log::info!(
-            "DETAIL VIEW: Found {} seasons for series '{}' (ID: {})",
-            season_count,
-            series_ref.title.as_str(),
-            series_id.as_str()
-        );
-    }
-
-    let stats = format!(
-        "{} Seasons • {} Episodes",
-        season_count,
-        total_episodes.unwrap_or(0)
-    );
-    details = details.push(
-        text(stats)
-            .size(16)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    ); */
-
-    // Stats: seasons and total episodes (if season list available)
-    if !seasons.is_empty() {
-        let season_count = seasons.len();
-        let total_eps: u16 =
-            seasons.iter().map(|s| s.details.episode_count).sum();
-        details = details.push(
-            text(format!("{} Seasons • {} Episodes", season_count, total_eps))
-                .size(fonts.body)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
-    }
-
-    // Rating
-    if let Some(rating) = rating {
-        details = details.push(
-            text(format!("★ {:.1}", rating))
-                .size(fonts.body)
-                .color(accent()),
-        );
-    }
-
-    // Play/Resume button – uses identity endpoint when available, falls back to local selection
-    if selectors::select_next_episode_for_series(state, series_id).is_some() {
-        let button_row = components::create_action_button_row(
-            PlaybackMessage::PlaySeriesNextEpisode(series_id).into(),
-            Some(PlaybackMessage::PlaySeriesNextEpisode(series_id).into()),
-            vec![],
-        );
-        details = details.push(Space::new().height(10));
-        details = details.push(button_row);
-    }
-
-    // Description
-    if let Some(desc) = description {
-        details = details.push(Space::new().height(10));
-        details = details.push(
-            container(
-                text(desc.to_string())
-                    .size(fonts.caption)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            )
-            .width(Length::Fill)
-            .padding(10),
-        );
-    }
-
-    // Genres
-    if let Some(series_details) = series_details
-        && !series_details.genres().is_empty()
+    let mut metadata = Vec::new();
+    if let Some(first_air_date) = series_details.first_air_date()
+        && let Some(year) = first_air_date.split('-').next()
+        && !year.is_empty()
     {
-        details = details.push(
-            text(format!("Genres: {}", series_details.genres().join(", ")))
-                .size(fonts.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
+        metadata.push(year.to_string());
     }
-
-    // Content row with poster and details
-    let info_row = row![poster_element, details]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-    content = content.push(info_row);
-
-    // Seasons carousel - virtual carousel module
     if !seasons.is_empty() {
-        content = content.push(Space::new().height(20));
-        let key = CarouselKey::ShowSeasons(series_id.to_uuid());
-        if let Some(vc_state) =
-            state.domains.ui.state.carousel_registry.get(&key)
-        {
-            let seasons_vec = seasons.clone();
-            let section = virtual_carousel::virtual_carousel(
-                key.clone(),
-                "Seasons",
-                seasons_vec.len(),
-                vc_state,
-                move |idx| {
-                    seasons_vec.get(idx).map(|s| {
-                        let title_str = if s.season_number.value() == 0 {
-                            "Specials".to_string()
-                        } else {
-                            format!("Season {}", s.season_number.value())
-                        };
-                        let subtitle_str =
-                            format!("{} episodes", s.details.episode_count);
-
-                        media_card! {
-                            type: Season,
-                            data: (s.clone()),
-                            {
-                                id: s.id.to_uuid(),
-                                title: title_str.as_str(),
-                                subtitle: subtitle_str.as_str(),
-                                image: {
-                                    key: s.id.to_uuid(),
-                                    type: poster,
-                                    fallback: "📺",
-                                },
-                                image_size: ImageSize::Poster(library_poster_quality),
-                                size: Medium,
-                                on_click: UiShellMessage::ViewSeason(
-                                    s.series_id,
-                                    s.id,
-                                )
-                                .into(),
-                                on_play: UiMessage::NoOp,
-                                hover_icon: lucide_icons::Icon::List,
-                                is_hovered: false,
-                            }
-                        }
-                    })
-                },
-                false,
-                fonts,
-                scaled_layout,
-                0.0,
-            );
-            content = content.push(section);
+        metadata.push(plural_label(seasons.len(), "season", "seasons"));
+        let total_eps: u16 = seasons
+            .iter()
+            .map(|season| season.details.episode_count)
+            .sum();
+        if total_eps > 0 {
+            metadata.push(plural_label(
+                total_eps as usize,
+                "episode",
+                "episodes",
+            ));
+        }
+    } else {
+        if let Some(count) = series_details.num_seasons() {
+            metadata.push(plural_label(count as usize, "season", "seasons"));
+        }
+        if let Some(count) = series_details.num_episodes() {
+            metadata.push(plural_label(count as usize, "episode", "episodes"));
         }
     }
-    // Create the main content container
-    let content_container = container(content).width(Length::Fill);
+    if let Some(rating) = series_details.vote_average() {
+        metadata.push(format!("★ {:.1}", rating));
+    }
 
-    // Calculate backdrop dimensions using centralized method
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let backdrop_dims = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_backdrop_dimensions(window_width, window_height);
+    let mut model = DetailPageModel::new(
+        DetailContentKind::Series,
+        series.title().to_string(),
+    )
+    .with_eyebrow("Series Details")
+    .with_subtitle(subtitle)
+    .with_hero_art(DetailArtwork::tv_poster(
+        media_uuid,
+        poster_iid,
+        format!("{} poster", series.title()),
+    ));
+    model.metadata = metadata_pills(metadata);
+    model.actions = series_actions(series_id, next_episode);
 
-    // Create aspect ratio toggle button
-    let aspect_button =
-        crate::domains::ui::components::create_backdrop_aspect_button(state);
+    if let Some(overview) = series_details.overview() {
+        model.sections.push(DetailSection::Overview(
+            DetailOverviewSection::new(overview.to_string()),
+        ));
+    }
 
-    // Position the button at bottom-right of backdrop
-    let button_container = container(aspect_button)
-        .padding([0, 20])
-        .width(Length::Fill)
-        .height(Length::Fixed(backdrop_dims.button_height))
-        .align_x(iced::alignment::Horizontal::Right)
-        .align_y(iced::alignment::Vertical::Bottom);
+    if let Some(error) = seasons_error {
+        model.sections.push(warning_notice(
+            "Season rows unavailable",
+            format!(
+                "Local season rows for series {series_uuid} could not be read ({error}). Use Back or Home, then retry after the repository recovers."
+            ),
+        ));
+        ensure_recovery_actions(&mut model.actions);
+    } else if seasons.is_empty() {
+        model.sections.push(warning_notice(
+            "No local seasons",
+            format!(
+                "No local season rows were found for series {series_uuid}. Use Back or Home, then refresh the library if this series should have playable seasons."
+            ),
+        ));
+        ensure_recovery_actions(&mut model.actions);
+    } else {
+        model.sections.push(DetailSection::RelationshipRail(
+            seasons_relationship_rail(series_id, &seasons),
+        ));
+    }
 
-    // Layer the button over the content using Stack
-    Stack::new()
-        .push(content_container)
-        .push(button_container)
-        .into()
+    if next_episode.is_none() {
+        model.sections.push(warning_notice(
+            "Playback unavailable",
+            format!(
+                "No local playable episode mapping is available for series {series_uuid}. The primary play action is disabled until an episode row exists."
+            ),
+        ));
+    }
+
+    view_adaptive_tv_detail(model, state)
 }
 
 #[cfg_attr(
@@ -395,17 +221,11 @@ pub fn view_series_detail<'a>(
     ),
     profiling::function
 )]
-pub fn view_season_detail<'a>(
-    state: &'a State,
-    _series_id: &'a SeriesID,
-    season_id: &'a SeasonID,
-) -> Element<'a, UiMessage> {
-    let fonts = &state.domains.ui.state.size_provider.font;
-    let scaled_layout = &state.domains.ui.state.scaled_layout;
-    let detail_poster_quality =
-        state.domains.settings.display.detail_poster_quality;
-
-    // Resolve season yoke via UI cache with lazy fetch
+pub fn view_season_detail(
+    state: &State,
+    series_id: &SeriesID,
+    season_id: &SeasonID,
+) -> Element<'static, UiMessage> {
     let season_uuid = season_id.to_uuid();
     let season_yoke_arc = match state
         .domains
@@ -432,248 +252,110 @@ pub fn view_season_detail<'a>(
                     .insert(season_uuid, arc.clone());
                 arc
             }
-            Err(e) => {
+            Err(error) => {
                 log::warn!(
                     "[TV] Failed to fetch season yoke for {}: {:?}",
                     season_uuid,
-                    e
+                    error
                 );
-                return container(
-                    column![
-                        text("Media Not Found")
-                            .size(fonts.title)
-                            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                        Space::new().height(10),
-                        text("Repository error:")
-                            .size(fonts.body)
-                            .color(theme::MediaServerTheme::TEXT_SUBDUED),
-                    ]
-                    .spacing(10)
-                    .align_x(iced::Alignment::Center),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .into();
+                return view_repository_unavailable(
+                    state,
+                    DetailContentKind::Season,
+                    "Season unavailable",
+                    format!(
+                        "Season {season_uuid} is not available from the local repository. Use Back or Home, then retry after the library has refreshed."
+                    ),
+                );
             }
         },
     };
+
     let season = season_yoke_arc.get();
+    let title = season_title(season.details.season_number.into());
+    let poster_iid = archived_uuid(&season.details.primary_poster_iid);
+    let next_episode =
+        selectors::select_next_episode_for_season(state, *season_id);
 
-    let mut content = column![];
-
-    // Add dynamic spacing at the top based on backdrop dimensions
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let content_offset = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_content_offset_height(window_width, window_height);
-    content = content.push(Space::new().height(Length::Fixed(content_offset)));
-
-    let season_poster_iid = match &season.details.primary_poster_iid {
-        ArchivedOption::Some(iid) => Some(*iid),
-        ArchivedOption::None => None,
-    };
-
-    // Poster element
-    let mut poster = image_for(season.id.to_uuid())
-        .iid(season_poster_iid)
-        .skip_request(season_poster_iid.is_none())
-        .request_size(ImageSize::Poster(detail_poster_quality))
-        .display_size(300.0, 450.0)
-        .priority(Priority::Visible)
-        .animation_behavior(AnimationBehavior::flip_then_fade());
-    if let Some(hex) = season.theme_color()
-        && let Ok(color) = parse_hex_color(hex)
-    {
-        poster = poster.theme_color(color);
-    }
-    let poster_id = season.id.to_uuid();
-    let season_instance_key = PosterInstanceKey::standalone(poster_id);
-    let (face, rotation_override) = if let Some(menu_state) = state
-        .domains
-        .ui
-        .state
-        .poster_menu_states
-        .get(&season_instance_key)
-    {
-        (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open.as_ref()
-        == Some(&season_instance_key)
-    {
-        (PosterFace::Back, Some(PI))
-    } else {
-        (PosterFace::Front, None)
-    };
-    poster = poster.face(face);
-    if let Some(rot) = rotation_override {
-        poster = poster.rotation_y(rot);
-    }
-    let poster_element: Element<UiMessage> = poster.into();
-
-    // Details column
-    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-    // Title and episode count
-    let season_number = season.details.season_number;
-    let title = if season_number == 0 {
-        "Specials".to_string()
-    } else {
-        format!("Season {}", season_number)
-    };
-    details = details.push(
-        text(title)
-            .size(fonts.display)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-    );
-
-    let episode_count = season.num_episodes();
-    details = details.push(
-        text(format!("{} Episodes", episode_count))
-            .size(fonts.body)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    );
-
-    // Play button: play first in-progress or first unwatched episode in this season
-    if let Some(next_ep_id) =
-        selectors::select_next_episode_for_season(state, *season_id)
-    {
-        let button_row = components::create_action_button_row(
-            PlaybackMessage::PlayMediaWithId(MediaID::Episode(next_ep_id))
-                .into(),
-            Some(
-                PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(
-                    next_ep_id,
-                ))
-                .into(),
-            ),
-            vec![],
-        );
-        details = details.push(Space::new().height(10));
-        details = details.push(button_row);
-    }
-
-    // Overview
-    if let Some(desc) = season.details.overview.as_ref() {
-        details = details.push(Space::new().height(10));
-        details = details.push(
-            container(
-                text(desc.to_string())
-                    .size(fonts.caption)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            )
-            .width(Length::Fill)
-            .padding(10),
-        );
-    }
-
-    // Content row with poster and details
-    let info_row = row![poster_element, details]
-        .spacing(10)
-        .align_y(iced::Alignment::Start);
-
-    content = content.push(info_row);
-
-    // Episodes carousel for this season
-    let episodes = state
+    let episodes_result = state
         .domains
         .ui
         .state
         .repo_accessor
-        .get_season_episodes(season_id)
-        .unwrap_or_else(|_| Vec::new());
-
-    if !episodes.is_empty() {
-        content = content.push(Space::new().height(20));
-        let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
-        if let Some(vc_state) =
-            state.domains.ui.state.carousel_registry.get(&key)
-        {
-            let eps_vec = episodes.clone();
-            let ep_section = virtual_carousel::virtual_carousel(
-                key.clone(),
-                "Episodes",
-                eps_vec.len(),
-                vc_state,
-                move |idx| {
-                    eps_vec.get(idx).map(|e| {
-                        let title_str = format!(
-                            "S{:02}E{:02}",
-                            e.season_number.value(),
-                            e.episode_number.value()
-                        );
-                        let subtitle_str = e.details.name.as_str();
-
-                        media_card! {
-                            type: Episode,
-                            data: (e.clone()),
-                            {
-                                id: e.id.to_uuid(),
-                                title: title_str.as_str(),
-                                subtitle: subtitle_str,
-                                image: {
-                                    key: e.id.to_uuid(),
-                                    type: thumbnail,
-                                    fallback: "🎞",
-                                },
-                                size: Wide,
-                                on_click: PlaybackMessage::PlayMediaWithId(
-                                    MediaID::Episode(e.id),
-                                )
-                                .into(),
-                                on_play: PlaybackMessage::PlayMediaWithId(
-                                    MediaID::Episode(e.id),
-                                )
-                                .into(),
-                                hover_icon: lucide_icons::Icon::Play,
-                                is_hovered: false,
-                            }
-                        }
-                    })
-                },
-                false,
-                fonts,
-                scaled_layout,
-                0.0,
+        .get_season_episodes(season_id);
+    let (episodes, episodes_error) = match episodes_result {
+        Ok(episodes) => (episodes, None),
+        Err(error) => {
+            log::warn!(
+                "[TV] Failed to fetch episodes for season {}: {:?}",
+                season_id,
+                error
             );
-            content = content.push(ep_section);
+            (Vec::new(), Some(format!("{error:?}")))
         }
+    };
+
+    let mut metadata = vec![plural_label(
+        season.num_episodes() as usize,
+        "episode",
+        "episodes",
+    )];
+    if let Some(air_date) = season.details.air_date.as_ref()
+        && let Some(year) = air_date.split('-').next()
+        && !year.is_empty()
+    {
+        metadata.push(year.to_string());
     }
 
-    // Create the main content container
-    let content_container = container(content).width(Length::Fill);
+    let mut model =
+        DetailPageModel::new(DetailContentKind::Season, title.clone())
+            .with_eyebrow("Season Details")
+            .with_subtitle(series_detail_subtitle(state, series_id))
+            .with_hero_art(DetailArtwork::tv_poster(
+                season_uuid,
+                poster_iid,
+                format!("{title} poster"),
+            ));
+    model.metadata = metadata_pills(metadata);
+    model.actions = season_actions(*season_id, next_episode);
 
-    // Calculate backdrop dimensions using centralized method
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let backdrop_dims = state
-        .domains
-        .ui
-        .state
-        .background_shader_state
-        .calculate_backdrop_dimensions(window_width, window_height);
+    if let Some(overview) = season.details.overview.as_ref() {
+        model.sections.push(DetailSection::Overview(
+            DetailOverviewSection::new(overview.to_string()),
+        ));
+    }
 
-    // Create aspect ratio toggle button
-    let aspect_button =
-        crate::domains::ui::components::create_backdrop_aspect_button(state);
+    if let Some(error) = episodes_error {
+        model.sections.push(warning_notice(
+            "Episode rows unavailable",
+            format!(
+                "Local episode rows for season {season_uuid} could not be read ({error}). Use Back or Home, then retry after the repository recovers."
+            ),
+        ));
+        ensure_recovery_actions(&mut model.actions);
+    } else if episodes.is_empty() {
+        model.sections.push(warning_notice(
+            "No local episodes",
+            format!(
+                "No local episode rows were found for season {season_uuid}. Use Back or Home, then refresh the library if this season should have playable episodes."
+            ),
+        ));
+        ensure_recovery_actions(&mut model.actions);
+    } else {
+        model.sections.push(DetailSection::RelationshipRail(
+            episodes_relationship_rail(*season_id, &episodes),
+        ));
+    }
 
-    // Position the button at bottom-right of backdrop
-    let button_container = container(aspect_button)
-        .padding([0, 20])
-        .width(Length::Fill)
-        .height(Length::Fixed(backdrop_dims.button_height))
-        .align_x(iced::alignment::Horizontal::Right)
-        .align_y(iced::alignment::Vertical::Bottom);
+    if next_episode.is_none() {
+        model.sections.push(warning_notice(
+            "Playback unavailable",
+            format!(
+                "No local playable episodes were found for season {season_uuid}. The primary play action is disabled until episode rows exist."
+            ),
+        ));
+    }
 
-    // Layer the button over the content using Stack
-    Stack::new()
-        .push(content_container)
-        .push(button_container)
-        .into()
+    view_adaptive_tv_detail(model, state)
 }
 
 #[cfg_attr(
@@ -684,214 +366,622 @@ pub fn view_season_detail<'a>(
     ),
     profiling::function
 )]
-pub fn view_episode_detail<'a>(
-    state: &'a State,
-    episode_id: &'a EpisodeID,
-) -> Element<'a, UiMessage> {
-    let fonts = &state.domains.ui.state.size_provider.font;
-
-    // Try to get episode yoke from cache or fetch on-demand
-    let ep_uuid = episode_id.to_uuid();
-    let episode_yoke_arc =
-        match state.domains.ui.state.episode_yoke_cache.peek_ref(&ep_uuid) {
-            Some(arc) => arc,
-            _ => match state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get_episode_yoke(&MediaID::Episode(*episode_id))
-            {
-                Ok(yoke) => {
-                    let arc = std::sync::Arc::new(yoke);
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .episode_yoke_cache
-                        .insert(ep_uuid, arc.clone());
-                    arc
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[TV] Failed to fetch episode yoke for {}: {:?}",
-                        ep_uuid,
-                        e
-                    );
-                    return container(
-                        column![
-                            text("Media Not Found")
-                                .size(fonts.title)
-                                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-                            Space::new().height(10),
-                            text("Repository error:")
-                                .size(fonts.body)
-                                .color(theme::MediaServerTheme::TEXT_SUBDUED),
-                        ]
-                        .spacing(10)
-                        .align_x(iced::Alignment::Center),
-                    )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                    .into();
-                }
-            },
-        };
-    let episode = episode_yoke_arc.get();
-
-    // Add dynamic spacing at the top based on backdrop dimensions
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let content_offset = state
+pub fn view_episode_detail(
+    state: &State,
+    episode_id: &EpisodeID,
+) -> Element<'static, UiMessage> {
+    let episode_uuid = episode_id.to_uuid();
+    let episode_yoke_arc = match state
         .domains
         .ui
         .state
-        .background_shader_state
-        .calculate_content_offset_height(window_width, window_height);
+        .episode_yoke_cache
+        .peek_ref(&episode_uuid)
+    {
+        Some(arc) => arc,
+        _ => match state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_episode_yoke(&MediaID::Episode(*episode_id))
+        {
+            Ok(yoke) => {
+                let arc = std::sync::Arc::new(yoke);
+                state
+                    .domains
+                    .ui
+                    .state
+                    .episode_yoke_cache
+                    .insert(episode_uuid, arc.clone());
+                arc
+            }
+            Err(error) => {
+                log::warn!(
+                    "[TV] Failed to fetch episode yoke for {}: {:?}",
+                    episode_uuid,
+                    error
+                );
+                return view_repository_unavailable(
+                    state,
+                    DetailContentKind::Episode,
+                    "Episode unavailable",
+                    format!(
+                        "Episode {episode_uuid} is not available from the local repository. Use Back or Home, then retry after the library has refreshed."
+                    ),
+                );
+            }
+        },
+    };
 
-    let mut content = column![].padding(20);
-    content = content.push(Space::new().height(Length::Fixed(content_offset)));
+    let episode = episode_yoke_arc.get();
+    let still_iid = archived_uuid(&episode.details.primary_still_iid);
+    let episode_title = if episode.details.name.is_empty() {
+        format!("Episode {}", episode.details.episode_number)
+    } else {
+        episode.details.name.to_string()
+    };
+    let episode_code = format!(
+        "S{:02}E{:02}",
+        episode.details.season_number, episode.details.episode_number
+    );
 
-    let still_iid = match &episode.details.primary_still_iid {
+    let mut metadata = vec![episode_code.clone()];
+    if let Some(air_date) = episode.details.air_date.as_ref() {
+        metadata.push(air_date.to_string());
+    }
+    if let Some(runtime) = episode.details.runtime.as_ref() {
+        metadata.push(format!("{} min", runtime));
+    }
+    if let Some(rating) = episode.details.vote_average.as_ref() {
+        metadata.push(format!("★ {:.1}", rating));
+    }
+
+    let mut model =
+        DetailPageModel::new(DetailContentKind::Episode, episode_title.clone())
+            .with_eyebrow("Episode Details")
+            .with_subtitle(episode_code)
+            .with_hero_art(DetailArtwork::still(
+                episode_uuid,
+                still_iid,
+                format!("{episode_title} still"),
+            ));
+    model.metadata = metadata_pills(metadata);
+    model.actions = episode_actions(*episode_id);
+
+    if let Some(overview) = episode.details.overview.as_ref() {
+        model.sections.push(DetailSection::Overview(
+            DetailOverviewSection::new(overview.to_string()),
+        ));
+    } else {
+        model.sections.push(warning_notice(
+            "No overview available",
+            "This episode has a local playable row, but no synopsis was available in the repository metadata.",
+        ));
+    }
+
+    view_adaptive_tv_detail(model, state)
+}
+
+fn view_adaptive_tv_detail(
+    mut model: DetailPageModel,
+    state: &State,
+) -> Element<'static, UiMessage> {
+    model.backdrop_controls.push(DetailBackdropControl {
+        label: backdrop_control_label(state),
+        on_press: BackgroundMessage::ToggleBackdropAspectMode.into(),
+    });
+
+    let sizes = &state.domains.ui.state.size_provider;
+    let plan = detail_layout_for_model(&model, state);
+    let mut body: Column<'static, UiMessage> = Column::new()
+        .spacing(plan.section_grid.gap)
+        .padding([plan.page_padding_y, plan.page_padding_x])
+        .width(Length::Fill)
+        .max_width(plan.content_width);
+
+    if let Some(empty) = model.empty_state.as_ref().filter(|_| model.is_empty())
+    {
+        body = body.push(view_empty_state(empty, sizes));
+    } else {
+        body = body.push(view_detail_hero(&model, &plan, sizes));
+        body =
+            body.push(view_tv_sections(&model.sections, &plan, sizes, state));
+    }
+
+    if !model.backdrop_controls.is_empty() {
+        body = body.push(view_backdrop_controls(
+            &model.backdrop_controls,
+            &plan,
+            sizes,
+        ));
+    }
+
+    container(body)
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .into()
+}
+
+fn view_tv_sections(
+    sections: &[DetailSection],
+    plan: &DetailLayoutPlan,
+    sizes: &crate::infra::design_tokens::SizeProvider,
+    state: &State,
+) -> Element<'static, UiMessage> {
+    if sections.is_empty() {
+        return Space::new().into();
+    }
+
+    let columns = plan.section_grid.columns.max(1);
+    let mut outer = Column::new().spacing(plan.section_grid.gap);
+    let mut current = Row::new()
+        .spacing(plan.section_grid.gap)
+        .align_y(iced::Alignment::Start);
+    let mut count = 0usize;
+
+    for section in sections
+        .iter()
+        .filter(|section| !matches!(section, DetailSection::Overview(_)))
+    {
+        if matches!(section, DetailSection::Cast(_)) {
+            if count > 0 {
+                let completed = std::mem::replace(
+                    &mut current,
+                    Row::new()
+                        .spacing(plan.section_grid.gap)
+                        .align_y(iced::Alignment::Start),
+                );
+                outer = outer.push(completed);
+                count = 0;
+            }
+            outer = outer.push(view_tv_section(section, plan, sizes, state));
+            continue;
+        }
+
+        current = current.push(view_tv_section(section, plan, sizes, state));
+        count += 1;
+        if count == columns {
+            let completed = std::mem::replace(
+                &mut current,
+                Row::new()
+                    .spacing(plan.section_grid.gap)
+                    .align_y(iced::Alignment::Start),
+            );
+            outer = outer.push(completed);
+            count = 0;
+        }
+    }
+
+    if count > 0 {
+        outer = outer.push(current);
+    }
+
+    outer.into()
+}
+
+fn view_tv_section(
+    section: &DetailSection,
+    plan: &DetailLayoutPlan,
+    sizes: &crate::infra::design_tokens::SizeProvider,
+    state: &State,
+) -> Element<'static, UiMessage> {
+    match section {
+        DetailSection::RelationshipRail(rail) => {
+            if let Some(key) = rail.carousel_key.clone()
+                && let Some(carousel_state) =
+                    state.domains.ui.state.carousel_registry.get(&key)
+            {
+                return view_registered_relationship_rail(
+                    rail,
+                    key,
+                    carousel_state,
+                    plan,
+                    sizes,
+                );
+            }
+
+            view_relationship_rail(rail, plan, sizes)
+        }
+        _ => view_section(section, plan, sizes),
+    }
+}
+
+fn detail_layout_for_model(
+    model: &DetailPageModel,
+    state: &State,
+) -> crate::domains::ui::views::detail::DetailLayoutPlan {
+    let aspect = match model.hero_art {
+        DetailArtwork::Still { .. } => DetailArtAspect::Still,
+        DetailArtwork::Poster { .. }
+        | DetailArtwork::Profile { .. }
+        | DetailArtwork::None { .. } => DetailArtAspect::Poster,
+    };
+
+    solve_detail_layout(
+        DetailLayoutInput::from_runtime(
+            state.window_size.width,
+            state.window_size.height,
+            state.domains.ui.state.view.header_height().unwrap_or(0.0),
+            state.interface_mode,
+            &state.domains.ui.state.size_provider,
+            &state.domains.ui.state.scaled_layout,
+        )
+        .with_hero_art_aspect(aspect),
+    )
+}
+
+fn view_repository_unavailable(
+    state: &State,
+    content_kind: DetailContentKind,
+    title: impl Into<String>,
+    message: impl Into<String>,
+) -> Element<'static, UiMessage> {
+    let mut model = DetailPageModel::new(content_kind, title.into())
+        .with_eyebrow("Details unavailable")
+        .with_subtitle("Local repository data is required for this route")
+        .with_hero_art(DetailArtwork::None {
+            label: "No local artwork".to_string(),
+        });
+    model.actions = vec![back_action(), home_action()];
+    model
+        .sections
+        .push(danger_notice("Repository unavailable", message));
+    view_adaptive_tv_detail(model, state)
+}
+
+fn seasons_relationship_rail(
+    series_id: SeriesID,
+    seasons: &[SeasonReference],
+) -> DetailRelationshipRail {
+    let key = CarouselKey::ShowSeasons(series_id.to_uuid());
+    DetailRelationshipRail {
+        id: carousel_key_id(&key),
+        carousel_key: Some(key),
+        title: "Seasons".to_string(),
+        empty_message: Some(format!(
+            "No local season rows were found for series {}.",
+            series_id.to_uuid()
+        )),
+        items: seasons
+            .iter()
+            .map(|season| {
+                let title = season_title(season.season_number.value());
+                DetailRailItem {
+                    id: season.id.to_uuid().to_string(),
+                    title: title.clone(),
+                    subtitle: Some(plural_label(
+                        season.details.episode_count as usize,
+                        "episode",
+                        "episodes",
+                    )),
+                    artwork: DetailArtwork::tv_poster(
+                        season.id.to_uuid(),
+                        season.details.primary_poster_iid,
+                        format!("{title} poster"),
+                    ),
+                    on_press: Some(
+                        UiShellMessage::ViewSeason(season.series_id, season.id)
+                            .into(),
+                    ),
+                }
+            })
+            .collect(),
+    }
+}
+
+fn episodes_relationship_rail(
+    season_id: SeasonID,
+    episodes: &[EpisodeReference],
+) -> DetailRelationshipRail {
+    let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
+    DetailRelationshipRail {
+        id: carousel_key_id(&key),
+        carousel_key: Some(key),
+        title: "Episodes".to_string(),
+        empty_message: Some(format!(
+            "No local episode rows were found for season {}.",
+            season_id.to_uuid()
+        )),
+        items: episodes
+            .iter()
+            .map(|episode| {
+                let title = episode_code(episode);
+                DetailRailItem {
+                    id: episode.id.to_uuid().to_string(),
+                    title,
+                    subtitle: Some(episode.details.name.clone()),
+                    artwork: DetailArtwork::still(
+                        episode.id.to_uuid(),
+                        episode.details.primary_still_iid,
+                        format!("{} still", episode.details.name),
+                    ),
+                    // Season episode cards keep their historical primary behavior:
+                    // clicking the card starts playback. Opening the episode detail
+                    // remains available through explicit navigation surfaces.
+                    on_press: Some(
+                        PlaybackMessage::PlayMediaWithId(MediaID::Episode(
+                            episode.id,
+                        ))
+                        .into(),
+                    ),
+                }
+            })
+            .collect(),
+    }
+}
+
+fn series_actions(
+    series_id: SeriesID,
+    next_episode: Option<EpisodeID>,
+) -> Vec<DetailAction> {
+    if let Some(next_episode_id) = next_episode {
+        let media_id = MediaID::Episode(next_episode_id);
+        vec![
+            DetailAction::primary(
+                "play-next",
+                "Play next",
+                PlaybackMessage::PlaySeriesNextEpisode(series_id).into(),
+            )
+            .with_subtitle("Next local episode"),
+            DetailAction::secondary(
+                "play-next-mpv",
+                "Play in MPV",
+                PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
+            )
+            .with_subtitle("External player"),
+        ]
+    } else {
+        vec![
+            DetailAction::disabled("play-next", "Play next episode")
+                .with_subtitle("No local episode rows available"),
+            back_action(),
+            home_action(),
+        ]
+    }
+}
+
+fn season_actions(
+    season_id: SeasonID,
+    next_episode: Option<EpisodeID>,
+) -> Vec<DetailAction> {
+    if let Some(episode_id) = next_episode {
+        let media_id = MediaID::Episode(episode_id);
+        vec![
+            DetailAction::primary(
+                "play-season",
+                "Play season",
+                PlaybackMessage::PlayMediaWithId(media_id).into(),
+            )
+            .with_subtitle("Next local episode"),
+            DetailAction::secondary(
+                "play-season-mpv",
+                "Play in MPV",
+                PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
+            )
+            .with_subtitle("External player"),
+        ]
+    } else {
+        vec![
+            DetailAction::disabled("play-season", "Play season").with_subtitle(
+                format!(
+                    "No playable episodes found for {}",
+                    season_id.to_uuid()
+                ),
+            ),
+            back_action(),
+            home_action(),
+        ]
+    }
+}
+
+fn episode_actions(episode_id: EpisodeID) -> Vec<DetailAction> {
+    let media_id = MediaID::Episode(episode_id);
+    vec![
+        DetailAction::primary(
+            "play-episode",
+            "Play episode",
+            PlaybackMessage::PlayMediaWithId(media_id).into(),
+        ),
+        DetailAction::secondary(
+            "play-episode-mpv",
+            "Play in MPV",
+            PlaybackMessage::PlayMediaWithIdInMpv(media_id).into(),
+        )
+        .with_subtitle("Open externally"),
+    ]
+}
+
+fn ensure_recovery_actions(actions: &mut Vec<DetailAction>) {
+    push_action_if_missing(actions, back_action());
+    push_action_if_missing(actions, home_action());
+}
+
+fn push_action_if_missing(
+    actions: &mut Vec<DetailAction>,
+    action: DetailAction,
+) {
+    if !actions.iter().any(|existing| existing.id == action.id) {
+        actions.push(action);
+    }
+}
+
+fn back_action() -> DetailAction {
+    DetailAction::secondary("back", "Back", UiShellMessage::NavigateBack.into())
+}
+
+fn home_action() -> DetailAction {
+    DetailAction::secondary("home", "Home", UiShellMessage::NavigateHome.into())
+}
+
+fn metadata_pills(labels: Vec<String>) -> Vec<DetailMetadataPill> {
+    labels
+        .into_iter()
+        .filter(|label| !label.trim().is_empty())
+        .map(DetailMetadataPill::neutral)
+        .collect()
+}
+
+fn warning_notice(
+    title: impl Into<String>,
+    message: impl Into<String>,
+) -> DetailSection {
+    DetailSection::Notice(DetailNotice {
+        title: title.into(),
+        message: message.into(),
+        tone: DetailTone::Warning,
+    })
+}
+
+fn danger_notice(
+    title: impl Into<String>,
+    message: impl Into<String>,
+) -> DetailSection {
+    DetailSection::Notice(DetailNotice {
+        title: title.into(),
+        message: message.into(),
+        tone: DetailTone::Danger,
+    })
+}
+
+fn archived_uuid(value: &ArchivedOption<Uuid>) -> Option<Uuid> {
+    match value {
         ArchivedOption::Some(iid) => Some(*iid),
         ArchivedOption::None => None,
-    };
+    }
+}
 
-    // Episode still image
-    let mut still = image_for(episode.id.to_uuid())
-        .iid(still_iid)
-        .skip_request(still_iid.is_none())
-        .request_size(ImageSize::thumbnail())
-        .display_size(640.0, 360.0)
-        .priority(Priority::Visible);
-    let poster_id = episode.id.to_uuid();
-    let episode_instance_key = PosterInstanceKey::standalone(poster_id);
-    let (face, rotation_override) = if let Some(menu_state) = state
+fn season_title(season_number: u16) -> String {
+    if season_number == 0 {
+        "Specials".to_string()
+    } else {
+        format!("Season {season_number}")
+    }
+}
+
+fn episode_code(episode: &EpisodeReference) -> String {
+    format!(
+        "S{:02}E{:02}",
+        episode.season_number.value(),
+        episode.episode_number.value()
+    )
+}
+
+fn plural_label(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
+}
+
+fn carousel_key_id(key: &CarouselKey) -> String {
+    format!("{key:?}")
+}
+
+fn series_detail_subtitle(state: &State, series_id: &SeriesID) -> String {
+    match state
         .domains
         .ui
         .state
-        .poster_menu_states
-        .get(&episode_instance_key)
+        .repo_accessor
+        .get(&MediaID::Series(*series_id))
     {
-        (menu_state.face_from_angle(), Some(menu_state.angle))
-    } else if state.domains.ui.state.poster_menu_open.as_ref()
-        == Some(&episode_instance_key)
-    {
-        (PosterFace::Back, Some(PI))
-    } else {
-        (PosterFace::Front, None)
-    };
-    still = still.face(face);
-    if let Some(rot) = rotation_override {
-        still = still.rotation_y(rot);
+        Ok(ferrex_model::Media::Series(series)) => series.title().to_string(),
+        Ok(_) | Err(_) => format!("Series {}", series_id.to_uuid()),
     }
-    let still_element: Element<UiMessage> = still.into();
+}
 
-    // Details column
-    let mut details = column![].spacing(15).padding(20).width(Length::Fill);
-
-    // Title and info
-    let (ep_name, overview, air_date, runtime, vote_average) = (
-        Some(episode.details.name.to_string()),
-        episode.details.overview.as_ref(),
-        episode.details.air_date.as_ref(),
-        episode.details.runtime.as_ref(),
-        episode.details.vote_average.as_ref(),
-    );
-
-    let (season_number, ep_number) = (
-        episode.details.season_number,
-        episode.details.episode_number,
-    );
-
-    let title = ep_name.unwrap_or_else(|| format!("Episode {}", ep_number));
-    details = details.push(
-        text(format!("S{:02}E{:02}: {}", season_number, ep_number, title))
-            .size(fonts.title_lg)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-    );
-
-    let mut info_parts = Vec::new();
-    if let Some(date) = air_date {
-        info_parts.push(date.to_string());
-    }
-    if let Some(rt) = runtime {
-        info_parts.push(format!("{} min", rt));
-    }
-    if let Some(rating) = vote_average {
-        info_parts.push(format!("★ {:.1}", rating));
-    }
-    if !info_parts.is_empty() {
-        details = details.push(
-            text(info_parts.join(" • "))
-                .size(fonts.body)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
-    }
-
-    // Play button
-    let button_row = components::create_action_button_row(
-        PlaybackMessage::PlayMediaWithId(MediaID::Episode(EpisodeID(
-            episode.id.to_uuid(),
-        )))
-        .into(),
-        Some(
-            PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(EpisodeID(
-                episode.id.to_uuid(),
-            )))
-            .into(),
-        ),
-        vec![],
-    );
-    details = details.push(Space::new().height(10));
-    details = details.push(button_row);
-
-    // Overview
-    if let Some(desc) = overview {
-        details = details.push(Space::new().height(20));
-        details = details.push(
-            container(
-                text(desc.to_string())
-                    .size(fonts.caption)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            )
-            .width(Length::Fill)
-            .padding(10),
-        );
-    }
-
-    // Layout
-    content = content.push(
-        column![still_element, Space::new().height(20), details].spacing(10),
-    );
-
-    // Create the main content container
-    let content_container = container(content).width(Length::Fill);
-
-    // Calculate backdrop dimensions using centralized method
-    let backdrop_dims = state
+fn backdrop_control_label(state: &State) -> String {
+    match state
         .domains
         .ui
         .state
         .background_shader_state
-        .calculate_backdrop_dimensions(window_width, window_height);
+        .backdrop_aspect_mode
+    {
+        BackdropAspectMode::Auto => "Backdrop: Auto".to_string(),
+        BackdropAspectMode::Force21x9 => "Backdrop: 21:9".to_string(),
+    }
+}
 
-    // Create aspect ratio toggle button
-    let aspect_button =
-        crate::domains::ui::components::create_backdrop_aspect_button(state);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Position the button at bottom-right of backdrop
-    let button_container = container(aspect_button)
-        .padding([0, 20])
-        .width(Length::Fill)
-        .height(Length::Fixed(backdrop_dims.button_height))
-        .align_x(iced::alignment::Horizontal::Right)
-        .align_y(iced::alignment::Vertical::Bottom);
+    #[test]
+    fn season_title_names_specials_without_numeric_prefix() {
+        assert_eq!(season_title(0), "Specials");
+        assert_eq!(season_title(2), "Season 2");
+    }
 
-    Stack::new()
-        .push(content_container)
-        .push(button_container)
-        .into()
+    #[test]
+    fn plural_label_uses_singular_only_for_one() {
+        assert_eq!(plural_label(0, "episode", "episodes"), "0 episodes");
+        assert_eq!(plural_label(1, "episode", "episodes"), "1 episode");
+        assert_eq!(plural_label(7, "episode", "episodes"), "7 episodes");
+    }
+
+    #[test]
+    fn relationship_rails_keep_typed_carousel_keys() {
+        let series_id = SeriesID(Uuid::nil());
+        let season_id = SeasonID(Uuid::nil());
+
+        let seasons = seasons_relationship_rail(series_id, &[]);
+        let episodes = episodes_relationship_rail(season_id, &[]);
+
+        assert_eq!(
+            seasons.carousel_key,
+            Some(CarouselKey::ShowSeasons(series_id.to_uuid()))
+        );
+        assert_eq!(
+            episodes.carousel_key,
+            Some(CarouselKey::SeasonEpisodes(season_id.to_uuid()))
+        );
+        assert!(seasons.id.starts_with("ShowSeasons"));
+        assert!(episodes.id.starts_with("SeasonEpisodes"));
+    }
+
+    #[test]
+    fn missing_row_recovery_actions_include_back_and_home() {
+        let series_id = SeriesID(Uuid::from_u128(1));
+        let episode_id = EpisodeID(Uuid::from_u128(2));
+        let mut actions = series_actions(series_id, Some(episode_id));
+
+        ensure_recovery_actions(&mut actions);
+        ensure_recovery_actions(&mut actions);
+
+        assert_eq!(
+            actions.iter().filter(|action| action.id == "back").count(),
+            1
+        );
+        assert_eq!(
+            actions.iter().filter(|action| action.id == "home").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn series_mpv_action_plays_selected_next_episode_externally() {
+        let series_id = SeriesID(Uuid::from_u128(1));
+        let episode_id = EpisodeID(Uuid::from_u128(2));
+        let actions = series_actions(series_id, Some(episode_id));
+
+        let mpv_action = actions
+            .iter()
+            .find(|action| action.id == "play-next-mpv")
+            .expect("series actions should expose an MPV action");
+
+        assert_eq!(mpv_action.label, "Play in MPV");
+        match mpv_action.on_press.as_ref() {
+            Some(UiMessage::Playback(
+                PlaybackMessage::PlayMediaWithIdInMpv(MediaID::Episode(
+                    actual_episode_id,
+                )),
+            )) => assert_eq!(actual_episode_id, &episode_id),
+            other => {
+                panic!("expected MPV episode playback action, got {other:?}")
+            }
+        }
+    }
 }

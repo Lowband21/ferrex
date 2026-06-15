@@ -8,9 +8,19 @@ use crate::{
     domains::{
         media::selectors,
         ui::{
-            messages::UiMessage, playback_ui::PlaybackMessage,
-            shell_ui::UiShellMessage, theme, widgets::image_for,
+            messages::UiMessage,
+            playback_ui::PlaybackMessage,
+            shell_ui::UiShellMessage,
+            theme,
+            views::detail::{
+                DetailInterfaceMode, DetailLayoutPlan,
+                solve_detail_layout_from_runtime,
+            },
+            widgets::image_for,
         },
+    },
+    infra::shader_widgets::poster::{
+        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
     },
     state::State,
 };
@@ -28,23 +38,68 @@ use iced::{
 };
 use uuid::Uuid;
 
-const PAGE_PADDING_X: f32 = 72.0;
-const PAGE_PADDING_Y: f32 = 42.0;
-const HERO_HEIGHT: f32 = 430.0;
-const HERO_IMAGE_WIDTH: f32 = 250.0;
-const HERO_POSTER_HEIGHT: f32 = 375.0;
-const HERO_STILL_WIDTH: f32 = 470.0;
-const HERO_STILL_HEIGHT: f32 = 265.0;
-const ACTION_WIDTH: f32 = 245.0;
-const ACTION_HEIGHT: f32 = 70.0;
-const PANEL_GAP: f32 = 34.0;
-const PANEL_HEADER_HEIGHT: f32 = 44.0;
-const PANEL_ROW_HEIGHT: f32 = 154.0;
-const PANEL_ROW_GAP: f32 = 18.0;
-const PANEL_CARD_WIDTH: f32 = 312.0;
-const PANEL_CARD_GAP: f32 = 18.0;
-const SCROLL_FOLLOW_MARGIN: f32 = 44.0;
-const PANEL_ROWS: usize = 2;
+const TENFOOT_HEADER_HEIGHT: f32 = 0.0;
+const HERO_STILL_ASPECT: f32 = 16.0 / 9.0;
+const HERO_STILL_MAX_CONTENT_FRACTION: f32 = 0.42;
+const PANEL_POSTER_ASPECT: f32 = 2.0 / 3.0;
+const PANEL_STILL_ASPECT: f32 = 16.0 / 9.0;
+const TWO_ROW_PANEL_ROWS: usize = 2;
+
+fn tenfoot_detail_layout_plan(state: &State) -> DetailLayoutPlan {
+    solve_detail_layout_from_runtime(
+        state.window_size.width,
+        state.window_size.height,
+        TENFOOT_HEADER_HEIGHT,
+        DetailInterfaceMode::TenFoot,
+        &state.domains.ui.state.size_provider,
+        &state.domains.ui.state.scaled_layout,
+    )
+}
+
+fn hero_padding(plan: &DetailLayoutPlan) -> f32 {
+    (plan.page_padding_y * 0.55)
+        .min(plan.available_height * 0.028)
+        .clamp(16.0, 30.0)
+}
+
+fn hero_height(plan: &DetailLayoutPlan) -> f32 {
+    plan.backdrop
+        .height
+        .max(plan.hero_art.height + hero_padding(plan) * 2.0)
+}
+
+fn panel_rows(plan: &DetailLayoutPlan) -> usize {
+    plan.rail.visible_rows.max(1)
+}
+
+fn panel_body_padding(plan: &DetailLayoutPlan) -> f32 {
+    (plan.rail.gap * 1.2).clamp(14.0, 24.0)
+}
+
+fn panel_header_height(plan: &DetailLayoutPlan) -> f32 {
+    (plan.action_cluster.button_height * 0.67).clamp(38.0, 54.0)
+}
+
+fn panel_header_body_gap(plan: &DetailLayoutPlan) -> f32 {
+    (plan.section_grid.gap * 0.66).clamp(10.0, 18.0)
+}
+
+fn panel_body_height(plan: &DetailLayoutPlan) -> f32 {
+    let rows = panel_rows(plan);
+    rows as f32 * plan.rail.card_height
+        + rows.saturating_sub(1) as f32 * plan.rail.gap
+        + panel_body_padding(plan) * 2.0
+}
+
+fn panel_height(plan: &DetailLayoutPlan) -> f32 {
+    panel_header_height(plan)
+        + panel_header_body_gap(plan)
+        + panel_body_height(plan)
+}
+
+fn scroll_follow_margin(plan: &DetailLayoutPlan) -> f32 {
+    (plan.page_padding_y * 0.82).clamp(28.0, 56.0)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TenFootDetailAction {
@@ -129,12 +184,14 @@ impl TenFootDetailState {
         panel: &TenFootDetailPanelId,
         total: usize,
         columns: usize,
+        rows: usize,
     ) -> usize {
-        bounded_two_row_window_start(
+        bounded_panel_window_start(
             *self.panel_windows.get(panel).unwrap_or(&0),
             None,
             total,
             columns,
+            rows,
         )
     }
 
@@ -143,6 +200,7 @@ impl TenFootDetailState {
         data: &TenFootDetailData,
         focus: &TenFootDetailFocusId,
         columns: usize,
+        rows: usize,
     ) {
         let Some((panel, index, total)) = data.panel_item_position(focus)
         else {
@@ -150,11 +208,12 @@ impl TenFootDetailState {
         };
 
         let current = *self.panel_windows.get(&panel).unwrap_or(&0);
-        let next = bounded_two_row_window_start(
+        let next = bounded_panel_window_start(
             current,
             Some(index),
             total,
             columns.max(1),
+            rows.max(1),
         );
         self.panel_windows.insert(panel, next);
     }
@@ -163,9 +222,11 @@ impl TenFootDetailState {
         &mut self,
         data: &TenFootDetailData,
         focus: &TenFootDetailFocusId,
+        plan: &DetailLayoutPlan,
         fallback_height: f32,
     ) -> Task<UiMessage> {
-        let Some((top, height)) = data.focus_vertical_bounds(focus) else {
+        let Some((top, height)) = data.focus_vertical_bounds(focus, plan)
+        else {
             return Task::none();
         };
 
@@ -173,10 +234,11 @@ impl TenFootDetailState {
             self.viewport_height.max(fallback_height).max(1.0);
         let visible_top = self.scroll_y;
         let visible_bottom = visible_top + viewport_height;
-        let target = if top < visible_top + SCROLL_FOLLOW_MARGIN {
-            (top - SCROLL_FOLLOW_MARGIN).max(0.0)
-        } else if top + height > visible_bottom - SCROLL_FOLLOW_MARGIN {
-            (top + height + SCROLL_FOLLOW_MARGIN - viewport_height).max(0.0)
+        let margin = scroll_follow_margin(plan);
+        let target = if top < visible_top + margin {
+            (top - margin).max(0.0)
+        } else if top + height > visible_bottom - margin {
+            (top + height + margin - viewport_height).max(0.0)
         } else {
             return Task::none();
         };
@@ -1189,15 +1251,20 @@ impl TenFootDetailData {
     fn focus_vertical_bounds(
         &self,
         focus: &TenFootDetailFocusId,
+        plan: &DetailLayoutPlan,
     ) -> Option<(f32, f32)> {
         match focus {
-            TenFootDetailFocusId::Action(_) => Some((0.0, HERO_HEIGHT)),
+            TenFootDetailFocusId::Action(_) => {
+                Some((plan.page_padding_y, hero_height(plan)))
+            }
             TenFootDetailFocusId::PanelItem { panel, .. } => {
                 let panel_index = self.panel_index(panel)?;
-                let top = HERO_HEIGHT
-                    + PANEL_GAP
-                    + panel_index as f32 * (panel_height() + PANEL_GAP);
-                Some((top, panel_height()))
+                let panel_height = panel_height(plan);
+                let top = plan.page_padding_y
+                    + hero_height(plan)
+                    + plan.hero_gap
+                    + panel_index as f32 * (panel_height + plan.hero_gap);
+                Some((top, panel_height))
             }
         }
     }
@@ -1222,10 +1289,12 @@ pub fn update_tenfoot_detail(
     match message {
         TenFootDetailMessage::Move(direction) => {
             let data = TenFootDetailData::from_state(state);
+            let plan = tenfoot_detail_layout_plan(state);
             let current =
                 state.domains.ui.state.tenfoot_detail.resolved_focus(&data);
             let columns =
-                visible_panel_columns_for_width(state.window_size.width);
+                visible_panel_columns_for_width(state.window_size.width, &plan);
+            let rows = panel_rows(&plan);
             let Some(next) =
                 data.move_focus(current.as_ref(), direction, columns)
             else {
@@ -1235,8 +1304,13 @@ pub fn update_tenfoot_detail(
             let task = {
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
                 detail.focus_id = Some(next.clone());
-                detail.follow_focus_window(&data, &next, columns);
-                detail.scroll_task_for_focus(&data, &next, fallback_height)
+                detail.follow_focus_window(&data, &next, columns, rows);
+                detail.scroll_task_for_focus(
+                    &data,
+                    &next,
+                    &plan,
+                    fallback_height,
+                )
             };
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
@@ -1245,14 +1319,21 @@ pub fn update_tenfoot_detail(
             if !data.contains_focus(&focus) {
                 return DomainUpdateResult::task(Task::none());
             }
+            let plan = tenfoot_detail_layout_plan(state);
             let columns =
-                visible_panel_columns_for_width(state.window_size.width);
+                visible_panel_columns_for_width(state.window_size.width, &plan);
+            let rows = panel_rows(&plan);
             let fallback_height = state.window_size.height;
             let task = {
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
                 detail.focus_id = Some(focus.clone());
-                detail.follow_focus_window(&data, &focus, columns);
-                detail.scroll_task_for_focus(&data, &focus, fallback_height)
+                detail.follow_focus_window(&data, &focus, columns, rows);
+                detail.scroll_task_for_focus(
+                    &data,
+                    &focus,
+                    &plan,
+                    fallback_height,
+                )
             };
             DomainUpdateResult::task(task.map(DomainMessage::Ui))
         }
@@ -1272,11 +1353,15 @@ pub fn update_tenfoot_detail(
             }
             let activation = data.activation_for_focus(&focus);
             {
-                let columns =
-                    visible_panel_columns_for_width(state.window_size.width);
+                let plan = tenfoot_detail_layout_plan(state);
+                let columns = visible_panel_columns_for_width(
+                    state.window_size.width,
+                    &plan,
+                );
+                let rows = panel_rows(&plan);
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
                 detail.focus_id = Some(focus.clone());
-                detail.follow_focus_window(&data, &focus, columns);
+                detail.follow_focus_window(&data, &focus, columns, rows);
             }
             DomainUpdateResult::task(task_for_activation(activation))
         }
@@ -1304,23 +1389,31 @@ pub fn view_tenfoot_detail(state: &State) -> Element<'_, UiMessage> {
     let data = TenFootDetailData::from_state(state);
     let detail_state = &state.domains.ui.state.tenfoot_detail;
     let focused = detail_state.resolved_focus(&data);
-    let columns = visible_panel_columns_for_width(state.window_size.width);
+    let plan = tenfoot_detail_layout_plan(state);
+    let columns =
+        visible_panel_columns_for_width(state.window_size.width, &plan);
 
-    let mut panels: Column<'_, UiMessage> = column![].spacing(PANEL_GAP);
+    let mut panels: Column<'_, UiMessage> = column![].spacing(plan.hero_gap);
     for panel in &data.panels {
         panels = panels.push(view_panel(
             state,
             detail_state,
             panel,
             focused.as_ref(),
+            &plan,
             columns,
         ));
     }
 
-    let content = column![view_hero(state, &data, focused.as_ref()), panels]
-        .spacing(PANEL_GAP)
-        .padding([PAGE_PADDING_Y, PAGE_PADDING_X])
-        .width(Length::Fill);
+    let stage =
+        column![view_hero(state, &data, focused.as_ref(), &plan), panels]
+            .spacing(plan.hero_gap)
+            .width(Length::Fixed(plan.content_width));
+
+    let content = container(stage)
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .padding([plan.page_padding_y, plan.page_padding_x]);
 
     let scroll = scrollable(content)
         .id(detail_state.scrollable_id.clone())
@@ -1339,8 +1432,9 @@ fn view_hero<'a>(
     state: &'a State,
     data: &TenFootDetailData,
     focused: Option<&TenFootDetailFocusId>,
+    plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
-    let image = view_detail_image(state, &data.image, true);
+    let image = view_detail_image(state, &data.image, plan, true);
 
     let mut metadata_row: Row<'a, UiMessage> = Row::new().spacing(12);
     for item in &data.metadata {
@@ -1355,12 +1449,12 @@ fn view_hero<'a>(
         );
     }
 
-    let mut actions = Row::new().spacing(16);
+    let mut actions = Row::new().spacing(plan.action_cluster.gap);
     for spec in &data.actions {
         let focus_id = TenFootDetailFocusId::Action(spec.action);
         let is_focused = focused == Some(&focus_id);
-        actions =
-            actions.push(focusable_action_button(spec, focus_id, is_focused));
+        actions = actions
+            .push(focusable_action_button(spec, focus_id, is_focused, plan));
     }
 
     let mut text_column = column![
@@ -1398,13 +1492,13 @@ fn view_hero<'a>(
 
     container(
         row![image, text_column]
-            .spacing(38)
-            .align_y(iced::Alignment::Center),
+            .spacing(plan.hero_gap)
+            .align_y(iced::Alignment::End),
     )
-    .height(Length::Fixed(HERO_HEIGHT))
+    .height(Length::Fixed(hero_height(plan)))
     .width(Length::Fill)
-    .padding(30)
-    .style(tenfoot_panel_style(false))
+    .padding(hero_padding(plan))
+    .style(tenfoot_hero_scrim_style())
     .into()
 }
 
@@ -1412,6 +1506,7 @@ fn focusable_action_button<'a>(
     spec: &DetailActionSpec,
     focus_id: TenFootDetailFocusId,
     focused: bool,
+    plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
     let content = column![
         text(spec.label.clone())
@@ -1426,8 +1521,8 @@ fn focusable_action_button<'a>(
 
     let button_element = button(content)
         .padding([10, 18])
-        .width(Length::Fixed(ACTION_WIDTH))
-        .height(Length::Fixed(ACTION_HEIGHT))
+        .width(Length::Fixed(plan.action_cluster.button_width))
+        .height(Length::Fixed(plan.action_cluster.button_height))
         .style(tenfoot_button_style(focused))
         .on_press(TenFootDetailMessage::Activate(focus_id.clone()).into());
 
@@ -1441,6 +1536,7 @@ fn view_panel<'a>(
     detail_state: &TenFootDetailState,
     panel: &TenFootDetailPanel,
     focused: Option<&TenFootDetailFocusId>,
+    plan: &DetailLayoutPlan,
     columns: usize,
 ) -> Element<'a, UiMessage> {
     let total = panel.items.len();
@@ -1454,13 +1550,15 @@ fn view_panel<'a>(
             .position(|candidate| candidate.id() == *item),
         _ => None,
     });
-    let start = bounded_two_row_window_start(
-        detail_state.panel_window_start(&panel.id, total, columns),
+    let rows = panel_rows(plan);
+    let start = bounded_panel_window_start(
+        detail_state.panel_window_start(&panel.id, total, columns, rows),
         focused_index,
         total,
         columns,
+        rows,
     );
-    let visible_count = columns.max(1) * PANEL_ROWS;
+    let visible_count = columns.max(1) * rows;
     let end = (start + visible_count).min(total);
 
     let range_label = if total == 0 {
@@ -1482,6 +1580,7 @@ fn view_panel<'a>(
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
     .spacing(18)
+    .height(Length::Fixed(panel_header_height(plan)))
     .align_y(iced::Alignment::Center);
 
     let body: Element<'a, UiMessage> = if panel.items.is_empty() {
@@ -1491,8 +1590,8 @@ fn view_panel<'a>(
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         )
         .width(Length::Fill)
-        .height(Length::Fixed(panel_body_height()))
-        .padding(28)
+        .height(Length::Fixed(panel_body_height(plan)))
+        .padding(panel_body_padding(plan))
         .align_y(iced::Alignment::Center)
         .style(tenfoot_panel_style(false))
         .into()
@@ -1505,9 +1604,9 @@ fn view_panel<'a>(
             .take(visible_count)
             .collect::<Vec<_>>();
 
-        let mut grid = Column::new().spacing(PANEL_ROW_GAP);
+        let mut grid = Column::new().spacing(plan.rail.gap);
         for row_items in visible_items.chunks(columns.max(1)) {
-            let mut row = Row::new().spacing(PANEL_CARD_GAP);
+            let mut row = Row::new().spacing(plan.rail.gap);
             for (index, item) in row_items.iter().copied() {
                 let focus_id = TenFootDetailFocusId::PanelItem {
                     panel: panel.id.clone(),
@@ -1515,7 +1614,7 @@ fn view_panel<'a>(
                 };
                 let is_focused = focused == Some(&focus_id);
                 row = row.push(view_panel_card(
-                    state, item, focus_id, is_focused, index,
+                    state, item, focus_id, is_focused, index, plan,
                 ));
             }
             grid = grid.push(row);
@@ -1523,13 +1622,16 @@ fn view_panel<'a>(
 
         container(grid)
             .width(Length::Fill)
-            .height(Length::Fixed(panel_body_height()))
-            .padding(18)
+            .height(Length::Fixed(panel_body_height(plan)))
+            .padding(panel_body_padding(plan))
             .style(tenfoot_panel_style(false))
             .into()
     };
 
-    column![header, body].spacing(12).width(Length::Fill).into()
+    column![header, body]
+        .spacing(panel_header_body_gap(plan))
+        .width(Length::Fill)
+        .into()
 }
 
 fn view_panel_card<'a>(
@@ -1538,8 +1640,9 @@ fn view_panel_card<'a>(
     focus_id: TenFootDetailFocusId,
     focused: bool,
     _index: usize,
+    plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
-    let image = view_panel_item_image(state, &item.image(), focused);
+    let image = view_panel_item_image(state, &item.image(), plan, focused);
     let content = row![
         image,
         column![
@@ -1556,19 +1659,19 @@ fn view_panel_card<'a>(
         .spacing(6)
         .width(Length::Fill),
     ]
-    .spacing(14)
+    .spacing(plan.rail.gap.min(16.0))
     .align_y(iced::Alignment::Center);
 
     let button_element = button(
         container(content)
-            .padding(14)
+            .padding((plan.rail.gap * 0.9).clamp(10.0, 16.0))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_y(iced::Alignment::Center),
     )
     .padding(0)
-    .width(Length::Fixed(PANEL_CARD_WIDTH))
-    .height(Length::Fixed(PANEL_ROW_HEIGHT))
+    .width(Length::Fixed(plan.rail.card_width))
+    .height(Length::Fixed(plan.rail.card_height))
     .style(tenfoot_button_style(focused))
     .on_press(TenFootDetailMessage::Activate(focus_id.clone()).into());
 
@@ -1577,39 +1680,89 @@ fn view_panel_card<'a>(
         .into()
 }
 
+fn hero_image_size(image: &DetailImage, plan: &DetailLayoutPlan) -> (f32, f32) {
+    match image {
+        DetailImage::Still { .. } => {
+            let max_width = (plan.content_width
+                * HERO_STILL_MAX_CONTENT_FRACTION)
+                .max(plan.hero_art.width)
+                .max(1.0);
+            let desired_height = (plan.hero_art.height * 0.70).max(1.0);
+            let desired_width = desired_height * HERO_STILL_ASPECT;
+            if desired_width > max_width {
+                (max_width, max_width / HERO_STILL_ASPECT)
+            } else {
+                (desired_width, desired_height)
+            }
+        }
+        DetailImage::Poster { .. } | DetailImage::None => {
+            (plan.hero_art.width, plan.hero_art.height)
+        }
+    }
+}
+
+fn panel_image_size(
+    image: &DetailImage,
+    plan: &DetailLayoutPlan,
+) -> (f32, f32) {
+    match image {
+        DetailImage::Still { .. } => {
+            let width = (plan.rail.card_height * 0.76).max(72.0);
+            (width, width / PANEL_STILL_ASPECT)
+        }
+        DetailImage::Poster { .. } | DetailImage::None => {
+            let height = (plan.rail.card_height * 0.72)
+                .min((plan.rail.card_height - 16.0).max(1.0))
+                .max(48.0);
+            (height * PANEL_POSTER_ASPECT, height)
+        }
+    }
+}
+
 fn view_detail_image<'a>(
     state: &'a State,
     image: &DetailImage,
+    plan: &DetailLayoutPlan,
     priority_visible: bool,
 ) -> Element<'a, UiMessage> {
+    let (width, height) = hero_image_size(image, plan);
     match image {
         DetailImage::Poster {
             media_uuid,
             iid,
             placeholder,
-        } => image_for(*media_uuid)
-            .iid(*iid)
-            .skip_request(iid.is_none())
-            .request_size(ImageSize::Poster(
-                state.domains.settings.display.detail_poster_quality,
-            ))
-            .display_size(HERO_IMAGE_WIDTH, HERO_POSTER_HEIGHT)
-            .radius(18.0)
-            .priority(if priority_visible {
-                Priority::Visible
-            } else {
-                Priority::Preload
-            })
-            .placeholder(*placeholder)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let (face, rotation_y) = poster_menu_face(state, *media_uuid);
+            let mut poster = image_for(*media_uuid)
+                .iid(*iid)
+                .skip_request(iid.is_none())
+                .request_size(ImageSize::Poster(
+                    state.domains.settings.display.detail_poster_quality,
+                ))
+                .display_size(width, height)
+                .radius(plan.hero_art.corner_radius)
+                .priority(if priority_visible {
+                    Priority::Visible
+                } else {
+                    Priority::Preload
+                })
+                .placeholder(*placeholder)
+                .tight_bounds()
+                .animation_behavior(AnimationBehavior::flip_then_fade())
+                .face(face);
+
+            if let Some(rotation_y) = rotation_y {
+                poster = poster.rotation_y(rotation_y);
+            }
+
+            poster.into()
+        }
         DetailImage::Still { media_uuid, iid } => image_for(*media_uuid)
             .iid(*iid)
             .skip_request(iid.is_none())
             .request_size(ImageSize::thumbnail())
-            .display_size(HERO_STILL_WIDTH, HERO_STILL_HEIGHT)
-            .radius(18.0)
+            .display_size(width, height)
+            .radius(plan.hero_art.corner_radius)
             .priority(if priority_visible {
                 Priority::Visible
             } else {
@@ -1624,8 +1777,8 @@ fn view_detail_image<'a>(
                 .size(24)
                 .color(theme::MediaServerTheme::TEXT_SECONDARY),
         )
-        .width(Length::Fixed(HERO_IMAGE_WIDTH))
-        .height(Length::Fixed(HERO_POSTER_HEIGHT))
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center)
         .style(tenfoot_panel_style(false))
@@ -1636,8 +1789,11 @@ fn view_detail_image<'a>(
 fn view_panel_item_image<'a>(
     state: &'a State,
     image: &DetailImage,
+    plan: &DetailLayoutPlan,
     focused: bool,
 ) -> Element<'a, UiMessage> {
+    let (width, height) = panel_image_size(image, plan);
+    let radius = (plan.hero_art.corner_radius * 0.55).clamp(2.0, 6.0);
     match image {
         DetailImage::Poster {
             media_uuid,
@@ -1649,8 +1805,8 @@ fn view_panel_item_image<'a>(
             .request_size(ImageSize::Poster(
                 state.domains.settings.display.library_poster_quality,
             ))
-            .display_size(74.0, 110.0)
-            .radius(10.0)
+            .display_size(width, height)
+            .radius(radius)
             .priority(if focused {
                 Priority::Visible
             } else {
@@ -1664,8 +1820,8 @@ fn view_panel_item_image<'a>(
             .iid(*iid)
             .skip_request(iid.is_none())
             .request_size(ImageSize::thumbnail())
-            .display_size(118.0, 66.0)
-            .radius(10.0)
+            .display_size(width, height)
+            .radius(radius)
             .priority(if focused {
                 Priority::Visible
             } else {
@@ -1676,9 +1832,27 @@ fn view_panel_item_image<'a>(
             .no_animation()
             .into(),
         DetailImage::None => Space::new()
-            .width(Length::Fixed(74.0))
-            .height(Length::Fixed(110.0))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(height))
             .into(),
+    }
+}
+
+fn poster_menu_face(
+    state: &State,
+    poster_id: Uuid,
+) -> (PosterFace, Option<f32>) {
+    let instance_key = PosterInstanceKey::standalone(poster_id);
+    if let Some(menu_state) =
+        state.domains.ui.state.poster_menu_states.get(&instance_key)
+    {
+        (menu_state.face_from_angle(), Some(menu_state.angle))
+    } else if state.domains.ui.state.poster_menu_open.as_ref()
+        == Some(&instance_key)
+    {
+        (PosterFace::Back, Some(std::f32::consts::PI))
+    } else {
+        (PosterFace::Front, None)
     }
 }
 
@@ -1911,34 +2085,32 @@ fn before_after_copy(start: usize, end: usize, total: usize) -> String {
     }
 }
 
-fn panel_body_height() -> f32 {
-    PANEL_ROWS as f32 * PANEL_ROW_HEIGHT
-        + (PANEL_ROWS.saturating_sub(1)) as f32 * PANEL_ROW_GAP
-        + 36.0
+pub fn visible_panel_columns_for_width(
+    width: f32,
+    plan: &DetailLayoutPlan,
+) -> usize {
+    let available = (width - plan.page_padding_x * 2.0)
+        .max(1.0)
+        .min(plan.content_width);
+    let card_width = plan.rail.card_width.max(1.0);
+    let gap = plan.rail.gap.max(0.0);
+    ((available + gap) / (card_width + gap)).floor().max(1.0) as usize
 }
 
-fn panel_height() -> f32 {
-    PANEL_HEADER_HEIGHT + 12.0 + panel_body_height()
-}
-
-pub fn visible_panel_columns_for_width(width: f32) -> usize {
-    let available = (width - PAGE_PADDING_X * 2.0).max(PANEL_CARD_WIDTH);
-    let per_card = PANEL_CARD_WIDTH + PANEL_CARD_GAP;
-    ((available + PANEL_CARD_GAP) / per_card).floor().max(1.0) as usize
-}
-
-pub fn bounded_two_row_window_start(
+pub fn bounded_panel_window_start(
     current_start: usize,
     focused_index: Option<usize>,
     total: usize,
     columns: usize,
+    rows: usize,
 ) -> usize {
     if total == 0 {
         return 0;
     }
 
     let columns = columns.max(1);
-    let visible_count = (columns * PANEL_ROWS).min(total).max(1);
+    let rows = rows.max(1);
+    let visible_count = (columns * rows).min(total).max(1);
     let max_start = total.saturating_sub(visible_count);
     let mut start = current_start.min(max_start);
     start = (start / columns) * columns;
@@ -1948,21 +2120,51 @@ pub fn bounded_two_row_window_start(
             start = (index / columns) * columns;
         } else if index >= start + visible_count {
             let focus_row = index / columns;
-            start = focus_row.saturating_add(1).saturating_sub(PANEL_ROWS)
-                * columns;
+            start = focus_row.saturating_add(1).saturating_sub(rows) * columns;
         }
     }
 
     start.min(max_start)
 }
 
+pub fn bounded_two_row_window_start(
+    current_start: usize,
+    focused_index: Option<usize>,
+    total: usize,
+    columns: usize,
+) -> usize {
+    bounded_panel_window_start(
+        current_start,
+        focused_index,
+        total,
+        columns,
+        TWO_ROW_PANEL_ROWS,
+    )
+}
+
 fn tenfoot_detail_page_style() -> impl Fn(&Theme) -> container::Style + Clone {
     |_| container::Style {
         text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
         background: Some(Background::Color(Color::from_rgba(
-            0.015, 0.014, 0.02, 0.82,
+            0.015, 0.014, 0.02, 0.22,
         ))),
         border: Border::default(),
+        shadow: Shadow::default(),
+        snap: false,
+    }
+}
+
+fn tenfoot_hero_scrim_style() -> impl Fn(&Theme) -> container::Style + Clone {
+    |_| container::Style {
+        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
+        background: Some(Background::Color(Color::from_rgba(
+            0.0, 0.0, 0.0, 0.48,
+        ))),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
         shadow: Shadow::default(),
         snap: false,
     }
@@ -1985,7 +2187,7 @@ fn tenfoot_panel_style(
                 Color::from_rgba(1.0, 1.0, 1.0, 0.10)
             },
             width: if focused { 3.0 } else { 1.0 },
-            radius: 24.0.into(),
+            radius: 3.0.into(),
         },
         shadow: if focused {
             Shadow {
@@ -2009,7 +2211,7 @@ fn metadata_pill_style() -> impl Fn(&Theme) -> container::Style + Clone {
         border: Border {
             color: Color::from_rgba(1.0, 1.0, 1.0, 0.14),
             width: 1.0,
-            radius: 18.0.into(),
+            radius: 3.0.into(),
         },
         shadow: Shadow::default(),
         snap: false,
@@ -2025,7 +2227,7 @@ fn notice_style() -> impl Fn(&Theme) -> container::Style + Clone {
         border: Border {
             color: Color::from_rgba(1.0, 0.85, 0.30, 0.35),
             width: 1.0,
-            radius: 16.0.into(),
+            radius: 2.0.into(),
         },
         shadow: Shadow::default(),
         snap: false,
@@ -2059,7 +2261,7 @@ fn tenfoot_button_style(
             border: Border {
                 color: border_color,
                 width: if focused { 3.0 } else { 1.0 },
-                radius: 22.0.into(),
+                radius: 4.0.into(),
             },
             shadow: if focused {
                 Shadow {
@@ -2072,5 +2274,209 @@ fn tenfoot_button_style(
             },
             snap: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::{
+        constants::layout::{calculations::ScaledLayout, grid},
+        design_tokens::{ScalingContext, SizeProvider},
+    };
+
+    fn layout_plan(width: f32, height: f32, scale: f32) -> DetailLayoutPlan {
+        let sizes =
+            SizeProvider::new(ScalingContext::new().with_user_scale(scale));
+        let layout = ScaledLayout::new(sizes.scale, grid::EFFECTIVE_SPACING);
+        solve_detail_layout_from_runtime(
+            width,
+            height,
+            TENFOOT_HEADER_HEIGHT,
+            DetailInterfaceMode::TenFoot,
+            &sizes,
+            &layout,
+        )
+    }
+
+    fn season_id(value: u128) -> SeasonID {
+        SeasonID(Uuid::from_u128(value))
+    }
+
+    fn episode_id(value: u128) -> EpisodeID {
+        EpisodeID(Uuid::from_u128(value))
+    }
+
+    fn action_spec(action: TenFootDetailAction) -> DetailActionSpec {
+        DetailActionSpec {
+            action,
+            label: format!("{action:?}"),
+            subtitle: "Test action".to_string(),
+            activation: TenFootDetailActivation::Back,
+        }
+    }
+
+    fn episode_item(index: usize) -> TenFootDetailPanelItem {
+        TenFootDetailPanelItem::Episode(EpisodePanelItem {
+            id: episode_id(index as u128 + 1),
+            title: format!("Episode {index}"),
+            subtitle: format!("E{index}"),
+            context: "Open details".to_string(),
+            still_iid: None,
+        })
+    }
+
+    fn detail_data(panel_lengths: &[usize]) -> TenFootDetailData {
+        let panels = panel_lengths
+            .iter()
+            .enumerate()
+            .map(|(panel_index, item_count)| TenFootDetailPanel {
+                id: if panel_index == 0 {
+                    TenFootDetailPanelId::SeasonEpisodes(season_id(1))
+                } else {
+                    TenFootDetailPanelId::EpisodeSiblings(season_id(
+                        panel_index as u128 + 1,
+                    ))
+                },
+                empty_message: "No episodes".to_string(),
+                items: (0..*item_count)
+                    .map(|item_index| {
+                        episode_item(panel_index * 100 + item_index)
+                    })
+                    .collect(),
+            })
+            .collect();
+
+        TenFootDetailData {
+            eyebrow: "Details".to_string(),
+            title: "Focus Fixture".to_string(),
+            subtitle: "Fixture".to_string(),
+            metadata: Vec::new(),
+            overview: "Overview".to_string(),
+            image: DetailImage::None,
+            actions: vec![
+                action_spec(TenFootDetailAction::Primary),
+                action_spec(TenFootDetailAction::StartOver),
+                action_spec(TenFootDetailAction::Back),
+            ],
+            panels,
+            notice: None,
+        }
+    }
+
+    fn panel_focus(
+        data: &TenFootDetailData,
+        panel_index: usize,
+        item_index: usize,
+    ) -> TenFootDetailFocusId {
+        let panel = &data.panels[panel_index];
+        TenFootDetailFocusId::PanelItem {
+            panel: panel.id.clone(),
+            item: panel.items[item_index].id(),
+        }
+    }
+
+    #[test]
+    fn focus_movement_uses_columns_from_viewport_plans() {
+        let data = detail_data(&[8, 6]);
+        let hd = layout_plan(1_280.0, 800.0, 1.0);
+        let full_hd = layout_plan(1_920.0, 1_080.0, 1.0);
+        let hd_columns = visible_panel_columns_for_width(1_280.0, &hd);
+        let full_hd_columns =
+            visible_panel_columns_for_width(1_920.0, &full_hd);
+
+        assert_eq!(hd_columns, 3);
+        assert_eq!(full_hd_columns, 5);
+        assert_eq!(
+            data.move_focus(
+                Some(&TenFootDetailFocusId::Action(
+                    TenFootDetailAction::Primary,
+                )),
+                SpatialDirection::Down,
+                hd_columns,
+            ),
+            Some(panel_focus(&data, 0, 0))
+        );
+        assert_eq!(
+            data.move_focus(
+                Some(&panel_focus(&data, 0, 1)),
+                SpatialDirection::Up,
+                hd_columns,
+            ),
+            Some(TenFootDetailFocusId::Action(TenFootDetailAction::StartOver))
+        );
+        assert_eq!(
+            data.move_focus(
+                Some(&panel_focus(&data, 0, 2)),
+                SpatialDirection::Down,
+                hd_columns,
+            ),
+            Some(panel_focus(&data, 0, 5))
+        );
+        assert_eq!(
+            data.move_focus(
+                Some(&panel_focus(&data, 0, 5)),
+                SpatialDirection::Down,
+                hd_columns,
+            ),
+            Some(panel_focus(&data, 1, 2))
+        );
+        assert_eq!(
+            data.move_focus(
+                Some(&panel_focus(&data, 0, 2)),
+                SpatialDirection::Down,
+                full_hd_columns,
+            ),
+            Some(panel_focus(&data, 0, 7))
+        );
+    }
+
+    #[test]
+    fn focus_vertical_bounds_follow_viewport_layout_plans() {
+        let data = detail_data(&[8, 6]);
+        let full_hd = layout_plan(1_920.0, 1_080.0, 1.0);
+        let short = layout_plan(1_280.0, 560.0, 1.0);
+        let action_focus =
+            TenFootDetailFocusId::Action(TenFootDetailAction::Primary);
+        let first_panel_focus = panel_focus(&data, 0, 0);
+        let second_panel_focus = panel_focus(&data, 1, 0);
+
+        assert_eq!(panel_rows(&full_hd), 2);
+        assert_eq!(panel_rows(&short), 1);
+        assert_eq!(
+            data.focus_vertical_bounds(&action_focus, &full_hd),
+            Some((full_hd.page_padding_y, hero_height(&full_hd)))
+        );
+
+        let first_panel_bounds = data
+            .focus_vertical_bounds(&first_panel_focus, &full_hd)
+            .expect("first panel bounds");
+        assert!(
+            (first_panel_bounds.0
+                - (full_hd.page_padding_y
+                    + hero_height(&full_hd)
+                    + full_hd.hero_gap))
+                .abs()
+                < 0.01
+        );
+        assert!((first_panel_bounds.1 - panel_height(&full_hd)).abs() < 0.01);
+
+        let second_panel_bounds = data
+            .focus_vertical_bounds(&second_panel_focus, &full_hd)
+            .expect("second panel bounds");
+        assert!(
+            (second_panel_bounds.0
+                - (first_panel_bounds.0
+                    + panel_height(&full_hd)
+                    + full_hd.hero_gap))
+                .abs()
+                < 0.01
+        );
+
+        let short_panel_bounds = data
+            .focus_vertical_bounds(&first_panel_focus, &short)
+            .expect("short panel bounds");
+        assert!(short_panel_bounds.0 < first_panel_bounds.0);
+        assert!(short_panel_bounds.1 < first_panel_bounds.1);
     }
 }

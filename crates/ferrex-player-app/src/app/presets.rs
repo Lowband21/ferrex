@@ -18,7 +18,9 @@ use crate::{
             shell_ui::Scope,
             tabs::{TabId, TabState},
             types::ViewState,
-            update_handlers::recompute_and_init_curated_carousels,
+            update_handlers::{
+                handle_view_movie_details, recompute_and_init_curated_carousels,
+            },
             views::tenfoot::{
                 detail::{TenFootDetailAction, TenFootDetailFocusId},
                 home::{
@@ -39,11 +41,13 @@ use ferrex_core::player_prelude::{
     PosterSize, Priority, Role, Series, SeriesID, UserPermissions,
 };
 use ferrex_model::{
-    EnhancedMovieDetails, EnhancedSeriesDetails,
+    EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
+    EpisodeReference, SeasonDetails, SeasonID, SeasonReference,
     details::ExternalIds,
     image::metadata::MediaImages,
+    numbers::{EpisodeNumber, SeasonNumber},
     titles::{MovieTitle, SeriesTitle},
-    urls::{MovieURL, SeriesURL},
+    urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL},
 };
 use iced::{Preset, Task, widget::image::Handle};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
@@ -69,6 +73,14 @@ pub enum PlayerScenario {
     UserSelection,
     /// Desktop library home with seeded media and artwork.
     DesktopLibraryHome,
+    /// Desktop movie detail surface with seeded media and artwork.
+    DesktopMovieDetail,
+    /// Desktop series detail surface with seeded seasons and artwork.
+    DesktopSeriesDetail,
+    /// Desktop season detail surface with seeded episodes and artwork.
+    DesktopSeasonDetail,
+    /// Desktop episode detail surface with seeded still artwork.
+    DesktopEpisodeDetail,
     /// Authenticated settings/device-management surface.
     SettingsDevices,
     /// 10-foot home surface with seeded rails.
@@ -87,10 +99,14 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 11] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
+        Self::DesktopMovieDetail,
+        Self::DesktopSeriesDetail,
+        Self::DesktopSeasonDetail,
+        Self::DesktopEpisodeDetail,
         Self::SettingsDevices,
         Self::TenFootHome,
         Self::TenFootDetail,
@@ -103,6 +119,10 @@ impl PlayerScenario {
             Self::FirstRunAuth => "FirstRunAuth",
             Self::UserSelection => "UserSelection",
             Self::DesktopLibraryHome => "DesktopLibraryHome",
+            Self::DesktopMovieDetail => "DesktopMovieDetail",
+            Self::DesktopSeriesDetail => "DesktopSeriesDetail",
+            Self::DesktopSeasonDetail => "DesktopSeasonDetail",
+            Self::DesktopEpisodeDetail => "DesktopEpisodeDetail",
             Self::SettingsDevices => "SettingsDevices",
             Self::TenFootHome => "TenFootHome",
             Self::TenFootDetail => "TenFootDetail",
@@ -121,6 +141,18 @@ impl PlayerScenario {
             }
             Self::DesktopLibraryHome => {
                 "Desktop home/library surface with seeded movie and series rails"
+            }
+            Self::DesktopMovieDetail => {
+                "Desktop movie detail page for a seeded deterministic movie"
+            }
+            Self::DesktopSeriesDetail => {
+                "Desktop series detail page with seeded seasons and recovery-safe actions"
+            }
+            Self::DesktopSeasonDetail => {
+                "Desktop season detail page with seeded episode relationship rail"
+            }
+            Self::DesktopEpisodeDetail => {
+                "Desktop episode detail page with seeded still artwork and playback actions"
             }
             Self::SettingsDevices => {
                 "Authenticated settings surface showing deterministic devices"
@@ -160,6 +192,18 @@ impl PlayerScenario {
                 "authenticatedwithdevices" => Some(Self::SettingsDevices),
                 "adminsession" | "libraryloaded" | "libraryhome"
                 | "desktoplibrary" => Some(Self::DesktopLibraryHome),
+                "desktopmoviedetail" | "moviedetail" => {
+                    Some(Self::DesktopMovieDetail)
+                }
+                "desktopseriesdetail" | "seriesdetail" => {
+                    Some(Self::DesktopSeriesDetail)
+                }
+                "desktopseasondetail" | "seasondetail" => {
+                    Some(Self::DesktopSeasonDetail)
+                }
+                "desktopepisodedetail" | "episodedetail" => {
+                    Some(Self::DesktopEpisodeDetail)
+                }
                 "playerloading" | "loadingoverlay" => {
                     Some(Self::PlayerLoadingOverlay)
                 }
@@ -181,6 +225,10 @@ impl PlayerScenario {
             Self::FirstRunAuth => first_run_state(config),
             Self::UserSelection => user_selection_state(config),
             Self::DesktopLibraryHome => desktop_library_home_state(config),
+            Self::DesktopMovieDetail => desktop_movie_detail_state(config),
+            Self::DesktopSeriesDetail => desktop_series_detail_state(config),
+            Self::DesktopSeasonDetail => desktop_season_detail_state(config),
+            Self::DesktopEpisodeDetail => desktop_episode_detail_state(config),
             Self::SettingsDevices => settings_devices_state(config),
             Self::TenFootHome => tenfoot_home_state(config),
             Self::TenFootDetail => tenfoot_detail_state(config),
@@ -271,6 +319,53 @@ fn desktop_library_home_state(config: &AppConfig) -> State {
     state.domains.ui.state.scope = Scope::Home;
     state.domains.ui.state.current_library_id = None;
     state.tab_manager.set_active_tab(TabId::Home);
+    state.loading = false;
+    state
+}
+
+fn desktop_movie_detail_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+
+    let movie_id = seed_movie_id(0);
+    let _ = handle_view_movie_details(&mut state, movie_id);
+    state.loading = false;
+    state
+}
+
+fn desktop_series_detail_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+
+    state.domains.ui.state.view = ViewState::SeriesDetail {
+        series_id: seed_series_id(0),
+        backdrop_handle: None,
+    };
+    state.loading = false;
+    state
+}
+
+fn desktop_season_detail_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+
+    state.domains.ui.state.view = ViewState::SeasonDetail {
+        series_id: seed_series_id(0),
+        season_id: seed_season_id(0),
+        backdrop_handle: None,
+    };
+    state.loading = false;
+    state
+}
+
+fn desktop_episode_detail_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+
+    state.domains.ui.state.view = ViewState::EpisodeDetail {
+        episode_id: seed_episode_id(0),
+        backdrop_handle: None,
+    };
     state.loading = false;
     state
 }
@@ -398,6 +493,8 @@ struct SeededLibraryState {
     series_library: Library,
     movies: Vec<MovieReference>,
     series: Vec<Series>,
+    seasons: Vec<SeasonReference>,
+    episodes: Vec<EpisodeReference>,
 }
 
 fn seed_library_state(state: &mut State) -> SeededLibraryState {
@@ -434,6 +531,30 @@ fn seed_library_state(state: &mut State) -> SeededLibraryState {
                 &seed.series_library.id,
             )
             .expect("upsert seeded series");
+    }
+    for season in &seed.seasons {
+        state
+            .domains
+            .library
+            .state
+            .repo_accessor
+            .upsert(
+                Media::Season(Box::new(season.clone())),
+                &seed.series_library.id,
+            )
+            .expect("upsert seeded season");
+    }
+    for episode in &seed.episodes {
+        state
+            .domains
+            .library
+            .state
+            .repo_accessor
+            .upsert(
+                Media::Episode(Box::new(episode.clone())),
+                &seed.series_library.id,
+            )
+            .expect("upsert seeded episode");
     }
 
     state.domains.library.state.libraries =
@@ -532,12 +653,38 @@ fn seeded_media() -> SeededLibraryState {
         8.1,
         "#4F6B3C",
     )];
+    let seasons = vec![seeded_season(
+        0,
+        series_library.id,
+        series[0].id,
+        91_000,
+        1,
+        8,
+        "A first season that turns recovered set lists into a map of hidden transmitters.",
+        "2023-09-21",
+        "#4F6B3C",
+    )];
+    let episodes = (0..8)
+        .map(|episode_index| {
+            seeded_episode(
+                episode_index,
+                series_library.id,
+                series[0].id,
+                seasons[0].id,
+                91_000,
+                1,
+                episode_index as u16 + 1,
+            )
+        })
+        .collect();
 
     SeededLibraryState {
         movies_library,
         series_library,
         movies,
         series,
+        seasons,
+        episodes,
     }
 }
 
@@ -722,6 +869,116 @@ fn seeded_series(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn seeded_season(
+    index: usize,
+    library_id: LibraryId,
+    series_id: SeriesID,
+    tmdb_series_id: u64,
+    season_number: u16,
+    episode_count: u16,
+    overview: &str,
+    air_date: &str,
+    theme_color: &str,
+) -> SeasonReference {
+    let id = seed_season_id(index);
+    let poster_iid = seed_poster_iid(20 + index);
+
+    SeasonReference {
+        id,
+        library_id,
+        season_number: SeasonNumber::from(season_number),
+        series_id,
+        tmdb_series_id,
+        details: SeasonDetails {
+            id: 92_000 + index as u64,
+            season_number,
+            name: format!("Season {season_number}"),
+            overview: Some(overview.to_string()),
+            air_date: Some(air_date.to_string()),
+            episode_count,
+            poster_path: Some(format!(
+                "/screenshot/series-0-season-{season_number}-poster.png"
+            )),
+            primary_poster_iid: Some(poster_iid),
+            runtime: Some(48),
+            external_ids: ExternalIds::default(),
+            images: MediaImages::default(),
+            videos: Vec::new(),
+            keywords: Vec::new(),
+            translations: Vec::new(),
+        },
+        endpoint: SeasonURL::from(format!("/api/v1/media/seasons/{id}")),
+        discovered_at: fixed_time(-3 * 24 * 60 * 60),
+        created_at: fixed_time(-3 * 24 * 60 * 60),
+        theme_color: Some(theme_color.to_string()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seeded_episode(
+    index: usize,
+    library_id: LibraryId,
+    series_id: SeriesID,
+    season_id: SeasonID,
+    tmdb_series_id: u64,
+    season_number: u16,
+    episode_number: u16,
+) -> EpisodeReference {
+    let id = seed_episode_id(index);
+    let still_iid = seed_still_iid(index);
+    let title = format!("The Broadcast Cipher, Part {episode_number}");
+    let overview = format!(
+        "The Signal Grove ensemble follows clue {episode_number} through archival audio, rehearsal notes, and a moonlit transmitter room."
+    );
+
+    EpisodeReference {
+        id,
+        library_id,
+        episode_number: EpisodeNumber::from(episode_number),
+        season_number: SeasonNumber::from(season_number),
+        season_id,
+        series_id,
+        tmdb_series_id,
+        details: EpisodeDetails {
+            id: 93_000 + index as u64,
+            episode_number,
+            season_number,
+            name: title.clone(),
+            overview: Some(overview),
+            air_date: Some(format!("2023-10-{episode_number:02}")),
+            runtime: Some(47 + (index as u32 % 4)),
+            still_path: Some(format!(
+                "/screenshot/series-0-s{season_number:02}e{episode_number:02}-still.png"
+            )),
+            primary_still_iid: Some(still_iid),
+            vote_average: Some(7.8 + index as f32 * 0.05),
+            vote_count: Some(120 + index as u32 * 9),
+            production_code: Some(format!("SG-{episode_number:03}")),
+            external_ids: ExternalIds::default(),
+            images: MediaImages::default(),
+            videos: Vec::new(),
+            keywords: Vec::new(),
+            translations: Vec::new(),
+            guest_stars: Vec::new(),
+            crew: Vec::new(),
+            content_ratings: Vec::new(),
+        },
+        endpoint: EpisodeURL::from(format!("/api/v1/media/episodes/{id}")),
+        file: seeded_media_file(
+            seed_file_id(100 + index),
+            MediaID::Episode(id),
+            library_id,
+            &format!(
+                "Signal Grove - S{season_number:02}E{episode_number:02} - {title}.mkv"
+            ),
+            100 + index,
+        ),
+        discovered_at: fixed_time(-(2 * 24 * 60 * 60 + index as i64 * 900)),
+        created_at: fixed_time(-(2 * 24 * 60 * 60 + index as i64 * 900)),
+    }
+}
+
 fn seeded_media_file(
     id: Uuid,
     media_id: MediaID,
@@ -773,6 +1030,30 @@ fn seed_artwork(state: &mut State, seed: &SeededLibraryState) {
             detail_poster_size,
             (10 + index) as u8,
         );
+    }
+
+    for (index, season) in seed.seasons.iter().enumerate() {
+        seed_media_artwork(
+            state,
+            season.details.primary_poster_iid,
+            None,
+            library_poster_size,
+            detail_poster_size,
+            (20 + index) as u8,
+        );
+    }
+
+    for (index, episode) in seed.episodes.iter().enumerate() {
+        if let Some(iid) = episode.details.primary_still_iid {
+            mark_artwork_loaded(
+                state,
+                iid,
+                ImageSize::thumbnail(),
+                192,
+                108,
+                (40 + index) as u8,
+            );
+        }
     }
 }
 
@@ -868,6 +1149,14 @@ fn seed_series_id(index: usize) -> SeriesID {
     SeriesID(uuid_from(0x3000_0000_0000_7000_8000_0000_0000_0000, index))
 }
 
+fn seed_season_id(index: usize) -> SeasonID {
+    SeasonID(uuid_from(0x3100_0000_0000_7000_8000_0000_0000_0000, index))
+}
+
+fn seed_episode_id(index: usize) -> EpisodeID {
+    EpisodeID(uuid_from(0x3200_0000_0000_7000_8000_0000_0000_0000, index))
+}
+
 fn seed_file_id(index: usize) -> Uuid {
     uuid_from(0x4000_0000_0000_7000_8000_0000_0000_0000, index)
 }
@@ -878,6 +1167,10 @@ fn seed_poster_iid(index: usize) -> Uuid {
 
 fn seed_backdrop_iid(index: usize) -> Uuid {
     uuid_from(0x6000_0000_0000_7000_8000_0000_0000_0000, index)
+}
+
+fn seed_still_iid(index: usize) -> Uuid {
+    uuid_from(0x6100_0000_0000_7000_8000_0000_0000_0000, index)
 }
 
 fn seed_user_id(index: usize) -> Uuid {
@@ -960,6 +1253,26 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name == "DesktopMovieDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "DesktopSeriesDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "DesktopSeasonDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "DesktopEpisodeDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "TenFootDetail")
         );
         assert!(
@@ -1018,7 +1331,29 @@ mod tests {
                 .get_library_media(&seed_library_id(1))
                 .expect("series media")
                 .len(),
+            10
+        );
+        assert_eq!(
+            state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_series_seasons(&seed_series_id(0))
+                .expect("series seasons")
+                .len(),
             1
+        );
+        assert_eq!(
+            state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_season_episodes(&seed_season_id(0))
+                .expect("season episodes")
+                .len(),
+            8
         );
 
         let Some(TabState::Home(home)) = state.tab_manager.get_tab(TabId::Home)
@@ -1027,6 +1362,83 @@ mod tests {
         };
         assert!(!home.recent_movies.is_empty());
         assert!(!home.recent_series.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn desktop_movie_detail_scenario_selects_seeded_movie_detail() {
+        let state = PlayerScenario::DesktopMovieDetail.build(&test_config());
+
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+        assert!(matches!(
+            state.domains.ui.state.view,
+            ViewState::MovieDetail { movie_id, .. } if movie_id == seed_movie_id(0)
+        ));
+        assert!(
+            state
+                .domains
+                .ui
+                .state
+                .movie_yoke_cache
+                .peek(&seed_movie_id(0).to_uuid())
+                .is_some()
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn desktop_tv_detail_scenarios_select_seeded_routes() {
+        let series_state =
+            PlayerScenario::DesktopSeriesDetail.build(&test_config());
+        let season_state =
+            PlayerScenario::DesktopSeasonDetail.build(&test_config());
+        let episode_state =
+            PlayerScenario::DesktopEpisodeDetail.build(&test_config());
+
+        assert!(matches!(
+            series_state.domains.ui.state.view,
+            ViewState::SeriesDetail { series_id, .. } if series_id == seed_series_id(0)
+        ));
+        assert_eq!(
+            series_state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_series_seasons(&seed_series_id(0))
+                .expect("series seasons")
+                .len(),
+            1
+        );
+
+        assert!(matches!(
+            season_state.domains.ui.state.view,
+            ViewState::SeasonDetail { series_id, season_id, .. }
+                if series_id == seed_series_id(0) && season_id == seed_season_id(0)
+        ));
+        assert_eq!(
+            season_state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get_season_episodes(&seed_season_id(0))
+                .expect("season episodes")
+                .len(),
+            8
+        );
+
+        assert!(matches!(
+            episode_state.domains.ui.state.view,
+            ViewState::EpisodeDetail { episode_id, .. } if episode_id == seed_episode_id(0)
+        ));
+        assert!(
+            episode_state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Episode(seed_episode_id(0)))
+                .is_ok()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1062,32 +1474,92 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn seeded_poster_and_backdrop_images_are_loaded() {
+    async fn seeded_detail_artwork_images_are_loaded() {
         let state = PlayerScenario::DesktopLibraryHome.build(&test_config());
-        let media = state
+        let movie = state
             .domains
             .ui
             .state
             .repo_accessor
             .get(&MediaID::Movie(seed_movie_id(0)))
             .expect("seed movie");
-        let Media::Movie(movie) = media else {
+        let season = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get(&MediaID::Season(seed_season_id(0)))
+            .expect("seed season");
+        let episode = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get(&MediaID::Episode(seed_episode_id(0)))
+            .expect("seed episode");
+
+        let Media::Movie(movie) = movie else {
             panic!("expected movie");
         };
-        let poster_iid = movie.details.primary_poster_iid.expect("poster iid");
+        let Media::Season(season) = season else {
+            panic!("expected season");
+        };
+        let Media::Episode(episode) = episode else {
+            panic!("expected episode");
+        };
+
+        let movie_poster_iid =
+            movie.details.primary_poster_iid.expect("movie poster iid");
         let backdrop_iid =
             movie.details.primary_backdrop_iid.expect("backdrop iid");
-        let poster_request = ImageRequest::new(
-            poster_iid,
-            ImageSize::Poster(
-                state.domains.settings.display.library_poster_quality,
-            ),
+        let season_poster_iid = season
+            .details
+            .primary_poster_iid
+            .expect("season poster iid");
+        let episode_still_iid = episode
+            .details
+            .primary_still_iid
+            .expect("episode still iid");
+        let library_poster_size = ImageSize::Poster(
+            state.domains.settings.display.library_poster_quality,
         );
-        let backdrop_request =
-            ImageRequest::new(backdrop_iid, ImageSize::backdrop());
+        let detail_poster_size = ImageSize::Poster(
+            state.domains.settings.display.detail_poster_quality,
+        );
 
-        assert!(state.image_service.get(&poster_request).is_some());
-        assert!(state.image_service.get(&backdrop_request).is_some());
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(movie_poster_iid, library_poster_size))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(movie_poster_iid, detail_poster_size))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(backdrop_iid, ImageSize::backdrop()))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(season_poster_iid, detail_poster_size))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(
+                    episode_still_iid,
+                    ImageSize::thumbnail()
+                ))
+                .is_some()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
