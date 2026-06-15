@@ -1,5 +1,6 @@
 use ferrex_core::player_prelude::{
     EpisodeSize, ImageRequest, ImageSize, Media, Priority, ProfileSize,
+    TheaterPlateViewport, theater_plate_backdrop_size_for_viewport,
 };
 use iced::Task;
 use rkyv::option::ArchivedOption;
@@ -37,6 +38,15 @@ use ferrex_core::{
     ),
     profiling::function
 )]
+fn detail_backdrop_request_size(state: &State) -> ImageSize {
+    theater_plate_backdrop_size_for_viewport(
+        TheaterPlateViewport::from_logical_size(
+            state.window_size.width,
+            state.window_size.height,
+        ),
+    )
+}
+
 fn prepare_depth_regions_for_transition(
     state: &mut State,
     new_view: &ViewState,
@@ -148,8 +158,9 @@ pub fn handle_view_movie_details(
 
         // Queue image requests if not in cache
         if let ArchivedOption::Some(iid) = &movie.details.primary_backdrop_iid {
-            let request = ImageRequest::new(*iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(*iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }
@@ -303,8 +314,9 @@ pub fn handle_view_series(
         // Queue request if not in cache
         if let ArchivedOption::Some(iid) = &series.details.primary_backdrop_iid
         {
-            let request = ImageRequest::new(*iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(*iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }
@@ -546,8 +558,9 @@ pub fn handle_view_season(
             && let Media::Series(sr) = media
             && let Some(iid) = sr.details.primary_backdrop_iid
         {
-            let request = ImageRequest::new(iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }

@@ -36,9 +36,10 @@ use crate::{
 
 use chrono::{TimeZone, Utc};
 use ferrex_core::player_prelude::{
-    GenreInfo, ImageRequest, ImageSize, Library, LibraryId, LibraryType, Media,
-    MediaFile, MediaID, MovieID, MovieReference, MovieReferenceBatchSize,
-    PosterSize, Priority, Role, Series, SeriesID, UserPermissions,
+    BackdropSize, GenreInfo, ImageRequest, ImageSize, Library, LibraryId,
+    LibraryType, Media, MediaFile, MediaID, MovieID, MovieReference,
+    MovieReferenceBatchSize, PosterSize, Priority, Role, Series, SeriesID,
+    UserPermissions,
 };
 use ferrex_model::{
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
@@ -1089,10 +1090,18 @@ fn seed_media_artwork(
         mark_artwork_loaded(
             state,
             iid,
-            ImageSize::backdrop(),
+            ImageSize::Backdrop(BackdropSize::W780),
             192,
             108,
             seed + 43,
+        );
+        mark_artwork_loaded(
+            state,
+            iid,
+            ImageSize::Backdrop(BackdropSize::W1280),
+            256,
+            144,
+            seed + 47,
         );
     }
 }
@@ -1542,7 +1551,19 @@ mod tests {
         assert!(
             state
                 .image_service
-                .get(&ImageRequest::new(backdrop_iid, ImageSize::backdrop()))
+                .get(&ImageRequest::new(
+                    backdrop_iid,
+                    ImageSize::Backdrop(BackdropSize::W780)
+                ))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(
+                    backdrop_iid,
+                    ImageSize::Backdrop(BackdropSize::W1280)
+                ))
                 .is_some()
         );
         assert!(

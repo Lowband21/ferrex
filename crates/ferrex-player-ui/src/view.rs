@@ -28,7 +28,10 @@ use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
 use crate::state::State;
-use ferrex_core::player_prelude::{ImageRequest, ImageSize, Media, MediaID};
+use ferrex_core::player_prelude::{
+    ImageRequest, Media, MediaID, TheaterPlateViewport,
+    theater_plate_backdrop_size_for_viewport,
+};
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
 
@@ -274,7 +277,15 @@ pub fn view(
         };
 
         let backdrop_handle = backdrop_iid.and_then(|iid| {
-            let request = ImageRequest::new(iid, ImageSize::backdrop());
+            let request = ImageRequest::new(
+                iid,
+                theater_plate_backdrop_size_for_viewport(
+                    TheaterPlateViewport::from_logical_size(
+                        state.window_size.width,
+                        state.window_size.height,
+                    ),
+                ),
+            );
             state.image_service.get(&request)
         });
 

@@ -13,5 +13,6 @@ pub mod scan;
 /// First-run setup flows (claim codes, binding)
 #[cfg(feature = "database")]
 pub mod setup;
+pub mod theater_plate;
 pub mod users;
 pub mod watch;
