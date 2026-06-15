@@ -125,6 +125,106 @@
       workspaceToml = fromTOML (builtins.readFile ./Cargo.toml);
       workspaceVersion = workspaceToml.workspace.package.version or "0.0.0";
 
+      playerMediaInputs =
+        { pkgs, gst }:
+        [
+          pkgs.pipewire
+
+          # Include full outputs so setup hooks set `GST_PLUGIN_SYSTEM_PATH_1_0`.
+          gst.gstreamer
+          gst.gst-plugins-base
+          gst.gst-plugins-good
+          gst.gst-plugins-bad
+          gst.gst-plugins-ugly
+          gst.gst-libav
+
+          # Headers/pkg-config for builds.
+          gst.gstreamer.dev
+          gst.gst-plugins-base.dev
+          gst.gst-plugins-good.dev
+
+          # VA-API / dmabuf runtime dependencies (helps keep crash reports actionable).
+          pkgs.libva
+          pkgs.libdrm
+          pkgs.mesa
+
+          # wgpu backends (Vulkan/OpenGL).
+          pkgs.vulkan-loader
+        ]
+        ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          # winit loads Wayland/X11 libs via dlopen; ensure they're in the shell
+          # environment so `cargo run` binaries can find them on NixOS.
+          pkgs.wayland
+          pkgs.libxkbcommon
+          pkgs.libx11
+          pkgs.libxcursor
+          pkgs.libxi
+          pkgs.libxrandr
+        ];
+
+      makePlayerRuntimeEnv =
+        { pkgs, gst }:
+        let
+          gstPluginPath = nixpkgs.lib.concatStringsSep ":" [
+            "${gst.gstreamer.out}/lib/gstreamer-1.0"
+            "${gst.gst-plugins-base.out}/lib/gstreamer-1.0"
+            "${gst.gst-plugins-good.out}/lib/gstreamer-1.0"
+            "${gst.gst-plugins-bad.out}/lib/gstreamer-1.0"
+            "${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0"
+            "${gst.gst-libav.out}/lib/gstreamer-1.0"
+            "${pkgs.pipewire}/lib/gstreamer-1.0"
+          ];
+
+          gpuLibraryPath = nixpkgs.lib.concatStringsSep ":" [
+            "${pkgs.wayland}/lib"
+            "${pkgs.libxkbcommon}/lib"
+            "${pkgs.libx11}/lib"
+            "${pkgs.libxcursor}/lib"
+            "${pkgs.libxi}/lib"
+            "${pkgs.libxrandr}/lib"
+            "${pkgs.vulkan-loader}/lib"
+          ];
+        in
+        {
+          inherit gstPluginPath gpuLibraryPath;
+
+          gpuEnvironment = ''
+            # Prefer system GPU drivers on NixOS for Vulkan/GL discovery.
+            if [ -d /run/opengl-driver ]; then
+              export LD_LIBRARY_PATH="/run/opengl-driver/lib''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
+              export LIBGL_DRIVERS_PATH="/run/opengl-driver/lib/dri"
+              export LIBVA_DRIVERS_PATH="/run/opengl-driver/lib/dri"
+              export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d''${__EGL_VENDOR_LIBRARY_DIRS:+:}$__EGL_VENDOR_LIBRARY_DIRS"
+
+              # Best-effort default for VA-API on Wayland; override if needed.
+              export GST_VA_DISPLAY="''${GST_VA_DISPLAY:-wayland}"
+
+              if [ -z "''${LIBVA_DRIVER_NAME:-}" ]; then
+                if [ -f /run/opengl-driver/lib/dri/radeonsi_drv_video.so ]; then
+                  export LIBVA_DRIVER_NAME=radeonsi
+                fi
+              fi
+
+              if [ -d /run/opengl-driver/share/vulkan/icd.d ]; then
+                shopt -s nullglob
+                icds=(/run/opengl-driver/share/vulkan/icd.d/*.json)
+                shopt -u nullglob
+                if [ "''${#icds[@]}" -gt 0 ]; then
+                  export VK_ICD_FILENAMES="$(IFS=:; echo "''${icds[*]}")"
+                fi
+              fi
+            else
+              # Non-NixOS fallback: use the Mesa packages in this environment.
+              export LD_LIBRARY_PATH="${pkgs.mesa}/lib''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
+              export LIBGL_DRIVERS_PATH="${pkgs.mesa}/lib/dri"
+              export LIBVA_DRIVERS_PATH="${pkgs.mesa}/lib/dri"
+              export __EGL_VENDOR_LIBRARY_DIRS="${pkgs.mesa}/share/glvnd/egl_vendor.d''${__EGL_VENDOR_LIBRARY_DIRS:+:}$__EGL_VENDOR_LIBRARY_DIRS"
+
+              export GST_VA_DISPLAY="''${GST_VA_DISPLAY:-wayland}"
+            fi
+          '';
+        };
+
     in
     {
       overlays.gst_1_28_4 = gstOverlay_1_28_4;
@@ -132,6 +232,12 @@
       packages = forAllSystems (
         system:
         let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+            config.allowUnfree = true;
+          };
+
           pkgsPlayer = import nixpkgs {
             inherit system;
             overlays = [
@@ -141,12 +247,18 @@
             config.allowUnfree = true;
           };
           gst = pkgsPlayer.gst_1_28_4;
+          ffmpegPkg = if pkgs ? ffmpeg-full then pkgs.ffmpeg-full else pkgs.ffmpeg;
           ffmpegPkgPlayer =
             if pkgsPlayer ? ffmpeg-full then pkgsPlayer.ffmpeg-full else pkgsPlayer.ffmpeg;
-          libclang = pkgsPlayer.llvmPackages.libclang;
+          libclang = pkgs.llvmPackages.libclang;
+          libclangPlayer = pkgsPlayer.llvmPackages.libclang;
 
-          rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
-          craneLib = (crane.mkLib pkgsPlayer).overrideToolchain rustToolchain;
+          rustToolchain = pkgs.rust-bin.stable."1.92.0".default;
+          rustToolchainPlayer = pkgsPlayer.rust-bin.stable."1.92.0".default;
+          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+          craneLibPlayer = (crane.mkLib pkgsPlayer).overrideToolchain rustToolchainPlayer;
+          playerRuntime = makePlayerRuntimeEnv { pkgs = pkgsPlayer; inherit gst; };
+          playerMediaBuildInputs = playerMediaInputs { pkgs = pkgsPlayer; inherit gst; };
 
           src =
             let
@@ -166,105 +278,74 @@
                 || (craneLib.filterCargoSources path type);
             };
 
-          # Build workspace dependencies once — reused by all three crates.
-          # libclang + clang are in common because ffmpeg-sys-next uses
-          # bindgen at build time for all three crates.
-          commonArgs = {
-            inherit src;
-            strictDeps = true;
-            pname = "ferrex-workspace-deps";
-            version = workspaceVersion;
+          mkCommonArgs =
+            { pkgs, libclang, ffmpegPkg }:
+            {
+              inherit src;
+              strictDeps = true;
+              pname = "ferrex-workspace";
+              version = workspaceVersion;
 
-            nativeBuildInputs = with pkgsPlayer; [
-              pkg-config
-              llvmPackages.clang
-            ];
+              nativeBuildInputs = with pkgs; [
+                pkg-config
+                llvmPackages.clang
+              ];
 
-            buildInputs = with pkgsPlayer; [
-              libclang
-              openssl
-              ffmpegPkgPlayer.dev
-            ];
+              buildInputs = [
+                libclang
+                pkgs.openssl
+                ffmpegPkg.dev
+              ];
 
-            SQLX_OFFLINE = "true";
-            LIBCLANG_PATH = "${libclang.lib}/lib";
+              SQLX_OFFLINE = "true";
+              LIBCLANG_PATH = "${libclang.lib}/lib";
+            };
+
+          commonArgs = mkCommonArgs { inherit pkgs libclang ffmpegPkg; };
+          playerCommonArgs = mkCommonArgs {
+            pkgs = pkgsPlayer;
+            libclang = libclangPlayer;
+            ffmpegPkg = ffmpegPkgPlayer;
           };
 
-          cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
-            # buildDepsOnly needs the superset of all build inputs so that
-            # every workspace crate's deps can compile (player needs GStreamer,
-            # Wayland, Vulkan, etc.).
-            buildInputs = commonArgs.buildInputs ++ [
-              gst.gstreamer
-              gst.gst-plugins-base
-              gst.gst-plugins-good
-              gst.gst-plugins-bad
-              gst.gst-plugins-ugly
-              gst.gst-libav
-
-              gst.gstreamer.dev
-              gst.gst-plugins-base.dev
-              gst.gst-plugins-good.dev
-
-              pkgsPlayer.pipewire
-              pkgsPlayer.libva
-              pkgsPlayer.libdrm
-              pkgsPlayer.mesa
-              pkgsPlayer.vulkan-loader
-              pkgsPlayer.wayland
-              pkgsPlayer.libxkbcommon
-              pkgsPlayer.libx11
-              pkgsPlayer.libxcursor
-              pkgsPlayer.libxi
-              pkgsPlayer.libxrandr
-            ];
+          serverCargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+            pname = "ferrex-server-deps";
+            cargoExtraArgs = "-p ferrex-server";
           });
 
-          ferrexPlayerBin = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
+          ctlCargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+            pname = "ferrexctl-deps";
+            cargoExtraArgs = "-p ferrexctl";
+          });
+
+          playerCargoArtifacts = craneLibPlayer.buildDepsOnly (playerCommonArgs // {
+            pname = "ferrex-player-deps";
+            cargoExtraArgs = "-p ferrex-player";
+            buildInputs = playerCommonArgs.buildInputs ++ playerMediaBuildInputs;
+          });
+
+          ferrexPlayerBin = craneLibPlayer.buildPackage (playerCommonArgs // {
+            cargoArtifacts = playerCargoArtifacts;
             pname = "ferrex-player";
             cargoExtraArgs = "-p ferrex-player";
             doCheck = false;
 
-            nativeBuildInputs = commonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
+            nativeBuildInputs = playerCommonArgs.nativeBuildInputs ++ (with pkgsPlayer; [
               makeWrapper
             ]);
 
-            buildInputs = commonArgs.buildInputs ++ [
-              gst.gstreamer
-              gst.gst-plugins-base
-              gst.gst-plugins-good
-              gst.gst-plugins-bad
-              gst.gst-plugins-ugly
-              gst.gst-libav
-
-              gst.gstreamer.dev
-              gst.gst-plugins-base.dev
-              gst.gst-plugins-good.dev
-
-              pkgsPlayer.pipewire
-              pkgsPlayer.libva
-              pkgsPlayer.libdrm
-              pkgsPlayer.mesa
-              pkgsPlayer.vulkan-loader
-              pkgsPlayer.wayland
-              pkgsPlayer.libxkbcommon
-              pkgsPlayer.libx11
-              pkgsPlayer.libxcursor
-              pkgsPlayer.libxi
-              pkgsPlayer.libxrandr
-            ];
+            buildInputs = playerCommonArgs.buildInputs ++ playerMediaBuildInputs;
           });
 
           ferrexServerBin = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
+            cargoArtifacts = serverCargoArtifacts;
             pname = "ferrex-server";
             cargoExtraArgs = "-p ferrex-server";
             doCheck = false;
           });
 
           ferrexCtlBin = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
+            cargoArtifacts = ctlCargoArtifacts;
             pname = "ferrexctl";
             cargoExtraArgs = "-p ferrexctl";
             doCheck = false;
@@ -288,24 +369,10 @@
           } ''
             mkdir -p "$out/bin"
             makeWrapper "${ferrexPlayerBin}/bin/ferrex-player" "$out/bin/ferrex-player" \
-              --run 'if [ -d /run/opengl-driver ]; then
-                export LD_LIBRARY_PATH="/run/opengl-driver/lib''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
-                export LIBGL_DRIVERS_PATH="/run/opengl-driver/lib/dri"
-                export LIBVA_DRIVERS_PATH="/run/opengl-driver/lib/dri"
-                export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d''${__EGL_VENDOR_LIBRARY_DIRS:+:}$__EGL_VENDOR_LIBRARY_DIRS"
-
-                if [ -d /run/opengl-driver/share/vulkan/icd.d ]; then
-                  shopt -s nullglob
-                  icds=(/run/opengl-driver/share/vulkan/icd.d/*.json)
-                  shopt -u nullglob
-                  if [ "''${#icds[@]}" -gt 0 ]; then
-                    export VK_ICD_FILENAMES="$(IFS=:; echo "''${icds[*]}")"
-                  fi
-                fi
-              fi' \
-              --set GST_PLUGIN_SYSTEM_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0" \
-              --set GST_PLUGIN_PATH_1_0 "${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0" \
-              --prefix LD_LIBRARY_PATH : "${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib"
+              --run ${nixpkgs.lib.escapeShellArg playerRuntime.gpuEnvironment} \
+              --set GST_PLUGIN_SYSTEM_PATH_1_0 "${playerRuntime.gstPluginPath}" \
+              --set GST_PLUGIN_PATH_1_0 "${playerRuntime.gstPluginPath}" \
+              --prefix LD_LIBRARY_PATH : "${playerRuntime.gpuLibraryPath}"
           '';
 
           ferrex-server = ferrexServerBin;
@@ -364,17 +431,23 @@
           };
           gst = pkgsPlayer.gst_1_28_4;
 
-          rustToolchain = pkgsPlayer.rust-bin.stable."1.92.0".default;
+          rustToolchain = pkgs.rust-bin.stable."1.92.0".default;
+          rustToolchainPlayer = pkgsPlayer.rust-bin.stable."1.92.0".default;
 
           ffmpegPkg = if pkgs ? ffmpeg-full then pkgs.ffmpeg-full else pkgs.ffmpeg;
           ffmpegPkgPlayer =
             if pkgsPlayer ? ffmpeg-full then pkgsPlayer.ffmpeg-full else pkgsPlayer.ffmpeg;
           libclang = pkgs.llvmPackages.libclang;
+          libclangPlayer = pkgsPlayer.llvmPackages.libclang;
           postgresqlWithPgUuidv7 = pkgs.postgresql.withPackages (ps: [ ps.pg_uuidv7 ]);
           postgresqlWithPgUuidv7Player = pkgsPlayer.postgresql.withPackages (ps: [ ps.pg_uuidv7 ]);
-        in
-        {
-          default = pkgs.mkShell {
+          playerRuntime = makePlayerRuntimeEnv { pkgs = pkgsPlayer; inherit gst; };
+          playerShellBuildInputs = [
+            libclangPlayer
+            ffmpegPkgPlayer.dev
+          ] ++ playerMediaInputs { pkgs = pkgsPlayer; inherit gst; };
+
+          serverShell = pkgs.mkShell {
             nativeBuildInputs = with pkgs; [
               rustToolchain
               pkg-config
@@ -411,9 +484,9 @@
             '';
           };
 
-          ferrex-player = pkgsPlayer.mkShell {
+          playerShell = pkgsPlayer.mkShell {
             nativeBuildInputs = with pkgsPlayer; [
-              rustToolchain
+              rustToolchainPlayer
               pkg-config
               llvmPackages.clang
               just
@@ -438,47 +511,11 @@
               hadolint
             ];
 
-            buildInputs =
-              [
-                pkgsPlayer.pipewire
-                pkgsPlayer.llvmPackages.libclang
-                ffmpegPkgPlayer.dev
-
-                # Include full outputs so setup hooks set `GST_PLUGIN_SYSTEM_PATH_1_0`.
-                gst.gstreamer
-                gst.gst-plugins-base
-                gst.gst-plugins-good
-                gst.gst-plugins-bad
-                gst.gst-plugins-ugly
-                gst.gst-libav
-
-                # Headers/pkg-config for builds.
-                gst.gstreamer.dev
-                gst.gst-plugins-base.dev
-                gst.gst-plugins-good.dev
-
-                # VA-API / dmabuf runtime dependencies (helps keep crash reports actionable).
-                pkgsPlayer.libva
-                pkgsPlayer.libdrm
-                pkgsPlayer.mesa
-
-                # wgpu backends (Vulkan/OpenGL).
-                pkgsPlayer.vulkan-loader
-              ]
-              ++ pkgsPlayer.lib.optionals pkgsPlayer.stdenv.hostPlatform.isLinux [
-                # winit loads Wayland/X11 libs via dlopen; ensure they're in the shell
-                # environment so `cargo run` binaries can find them on NixOS.
-                pkgsPlayer.wayland
-                pkgsPlayer.libxkbcommon
-                pkgsPlayer.libx11
-                pkgsPlayer.libxcursor
-                pkgsPlayer.libxi
-                pkgsPlayer.libxrandr
-              ];
+            buildInputs = playerShellBuildInputs;
 
             shellHook = ''
               export CARGO_TARGET_DIR="$PWD/target-nix"
-              export LIBCLANG_PATH="${pkgsPlayer.llvmPackages.libclang.lib}/lib"
+              export LIBCLANG_PATH="${libclangPlayer.lib}/lib"
 
               # Helps crates like ffmpeg-sys-next when building outside Nix's build sandbox.
               export PKG_CONFIG_PATH="${ffmpegPkgPlayer.dev}/lib/pkgconfig:${ffmpegPkgPlayer.dev}/share/pkgconfig:''${PKG_CONFIG_PATH:-}"
@@ -488,55 +525,24 @@
               #
               # NOTE: `multiqueue` (required by playbin3/decodebin3) lives in
               # `libgstcoreelements.so` from the `gstreamer` package, so include
-              # `${gst.gstreamer}/lib/gstreamer-1.0`.
-              #
-              # In nixpkgs, `gstreamer` is multi-output; `gst.gstreamer` can resolve
-              # to the `bin` output in some contexts, which does *not* contain
-              # `lib/gstreamer-1.0`. Use `.out` explicitly so core elements are
-              # discoverable.
-              export GST_PLUGIN_SYSTEM_PATH_1_0="${gst.gstreamer.out}/lib/gstreamer-1.0:${gst.gst-plugins-base.out}/lib/gstreamer-1.0:${gst.gst-plugins-good.out}/lib/gstreamer-1.0:${gst.gst-plugins-bad.out}/lib/gstreamer-1.0:${gst.gst-plugins-ugly.out}/lib/gstreamer-1.0:${gst.gst-libav.out}/lib/gstreamer-1.0:${pkgsPlayer.pipewire}/lib/gstreamer-1.0"
+              # the `gstreamer` output explicitly; the package can otherwise
+              # resolve to a non-plugin output in some contexts.
+              export GST_PLUGIN_SYSTEM_PATH_1_0="${playerRuntime.gstPluginPath}"
               export GST_PLUGIN_PATH_1_0="$GST_PLUGIN_SYSTEM_PATH_1_0"
 
-              export LD_LIBRARY_PATH="${pkgsPlayer.wayland}/lib:${pkgsPlayer.libxkbcommon}/lib:${pkgsPlayer.libx11}/lib:${pkgsPlayer.libxcursor}/lib:${pkgsPlayer.libxi}/lib:${pkgsPlayer.libxrandr}/lib:${pkgsPlayer.vulkan-loader}/lib:''${LD_LIBRARY_PATH:-}"
+              export LD_LIBRARY_PATH="${playerRuntime.gpuLibraryPath}:''${LD_LIBRARY_PATH:-}"
 
-              # Prefer system GPU drivers on NixOS for Vulkan/GL discovery.
-              if [ -d /run/opengl-driver ]; then
-                export LD_LIBRARY_PATH="/run/opengl-driver/lib''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
-                export LIBGL_DRIVERS_PATH="/run/opengl-driver/lib/dri"
-                export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d"
-                export LIBVA_DRIVERS_PATH="/run/opengl-driver/lib/dri"
-
-                # Best-effort default for VA-API on Wayland; override if needed.
-                export GST_VA_DISPLAY="''${GST_VA_DISPLAY:-wayland}"
-
-                if [ -z "''${LIBVA_DRIVER_NAME:-}" ]; then
-                  if [ -f /run/opengl-driver/lib/dri/radeonsi_drv_video.so ]; then
-                    export LIBVA_DRIVER_NAME=radeonsi
-                  fi
-                fi
-
-                if [ -d /run/opengl-driver/share/vulkan/icd.d ]; then
-                  shopt -s nullglob
-                  icds=(/run/opengl-driver/share/vulkan/icd.d/*.json)
-                  shopt -u nullglob
-                  if [ "''${#icds[@]}" -gt 0 ]; then
-                    export VK_ICD_FILENAMES="$(IFS=:; echo "''${icds[*]}")"
-                  fi
-                fi
-              else
-                # Non-NixOS fallback: use the Mesa packages in this shell.
-                export LD_LIBRARY_PATH="${pkgsPlayer.mesa}/lib''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
-                export LIBGL_DRIVERS_PATH="${pkgsPlayer.mesa}/lib/dri"
-                export LIBVA_DRIVERS_PATH="${pkgsPlayer.mesa}/lib/dri"
-                export __EGL_VENDOR_LIBRARY_DIRS="${pkgsPlayer.mesa}/share/glvnd/egl_vendor.d:''${__EGL_VENDOR_LIBRARY_DIRS:-}"
-
-                export GST_VA_DISPLAY="''${GST_VA_DISPLAY:-wayland}"
-              fi
+              ${playerRuntime.gpuEnvironment}
 
               echo "GStreamer: $(pkg-config --modversion gstreamer-1.0 2>/dev/null || true)"
               echo "Tip: confirm VA with: vainfo && gst-inspect-1.0 vapostproc"
             '';
           };
+        in
+        {
+          default = playerShell;
+          ferrex-player = playerShell;
+          server = serverShell;
         }
       );
     };

@@ -75,9 +75,23 @@ Unraid note: see `docs/unraid.md` for recommended paths and `PUID`/`PGID` suppor
 
 ### Development (build from source)
 
-- Rust toolchain (stable 1.90+, edition 2024)
-- just (https://github.com/casey/just)
-- Linux: GStreamer + FFmpeg development headers (see CI workflow)
+Nix users should start with the canonical, player-capable shell:
+
+```bash
+nix develop
+# equivalent alias for existing workflows:
+nix develop .#ferrex-player
+```
+
+Use the lean server/core shell when you only need backend crates and want to
+skip GStreamer/GPU inputs:
+
+```bash
+nix develop .#server
+```
+
+Without Nix, install Rust stable 1.90+, just, and Linux GStreamer + FFmpeg
+development headers (see the CI workflow for the current package list).
 
 ```bash
 just start
