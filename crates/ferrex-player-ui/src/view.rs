@@ -27,6 +27,7 @@ use crate::domains::ui::views::tv::{
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
+use crate::infra::shader_widgets::background::TheaterPlateScene;
 use crate::state::State;
 use ferrex_core::player_prelude::{
     ImageRequest, Media, MediaID, TheaterPlateViewport,
@@ -34,6 +35,8 @@ use ferrex_core::player_prelude::{
 };
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 #[cfg_attr(
     any(
@@ -276,8 +279,8 @@ pub fn view(
             _ => None,
         };
 
-        let backdrop_handle = backdrop_iid.and_then(|iid| {
-            let request = ImageRequest::new(
+        let backdrop_request = backdrop_iid.map(|iid| {
+            ImageRequest::new(
                 iid,
                 theater_plate_backdrop_size_for_viewport(
                     TheaterPlateViewport::from_logical_size(
@@ -285,23 +288,66 @@ pub fn view(
                         state.window_size.height,
                     ),
                 ),
-            );
-            state.image_service.get(&request)
+            )
+        });
+        let backdrop_handle = backdrop_request
+            .as_ref()
+            .and_then(|request| state.image_service.get(request));
+        let theater_plate_scene = backdrop_request.as_ref().map(|request| {
+            let cache_key = theater_plate_cache_key(request);
+            state
+                .image_service
+                .get_theater_plate_analysis(request)
+                .map(|analysis| {
+                    TheaterPlateScene::from_analysis(cache_key, &analysis)
+                })
+                .unwrap_or_else(|| {
+                    TheaterPlateScene::fallback_from_colors(
+                        cache_key ^ 0x7a45_706c_6174_6521,
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .primary_color,
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .secondary_color,
+                    )
+                })
         });
 
         // Add backdrop if available
         if let Some(handle) = backdrop_handle {
-            bg_shader = bg_shader
-                .effect(BackgroundEffect::BackdropGradient)
-                .backdrop(handle)
-                .backdrop_aspect_mode(
-                    state
-                        .domains
-                        .ui
-                        .state
-                        .background_shader_state
-                        .backdrop_aspect_mode,
-                );
+            if let Some(scene) = theater_plate_scene {
+                bg_shader = bg_shader
+                    .effect(BackgroundEffect::TheaterPlate)
+                    .backdrop(handle)
+                    .theater_plate(scene)
+                    .backdrop_aspect_mode(
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .backdrop_aspect_mode,
+                    );
+            } else {
+                bg_shader = bg_shader
+                    .effect(BackgroundEffect::BackdropGradient)
+                    .backdrop(handle)
+                    .backdrop_aspect_mode(
+                        state
+                            .domains
+                            .ui
+                            .state
+                            .background_shader_state
+                            .backdrop_aspect_mode,
+                    );
+            }
         } else {
             // No backdrop, use gradient effect
             bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
@@ -376,6 +422,12 @@ pub fn view(
     } else {
         with_search_overlay
     }
+}
+
+fn theater_plate_cache_key(request: &ImageRequest) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    request.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg_attr(
