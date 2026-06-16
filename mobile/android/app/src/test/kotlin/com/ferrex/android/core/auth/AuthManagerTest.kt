@@ -211,6 +211,32 @@ class AuthManagerTest {
     }
 
     @Test
+    fun playbackSessionInvalidationRequiresLoginWithoutClearingServerOrDevice() = runTest {
+        val fixture = Fixture()
+        fixture.storage.serverUrl = "http://ferrex.local"
+        fixture.storage.accessToken = "expired-access"
+        fixture.storage.refreshToken = "expired-refresh"
+        fixture.storage.username = testUser.username
+        fixture.storage.userId = testUser.id
+        fixture.storage.userDisplayName = testUser.displayName
+        fixture.storage.localDeviceId = "018f5f8d-0000-7000-8000-000000000001"
+        fixture.interceptor.setAccessToken("expired-access")
+
+        fixture.manager.invalidateSessionFromPlayback()
+
+        val state = fixture.manager.sessionState.value
+        assertTrue(state is SessionState.NeedsLogin)
+        assertEquals(LoginRequiredReason.SessionRevoked, (state as SessionState.NeedsLogin).reason)
+        assertEquals("http://ferrex.local", state.serverUrl)
+        assertEquals("http://ferrex.local", fixture.storage.serverUrl)
+        assertEquals("018f5f8d-0000-7000-8000-000000000001", fixture.storage.localDeviceId)
+        assertNull(fixture.storage.accessToken)
+        assertNull(fixture.storage.refreshToken)
+        assertNull(fixture.interceptor.accessToken)
+        assertTrue(fixture.resetClears.isEmpty())
+    }
+
+    @Test
     fun signOutClearsTokensAndPreservesServerUrl() = runTest {
         val fixture = Fixture()
         fixture.storage.serverUrl = "http://ferrex.local"

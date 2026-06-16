@@ -93,6 +93,8 @@ import com.ferrex.android.core.library.LibraryKind
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.playback.PlaybackLaunchDecision
+import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
 import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
 import com.ferrex.android.core.playback.PlaybackRouteContract
@@ -397,16 +399,22 @@ fun TvHomeScreen(
     }
 
     fun launchPlayback(contract: PlaybackRouteContract) {
-        if (!detailConnectionUi.networkActionsEnabled) {
-            playbackNotice = detailConnectionUi.networkActionMessage
-            return
+        when (
+            val decision = PlaybackLaunchPolicy.tv(
+                route = contract,
+                networkActionsEnabled = detailConnectionUi.networkActionsEnabled,
+                networkActionMessage = detailConnectionUi.networkActionMessage,
+                ticketTransportReady = playbackTicketTransport != null,
+                streamUrlFactoryReady = playbackStreamUrlFactory != null,
+                streamingHttpClientReady = streamingHttpClient != null,
+            )
+        ) {
+            is PlaybackLaunchDecision.Launch -> {
+                playbackNotice = null
+                activePlaybackContract = decision.route
+            }
+            is PlaybackLaunchDecision.Blocked -> playbackNotice = decision.message
         }
-        if (playbackTicketTransport == null || playbackStreamUrlFactory == null || streamingHttpClient == null) {
-            playbackNotice = "Playback is unavailable because the ticketed Media3 substrate is not configured."
-            return
-        }
-        playbackNotice = null
-        activePlaybackContract = contract
     }
 
     fun refreshPlaybackProgress(contract: PlaybackRouteContract) {
