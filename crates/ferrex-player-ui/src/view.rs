@@ -288,6 +288,7 @@ pub fn view(
             bg_shader = bg_shader
                 .effect(BackgroundEffect::TheaterPlate)
                 .theater_plate(scene)
+                .header_offset(context.header_height)
                 .backdrop_aspect_mode(
                     state
                         .domains
@@ -393,6 +394,7 @@ struct TheaterPlateSource {
 #[derive(Debug, Clone)]
 struct DetailTheaterPlateContext {
     layout: DetailTheaterPlateLayout,
+    header_height: f32,
     viewport: TheaterPlateViewport,
     source: TheaterPlateSource,
 }
@@ -417,7 +419,7 @@ fn detail_theater_plate_context(
         DetailLayoutInput::from_runtime(
             state.window_size.width,
             state.window_size.height,
-            view.header_height().unwrap_or(0.0),
+            detail_theater_plate_header_height(state, view),
             state.interface_mode,
             &state.domains.ui.state.size_provider,
             &state.domains.ui.state.scaled_layout,
@@ -430,9 +432,18 @@ fn detail_theater_plate_context(
 
     Some(DetailTheaterPlateContext {
         layout,
+        header_height: detail_theater_plate_header_height(state, view),
         viewport,
         source: theater_plate_source_for_view(state, view, viewport),
     })
+}
+
+fn detail_theater_plate_header_height(state: &State, view: &ViewState) -> f32 {
+    if state.interface_mode.is_tenfoot() {
+        0.0
+    } else {
+        view.header_height().unwrap_or(0.0)
+    }
 }
 
 fn theater_plate_source_for_view(
@@ -694,6 +705,23 @@ fn theater_plate_cache_key(request: &ImageRequest) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::InterfaceMode;
+    use ferrex_core::player_prelude::MovieID;
+    use uuid::Uuid;
+
+    fn detail_state(interface_mode: InterfaceMode) -> State {
+        let mut state = State::new_with_interface_mode(
+            "http://localhost:9".to_string(),
+            interface_mode,
+        );
+        state.is_authenticated = true;
+        state.window_size = iced::Size::new(1_280.0, 720.0);
+        state.domains.ui.state.view = ViewState::MovieDetail {
+            movie_id: MovieID(Uuid::from_u128(1)),
+            backdrop_handle: None,
+        };
+        state
+    }
 
     #[test]
     fn theater_plate_geometry_maps_hero_art_rect_to_uniforms() {
@@ -747,6 +775,37 @@ mod tests {
 
         assert_eq!(scene.uniforms.hero_art_rect, [0.11, 0.16, 0.20, 0.50]);
         assert_eq!(scene.uniforms.transition[1], 0.25);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tenfoot_theater_plate_uses_hidden_header_geometry() {
+        let state = detail_state(InterfaceMode::TenFoot);
+        let context = detail_theater_plate_context(&state)
+            .expect("theater plate context");
+
+        assert_eq!(context.header_height, 0.0);
+        assert_eq!(context.layout.scrim_rect.y, 0.0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tenfoot_theater_plate_tracks_detail_scroll_offset() {
+        let mut state = detail_state(InterfaceMode::TenFoot);
+        let base = detail_theater_plate_context(&state).expect("base context");
+
+        state
+            .domains
+            .ui
+            .state
+            .background_shader_state
+            .set_vertical_scroll_px(160.0);
+        let scrolled =
+            detail_theater_plate_context(&state).expect("scrolled context");
+
+        assert!(
+            scrolled.layout.content_rect.y < base.layout.content_rect.y,
+            "scrolled Theater Plate content rect should follow 10-foot detail content"
+        );
+        assert_eq!(scrolled.layout.scrim_rect.y, 0.0);
     }
 }
 

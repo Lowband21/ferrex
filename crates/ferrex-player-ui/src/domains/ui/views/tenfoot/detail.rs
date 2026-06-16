@@ -2493,4 +2493,94 @@ mod tests {
         assert!(short_panel_bounds.0 < first_panel_bounds.0);
         assert!(short_panel_bounds.1 < first_panel_bounds.1);
     }
+
+    #[test]
+    fn tenfoot_viewport_matrix_keeps_actions_inside_hero_copy_width() {
+        let matrix = [
+            (1_280.0, 720.0),
+            (1_280.0, 800.0),
+            (1_366.0, 768.0),
+            (1_920.0, 1_080.0),
+            (2_560.0, 1_440.0),
+        ];
+
+        for (width, height) in matrix {
+            let plan = layout_plan(width, height, 1.0);
+            let copy_width = plan.content_width
+                - hero_padding(&plan) * 2.0
+                - plan.hero_art.width
+                - plan.hero_gap;
+            let action_row_width = 3.0 * plan.action_cluster.button_width
+                + 2.0 * plan.action_cluster.gap;
+            let columns = visible_panel_columns_for_width(width, &plan);
+
+            assert!(
+                action_row_width <= copy_width + 0.01,
+                "primary/start-over/back row should fit at {width}x{height}: actions={action_row_width}, copy={copy_width}"
+            );
+            assert!(columns >= 3, "panel focus grid should stay readable");
+            assert!(panel_rows(&plan) >= 1);
+            assert!(panel_height(&plan) < height);
+        }
+    }
+
+    #[test]
+    fn focus_follow_scroll_keeps_theater_plate_anchor_in_content_space() {
+        let data = detail_data(&[8, 8]);
+        let plan = layout_plan(1_280.0, 720.0, 1.0);
+        let mut detail = TenFootDetailState::new();
+        detail.viewport_height = 720.0;
+        let focus = panel_focus(&data, 1, 0);
+        let base_plate = plan.theater_plate_layout(detail.scroll_y);
+
+        let _ = detail.scroll_task_for_focus(&data, &focus, &plan, 720.0);
+        let scrolled_plate = plan.theater_plate_layout(detail.scroll_y);
+
+        assert!(detail.scroll_y > 0.0);
+        assert!(scrolled_plate.content_rect.y < base_plate.content_rect.y);
+        assert_eq!(scrolled_plate.scrim_rect.y, base_plate.scrim_rect.y);
+    }
+
+    #[test]
+    fn action_specs_preserve_tv_recovery_paths() {
+        let media_id = MediaID::Movie(MovieID(Uuid::from_u128(42)));
+        let actions = action_specs(
+            Some(TenFootDetailActivation::PlayMedia(media_id.clone())),
+            "Resume",
+            "Continue watching",
+            Some(TenFootDetailActivation::PlayMediaFromStart(media_id)),
+        )
+        .into_iter()
+        .map(|spec| spec.action)
+        .collect::<Vec<_>>();
+
+        assert_eq!(
+            actions,
+            vec![
+                TenFootDetailAction::Primary,
+                TenFootDetailAction::StartOver,
+                TenFootDetailAction::Back,
+            ]
+        );
+
+        let unavailable_actions =
+            action_specs(None, "Play", "Unavailable", None)
+                .into_iter()
+                .map(|spec| spec.action)
+                .collect::<Vec<_>>();
+        assert_eq!(unavailable_actions, vec![TenFootDetailAction::Back]);
+    }
+
+    #[test]
+    fn focused_button_style_keeps_visible_dpad_ring() {
+        let focused =
+            tenfoot_button_style(true)(&Theme::Dark, button::Status::Active);
+        let resting =
+            tenfoot_button_style(false)(&Theme::Dark, button::Status::Active);
+
+        assert!(focused.border.width >= 3.0);
+        assert!(focused.border.width > resting.border.width);
+        assert_eq!(focused.border.color, theme::MediaServerTheme::ACCENT);
+        assert!(focused.shadow.blur_radius > resting.shadow.blur_radius);
+    }
 }

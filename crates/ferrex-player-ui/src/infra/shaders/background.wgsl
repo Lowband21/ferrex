@@ -73,11 +73,10 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
+@group(1) @binding(0) var<uniform> theater_plate: TheaterPlateUniforms;
 @group(1) @binding(1) var texture_sampler: sampler;
 @group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
-@group(2) @binding(0) var<uniform> theater_plate: TheaterPlateUniforms;
-@group(2) @binding(1) var ambient_sampler: sampler;
-@group(2) @binding(2) var ambient_texture: texture_2d<f32>;
+@group(1) @binding(3) var ambient_texture: texture_2d<f32>;
 
 // Generate vertex positions for a full-screen quad
 @vertex
@@ -745,7 +744,7 @@ fn theater_plate_stack(
     // Ambient color field comes from the CPU-produced downsample texture. It is
     // intentionally tiny and linearly filtered, so this path has no per-frame blur.
     let ambient_uv = clamp((uv - 0.5) * 0.82 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
-    let ambient = textureSample(ambient_texture, ambient_sampler, ambient_uv).rgb;
+    let ambient = textureSample(ambient_texture, texture_sampler, ambient_uv).rgb;
     let ambient_opacity = clamp(theater_plate.ambient_field.x * theater_plate.transition.z, 0.0, 1.0);
     let ambient_strength = clamp(theater_plate.ambient_field.y, 0.0, 1.0);
     color = mix(color, mix(color, ambient, ambient_strength), ambient_opacity);

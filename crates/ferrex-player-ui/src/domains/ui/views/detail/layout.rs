@@ -992,7 +992,7 @@ fn plate_expansion_x(plan: &DetailLayoutPlan) -> f32 {
         DetailComposition::CompactLandscape => plan.page_padding_x * 1.25,
         DetailComposition::BalancedDesktop => plan.page_padding_x * 1.10,
         DetailComposition::CinematicWide => plan.page_padding_x * 0.88,
-        DetailComposition::TenFoot => plan.page_padding_x * 1.20,
+        DetailComposition::TenFoot => plan.page_padding_x * 1.55,
     }
     .max(plan.hero_gap * 0.32)
 }
@@ -1003,7 +1003,7 @@ fn plate_expansion_y(plan: &DetailLayoutPlan) -> f32 {
         DetailComposition::CompactLandscape => plan.page_padding_y * 1.80,
         DetailComposition::BalancedDesktop => plan.page_padding_y * 1.45,
         DetailComposition::CinematicWide => plan.page_padding_y * 1.10,
-        DetailComposition::TenFoot => plan.page_padding_y * 1.70,
+        DetailComposition::TenFoot => plan.page_padding_y * 2.10,
     }
     .max(plan.action_cluster.button_height * 0.38)
 }
@@ -1065,17 +1065,17 @@ fn theater_plate_controls(
             backdrop_opacity: 0.92,
         },
         DetailComposition::TenFoot => TheaterPlateControls {
-            plate_opacity: 0.58,
-            plate_radius_px: 64.0,
-            plate_feather_px: 154.0,
-            scrim_opacity: 0.72,
-            top_feather_uv: 0.14,
-            bottom_feather_uv: 0.42,
-            side_falloff: 0.50,
-            ambient_opacity_scale: 0.82,
-            vignette_opacity: 0.62,
-            grain_opacity_scale: 1.05,
-            backdrop_opacity: 0.84,
+            plate_opacity: 0.68,
+            plate_radius_px: 88.0,
+            plate_feather_px: 220.0,
+            scrim_opacity: 0.78,
+            top_feather_uv: 0.16,
+            bottom_feather_uv: 0.48,
+            side_falloff: 0.62,
+            ambient_opacity_scale: 0.72,
+            vignette_opacity: 0.70,
+            grain_opacity_scale: 0.0,
+            backdrop_opacity: 0.78,
         },
     }
 }
@@ -1451,6 +1451,61 @@ mod tests {
             assert!(compact.side_falloff > wide.side_falloff);
             assert!(compact.backdrop_opacity < wide.backdrop_opacity);
             assert!(compact.ambient_opacity_scale < wide.ambient_opacity_scale);
+        }
+    }
+
+    #[test]
+    fn theater_plate_layout_tenfoot_uses_couch_distance_masks_and_static_grain()
+    {
+        let theater = solve_detail_layout(input(
+            1_920.0,
+            1_080.0,
+            1.0,
+            0.0,
+            DetailInterfaceMode::TenFoot,
+        ))
+        .theater_plate_layout(0.0);
+
+        assert!(theater.plate_opacity >= 0.68);
+        assert!(theater.plate_radius_px >= 88.0);
+        assert!(theater.plate_feather_px >= 220.0);
+        assert!(theater.scrim_opacity >= 0.78);
+        assert!(theater.side_falloff >= 0.62);
+        assert_eq!(theater.grain_opacity_scale, 0.0);
+        assert!(theater.backdrop_opacity <= 0.80);
+    }
+
+    #[test]
+    fn theater_plate_layout_tenfoot_matrix_keeps_readability_regions_bounded() {
+        let matrix = [
+            (1_280.0, 720.0),
+            (1_280.0, 800.0),
+            (1_366.0, 768.0),
+            (1_920.0, 1_080.0),
+            (2_560.0, 1_440.0),
+        ];
+
+        for (width, height) in matrix {
+            let plan = solve_detail_layout(input(
+                width,
+                height,
+                1.0,
+                0.0,
+                DetailInterfaceMode::TenFoot,
+            ));
+            let theater = plan.theater_plate_layout(0.0);
+
+            assert_eq!(plan.composition, DetailComposition::TenFoot);
+            assert!(plan.content_width <= width);
+            assert!(plan.hero_art.width + plan.hero_gap < plan.content_width);
+            assert_eq!(theater.scrim_rect.y, 0.0);
+            assert!(theater.content_rect.width > 0.70);
+            assert!(
+                theater.plate_rect.width > theater.content_rect.width * 0.35
+            );
+            assert!(theater.plate_rect.right() <= 1.0 + 0.001);
+            assert!(theater.plate_rect.bottom() <= 1.0 + 0.001);
+            assert!(theater.scrim_rect.bottom() <= 1.0 + 0.001);
         }
     }
 

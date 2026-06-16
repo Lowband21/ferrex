@@ -785,18 +785,21 @@ struct Pipeline {
     render_pipeline: wgpu::RenderPipeline,
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     texture_bind_group_layout: Arc<wgpu::BindGroupLayout>,
-    theater_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     sampler: Arc<wgpu::Sampler>,
     default_texture: Arc<wgpu::Texture>,
-    default_texture_bind_group: Arc<wgpu::BindGroup>,
     default_ambient_texture: Arc<wgpu::Texture>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TextureBindGroupKey {
+    backdrop_id: Option<ImageId>,
+    ambient_cache_key: Option<u64>,
 }
 
 /// Per-primitive render data
 #[derive(Debug)]
 struct PrimitiveData {
     texture_bind_group: Option<wgpu::BindGroup>,
-    theater_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// Texture info
@@ -818,13 +821,12 @@ struct State {
     globals_buffer: Option<wgpu::Buffer>,
     globals_bind_group: Option<wgpu::BindGroup>,
     theater_uniform_buffer: Option<wgpu::Buffer>,
-    default_theater_bind_group: Option<wgpu::BindGroup>,
+    default_texture_bind_group: Option<wgpu::BindGroup>,
     // Texture cache for backdrops
     texture_cache: HashMap<ImageId, TextureInfo>,
-    texture_bind_groups: HashMap<ImageId, wgpu::BindGroup>,
+    texture_bind_groups: HashMap<TextureBindGroupKey, wgpu::BindGroup>,
     // Texture cache for Theater Plate ambient fields
     ambient_texture_cache: HashMap<u64, AmbientTextureInfo>,
-    theater_bind_groups: HashMap<u64, wgpu::BindGroup>,
     // Per-primitive data for current frame
     primitive_data: HashMap<usize, PrimitiveData>,
     // Track if default texture has been initialized
@@ -892,38 +894,12 @@ impl Pipeline {
                 }],
             });
 
-        // Create texture bind group layout
+        // Create a combined texture bind group layout. Keep Theater Plate in
+        // group 1 with the backdrop texture so the shader only needs two bind
+        // groups total; some screenshot/emulator adapters expose exactly two.
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Background Texture"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(
-                            wgpu::SamplerBindingType::Filtering,
-                        ),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float {
-                                filterable: true,
-                            },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        // Create Theater Plate bind group layout (uniforms + ambient field texture)
-        let theater_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Theater Plate Layers"),
+                label: Some("Background Textures and Theater Plate"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -945,6 +921,18 @@ impl Pipeline {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float {
@@ -988,27 +976,6 @@ impl Pipeline {
             view_formats: &[],
         });
 
-        // Create default texture bind group
-        let default_texture_view = default_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let default_texture_bind_group =
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Default Texture Bind Group"),
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(
-                            &default_texture_view,
-                        ),
-                    },
-                ],
-            });
-
         let default_ambient_texture =
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Default Theater Plate Ambient Texture"),
@@ -1033,7 +1000,6 @@ impl Pipeline {
                 bind_group_layouts: &[
                     &globals_bind_group_layout,
                     &texture_bind_group_layout,
-                    &theater_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -1082,10 +1048,8 @@ impl Pipeline {
             render_pipeline,
             globals_bind_group_layout: Arc::new(globals_bind_group_layout),
             texture_bind_group_layout: Arc::new(texture_bind_group_layout),
-            theater_bind_group_layout: Arc::new(theater_bind_group_layout),
             sampler: Arc::new(sampler),
             default_texture: Arc::new(default_texture),
-            default_texture_bind_group: Arc::new(default_texture_bind_group),
             default_ambient_texture: Arc::new(default_ambient_texture),
         }
     }
@@ -1445,13 +1409,24 @@ impl Primitive for BackgroundPrimitive {
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
+
+            state.theater_uniform_buffer = Some(theater_uniform_buffer);
+        }
+
+        if state.default_texture_bind_group.is_none()
+            && let Some(theater_uniform_buffer) =
+                state.theater_uniform_buffer.as_ref()
+        {
+            let default_texture_view = pipeline
+                .default_texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
             let default_ambient_view = pipeline
                 .default_ambient_texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
-            let default_theater_bind_group =
+            let default_texture_bind_group =
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Default Theater Plate Bind Group"),
-                    layout: pipeline.theater_bind_group_layout.as_ref(),
+                    label: Some("Default Background Texture Bind Group"),
+                    layout: pipeline.texture_bind_group_layout.as_ref(),
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -1467,17 +1442,27 @@ impl Primitive for BackgroundPrimitive {
                         wgpu::BindGroupEntry {
                             binding: 2,
                             resource: wgpu::BindingResource::TextureView(
+                                &default_texture_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(
                                 &default_ambient_view,
                             ),
                         },
                     ],
                 });
 
-            state.theater_uniform_buffer = Some(theater_uniform_buffer);
-            state.default_theater_bind_group = Some(default_theater_bind_group);
+            state.default_texture_bind_group = Some(default_texture_bind_group);
         }
 
         let backdrop_handle = self.backdrop_handle.as_ref();
+        let backdrop_id = backdrop_handle.map(|handle| handle.id());
+        let ambient_cache_key = self
+            .theater_plate
+            .as_ref()
+            .map(|scene| scene.ambient.cache_key);
 
         if let Some(handle) = backdrop_handle {
             let image_id = handle.id();
@@ -1494,40 +1479,6 @@ impl Primitive for BackgroundPrimitive {
                     },
                 );
             }
-
-            if state.texture_cache.contains_key(&image_id)
-                && !state.texture_bind_groups.contains_key(&image_id)
-            {
-                let texture_info = state
-                    .texture_cache
-                    .get(&image_id)
-                    .expect("texture cache entry must exist");
-                let texture_view = texture_info
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-
-                let bind_group =
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Background Texture Bind Group"),
-                        layout: pipeline.texture_bind_group_layout.as_ref(),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(
-                                    pipeline.sampler.as_ref(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &texture_view,
-                                ),
-                            },
-                        ],
-                    });
-
-                state.texture_bind_groups.insert(image_id, bind_group);
-            }
         }
 
         if let Some(scene) = self.theater_plate.as_ref() {
@@ -1539,45 +1490,79 @@ impl Primitive for BackgroundPrimitive {
                     .ambient_texture_cache
                     .insert(cache_key, AmbientTextureInfo { texture });
             }
+        }
 
-            if state.ambient_texture_cache.contains_key(&cache_key)
-                && !state.theater_bind_groups.contains_key(&cache_key)
-                && let Some(theater_uniform_buffer) =
-                    state.theater_uniform_buffer.as_ref()
-            {
-                let texture_info = state
-                    .ambient_texture_cache
-                    .get(&cache_key)
-                    .expect("ambient texture cache entry must exist");
-                let ambient_view = texture_info
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-                let bind_group =
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Theater Plate Bind Group"),
-                        layout: pipeline.theater_bind_group_layout.as_ref(),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: theater_uniform_buffer
-                                    .as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(
-                                    pipeline.sampler.as_ref(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &ambient_view,
-                                ),
-                            },
-                        ],
-                    });
-                state.theater_bind_groups.insert(cache_key, bind_group);
-            }
+        let texture_bind_group_key = TextureBindGroupKey {
+            backdrop_id: backdrop_id.clone(),
+            ambient_cache_key,
+        };
+        if !state
+            .texture_bind_groups
+            .contains_key(&texture_bind_group_key)
+            && let Some(theater_uniform_buffer) =
+                state.theater_uniform_buffer.as_ref()
+        {
+            let backdrop_view = backdrop_id
+                .as_ref()
+                .and_then(|image_id| state.texture_cache.get(image_id))
+                .map(|texture_info| {
+                    texture_info
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                })
+                .unwrap_or_else(|| {
+                    pipeline
+                        .default_texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                });
+            let ambient_view = ambient_cache_key
+                .and_then(|cache_key| {
+                    state.ambient_texture_cache.get(&cache_key)
+                })
+                .map(|texture_info| {
+                    texture_info
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                })
+                .unwrap_or_else(|| {
+                    pipeline
+                        .default_ambient_texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                });
+
+            let bind_group =
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Background Texture Bind Group"),
+                    layout: pipeline.texture_bind_group_layout.as_ref(),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: theater_uniform_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(
+                                pipeline.sampler.as_ref(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(
+                                &backdrop_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(
+                                &ambient_view,
+                            ),
+                        },
+                    ],
+                });
+            state
+                .texture_bind_groups
+                .insert(texture_bind_group_key.clone(), bind_group);
         }
 
         let time = self.start_time.elapsed().as_secs_f32();
@@ -1821,7 +1806,9 @@ impl Primitive for BackgroundPrimitive {
             .map(|scene| scene.uniforms)
             .unwrap_or_default();
         theater_uniforms.transition[0] = self.transition_progress;
-        theater_uniforms.transition[1] = self.backdrop_opacity;
+        theater_uniforms.transition[1] = (theater_uniforms.transition[1]
+            * self.backdrop_opacity)
+            .clamp(0.0, 1.0);
         if let Some(buffer) = state.theater_uniform_buffer.as_ref() {
             queue.write_buffer(
                 buffer,
@@ -1830,24 +1817,14 @@ impl Primitive for BackgroundPrimitive {
             );
         }
 
-        let texture_bind_group = backdrop_handle.and_then(|handle| {
-            state.texture_bind_groups.get(&handle.id()).cloned()
-        });
-        let theater_bind_group =
-            self.theater_plate.as_ref().and_then(|scene| {
-                state
-                    .theater_bind_groups
-                    .get(&scene.ambient.cache_key)
-                    .cloned()
-            });
+        let texture_bind_group = state
+            .texture_bind_groups
+            .get(&texture_bind_group_key)
+            .cloned();
 
-        state.primitive_data.insert(
-            self.program_id,
-            PrimitiveData {
-                texture_bind_group,
-                theater_bind_group,
-            },
-        );
+        state
+            .primitive_data
+            .insert(self.program_id, PrimitiveData { texture_bind_group });
     }
 
     fn draw(
@@ -1872,23 +1849,15 @@ impl Primitive for BackgroundPrimitive {
 
         match bind_group {
             Some(group) => render_pass.set_bind_group(1, group, &[]),
-            None => render_pass.set_bind_group(
-                1,
-                renderer.pipeline.default_texture_bind_group.as_ref(),
-                &[],
-            ),
+            None => {
+                let Some(default_group) =
+                    renderer.state.default_texture_bind_group.as_ref()
+                else {
+                    return false;
+                };
+                render_pass.set_bind_group(1, default_group, &[]);
+            }
         }
-
-        let theater_bind_group = renderer
-            .state
-            .primitive_data
-            .get(&self.program_id)
-            .and_then(|data| data.theater_bind_group.as_ref())
-            .or(renderer.state.default_theater_bind_group.as_ref());
-        let Some(theater_bind_group) = theater_bind_group else {
-            return false;
-        };
-        render_pass.set_bind_group(2, theater_bind_group, &[]);
 
         render_pass.draw(0..4, 0..1);
         true
