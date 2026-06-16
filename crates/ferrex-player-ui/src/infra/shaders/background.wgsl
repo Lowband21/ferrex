@@ -54,6 +54,18 @@ struct Globals {
     // Total: 512 bytes (32 * 16)
 }
 
+struct TheaterPlateUniforms {
+    // Must match Rust `TheaterPlateUniforms`: 8 vec4s, 128 bytes.
+    base_stage: vec4<f32>,       // offset 0, size 16
+    ambient_field: vec4<f32>,    // offset 16, size 16
+    focused_plate: vec4<f32>,    // offset 32, size 16
+    plate_mask: vec4<f32>,       // offset 48, size 16
+    scrim_masks: vec4<f32>,      // offset 64, size 16
+    vignette_grain: vec4<f32>,   // offset 80, size 16
+    highlight_grade: vec4<f32>,  // offset 96, size 16
+    transition: vec4<f32>,       // progress, backdrop opacity, ambient transition, reserved (offset 112, size 16)
+}
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -62,6 +74,9 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(1) var texture_sampler: sampler;
 @group(1) @binding(2) var backdrop_texture: texture_2d<f32>;
+@group(2) @binding(0) var<uniform> theater_plate: TheaterPlateUniforms;
+@group(2) @binding(1) var ambient_sampler: sampler;
+@group(2) @binding(2) var ambient_texture: texture_2d<f32>;
 
 // Generate vertex positions for a full-screen quad
 @vertex
@@ -507,6 +522,185 @@ fn calculate_highlight(pixel_depth: f32, light_dir: vec2<f32>) -> f32 {
     return 0.0;
 }
 
+fn soft_vertical_band_alpha(y: f32, top: f32, bottom: f32, feather: f32) -> f32 {
+    if (bottom <= top) {
+        return 0.0;
+    }
+    let safe_feather = max(min(feather, (bottom - top) * 0.5), 0.0001);
+    let enter = smoothstep(top, top + safe_feather, y);
+    let exit = 1.0 - smoothstep(bottom - safe_feather, bottom, y);
+    return enter * exit;
+}
+
+fn rounded_plate_alpha(
+    uv: vec2<f32>,
+    resolution: vec2<f32>,
+    center: vec2<f32>,
+    half_size: vec2<f32>,
+    radius_px: f32,
+    feather_px: f32,
+) -> f32 {
+    let p = uv * resolution;
+    let c = center * resolution;
+    let h = half_size * resolution;
+    let q = abs(p - c) - h + vec2<f32>(radius_px);
+    let outside = length(max(q, vec2<f32>(0.0)));
+    let inside = min(max(q.x, q.y), 0.0);
+    let signed_distance = outside + inside - radius_px;
+    return 1.0 - smoothstep(0.0, max(feather_px, 0.0001), signed_distance);
+}
+
+fn apply_highlight_compression(color: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let highlight = smoothstep(0.55, 1.0, luma);
+    let compressed = color / (1.0 + amount * highlight * 0.85);
+    return mix(color, compressed, clamp(amount, 0.0, 1.0));
+}
+
+fn apply_desaturation(color: vec3<f32>, amount: f32) -> vec3<f32> {
+    let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return mix(color, vec3<f32>(luma), clamp(amount, 0.0, 1.0));
+}
+
+fn backdrop_texture_uv_for_region(
+    uv: vec2<f32>,
+    backdrop_uv_y: f32,
+    viewport_width: f32,
+    backdrop_visible_height: f32,
+    crop_factor_to_use: f32,
+    crop_bias_to_use: f32,
+) -> vec2<f32> {
+    let texture_aspect = globals.texture_params.x;
+    let backdrop_aspect = viewport_width / max(backdrop_visible_height, 1.0);
+    var texture_uv = vec2<f32>(uv.x, backdrop_uv_y);
+    let source_aspect = 16.0 / 9.0;
+
+    if (abs(texture_aspect - source_aspect) < 0.01) {
+        let total_crop = 1.0 - crop_factor_to_use;
+        let crop_from_top = total_crop * crop_bias_to_use;
+        texture_uv.y = crop_from_top + backdrop_uv_y * crop_factor_to_use;
+    } else {
+        if (texture_aspect > backdrop_aspect) {
+            let scale = backdrop_aspect / texture_aspect;
+            texture_uv.x = (uv.x - 0.5) * scale + 0.5;
+        } else {
+            let scale = texture_aspect / backdrop_aspect;
+            texture_uv.y = backdrop_uv_y * scale;
+        }
+    }
+
+    return clamp(texture_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+}
+
+fn theater_plate_stack(
+    uv: vec2<f32>,
+    time: f32,
+    resolution: vec2<f32>,
+    content_px_pos: vec2<f32>,
+    primary_bg: vec3<f32>,
+    secondary_bg: vec3<f32>,
+) -> vec3<f32> {
+    let stage = theater_plate.base_stage.rgb;
+    let gradient_center = globals.gradient_center.xy;
+    let dist = length(uv - gradient_center);
+    let base_t = smoothstep(0.0, 1.25, dist);
+    var color = mix(stage, mix(primary_bg, secondary_bg, base_t), 0.18);
+
+    // Ambient color field comes from the CPU-produced downsample texture. It is
+    // intentionally tiny and linearly filtered, so this path has no per-frame blur.
+    let ambient_uv = clamp((uv - 0.5) * 0.82 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    let ambient = textureSample(ambient_texture, ambient_sampler, ambient_uv).rgb;
+    let ambient_opacity = clamp(theater_plate.ambient_field.x * theater_plate.transition.z, 0.0, 1.0);
+    let ambient_strength = clamp(theater_plate.ambient_field.y, 0.0, 1.0);
+    color = mix(color, mix(color, ambient, ambient_strength), ambient_opacity);
+
+    let viewport_width = 2.0 / globals.transform[0][0];
+    let viewport_height = 2.0 / abs(globals.transform[1][1]);
+    let aspect_mode = globals.scale_and_effect.w;
+    let window_aspect = viewport_width / viewport_height;
+
+    var crop_factor_to_use: f32;
+    var crop_bias_to_use: f32;
+    if (aspect_mode > 0.5) {
+        crop_factor_to_use = 16.0 / 21.0;
+        crop_bias_to_use = 0.3;
+    } else if (window_aspect >= 1.0) {
+        crop_factor_to_use = 16.0 / 30.0;
+        crop_bias_to_use = 0.05;
+    } else {
+        crop_factor_to_use = 16.0 / 21.0;
+        crop_bias_to_use = 0.3;
+    }
+
+    let header_offset_uv = globals.texture_params.z / viewport_height;
+    let backdrop_screen_coverage = globals.texture_params.w;
+    let backdrop_region_height = backdrop_screen_coverage - header_offset_uv;
+    let scroll_offset_uv = globals.texture_params.y / viewport_height;
+    let scrolled_uv_y = uv.y + scroll_offset_uv;
+    let backdrop_feather_uv = max(40.0 / viewport_height, 0.035);
+    let backdrop_alpha = soft_vertical_band_alpha(
+        scrolled_uv_y,
+        header_offset_uv,
+        backdrop_screen_coverage,
+        backdrop_feather_uv,
+    ) * clamp(theater_plate.transition.y, 0.0, 1.0);
+
+    if (backdrop_alpha > 0.001 && backdrop_region_height > 0.001) {
+        let backdrop_uv_y = clamp((scrolled_uv_y - header_offset_uv) / backdrop_region_height, 0.0, 1.0);
+        let backdrop_visible_height = backdrop_region_height * viewport_height;
+        let texture_uv = backdrop_texture_uv_for_region(
+            uv,
+            backdrop_uv_y,
+            viewport_width,
+            backdrop_visible_height,
+            crop_factor_to_use,
+            crop_bias_to_use,
+        );
+        let backdrop_color = textureSample(backdrop_texture, texture_sampler, texture_uv).rgb;
+        color = mix(color, backdrop_color, backdrop_alpha * 0.86);
+    }
+
+    // Grade-controlled side falloff and scrim masks.
+    let side_falloff = clamp(theater_plate.plate_mask.w, 0.0, 0.85);
+    let left_side = 1.0 - smoothstep(0.0, max(side_falloff, 0.001), uv.x);
+    let right_side = smoothstep(1.0 - max(side_falloff, 0.001), 1.0, uv.x);
+    let side_mask = max(left_side, right_side);
+    let top_mask = 1.0 - smoothstep(0.0, max(theater_plate.scrim_masks.y, 0.001), uv.y);
+    let bottom_mask = smoothstep(1.0 - max(theater_plate.scrim_masks.z, 0.001), 1.0, uv.y);
+    let scrim_mask = max(max(side_mask, top_mask), bottom_mask);
+    let scrim_opacity = clamp(theater_plate.scrim_masks.x, 0.0, 1.0);
+    color *= 1.0 - scrim_mask * scrim_opacity * 0.44;
+
+    // Focused plate under detail copy; SDF mask keeps all edges soft.
+    let plate_alpha = rounded_plate_alpha(
+        uv,
+        resolution,
+        theater_plate.focused_plate.xy,
+        theater_plate.focused_plate.zw,
+        theater_plate.plate_mask.y,
+        theater_plate.plate_mask.z,
+    ) * clamp(theater_plate.plate_mask.x * theater_plate.transition.x, 0.0, 1.0);
+    let plate_color = mix(stage, color, 0.18);
+    color = mix(color, plate_color, plate_alpha);
+
+    color = apply_highlight_compression(color, theater_plate.highlight_grade.x);
+    color = apply_desaturation(color, theater_plate.highlight_grade.y);
+
+    let centered = uv - vec2<f32>(0.5);
+    let vignette_distance = length(centered * vec2<f32>(resolution.x / resolution.y, 1.0));
+    let vignette = smoothstep(
+        theater_plate.vignette_grain.z,
+        theater_plate.vignette_grain.w,
+        vignette_distance,
+    ) * clamp(theater_plate.vignette_grain.x, 0.0, 1.0);
+    color *= 1.0 - vignette * 0.55;
+
+    let grain = film_grain(content_px_pos, theater_plate.vignette_grain.y);
+    color += vec3<f32>(grain);
+
+    return color;
+}
+
 
 // Main fragment shader
 @fragment
@@ -721,6 +915,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let backdrop_color = textureSample(backdrop_texture, texture_sampler, texture_uv);
             color = backdrop_color.rgb;
         }
+    } else if (effect == 6) {
+        color = theater_plate_stack(
+            uv,
+            time,
+            resolution,
+            content_px_pos,
+            primary_bg,
+            secondary_bg,
+        );
     }
 
     // Apply region-based depth and shadow effects

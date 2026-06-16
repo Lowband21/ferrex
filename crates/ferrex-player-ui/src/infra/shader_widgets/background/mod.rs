@@ -16,6 +16,9 @@ use crate::{
 };
 
 use bytemuck::{Pod, Zeroable};
+use ferrex_core::player_prelude::{
+    TheaterPlateAnalysis, TheaterPlateColor, TheaterPlateGrade,
+};
 
 use iced::{
     Color, Element, Length, Rectangle, Vector,
@@ -41,6 +44,8 @@ pub enum BackgroundEffect {
     WaveRipple { frequency: f32, amplitude: f32 },
     /// Backdrop image composited over a gradient background
     BackdropGradient,
+    /// Theater Plate detail background with downsampled ambient color field and soft masks
+    TheaterPlate,
 }
 
 /// Background theme presets
@@ -56,6 +61,265 @@ pub enum BackgroundTheme {
     Cinematic,
     /// Adaptive - responds to content
     Adaptive,
+}
+
+/// Uniform byte size shared with the WGSL `TheaterPlateUniforms` struct.
+pub const THEATER_PLATE_UNIFORM_SIZE: u64 = 128;
+
+/// Uniforms for the dedicated Theater Plate layer stack.
+///
+/// Every field maps to one WGSL `vec4<f32>` so field offsets stay on 16-byte
+/// boundaries for uniform-buffer layout.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct TheaterPlateUniforms {
+    /// Base stage color: rgb, reserved.
+    pub base_stage: [f32; 4],
+    /// Ambient field: opacity, texture strength, average luma, p95 luma.
+    pub ambient_field: [f32; 4],
+    /// Focused plate: center x/y and half extents in UV space.
+    pub focused_plate: [f32; 4],
+    /// Plate mask: opacity, corner radius px, feather px, side falloff.
+    pub plate_mask: [f32; 4],
+    /// Scrim masks: opacity, top feather UV, bottom feather UV, side falloff.
+    pub scrim_masks: [f32; 4],
+    /// Vignette/grain controls: vignette opacity, grain opacity, radius, softness.
+    pub vignette_grain: [f32; 4],
+    /// Grade controls: highlight compression, desaturation, saturation, edge density.
+    pub highlight_grade: [f32; 4],
+    /// Transition controls: progress, backdrop opacity, ambient transition, reserved.
+    pub transition: [f32; 4],
+}
+
+impl Default for TheaterPlateUniforms {
+    fn default() -> Self {
+        Self {
+            base_stage: color_to_vec4(TheaterPlateColor::DEFAULT_STAGE),
+            ambient_field: [0.52, 0.85, 0.18, 0.45],
+            focused_plate: [0.58, 0.46, 0.50, 0.34],
+            plate_mask: [0.44, 34.0, 76.0, 0.34],
+            scrim_masks: [0.46, 0.10, 0.32, 0.34],
+            vignette_grain: [0.42, 0.016, 0.24, 0.82],
+            highlight_grade: [0.34, 0.08, 0.0, 0.0],
+            transition: [1.0, 1.0, 1.0, 0.0],
+        }
+    }
+}
+
+/// Tiny downsampled ambient texture consumed by the Theater Plate shader.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TheaterPlateAmbientImage {
+    pub cache_key: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Arc<[u8]>,
+}
+
+impl TheaterPlateAmbientImage {
+    fn solid(cache_key: u64, color: TheaterPlateColor) -> Self {
+        Self {
+            cache_key,
+            width: 1,
+            height: 1,
+            rgba: Arc::<[u8]>::from([color.r, color.g, color.b, 255]),
+        }
+    }
+}
+
+/// CPU-side Theater Plate scene data passed to the shader widget.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TheaterPlateScene {
+    pub uniforms: TheaterPlateUniforms,
+    pub ambient: TheaterPlateAmbientImage,
+}
+
+impl TheaterPlateScene {
+    /// Build shader inputs from the cached CPU analysis sidecar.
+    pub fn from_analysis(
+        cache_key: u64,
+        analysis: &TheaterPlateAnalysis,
+    ) -> Self {
+        let ambient = ambient_image_from_analysis(cache_key, analysis);
+        let uniforms = uniforms_from_analysis(analysis);
+        Self { uniforms, ambient }
+    }
+
+    /// Build a cheap solid ambient field while the analysis sidecar is not ready.
+    pub fn fallback_from_colors(
+        cache_key: u64,
+        primary: Color,
+        secondary: Color,
+    ) -> Self {
+        let stage = color_from_iced(primary)
+            .unwrap_or(TheaterPlateColor::DEFAULT_STAGE)
+            .stage_wash();
+        let accent = color_from_iced(secondary).unwrap_or(stage);
+        let ambient = TheaterPlateAmbientImage {
+            cache_key,
+            width: 2,
+            height: 2,
+            rgba: Arc::<[u8]>::from([
+                stage.r, stage.g, stage.b, 255, accent.r, accent.g, accent.b,
+                255, stage.r, stage.g, stage.b, 255, accent.r, accent.g,
+                accent.b, 255,
+            ]),
+        };
+        Self {
+            uniforms: TheaterPlateUniforms {
+                base_stage: color_to_vec4(stage),
+                ambient_field: [0.50, 0.72, stage.luminance(), 0.45],
+                highlight_grade: [0.30, 0.06, accent.saturation(), 0.0],
+                ..TheaterPlateUniforms::default()
+            },
+            ambient,
+        }
+    }
+}
+
+fn color_to_vec4(color: TheaterPlateColor) -> [f32; 4] {
+    [
+        color.r as f32 / 255.0,
+        color.g as f32 / 255.0,
+        color.b as f32 / 255.0,
+        1.0,
+    ]
+}
+
+fn color_from_iced(color: Color) -> Option<TheaterPlateColor> {
+    if !color.r.is_finite() || !color.g.is_finite() || !color.b.is_finite() {
+        return None;
+    }
+
+    Some(TheaterPlateColor::rgb(
+        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    ))
+}
+
+fn ambient_image_from_analysis(
+    cache_key: u64,
+    analysis: &TheaterPlateAnalysis,
+) -> TheaterPlateAmbientImage {
+    let downsample = &analysis.downsample;
+    if downsample.width == 0
+        || downsample.height == 0
+        || downsample.pixels.is_empty()
+    {
+        return TheaterPlateAmbientImage::solid(
+            cache_key,
+            analysis.grade.stage_color,
+        );
+    }
+
+    let expected_len = downsample.width as usize * downsample.height as usize;
+    let mut rgba = Vec::with_capacity(expected_len * 4);
+    for color in downsample.pixels.iter().take(expected_len) {
+        rgba.extend_from_slice(&[color.r, color.g, color.b, 255]);
+    }
+
+    if rgba.len() < expected_len * 4 {
+        let fill = analysis.grade.stage_color;
+        while rgba.len() < expected_len * 4 {
+            rgba.extend_from_slice(&[fill.r, fill.g, fill.b, 255]);
+        }
+    }
+
+    TheaterPlateAmbientImage {
+        cache_key,
+        width: downsample.width.max(1),
+        height: downsample.height.max(1),
+        rgba: rgba.into(),
+    }
+}
+
+fn uniforms_from_analysis(
+    analysis: &TheaterPlateAnalysis,
+) -> TheaterPlateUniforms {
+    let grade = analysis.grade;
+    let side_falloff = side_falloff_for_grade(&grade);
+    let vignette = (0.28 + grade.scrim_opacity * 0.36).clamp(0.0, 0.78);
+
+    TheaterPlateUniforms {
+        base_stage: color_to_vec4(grade.stage_color),
+        ambient_field: [
+            grade.ambient_opacity,
+            0.92,
+            analysis.average_luminance,
+            analysis.p95_luminance,
+        ],
+        focused_plate: [0.58, 0.46, 0.50, 0.34],
+        plate_mask: [grade.plate_opacity, 34.0, 76.0, side_falloff],
+        scrim_masks: [grade.scrim_opacity, 0.10, 0.32, side_falloff],
+        vignette_grain: [vignette, grade.grain_opacity, 0.24, 0.82],
+        highlight_grade: [
+            grade.highlight_compression,
+            grade.desaturation,
+            analysis.average_saturation,
+            analysis.edge_density,
+        ],
+        transition: [1.0, 1.0, 1.0, 0.0],
+    }
+}
+
+fn side_falloff_for_grade(grade: &TheaterPlateGrade) -> f32 {
+    if grade.is_busy || grade.is_bright {
+        0.46
+    } else if grade.is_dark {
+        0.22
+    } else if grade.is_saturated {
+        0.38
+    } else {
+        0.30
+    }
+}
+
+#[cfg(test)]
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+#[cfg(test)]
+fn soft_vertical_band_alpha(
+    y: f32,
+    top: f32,
+    bottom: f32,
+    feather: f32,
+) -> f32 {
+    if bottom <= top {
+        return 0.0;
+    }
+    let feather = feather.min((bottom - top) * 0.5).max(0.0001);
+    smoothstep(top, top + feather, y)
+        * (1.0 - smoothstep(bottom - feather, bottom, y))
+}
+
+#[cfg(test)]
+fn theater_plate_soft_rect_alpha(
+    uv: [f32; 2],
+    center: [f32; 2],
+    half_size: [f32; 2],
+    radius_px: f32,
+    feather_px: f32,
+    resolution: [f32; 2],
+) -> f32 {
+    let p = [uv[0] * resolution[0], uv[1] * resolution[1]];
+    let c = [center[0] * resolution[0], center[1] * resolution[1]];
+    let h = [half_size[0] * resolution[0], half_size[1] * resolution[1]];
+    let q = [
+        (p[0] - c[0]).abs() - h[0] + radius_px,
+        (p[1] - c[1]).abs() - h[1] + radius_px,
+    ];
+    let outside = [q[0].max(0.0), q[1].max(0.0)];
+    let outside_len =
+        (outside[0] * outside[0] + outside[1] * outside[1]).sqrt();
+    let inside = q[0].max(q[1]).min(0.0);
+    let distance = outside_len + inside - radius_px;
+    1.0 - smoothstep(0.0, feather_px.max(0.0001), distance)
 }
 
 // ===== Region-Based Depth System =====
@@ -201,6 +465,8 @@ pub struct BackgroundShaderProgram {
     pub backdrop_aspect_mode: BackdropAspectMode,
     /// Optional fallback aspect ratio for the backdrop texture
     pub backdrop_aspect_ratio: Option<f32>,
+    /// Theater Plate layer-stack uniforms and ambient texture.
+    pub theater_plate: Option<TheaterPlateScene>,
 }
 
 // Global counter for generating unique IDs
@@ -249,6 +515,7 @@ impl<Message> Program<Message> for BackgroundShaderProgram {
             header_offset: self.header_offset,
             backdrop_aspect_mode: self.backdrop_aspect_mode,
             backdrop_aspect_ratio: self.backdrop_aspect_ratio,
+            theater_plate: self.theater_plate.clone(),
         }
     }
 }
@@ -288,6 +555,8 @@ pub struct BackgroundPrimitive {
     pub backdrop_aspect_mode: BackdropAspectMode,
     /// Optional fallback aspect ratio for the backdrop texture
     pub backdrop_aspect_ratio: Option<f32>,
+    /// Theater Plate layer-stack uniforms and ambient texture.
+    pub theater_plate: Option<TheaterPlateScene>,
 }
 
 /// Global uniform data
@@ -347,10 +616,20 @@ struct Globals {
                               // Total: 512 bytes (32 * 16)
 }
 
-// Compile-time assertion to verify our struct size
+const GLOBALS_UNIFORM_SIZE: u64 = 512;
+
+// Compile-time assertions to verify our struct sizes
 const _: () = {
     let size = std::mem::size_of::<Globals>();
-    assert!(size == 512, "Globals struct size mismatch");
+    assert!(
+        size == GLOBALS_UNIFORM_SIZE as usize,
+        "Globals struct size mismatch"
+    );
+    let theater_size = std::mem::size_of::<TheaterPlateUniforms>();
+    assert!(
+        theater_size == THEATER_PLATE_UNIFORM_SIZE as usize,
+        "TheaterPlateUniforms struct size mismatch"
+    );
 };
 
 /// Pipeline state
@@ -359,15 +638,18 @@ struct Pipeline {
     render_pipeline: wgpu::RenderPipeline,
     globals_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     texture_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    theater_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     sampler: Arc<wgpu::Sampler>,
     default_texture: Arc<wgpu::Texture>,
     default_texture_bind_group: Arc<wgpu::BindGroup>,
+    default_ambient_texture: Arc<wgpu::Texture>,
 }
 
 /// Per-primitive render data
 #[derive(Debug)]
 struct PrimitiveData {
     texture_bind_group: Option<wgpu::BindGroup>,
+    theater_bind_group: Option<wgpu::BindGroup>,
 }
 
 /// Texture info
@@ -377,14 +659,25 @@ struct TextureInfo {
     aspect_ratio: f32, // width / height
 }
 
+/// Cached ambient field texture info.
+#[derive(Debug)]
+struct AmbientTextureInfo {
+    texture: Arc<wgpu::Texture>,
+}
+
 /// Shared state
 #[derive(Debug, Default)]
 struct State {
     globals_buffer: Option<wgpu::Buffer>,
     globals_bind_group: Option<wgpu::BindGroup>,
+    theater_uniform_buffer: Option<wgpu::Buffer>,
+    default_theater_bind_group: Option<wgpu::BindGroup>,
     // Texture cache for backdrops
     texture_cache: HashMap<ImageId, TextureInfo>,
     texture_bind_groups: HashMap<ImageId, wgpu::BindGroup>,
+    // Texture cache for Theater Plate ambient fields
+    ambient_texture_cache: HashMap<u64, AmbientTextureInfo>,
+    theater_bind_groups: HashMap<u64, wgpu::BindGroup>,
     // Per-primitive data for current frame
     primitive_data: HashMap<usize, PrimitiveData>,
     // Track if default texture has been initialized
@@ -480,6 +773,44 @@ impl Pipeline {
                 ],
             });
 
+        // Create Theater Plate bind group layout (uniforms + ambient field texture)
+        let theater_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Theater Plate Layers"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(
+                            wgpu::SamplerBindingType::Filtering,
+                        ),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: true,
+                            },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
         // Create sampler
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Background Sampler"),
@@ -531,6 +862,23 @@ impl Pipeline {
                 ],
             });
 
+        let default_ambient_texture =
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Default Theater Plate Ambient Texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+
         // Create provider layout
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -538,6 +886,7 @@ impl Pipeline {
                 bind_group_layouts: &[
                     &globals_bind_group_layout,
                     &texture_bind_group_layout,
+                    &theater_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -586,9 +935,11 @@ impl Pipeline {
             render_pipeline,
             globals_bind_group_layout: Arc::new(globals_bind_group_layout),
             texture_bind_group_layout: Arc::new(texture_bind_group_layout),
+            theater_bind_group_layout: Arc::new(theater_bind_group_layout),
             sampler: Arc::new(sampler),
             default_texture: Arc::new(default_texture),
             default_texture_bind_group: Arc::new(default_texture_bind_group),
+            default_ambient_texture: Arc::new(default_ambient_texture),
         }
     }
 }
@@ -753,6 +1104,95 @@ fn load_texture(
     Some((Arc::new(texture), aspect_ratio))
 }
 
+fn load_ambient_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    ambient: &TheaterPlateAmbientImage,
+) -> Arc<wgpu::Texture> {
+    let width = ambient.width.max(1);
+    let height = ambient.height.max(1);
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Theater Plate Ambient Field Texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    let bytes_per_pixel: u32 = 4;
+    let row_stride = (width * bytes_per_pixel) as usize;
+    let expected_len = row_stride * height as usize;
+    let mut rgba = Vec::with_capacity(expected_len);
+    rgba.extend_from_slice(
+        &ambient.rgba[..ambient.rgba.len().min(expected_len)],
+    );
+    if rgba.len() < expected_len {
+        rgba.resize(expected_len, 255);
+    }
+
+    let padded_row_stride =
+        crate::infra::render::row_padding::compute_padded_stride(
+            width,
+            bytes_per_pixel,
+        );
+
+    if padded_row_stride == row_stride {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * bytes_per_pixel),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    } else {
+        let (padded, padded_row_stride) =
+            crate::infra::render::row_padding::pad_rows_rgba(
+                &rgba, width, height,
+            );
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &padded,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_stride as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    Arc::new(texture)
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -803,16 +1243,33 @@ impl Primitive for BackgroundPrimitive {
                     depth_or_array_layers: 1,
                 },
             );
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: pipeline.default_ambient_texture.as_ref(),
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &[18u8, 20u8, 24u8, 255u8],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
             state.default_texture_initialized = true;
         }
 
         if state.globals_buffer.is_none() {
-            const EXPECTED_SIZE: u64 = 512;
-
             let globals_buffer =
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("Background Globals"),
-                    size: EXPECTED_SIZE,
+                    size: GLOBALS_UNIFORM_SIZE,
                     usage: wgpu::BufferUsages::UNIFORM
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -830,6 +1287,47 @@ impl Primitive for BackgroundPrimitive {
 
             state.globals_buffer = Some(globals_buffer);
             state.globals_bind_group = Some(globals_bind_group);
+        }
+
+        if state.theater_uniform_buffer.is_none() {
+            let theater_uniform_buffer =
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Theater Plate Uniforms"),
+                    size: THEATER_PLATE_UNIFORM_SIZE,
+                    usage: wgpu::BufferUsages::UNIFORM
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            let default_ambient_view = pipeline
+                .default_ambient_texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let default_theater_bind_group =
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Default Theater Plate Bind Group"),
+                    layout: pipeline.theater_bind_group_layout.as_ref(),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: theater_uniform_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(
+                                pipeline.sampler.as_ref(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(
+                                &default_ambient_view,
+                            ),
+                        },
+                    ],
+                });
+
+            state.theater_uniform_buffer = Some(theater_uniform_buffer);
+            state.default_theater_bind_group = Some(default_theater_bind_group);
         }
 
         let backdrop_handle = self.backdrop_handle.as_ref();
@@ -885,6 +1383,56 @@ impl Primitive for BackgroundPrimitive {
             }
         }
 
+        if let Some(scene) = self.theater_plate.as_ref() {
+            let cache_key = scene.ambient.cache_key;
+            if !state.ambient_texture_cache.contains_key(&cache_key) {
+                let texture =
+                    load_ambient_texture(device, queue, &scene.ambient);
+                state
+                    .ambient_texture_cache
+                    .insert(cache_key, AmbientTextureInfo { texture });
+            }
+
+            if state.ambient_texture_cache.contains_key(&cache_key)
+                && !state.theater_bind_groups.contains_key(&cache_key)
+                && let Some(theater_uniform_buffer) =
+                    state.theater_uniform_buffer.as_ref()
+            {
+                let texture_info = state
+                    .ambient_texture_cache
+                    .get(&cache_key)
+                    .expect("ambient texture cache entry must exist");
+                let ambient_view = texture_info
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let bind_group =
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Theater Plate Bind Group"),
+                        layout: pipeline.theater_bind_group_layout.as_ref(),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: theater_uniform_buffer
+                                    .as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    pipeline.sampler.as_ref(),
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &ambient_view,
+                                ),
+                            },
+                        ],
+                    });
+                state.theater_bind_groups.insert(cache_key, bind_group);
+            }
+        }
+
         let time = self.start_time.elapsed().as_secs_f32();
         log::trace!(
             "BackgroundPrimitive::prepare effect={:?} time={:.3} scroll_offset={} content_offset_px=({}, {}) viewport={}x{}",
@@ -903,6 +1451,7 @@ impl Primitive for BackgroundPrimitive {
             BackgroundEffect::FloatingParticles { .. } => 3.0,
             BackgroundEffect::WaveRipple { .. } => 4.0,
             BackgroundEffect::BackdropGradient => 5.0,
+            BackgroundEffect::TheaterPlate => 6.0,
         };
 
         let (effect_param1, effect_param2) = match &self.effect {
@@ -915,8 +1464,9 @@ impl Primitive for BackgroundPrimitive {
                 frequency,
                 amplitude,
             } => (*frequency, *amplitude),
-            BackgroundEffect::BackdropGradient => {
-                // For BackdropGradient, effect_param2 holds aspect_mode (0.0 = Auto, 1.0 = Force21x9)
+            BackgroundEffect::BackdropGradient
+            | BackgroundEffect::TheaterPlate => {
+                // For backdrop effects, effect_param2 holds aspect_mode (0.0 = Auto, 1.0 = Force21x9)
                 let aspect_mode = match self.backdrop_aspect_mode {
                     BackdropAspectMode::Auto => 0.0,
                     BackdropAspectMode::Force21x9 => 1.0,
@@ -1118,13 +1668,39 @@ impl Primitive for BackgroundPrimitive {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[globals]));
         }
 
+        let mut theater_uniforms = self
+            .theater_plate
+            .as_ref()
+            .map(|scene| scene.uniforms)
+            .unwrap_or_default();
+        theater_uniforms.transition[0] = self.transition_progress;
+        theater_uniforms.transition[1] = self.backdrop_opacity;
+        if let Some(buffer) = state.theater_uniform_buffer.as_ref() {
+            queue.write_buffer(
+                buffer,
+                0,
+                bytemuck::cast_slice(&[theater_uniforms]),
+            );
+        }
+
         let texture_bind_group = backdrop_handle.and_then(|handle| {
             state.texture_bind_groups.get(&handle.id()).cloned()
         });
+        let theater_bind_group =
+            self.theater_plate.as_ref().and_then(|scene| {
+                state
+                    .theater_bind_groups
+                    .get(&scene.ambient.cache_key)
+                    .cloned()
+            });
 
-        state
-            .primitive_data
-            .insert(self.program_id, PrimitiveData { texture_bind_group });
+        state.primitive_data.insert(
+            self.program_id,
+            PrimitiveData {
+                texture_bind_group,
+                theater_bind_group,
+            },
+        );
     }
 
     fn draw(
@@ -1156,6 +1732,17 @@ impl Primitive for BackgroundPrimitive {
             ),
         }
 
+        let theater_bind_group = renderer
+            .state
+            .primitive_data
+            .get(&self.program_id)
+            .and_then(|data| data.theater_bind_group.as_ref())
+            .or(renderer.state.default_theater_bind_group.as_ref());
+        let Some(theater_bind_group) = theater_bind_group else {
+            return false;
+        };
+        render_pass.set_bind_group(2, theater_bind_group, &[]);
+
         render_pass.draw(0..4, 0..1);
         true
     }
@@ -1184,6 +1771,7 @@ pub struct BackgroundShader {
     backdrop_aspect_mode: BackdropAspectMode,
     backdrop_handle: Option<iced::widget::image::Handle>,
     backdrop_aspect_ratio: Option<f32>,
+    theater_plate: Option<TheaterPlateScene>,
     // Depth layout for visual hierarchy
     depth_layout: DepthLayout,
     // Header offset for detail views
@@ -1224,6 +1812,7 @@ impl BackgroundShader {
             gradient_center: generate_random_gradient_center(),
             backdrop_handle: None,
             backdrop_aspect_ratio: None,
+            theater_plate: None,
             depth_layout: DepthLayout {
                 regions: Vec::new(),
                 ambient_light_direction: iced::Vector::new(0.707, 0.707), // Light from bottom-right
@@ -1303,6 +1892,12 @@ impl BackgroundShader {
         self
     }
 
+    /// Set the Theater Plate layer stack inputs.
+    pub fn theater_plate(mut self, scene: TheaterPlateScene) -> Self {
+        self.theater_plate = Some(scene);
+        self
+    }
+
     /// Provide a fallback aspect ratio for the backdrop when precise metadata isn’t available yet.
     pub fn backdrop_aspect_ratio(mut self, ratio: Option<f32>) -> Self {
         self.backdrop_aspect_ratio = ratio;
@@ -1351,6 +1946,93 @@ impl BackgroundShader {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::{align_of, offset_of, size_of};
+
+    #[test]
+    fn uniform_structs_match_wgsl_layout_sizes() {
+        assert_eq!(size_of::<Globals>(), GLOBALS_UNIFORM_SIZE as usize);
+        assert_eq!(align_of::<Globals>(), 4);
+        assert_eq!(
+            size_of::<TheaterPlateUniforms>(),
+            THEATER_PLATE_UNIFORM_SIZE as usize
+        );
+        assert_eq!(align_of::<TheaterPlateUniforms>(), 4);
+
+        assert_eq!(offset_of!(TheaterPlateUniforms, base_stage), 0);
+        assert_eq!(offset_of!(TheaterPlateUniforms, ambient_field), 16);
+        assert_eq!(offset_of!(TheaterPlateUniforms, focused_plate), 32);
+        assert_eq!(offset_of!(TheaterPlateUniforms, plate_mask), 48);
+        assert_eq!(offset_of!(TheaterPlateUniforms, scrim_masks), 64);
+        assert_eq!(offset_of!(TheaterPlateUniforms, vignette_grain), 80);
+        assert_eq!(offset_of!(TheaterPlateUniforms, highlight_grade), 96);
+        assert_eq!(offset_of!(TheaterPlateUniforms, transition), 112);
+    }
+
+    #[test]
+    fn theater_plate_soft_plate_mask_has_feathered_edges() {
+        let resolution = [1920.0, 1080.0];
+        let center = [0.5, 0.5];
+        let half = [0.25, 0.20];
+        let radius = 32.0;
+        let feather = 80.0;
+
+        let inside = theater_plate_soft_rect_alpha(
+            [0.5, 0.5],
+            center,
+            half,
+            radius,
+            feather,
+            resolution,
+        );
+        let edge = theater_plate_soft_rect_alpha(
+            [0.5 + half[0] + 20.0 / resolution[0], 0.5],
+            center,
+            half,
+            radius,
+            feather,
+            resolution,
+        );
+        let outside = theater_plate_soft_rect_alpha(
+            [0.5 + half[0] + 96.0 / resolution[0], 0.5],
+            center,
+            half,
+            radius,
+            feather,
+            resolution,
+        );
+
+        assert!(inside > 0.99);
+        assert!((0.0..1.0).contains(&edge), "edge alpha was {edge}");
+        assert!(outside < 0.05);
+        assert!(inside > edge && edge > outside);
+    }
+
+    #[test]
+    fn theater_plate_backdrop_band_fades_instead_of_cutting_hard_edges() {
+        let top = 0.08;
+        let bottom = 0.52;
+        let feather = 0.08;
+
+        let before = soft_vertical_band_alpha(top - 0.02, top, bottom, feather);
+        let entering =
+            soft_vertical_band_alpha(top + 0.03, top, bottom, feather);
+        let middle = soft_vertical_band_alpha(0.30, top, bottom, feather);
+        let leaving =
+            soft_vertical_band_alpha(bottom - 0.03, top, bottom, feather);
+        let after =
+            soft_vertical_band_alpha(bottom + 0.02, top, bottom, feather);
+
+        assert_eq!(before, 0.0);
+        assert!((0.0..1.0).contains(&entering));
+        assert!(middle > 0.99);
+        assert!((0.0..1.0).contains(&leaving));
+        assert_eq!(after, 0.0);
+    }
+}
+
 impl Default for BackgroundShader {
     fn default() -> Self {
         Self::new()
@@ -1386,6 +2068,7 @@ impl<'a> From<BackgroundShader> for Element<'a, UiMessage> {
             header_offset: background.header_offset,
             backdrop_aspect_mode: background.backdrop_aspect_mode,
             backdrop_aspect_ratio: background.backdrop_aspect_ratio,
+            theater_plate: background.theater_plate,
             id: background.program_id,
         })
         .width(Length::Fill)
