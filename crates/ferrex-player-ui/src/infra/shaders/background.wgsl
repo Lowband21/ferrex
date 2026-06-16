@@ -55,15 +55,16 @@ struct Globals {
 }
 
 struct TheaterPlateUniforms {
-    // Must match Rust `TheaterPlateUniforms`: 8 vec4s, 128 bytes.
+    // Must match Rust `TheaterPlateUniforms`: 9 vec4s, 144 bytes.
     base_stage: vec4<f32>,       // offset 0, size 16
     ambient_field: vec4<f32>,    // offset 16, size 16
     focused_plate: vec4<f32>,    // offset 32, size 16
     plate_mask: vec4<f32>,       // offset 48, size 16
     scrim_masks: vec4<f32>,      // offset 64: opacity, top UV, bottom UV, side falloff
-    vignette_grain: vec4<f32>,   // offset 80, size 16
-    highlight_grade: vec4<f32>,  // offset 96, size 16
-    transition: vec4<f32>,       // progress, backdrop opacity, ambient transition, reserved (offset 112, size 16)
+    hero_art_rect: vec4<f32>,    // offset 80: normalized viewport x, y, width, height
+    vignette_grain: vec4<f32>,   // offset 96, size 16
+    highlight_grade: vec4<f32>,  // offset 112, size 16
+    transition: vec4<f32>,       // progress, backdrop opacity, ambient transition, reserved (offset 128, size 16)
 }
 
 struct VertexOutput {
@@ -597,6 +598,94 @@ fn readability_lobes_alpha(
     return clamp(max(max(title, metadata), max(actions, floor)), 0.0, 1.0);
 }
 
+fn apply_hero_art_grounding(
+    uv: vec2<f32>,
+    resolution: vec2<f32>,
+    color_in: vec3<f32>,
+    stage: vec3<f32>,
+    ambient: vec3<f32>,
+) -> vec3<f32> {
+    let rect_min = clamp(theater_plate.hero_art_rect.xy, vec2<f32>(0.0), vec2<f32>(1.0));
+    let rect_size = clamp(theater_plate.hero_art_rect.zw, vec2<f32>(0.0), vec2<f32>(1.0) - rect_min);
+    if (rect_size.x <= 0.001 || rect_size.y <= 0.001) {
+        return color_in;
+    }
+
+    let rect_max = rect_min + rect_size;
+    let rect_center = rect_min + rect_size * 0.5;
+    let rect_half = max(rect_size * 0.5, vec2<f32>(0.001));
+    let min_art_px = max(min(rect_size.x * resolution.x, rect_size.y * resolution.y), 1.0);
+    let transition = clamp(theater_plate.transition.x, 0.0, 1.0);
+
+    // Soft contact shadow: an ellipse just below the actual adaptive artwork
+    // bounds, not a fixed legacy poster trough.
+    let shadow_center = vec2<f32>(
+        rect_center.x,
+        rect_max.y + max(rect_size.y * 0.035, 14.0 / resolution.y),
+    );
+    let shadow_half = vec2<f32>(
+        rect_size.x * 0.72 + 28.0 / resolution.x,
+        max(rect_size.y * 0.055, 20.0 / resolution.y),
+    );
+    let shadow_p = (uv - shadow_center) / max(shadow_half, vec2<f32>(0.001));
+    let below_art = smoothstep(rect_max.y - 5.0 / resolution.y, rect_max.y + 18.0 / resolution.y, uv.y);
+    let shadow_fade = 1.0 - smoothstep(
+        rect_max.y + max(rect_size.y * 0.14, 48.0 / resolution.y),
+        rect_max.y + max(rect_size.y * 0.26, 96.0 / resolution.y),
+        uv.y,
+    );
+    let contact_shadow = (1.0 - smoothstep(0.62, 1.85, length(shadow_p)))
+        * below_art
+        * shadow_fade
+        * transition;
+
+    var color = color_in * (1.0 - contact_shadow * 0.20);
+
+    // Subtle palette reflection below the art. It borrows from the stage and
+    // ambient field so bright posters do not produce a hard fake mirror.
+    let x_feather = max(20.0 / resolution.x, rect_size.x * 0.07);
+    let x_mask = smoothstep(rect_min.x - x_feather, rect_min.x + x_feather, uv.x)
+        * (1.0 - smoothstep(rect_max.x - x_feather, rect_max.x + x_feather, uv.x));
+    let reflection_height = max(rect_size.y * 0.20, 48.0 / resolution.y);
+    let reflection_t = (uv.y - rect_max.y) / reflection_height;
+    let reflection_alpha = x_mask
+        * smoothstep(0.0, 0.12, reflection_t)
+        * (1.0 - smoothstep(0.18, 1.0, reflection_t))
+        * 0.085
+        * transition;
+    let reflection_color = mix(stage, ambient, 0.46);
+    color = mix(color, reflection_color, reflection_alpha);
+
+    // A small edge bloom behind the physical object helps it sit on the plate
+    // without drawing over the poster/still or focus/hover treatments.
+    let glow_spread = vec2<f32>(
+        max(24.0 / resolution.x, rect_size.x * 0.035),
+        max(24.0 / resolution.y, rect_size.y * 0.025),
+    );
+    let radius_px = min_art_px * 0.035;
+    let outer = rounded_plate_alpha(
+        uv,
+        resolution,
+        rect_center,
+        rect_half + glow_spread,
+        radius_px + 16.0,
+        max(42.0, min_art_px * 0.08),
+    );
+    let inner = rounded_plate_alpha(
+        uv,
+        resolution,
+        rect_center,
+        rect_half,
+        radius_px,
+        max(3.0, radius_px * 0.4),
+    );
+    let edge_glow = clamp(outer - inner, 0.0, 1.0) * 0.10 * transition;
+    let glow_color = mix(stage, ambient, 0.62);
+    color = mix(color, glow_color, edge_glow);
+
+    return color;
+}
+
 fn apply_highlight_compression(color: vec3<f32>, amount: f32) -> vec3<f32> {
     let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     let highlight = smoothstep(0.55, 1.0, luma);
@@ -734,6 +823,8 @@ fn theater_plate_stack(
     ) * clamp(theater_plate.plate_mask.x * theater_plate.transition.x, 0.0, 1.0);
     let plate_color = mix(stage, color, 0.14);
     color = mix(color, plate_color, plate_alpha);
+
+    color = apply_hero_art_grounding(uv, resolution, color, stage, ambient);
 
     color = apply_highlight_compression(color, theater_plate.highlight_grade.x);
     color = apply_desaturation(color, theater_plate.highlight_grade.y);

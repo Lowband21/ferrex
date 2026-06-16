@@ -8,6 +8,8 @@ use crate::domains::ui::views::admin::{
     view_admin_dashboard, view_admin_users, view_library_management,
 };
 use crate::domains::ui::views::auth::view_auth;
+#[cfg(test)]
+use crate::domains::ui::views::detail::DetailTheaterPlateRect;
 use crate::domains::ui::views::detail::{
     DetailArtAspect, DetailLayoutInput, DetailTheaterPlateLayout,
     solve_detail_layout,
@@ -644,6 +646,12 @@ fn theater_plate_geometry_from_layout(
             layout.scrim_rect.bottom(),
             layout.side_falloff,
         ],
+        hero_art_rect: [
+            layout.hero_art_rect.x,
+            layout.hero_art_rect.y,
+            layout.hero_art_rect.width,
+            layout.hero_art_rect.height,
+        ],
         ambient_opacity_scale: layout.ambient_opacity_scale,
         vignette_opacity: layout.vignette_opacity,
         grain_opacity_scale: layout.grain_opacity_scale,
@@ -681,6 +689,65 @@ fn theater_plate_cache_key(request: &ImageRequest) -> u64 {
     let mut hasher = DefaultHasher::new();
     request.hash(&mut hasher);
     hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theater_plate_geometry_maps_hero_art_rect_to_uniforms() {
+        let layout = DetailTheaterPlateLayout {
+            content_rect: DetailTheaterPlateRect {
+                x: 0.08,
+                y: 0.12,
+                width: 0.72,
+                height: 0.44,
+            },
+            plate_rect: DetailTheaterPlateRect {
+                x: 0.32,
+                y: 0.18,
+                width: 0.48,
+                height: 0.30,
+            },
+            scrim_rect: DetailTheaterPlateRect {
+                x: 0.0,
+                y: 0.08,
+                width: 1.0,
+                height: 0.52,
+            },
+            hero_art_rect: DetailTheaterPlateRect {
+                x: 0.11,
+                y: 0.16,
+                width: 0.20,
+                height: 0.50,
+            },
+            plate_opacity: 0.5,
+            plate_radius_px: 48.0,
+            plate_feather_px: 116.0,
+            scrim_opacity: 0.54,
+            top_feather_uv: 0.12,
+            bottom_feather_uv: 0.34,
+            side_falloff: 0.38,
+            ambient_opacity_scale: 0.9,
+            vignette_opacity: 0.48,
+            grain_opacity_scale: 1.0,
+            backdrop_opacity: 0.8,
+        };
+
+        let geometry = theater_plate_geometry_from_layout(layout, 0.25);
+        assert_eq!(geometry.hero_art_rect, [0.11, 0.16, 0.20, 0.50]);
+
+        let scene = TheaterPlateScene::fallback_from_colors(
+            7,
+            iced::Color::from_rgb(0.1, 0.2, 0.3),
+            iced::Color::from_rgb(0.4, 0.3, 0.2),
+        )
+        .with_geometry(geometry);
+
+        assert_eq!(scene.uniforms.hero_art_rect, [0.11, 0.16, 0.20, 0.50]);
+        assert_eq!(scene.uniforms.transition[1], 0.25);
+    }
 }
 
 #[cfg_attr(

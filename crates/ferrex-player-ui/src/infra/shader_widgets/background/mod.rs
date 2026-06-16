@@ -65,7 +65,7 @@ pub enum BackgroundTheme {
 }
 
 /// Uniform byte size shared with the WGSL `TheaterPlateUniforms` struct.
-pub const THEATER_PLATE_UNIFORM_SIZE: u64 = 128;
+pub const THEATER_PLATE_UNIFORM_SIZE: u64 = 144;
 
 /// Uniforms for the dedicated Theater Plate layer stack.
 ///
@@ -84,6 +84,8 @@ pub struct TheaterPlateUniforms {
     pub plate_mask: [f32; 4],
     /// Scrim masks: opacity, scrim top UV, scrim bottom UV, side falloff.
     pub scrim_masks: [f32; 4],
+    /// Hero art rectangle: normalized viewport x, y, width, height.
+    pub hero_art_rect: [f32; 4],
     /// Vignette/grain controls: vignette opacity, grain opacity, radius, softness.
     pub vignette_grain: [f32; 4],
     /// Grade controls: highlight compression, desaturation, saturation, edge density.
@@ -100,6 +102,7 @@ impl Default for TheaterPlateUniforms {
             focused_plate: [0.58, 0.46, 0.50, 0.34],
             plate_mask: [0.44, 34.0, 76.0, 0.34],
             scrim_masks: [0.46, 0.10, 0.32, 0.34],
+            hero_art_rect: [0.0, 0.0, 0.0, 0.0],
             vignette_grain: [0.42, 0.016, 0.24, 0.82],
             highlight_grade: [0.34, 0.08, 0.0, 0.0],
             transition: [1.0, 1.0, 1.0, 0.0],
@@ -113,6 +116,7 @@ pub struct TheaterPlateGeometry {
     pub focused_plate: [f32; 4],
     pub plate_mask: [f32; 4],
     pub scrim_masks: [f32; 4],
+    pub hero_art_rect: [f32; 4],
     pub ambient_opacity_scale: f32,
     pub vignette_opacity: f32,
     pub grain_opacity_scale: f32,
@@ -125,6 +129,7 @@ impl Default for TheaterPlateGeometry {
             focused_plate: TheaterPlateUniforms::default().focused_plate,
             plate_mask: TheaterPlateUniforms::default().plate_mask,
             scrim_masks: TheaterPlateUniforms::default().scrim_masks,
+            hero_art_rect: TheaterPlateUniforms::default().hero_art_rect,
             ambient_opacity_scale: 1.0,
             vignette_opacity: TheaterPlateUniforms::default().vignette_grain[0],
             grain_opacity_scale: 1.0,
@@ -206,6 +211,14 @@ impl TheaterPlateScene {
             geometry.scrim_masks[1].clamp(0.001, 1.0),
             geometry.scrim_masks[2].clamp(0.001, 1.0),
             geometry.scrim_masks[3].clamp(0.0, 0.85),
+        ];
+        let art_x = geometry.hero_art_rect[0].clamp(0.0, 1.0);
+        let art_y = geometry.hero_art_rect[1].clamp(0.0, 1.0);
+        self.uniforms.hero_art_rect = [
+            art_x,
+            art_y,
+            geometry.hero_art_rect[2].clamp(0.0, 1.0 - art_x),
+            geometry.hero_art_rect[3].clamp(0.0, 1.0 - art_y),
         ];
         self.uniforms.ambient_field[0] = (self.uniforms.ambient_field[0]
             * geometry.ambient_opacity_scale)
@@ -327,6 +340,7 @@ fn uniforms_from_analysis(
         focused_plate: [0.58, 0.46, 0.50, 0.34],
         plate_mask: [grade.plate_opacity, 34.0, 76.0, side_falloff],
         scrim_masks: [grade.scrim_opacity, 0.10, 0.32, side_falloff],
+        hero_art_rect: [0.0, 0.0, 0.0, 0.0],
         vignette_grain: [vignette, grade.grain_opacity, 0.24, 0.82],
         highlight_grade: [
             grade.highlight_compression,
@@ -2099,9 +2113,10 @@ mod tests {
         assert_eq!(offset_of!(TheaterPlateUniforms, focused_plate), 32);
         assert_eq!(offset_of!(TheaterPlateUniforms, plate_mask), 48);
         assert_eq!(offset_of!(TheaterPlateUniforms, scrim_masks), 64);
-        assert_eq!(offset_of!(TheaterPlateUniforms, vignette_grain), 80);
-        assert_eq!(offset_of!(TheaterPlateUniforms, highlight_grade), 96);
-        assert_eq!(offset_of!(TheaterPlateUniforms, transition), 112);
+        assert_eq!(offset_of!(TheaterPlateUniforms, hero_art_rect), 80);
+        assert_eq!(offset_of!(TheaterPlateUniforms, vignette_grain), 96);
+        assert_eq!(offset_of!(TheaterPlateUniforms, highlight_grade), 112);
+        assert_eq!(offset_of!(TheaterPlateUniforms, transition), 128);
     }
 
     #[test]
@@ -2184,6 +2199,7 @@ mod tests {
             focused_plate: [0.64, 0.44, 0.26, 0.18],
             plate_mask: [0.72, 52.0, 144.0, 0.58],
             scrim_masks: [0.70, 0.16, 0.44, 0.58],
+            hero_art_rect: [0.12, 0.18, 0.24, 0.56],
             ambient_opacity_scale: 0.7,
             vignette_opacity: 0.62,
             grain_opacity_scale: 1.2,
@@ -2196,6 +2212,7 @@ mod tests {
         assert_eq!(scene.uniforms.plate_mask[3], 0.58);
         assert!(scene.uniforms.plate_mask[0] >= 0.72);
         assert!(scene.uniforms.scrim_masks[0] >= 0.70);
+        assert_eq!(scene.uniforms.hero_art_rect, [0.12, 0.18, 0.24, 0.56]);
         assert!(scene.uniforms.ambient_field[0] < 0.52);
         assert_eq!(scene.uniforms.transition[1], 0.0);
     }

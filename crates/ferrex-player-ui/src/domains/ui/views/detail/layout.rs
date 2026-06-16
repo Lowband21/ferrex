@@ -112,6 +112,7 @@ pub struct DetailLayoutPlan {
     pub viewport_width: f32,
     pub viewport_height: f32,
     pub available_height: f32,
+    pub scale: f32,
     pub content_width: f32,
     pub content_max_width: f32,
     pub page_padding_x: f32,
@@ -169,6 +170,7 @@ pub struct DetailTheaterPlateLayout {
     pub content_rect: DetailTheaterPlateRect,
     pub plate_rect: DetailTheaterPlateRect,
     pub scrim_rect: DetailTheaterPlateRect,
+    pub hero_art_rect: DetailTheaterPlateRect,
     pub plate_opacity: f32,
     pub plate_radius_px: f32,
     pub plate_feather_px: f32,
@@ -303,6 +305,7 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
         viewport_width,
         viewport_height,
         available_height,
+        scale,
         content_width,
         content_max_width,
         page_padding_x,
@@ -704,6 +707,7 @@ fn theater_plate_layout(
         viewport_height,
     );
     let content = content_rect_px(plan, content_x, hero_top, content_width);
+    let hero_art = hero_art_rect_px(plan, content_x, hero_top, content_width);
     let scrim = scrim_rect_px(plan, header_height, content, viewport_height);
     let controls = theater_plate_controls(plan.composition);
 
@@ -711,6 +715,11 @@ fn theater_plate_layout(
         content_rect: normalize_rect(content, viewport_width, viewport_height),
         plate_rect: normalize_rect(plate, viewport_width, viewport_height),
         scrim_rect: normalize_rect(scrim, viewport_width, viewport_height),
+        hero_art_rect: normalize_rect(
+            hero_art,
+            viewport_width,
+            viewport_height,
+        ),
         plate_opacity: controls.plate_opacity,
         plate_radius_px: controls.plate_radius_px,
         plate_feather_px: controls.plate_feather_px,
@@ -825,6 +834,83 @@ fn content_rect_px(
         width: content_width,
         height: height.max(1.0),
     }
+}
+
+fn hero_art_rect_px(
+    plan: &DetailLayoutPlan,
+    content_x: f32,
+    hero_top: f32,
+    content_width: f32,
+) -> RectPx {
+    let (x, y, width, height) = match plan.composition {
+        DetailComposition::TenFoot => {
+            let stage_left = tenfoot_stage_left(plan);
+            let padding = tenfoot_detail_hero_padding(plan);
+            let (width, height) = tenfoot_hero_art_size(plan);
+            (stage_left + padding, hero_top + padding, width, height)
+        }
+        DetailComposition::CompactPortrait => {
+            let padding = shared_detail_hero_padding(plan);
+            let inner_width = (content_width - padding * 2.0).max(1.0);
+            let centered_offset =
+                ((inner_width - plan.hero_art.width) * 0.5).max(0.0);
+            (
+                content_x + padding + centered_offset,
+                hero_top + padding,
+                plan.hero_art.width,
+                plan.hero_art.height,
+            )
+        }
+        _ => {
+            let padding = shared_detail_hero_padding(plan);
+            (
+                content_x + padding,
+                hero_top + padding,
+                plan.hero_art.width,
+                plan.hero_art.height,
+            )
+        }
+    };
+
+    RectPx {
+        x,
+        y,
+        width: width.max(1.0),
+        height: height.max(1.0),
+    }
+}
+
+fn tenfoot_hero_art_size(plan: &DetailLayoutPlan) -> (f32, f32) {
+    if plan.hero_art.aspect != DetailArtAspect::Still {
+        return (plan.hero_art.width, plan.hero_art.height);
+    }
+
+    let max_width = (plan.content_width * 0.42)
+        .max(plan.hero_art.width)
+        .max(1.0);
+    let desired_height = (plan.hero_art.height * 0.70).max(1.0);
+    let desired_width = desired_height * STILL_ASPECT;
+    if desired_width > max_width {
+        (max_width, max_width / STILL_ASPECT)
+    } else {
+        (desired_width, desired_height)
+    }
+}
+
+fn shared_detail_hero_padding(plan: &DetailLayoutPlan) -> f32 {
+    24.0 * plan.scale
+}
+
+fn tenfoot_detail_hero_padding(plan: &DetailLayoutPlan) -> f32 {
+    (plan.page_padding_y * 0.55)
+        .min(plan.available_height * 0.028)
+        .clamp(16.0, 30.0)
+}
+
+fn tenfoot_stage_left(plan: &DetailLayoutPlan) -> f32 {
+    let inner_width =
+        (plan.viewport_width - plan.page_padding_x * 2.0).max(1.0);
+    plan.page_padding_x + ((inner_width - plan.content_width) * 0.5).max(0.0)
 }
 
 fn scrim_rect_px(
@@ -1204,9 +1290,12 @@ mod tests {
             );
             let theater = plan.theater_plate_layout(0.0);
 
-            for rect in
-                [theater.content_rect, theater.plate_rect, theater.scrim_rect]
-            {
+            for rect in [
+                theater.content_rect,
+                theater.plate_rect,
+                theater.scrim_rect,
+                theater.hero_art_rect,
+            ] {
                 assert!(rect.x >= 0.0 && rect.x <= 1.0, "rect {rect:?}");
                 assert!(rect.y >= 0.0 && rect.y <= 1.0, "rect {rect:?}");
                 assert!(rect.width > 0.0, "rect {rect:?}");
@@ -1228,6 +1317,105 @@ mod tests {
                 "scrim should reach the readability lobe at {width}x{height}"
             );
         }
+    }
+
+    #[test]
+    fn theater_plate_layout_maps_adaptive_hero_art_rects() {
+        let compact_plan = solve_detail_layout(input(
+            480.0,
+            900.0,
+            1.0,
+            50.0,
+            DetailInterfaceMode::Desktop,
+        ));
+        let compact = compact_plan.theater_plate_layout(0.0);
+        let wide_plan = solve_detail_layout(input(
+            1_920.0,
+            1_080.0,
+            1.0,
+            50.0,
+            DetailInterfaceMode::Desktop,
+        ));
+        let wide = wide_plan.theater_plate_layout(0.0);
+        let tenfoot_plan = solve_detail_layout(input(
+            1_920.0,
+            1_080.0,
+            1.0,
+            0.0,
+            DetailInterfaceMode::TenFoot,
+        ));
+        let tenfoot = tenfoot_plan.theater_plate_layout(0.0);
+        let tenfoot_still_plan = solve_detail_layout(
+            input(1_920.0, 1_080.0, 1.0, 0.0, DetailInterfaceMode::TenFoot)
+                .with_hero_art_aspect(DetailArtAspect::Still),
+        );
+        let tenfoot_still = tenfoot_still_plan.theater_plate_layout(0.0);
+        let still_plan = solve_detail_layout(
+            input(1_280.0, 720.0, 1.0, 50.0, DetailInterfaceMode::Desktop)
+                .with_hero_art_aspect(DetailArtAspect::Still),
+        );
+        let still = still_plan.theater_plate_layout(0.0);
+
+        assert!(compact.hero_art_rect.x > 0.0);
+        assert!(compact.hero_art_rect.width > wide.hero_art_rect.width);
+        assert!(
+            (compact.hero_art_rect.width * compact_plan.viewport_width
+                - compact_plan.hero_art.width)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (wide.hero_art_rect.width * wide_plan.viewport_width
+                - wide_plan.hero_art.width)
+                .abs()
+                < 0.01
+        );
+
+        let expected_tenfoot_x = tenfoot_stage_left(&tenfoot_plan)
+            + tenfoot_detail_hero_padding(&tenfoot_plan);
+        assert!(
+            (tenfoot.hero_art_rect.x * tenfoot_plan.viewport_width
+                - expected_tenfoot_x)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (tenfoot.hero_art_rect.width * tenfoot_plan.viewport_width
+                - tenfoot_plan.hero_art.width)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (tenfoot.hero_art_rect.height * tenfoot_plan.viewport_height
+                - tenfoot_plan.hero_art.height)
+                .abs()
+                < 0.01
+        );
+
+        let (tenfoot_still_width, tenfoot_still_height) =
+            tenfoot_hero_art_size(&tenfoot_still_plan);
+        assert!(
+            (tenfoot_still.hero_art_rect.width
+                * tenfoot_still_plan.viewport_width
+                - tenfoot_still_width)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            (tenfoot_still.hero_art_rect.height
+                * tenfoot_still_plan.viewport_height
+                - tenfoot_still_height)
+                .abs()
+                < 0.01
+        );
+
+        let still_aspect = (still.hero_art_rect.width
+            * still_plan.viewport_width)
+            / (still.hero_art_rect.height * still_plan.viewport_height);
+        assert!((still_aspect - STILL_ASPECT).abs() < 0.01);
+
+        let scrolled = still_plan.theater_plate_layout(120.0);
+        assert!(scrolled.hero_art_rect.y < still.hero_art_rect.y);
     }
 
     #[test]

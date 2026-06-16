@@ -13,8 +13,8 @@ use crate::{
             shell_ui::UiShellMessage,
             theme,
             views::detail::{
-                DetailInterfaceMode, DetailLayoutPlan,
-                solve_detail_layout_from_runtime,
+                DetailArtAspect, DetailInterfaceMode, DetailLayoutInput,
+                DetailLayoutPlan, solve_detail_layout,
             },
             widgets::image_for,
         },
@@ -46,14 +46,28 @@ const PANEL_STILL_ASPECT: f32 = 16.0 / 9.0;
 const TWO_ROW_PANEL_ROWS: usize = 2;
 
 fn tenfoot_detail_layout_plan(state: &State) -> DetailLayoutPlan {
-    solve_detail_layout_from_runtime(
-        state.window_size.width,
-        state.window_size.height,
-        TENFOOT_HEADER_HEIGHT,
-        DetailInterfaceMode::TenFoot,
-        &state.domains.ui.state.size_provider,
-        &state.domains.ui.state.scaled_layout,
+    solve_detail_layout(
+        DetailLayoutInput::from_runtime(
+            state.window_size.width,
+            state.window_size.height,
+            TENFOOT_HEADER_HEIGHT,
+            DetailInterfaceMode::TenFoot,
+            &state.domains.ui.state.size_provider,
+            &state.domains.ui.state.scaled_layout,
+        )
+        .with_hero_art_aspect(tenfoot_detail_art_aspect(state)),
     )
+}
+
+fn tenfoot_detail_art_aspect(state: &State) -> DetailArtAspect {
+    if matches!(
+        state.domains.ui.state.view,
+        crate::domains::ui::types::ViewState::EpisodeDetail { .. }
+    ) {
+        DetailArtAspect::Still
+    } else {
+        DetailArtAspect::Poster
+    }
 }
 
 fn hero_padding(plan: &DetailLayoutPlan) -> f32 {
@@ -2289,14 +2303,14 @@ mod tests {
         let sizes =
             SizeProvider::new(ScalingContext::new().with_user_scale(scale));
         let layout = ScaledLayout::new(sizes.scale, grid::EFFECTIVE_SPACING);
-        solve_detail_layout_from_runtime(
+        solve_detail_layout(DetailLayoutInput::from_runtime(
             width,
             height,
             TENFOOT_HEADER_HEIGHT,
             DetailInterfaceMode::TenFoot,
             &sizes,
             &layout,
-        )
+        ))
     }
 
     fn season_id(value: u128) -> SeasonID {
