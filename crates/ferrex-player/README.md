@@ -32,9 +32,14 @@ compatibility shims.
 
 ## Build prerequisites
 
-- Rust 1.90+ (workspace MSRV)
-- Linux builds require GStreamer + FFmpeg development headers. The CI workflow
-  shows the current package list used for builds.
+- Nix is recommended for Linux development: `nix develop` enters the canonical
+  player-capable shell with pinned GStreamer/GPU runtime wiring.
+- `nix develop .#ferrex-player` is a backward-compatible alias for the same
+  shell; use `nix develop .#server` when you only need the lean server/core
+  environment without player-only GStreamer/GPU inputs.
+- Without Nix, install Rust 1.90+ (workspace MSRV) plus Linux GStreamer + FFmpeg
+  development headers. The CI workflow shows the current package list used for
+  builds.
 
 ## Running
 
@@ -82,8 +87,8 @@ Use these commands after player crate graph or UI/app changes:
 ```bash
 ./scripts/check-player-crate-boundaries.sh
 cargo fmt --all --check
-nix develop .#ferrex-player --command cargo check --workspace --all-targets
-nix develop .#ferrex-player --command cargo test -p ferrex-core --lib
+nix develop --command env cargo check --workspace --all-targets
+nix develop --command env cargo test -p ferrex-core --lib
 cargo test -p ferrex-player-app --test ui_end_to_end
 ```
 

@@ -53,11 +53,19 @@ Unraid: see `docs/unraid.md`.
 ## Nix (NixOS)
 
 This repo includes a flake for local development and for running the player with
-a pinned Linux GStreamer build.
+a pinned Linux GStreamer build. `nix develop` is the canonical development shell
+and includes the player-capable GStreamer/GPU environment. The historical
+`ferrex-player` shell remains as an alias for existing scripts.
 
 ```bash
-# dev shell
+# canonical player-capable dev shell
 nix develop
+
+# backward-compatible alias
+nix develop .#ferrex-player
+
+# lean server/core shell without player-only GStreamer/GPU inputs
+nix develop .#server
 
 # run player (NixOS-friendly)
 nix run .#ferrex-player
