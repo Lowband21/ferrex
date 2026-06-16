@@ -80,6 +80,38 @@ or `mode`, explicit CLI values must match it. If headless renderer initializatio
 fails, the command exits non-zero with suggested `WGPU_BACKEND`,
 `WGPU_ADAPTER_NAME`, and software rendering environment variables.
 
+### Theater Plate visual QA matrix
+
+The screenshot harness includes deterministic Theater Plate detail presets for
+balanced, bright, busy/text-like, low-detail, missing-backdrop, compact/tall, and
+10-foot review. Write captures under `target/` only; PNG baselines are not
+committed. For before/after review, run the same command set with `before/` and
+`after/` output directories.
+
+```bash
+mkdir -p target/theater-plate-visual-qa/before target/theater-plate-visual-qa/after
+
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateGood --viewport 1280x720 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/desktop-good-1280x720.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateGood --viewport 1440x900 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/desktop-good-1440x900.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateGood --viewport 1920x1080 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/desktop-good-1920x1080.png
+
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateCompact --viewport 390x844 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/compact-390x844.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateCompact --viewport 900x1600 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/tall-900x1600.png
+
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateTenFoot --viewport 1280x720 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/tenfoot-1280x720.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateTenFoot --viewport 1920x1080 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/tenfoot-1920x1080.png
+
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateBright --viewport 1440x900 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/bright-1440x900.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateBusyText --viewport 1440x900 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/busy-text-1440x900.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateLowDetail --viewport 1440x900 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/low-detail-1440x900.png
+nix develop .#ferrex-player --command env cargo run -p ferrex-player -- screenshot --preset TheaterPlateMissingBackdrop --viewport 1440x900 --scale-factor 1 --mode Immediate --settle-ms 200 --output target/theater-plate-visual-qa/after/missing-backdrop-1440x900.png
+```
+
+Reject a Theater Plate visual review if any capture looks like raw wallpaper,
+shows a hard plate edge, makes title/metadata/action text unreadable, or leaves a
+stale poster-depth artifact in the missing-backdrop fixture. If the renderer is
+unavailable, record the command output and skip reason in the review packet.
+
 ## Validation commands
 
 Use these commands after player crate graph or UI/app changes:

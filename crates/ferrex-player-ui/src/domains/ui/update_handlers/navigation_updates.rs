@@ -1,5 +1,6 @@
 use ferrex_core::player_prelude::{
     EpisodeSize, ImageRequest, ImageSize, Media, Priority, ProfileSize,
+    TheaterPlateViewport, theater_plate_backdrop_size_for_viewport,
 };
 use iced::Task;
 use rkyv::option::ArchivedOption;
@@ -37,6 +38,15 @@ use ferrex_core::{
     ),
     profiling::function
 )]
+fn detail_backdrop_request_size(state: &State) -> ImageSize {
+    theater_plate_backdrop_size_for_viewport(
+        TheaterPlateViewport::from_logical_size(
+            state.window_size.width,
+            state.window_size.height,
+        ),
+    )
+}
+
 fn prepare_depth_regions_for_transition(
     state: &mut State,
     new_view: &ViewState,
@@ -148,8 +158,9 @@ pub fn handle_view_movie_details(
 
         // Queue image requests if not in cache
         if let ArchivedOption::Some(iid) = &movie.details.primary_backdrop_iid {
-            let request = ImageRequest::new(*iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(*iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }
@@ -303,8 +314,9 @@ pub fn handle_view_series(
         // Queue request if not in cache
         if let ArchivedOption::Some(iid) = &series.details.primary_backdrop_iid
         {
-            let request = ImageRequest::new(*iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(*iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }
@@ -546,8 +558,9 @@ pub fn handle_view_season(
             && let Media::Series(sr) = media
             && let Some(iid) = sr.details.primary_backdrop_iid
         {
-            let request = ImageRequest::new(iid, ImageSize::backdrop())
-                .with_priority(Priority::Visible);
+            let request =
+                ImageRequest::new(iid, detail_backdrop_request_size(state))
+                    .with_priority(Priority::Visible);
             if state.image_service.get(&request).is_none() {
                 state.image_service.request_image(request);
             }
@@ -737,12 +750,53 @@ pub fn handle_view_episode(
         .repo_accessor
         .get_episode_yoke(&MediaID::Episode(episode_id))
     {
+        let episode = yoke.get();
         let new_view = ViewState::EpisodeDetail {
-            episode_id: yoke.get().id(),
+            episode_id: episode.id(),
             backdrop_handle: None,
         };
 
         prepare_depth_regions_for_transition(state, &new_view);
+
+        if let Ok(media) = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get(&MediaID::Season(SeasonID(episode.season_id.0)))
+            && let Media::Season(season) = media
+            && let Some(hex) = season.theme_color()
+            && let Ok(color) = macros::parse_hex_color(hex)
+        {
+            let primary_dark = iced::Color::from_rgb(
+                color.r * 0.2,
+                color.g * 0.2,
+                color.b * 0.2,
+            );
+            let secondary = iced::Color::from_rgb(
+                (color.r * 0.8).min(1.0),
+                (color.g * 0.8).min(1.0),
+                (color.b * 0.8).min(1.0),
+            );
+            state
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .color_transitions
+                .transition_to(primary_dark, secondary);
+        }
+
+        if let ArchivedOption::Some(iid) = &episode.details.primary_still_iid {
+            let request = ImageRequest::new(
+                *iid,
+                ImageSize::Thumbnail(EpisodeSize::W512),
+            )
+            .with_priority(Priority::Visible);
+            if state.image_service.get(&request).is_none() {
+                state.image_service.request_image(request);
+            }
+        }
 
         state.domains.ui.state.view = new_view;
         state

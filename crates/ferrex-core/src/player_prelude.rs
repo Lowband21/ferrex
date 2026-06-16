@@ -4,6 +4,7 @@
 
 pub use crate::api::types::player::*;
 pub use crate::api::{ScanConfig, ScanMetrics};
+pub use crate::domain::theater_plate::*;
 pub use crate::domain::users::auth::device::{
     AuthenticatedDevice, DeviceRegistration, Platform,
 };

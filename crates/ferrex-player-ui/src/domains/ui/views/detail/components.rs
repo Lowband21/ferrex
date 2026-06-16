@@ -58,7 +58,6 @@ pub fn view_detail_hero(
     container(hero)
         .padding(sizes.spacing.lg)
         .width(Length::Fill)
-        .style(theater_hero_scrim_style())
         .into()
 }
 
@@ -1063,22 +1062,6 @@ fn tone_text_color(tone: DetailTone) -> Color {
         DetailTone::Warning => theme::MediaServerTheme::WARNING,
         DetailTone::Danger => theme::MediaServerTheme::ERROR,
         DetailTone::Muted => theme::MediaServerTheme::TEXT_SECONDARY,
-    }
-}
-
-fn theater_hero_scrim_style() -> impl Fn(&Theme) -> container::Style + Clone {
-    |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(Color::from_rgba(
-            0.0, 0.0, 0.0, 0.46,
-        ))),
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        shadow: Shadow::default(),
-        snap: false,
     }
 }
 

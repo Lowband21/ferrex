@@ -8,6 +8,8 @@ use crate::infra::{cache::PlayerDiskImageCache, services::api::ApiService};
 use ferrex_core::api::routes::{utils::replace_param, v1};
 use ferrex_core::player_prelude::{
     ImageManifestItem, ImageManifestRequest, ImageManifestStatus,
+    TheaterPlateAnalyzer, TheaterPlateImage, TheaterPlateSourceContext,
+    TheaterPlateViewport,
 };
 
 use ferrex_model::ImageRequest;
@@ -82,6 +84,63 @@ pub(crate) fn image_loading(
             sub.disk_cache.clone(),
         )
     })
+}
+
+fn cache_theater_plate_analysis_from_encoded_bytes(
+    request: &ImageRequest,
+    bytes: &[u8],
+) {
+    if !matches!(
+        request.size,
+        ImageSize::Backdrop(_) | ImageSize::Poster(_) | ImageSize::Thumbnail(_)
+    ) {
+        return;
+    }
+
+    let Some(image_service) = get_image_service() else {
+        return;
+    };
+
+    if image_service.get_theater_plate_analysis(request).is_some() {
+        return;
+    }
+
+    let decoded = match image::load_from_memory(bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            log::debug!(
+                "Theater Plate image analysis decode failed (iid={}, size={:?}, err={})",
+                request.iid,
+                request.size,
+                err
+            );
+            return;
+        }
+    };
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let context = TheaterPlateSourceContext::backdrop(
+        request.clone(),
+        TheaterPlateViewport::new(width, height),
+    );
+
+    match TheaterPlateAnalyzer::default().analyze(
+        TheaterPlateImage::rgba8(width, height, rgba.as_raw()),
+        context,
+    ) {
+        Ok(analysis) => {
+            image_service
+                .cache_theater_plate_analysis(request.clone(), analysis);
+        }
+        Err(err) => {
+            log::debug!(
+                "Theater Plate image analysis failed (iid={}, size={:?}, err={})",
+                request.iid,
+                request.size,
+                err
+            );
+        }
+    }
 }
 
 fn image_loader_stream_concurrent(
@@ -170,6 +229,10 @@ fn image_loader_stream_concurrent(
                                                 .read_bytes(&request_for_fetch)
                                                 .await
                                         {
+                                            cache_theater_plate_analysis_from_encoded_bytes(
+                                                &request_for_fetch,
+                                                &bytes,
+                                            );
                                             let (handle, estimated_bytes) =
                                                 handle_from_encoded_bytes(
                                                     &request_for_fetch,
@@ -192,6 +255,10 @@ fn image_loader_stream_concurrent(
                                             .read_bytes(&request_for_fetch)
                                             .await
                                     {
+                                        cache_theater_plate_analysis_from_encoded_bytes(
+                                            &request_for_fetch,
+                                            &bytes,
+                                        );
                                         let (handle, estimated_bytes) =
                                             handle_from_encoded_bytes(
                                                 &request_for_fetch,
@@ -427,6 +494,11 @@ fn image_loader_stream_concurrent(
                                             msg,
                                         );
                                     }
+
+                                    cache_theater_plate_analysis_from_encoded_bytes(
+                                        &request_for_fetch,
+                                        &bytes,
+                                    );
 
                                     if let Some(cache) = disk_cache.as_ref() {
                                         cache

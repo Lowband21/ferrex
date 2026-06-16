@@ -1,5 +1,7 @@
 use dashmap::DashMap;
-use ferrex_core::player_prelude::ImageRequest;
+use ferrex_core::player_prelude::{
+    ImageRequest, TheaterPlateAnalysis, TheaterPlateAnalysisCache,
+};
 use iced::widget::image::Handle;
 use log::{info, warn};
 use priority_queue::PriorityQueue;
@@ -84,6 +86,9 @@ pub struct UnifiedImageService {
 
     // Hard cap for loaded images in RAM (best-effort, enforced via eviction).
     ram_max_bytes: Arc<AtomicU64>,
+
+    // CPU analysis/downsample sidecars for Theater Plate detail backgrounds.
+    theater_plate_analysis_cache: Arc<Mutex<TheaterPlateAnalysisCache>>,
 }
 
 #[cfg_attr(
@@ -112,9 +117,32 @@ impl UnifiedImageService {
             ram_max_bytes: Arc::new(AtomicU64::new(
                 memory_usage::MAX_RAM_BYTES,
             )),
+            theater_plate_analysis_cache: Arc::new(Mutex::new(
+                TheaterPlateAnalysisCache::default(),
+            )),
         };
 
         (service, load_receiver)
+    }
+
+    pub fn get_theater_plate_analysis(
+        &self,
+        request: &ImageRequest,
+    ) -> Option<TheaterPlateAnalysis> {
+        self.theater_plate_analysis_cache
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get(request).cloned())
+    }
+
+    pub fn cache_theater_plate_analysis(
+        &self,
+        request: ImageRequest,
+        analysis: TheaterPlateAnalysis,
+    ) {
+        if let Ok(mut cache) = self.theater_plate_analysis_cache.lock() {
+            cache.insert(request, analysis);
+        }
     }
 
     pub fn set_ready_token(&self, request: &ImageRequest, token: String) {
