@@ -2,9 +2,20 @@ name: Ferrex CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["dev", "main"]
   pull_request:
-    branches: ["main"]
+    branches: ["dev", "main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
 
 jobs:
   build:
@@ -50,12 +61,12 @@ jobs:
       # On Windows leverage GitHub action to install official MSVC GStreamer runtime + devel packages
       - name: Setup GStreamer (Windows)
         if: runner.os == 'Windows'
-        # v.1.5.3 not v1.5.3. Official MSVC installers currently stop at
-        # 1.28.3, so Windows CI intentionally trails the 1.28.4
-        # source/Nix/Flatpak pin.
+        # v.1.5.3 not v1.5.3. The action installs MSI packages;
+        # upstream Windows 1.28.x artifacts are EXE-only, so pin the
+        # newest available MSI release until the action supports EXE installers.
         uses: marcpabst/setup-gstreamer@v.1.5.3
         with:
-          version: '1.28.3'
+          version: '1.26.11'
           arch: x86_64
 
       - uses: moonrepo/setup-rust@v1
@@ -75,6 +86,18 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy,rustfmt
           profile: minimal
+
+      - name: Cache Rust/Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.os }}-${{ matrix.target }}-
+
       - if: runner.os != 'Windows'
         run: cargo fmt --all --check
       - if: runner.os != 'Windows'
