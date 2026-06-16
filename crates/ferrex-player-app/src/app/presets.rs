@@ -39,7 +39,8 @@ use ferrex_core::player_prelude::{
     BackdropSize, GenreInfo, ImageRequest, ImageSize, Library, LibraryId,
     LibraryType, Media, MediaFile, MediaID, MovieID, MovieReference,
     MovieReferenceBatchSize, PosterSize, Priority, Role, Series, SeriesID,
-    UserPermissions,
+    TheaterPlateAnalyzer, TheaterPlateColor, TheaterPlateImage,
+    TheaterPlateSourceContext, TheaterPlateViewport, UserPermissions,
 };
 use ferrex_model::{
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
@@ -90,6 +91,20 @@ pub enum PlayerScenario {
     TenFootDetail,
     /// 10-foot loading/player overlay surface.
     PlayerLoadingOverlay,
+    /// Theater Plate desktop detail fixture with balanced, review-friendly art.
+    TheaterPlateGood,
+    /// Theater Plate fixture for bright backdrop readability pressure.
+    TheaterPlateBright,
+    /// Theater Plate fixture with busy, text-like backdrop detail.
+    TheaterPlateBusyText,
+    /// Theater Plate fixture for low-detail/flat backdrop abstraction.
+    TheaterPlateLowDetail,
+    /// Theater Plate fixture with no usable backdrop or poster artwork.
+    TheaterPlateMissingBackdrop,
+    /// Theater Plate compact/tall layout fixture with long readable copy.
+    TheaterPlateCompact,
+    /// Theater Plate 10-foot detail fixture for couch-distance review.
+    TheaterPlateTenFoot,
 }
 
 impl std::fmt::Display for PlayerScenario {
@@ -100,7 +115,7 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 18] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
@@ -112,6 +127,13 @@ impl PlayerScenario {
         Self::TenFootHome,
         Self::TenFootDetail,
         Self::PlayerLoadingOverlay,
+        Self::TheaterPlateGood,
+        Self::TheaterPlateBright,
+        Self::TheaterPlateBusyText,
+        Self::TheaterPlateLowDetail,
+        Self::TheaterPlateMissingBackdrop,
+        Self::TheaterPlateCompact,
+        Self::TheaterPlateTenFoot,
     ];
 
     /// Return the exact Iced preset / screenshot CLI name.
@@ -128,6 +150,13 @@ impl PlayerScenario {
             Self::TenFootHome => "TenFootHome",
             Self::TenFootDetail => "TenFootDetail",
             Self::PlayerLoadingOverlay => "PlayerLoadingOverlay",
+            Self::TheaterPlateGood => "TheaterPlateGood",
+            Self::TheaterPlateBright => "TheaterPlateBright",
+            Self::TheaterPlateBusyText => "TheaterPlateBusyText",
+            Self::TheaterPlateLowDetail => "TheaterPlateLowDetail",
+            Self::TheaterPlateMissingBackdrop => "TheaterPlateMissingBackdrop",
+            Self::TheaterPlateCompact => "TheaterPlateCompact",
+            Self::TheaterPlateTenFoot => "TheaterPlateTenFoot",
         }
     }
 
@@ -166,6 +195,27 @@ impl PlayerScenario {
             }
             Self::PlayerLoadingOverlay => {
                 "10-foot player/loading overlay for a seeded movie stream"
+            }
+            Self::TheaterPlateGood => {
+                "Theater Plate desktop detail fixture with balanced cinematic backdrop analysis"
+            }
+            Self::TheaterPlateBright => {
+                "Theater Plate desktop detail fixture with bright backdrop readability pressure"
+            }
+            Self::TheaterPlateBusyText => {
+                "Theater Plate desktop detail fixture with busy, text-like backdrop detail"
+            }
+            Self::TheaterPlateLowDetail => {
+                "Theater Plate desktop detail fixture with low-detail flat backdrop analysis"
+            }
+            Self::TheaterPlateMissingBackdrop => {
+                "Theater Plate desktop detail fixture with no backdrop/poster artwork fallback"
+            }
+            Self::TheaterPlateCompact => {
+                "Theater Plate compact/tall detail fixture with long text for readability review"
+            }
+            Self::TheaterPlateTenFoot => {
+                "Theater Plate 10-foot detail fixture for couch-distance readability review"
             }
         }
     }
@@ -208,6 +258,12 @@ impl PlayerScenario {
                 "playerloading" | "loadingoverlay" => {
                     Some(Self::PlayerLoadingOverlay)
                 }
+                "theaterplatebusy" | "theaterplatetext" => {
+                    Some(Self::TheaterPlateBusyText)
+                }
+                "theaterplatenobackdrop" | "theaterplatemissing" => {
+                    Some(Self::TheaterPlateMissingBackdrop)
+                }
                 _ => None,
             })
     }
@@ -234,6 +290,41 @@ impl PlayerScenario {
             Self::TenFootHome => tenfoot_home_state(config),
             Self::TenFootDetail => tenfoot_detail_state(config),
             Self::PlayerLoadingOverlay => player_loading_overlay_state(config),
+            Self::TheaterPlateGood => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::Good,
+                false,
+            ),
+            Self::TheaterPlateBright => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::Bright,
+                false,
+            ),
+            Self::TheaterPlateBusyText => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::BusyText,
+                false,
+            ),
+            Self::TheaterPlateLowDetail => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::LowDetail,
+                false,
+            ),
+            Self::TheaterPlateMissingBackdrop => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::MissingBackdrop,
+                false,
+            ),
+            Self::TheaterPlateCompact => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::Compact,
+                false,
+            ),
+            Self::TheaterPlateTenFoot => theater_plate_fixture_state(
+                config,
+                TheaterPlateFixture::TenFoot,
+                true,
+            ),
         }
     }
 
@@ -462,6 +553,323 @@ fn player_loading_overlay_state(config: &AppConfig) -> State {
     state.loading = false;
 
     state
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TheaterPlateFixture {
+    Good,
+    Bright,
+    BusyText,
+    LowDetail,
+    MissingBackdrop,
+    Compact,
+    TenFoot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TheaterPlateFixtureImage {
+    Good,
+    Bright,
+    BusyText,
+    LowDetail,
+}
+
+impl TheaterPlateFixture {
+    fn image(self) -> Option<TheaterPlateFixtureImage> {
+        match self {
+            Self::Good | Self::Compact | Self::TenFoot => {
+                Some(TheaterPlateFixtureImage::Good)
+            }
+            Self::Bright => Some(TheaterPlateFixtureImage::Bright),
+            Self::BusyText => Some(TheaterPlateFixtureImage::BusyText),
+            Self::LowDetail => Some(TheaterPlateFixtureImage::LowDetail),
+            Self::MissingBackdrop => None,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Good => "Aurora Transit: Theater Plate",
+            Self::Bright => "Daybreak Overexposure",
+            Self::BusyText => "Subtitle Storm Protocol",
+            Self::LowDetail => "Quiet Fog Shelf",
+            Self::MissingBackdrop => "Fallback Without Backdrop",
+            Self::Compact => "Compact Theater Plate Readability Gauntlet",
+            Self::TenFoot => "Couch Distance Theater Plate",
+        }
+    }
+
+    fn overview(self) -> &'static str {
+        match self {
+            Self::Good => {
+                "A balanced cinematic backdrop with enough shape for ambiance while keeping the title, metadata, and actions comfortably readable."
+            }
+            Self::Bright => {
+                "A deliberately bright fixture that should compress highlights and strengthen the foreground plate instead of washing out text."
+            }
+            Self::BusyText => {
+                "A text-like backdrop full of lines, columns, and sharp luminance changes that must not compete with real UI copy."
+            }
+            Self::LowDetail => {
+                "A flat low-detail backdrop that should still feel art-directed rather than collapsing into a raw wallpaper wash."
+            }
+            Self::MissingBackdrop => {
+                "A missing-artwork fixture that must fall back to theme colors without exposing a stale poster-depth artifact."
+            }
+            Self::Compact => {
+                "A compact and tall viewport fixture with intentionally long copy so reviewers can check wrapping, plate softness, and action readability at constrained widths."
+            }
+            Self::TenFoot => {
+                "A living-room fixture for 10-foot mode where the plate must remain soft, legible, and free of busy backdrop interference from couch distance."
+            }
+        }
+    }
+
+    fn tagline(self) -> &'static str {
+        match self {
+            Self::Good => "Balanced art, readable detail.",
+            Self::Bright => "If the sky blooms, the copy still wins.",
+            Self::BusyText => "Synthetic text must stay behind real text.",
+            Self::LowDetail => "Subtle does not mean raw wallpaper.",
+            Self::MissingBackdrop => "No art should still be intentional.",
+            Self::Compact => "Small screens still deserve a soft stage.",
+            Self::TenFoot => "Readable from the couch.",
+        }
+    }
+
+    fn theme_color(self) -> &'static str {
+        match self {
+            Self::Good | Self::Compact | Self::TenFoot => "#44566f",
+            Self::Bright => "#8aa4c8",
+            Self::BusyText => "#56486c",
+            Self::LowDetail => "#5f666e",
+            Self::MissingBackdrop => "#6d4b35",
+        }
+    }
+
+    fn runtime(self) -> u32 {
+        match self {
+            Self::Compact => 142,
+            Self::TenFoot => 128,
+            _ => 121,
+        }
+    }
+
+    fn rating(self) -> f32 {
+        match self {
+            Self::Bright => 7.9,
+            Self::BusyText => 8.2,
+            Self::LowDetail => 7.4,
+            Self::MissingBackdrop => 7.1,
+            _ => 8.4,
+        }
+    }
+}
+
+fn theater_plate_fixture_state(
+    config: &AppConfig,
+    fixture: TheaterPlateFixture,
+    tenfoot_mode: bool,
+) -> State {
+    let mut state = authenticated_base_state(config, tenfoot_mode);
+    seed_library_state(&mut state);
+    seed_theater_plate_fixture_movie(&mut state, fixture);
+
+    let movie_id = seed_movie_id(0);
+    let _ = handle_view_movie_details(&mut state, movie_id);
+    if tenfoot_mode {
+        state.domains.ui.state.tenfoot_detail.focus_id =
+            Some(TenFootDetailFocusId::Action(TenFootDetailAction::Primary));
+    }
+    state.loading = false;
+    state
+}
+
+fn seed_theater_plate_fixture_movie(
+    state: &mut State,
+    fixture: TheaterPlateFixture,
+) {
+    let library_id = seed_library_id(0);
+    let mut movie = seeded_movie(
+        0,
+        library_id,
+        fixture.title(),
+        fixture.overview(),
+        "2025-03-07",
+        fixture.runtime(),
+        fixture.rating(),
+        fixture.theme_color(),
+    );
+    movie.details.tagline = Some(fixture.tagline().to_string());
+    if matches!(fixture, TheaterPlateFixture::Compact) {
+        movie.details.vote_count = None;
+    }
+
+    if fixture.image().is_none() {
+        movie.details.backdrop_path = None;
+        movie.details.primary_backdrop_iid = None;
+        movie.details.poster_path = None;
+        movie.details.primary_poster_iid = None;
+    }
+
+    state
+        .domains
+        .library
+        .state
+        .repo_accessor
+        .upsert(Media::Movie(Box::new(movie.clone())), &library_id)
+        .expect("upsert Theater Plate fixture movie");
+
+    if let Some(image) = fixture.image() {
+        seed_theater_plate_fixture_backdrop(
+            state,
+            seed_backdrop_iid(0),
+            image,
+            TheaterPlateColor::from_hex(fixture.theme_color()),
+        );
+    }
+}
+
+fn seed_theater_plate_fixture_backdrop(
+    state: &State,
+    iid: Uuid,
+    fixture: TheaterPlateFixtureImage,
+    theme_color: Option<TheaterPlateColor>,
+) {
+    const WIDTH: u32 = 256;
+    const HEIGHT: u32 = 144;
+
+    let pixels = theater_plate_fixture_rgba(fixture, WIDTH, HEIGHT);
+    let variants = [
+        (BackdropSize::W780, TheaterPlateViewport::new(800, 600)),
+        (BackdropSize::W1280, TheaterPlateViewport::new(1280, 720)),
+    ];
+
+    for (backdrop_size, viewport) in variants {
+        let request =
+            ImageRequest::new(iid, ImageSize::Backdrop(backdrop_size));
+        state.image_service.mark_loaded(
+            &request,
+            Handle::from_rgba(WIDTH, HEIGHT, pixels.clone()),
+            pixels.len() as u64,
+        );
+
+        let context =
+            TheaterPlateSourceContext::backdrop(request.clone(), viewport)
+                .with_theme_color(theme_color)
+                .with_default_color(TheaterPlateColor::DEFAULT_STAGE);
+        let analysis = TheaterPlateAnalyzer::default()
+            .analyze(TheaterPlateImage::rgba8(WIDTH, HEIGHT, &pixels), context)
+            .expect("analyze Theater Plate fixture backdrop");
+        state
+            .image_service
+            .cache_theater_plate_analysis(request, analysis);
+    }
+}
+
+fn theater_plate_fixture_rgba(
+    fixture: TheaterPlateFixtureImage,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+    let width_denom = width.saturating_sub(1).max(1) as f32;
+    let height_denom = height.saturating_sub(1).max(1) as f32;
+
+    for y in 0..height {
+        for x in 0..width {
+            let xf = x as f32 / width_denom;
+            let yf = y as f32 / height_denom;
+            let (r, g, b) = match fixture {
+                TheaterPlateFixtureImage::Good => {
+                    good_theater_plate_pixel(xf, yf)
+                }
+                TheaterPlateFixtureImage::Bright => {
+                    bright_theater_plate_pixel(x, y, xf, yf)
+                }
+                TheaterPlateFixtureImage::BusyText => {
+                    busy_text_theater_plate_pixel(x, y)
+                }
+                TheaterPlateFixtureImage::LowDetail => {
+                    low_detail_theater_plate_pixel(xf, yf)
+                }
+            };
+            pixels.extend_from_slice(&[r, g, b, 255]);
+        }
+    }
+
+    pixels
+}
+
+fn good_theater_plate_pixel(xf: f32, yf: f32) -> (u8, u8, u8) {
+    let glow_distance =
+        (((xf - 0.62).powi(2) / 0.18) + ((yf - 0.36).powi(2) / 0.10)).sqrt();
+    let glow = (1.0 - glow_distance).clamp(0.0, 1.0) * 42.0;
+    let horizon_t = ((yf - 0.54).abs() / 0.08).clamp(0.0, 1.0);
+    let horizon =
+        18.0 * (1.0 - horizon_t * horizon_t * (3.0 - 2.0 * horizon_t));
+
+    (
+        clamp_byte(42.0 + xf * 54.0 + yf * 18.0 + glow + horizon * 0.45),
+        clamp_byte(50.0 + xf * 32.0 + yf * 22.0 + glow * 0.76 + horizon),
+        clamp_byte(66.0 + xf * 14.0 + yf * 20.0 + glow * 0.42),
+    )
+}
+
+fn bright_theater_plate_pixel(
+    x: u32,
+    y: u32,
+    xf: f32,
+    yf: f32,
+) -> (u8, u8, u8) {
+    let cloud = if (x / 48 + y / 24).is_multiple_of(2) {
+        10.0
+    } else {
+        0.0
+    };
+    let band_t = ((yf - 0.43).abs() / 0.28).clamp(0.0, 1.0);
+    let band_weight = 1.0 - band_t * band_t * (3.0 - 2.0 * band_t);
+    let readability_band = -54.0 * band_weight;
+    (
+        clamp_byte(214.0 + xf * 24.0 + cloud + readability_band),
+        clamp_byte(224.0 + yf * 18.0 + cloud + readability_band),
+        clamp_byte(232.0 + (1.0 - xf) * 14.0 + cloud * 0.65 + readability_band),
+    )
+}
+
+fn busy_text_theater_plate_pixel(x: u32, y: u32) -> (u8, u8, u8) {
+    let text_row = y % 20;
+    let text_col = x % 46;
+    let glyph = (4..=10).contains(&text_row)
+        && text_col < 34
+        && !(x + y).is_multiple_of(7);
+    let column_rule = (x / 18 + y / 14).is_multiple_of(2);
+    let light = glyph || column_rule;
+    let base = if light { 214.0 } else { 28.0 };
+    let accent = if (x / 64).is_multiple_of(2) {
+        12.0
+    } else {
+        -10.0
+    };
+
+    (
+        clamp_byte(base + accent),
+        clamp_byte(base * 0.92),
+        clamp_byte(base + if light { -18.0 } else { 24.0 }),
+    )
+}
+
+fn low_detail_theater_plate_pixel(xf: f32, yf: f32) -> (u8, u8, u8) {
+    let base = 96.0 + xf * 5.0 + yf * 4.0;
+    (
+        clamp_byte(base),
+        clamp_byte(base + 2.0),
+        clamp_byte(base + 5.0),
+    )
+}
+
+fn clamp_byte(value: f32) -> u8 {
+    value.round().clamp(0.0, 255.0) as u8
 }
 
 fn scenario_base_state(config: &AppConfig, tenfoot_mode: bool) -> State {
@@ -1244,6 +1652,7 @@ fn sample_user(username: &str) -> ferrex_core::player_prelude::User {
 mod tests {
     use super::*;
     use crate::state::InterfaceMode;
+    use ferrex_core::player_prelude::TheaterPlateGradeClass;
 
     fn test_config() -> AppConfig {
         AppConfig::new("http://example.invalid").with_test_stubs(true)
@@ -1287,8 +1696,108 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name == "TheaterPlateGood")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "TheaterPlateBusyText")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "TheaterPlateTenFoot")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .all(|scenario| !scenario.description.is_empty())
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn theater_plate_fixture_scenarios_seed_expected_analysis_grades() {
+        let cases = [
+            (
+                PlayerScenario::TheaterPlateGood,
+                TheaterPlateGradeClass::Balanced,
+            ),
+            (
+                PlayerScenario::TheaterPlateBright,
+                TheaterPlateGradeClass::Bright,
+            ),
+            (
+                PlayerScenario::TheaterPlateBusyText,
+                TheaterPlateGradeClass::Busy,
+            ),
+            (
+                PlayerScenario::TheaterPlateLowDetail,
+                TheaterPlateGradeClass::LowDetail,
+            ),
+            (
+                PlayerScenario::TheaterPlateCompact,
+                TheaterPlateGradeClass::Balanced,
+            ),
+            (
+                PlayerScenario::TheaterPlateTenFoot,
+                TheaterPlateGradeClass::Balanced,
+            ),
+        ];
+
+        for (scenario, expected_grade) in cases {
+            let state = scenario.build(&test_config());
+            let request = ImageRequest::new(
+                seed_backdrop_iid(0),
+                ImageSize::Backdrop(BackdropSize::W1280),
+            );
+            let analysis = state
+                .image_service
+                .get_theater_plate_analysis(&request)
+                .unwrap_or_else(|| panic!("{scenario:?} analysis missing"));
+
+            assert_eq!(analysis.grade.class, expected_grade, "{scenario:?}");
+            assert!(state.image_service.get(&request).is_some());
+            assert!(matches!(
+                state.domains.ui.state.view,
+                ViewState::MovieDetail { movie_id, .. } if movie_id == seed_movie_id(0)
+            ));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn theater_plate_missing_backdrop_fixture_uses_artless_detail_route()
+    {
+        let state =
+            PlayerScenario::TheaterPlateMissingBackdrop.build(&test_config());
+        let media = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get(&MediaID::Movie(seed_movie_id(0)))
+            .expect("fixture movie");
+        let Media::Movie(movie) = media else {
+            panic!("expected movie fixture");
+        };
+
+        assert!(movie.details.primary_backdrop_iid.is_none());
+        assert!(movie.details.primary_poster_iid.is_none());
+        assert!(matches!(
+            state.domains.ui.state.view,
+            ViewState::MovieDetail { movie_id, .. } if movie_id == seed_movie_id(0)
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn theater_plate_tenfoot_fixture_selects_couch_mode_detail() {
+        let state = PlayerScenario::TheaterPlateTenFoot.build(&test_config());
+
+        assert_eq!(state.interface_mode, InterfaceMode::TenFoot);
+        assert!(state.domains.ui.state.tenfoot_detail.focus_id.is_some());
+        assert!(matches!(
+            state.domains.ui.state.view,
+            ViewState::MovieDetail { movie_id, .. } if movie_id == seed_movie_id(0)
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]

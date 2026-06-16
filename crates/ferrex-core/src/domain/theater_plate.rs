@@ -999,15 +999,6 @@ fn grade_from_metrics(
     }
 }
 
-/// Basic hit/miss counters for the analysis sidecar cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TheaterPlateAnalysisCacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub len: usize,
-    pub capacity: usize,
-}
-
 /// Small LRU cache for Theater Plate analysis/downsample sidecars keyed by the
 /// exact image request. `ImageRequest` identity ignores priority, so visible and
 /// preload requests for the same iid+size share one analysis entry.
@@ -1016,8 +1007,6 @@ pub struct TheaterPlateAnalysisCache {
     capacity: usize,
     entries: HashMap<ImageRequest, TheaterPlateAnalysis>,
     lru: VecDeque<ImageRequest>,
-    hits: u64,
-    misses: u64,
 }
 
 impl Default for TheaterPlateAnalysisCache {
@@ -1032,8 +1021,6 @@ impl TheaterPlateAnalysisCache {
             capacity: capacity.max(1),
             entries: HashMap::new(),
             lru: VecDeque::new(),
-            hits: 0,
-            misses: 0,
         }
     }
 
@@ -1049,15 +1036,6 @@ impl TheaterPlateAnalysisCache {
         self.capacity
     }
 
-    pub fn stats(&self) -> TheaterPlateAnalysisCacheStats {
-        TheaterPlateAnalysisCacheStats {
-            hits: self.hits,
-            misses: self.misses,
-            len: self.len(),
-            capacity: self.capacity,
-        }
-    }
-
     pub fn peek(
         &self,
         request: &ImageRequest,
@@ -1070,11 +1048,9 @@ impl TheaterPlateAnalysisCache {
         request: &ImageRequest,
     ) -> Option<&TheaterPlateAnalysis> {
         if self.entries.contains_key(request) {
-            self.hits += 1;
             self.touch(request);
             self.entries.get(request)
         } else {
-            self.misses += 1;
             None
         }
     }
@@ -1096,7 +1072,6 @@ impl TheaterPlateAnalysisCache {
         F: FnOnce() -> TheaterPlateAnalysis,
     {
         if self.entries.contains_key(&request) {
-            self.hits += 1;
             self.touch(&request);
             return self
                 .entries
@@ -1104,7 +1079,6 @@ impl TheaterPlateAnalysisCache {
                 .expect("analysis cache entry should exist after hit");
         }
 
-        self.misses += 1;
         let analysis = analyze();
         self.insert_without_stats(request.clone(), analysis);
         self.entries
@@ -1363,8 +1337,6 @@ mod tests {
 
         assert_eq!(runs.get(), 1);
         assert_eq!(first.average_luminance, second.average_luminance);
-        assert_eq!(cache.stats().misses, 1);
-        assert_eq!(cache.stats().hits, 1);
     }
 
     #[test]
