@@ -1,5 +1,6 @@
 use crate::{
     PlayerMessage,
+    diagnostics::redact_playback_url,
     state::PlayerDomainState,
     update::{PlaybackUiShell, PlaybackUpdatePort},
 };
@@ -90,8 +91,10 @@ where
         }
     };
 
+    let redacted_url = redact_playback_url(url.as_str());
+
     log::info!("=== VIDEO LOADING DEBUG ===");
-    log::info!("Loading video URL: {}", url);
+    log::info!("Loading video URL: {}", redacted_url);
     log::info!("URL scheme: {}", url.scheme());
     log::info!("URL host: {:?}", url.host());
     log::info!("URL path: {}", url.path());
@@ -157,7 +160,10 @@ where
     // Validate URL is valid UTF-8 before using
     let url_string = url.as_str();
     if !url_string.is_ascii() {
-        log::warn!("URL contains non-ASCII characters: {}", url_string);
+        log::warn!(
+            "URL contains non-ASCII characters: {}",
+            redact_playback_url(url_string)
+        );
         // Check each byte
         for (i, byte) in url_string.bytes().enumerate() {
             if byte > 127 {
@@ -168,7 +174,7 @@ where
 
     log::info!(
         "Creating Video object with URL: {} (HDR: {})",
-        url_string,
+        redact_playback_url(url_string),
         use_hdr_pipeline_final
     );
 

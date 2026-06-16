@@ -7,6 +7,7 @@
 pub mod constants;
 #[cfg(feature = "ui")]
 pub mod controls;
+mod diagnostics;
 pub mod external_mpv;
 pub mod messages;
 pub mod state;
@@ -23,6 +24,7 @@ use ferrex_player_api::services::api::ApiService;
 use iced::Task;
 use std::sync::Arc;
 
+pub use diagnostics::redact_playback_url;
 pub use messages::PlayerMessage;
 pub use state::{PlayerDomainState, TrackNotification};
 

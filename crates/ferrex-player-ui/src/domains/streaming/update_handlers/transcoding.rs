@@ -6,6 +6,7 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::TranscodingStatus;
+use ferrex_player_playback::redact_playback_url;
 use iced::Task;
 
 /// Handle transcoding started event
@@ -169,7 +170,10 @@ pub fn handle_transcoding_status_update(
                 } else {
                     format!("{}{}", state.server_url, playlist_path)
                 };
-                log::info!("Updating playlist URL from job: {}", playlist_url);
+                log::info!(
+                    "Updating playlist URL from job: {}",
+                    redact_playback_url(&playlist_url)
+                );
 
                 // Update the URL to the actual playlist path
                 if let Ok(url) = url::Url::parse(&playlist_url) {

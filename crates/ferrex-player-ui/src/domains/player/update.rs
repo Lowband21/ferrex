@@ -25,8 +25,10 @@ impl PlaybackUiShell for UIDomainState {
         self.view = ViewState::Player;
     }
 
-    fn set_loading_video_view(&mut self, url: String) {
-        self.view = ViewState::LoadingVideo { url };
+    fn set_loading_video_view(&mut self, _url: String) {
+        self.view = ViewState::LoadingVideo {
+            url: "<redacted>".to_string(),
+        };
     }
 
     fn set_video_error(&mut self, message: String) {

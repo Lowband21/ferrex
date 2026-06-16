@@ -1,6 +1,7 @@
 //! Minimal external MPV player management for HDR passthrough
 //! This module spawns MPV as a separate process and tracks playback position
 
+use crate::diagnostics::{contains_access_token, redact_playback_url};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
@@ -45,6 +46,7 @@ impl ExternalMpvHandle {
 
         // Resolve log file path for diagnostics
         let log_path = mpv_log_path();
+        let authenticated_url = contains_access_token(url);
 
         // Build MPV command with HDR-preserving settings
         let mpv_path = resolve_mpv_binary();
@@ -111,17 +113,28 @@ impl ExternalMpvHandle {
             .arg("--target-colorspace-hint") // Signal HDR to display
             .arg("--hdr-compute-peak=yes"); // Dynamic tone mapping if needed
 
-        // Enable MPV internal log file when available
+        // Enable MPV internal log file only for URLs without embedded
+        // credentials. MPV writes this file itself, so Ferrex cannot redact it
+        // after the fact; captured stdout/stderr below are still redacted.
         if let Some(ref p) = log_path {
-            cmd.arg(format!("--log-file={}", p.to_string_lossy()));
-            // Reasonable verbosity for diagnostics without being overwhelming
-            cmd.arg("--msg-level=all=info");
+            if authenticated_url {
+                log::info!(
+                    "Skipping MPV internal log file for authenticated playback URL"
+                );
+            } else {
+                cmd.arg(format!("--log-file={}", p.to_string_lossy()));
+                // Reasonable verbosity for diagnostics without being overwhelming
+                cmd.arg("--msg-level=all=info");
+            }
         }
 
         // Add the URL
         cmd.arg(url);
 
-        log::info!("Spawning external MPV with URL: {}", url);
+        log::info!(
+            "Spawning external MPV with URL: {}",
+            redact_playback_url(url)
+        );
         // Pipe stdout/stderr so we can capture diagnostics cross‑platform
         let mut child = cmd
             .stdout(Stdio::piped())
@@ -145,7 +158,12 @@ impl ExternalMpvHandle {
                         Ok(n) => {
                             if let Ok(s) = std::str::from_utf8(&buf[..n]) {
                                 for line in s.lines() {
-                                    log::debug!("mpv(stdout): {}", line);
+                                    let redacted_line =
+                                        redact_playback_url(line);
+                                    log::debug!(
+                                        "mpv(stdout): {}",
+                                        redacted_line
+                                    );
                                     if let Some(ref path) = log_file
                                         && let Ok(mut f) =
                                             std::fs::OpenOptions::new()
@@ -153,8 +171,11 @@ impl ExternalMpvHandle {
                                                 .append(true)
                                                 .open(path)
                                     {
-                                        let _ =
-                                            writeln!(f, "[stdout] {}", line);
+                                        let _ = writeln!(
+                                            f,
+                                            "[stdout] {}",
+                                            redacted_line
+                                        );
                                     }
                                 }
                             }
@@ -174,7 +195,12 @@ impl ExternalMpvHandle {
                         Ok(n) => {
                             if let Ok(s) = std::str::from_utf8(&buf[..n]) {
                                 for line in s.lines() {
-                                    log::warn!("mpv(stderr): {}", line);
+                                    let redacted_line =
+                                        redact_playback_url(line);
+                                    log::warn!(
+                                        "mpv(stderr): {}",
+                                        redacted_line
+                                    );
                                     if let Some(ref path) = log_file
                                         && let Ok(mut f) =
                                             std::fs::OpenOptions::new()
@@ -182,8 +208,11 @@ impl ExternalMpvHandle {
                                                 .append(true)
                                                 .open(path)
                                     {
-                                        let _ =
-                                            writeln!(f, "[stderr] {}", line);
+                                        let _ = writeln!(
+                                            f,
+                                            "[stderr] {}",
+                                            redacted_line
+                                        );
                                     }
                                 }
                             }
