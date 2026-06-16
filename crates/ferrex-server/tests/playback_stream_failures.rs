@@ -51,6 +51,31 @@ async fn register_user(server: &TestServer, username: &str) -> Result<String> {
     Ok(extract_token_field(&body, "access_token").to_string())
 }
 
+async fn device_login_user(
+    server: &TestServer,
+    username: &str,
+) -> Result<serde_json::Value> {
+    let response = server
+        .post(v1::auth::device::LOGIN)
+        .add_header("user-agent", "FerrexAndroid/1.0 (Android TV)")
+        .json(&json!({
+            "username": username,
+            "password": "Password#123",
+            "remember_device": false,
+            "device_info": {
+                "device_id": Uuid::new_v4(),
+                "device_name": "Living Room TV",
+                "platform": "android",
+                "app_version": "2.3.4",
+                "hardware_id": "playback-ticket-test-hw"
+            }
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    Ok(body["data"].clone())
+}
+
 async fn seed_library(pool: &PgPool, id: Uuid) {
     sqlx::query(
         r#"
@@ -238,6 +263,98 @@ async fn playback_ticket_and_range_stream_ignore_corrupt_technical_metadata(
     bearer_range.assert_status(StatusCode::PARTIAL_CONTENT);
     assert_eq!(bearer_range.as_bytes().as_ref(), b"2345");
     assert_success_has_no_media_error(&bearer_range);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn device_bound_playback_tickets_coexist_with_full_device_session(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, tempdir) = build_server(pool.clone()).await?;
+    let username = "playback_device_ticket";
+    register_user(&server, username).await?;
+    let device_login = device_login_user(&server, username).await?;
+    assert_eq!(device_login["scope"], "full");
+    let access_token = device_login["access_token"]
+        .as_str()
+        .context("device login should return an access token")?
+        .to_string();
+    let device_session_id: Uuid =
+        serde_json::from_value(device_login["device_session_id"].clone())?;
+
+    let library_id = Uuid::new_v4();
+    seed_library(&pool, library_id).await;
+
+    let file_id = Uuid::new_v4();
+    let media_path = tempdir.path().join("device-bound-ticket.mkv");
+    let media_bytes = b"0123456789";
+    tokio::fs::write(&media_path, media_bytes).await?;
+    seed_media_file(
+        &pool,
+        library_id,
+        Uuid::new_v4(),
+        file_id,
+        &media_path,
+        true,
+    )
+    .await;
+
+    let first_ticket = server
+        .get(&playback_ticket_path(file_id))
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    first_ticket.assert_status_ok();
+    let first_ticket_body: serde_json::Value = first_ticket.json();
+    let first_ticket_token = first_ticket_body["data"]["access_token"]
+        .as_str()
+        .context("ticket response should include a playback token")?
+        .to_string();
+
+    let current_user = server
+        .get(v1::users::CURRENT)
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    current_user.assert_status_ok();
+
+    let second_ticket = server
+        .get(&playback_ticket_path(file_id))
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    second_ticket.assert_status_ok();
+    let second_ticket_body: serde_json::Value = second_ticket.json();
+    let second_ticket_token = second_ticket_body["data"]["access_token"]
+        .as_str()
+        .context("second ticket response should include a playback token")?
+        .to_string();
+
+    let full_ticket_path =
+        playback_stream_ticket_path(file_id, &first_ticket_token);
+    let full_ticket_stream = server.get(&full_ticket_path).await;
+    full_ticket_stream.assert_status_ok();
+    assert_eq!(full_ticket_stream.as_bytes().as_ref(), media_bytes);
+    assert_success_has_no_media_error(&full_ticket_stream);
+
+    let ranged_ticket_path =
+        playback_stream_ticket_path(file_id, &second_ticket_token);
+    let ranged_ticket_stream = server
+        .get(&ranged_ticket_path)
+        .add_header("Range", "bytes=2-5")
+        .await;
+    ranged_ticket_stream.assert_status(StatusCode::PARTIAL_CONTENT);
+    assert_eq!(ranged_ticket_stream.as_bytes().as_ref(), b"2345");
+    assert_success_has_no_media_error(&ranged_ticket_stream);
+
+    let revoke = server
+        .post(v1::auth::device::REVOKE)
+        .add_header("Authorization", bearer(&access_token))
+        .json(&json!({ "device_id": device_session_id }))
+        .await;
+    revoke.assert_status_ok();
+
+    let revoked_ticket_stream = server.get(&full_ticket_path).await;
+    revoked_ticket_stream.assert_status(StatusCode::UNAUTHORIZED);
+    assert_not_media_response(&revoked_ticket_stream, media_bytes);
 
     Ok(())
 }
