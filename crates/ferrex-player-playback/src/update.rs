@@ -1,5 +1,6 @@
 use crate::{
     constants::player_controls,
+    diagnostics::redact_playback_url,
     messages::PlayerMessage,
     state::PlayerDomainState,
     video::{close_video, load_video},
@@ -75,6 +76,66 @@ pub struct PlaybackUpdateContext<'a> {
     pub server_url: &'a str,
     pub window_size: iced::Size,
     pub window_position: Option<iced::Point>,
+}
+
+async fn resolve_playback_stream_url(
+    api: Arc<dyn ApiService>,
+    server_url: String,
+    media_id_string: String,
+) -> Result<String, String> {
+    let base = build_protected_stream_url(&server_url, &media_id_string);
+    let token =
+        api.fetch_playback_ticket(&media_id_string)
+            .await
+            .map_err(|error| {
+                let error = error.to_string();
+                warn!(
+                    "Failed to authorize playback stream: {}",
+                    redact_playback_url(&error)
+                );
+                playback_ticket_failure_message(&error)
+            })?;
+
+    if token.trim().is_empty() {
+        warn!("Playback ticket endpoint returned an empty access token");
+        return Err(
+            "Could not authorize playback. Retry playback in a moment."
+                .to_string(),
+        );
+    }
+
+    Ok(format!(
+        "{}?access_token={}",
+        base,
+        urlencoding::encode(&token)
+    ))
+}
+
+fn build_protected_stream_url(
+    server_url: &str,
+    media_id_string: &str,
+) -> String {
+    let encoded_media_id = urlencoding::encode(media_id_string);
+    format!(
+        "{}/api/v1/stream/{}",
+        server_url.trim_end_matches('/'),
+        encoded_media_id
+    )
+}
+
+fn playback_ticket_failure_message(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("unauthorized")
+        || lower.contains("please login")
+        || lower.contains("login again")
+        || lower.contains("token refresh")
+    {
+        "Playback authorization expired. Sign in again, then retry playback."
+            .to_string()
+    } else {
+        "Could not authorize playback. Check your connection and retry."
+            .to_string()
+    }
 }
 
 /// Handle player domain messages
@@ -1103,53 +1164,25 @@ where
             };
             state.is_hdr_content = is_hdr_content;
 
-            // Build secure streaming URL with access_token query
+            // Clear any previous stream before resolving a new authenticated URL.
+            // External MPV may be requested before this async task completes, so a
+            // stale URL must not be available for handoff.
+            state.current_url = None;
+            state.is_resolving_stream_url = true;
+            state.stream_url_resolution_failed = false;
+
             let server_url = context.server_url.to_string();
             let media_id_string = media.id.to_string();
             let api = Arc::clone(&context.api_service);
             DomainUpdateResult::task(Task::perform(
-                async move {
-                    // URL-encode path component
-                    let encoded_media_id =
-                        urlencoding::encode(&media_id_string);
-                    let base = format!(
-                        "{}/api/v1/stream/{}",
-                        server_url, encoded_media_id
-                    );
-
-                    // Request a short-lived playback ticket via authenticated API
-                    let token_opt: Option<String> =
-                        match api.fetch_playback_ticket(&media_id_string).await
-                        {
-                            Ok(token) => Some(token),
-                            Err(e) => {
-                                warn!("Failed to fetch playback ticket: {}", e);
-                                None
-                            }
-                        };
-
-                    // Attach token if present
-                    let final_url = if let Some(token) = token_opt {
-                        format!(
-                            "{}?access_token={}",
-                            base,
-                            urlencoding::encode(&token)
-                        )
-                    } else {
-                        base
-                    };
-                    Ok::<String, String>(final_url)
-                },
-                |url| match url {
-                    Ok(u) => {
-                        P::playback_message(PlayerMessage::SetStreamUrl(u))
+                resolve_playback_stream_url(api, server_url, media_id_string),
+                |result| match result {
+                    Ok(url) => {
+                        P::playback_message(PlayerMessage::SetStreamUrl(url))
                     }
-                    Err(e) => {
-                        error!("Failed to construct stream URL: {}", e);
-                        P::playback_message(PlayerMessage::SetStreamUrl(
-                            String::new(),
-                        ))
-                    }
+                    Err(message) => P::playback_message(
+                        PlayerMessage::StreamUrlResolutionFailed(message),
+                    ),
                 },
             ))
         }
@@ -1339,8 +1372,20 @@ where
             start_external_mpv_with_current_url::<P>(context)
         }
 
+        PlayerMessage::StreamUrlResolutionFailed(message) => {
+            state.current_url = None;
+            state.is_resolving_stream_url = false;
+            state.stream_url_resolution_failed = true;
+            state.is_loading_video = false;
+            context.ui.set_video_error(message);
+            DomainUpdateResult::task(Task::none())
+        }
+
         // Accept resolved URL and kick off playback
         PlayerMessage::SetStreamUrl(video_url) => {
+            state.is_resolving_stream_url = false;
+            state.stream_url_resolution_failed = false;
+
             if video_url.is_empty() {
                 // Should not happen; guard to avoid parsing panics
                 context.ui.set_video_error(
@@ -1451,15 +1496,26 @@ where
         .unwrap_or_default();
 
     if url.is_empty() {
-        // URL not ready yet (e.g., tokenization async); retry shortly
-        info!("External MPV requested before stream URL resolved; retrying...");
-        return DomainUpdateResult::task(Task::perform(
-            async {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                    .await;
-            },
-            |_| P::playback_message(PlayerMessage::PlayExternal),
-        ));
+        if state.is_resolving_stream_url {
+            // URL not ready yet (e.g., tokenization async); retry shortly
+            info!(
+                "External MPV requested before stream URL resolved; retrying..."
+            );
+            return DomainUpdateResult::task(Task::perform(
+                async {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
+                        .await;
+                },
+                |_| P::playback_message(PlayerMessage::PlayExternal),
+            ));
+        }
+
+        if !state.stream_url_resolution_failed {
+            context.ui.set_video_error(
+                "Playback stream is not ready. Retry playback.".to_string(),
+            );
+        }
+        return DomainUpdateResult::task(Task::none());
     }
 
     // Stop internal playback if running before handoff
@@ -1490,5 +1546,48 @@ where
             state.external_mpv_active = false;
             DomainUpdateResult::task(load_video::<P>(state, context.ui))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_player_api::testing::TestApiService;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn resolve_playback_stream_url_returns_ticketed_url() {
+        let api = TestApiService::new("https://ferrex.example");
+        api.set_playback_ticket("ticket secret/with symbols");
+
+        let resolved = resolve_playback_stream_url(
+            Arc::new(api),
+            "https://ferrex.example/".to_string(),
+            "media file".to_string(),
+        )
+        .await
+        .expect("ticket resolution succeeds");
+
+        assert_eq!(
+            resolved,
+            "https://ferrex.example/api/v1/stream/media%20file?access_token=ticket%20secret%2Fwith%20symbols"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_playback_stream_url_fails_closed_on_ticket_error() {
+        let api = TestApiService::new("https://ferrex.example");
+        api.set_playback_ticket_error("Unauthorized - please login again");
+
+        let error = resolve_playback_stream_url(
+            Arc::new(api),
+            "https://ferrex.example".to_string(),
+            "media-file".to_string(),
+        )
+        .await
+        .expect_err("ticket failure must not return a bare stream URL");
+
+        assert!(error.contains("Sign in again"));
+        assert!(!error.contains("/api/v1/stream/media-file"));
     }
 }

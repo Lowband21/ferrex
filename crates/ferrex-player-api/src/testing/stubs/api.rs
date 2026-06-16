@@ -48,6 +48,7 @@ struct InnerApiState {
     last_claim: Option<StartClaimResponse>,
     current_user: Option<User>,
     current_permissions: Option<UserPermissions>,
+    playback_ticket_result: Option<Result<String, String>>,
 }
 
 impl Default for TestApiService {
@@ -77,6 +78,7 @@ impl TestApiService {
                 last_claim: None,
                 current_user: Some(sample_user),
                 current_permissions: Some(sample_permissions),
+                playback_ticket_result: None,
             })),
             base_url: Arc::from(base_url_string),
         }
@@ -109,6 +111,18 @@ impl TestApiService {
     pub fn set_watch_state(&self, watch_state: UserWatchState) {
         if let Ok(mut guard) = self.inner.write() {
             guard.watch_state = watch_state;
+        }
+    }
+
+    pub fn set_playback_ticket(&self, access_token: impl Into<String>) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.playback_ticket_result = Some(Ok(access_token.into()));
+        }
+    }
+
+    pub fn set_playback_ticket_error(&self, message: impl Into<String>) {
+        if let Ok(mut guard) = self.inner.write() {
+            guard.playback_ticket_result = Some(Err(message.into()));
         }
     }
 }
@@ -686,9 +700,19 @@ impl ApiService for TestApiService {
         &self,
         _media_id: &str,
     ) -> RepositoryResult<String> {
-        Err(RepositoryError::QueryFailed(
-            "TestApiService::fetch_playback_ticket not implemented".into(),
-        ))
+        match self
+            .inner
+            .read()
+            .expect("lock poisoned")
+            .playback_ticket_result
+            .clone()
+        {
+            Some(Ok(token)) => Ok(token),
+            Some(Err(message)) => Err(RepositoryError::QueryFailed(message)),
+            None => Err(RepositoryError::QueryFailed(
+                "TestApiService::fetch_playback_ticket not implemented".into(),
+            )),
+        }
     }
 }
 

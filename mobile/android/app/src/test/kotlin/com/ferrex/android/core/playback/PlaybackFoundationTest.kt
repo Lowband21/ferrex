@@ -19,6 +19,59 @@ import org.junit.Test
 
 class PlaybackFoundationTest {
     @Test
+    fun phoneAndTvLaunchPoliciesPreserveMediaFileTargetForController() {
+        val route = playbackRoute(startOver = true)
+
+        val phoneDecision = PlaybackLaunchPolicy.phone(
+            route = route,
+            networkActionsEnabled = true,
+            networkActionMessage = null,
+            ticketTransportReady = true,
+            streamUrlFactoryReady = true,
+            streamingHttpClientReady = true,
+        ) as PlaybackLaunchDecision.Launch
+        val tvDecision = PlaybackLaunchPolicy.tv(
+            route = route,
+            networkActionsEnabled = true,
+            networkActionMessage = null,
+            ticketTransportReady = true,
+            streamUrlFactoryReady = true,
+            streamingHttpClientReady = true,
+        ) as PlaybackLaunchDecision.Launch
+
+        listOf(phoneDecision.route, tvDecision.route).forEach { launchedRoute ->
+            assertEquals("target-media-id", launchedRoute.targetMediaId)
+            assertEquals("logical-media-id", launchedRoute.logicalMediaId)
+            assertEquals(route, launchedRoute)
+        }
+    }
+
+    @Test
+    fun launchPolicyBlocksOfflineAndMissingSubstrateWithoutRewritingRoute() {
+        val route = playbackRoute(startOver = true)
+
+        val offline = PlaybackLaunchPolicy.phone(
+            route = route,
+            networkActionsEnabled = false,
+            networkActionMessage = "Reconnect before starting playback.",
+            ticketTransportReady = true,
+            streamUrlFactoryReady = true,
+            streamingHttpClientReady = true,
+        )
+        val missingSubstrate = PlaybackLaunchPolicy.tv(
+            route = route,
+            networkActionsEnabled = true,
+            networkActionMessage = null,
+            ticketTransportReady = false,
+            streamUrlFactoryReady = true,
+            streamingHttpClientReady = true,
+        )
+
+        assertEquals("Reconnect before starting playback.", (offline as PlaybackLaunchDecision.Blocked).message)
+        assertEquals(PlaybackLaunchPolicy.MISSING_SUBSTRATE_MESSAGE, (missingSubstrate as PlaybackLaunchDecision.Blocked).message)
+    }
+
+    @Test
     fun fetchTicketUsesAuthenticatedTicketRouteAndBuildsTicketedStreamUrl() = runTest {
         MockWebServer().use { server ->
             server.enqueue(
@@ -48,6 +101,24 @@ class PlaybackFoundationTest {
             assertTrue(streamUrl.contains("access_token=playback-ticket-secret"))
             assertFalse(streamUrl.contains("full-session-secret"))
         }
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun controllerFetchesTicketsForTargetMediaFileIdNotLogicalId() = runTest {
+        val transport = FakeTicketTransport { ApiResult.Success(PlaybackTicket("ticket", 60)) }
+        val controller = playbackController(
+            scope = this,
+            transport = transport,
+            maxRetries = 0,
+            onSessionInvalidated = {},
+        )
+
+        controller.prepare()
+        advanceUntilIdle()
+
+        assertTrue(controller.state.value is PlaybackPlayerState.Ready)
+        assertEquals(listOf("target-media-id"), transport.requestedMediaIds)
     }
 
     @Test
@@ -474,9 +545,11 @@ private class FakeTicketTransport(
 ) : PlaybackTicketTransport {
     var fetchCount: Int = 0
         private set
+    val requestedMediaIds = mutableListOf<String>()
 
     override suspend fun fetchTicket(mediaId: String): ApiResult<PlaybackTicket> {
         fetchCount += 1
+        requestedMediaIds += mediaId
         return response(fetchCount)
     }
 }

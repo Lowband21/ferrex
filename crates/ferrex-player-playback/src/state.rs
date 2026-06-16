@@ -1,6 +1,10 @@
+use crate::diagnostics::redact_playback_url;
 use ferrex_core::player_prelude::{MediaFile, MediaID};
 use iced::ContentFit;
-use std::time::{Duration, Instant};
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 use subwave_core::video::types::{AudioTrack, SubtitleTrack};
 use subwave_unified::video::SubwaveVideo;
 
@@ -8,12 +12,13 @@ use subwave_unified::video::SubwaveVideo;
 pub const SEEK_BAR_VISUAL_HEIGHT: f32 = 4.0; // The visible bar height
 pub const SEEK_BAR_CLICK_TOLERANCE_MULTIPLIER: f32 = 7.0; // Allow clicks within 7x the visual bar height
 
-#[derive(Debug)]
 pub struct PlayerDomainState {
     // Current media
     pub current_media: Option<MediaFile>,
     pub current_media_id: Option<MediaID>,
     pub current_url: Option<url::Url>,
+    pub is_resolving_stream_url: bool,
+    pub stream_url_resolution_failed: bool,
 
     // Video instance (unified)
     pub video_opt: Option<SubwaveVideo>,
@@ -83,6 +88,68 @@ pub struct PlayerDomainState {
     pub external_mpv_active: bool,
 }
 
+impl fmt::Debug for PlayerDomainState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let current_url = self
+            .current_url
+            .as_ref()
+            .map(|url| redact_playback_url(url.as_str()));
+        let video_opt = self.video_opt.as_ref().map(|_| "SubwaveVideo(..)");
+
+        f.debug_struct("PlayerDomainState")
+            .field("current_media", &self.current_media)
+            .field("current_media_id", &self.current_media_id)
+            .field("current_url", &current_url)
+            .field("is_resolving_stream_url", &self.is_resolving_stream_url)
+            .field(
+                "stream_url_resolution_failed",
+                &self.stream_url_resolution_failed,
+            )
+            .field("video_opt", &video_opt)
+            .field("last_progress_update", &self.last_progress_update)
+            .field("last_progress_sent", &self.last_progress_sent)
+            .field("pending_resume_position", &self.pending_resume_position)
+            .field("buffered_percentage", &self.buffered_percentage)
+            .field("dragging", &self.dragging)
+            .field("last_seek_position", &self.last_seek_position)
+            .field("last_mouse_y", &self.last_mouse_y)
+            .field("seek_bar_hovered", &self.seek_bar_hovered)
+            .field("seeking", &self.seeking)
+            .field("seek_started_time", &self.seek_started_time)
+            .field("controls", &self.controls)
+            .field("controls_time", &self.controls_time)
+            .field("is_fullscreen", &self.is_fullscreen)
+            .field("volume", &self.volume)
+            .field("is_muted", &self.is_muted)
+            .field("playback_speed", &self.playback_speed)
+            .field("content_fit", &self.content_fit)
+            .field("is_shuffle_enabled", &self.is_shuffle_enabled)
+            .field("is_repeat_enabled", &self.is_repeat_enabled)
+            .field("show_settings", &self.show_settings)
+            .field("last_click_time", &self.last_click_time)
+            .field("available_audio_tracks", &self.available_audio_tracks)
+            .field("current_audio_track", &self.current_audio_track)
+            .field("available_subtitle_tracks", &self.available_subtitle_tracks)
+            .field("current_subtitle_track", &self.current_subtitle_track)
+            .field("last_subtitle_track", &self.last_subtitle_track)
+            .field("subtitles_enabled", &self.subtitles_enabled)
+            .field("track_notification", &self.track_notification)
+            .field("show_subtitle_menu", &self.show_subtitle_menu)
+            .field("show_quality_menu", &self.show_quality_menu)
+            .field("current_quality_profile", &self.current_quality_profile)
+            .field("last_seek_time", &self.last_seek_time)
+            .field("pending_seek_position", &self.pending_seek_position)
+            .field("last_valid_position", &self.last_valid_position)
+            .field("last_valid_duration", &self.last_valid_duration)
+            .field("is_hdr_content", &self.is_hdr_content)
+            .field("is_loading_video", &self.is_loading_video)
+            .field("source_duration", &self.source_duration)
+            .field("external_mpv_handle", &self.external_mpv_handle)
+            .field("external_mpv_active", &self.external_mpv_active)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TrackNotification {
     pub message: String,
@@ -95,6 +162,8 @@ impl Default for PlayerDomainState {
             current_media: None,
             current_media_id: None,
             current_url: None,
+            is_resolving_stream_url: false,
+            stream_url_resolution_failed: false,
             video_opt: None,
             last_progress_update: None,
             last_progress_sent: 0.0,
@@ -140,6 +209,26 @@ impl Default for PlayerDomainState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_current_stream_access_token() {
+        let mut state = PlayerDomainState::default();
+        state.current_url = Some(
+            "https://ferrex.example/api/v1/stream/file?access_token=raw-secret"
+                .parse()
+                .expect("valid url"),
+        );
+
+        let debug = format!("{state:?}");
+
+        assert!(debug.contains("access_token=<redacted>"));
+        assert!(!debug.contains("raw-secret"));
+    }
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -153,6 +242,8 @@ impl PlayerDomainState {
         self.current_media = None;
         self.current_media_id = None;
         self.current_url = None;
+        self.is_resolving_stream_url = false;
+        self.stream_url_resolution_failed = false;
         self.video_opt = None;
         self.last_progress_update = None;
         self.last_progress_sent = 0.0;

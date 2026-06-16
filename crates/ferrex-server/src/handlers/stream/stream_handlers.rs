@@ -218,8 +218,8 @@ pub async fn stream_with_progress_handler(
             Ok(validated) => match validated.scope {
                 SessionScope::Full | SessionScope::Playback => {}
             },
-            Err(err) => {
-                warn!("Stream token validation failed: {:?}", err);
+            Err(_) => {
+                warn!("stream token validation failed");
                 return Err(PlaybackHttpError::invalid_token());
             }
         }
@@ -320,6 +320,12 @@ pub struct PlaybackTicketResponse {
 }
 
 /// Issue a short-lived playback token suitable for query-string embedding.
+///
+/// Tickets intentionally reuse persisted `SessionScope::Playback` sessions
+/// rather than a media-bound token table so expiry, revocation, and device
+/// binding stay on the existing auth path. The general auth middleware rejects
+/// playback-scoped sessions for account/admin APIs; only this stream endpoint
+/// accepts them for media delivery.
 pub async fn playback_ticket_handler(
     State(state): State<AppState>,
     Extension(user): Extension<User>,

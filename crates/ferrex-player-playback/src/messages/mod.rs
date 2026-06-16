@@ -51,6 +51,8 @@ pub enum PlayerMessage {
     PlayExternal,
     // Internal: set resolved stream URL and trigger playback
     SetStreamUrl(String),
+    // Internal: surface stream authorization failures before opening a renderer
+    StreamUrlResolutionFailed(String),
 
     // UI control
     ShowControls,
@@ -147,6 +149,9 @@ impl fmt::Debug for PlayerMessage {
             PlayerMessage::PlayExternal => write!(f, "PlayExternal"),
             PlayerMessage::SetStreamUrl(_) => {
                 write!(f, "SetStreamUrl(<redacted>)")
+            }
+            PlayerMessage::StreamUrlResolutionFailed(_) => {
+                write!(f, "StreamUrlResolutionFailed(<redacted>)")
             }
 
             // UI control
