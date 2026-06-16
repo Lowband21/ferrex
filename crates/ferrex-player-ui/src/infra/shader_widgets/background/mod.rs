@@ -17,7 +17,8 @@ use crate::{
 
 use bytemuck::{Pod, Zeroable};
 use ferrex_core::player_prelude::{
-    TheaterPlateAnalysis, TheaterPlateColor, TheaterPlateGrade,
+    TheaterPlateAnalysis, TheaterPlateAnalyzer, TheaterPlateColor,
+    TheaterPlateGrade, TheaterPlateSourceContext, TheaterPlateViewport,
 };
 
 use iced::{
@@ -81,7 +82,7 @@ pub struct TheaterPlateUniforms {
     pub focused_plate: [f32; 4],
     /// Plate mask: opacity, corner radius px, feather px, side falloff.
     pub plate_mask: [f32; 4],
-    /// Scrim masks: opacity, top feather UV, bottom feather UV, side falloff.
+    /// Scrim masks: opacity, scrim top UV, scrim bottom UV, side falloff.
     pub scrim_masks: [f32; 4],
     /// Vignette/grain controls: vignette opacity, grain opacity, radius, softness.
     pub vignette_grain: [f32; 4],
@@ -102,6 +103,32 @@ impl Default for TheaterPlateUniforms {
             vignette_grain: [0.42, 0.016, 0.24, 0.82],
             highlight_grade: [0.34, 0.08, 0.0, 0.0],
             transition: [1.0, 1.0, 1.0, 0.0],
+        }
+    }
+}
+
+/// Shader-ready Theater Plate geometry derived from a detail route layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TheaterPlateGeometry {
+    pub focused_plate: [f32; 4],
+    pub plate_mask: [f32; 4],
+    pub scrim_masks: [f32; 4],
+    pub ambient_opacity_scale: f32,
+    pub vignette_opacity: f32,
+    pub grain_opacity_scale: f32,
+    pub backdrop_opacity: f32,
+}
+
+impl Default for TheaterPlateGeometry {
+    fn default() -> Self {
+        Self {
+            focused_plate: TheaterPlateUniforms::default().focused_plate,
+            plate_mask: TheaterPlateUniforms::default().plate_mask,
+            scrim_masks: TheaterPlateUniforms::default().scrim_masks,
+            ambient_opacity_scale: 1.0,
+            vignette_opacity: TheaterPlateUniforms::default().vignette_grain[0],
+            grain_opacity_scale: 1.0,
+            backdrop_opacity: 1.0,
         }
     }
 }
@@ -142,6 +169,55 @@ impl TheaterPlateScene {
         let ambient = ambient_image_from_analysis(cache_key, analysis);
         let uniforms = uniforms_from_analysis(analysis);
         Self { uniforms, ambient }
+    }
+
+    /// Build a fallback Theater Plate stage when no usable backdrop texture is available.
+    pub fn missing_backdrop_from_colors(
+        cache_key: u64,
+        viewport: TheaterPlateViewport,
+        poster_color: Option<TheaterPlateColor>,
+        theme_color: Option<TheaterPlateColor>,
+        default_color: TheaterPlateColor,
+    ) -> Self {
+        let context = TheaterPlateSourceContext::missing_backdrop(viewport)
+            .with_poster_color(poster_color)
+            .with_theme_color(theme_color)
+            .with_default_color(default_color);
+        let analysis =
+            TheaterPlateAnalyzer::default().analyze_missing_backdrop(context);
+        Self::from_analysis(cache_key, &analysis)
+    }
+
+    /// Apply layout-derived readability geometry while preserving image grade decisions.
+    pub fn with_geometry(mut self, geometry: TheaterPlateGeometry) -> Self {
+        self.uniforms.focused_plate = geometry.focused_plate;
+        self.uniforms.plate_mask = [
+            self.uniforms.plate_mask[0]
+                .max(geometry.plate_mask[0])
+                .clamp(0.0, 1.0),
+            geometry.plate_mask[1].max(0.0),
+            geometry.plate_mask[2].max(1.0),
+            geometry.plate_mask[3].clamp(0.0, 0.85),
+        ];
+        self.uniforms.scrim_masks = [
+            self.uniforms.scrim_masks[0]
+                .max(geometry.scrim_masks[0])
+                .clamp(0.0, 1.0),
+            geometry.scrim_masks[1].clamp(0.001, 1.0),
+            geometry.scrim_masks[2].clamp(0.001, 1.0),
+            geometry.scrim_masks[3].clamp(0.0, 0.85),
+        ];
+        self.uniforms.ambient_field[0] = (self.uniforms.ambient_field[0]
+            * geometry.ambient_opacity_scale)
+            .clamp(0.0, 1.0);
+        self.uniforms.vignette_grain[0] = self.uniforms.vignette_grain[0]
+            .max(geometry.vignette_opacity)
+            .clamp(0.0, 1.0);
+        self.uniforms.vignette_grain[1] = (self.uniforms.vignette_grain[1]
+            * geometry.grain_opacity_scale)
+            .clamp(0.0, 0.08);
+        self.uniforms.transition[1] = geometry.backdrop_opacity.clamp(0.0, 1.0);
+        self
     }
 
     /// Build a cheap solid ambient field while the analysis sidecar is not ready.
@@ -320,6 +396,63 @@ fn theater_plate_soft_rect_alpha(
     let inside = q[0].max(q[1]).min(0.0);
     let distance = outside_len + inside - radius_px;
     1.0 - smoothstep(0.0, feather_px.max(0.0001), distance)
+}
+
+#[cfg(test)]
+fn theater_plate_lobe_alpha(
+    uv: [f32; 2],
+    center: [f32; 2],
+    half_size: [f32; 2],
+    feather: f32,
+) -> f32 {
+    fn ellipse(
+        uv: [f32; 2],
+        center: [f32; 2],
+        half_size: [f32; 2],
+        feather: f32,
+    ) -> f32 {
+        let dx = (uv[0] - center[0]) / half_size[0].max(0.001);
+        let dy = (uv[1] - center[1]) / half_size[1].max(0.001);
+        let d = (dx * dx + dy * dy).sqrt();
+        1.0 - smoothstep(1.0 - feather * 0.35, 1.0 + feather, d)
+    }
+
+    let feather = feather.clamp(0.18, 0.85);
+    let title = ellipse(
+        uv,
+        [
+            center[0] - half_size[0] * 0.16,
+            center[1] - half_size[1] * 0.24,
+        ],
+        [half_size[0] * 0.92, half_size[1] * 0.58],
+        feather,
+    );
+    let metadata = ellipse(
+        uv,
+        [
+            center[0] + half_size[0] * 0.18,
+            center[1] + half_size[1] * 0.02,
+        ],
+        [half_size[0] * 0.72, half_size[1] * 0.48],
+        feather,
+    ) * 0.86;
+    let actions = ellipse(
+        uv,
+        [
+            center[0] - half_size[0] * 0.08,
+            center[1] + half_size[1] * 0.36,
+        ],
+        [half_size[0] * 0.82, half_size[1] * 0.40],
+        feather,
+    ) * 0.78;
+    let floor = ellipse(
+        uv,
+        [center[0], center[1] + half_size[1] * 0.56],
+        [half_size[0] * 1.10, half_size[1] * 0.34],
+        feather,
+    ) * 0.50;
+
+    title.max(metadata).max(actions).max(floor).clamp(0.0, 1.0)
 }
 
 // ===== Region-Based Depth System =====
@@ -2008,6 +2141,63 @@ mod tests {
         assert!((0.0..1.0).contains(&edge), "edge alpha was {edge}");
         assert!(outside < 0.05);
         assert!(inside > edge && edge > outside);
+    }
+
+    #[test]
+    fn theater_plate_lobe_mask_uses_gradient_scene_shadows() {
+        let center = [0.58, 0.42];
+        let half = [0.28, 0.22];
+        let center_alpha = theater_plate_lobe_alpha(center, center, half, 0.64);
+        let shoulder_alpha = theater_plate_lobe_alpha(
+            [center[0] + half[0] * 0.92, center[1]],
+            center,
+            half,
+            0.64,
+        );
+        let corner_alpha = theater_plate_lobe_alpha(
+            [center[0] + half[0] * 0.92, center[1] + half[1] * 0.92],
+            center,
+            half,
+            0.64,
+        );
+        let outside_alpha = theater_plate_lobe_alpha(
+            [center[0] + half[0] * 1.95, center[1] + half[1] * 1.50],
+            center,
+            half,
+            0.64,
+        );
+
+        assert!(center_alpha > 0.90);
+        assert!((0.0..1.0).contains(&shoulder_alpha));
+        assert!(corner_alpha < shoulder_alpha);
+        assert!(outside_alpha < 0.10);
+    }
+
+    #[test]
+    fn theater_plate_geometry_applies_layout_controls_to_scene() {
+        let scene = TheaterPlateScene::fallback_from_colors(
+            42,
+            Color::from_rgb(0.1, 0.2, 0.3),
+            Color::from_rgb(0.5, 0.4, 0.3),
+        )
+        .with_geometry(TheaterPlateGeometry {
+            focused_plate: [0.64, 0.44, 0.26, 0.18],
+            plate_mask: [0.72, 52.0, 144.0, 0.58],
+            scrim_masks: [0.70, 0.16, 0.44, 0.58],
+            ambient_opacity_scale: 0.7,
+            vignette_opacity: 0.62,
+            grain_opacity_scale: 1.2,
+            backdrop_opacity: 0.0,
+        });
+
+        assert_eq!(scene.uniforms.focused_plate, [0.64, 0.44, 0.26, 0.18]);
+        assert_eq!(scene.uniforms.plate_mask[1], 52.0);
+        assert_eq!(scene.uniforms.plate_mask[2], 144.0);
+        assert_eq!(scene.uniforms.plate_mask[3], 0.58);
+        assert!(scene.uniforms.plate_mask[0] >= 0.72);
+        assert!(scene.uniforms.scrim_masks[0] >= 0.70);
+        assert!(scene.uniforms.ambient_field[0] < 0.52);
+        assert_eq!(scene.uniforms.transition[1], 0.0);
     }
 
     #[test]

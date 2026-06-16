@@ -90,7 +90,10 @@ fn cache_theater_plate_analysis_from_encoded_bytes(
     request: &ImageRequest,
     bytes: &[u8],
 ) {
-    if !matches!(request.size, ImageSize::Backdrop(_)) {
+    if !matches!(
+        request.size,
+        ImageSize::Backdrop(_) | ImageSize::Poster(_) | ImageSize::Thumbnail(_)
+    ) {
         return;
     }
 
@@ -106,7 +109,7 @@ fn cache_theater_plate_analysis_from_encoded_bytes(
         Ok(decoded) => decoded,
         Err(err) => {
             log::debug!(
-                "Theater Plate backdrop analysis decode failed (iid={}, size={:?}, err={})",
+                "Theater Plate image analysis decode failed (iid={}, size={:?}, err={})",
                 request.iid,
                 request.size,
                 err
@@ -131,7 +134,7 @@ fn cache_theater_plate_analysis_from_encoded_bytes(
         }
         Err(err) => {
             log::debug!(
-                "Theater Plate backdrop analysis failed (iid={}, size={:?}, err={})",
+                "Theater Plate image analysis failed (iid={}, size={:?}, err={})",
                 request.iid,
                 request.size,
                 err

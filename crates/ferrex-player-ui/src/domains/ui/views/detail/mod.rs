@@ -25,8 +25,8 @@ pub use layout::{
     DetailActionClusterLayout, DetailArtAspect, DetailArtLayout, DetailAxis,
     DetailBackdropLayout, DetailComposition, DetailInterfaceMode,
     DetailLayoutInput, DetailLayoutPlan, DetailRailLayout,
-    DetailSectionGridLayout, solve_detail_layout,
-    solve_detail_layout_from_runtime,
+    DetailSectionGridLayout, DetailTheaterPlateLayout, DetailTheaterPlateRect,
+    solve_detail_layout, solve_detail_layout_from_runtime,
 };
 pub use model::{
     DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,

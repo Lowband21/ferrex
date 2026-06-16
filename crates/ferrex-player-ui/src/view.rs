@@ -8,6 +8,10 @@ use crate::domains::ui::views::admin::{
     view_admin_dashboard, view_admin_users, view_library_management,
 };
 use crate::domains::ui::views::auth::view_auth;
+use crate::domains::ui::views::detail::{
+    DetailArtAspect, DetailLayoutInput, DetailTheaterPlateLayout,
+    solve_detail_layout,
+};
 use crate::domains::ui::views::header::view_header;
 use crate::domains::ui::views::library::view_library;
 use crate::domains::ui::views::library_controls_bar::view_library_controls_bar;
@@ -27,11 +31,13 @@ use crate::domains::ui::views::tv::{
 use crate::domains::ui::views::{view_loading_video, view_video_error};
 use crate::domains::ui::widgets::BackgroundEffect;
 use crate::domains::{player, ui};
-use crate::infra::shader_widgets::background::TheaterPlateScene;
+use crate::infra::shader_widgets::background::{
+    TheaterPlateGeometry, TheaterPlateScene,
+};
 use crate::state::State;
 use ferrex_core::player_prelude::{
-    ImageRequest, Media, MediaID, TheaterPlateViewport,
-    theater_plate_backdrop_size_for_viewport,
+    EpisodeSize, ImageRequest, ImageSize, Media, MediaID, TheaterPlateColor,
+    TheaterPlateViewport, theater_plate_backdrop_size_for_viewport,
 };
 use iced::widget::{Space, Stack, column, container, scrollable};
 use iced::{Element, Font, Length, Theme};
@@ -242,114 +248,57 @@ pub fn view(
             .background_shader_state
             .build_shader(&state.domains.ui.state.view);
 
-        let backdrop_iid = match &state.domains.ui.state.view {
-            ViewState::MovieDetail { movie_id, .. } => state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get(&MediaID::Movie(*movie_id))
-                .ok()
-                .and_then(|m| match m {
-                    Media::Movie(mr) => mr.details.primary_backdrop_iid,
-                    _ => None,
-                }),
-            ViewState::SeriesDetail { series_id, .. } => state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get(&MediaID::Series(*series_id))
-                .ok()
-                .and_then(|m| match m {
-                    Media::Series(sr) => sr.details.primary_backdrop_iid,
-                    _ => None,
-                }),
-            ViewState::SeasonDetail { series_id, .. } => state
-                .domains
-                .ui
-                .state
-                .repo_accessor
-                .get(&MediaID::Series(*series_id))
-                .ok()
-                .and_then(|m| match m {
-                    Media::Series(sr) => sr.details.primary_backdrop_iid,
-                    _ => None,
-                }),
-            _ => None,
-        };
-
-        let backdrop_request = backdrop_iid.map(|iid| {
-            ImageRequest::new(
-                iid,
-                theater_plate_backdrop_size_for_viewport(
-                    TheaterPlateViewport::from_logical_size(
-                        state.window_size.width,
-                        state.window_size.height,
-                    ),
-                ),
-            )
-        });
-        let backdrop_handle = backdrop_request
-            .as_ref()
-            .and_then(|request| state.image_service.get(request));
-        let theater_plate_scene = backdrop_request.as_ref().map(|request| {
-            let cache_key = theater_plate_cache_key(request);
-            state
-                .image_service
-                .get_theater_plate_analysis(request)
+        if let Some(context) = detail_theater_plate_context(state) {
+            let source_request = context.source.request.as_ref();
+            let visual_handle = source_request
+                .filter(|_| {
+                    context.source.role == TheaterPlateImageRole::Visual
+                })
+                .and_then(|request| state.image_service.get(request));
+            let cache_key = source_request
+                .map(theater_plate_cache_key)
+                .unwrap_or_else(|| theater_plate_fallback_cache_key(state));
+            let scene = source_request
+                .and_then(|request| {
+                    state.image_service.get_theater_plate_analysis(request)
+                })
                 .map(|analysis| {
                     TheaterPlateScene::from_analysis(cache_key, &analysis)
                 })
                 .unwrap_or_else(|| {
-                    TheaterPlateScene::fallback_from_colors(
+                    TheaterPlateScene::missing_backdrop_from_colors(
                         cache_key ^ 0x7a45_706c_6174_6521,
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .primary_color,
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .secondary_color,
+                        context.viewport,
+                        context.source.poster_color,
+                        context.source.theme_color,
+                        context.source.default_color,
                     )
                 })
-        });
+                .with_geometry(theater_plate_geometry_from_layout(
+                    context.layout,
+                    if visual_handle.is_some() {
+                        context.layout.backdrop_opacity
+                    } else {
+                        0.0
+                    },
+                ));
 
-        // Add backdrop if available
-        if let Some(handle) = backdrop_handle {
-            if let Some(scene) = theater_plate_scene {
-                bg_shader = bg_shader
-                    .effect(BackgroundEffect::TheaterPlate)
-                    .backdrop(handle)
-                    .theater_plate(scene)
-                    .backdrop_aspect_mode(
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .backdrop_aspect_mode,
-                    );
-            } else {
-                bg_shader = bg_shader
-                    .effect(BackgroundEffect::BackdropGradient)
-                    .backdrop(handle)
-                    .backdrop_aspect_mode(
-                        state
-                            .domains
-                            .ui
-                            .state
-                            .background_shader_state
-                            .backdrop_aspect_mode,
-                    );
+            bg_shader = bg_shader
+                .effect(BackgroundEffect::TheaterPlate)
+                .theater_plate(scene)
+                .backdrop_aspect_mode(
+                    state
+                        .domains
+                        .ui
+                        .state
+                        .background_shader_state
+                        .backdrop_aspect_mode,
+                );
+
+            if let Some(handle) = visual_handle {
+                bg_shader = bg_shader.backdrop(handle);
             }
         } else {
-            // No backdrop, use gradient effect
             bg_shader = bg_shader.effect(BackgroundEffect::Gradient);
         }
         // Create a stack with background as base layer
@@ -422,6 +371,310 @@ pub fn view(
     } else {
         with_search_overlay
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TheaterPlateImageRole {
+    Visual,
+    AmbientOnly,
+}
+
+#[derive(Debug, Clone)]
+struct TheaterPlateSource {
+    request: Option<ImageRequest>,
+    role: TheaterPlateImageRole,
+    poster_color: Option<TheaterPlateColor>,
+    theme_color: Option<TheaterPlateColor>,
+    default_color: TheaterPlateColor,
+}
+
+#[derive(Debug, Clone)]
+struct DetailTheaterPlateContext {
+    layout: DetailTheaterPlateLayout,
+    viewport: TheaterPlateViewport,
+    source: TheaterPlateSource,
+}
+
+fn detail_theater_plate_context(
+    state: &State,
+) -> Option<DetailTheaterPlateContext> {
+    let view = &state.domains.ui.state.view;
+    let aspect = match view {
+        ViewState::EpisodeDetail { .. } => DetailArtAspect::Still,
+        ViewState::MovieDetail { .. }
+        | ViewState::SeriesDetail { .. }
+        | ViewState::SeasonDetail { .. } => DetailArtAspect::Poster,
+        _ => return None,
+    };
+
+    let viewport = TheaterPlateViewport::from_logical_size(
+        state.window_size.width,
+        state.window_size.height,
+    );
+    let layout_plan = solve_detail_layout(
+        DetailLayoutInput::from_runtime(
+            state.window_size.width,
+            state.window_size.height,
+            view.header_height().unwrap_or(0.0),
+            state.interface_mode,
+            &state.domains.ui.state.size_provider,
+            &state.domains.ui.state.scaled_layout,
+        )
+        .with_hero_art_aspect(aspect),
+    );
+    let layout = layout_plan.theater_plate_layout(
+        state.domains.ui.state.background_shader_state.scroll_offset,
+    );
+
+    Some(DetailTheaterPlateContext {
+        layout,
+        viewport,
+        source: theater_plate_source_for_view(state, view, viewport),
+    })
+}
+
+fn theater_plate_source_for_view(
+    state: &State,
+    view: &ViewState,
+    viewport: TheaterPlateViewport,
+) -> TheaterPlateSource {
+    let backdrop_size = theater_plate_backdrop_size_for_viewport(viewport);
+    let detail_poster_size =
+        state.domains.settings.display.detail_poster_quality;
+    let mut source = TheaterPlateSource {
+        request: None,
+        role: TheaterPlateImageRole::AmbientOnly,
+        poster_color: None,
+        theme_color: None,
+        default_color: theater_plate_color_from_iced(
+            state.domains.ui.state.background_shader_state.primary_color,
+        )
+        .unwrap_or(TheaterPlateColor::DEFAULT_STAGE),
+    };
+
+    match view {
+        ViewState::MovieDetail { movie_id, .. } => {
+            if let Ok(Media::Movie(movie)) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Movie(*movie_id))
+            {
+                source.theme_color = movie
+                    .theme_color
+                    .as_deref()
+                    .and_then(TheaterPlateColor::from_hex);
+                if let Some(iid) = movie.details.primary_backdrop_iid {
+                    source.request =
+                        Some(ImageRequest::new(iid, backdrop_size));
+                    source.role = TheaterPlateImageRole::Visual;
+                } else if let Some(iid) = movie.details.primary_poster_iid {
+                    source.request = Some(ImageRequest::new(
+                        iid,
+                        ImageSize::Poster(detail_poster_size),
+                    ));
+                    source.role = TheaterPlateImageRole::AmbientOnly;
+                }
+            }
+        }
+        ViewState::SeriesDetail { series_id, .. } => {
+            if let Ok(Media::Series(series)) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Series(*series_id))
+            {
+                source.theme_color = series
+                    .theme_color
+                    .as_deref()
+                    .and_then(TheaterPlateColor::from_hex);
+                if let Some(iid) = series.details.primary_backdrop_iid {
+                    source.request =
+                        Some(ImageRequest::new(iid, backdrop_size));
+                    source.role = TheaterPlateImageRole::Visual;
+                } else if let Some(iid) = series.details.primary_poster_iid {
+                    source.request = Some(ImageRequest::new(
+                        iid,
+                        ImageSize::Poster(detail_poster_size),
+                    ));
+                    source.role = TheaterPlateImageRole::AmbientOnly;
+                }
+            }
+        }
+        ViewState::SeasonDetail {
+            series_id,
+            season_id,
+            ..
+        } => {
+            if let Ok(Media::Season(season)) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Season(*season_id))
+            {
+                source.theme_color = season
+                    .theme_color
+                    .as_deref()
+                    .and_then(TheaterPlateColor::from_hex);
+                if let Some(iid) = season.details.primary_poster_iid {
+                    source.request = Some(ImageRequest::new(
+                        iid,
+                        ImageSize::Poster(detail_poster_size),
+                    ));
+                    source.role = TheaterPlateImageRole::AmbientOnly;
+                }
+            }
+            if let Ok(Media::Series(series)) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Series(*series_id))
+            {
+                source.theme_color = source.theme_color.or_else(|| {
+                    series
+                        .theme_color
+                        .as_deref()
+                        .and_then(TheaterPlateColor::from_hex)
+                });
+                if let Some(iid) = series.details.primary_backdrop_iid {
+                    source.request =
+                        Some(ImageRequest::new(iid, backdrop_size));
+                    source.role = TheaterPlateImageRole::Visual;
+                }
+            }
+        }
+        ViewState::EpisodeDetail { episode_id, .. } => {
+            if let Ok(Media::Episode(episode)) = state
+                .domains
+                .ui
+                .state
+                .repo_accessor
+                .get(&MediaID::Episode(*episode_id))
+            {
+                if let Some(iid) = episode.details.primary_still_iid {
+                    source.request = Some(ImageRequest::new(
+                        iid,
+                        ImageSize::Thumbnail(EpisodeSize::W512),
+                    ));
+                    source.role = TheaterPlateImageRole::Visual;
+                }
+                if let Ok(Media::Season(season)) = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get(&MediaID::Season(episode.season_id))
+                {
+                    source.theme_color = season
+                        .theme_color
+                        .as_deref()
+                        .and_then(TheaterPlateColor::from_hex);
+                    if source.request.is_none()
+                        && let Some(iid) = season.details.primary_poster_iid
+                    {
+                        source.request = Some(ImageRequest::new(
+                            iid,
+                            ImageSize::Poster(detail_poster_size),
+                        ));
+                        source.role = TheaterPlateImageRole::AmbientOnly;
+                    }
+                }
+                if let Ok(Media::Series(series)) = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get(&MediaID::Series(episode.series_id))
+                {
+                    source.theme_color = source.theme_color.or_else(|| {
+                        series
+                            .theme_color
+                            .as_deref()
+                            .and_then(TheaterPlateColor::from_hex)
+                    });
+                    if source.request.is_none()
+                        && let Some(iid) = series.details.primary_poster_iid
+                    {
+                        source.request = Some(ImageRequest::new(
+                            iid,
+                            ImageSize::Poster(detail_poster_size),
+                        ));
+                        source.role = TheaterPlateImageRole::AmbientOnly;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    source.poster_color = source.theme_color.or_else(|| {
+        theater_plate_color_from_iced(
+            state
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .secondary_color,
+        )
+    });
+    source
+}
+
+fn theater_plate_geometry_from_layout(
+    layout: DetailTheaterPlateLayout,
+    backdrop_opacity: f32,
+) -> TheaterPlateGeometry {
+    let center = layout.plate_rect.center();
+    let half = layout.plate_rect.half_size();
+    TheaterPlateGeometry {
+        focused_plate: [center[0], center[1], half[0], half[1]],
+        plate_mask: [
+            layout.plate_opacity,
+            layout.plate_radius_px,
+            layout.plate_feather_px,
+            layout.side_falloff,
+        ],
+        scrim_masks: [
+            layout.scrim_opacity,
+            layout.scrim_rect.y,
+            layout.scrim_rect.bottom(),
+            layout.side_falloff,
+        ],
+        ambient_opacity_scale: layout.ambient_opacity_scale,
+        vignette_opacity: layout.vignette_opacity,
+        grain_opacity_scale: layout.grain_opacity_scale,
+        backdrop_opacity,
+    }
+}
+
+fn theater_plate_color_from_iced(
+    color: iced::Color,
+) -> Option<TheaterPlateColor> {
+    if !color.r.is_finite() || !color.g.is_finite() || !color.b.is_finite() {
+        return None;
+    }
+
+    Some(TheaterPlateColor::rgb(
+        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    ))
+}
+
+fn theater_plate_fallback_cache_key(state: &State) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "theater-plate-fallback".hash(&mut hasher);
+    format!("{:?}", state.domains.ui.state.view).hash(&mut hasher);
+    if let Some(color) = theater_plate_color_from_iced(
+        state.domains.ui.state.background_shader_state.primary_color,
+    ) {
+        color.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn theater_plate_cache_key(request: &ImageRequest) -> u64 {

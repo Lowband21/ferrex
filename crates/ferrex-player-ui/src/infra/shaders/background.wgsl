@@ -60,7 +60,7 @@ struct TheaterPlateUniforms {
     ambient_field: vec4<f32>,    // offset 16, size 16
     focused_plate: vec4<f32>,    // offset 32, size 16
     plate_mask: vec4<f32>,       // offset 48, size 16
-    scrim_masks: vec4<f32>,      // offset 64, size 16
+    scrim_masks: vec4<f32>,      // offset 64: opacity, top UV, bottom UV, side falloff
     vignette_grain: vec4<f32>,   // offset 80, size 16
     highlight_grade: vec4<f32>,  // offset 96, size 16
     transition: vec4<f32>,       // progress, backdrop opacity, ambient transition, reserved (offset 112, size 16)
@@ -550,6 +550,53 @@ fn rounded_plate_alpha(
     return 1.0 - smoothstep(0.0, max(feather_px, 0.0001), signed_distance);
 }
 
+fn ellipse_lobe_alpha(
+    uv: vec2<f32>,
+    center: vec2<f32>,
+    half_size: vec2<f32>,
+    feather: f32,
+) -> f32 {
+    let p = (uv - center) / max(half_size, vec2<f32>(0.001));
+    let d = length(p);
+    return 1.0 - smoothstep(1.0 - feather * 0.35, 1.0 + feather, d);
+}
+
+fn readability_lobes_alpha(
+    uv: vec2<f32>,
+    center: vec2<f32>,
+    half_size: vec2<f32>,
+    feather: f32,
+) -> f32 {
+    let safe_half = max(half_size, vec2<f32>(0.001));
+    let lobe_feather = clamp(feather, 0.18, 0.85);
+    let title = ellipse_lobe_alpha(
+        uv,
+        center + vec2<f32>(-safe_half.x * 0.16, -safe_half.y * 0.24),
+        safe_half * vec2<f32>(0.92, 0.58),
+        lobe_feather,
+    );
+    let metadata = ellipse_lobe_alpha(
+        uv,
+        center + vec2<f32>(safe_half.x * 0.18, safe_half.y * 0.02),
+        safe_half * vec2<f32>(0.72, 0.48),
+        lobe_feather,
+    ) * 0.86;
+    let actions = ellipse_lobe_alpha(
+        uv,
+        center + vec2<f32>(-safe_half.x * 0.08, safe_half.y * 0.36),
+        safe_half * vec2<f32>(0.82, 0.40),
+        lobe_feather,
+    ) * 0.78;
+    let floor = ellipse_lobe_alpha(
+        uv,
+        center + vec2<f32>(0.0, safe_half.y * 0.56),
+        safe_half * vec2<f32>(1.10, 0.34),
+        lobe_feather,
+    ) * 0.50;
+
+    return clamp(max(max(title, metadata), max(actions, floor)), 0.0, 1.0);
+}
+
 fn apply_highlight_compression(color: vec3<f32>, amount: f32) -> vec3<f32> {
     let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     let highlight = smoothstep(0.55, 1.0, luma);
@@ -665,22 +712,27 @@ fn theater_plate_stack(
     let left_side = 1.0 - smoothstep(0.0, max(side_falloff, 0.001), uv.x);
     let right_side = smoothstep(1.0 - max(side_falloff, 0.001), 1.0, uv.x);
     let side_mask = max(left_side, right_side);
-    let top_mask = 1.0 - smoothstep(0.0, max(theater_plate.scrim_masks.y, 0.001), uv.y);
-    let bottom_mask = smoothstep(1.0 - max(theater_plate.scrim_masks.z, 0.001), 1.0, uv.y);
-    let scrim_mask = max(max(side_mask, top_mask), bottom_mask);
+    let scrim_top = clamp(theater_plate.scrim_masks.y, 0.0, 0.999);
+    let scrim_bottom = clamp(theater_plate.scrim_masks.z, scrim_top + 0.001, 1.0);
+    let scrim_feather = max((scrim_bottom - scrim_top) * 0.42, 0.035);
+    let top_guard = 1.0 - smoothstep(0.0, max(scrim_top + scrim_feather * 0.35, 0.001), uv.y);
+    let rect_enter = smoothstep(scrim_top, scrim_top + max(scrim_feather * 0.25, 0.001), uv.y);
+    let rect_exit = 1.0 - smoothstep(scrim_bottom - scrim_feather, scrim_bottom, uv.y);
+    let readability_wash = rect_enter * rect_exit;
+    let scrim_mask = max(max(side_mask, top_guard * 0.82), readability_wash);
     let scrim_opacity = clamp(theater_plate.scrim_masks.x, 0.0, 1.0);
     color *= 1.0 - scrim_mask * scrim_opacity * 0.44;
 
-    // Focused plate under detail copy; SDF mask keeps all edges soft.
-    let plate_alpha = rounded_plate_alpha(
+    // Readability lives in overlapping scene-shadow lobes behind copy instead of
+    // a visible rectangular app card.
+    let lobe_feather = theater_plate.plate_mask.z / 180.0;
+    let plate_alpha = readability_lobes_alpha(
         uv,
-        resolution,
         theater_plate.focused_plate.xy,
         theater_plate.focused_plate.zw,
-        theater_plate.plate_mask.y,
-        theater_plate.plate_mask.z,
+        lobe_feather,
     ) * clamp(theater_plate.plate_mask.x * theater_plate.transition.x, 0.0, 1.0);
-    let plate_color = mix(stage, color, 0.18);
+    let plate_color = mix(stage, color, 0.14);
     color = mix(color, plate_color, plate_alpha);
 
     color = apply_highlight_compression(color, theater_plate.highlight_grade.x);
