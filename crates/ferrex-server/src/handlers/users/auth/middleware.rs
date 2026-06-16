@@ -30,6 +30,11 @@ pub async fn auth_middleware(
         .await
         .map_err(map_authentication_error_to_status)?;
 
+    // Protected account, library, image, watch-state, and admin APIs require
+    // full sessions. Playback-scope URL tickets are accepted explicitly by the
+    // stream handler and must not become bearer access to broader APIs.
+    ensure_full_session_scope(Some(&session.scope))?;
+
     let user = state
         .unit_of_work()
         .users
@@ -163,33 +168,35 @@ fn map_authentication_error_to_status(err: AuthenticationError) -> StatusCode {
     }
 }
 
-fn ensure_admin_scope(
+fn ensure_full_session_scope(
     scope: Option<&SessionScope>,
-) -> Result<(), Box<Response>> {
-    let scope = scope.ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(ApiResponse::<()>::error(
-                "Authentication scope missing".to_string(),
-            )),
-        )
-            .into_response()
-    })?;
+) -> Result<(), StatusCode> {
+    let scope = scope.ok_or(StatusCode::UNAUTHORIZED)?;
 
     if *scope != SessionScope::Full {
-        return Err(Box::new(
-            (
-                StatusCode::FORBIDDEN,
-                axum::Json(ApiResponse::<()>::error(
-                    "Full authentication required for admin actions"
-                        .to_string(),
-                )),
-            )
-                .into_response(),
-        ));
+        return Err(StatusCode::FORBIDDEN);
     }
 
     Ok(())
+}
+
+fn ensure_admin_scope(
+    scope: Option<&SessionScope>,
+) -> Result<(), Box<Response>> {
+    ensure_full_session_scope(scope).map_err(|status| {
+        let message = if status == StatusCode::UNAUTHORIZED {
+            "Authentication scope missing"
+        } else {
+            "Full authentication required for admin actions"
+        };
+        Box::new(
+            (
+                status,
+                axum::Json(ApiResponse::<()>::error(message.to_string())),
+            )
+                .into_response(),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -198,6 +205,11 @@ mod tests {
 
     #[test]
     fn missing_scope_returns_unauthorized() {
+        assert_eq!(
+            ensure_full_session_scope(None),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+
         let response =
             ensure_admin_scope(None).expect_err("expected unauthorized");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -205,6 +217,11 @@ mod tests {
 
     #[test]
     fn playback_scope_is_rejected() {
+        assert_eq!(
+            ensure_full_session_scope(Some(&SessionScope::Playback)),
+            Err(StatusCode::FORBIDDEN)
+        );
+
         let response = ensure_admin_scope(Some(&SessionScope::Playback))
             .expect_err("playback scope should be rejected");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -212,6 +229,8 @@ mod tests {
 
     #[test]
     fn full_scope_is_allowed() {
+        ensure_full_session_scope(Some(&SessionScope::Full))
+            .expect("full scope should pass");
         ensure_admin_scope(Some(&SessionScope::Full))
             .expect("full scope should pass");
     }

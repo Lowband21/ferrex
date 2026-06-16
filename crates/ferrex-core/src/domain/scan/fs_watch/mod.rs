@@ -335,6 +335,77 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         Ok(())
     }
 
+    #[cfg(test)]
+    /// Register only the watch loop so injected fs-watch tests do not race
+    /// platform notify backends.
+    async fn register_library_for_test(
+        &self,
+        library_id: LibraryId,
+        roots: Vec<(LibraryRootsId, PathBuf)>,
+    ) -> Result<()> {
+        {
+            let guard = self.libraries.read().await;
+            if guard.contains_key(&library_id) {
+                return Ok(());
+            }
+        }
+
+        let resolved_roots = resolve_roots(roots);
+        let capacity = self.config.max_batch_events.max(64) * 4;
+        let (tx, rx) = mpsc::channel::<WatchMessage>(capacity);
+
+        let flush_task = spawn_watch_loop(
+            library_id,
+            resolved_roots.clone(),
+            Arc::clone(&self.observer),
+            Arc::clone(&self.command_executor),
+            self.event_bus.clone(),
+            self.consumer_group.clone(),
+            rx,
+            self.config.clone(),
+        );
+
+        let mut guard = self.libraries.write().await;
+        if guard.contains_key(&library_id) {
+            flush_task.abort();
+            return Ok(());
+        }
+
+        guard.insert(
+            library_id,
+            LibraryWatch {
+                watchers: None,
+                flush_task,
+                tx: tx.clone(),
+                root_count: resolved_roots.len(),
+            },
+        );
+        drop(guard);
+
+        if let Err(err) = replay_unacknowledged_events(
+            library_id,
+            &resolved_roots,
+            Arc::clone(&self.observer),
+            Arc::clone(&self.command_executor),
+            self.event_bus.clone(),
+            &self.consumer_group,
+            self.config.max_batch_events,
+        )
+        .await
+        {
+            if let Some(watch) =
+                self.libraries.write().await.remove(&library_id)
+            {
+                watch.shutdown();
+            }
+            return Err(err);
+        }
+
+        drop(tx);
+
+        Ok(())
+    }
+
     /// Stop watching the specified library.
     pub async fn unregister_library(&self, library_id: LibraryId) {
         if let Some(watch) = self.libraries.write().await.remove(&library_id) {
@@ -1958,7 +2029,10 @@ mod tests {
         );
 
         service
-            .register_library(library_id, vec![(LibraryRootsId(0), root)])
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
             .await?;
         clear_startup_watch_noise(&bus, &executor).await;
         service
@@ -2015,7 +2089,10 @@ mod tests {
         );
 
         service
-            .register_library(library_id, vec![(LibraryRootsId(0), root)])
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
             .await?;
         clear_startup_watch_noise(&bus, &executor).await;
         service
@@ -2070,7 +2147,10 @@ mod tests {
         );
 
         service
-            .register_library(library_id, vec![(LibraryRootsId(0), root)])
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
             .await?;
 
         let commands = wait_for_commands(&executor, 1).await;
@@ -2110,7 +2190,10 @@ mod tests {
         );
 
         service
-            .register_library(library_id, vec![(LibraryRootsId(0), root)])
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
             .await?;
         clear_startup_watch_noise(&bus, &executor).await;
         for _ in 0..2 {
@@ -2164,7 +2247,10 @@ mod tests {
         );
 
         service
-            .register_library(library_id, vec![(LibraryRootsId(0), root)])
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root)],
+            )
             .await?;
         clear_startup_watch_noise(&bus, &executor).await;
         service
@@ -2272,7 +2358,7 @@ mod tests {
             command_executor,
         );
         service
-            .register_library(
+            .register_library_for_test(
                 harness.library_id,
                 vec![(LibraryRootsId(0), root)],
             )
@@ -2350,7 +2436,7 @@ mod tests {
             command_executor,
         );
         service
-            .register_library(
+            .register_library_for_test(
                 harness.library_id,
                 vec![(LibraryRootsId(0), root)],
             )

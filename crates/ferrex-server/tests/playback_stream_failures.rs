@@ -110,6 +110,49 @@ fn playback_stream_path(file_id: Uuid) -> String {
     route_utils::replace_param(v1::stream::PLAY, "{id}", file_id.to_string())
 }
 
+fn playback_stream_ticket_path(file_id: Uuid, access_token: &str) -> String {
+    route_utils::with_query(
+        &playback_stream_path(file_id),
+        &[("access_token", access_token)],
+    )
+}
+
+fn assert_success_has_no_media_error(response: &TestResponse) {
+    assert!(
+        response
+            .maybe_header(HeaderName::from_static("x-media-error"))
+            .is_none(),
+        "successful playback responses must not carry recovery errors"
+    );
+}
+
+fn assert_not_media_response(response: &TestResponse, media_bytes: &[u8]) {
+    assert_ne!(
+        response.as_bytes().as_ref(),
+        media_bytes,
+        "auth failures must not stream media bytes"
+    );
+    assert!(
+        response.maybe_header(header::ACCEPT_RANGES).is_none(),
+        "auth failures must not advertise media streaming headers"
+    );
+}
+
+fn assert_response_does_not_expose_token(response: &TestResponse, token: &str) {
+    assert!(
+        !response.text().contains(token),
+        "response body exposed a raw token"
+    );
+    for (name, value) in response.headers() {
+        if let Ok(value) = value.to_str() {
+            assert!(
+                !value.contains(token),
+                "response header {name} exposed a raw token"
+            );
+        }
+    }
+}
+
 fn media_error(response: &TestResponse) -> Result<String> {
     response
         .maybe_header(HeaderName::from_static("x-media-error"))
@@ -132,7 +175,8 @@ async fn playback_ticket_and_range_stream_ignore_corrupt_technical_metadata(
     let logical_media_id = Uuid::new_v4();
     let file_id = Uuid::new_v4();
     let media_path = tempdir.path().join("legacy-corrupt-metadata.mkv");
-    tokio::fs::write(&media_path, b"0123456789").await?;
+    let media_bytes = b"0123456789";
+    tokio::fs::write(&media_path, media_bytes).await?;
     seed_media_file(
         &pool,
         library_id,
@@ -150,32 +194,155 @@ async fn playback_ticket_and_range_stream_ignore_corrupt_technical_metadata(
     ticket.assert_status_ok();
     let ticket_body: serde_json::Value = ticket.json();
     assert_eq!(ticket_body["status"], "success");
+    let ticket_token = ticket_body["data"]["access_token"]
+        .as_str()
+        .context("ticket response should include a playback token")?
+        .to_string();
+    assert!(!ticket_token.is_empty());
+    let expires_in = ticket_body["data"]["expires_in"]
+        .as_i64()
+        .context("ticket response should include an expiry")?;
     assert!(
-        ticket_body["data"]["access_token"]
-            .as_str()
-            .is_some_and(|token| !token.is_empty()),
-        "ticket response should include a playback token"
+        (1..=6 * 60 * 60).contains(&expires_in),
+        "ticket expiry should be positive and no longer than the configured lifetime"
     );
 
-    let range = server
-        .get(&playback_stream_path(file_id))
-        .add_header("Authorization", bearer(&access_token))
+    let full_ticket_path = playback_stream_ticket_path(file_id, &ticket_token);
+    let full_ticket_stream = server.get(&full_ticket_path).await;
+    full_ticket_stream.assert_status_ok();
+    assert_eq!(full_ticket_stream.as_bytes().as_ref(), media_bytes);
+    assert_success_has_no_media_error(&full_ticket_stream);
+
+    let ranged_ticket_path =
+        playback_stream_ticket_path(file_id, &ticket_token);
+    let ranged_ticket_stream = server
+        .get(&ranged_ticket_path)
         .add_header("Range", "bytes=2-5")
         .await;
-    range.assert_status(StatusCode::PARTIAL_CONTENT);
+    ranged_ticket_stream.assert_status(StatusCode::PARTIAL_CONTENT);
+    assert_eq!(ranged_ticket_stream.as_bytes().as_ref(), b"2345");
     assert_eq!(
-        range
+        ranged_ticket_stream
             .maybe_header(header::CONTENT_RANGE)
             .context("Content-Range header missing")?
             .to_str()?,
         "bytes 2-5/10",
     );
-    assert!(
-        range
-            .maybe_header(HeaderName::from_static("x-media-error"))
-            .is_none(),
-        "successful playback responses must not carry recovery errors"
+    assert_success_has_no_media_error(&ranged_ticket_stream);
+
+    let bearer_range = server
+        .get(&playback_stream_path(file_id))
+        .add_header("Authorization", bearer(&access_token))
+        .add_header("Range", "bytes=2-5")
+        .await;
+    bearer_range.assert_status(StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bearer_range.as_bytes().as_ref(), b"2345");
+    assert_success_has_no_media_error(&bearer_range);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn playback_stream_auth_rejects_missing_and_invalid_tokens_without_serving_media(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, tempdir) = build_server(pool.clone()).await?;
+    let library_id = Uuid::new_v4();
+    seed_library(&pool, library_id).await;
+
+    let file_id = Uuid::new_v4();
+    let media_path = tempdir.path().join("protected-media.mkv");
+    let media_bytes = b"0123456789";
+    tokio::fs::write(&media_path, media_bytes).await?;
+    seed_media_file(
+        &pool,
+        library_id,
+        Uuid::new_v4(),
+        file_id,
+        &media_path,
+        true,
+    )
+    .await;
+
+    let stream_path = playback_stream_path(file_id);
+    let missing = server.get(&stream_path).await;
+    missing.assert_status(StatusCode::UNAUTHORIZED);
+    assert_not_media_response(&missing, media_bytes);
+
+    let invalid_token = "invalid-stream-token-secret";
+    let invalid_query_path =
+        playback_stream_ticket_path(file_id, invalid_token);
+    let invalid_query = server.get(&invalid_query_path).await;
+    invalid_query.assert_status(StatusCode::UNAUTHORIZED);
+    assert_not_media_response(&invalid_query, media_bytes);
+    assert_response_does_not_expose_token(&invalid_query, invalid_token);
+
+    let invalid_bearer = server
+        .get(&stream_path)
+        .add_header("Authorization", bearer(invalid_token))
+        .await;
+    invalid_bearer.assert_status(StatusCode::UNAUTHORIZED);
+    assert_not_media_response(&invalid_bearer, media_bytes);
+    assert_response_does_not_expose_token(&invalid_bearer, invalid_token);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn playback_tickets_are_rejected_by_account_apis(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, tempdir) = build_server(pool.clone()).await?;
+    let access_token =
+        register_user(&server, "playback_scope_account_guard").await?;
+    let library_id = Uuid::new_v4();
+    seed_library(&pool, library_id).await;
+
+    let file_id = Uuid::new_v4();
+    let media_path = tempdir.path().join("scope-guard.mkv");
+    tokio::fs::write(&media_path, b"0123456789").await?;
+    seed_media_file(
+        &pool,
+        library_id,
+        Uuid::new_v4(),
+        file_id,
+        &media_path,
+        true,
+    )
+    .await;
+
+    let ticket = server
+        .get(&playback_ticket_path(file_id))
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    ticket.assert_status_ok();
+    let ticket_body: serde_json::Value = ticket.json();
+    let ticket_token = ticket_body["data"]["access_token"]
+        .as_str()
+        .context("ticket response should include a playback token")?
+        .to_string();
+
+    let current_user = server
+        .get(v1::users::CURRENT)
+        .add_header("Authorization", bearer(&ticket_token))
+        .await;
+    current_user.assert_status(StatusCode::FORBIDDEN);
+    assert_response_does_not_expose_token(&current_user, &ticket_token);
+
+    let admin_users = server
+        .get(v1::admin::USERS)
+        .add_header("Authorization", bearer(&ticket_token))
+        .await;
+    admin_users.assert_status(StatusCode::FORBIDDEN);
+    assert_response_does_not_expose_token(&admin_users, &ticket_token);
+
+    let query_account_path = route_utils::with_query(
+        v1::users::CURRENT,
+        &[("access_token", &ticket_token)],
     );
+    let query_account = server.get(&query_account_path).await;
+    query_account.assert_status(StatusCode::UNAUTHORIZED);
+    assert_response_does_not_expose_token(&query_account, &ticket_token);
 
     Ok(())
 }
@@ -227,6 +394,13 @@ async fn playback_availability_failures_return_typed_recovery_headers(
         true,
     )
     .await;
+    let missing_file_ticket = server
+        .get(&playback_ticket_path(missing_file_id))
+        .add_header("Authorization", bearer(&access_token))
+        .await;
+    missing_file_ticket.assert_status(StatusCode::NOT_FOUND);
+    assert_eq!(media_error(&missing_file_ticket)?, "file-missing");
+
     let missing_file_stream = server
         .get(&playback_stream_path(missing_file_id))
         .add_header("Authorization", bearer(&access_token))
