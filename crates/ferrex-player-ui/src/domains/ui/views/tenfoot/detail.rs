@@ -14,8 +14,10 @@ use crate::{
             theme,
             views::{
                 detail::{
-                    DetailArtAspect, DetailInterfaceMode, DetailLayoutInput,
-                    DetailLayoutPlan, solve_detail_layout,
+                    DetailArtAspect, DetailForegroundSurface,
+                    DetailForegroundSurfaceTokens, DetailInterfaceMode,
+                    DetailLayoutInput, DetailLayoutPlan, DetailTone,
+                    detail_foreground_surface_tokens, solve_detail_layout,
                 },
                 virtual_carousel::types::CarouselKey,
             },
@@ -85,12 +87,70 @@ fn hero_height(plan: &DetailLayoutPlan) -> f32 {
         .max(plan.hero_art.height + hero_padding(plan) * 2.0)
 }
 
+fn hero_text_scale(plan: &DetailLayoutPlan) -> f32 {
+    if plan.viewport_height <= 760.0 {
+        0.86
+    } else {
+        1.0
+    }
+}
+
+fn hero_spacing(plan: &DetailLayoutPlan) -> f32 {
+    (15.0 * hero_text_scale(plan)).clamp(11.0, 15.0)
+}
+
+fn hero_title_size(plan: &DetailLayoutPlan) -> f32 {
+    56.0 * hero_text_scale(plan)
+}
+
+fn hero_subtitle_size(plan: &DetailLayoutPlan) -> f32 {
+    24.0 * hero_text_scale(plan)
+}
+
+fn hero_overview_size(plan: &DetailLayoutPlan) -> f32 {
+    22.0 * hero_text_scale(plan)
+}
+
+fn action_label_size(plan: &DetailLayoutPlan) -> f32 {
+    25.0 * hero_text_scale(plan)
+}
+
+fn action_subtitle_size(plan: &DetailLayoutPlan) -> f32 {
+    15.0 * hero_text_scale(plan)
+}
+
+fn action_button_padding_y(plan: &DetailLayoutPlan) -> f32 {
+    if plan.viewport_height <= 760.0 {
+        7.0
+    } else {
+        10.0
+    }
+}
+
 fn panel_rows(plan: &DetailLayoutPlan) -> usize {
     plan.rail.visible_rows.max(1)
 }
 
 fn panel_body_padding(plan: &DetailLayoutPlan) -> f32 {
     (plan.rail.gap * 1.2).clamp(14.0, 24.0)
+}
+
+fn panel_band_padding(plan: &DetailLayoutPlan) -> f32 {
+    let tokens = tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::RailBand,
+        DetailTone::Neutral,
+    );
+    (plan.section_grid.gap * tokens.padding_scale).clamp(16.0, 28.0)
+}
+
+fn action_shelf_padding(plan: &DetailLayoutPlan) -> f32 {
+    let tokens = tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::ControlShelf,
+        DetailTone::Neutral,
+    );
+    (plan.action_cluster.gap * tokens.padding_scale).clamp(8.0, 16.0)
 }
 
 fn panel_header_height(plan: &DetailLayoutPlan) -> f32 {
@@ -109,13 +169,22 @@ fn panel_body_height(plan: &DetailLayoutPlan) -> f32 {
 }
 
 fn panel_height(plan: &DetailLayoutPlan) -> f32 {
-    panel_header_height(plan)
+    panel_band_padding(plan) * 2.0
+        + panel_header_height(plan)
         + panel_header_body_gap(plan)
         + panel_body_height(plan)
 }
 
 fn scroll_follow_margin(plan: &DetailLayoutPlan) -> f32 {
     (plan.page_padding_y * 0.82).clamp(28.0, 56.0)
+}
+
+fn tenfoot_surface_tokens(
+    plan: &DetailLayoutPlan,
+    surface: DetailForegroundSurface,
+    tone: DetailTone,
+) -> DetailForegroundSurfaceTokens {
+    detail_foreground_surface_tokens(plan, surface, tone)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1458,7 +1527,11 @@ pub fn view_tenfoot_detail(state: &State) -> Element<'_, UiMessage> {
     container(scroll)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(tenfoot_detail_page_style())
+        .style(tenfoot_surface_style(tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::StageField,
+            DetailTone::Neutral,
+        )))
         .into()
 }
 
@@ -1470,6 +1543,11 @@ fn view_hero<'a>(
 ) -> Element<'a, UiMessage> {
     let image = view_detail_image(state, &data.image, plan, true);
 
+    let metadata_tokens = tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::MetadataRibbon,
+        DetailTone::Neutral,
+    );
     let mut metadata_row: Row<'a, UiMessage> = Row::new().spacing(12);
     for item in &data.metadata {
         metadata_row = metadata_row.push(
@@ -1479,36 +1557,47 @@ fn view_hero<'a>(
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
             )
             .padding([6, 12])
-            .style(metadata_pill_style()),
+            .style(tenfoot_surface_style(metadata_tokens)),
         );
     }
 
-    let mut actions = Row::new().spacing(plan.action_cluster.gap);
+    let mut action_row = Row::new()
+        .spacing(plan.action_cluster.gap)
+        .align_y(iced::Alignment::Center);
     for spec in &data.actions {
         let focus_id = TenFootDetailFocusId::Action(spec.action);
         let is_focused = focused == Some(&focus_id);
-        actions = actions
+        action_row = action_row
             .push(focusable_action_button(spec, focus_id, is_focused, plan));
     }
+    let action_shelf_tokens = tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::ControlShelf,
+        DetailTone::Neutral,
+    );
+    let action_shelf = container(action_row)
+        .padding([action_shelf_padding(plan), 0.0])
+        .width(Length::Shrink)
+        .style(tenfoot_surface_style(action_shelf_tokens));
 
     let mut text_column = column![
         text(data.eyebrow.clone())
             .size(22)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
         text(data.title.clone())
-            .size(56)
+            .size(hero_title_size(plan))
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         text(data.subtitle.clone())
-            .size(24)
+            .size(hero_subtitle_size(plan))
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
         metadata_row,
         text(data.overview.clone())
-            .size(22)
+            .size(hero_overview_size(plan))
             .color(theme::MediaServerTheme::TEXT_PRIMARY)
             .width(Length::Fill),
-        actions,
+        action_shelf,
     ]
-    .spacing(15)
+    .spacing(hero_spacing(plan))
     .width(Length::Fill);
 
     if let Some(notice) = data.notice.as_ref() {
@@ -1520,7 +1609,11 @@ fn view_hero<'a>(
             )
             .padding(14)
             .width(Length::Fill)
-            .style(notice_style()),
+            .style(tenfoot_surface_style(tenfoot_surface_tokens(
+                plan,
+                DetailForegroundSurface::NoticeSlab,
+                DetailTone::Warning,
+            ))),
         );
     }
 
@@ -1532,7 +1625,12 @@ fn view_hero<'a>(
     .height(Length::Fixed(hero_height(plan)))
     .width(Length::Fill)
     .padding(hero_padding(plan))
-    .style(tenfoot_hero_scrim_style())
+    .clip(true)
+    .style(tenfoot_surface_style(tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::ProjectionShelf,
+        DetailTone::Neutral,
+    )))
     .into()
 }
 
@@ -1544,20 +1642,28 @@ fn focusable_action_button<'a>(
 ) -> Element<'a, UiMessage> {
     let content = column![
         text(spec.label.clone())
-            .size(25)
+            .size(action_label_size(plan))
             .color(theme::MediaServerTheme::TEXT_PRIMARY),
         text(spec.subtitle.clone())
-            .size(15)
+            .size(action_subtitle_size(plan))
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
     .spacing(4)
     .align_x(iced::Alignment::Center);
 
     let button_element = button(content)
-        .padding([10, 18])
+        .padding([action_button_padding_y(plan), 18.0])
         .width(Length::Fixed(plan.action_cluster.button_width))
         .height(Length::Fixed(plan.action_cluster.button_height))
-        .style(tenfoot_button_style(focused))
+        .style(tenfoot_button_style(
+            tenfoot_surface_tokens(
+                plan,
+                DetailForegroundSurface::ControlShelf,
+                action_tone(spec.action),
+            ),
+            action_tone(spec.action),
+            focused,
+        ))
         .on_press(TenFootDetailMessage::Activate(focus_id.clone()).into());
 
     mouse_area(button_element)
@@ -1602,16 +1708,32 @@ fn view_panel<'a>(
     };
 
     let before_after = before_after_copy(start, end, total);
-    let header = row![
-        text(panel.id.title())
-            .size(31)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    let metadata_tokens = tenfoot_surface_tokens(
+        plan,
+        DetailForegroundSurface::MetadataRibbon,
+        DetailTone::Neutral,
+    );
+    let range_pill = container(
         text(range_label)
             .size(18)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    )
+    .padding([4, 10])
+    .style(tenfoot_surface_style(metadata_tokens));
+    let before_after_pill = container(
         text(before_after)
             .size(18)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
+    )
+    .padding([4, 10])
+    .style(tenfoot_surface_style(metadata_tokens));
+    let header = row![
+        text(panel.id.title())
+            .size(31)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY)
+            .width(Length::Fill),
+        range_pill,
+        before_after_pill,
     ]
     .spacing(18)
     .height(Length::Fixed(panel_header_height(plan)))
@@ -1627,7 +1749,11 @@ fn view_panel<'a>(
         .height(Length::Fixed(panel_body_height(plan)))
         .padding(panel_body_padding(plan))
         .align_y(iced::Alignment::Center)
-        .style(tenfoot_panel_style(false))
+        .style(tenfoot_surface_style(tenfoot_surface_tokens(
+            plan,
+            DetailForegroundSurface::EmptyState,
+            DetailTone::Muted,
+        )))
         .into()
     } else {
         let visible_items = panel
@@ -1658,13 +1784,23 @@ fn view_panel<'a>(
             .width(Length::Fill)
             .height(Length::Fixed(panel_body_height(plan)))
             .padding(panel_body_padding(plan))
-            .style(tenfoot_panel_style(false))
             .into()
     };
 
-    column![header, body]
+    let band = column![header, body]
         .spacing(panel_header_body_gap(plan))
+        .width(Length::Fill);
+
+    container(band)
         .width(Length::Fill)
+        .height(Length::Fixed(panel_height(plan)))
+        .padding(panel_band_padding(plan))
+        .clip(true)
+        .style(tenfoot_surface_style(tenfoot_surface_tokens(
+            plan,
+            DetailForegroundSurface::RailBand,
+            DetailTone::Neutral,
+        )))
         .into()
 }
 
@@ -1718,7 +1854,15 @@ fn view_panel_card<'a>(
     .padding(0)
     .width(Length::Fixed(plan.rail.card_width))
     .height(Length::Fixed(plan.rail.card_height))
-    .style(tenfoot_button_style(focused))
+    .style(tenfoot_button_style(
+        tenfoot_surface_tokens(
+            plan,
+            DetailForegroundSurface::RailBand,
+            DetailTone::Neutral,
+        ),
+        DetailTone::Neutral,
+        focused,
+    ))
     .on_press(TenFootDetailMessage::Activate(focus_id.clone()).into());
 
     mouse_area(button_element)
@@ -1827,7 +1971,11 @@ fn view_detail_image<'a>(
         .height(Length::Fixed(height))
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center)
-        .style(tenfoot_panel_style(false))
+        .style(tenfoot_surface_style(tenfoot_surface_tokens(
+            plan,
+            DetailForegroundSurface::EmptyState,
+            DetailTone::Muted,
+        )))
         .into(),
     }
 }
@@ -1939,7 +2087,7 @@ fn action_specs(
     actions.push(DetailActionSpec {
         action: TenFootDetailAction::Back,
         label: "Back".to_string(),
-        subtitle: "Return to the previous screen".to_string(),
+        subtitle: "Previous screen".to_string(),
         activation: TenFootDetailActivation::Back,
     });
     actions
@@ -2199,58 +2347,22 @@ pub fn bounded_two_row_window_start(
     )
 }
 
-fn tenfoot_detail_page_style() -> impl Fn(&Theme) -> container::Style + Clone {
-    |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(Color::from_rgba(
-            0.015, 0.014, 0.02, 0.22,
-        ))),
-        border: Border::default(),
-        shadow: Shadow::default(),
-        snap: false,
-    }
-}
-
-fn tenfoot_hero_scrim_style() -> impl Fn(&Theme) -> container::Style + Clone {
-    |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(Color::from_rgba(
-            0.0, 0.0, 0.0, 0.48,
-        ))),
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        shadow: Shadow::default(),
-        snap: false,
-    }
-}
-
-fn tenfoot_panel_style(
-    focused: bool,
+fn tenfoot_surface_style(
+    tokens: DetailForegroundSurfaceTokens,
 ) -> impl Fn(&Theme) -> container::Style + Clone {
     move |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(if focused {
-            Color::from_rgba(0.18, 0.08, 0.20, 0.92)
-        } else {
-            Color::from_rgba(0.08, 0.075, 0.10, 0.84)
-        })),
+        text_color: Some(tokens.text),
+        background: Some(Background::Color(tokens.background)),
         border: Border {
-            color: if focused {
-                theme::MediaServerTheme::ACCENT
-            } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.10)
-            },
-            width: if focused { 3.0 } else { 1.0 },
-            radius: 3.0.into(),
+            color: tokens.edge,
+            width: tokens.border_width,
+            radius: tokens.radius.into(),
         },
-        shadow: if focused {
+        shadow: if tokens.shadow_blur > 0.0 {
             Shadow {
-                color: theme::MediaServerTheme::ACCENT_GLOW,
-                offset: Vector::new(0.0, 0.0),
-                blur_radius: 28.0,
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.28),
+                offset: Vector::new(0.0, tokens.shadow_blur * 0.10),
+                blur_radius: tokens.shadow_blur,
             }
         } else {
             Shadow::default()
@@ -2259,55 +2371,62 @@ fn tenfoot_panel_style(
     }
 }
 
-fn metadata_pill_style() -> impl Fn(&Theme) -> container::Style + Clone {
-    |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(Color::from_rgba(
-            1.0, 1.0, 1.0, 0.10,
-        ))),
-        border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.14),
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        shadow: Shadow::default(),
-        snap: false,
+fn action_tone(action: TenFootDetailAction) -> DetailTone {
+    match action {
+        TenFootDetailAction::Primary => DetailTone::Accent,
+        TenFootDetailAction::StartOver => DetailTone::Neutral,
+        TenFootDetailAction::Back => DetailTone::Muted,
     }
 }
 
-fn notice_style() -> impl Fn(&Theme) -> container::Style + Clone {
-    |_| container::Style {
-        text_color: Some(theme::MediaServerTheme::TEXT_PRIMARY),
-        background: Some(Background::Color(Color::from_rgba(
-            0.12, 0.10, 0.04, 0.72,
-        ))),
-        border: Border {
-            color: Color::from_rgba(1.0, 0.85, 0.30, 0.35),
-            width: 1.0,
-            radius: 2.0.into(),
-        },
-        shadow: Shadow::default(),
-        snap: false,
+fn tone_accent_color(tone: DetailTone) -> Color {
+    match tone {
+        DetailTone::Accent => theme::MediaServerTheme::ACCENT,
+        DetailTone::Success => theme::MediaServerTheme::SUCCESS,
+        DetailTone::Warning => theme::MediaServerTheme::WARNING,
+        DetailTone::Danger => theme::MediaServerTheme::ERROR,
+        DetailTone::Neutral | DetailTone::Muted => Color::from_rgba(
+            theme::MediaServerTheme::TEXT_PRIMARY.r,
+            theme::MediaServerTheme::TEXT_PRIMARY.g,
+            theme::MediaServerTheme::TEXT_PRIMARY.b,
+            0.88,
+        ),
     }
+}
+
+fn tenfoot_focus_fill(accent: Color) -> Color {
+    Color::from_rgba(
+        (0.055 + accent.r * 0.18).min(1.0),
+        (0.045 + accent.g * 0.12).min(1.0),
+        (0.070 + accent.b * 0.18).min(1.0),
+        0.97,
+    )
 }
 
 fn tenfoot_button_style(
+    tokens: DetailForegroundSurfaceTokens,
+    tone: DetailTone,
     focused: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + Clone {
     move |_, status| {
         let hovered =
             matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = tone_accent_color(tone);
         let background = if focused {
-            Color::from_rgba(0.30, 0.06, 0.34, 0.96)
+            tenfoot_focus_fill(accent)
+        } else if tone == DetailTone::Accent {
+            Color::from_rgba(accent.r, accent.g, accent.b, 0.80)
         } else if hovered {
-            Color::from_rgba(0.18, 0.08, 0.20, 0.94)
+            Color::from_rgba(1.0, 1.0, 1.0, 0.13 + tokens.intensity * 0.07)
         } else {
-            Color::from_rgba(0.09, 0.085, 0.11, 0.92)
+            Color::from_rgba(1.0, 1.0, 1.0, 0.05 + tokens.intensity * 0.05)
         };
         let border_color = if focused {
             theme::MediaServerTheme::ACCENT
+        } else if tone == DetailTone::Accent {
+            Color::from_rgba(accent.r, accent.g, accent.b, 0.88)
         } else if hovered {
-            Color::from_rgba(1.0, 1.0, 1.0, 0.28)
+            Color::from_rgba(1.0, 1.0, 1.0, 0.38)
         } else {
             Color::from_rgba(1.0, 1.0, 1.0, 0.12)
         };
@@ -2317,14 +2436,20 @@ fn tenfoot_button_style(
             background: Some(Background::Color(background)),
             border: Border {
                 color: border_color,
-                width: if focused { 3.0 } else { 1.0 },
-                radius: 4.0.into(),
+                width: if focused { 4.0 } else { 1.0 },
+                radius: tokens.radius.max(2.0).into(),
             },
             shadow: if focused {
                 Shadow {
-                    color: theme::MediaServerTheme::ACCENT_GLOW,
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.72),
                     offset: Vector::new(0.0, 0.0),
-                    blur_radius: 24.0,
+                    blur_radius: 34.0,
+                }
+            } else if hovered {
+                Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.34),
+                    offset: Vector::new(0.0, 4.0),
+                    blur_radius: 18.0,
                 }
             } else {
                 Shadow::default()
@@ -2638,15 +2763,111 @@ mod tests {
     }
 
     #[test]
-    fn focused_button_style_keeps_visible_dpad_ring() {
-        let focused =
-            tenfoot_button_style(true)(&Theme::Dark, button::Status::Active);
-        let resting =
-            tenfoot_button_style(false)(&Theme::Dark, button::Status::Active);
+    fn tenfoot_stage_surfaces_use_theater_plate_shelves() {
+        let plan = layout_plan(1_280.0, 720.0, 1.0);
+        let foreground = plan.foreground_stage(0.0);
+        let stage = tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::StageField,
+            DetailTone::Neutral,
+        );
+        let projection = tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::ProjectionShelf,
+            DetailTone::Neutral,
+        );
+        let control = tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::ControlShelf,
+            DetailTone::Neutral,
+        );
+        let rail = tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::RailBand,
+            DetailTone::Neutral,
+        );
 
-        assert!(focused.border.width >= 3.0);
+        assert_eq!(projection.border_width, 0.0);
+        assert_eq!(control.border_width, 0.0);
+        assert_eq!(rail.border_width, 0.0);
+        assert!(projection.background.a > stage.background.a);
+        assert_ne!(projection.background, rail.background);
+        assert_ne!(control.background, rail.background);
+        assert!(control.shadow_blur > 0.0);
+        assert!(
+            (hero_height(&plan) - foreground.stage.rect.height).abs() < 0.01
+        );
+
+        let action_row_width = 3.0 * plan.action_cluster.button_width
+            + 2.0 * plan.action_cluster.gap;
+        assert!(
+            action_row_width <= foreground.control_shelf.rect.width + 0.01,
+            "control shelf should hold primary/start-over/back actions"
+        );
+        assert!(
+            foreground.control_shelf.rect.y
+                >= foreground.readable_copy_lobe.text_rect.y
+        );
+    }
+
+    #[test]
+    fn tenfoot_panel_bands_track_stage_geometry_and_focus_bounds() {
+        for (width, height) in [(1_280.0, 720.0), (1_920.0, 1_080.0)] {
+            let plan = layout_plan(width, height, 1.0);
+            let foreground = plan.foreground_stage(0.0);
+            let columns = visible_panel_columns_for_width(width, &plan);
+            let rows = panel_rows(&plan);
+            let visible_span = columns as f32 * plan.rail.card_width
+                + columns.saturating_sub(1) as f32 * plan.rail.gap;
+
+            assert_eq!(foreground.rail_deck.visible_rows, rows);
+            assert!(
+                (foreground.rail_deck.visible_span - visible_span).abs() < 0.01,
+                "panel band visible span should match focus grid at {width}x{height}"
+            );
+            assert!(visible_span <= foreground.stage.stage_width + 0.01);
+            assert!(panel_band_padding(&plan) >= 16.0);
+            assert!(panel_height(&plan) > foreground.rail_deck.rect.height);
+
+            let data = detail_data(&[columns * rows + 1]);
+            let focus = panel_focus(&data, 0, 0);
+            let bounds = data
+                .focus_vertical_bounds(&focus, &plan)
+                .expect("panel focus bounds");
+            assert!((bounds.1 - panel_height(&plan)).abs() < 0.01);
+            assert!(bounds.0 >= foreground.stage.rect.bottom());
+        }
+    }
+
+    fn button_background_alpha(style: &button::Style) -> f32 {
+        match &style.background {
+            Some(Background::Color(color)) => color.a,
+            _ => 0.0,
+        }
+    }
+
+    #[test]
+    fn focused_button_style_keeps_visible_dpad_ring() {
+        let plan = layout_plan(1_280.0, 720.0, 1.0);
+        let tokens = tenfoot_surface_tokens(
+            &plan,
+            DetailForegroundSurface::ControlShelf,
+            DetailTone::Accent,
+        );
+        let focused = tenfoot_button_style(tokens, DetailTone::Accent, true)(
+            &Theme::Dark,
+            button::Status::Active,
+        );
+        let resting = tenfoot_button_style(tokens, DetailTone::Accent, false)(
+            &Theme::Dark,
+            button::Status::Active,
+        );
+
+        assert!(focused.border.width >= 4.0);
         assert!(focused.border.width > resting.border.width);
         assert_eq!(focused.border.color, theme::MediaServerTheme::ACCENT);
+        assert!(button_background_alpha(&focused) >= 0.95);
         assert!(focused.shadow.blur_radius > resting.shadow.blur_radius);
+        assert!(focused.shadow.color.a >= 0.70);
     }
 }

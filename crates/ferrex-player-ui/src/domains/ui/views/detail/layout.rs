@@ -126,6 +126,15 @@ pub struct DetailLayoutPlan {
 }
 
 impl DetailLayoutPlan {
+    /// Resolve foreground-stage geometry for the detail hero at the current
+    /// vertical scroll offset.
+    pub fn foreground_stage(
+        &self,
+        scroll_offset_y: f32,
+    ) -> DetailForegroundLayout {
+        foreground_stage_layout(self, scroll_offset_y)
+    }
+
     /// Resolve shader-facing Theater Plate readability geometry for the detail
     /// hero at the current vertical scroll offset.
     pub fn theater_plate_layout(
@@ -161,6 +170,129 @@ impl DetailTheaterPlateRect {
     pub fn bottom(self) -> f32 {
         self.y + self.height
     }
+}
+
+/// Pixel-space rectangle for foreground-stage primitives.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailForegroundRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl DetailForegroundRect {
+    pub fn center(self) -> [f32; 2] {
+        [self.x + self.width * 0.5, self.y + self.height * 0.5]
+    }
+
+    pub fn half_size(self) -> [f32; 2] {
+        [self.width * 0.5, self.height * 0.5]
+    }
+
+    pub fn right(self) -> f32 {
+        self.x + self.width
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.height
+    }
+
+    pub fn normalized(
+        self,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> DetailTheaterPlateRect {
+        normalize_rect(self.into(), viewport_width, viewport_height)
+    }
+}
+
+/// Foreground safe-area gutters around the stage in viewport pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailSafeGutters {
+    pub left: f32,
+    pub right: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+/// Bounded foreground stage for the hero, sections, and rail deck.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailForegroundStage {
+    pub rect: DetailForegroundRect,
+    pub stage_width: f32,
+}
+
+/// Readability lobe for copy and the larger Theater Plate focus mask.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailReadableCopyLobe {
+    pub text_rect: DetailForegroundRect,
+    pub plate_rect: DetailForegroundRect,
+    pub max_width: f32,
+}
+
+/// Hero-art anchor resolved independently from the route's generic gaps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailHeroArtAnchor {
+    pub rect: DetailForegroundRect,
+    pub anchor: [f32; 2],
+}
+
+/// Control shelf geometry for primary/secondary action rows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailControlShelf {
+    pub rect: DetailForegroundRect,
+    pub axis: DetailAxis,
+    pub button_width: f32,
+    pub button_height: f32,
+    pub gap: f32,
+}
+
+/// Section-band geometry for the panels below the hero stage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailSectionBandLayout {
+    pub rect: DetailForegroundRect,
+    pub columns: usize,
+    pub column_width: f32,
+    pub gap: f32,
+    pub panel_min_height: f32,
+}
+
+/// Rail-deck spans for relationship rows inside the foreground stage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailRailDeckLayout {
+    pub rect: DetailForegroundRect,
+    pub card_width: f32,
+    pub card_height: f32,
+    pub gap: f32,
+    pub visible_rows: usize,
+    pub visible_span: f32,
+}
+
+/// Surface intensity tokens consumed by foreground renderers and tests.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailSurfaceIntensityTokens {
+    pub stage: f32,
+    pub readable_copy_lobe: f32,
+    pub hero_art: f32,
+    pub control_shelf: f32,
+    pub section_band: f32,
+    pub rail_deck: f32,
+}
+
+/// Explicit Theater Plate foreground-stage primitives in viewport pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailForegroundLayout {
+    pub viewport_width: f32,
+    pub viewport_height: f32,
+    pub stage: DetailForegroundStage,
+    pub safe_gutters: DetailSafeGutters,
+    pub readable_copy_lobe: DetailReadableCopyLobe,
+    pub hero_art_anchor: DetailHeroArtAnchor,
+    pub control_shelf: DetailControlShelf,
+    pub section_bands: DetailSectionBandLayout,
+    pub rail_deck: DetailRailDeckLayout,
+    pub surface_intensity: DetailSurfaceIntensityTokens,
 }
 
 /// Theater Plate geometry and composition-strength controls derived from a
@@ -519,7 +651,7 @@ fn backdrop_layout(
         DetailComposition::CompactLandscape => available_height * 0.24,
         DetailComposition::BalancedDesktop => available_height * 0.36,
         DetailComposition::CinematicWide => available_height * 0.48,
-        DetailComposition::TenFoot => available_height * 0.52,
+        DetailComposition::TenFoot => available_height * 0.62,
     };
     let height =
         clamp_to_available(desired, 96.0 * scale, 520.0 * scale, max_height);
@@ -684,42 +816,33 @@ fn theater_plate_layout(
     plan: &DetailLayoutPlan,
     scroll_offset_y: f32,
 ) -> DetailTheaterPlateLayout {
-    let viewport_width = plan.viewport_width.max(1.0);
-    let viewport_height = plan.viewport_height.max(1.0);
+    let foreground = foreground_stage_layout(plan, scroll_offset_y);
+    let viewport_width = foreground.viewport_width;
+    let viewport_height = foreground.viewport_height;
     let header_height = (plan.viewport_height - plan.available_height)
         .clamp(0.0, plan.viewport_height);
-    let scroll_offset_y = scroll_offset_y.max(0.0);
-
-    let body_width = plan.content_width.min(viewport_width).max(1.0);
-    let body_left = ((viewport_width - body_width) * 0.5).max(0.0);
-    let content_x = body_left + plan.page_padding_x;
-    let content_width = (body_width - plan.page_padding_x * 2.0)
-        .max(1.0)
-        .min(viewport_width);
-    let hero_top = header_height + plan.page_padding_y - scroll_offset_y;
-
-    let summary = summary_rect_px(plan, content_x, hero_top, content_width);
-    let plate = expanded_rect_px(
-        summary,
-        plate_expansion_x(plan),
-        plate_expansion_y(plan),
-        viewport_width,
+    let scrim = scrim_rect_px(
+        plan,
+        header_height,
+        foreground.stage.rect.into(),
         viewport_height,
     );
-    let content = content_rect_px(plan, content_x, hero_top, content_width);
-    let hero_art = hero_art_rect_px(plan, content_x, hero_top, content_width);
-    let scrim = scrim_rect_px(plan, header_height, content, viewport_height);
     let controls = theater_plate_controls(plan.composition);
 
     DetailTheaterPlateLayout {
-        content_rect: normalize_rect(content, viewport_width, viewport_height),
-        plate_rect: normalize_rect(plate, viewport_width, viewport_height),
+        content_rect: foreground
+            .stage
+            .rect
+            .normalized(viewport_width, viewport_height),
+        plate_rect: foreground
+            .readable_copy_lobe
+            .plate_rect
+            .normalized(viewport_width, viewport_height),
         scrim_rect: normalize_rect(scrim, viewport_width, viewport_height),
-        hero_art_rect: normalize_rect(
-            hero_art,
-            viewport_width,
-            viewport_height,
-        ),
+        hero_art_rect: foreground
+            .hero_art_anchor
+            .rect
+            .normalized(viewport_width, viewport_height),
         plate_opacity: controls.plate_opacity,
         plate_radius_px: controls.plate_radius_px,
         plate_feather_px: controls.plate_feather_px,
@@ -752,6 +875,303 @@ impl RectPx {
     }
 }
 
+impl From<RectPx> for DetailForegroundRect {
+    fn from(rect: RectPx) -> Self {
+        Self {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
+}
+
+impl From<DetailForegroundRect> for RectPx {
+    fn from(rect: DetailForegroundRect) -> Self {
+        Self {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
+}
+
+fn foreground_stage_layout(
+    plan: &DetailLayoutPlan,
+    scroll_offset_y: f32,
+) -> DetailForegroundLayout {
+    let viewport_width = plan.viewport_width.max(1.0);
+    let viewport_height = plan.viewport_height.max(1.0);
+    let header_height = (plan.viewport_height - plan.available_height)
+        .clamp(0.0, plan.viewport_height);
+    let scroll_offset_y = scroll_offset_y.max(0.0);
+    let hero_top = header_height + plan.page_padding_y - scroll_offset_y;
+    let (stage_x, stage_width) = foreground_stage_horizontal_bounds(plan);
+    let stage_rect = content_rect_px(plan, stage_x, hero_top, stage_width);
+    let summary_rect = summary_rect_px(plan, stage_x, hero_top, stage_width);
+    let copy_text_rect = readable_copy_text_rect_px(
+        plan,
+        summary_rect,
+        stage_rect,
+        readable_copy_width_cap(plan, stage_width),
+    );
+    let plate_rect = expanded_rect_px(
+        copy_text_rect,
+        plate_expansion_x(plan),
+        plate_expansion_y(plan),
+        viewport_width,
+        viewport_height,
+    );
+    let hero_art_rect = hero_art_rect_px(plan, stage_x, hero_top, stage_width);
+    let hero_art_anchor_rect: DetailForegroundRect = hero_art_rect.into();
+    let control_shelf = control_shelf_layout(plan, copy_text_rect);
+    let section_bands = section_band_layout(plan, stage_rect);
+    let rail_deck = rail_deck_layout(plan, stage_rect, section_bands.rect);
+
+    DetailForegroundLayout {
+        viewport_width,
+        viewport_height,
+        stage: DetailForegroundStage {
+            rect: stage_rect.into(),
+            stage_width: stage_rect.width,
+        },
+        safe_gutters: safe_gutters_for_stage(
+            plan,
+            stage_rect,
+            header_height,
+            viewport_width,
+        ),
+        readable_copy_lobe: DetailReadableCopyLobe {
+            text_rect: copy_text_rect.into(),
+            plate_rect: plate_rect.into(),
+            max_width: readable_copy_width_cap(plan, stage_width),
+        },
+        hero_art_anchor: DetailHeroArtAnchor {
+            rect: hero_art_anchor_rect,
+            anchor: hero_art_anchor_rect.center(),
+        },
+        control_shelf,
+        section_bands,
+        rail_deck,
+        surface_intensity: surface_intensity_tokens(plan.composition),
+    }
+}
+
+fn foreground_stage_horizontal_bounds(plan: &DetailLayoutPlan) -> (f32, f32) {
+    let viewport_width = plan.viewport_width.max(1.0);
+    match plan.composition {
+        DetailComposition::TenFoot => {
+            let stage_width = plan
+                .content_width
+                .min((viewport_width - plan.page_padding_x * 2.0).max(1.0))
+                .max(1.0);
+            (tenfoot_stage_left(plan), stage_width)
+        }
+        _ => {
+            let body_width = plan.content_width.min(viewport_width).max(1.0);
+            let body_left = ((viewport_width - body_width) * 0.5).max(0.0);
+            let stage_x = body_left + plan.page_padding_x;
+            let stage_width = (body_width - plan.page_padding_x * 2.0)
+                .max(1.0)
+                .min(viewport_width);
+            (stage_x, stage_width)
+        }
+    }
+}
+
+fn safe_gutters_for_stage(
+    plan: &DetailLayoutPlan,
+    stage_rect: RectPx,
+    header_height: f32,
+    viewport_width: f32,
+) -> DetailSafeGutters {
+    DetailSafeGutters {
+        left: stage_rect.x.max(0.0),
+        right: (viewport_width - stage_rect.right()).max(0.0),
+        top: (header_height + plan.page_padding_y)
+            .clamp(0.0, plan.viewport_height.max(1.0)),
+        bottom: plan.page_padding_y.max(0.0),
+    }
+}
+
+fn readable_copy_width_cap(plan: &DetailLayoutPlan, stage_width: f32) -> f32 {
+    let cap = match plan.composition {
+        DetailComposition::CompactPortrait => stage_width,
+        DetailComposition::CompactLandscape => {
+            (stage_width * 0.72).min(640.0 * plan.scale)
+        }
+        DetailComposition::BalancedDesktop => {
+            (stage_width * 0.58).min(760.0 * plan.scale)
+        }
+        DetailComposition::CinematicWide => {
+            (stage_width * 0.48).min(840.0 * plan.scale)
+        }
+        DetailComposition::TenFoot => {
+            // The TV control shelf must cover the full primary/start-over/back
+            // action row at 720p while still staying bounded on 1080p+ stages.
+            (stage_width * 0.72).min(1_080.0 * plan.scale)
+        }
+    };
+
+    cap.clamp(1.0, stage_width.max(1.0))
+}
+
+fn readable_copy_text_rect_px(
+    plan: &DetailLayoutPlan,
+    rect: RectPx,
+    stage: RectPx,
+    max_width: f32,
+) -> RectPx {
+    let stage_right = stage.right();
+    let unclamped_x = match plan.composition {
+        DetailComposition::CompactPortrait
+            if rect.width.min(max_width) < stage.width =>
+        {
+            stage.x + ((stage.width - rect.width.min(max_width)) * 0.5).max(0.0)
+        }
+        _ => rect.x,
+    };
+    let x = unclamped_x
+        .max(stage.x)
+        .min((stage_right - 1.0).max(stage.x));
+    let max_inside_stage = (stage_right - x).max(1.0);
+    let width = rect.width.min(max_width).min(max_inside_stage).max(1.0);
+
+    RectPx { width, x, ..rect }
+}
+
+fn control_shelf_layout(
+    plan: &DetailLayoutPlan,
+    copy_rect: RectPx,
+) -> DetailControlShelf {
+    let height = plan
+        .action_cluster
+        .button_height
+        .min(copy_rect.height)
+        .max(1.0);
+    let y = (copy_rect.bottom() - height).max(copy_rect.y);
+    let rect = RectPx {
+        x: copy_rect.x,
+        y,
+        width: copy_rect.width,
+        height,
+    };
+
+    DetailControlShelf {
+        rect: rect.into(),
+        axis: plan.action_cluster.axis,
+        button_width: plan.action_cluster.button_width.min(copy_rect.width),
+        button_height: height,
+        gap: plan.action_cluster.gap,
+    }
+}
+
+fn section_band_layout(
+    plan: &DetailLayoutPlan,
+    stage: RectPx,
+) -> DetailSectionBandLayout {
+    let columns = plan.section_grid.columns.max(1);
+    let gap = plan.section_grid.gap.max(0.0);
+    let total_gap = gap * columns.saturating_sub(1) as f32;
+    let column_width = ((stage.width - total_gap) / columns as f32).max(1.0);
+    let rect = RectPx {
+        x: stage.x,
+        y: stage.bottom() + gap,
+        width: stage.width,
+        height: plan.section_grid.panel_min_height.max(1.0),
+    };
+
+    DetailSectionBandLayout {
+        rect: rect.into(),
+        columns,
+        column_width,
+        gap,
+        panel_min_height: plan.section_grid.panel_min_height,
+    }
+}
+
+fn rail_deck_layout(
+    plan: &DetailLayoutPlan,
+    stage: RectPx,
+    section_band: DetailForegroundRect,
+) -> DetailRailDeckLayout {
+    let gap = plan.rail.gap.max(0.0);
+    let card_width = plan.rail.card_width.min(stage.width).max(1.0);
+    let card_height = plan.rail.card_height.max(1.0);
+    let cards_that_fit =
+        ((stage.width + gap) / (card_width + gap)).floor().max(1.0);
+    let visible_span = (cards_that_fit * card_width
+        + (cards_that_fit - 1.0).max(0.0) * gap)
+        .min(stage.width)
+        .max(card_width.min(stage.width));
+    let visible_rows = plan.rail.visible_rows.max(1);
+    let height = visible_rows as f32 * card_height
+        + visible_rows.saturating_sub(1) as f32 * gap;
+    let rect = RectPx {
+        x: stage.x,
+        y: section_band.bottom() + plan.section_grid.gap.max(0.0),
+        width: visible_span,
+        height,
+    };
+
+    DetailRailDeckLayout {
+        rect: rect.into(),
+        card_width,
+        card_height,
+        gap,
+        visible_rows,
+        visible_span,
+    }
+}
+
+fn surface_intensity_tokens(
+    composition: DetailComposition,
+) -> DetailSurfaceIntensityTokens {
+    match composition {
+        DetailComposition::CompactPortrait => DetailSurfaceIntensityTokens {
+            stage: 0.72,
+            readable_copy_lobe: 0.82,
+            hero_art: 0.70,
+            control_shelf: 0.78,
+            section_band: 0.74,
+            rail_deck: 0.72,
+        },
+        DetailComposition::CompactLandscape => DetailSurfaceIntensityTokens {
+            stage: 0.66,
+            readable_copy_lobe: 0.76,
+            hero_art: 0.64,
+            control_shelf: 0.72,
+            section_band: 0.68,
+            rail_deck: 0.66,
+        },
+        DetailComposition::BalancedDesktop => DetailSurfaceIntensityTokens {
+            stage: 0.54,
+            readable_copy_lobe: 0.62,
+            hero_art: 0.52,
+            control_shelf: 0.58,
+            section_band: 0.56,
+            rail_deck: 0.54,
+        },
+        DetailComposition::CinematicWide => DetailSurfaceIntensityTokens {
+            stage: 0.44,
+            readable_copy_lobe: 0.52,
+            hero_art: 0.42,
+            control_shelf: 0.48,
+            section_band: 0.46,
+            rail_deck: 0.44,
+        },
+        DetailComposition::TenFoot => DetailSurfaceIntensityTokens {
+            stage: 0.78,
+            readable_copy_lobe: 0.86,
+            hero_art: 0.74,
+            control_shelf: 0.82,
+            section_band: 0.80,
+            rail_deck: 0.78,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct TheaterPlateControls {
     plate_opacity: f32,
@@ -773,44 +1193,53 @@ fn summary_rect_px(
     hero_top: f32,
     content_width: f32,
 ) -> RectPx {
-    let remaining_width = (content_width - plan.hero_art.width - plan.hero_gap)
-        .max(content_width * 0.42)
-        .max(1.0);
+    let (hero_width, hero_height) = match plan.composition {
+        DetailComposition::TenFoot => tenfoot_hero_art_size(plan),
+        _ => (plan.hero_art.width, plan.hero_art.height),
+    };
+    let padding = match plan.composition {
+        DetailComposition::TenFoot => tenfoot_detail_hero_padding(plan),
+        _ => shared_detail_hero_padding(plan),
+    };
+    let remaining_width =
+        (content_width - padding * 2.0 - hero_width - plan.hero_gap)
+            .max(content_width * 0.42)
+            .max(1.0);
     match plan.composition {
         DetailComposition::CompactPortrait => {
-            let top = hero_top + plan.hero_art.height + plan.hero_gap;
+            let top = hero_top + padding + hero_height + plan.hero_gap;
             let max_height = (plan.available_height * 0.58).max(1.0);
             RectPx {
-                x: content_x,
+                x: content_x + padding,
                 y: top,
-                width: content_width,
-                height: (plan.hero_art.height * 0.76)
+                width: (content_width - padding * 2.0).max(1.0),
+                height: (hero_height * 0.76)
                     .clamp(220.0_f32.min(max_height), max_height),
             }
         }
         DetailComposition::CompactLandscape => RectPx {
-            x: content_x + plan.hero_art.width + plan.hero_gap * 0.78,
-            y: hero_top + plan.hero_art.height * 0.06,
+            x: content_x + padding + hero_width + plan.hero_gap * 0.78,
+            y: hero_top + padding + hero_height * 0.06,
             width: remaining_width,
-            height: plan.hero_art.height * 0.92,
+            height: hero_height * 0.92,
         },
         DetailComposition::BalancedDesktop => RectPx {
-            x: content_x + plan.hero_art.width + plan.hero_gap * 0.78,
-            y: hero_top + plan.hero_art.height * 0.10,
+            x: content_x + padding + hero_width + plan.hero_gap * 0.78,
+            y: hero_top + padding + hero_height * 0.10,
             width: remaining_width,
-            height: plan.hero_art.height * 0.84,
+            height: hero_height * 0.84,
         },
         DetailComposition::CinematicWide => RectPx {
-            x: content_x + plan.hero_art.width + plan.hero_gap * 0.72,
-            y: hero_top + plan.hero_art.height * 0.16,
+            x: content_x + padding + hero_width + plan.hero_gap * 0.72,
+            y: hero_top + padding + hero_height * 0.16,
             width: remaining_width,
-            height: plan.hero_art.height * 0.72,
+            height: hero_height * 0.72,
         },
         DetailComposition::TenFoot => RectPx {
-            x: content_x + plan.hero_art.width + plan.hero_gap * 0.70,
-            y: hero_top + plan.hero_art.height * 0.08,
+            x: content_x + padding + hero_width + plan.hero_gap * 0.70,
+            y: hero_top + padding + hero_height * 0.08,
             width: remaining_width,
-            height: plan.hero_art.height * 0.88,
+            height: hero_height * 0.88,
         },
     }
 }
@@ -823,9 +1252,19 @@ fn content_rect_px(
 ) -> RectPx {
     let height = match plan.composition {
         DetailComposition::CompactPortrait => {
-            plan.hero_art.height + plan.hero_gap + plan.hero_art.height * 0.76
+            let padding = shared_detail_hero_padding(plan);
+            padding
+                + plan.hero_art.height
+                + plan.hero_gap
+                + plan.hero_art.height * 0.76
         }
-        _ => plan.hero_art.height,
+        DetailComposition::TenFoot => {
+            let padding = tenfoot_detail_hero_padding(plan);
+            plan.backdrop
+                .height
+                .max(plan.hero_art.height + padding * 2.0)
+        }
+        _ => plan.hero_art.height + shared_detail_hero_padding(plan) * 2.0,
     };
 
     RectPx {
@@ -1199,7 +1638,7 @@ mod tests {
         assert_eq!(short_scaled.action_cluster.axis, DetailAxis::Horizontal);
         assert!(
             short_scaled.backdrop.height
-                <= short_scaled.available_height * 0.52 + 0.01
+                <= short_scaled.available_height * 0.62 + 0.01
         );
         assert_eq!(full_hd.rail.visible_rows, 2);
     }
@@ -1269,6 +1708,207 @@ mod tests {
                 assert!(plan.rail.card_height > 0.0);
                 assert!(plan.backdrop.height <= plan.available_height + 0.01);
             }
+        }
+    }
+
+    #[test]
+    fn foreground_stage_primitives_cover_required_viewport_matrix() {
+        let matrix = [
+            (
+                "compact",
+                390.0,
+                844.0,
+                1.0,
+                50.0,
+                DetailInterfaceMode::Desktop,
+                DetailArtAspect::Poster,
+                DetailComposition::CompactPortrait,
+            ),
+            (
+                "desktop",
+                1_280.0,
+                720.0,
+                1.0,
+                50.0,
+                DetailInterfaceMode::Desktop,
+                DetailArtAspect::Poster,
+                DetailComposition::BalancedDesktop,
+            ),
+            (
+                "ultrawide",
+                3_440.0,
+                1_440.0,
+                1.0,
+                50.0,
+                DetailInterfaceMode::Desktop,
+                DetailArtAspect::Still,
+                DetailComposition::CinematicWide,
+            ),
+            (
+                "tenfoot",
+                1_920.0,
+                1_080.0,
+                1.0,
+                0.0,
+                DetailInterfaceMode::TenFoot,
+                DetailArtAspect::Still,
+                DetailComposition::TenFoot,
+            ),
+        ];
+
+        for (name, width, height, scale, header, mode, aspect, expected) in
+            matrix
+        {
+            let plan = solve_detail_layout(
+                input(width, height, scale, header, mode)
+                    .with_hero_art_aspect(aspect),
+            );
+            let foreground = plan.foreground_stage(0.0);
+            let theater = plan.theater_plate_layout(0.0);
+
+            assert_eq!(plan.composition, expected, "{name} composition");
+            assert!(foreground.stage.stage_width > 0.0, "{name} stage");
+            assert!(
+                (foreground.stage.stage_width - foreground.stage.rect.width)
+                    .abs()
+                    < 0.01,
+                "{name} stage width should be explicit"
+            );
+            assert!(
+                foreground.safe_gutters.left
+                    + foreground.stage.stage_width
+                    + foreground.safe_gutters.right
+                    <= width + 0.01,
+                "{name} gutters should bound stage"
+            );
+
+            for rect in [
+                foreground.stage.rect,
+                foreground.readable_copy_lobe.text_rect,
+                foreground.readable_copy_lobe.plate_rect,
+                foreground.hero_art_anchor.rect,
+                foreground.control_shelf.rect,
+                foreground.section_bands.rect,
+                foreground.rail_deck.rect,
+            ] {
+                assert!(rect.width > 0.0, "{name} rect {rect:?}");
+                assert!(rect.height > 0.0, "{name} rect {rect:?}");
+                assert!(rect.x >= -0.01, "{name} rect {rect:?}");
+                assert!(rect.right() <= width + 0.01, "{name} rect {rect:?}");
+            }
+
+            assert!(
+                foreground.readable_copy_lobe.text_rect.width
+                    <= foreground.readable_copy_lobe.max_width + 0.01,
+                "{name} copy width should honor cap"
+            );
+            assert!(
+                foreground.readable_copy_lobe.text_rect.width
+                    <= foreground.stage.stage_width + 0.01,
+                "{name} copy lobe should stay inside stage"
+            );
+            assert!(
+                foreground.readable_copy_lobe.plate_rect.x
+                    <= foreground.readable_copy_lobe.text_rect.x + 0.01,
+                "{name} plate should cover copy"
+            );
+            assert!(
+                foreground.readable_copy_lobe.plate_rect.right() + 0.01
+                    >= foreground.readable_copy_lobe.text_rect.right(),
+                "{name} plate should cover copy"
+            );
+            assert!(
+                foreground.rail_deck.visible_span
+                    <= foreground.stage.stage_width + 0.01,
+                "{name} rail span should fit the stage"
+            );
+            assert!(
+                (foreground.rail_deck.rect.width
+                    - foreground.rail_deck.visible_span)
+                    .abs()
+                    < 0.01,
+                "{name} rail deck width should expose visible span"
+            );
+
+            let expected_copy_cap = match expected {
+                DetailComposition::CompactPortrait => {
+                    foreground.stage.stage_width
+                }
+                DetailComposition::CompactLandscape => 640.0 * plan.scale,
+                DetailComposition::BalancedDesktop => 760.0 * plan.scale,
+                DetailComposition::CinematicWide => 840.0 * plan.scale,
+                DetailComposition::TenFoot => 1_080.0 * plan.scale,
+            };
+            assert!(
+                foreground.readable_copy_lobe.max_width
+                    <= expected_copy_cap + 0.01,
+                "{name} copy cap"
+            );
+
+            for value in [
+                foreground.surface_intensity.stage,
+                foreground.surface_intensity.readable_copy_lobe,
+                foreground.surface_intensity.hero_art,
+                foreground.surface_intensity.control_shelf,
+                foreground.surface_intensity.section_band,
+                foreground.surface_intensity.rail_deck,
+            ] {
+                assert!((0.0..=1.0).contains(&value), "{name} intensity");
+            }
+
+            assert_eq!(
+                theater.hero_art_rect,
+                foreground.hero_art_anchor.rect.normalized(width, height),
+                "{name} hero art should map to Theater Plate geometry"
+            );
+            assert_eq!(
+                theater.plate_rect,
+                foreground
+                    .readable_copy_lobe
+                    .plate_rect
+                    .normalized(width, height),
+                "{name} readable copy lobe should map to Theater Plate geometry"
+            );
+        }
+    }
+
+    #[test]
+    fn foreground_stage_primitives_follow_scroll_offset_for_viewport_matrix() {
+        let matrix = [
+            (390.0, 844.0, 50.0, DetailInterfaceMode::Desktop),
+            (1_280.0, 720.0, 50.0, DetailInterfaceMode::Desktop),
+            (3_440.0, 1_440.0, 50.0, DetailInterfaceMode::Desktop),
+            (1_920.0, 1_080.0, 0.0, DetailInterfaceMode::TenFoot),
+        ];
+
+        for (width, height, header, mode) in matrix {
+            let plan =
+                solve_detail_layout(input(width, height, 1.0, header, mode));
+            let base = plan.foreground_stage(0.0);
+            let scrolled = plan.foreground_stage(96.0);
+
+            assert!(scrolled.stage.rect.y < base.stage.rect.y);
+            assert!(
+                (base.stage.rect.y - scrolled.stage.rect.y - 96.0).abs() < 0.01
+            );
+            assert!(
+                scrolled.readable_copy_lobe.text_rect.y
+                    < base.readable_copy_lobe.text_rect.y
+            );
+            assert!(
+                scrolled.hero_art_anchor.rect.y < base.hero_art_anchor.rect.y
+            );
+            assert_eq!(base.safe_gutters.top, scrolled.safe_gutters.top);
+
+            let theater_base = plan.theater_plate_layout(0.0);
+            let theater_scrolled = plan.theater_plate_layout(96.0);
+            assert!(
+                theater_scrolled.content_rect.y <= theater_base.content_rect.y
+            );
+            assert!(
+                theater_scrolled.hero_art_rect.y
+                    <= theater_base.hero_art_rect.y
+            );
         }
     }
 

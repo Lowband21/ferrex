@@ -90,6 +90,8 @@ pub enum PlayerScenario {
     DesktopSeriesDetail,
     /// Desktop season detail surface with seeded episodes and artwork.
     DesktopSeasonDetail,
+    /// Desktop season detail surface with the episode rail restored to a scrolled state.
+    DesktopSeasonDetailScrolledRail,
     /// Desktop episode detail surface with seeded still artwork.
     DesktopEpisodeDetail,
     /// Authenticated settings/device-management surface.
@@ -128,13 +130,14 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
         Self::DesktopMovieDetail,
         Self::DesktopSeriesDetail,
         Self::DesktopSeasonDetail,
+        Self::DesktopSeasonDetailScrolledRail,
         Self::DesktopEpisodeDetail,
         Self::SettingsDevices,
         Self::TenFootHome,
@@ -160,6 +163,9 @@ impl PlayerScenario {
             Self::DesktopMovieDetail => "DesktopMovieDetail",
             Self::DesktopSeriesDetail => "DesktopSeriesDetail",
             Self::DesktopSeasonDetail => "DesktopSeasonDetail",
+            Self::DesktopSeasonDetailScrolledRail => {
+                "DesktopSeasonDetailScrolledRail"
+            }
             Self::DesktopEpisodeDetail => "DesktopEpisodeDetail",
             Self::SettingsDevices => "SettingsDevices",
             Self::TenFootHome => "TenFootHome",
@@ -201,6 +207,9 @@ impl PlayerScenario {
             }
             Self::DesktopSeasonDetail => {
                 "Desktop season detail page with seeded episode relationship rail"
+            }
+            Self::DesktopSeasonDetailScrolledRail => {
+                "Desktop season detail page with the episode relationship rail restored to a horizontal scrolled state"
             }
             Self::DesktopEpisodeDetail => {
                 "Desktop episode detail page with seeded still artwork and playback actions"
@@ -279,6 +288,11 @@ impl PlayerScenario {
                 "desktopseasondetail" | "seasondetail" => {
                     Some(Self::DesktopSeasonDetail)
                 }
+                "desktopseasondetailscrolledrail"
+                | "seasondetailscrolledrail"
+                | "seasondetailscrolled" => {
+                    Some(Self::DesktopSeasonDetailScrolledRail)
+                }
                 "desktopepisodedetail" | "episodedetail" => {
                     Some(Self::DesktopEpisodeDetail)
                 }
@@ -321,6 +335,9 @@ impl PlayerScenario {
             Self::DesktopMovieDetail => desktop_movie_detail_state(config),
             Self::DesktopSeriesDetail => desktop_series_detail_state(config),
             Self::DesktopSeasonDetail => desktop_season_detail_state(config),
+            Self::DesktopSeasonDetailScrolledRail => {
+                desktop_season_detail_scrolled_rail_state(config)
+            }
             Self::DesktopEpisodeDetail => desktop_episode_detail_state(config),
             Self::SettingsDevices => settings_devices_state(config),
             Self::TenFootHome => tenfoot_home_state(config),
@@ -382,6 +399,12 @@ impl PlayerScenario {
         let task = match self {
             Self::PosterClippingStackedRailsScrolled => {
                 poster_clipping_scroll_restore_task(&state)
+            }
+            Self::DesktopSeasonDetailScrolledRail => {
+                detail_rail_scroll_restore_task(
+                    &state,
+                    season_detail_scrolled_rail_key(),
+                )
             }
             _ => Task::none(),
         };
@@ -500,6 +523,12 @@ fn desktop_season_detail_state(config: &AppConfig) -> State {
         backdrop_handle: None,
     };
     state.loading = false;
+    state
+}
+
+fn desktop_season_detail_scrolled_rail_state(config: &AppConfig) -> State {
+    let mut state = desktop_season_detail_state(config);
+    configure_season_detail_scrolled_rail(&mut state);
     state
 }
 
@@ -954,6 +983,62 @@ fn poster_clipping_scroll_restore_task(state: &State) -> Task<DomainMessage> {
     } else {
         Task::batch(tasks).map(DomainMessage::from)
     }
+}
+
+fn season_detail_scrolled_rail_key() -> CarouselKey {
+    CarouselKey::SeasonEpisodes(seed_season_id(0).to_uuid())
+}
+
+fn configure_season_detail_scrolled_rail(state: &mut State) {
+    let key = season_detail_scrolled_rail_key();
+    let total = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&seed_season_id(0))
+        .map(|episodes| episodes.len())
+        .unwrap_or(0);
+    let width = state.window_size.width.max(1.0);
+    let scale = state.domains.ui.state.scaled_layout.scale;
+
+    state.domains.ui.state.carousel_registry.ensure_default(
+        key.clone(),
+        total,
+        width,
+        CarouselConfig::episode_defaults(),
+        scale,
+    );
+
+    if let Some(carousel) =
+        state.domains.ui.state.carousel_registry.get_mut(&key)
+    {
+        carousel.set_index_position(4.0);
+        carousel.set_reference_index(4.0);
+    }
+}
+
+fn detail_rail_scroll_restore_task(
+    state: &State,
+    key: CarouselKey,
+) -> Task<DomainMessage> {
+    state
+        .domains
+        .ui
+        .state
+        .carousel_registry
+        .get(&key)
+        .map(|carousel| {
+            scroll_to::<crate::domains::ui::messages::UiMessage>(
+                carousel.scrollable_id.clone(),
+                AbsoluteOffset {
+                    x: carousel.scroll_x,
+                    y: 0.0,
+                },
+            )
+        })
+        .unwrap_or_else(Task::none)
+        .map(DomainMessage::from)
 }
 
 fn poster_clipping_scroll_keys() -> [CarouselKey; 4] {
@@ -2096,6 +2181,12 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name
+                    == "DesktopSeasonDetailScrolledRail")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "DesktopEpisodeDetail")
         );
         assert!(
@@ -2189,6 +2280,29 @@ mod tests {
                 "{key:?} should have a horizontal scrolled offset"
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn season_detail_scrolled_rail_scenario_seeds_virtual_rail_offset() {
+        let state = PlayerScenario::DesktopSeasonDetailScrolledRail
+            .build(&test_config());
+        let key = season_detail_scrolled_rail_key();
+        let carousel = state
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&key)
+            .expect("scrolled season detail rail");
+
+        assert!(matches!(
+            state.domains.ui.state.view,
+            ViewState::SeasonDetail { series_id, season_id, .. }
+                if series_id == seed_series_id(0) && season_id == seed_season_id(0)
+        ));
+        assert!(carousel.scroll_x > 0.0);
+        assert!(carousel.index_position > 0.0);
+        assert!(carousel.visible_range.start > 0);
     }
 
     #[tokio::test(flavor = "current_thread")]

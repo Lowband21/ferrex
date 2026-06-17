@@ -11,15 +11,13 @@ use crate::{
                 detail::{
                     DetailAction, DetailArtAspect, DetailArtwork,
                     DetailBackdropControl, DetailContentKind,
-                    DetailLayoutInput, DetailLayoutPlan, DetailMetadataPill,
-                    DetailNotice, DetailOverviewSection, DetailPageModel,
-                    DetailRailItem, DetailRelationshipRail, DetailSection,
-                    DetailTone, solve_detail_layout, view_backdrop_controls,
-                    view_detail_hero, view_empty_state,
-                    view_registered_relationship_rail, view_relationship_rail,
-                    view_section,
+                    DetailLayoutInput, DetailMetadataPill, DetailNotice,
+                    DetailOverviewSection, DetailPageModel, DetailRailItem,
+                    DetailRegisteredRailAdapter, DetailRelationshipRail,
+                    DetailSection, DetailTone, solve_detail_layout,
+                    view_detail_stage_with_registered_rails,
                 },
-                virtual_carousel::types::CarouselKey,
+                virtual_carousel::{CarouselRegistry, types::CarouselKey},
             },
         },
     },
@@ -32,10 +30,7 @@ use ferrex_core::player_prelude::{
 use ferrex_model::{
     EpisodeID, EpisodeReference, MediaID, SeasonID, SeasonReference, SeriesID,
 };
-use iced::{
-    Element, Length,
-    widget::{Column, Row, Space, container},
-};
+use iced::Element;
 use rkyv::option::ArchivedOption;
 use uuid::Uuid;
 
@@ -474,117 +469,36 @@ fn view_adaptive_tv_detail(
 
     let sizes = &state.domains.ui.state.size_provider;
     let plan = detail_layout_for_model(&model, state);
-    let mut body: Column<'static, UiMessage> = Column::new()
-        .spacing(plan.section_grid.gap)
-        .padding([plan.page_padding_y, plan.page_padding_x])
-        .width(Length::Fill)
-        .max_width(plan.content_width);
+    let registered_rails = registered_tv_rail_adapters(
+        &model.sections,
+        &state.domains.ui.state.carousel_registry,
+    );
 
-    if let Some(empty) = model.empty_state.as_ref().filter(|_| model.is_empty())
-    {
-        body = body.push(view_empty_state(empty, sizes));
-    } else {
-        body = body.push(view_detail_hero(&model, &plan, sizes));
-        body =
-            body.push(view_tv_sections(&model.sections, &plan, sizes, state));
-    }
-
-    if !model.backdrop_controls.is_empty() {
-        body = body.push(view_backdrop_controls(
-            &model.backdrop_controls,
-            &plan,
-            sizes,
-        ));
-    }
-
-    container(body)
-        .width(Length::Fill)
-        .align_x(iced::alignment::Horizontal::Center)
-        .into()
+    view_detail_stage_with_registered_rails(
+        &model,
+        &plan,
+        sizes,
+        &registered_rails,
+    )
 }
 
-fn view_tv_sections(
-    sections: &[DetailSection],
-    plan: &DetailLayoutPlan,
-    sizes: &crate::infra::design_tokens::SizeProvider,
-    state: &State,
-) -> Element<'static, UiMessage> {
-    if sections.is_empty() {
-        return Space::new().into();
-    }
-
-    let columns = plan.section_grid.columns.max(1);
-    let mut outer = Column::new().spacing(plan.section_grid.gap);
-    let mut current = Row::new()
-        .spacing(plan.section_grid.gap)
-        .align_y(iced::Alignment::Start);
-    let mut count = 0usize;
-
-    for section in sections
+fn registered_tv_rail_adapters<'a>(
+    sections: &'a [DetailSection],
+    registry: &'a CarouselRegistry,
+) -> Vec<DetailRegisteredRailAdapter<'a>> {
+    sections
         .iter()
-        .filter(|section| !matches!(section, DetailSection::Overview(_)))
-    {
-        if matches!(section, DetailSection::Cast(_)) {
-            if count > 0 {
-                let completed = std::mem::replace(
-                    &mut current,
-                    Row::new()
-                        .spacing(plan.section_grid.gap)
-                        .align_y(iced::Alignment::Start),
-                );
-                outer = outer.push(completed);
-                count = 0;
-            }
-            outer = outer.push(view_tv_section(section, plan, sizes, state));
-            continue;
-        }
-
-        current = current.push(view_tv_section(section, plan, sizes, state));
-        count += 1;
-        if count == columns {
-            let completed = std::mem::replace(
-                &mut current,
-                Row::new()
-                    .spacing(plan.section_grid.gap)
-                    .align_y(iced::Alignment::Start),
-            );
-            outer = outer.push(completed);
-            count = 0;
-        }
-    }
-
-    if count > 0 {
-        outer = outer.push(current);
-    }
-
-    outer.into()
-}
-
-fn view_tv_section(
-    section: &DetailSection,
-    plan: &DetailLayoutPlan,
-    sizes: &crate::infra::design_tokens::SizeProvider,
-    state: &State,
-) -> Element<'static, UiMessage> {
-    match section {
-        DetailSection::RelationshipRail(rail) => {
-            if let Some(key) = rail.carousel_key.clone()
-                && let Some(carousel_state) =
-                    state.domains.ui.state.carousel_registry.get(&key)
-            {
-                return view_registered_relationship_rail(
-                    rail,
+        .filter_map(|section| match section {
+            DetailSection::RelationshipRail(rail) => {
+                let key = rail.carousel_key.as_ref()?;
+                Some(DetailRegisteredRailAdapter {
                     key,
-                    carousel_state,
-                    plan,
-                    sizes,
-                );
+                    carousel_state: registry.get(key)?,
+                })
             }
-
-            view_relationship_rail(rail, plan, sizes)
-        }
-        _ => view_section(section, plan, sizes),
-    }
+            _ => None,
+        })
+        .collect()
 }
 
 fn detail_layout_for_model(
@@ -909,6 +823,8 @@ fn backdrop_control_label(state: &State) -> String {
 mod tests {
     use super::*;
 
+    use crate::domains::ui::views::virtual_carousel::CarouselConfig;
+
     #[test]
     fn season_title_names_specials_without_numeric_prefix() {
         assert_eq!(season_title(0), "Specials");
@@ -940,6 +856,54 @@ mod tests {
         );
         assert!(seasons.id.starts_with("ShowSeasons"));
         assert!(episodes.id.starts_with("SeasonEpisodes"));
+    }
+
+    #[test]
+    fn tv_detail_stage_adapters_keep_registered_carousel_state() {
+        let series_id = SeriesID(Uuid::from_u128(11));
+        let season_id = SeasonID(Uuid::from_u128(12));
+        let registered_key = CarouselKey::ShowSeasons(series_id.to_uuid());
+        let missing_key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
+        let sections = vec![
+            DetailSection::Overview(DetailOverviewSection::new(
+                "Overview copy stays in the shared stage hero.",
+            )),
+            DetailSection::RelationshipRail(DetailRelationshipRail {
+                id: "registered-seasons".to_string(),
+                carousel_key: Some(registered_key.clone()),
+                title: "Seasons".to_string(),
+                items: Vec::new(),
+                empty_message: None,
+            }),
+            DetailSection::RelationshipRail(DetailRelationshipRail {
+                id: "missing-episodes".to_string(),
+                carousel_key: Some(missing_key),
+                title: "Episodes".to_string(),
+                items: Vec::new(),
+                empty_message: None,
+            }),
+            DetailSection::RelationshipRail(DetailRelationshipRail {
+                id: "anonymous".to_string(),
+                carousel_key: None,
+                title: "Related".to_string(),
+                items: Vec::new(),
+                empty_message: None,
+            }),
+        ];
+        let mut registry = CarouselRegistry::new();
+        registry.ensure_default(
+            registered_key.clone(),
+            6,
+            960.0,
+            CarouselConfig::poster_defaults(),
+            1.0,
+        );
+
+        let adapters = registered_tv_rail_adapters(&sections, &registry);
+
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].key, &registered_key);
+        assert_eq!(adapters[0].carousel_state.total_items, 6);
     }
 
     #[test]
