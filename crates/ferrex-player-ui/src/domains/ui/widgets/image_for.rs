@@ -132,11 +132,15 @@ pub struct ImageFor {
     meta: Option<String>,
     // Carousel context for unique poster instance identification
     carousel_key: Option<CarouselKey>,
+    // Caller-scoped identity for duplicate items inside the same rail/carousel.
+    item_identity: Option<String>,
     // Animation configuration snapshot used for config-aware bounds + animations.
     // Keeping this as a value avoids lifetime plumbing and allows per-widget overrides.
     animation_config: Option<AnimationConfig>,
     // Whether layout should be tight to the visible poster or reserve effect overflow.
     layout_bounds: PosterLayoutBounds,
+    // Optional explicit shader title/meta zone height in layout pixels.
+    shader_text_zone_height: Option<f32>,
 }
 
 impl ImageFor {
@@ -179,8 +183,10 @@ impl ImageFor {
             title: None,
             meta: None,
             carousel_key: None,
+            item_identity: None,
             animation_config: None,
             layout_bounds: PosterLayoutBounds::ReserveEffects,
+            shader_text_zone_height: None,
         }
     }
 
@@ -224,6 +230,16 @@ impl ImageFor {
     /// Set the poster layout bounds policy.
     pub fn layout_bounds(mut self, layout_bounds: PosterLayoutBounds) -> Self {
         self.layout_bounds = layout_bounds;
+        self
+    }
+
+    /// Set an explicit shader title/meta text zone height in layout pixels.
+    ///
+    /// This is useful for non-poster aspect cards whose visible height should
+    /// not shrink the title/meta reservation below the shader's two-line text
+    /// design. The value is only used when shader title/meta text is enabled.
+    pub fn shader_text_zone_height(mut self, height: f32) -> Self {
+        self.shader_text_zone_height = Some(height.max(0.0));
         self
     }
 
@@ -408,9 +424,26 @@ impl ImageFor {
         self.carousel_key = Some(key);
         self
     }
+
+    /// Set caller-scoped item identity for duplicate entries in one rail.
+    ///
+    /// This does not replace the media id used for actions; it only
+    /// disambiguates shader batching, animation state, and menu identity when
+    /// the same media/image appears more than once in the same carousel or
+    /// detail rail.
+    pub fn item_identity(mut self, identity: impl Into<String>) -> Self {
+        let identity = identity.into();
+        self.item_identity = if identity.is_empty() {
+            None
+        } else {
+            Some(identity)
+        };
+        self
+    }
 }
 
-fn shader_text_zone_height_for_display(poster_height: f32) -> f32 {
+/// Scale the default shader title/meta reservation for a visible poster height.
+pub fn shader_text_zone_height_for_display(poster_height: f32) -> f32 {
     use crate::infra::constants::layout::poster;
 
     let scale = if poster::BASE_HEIGHT > 0.0 {
@@ -420,6 +453,21 @@ fn shader_text_zone_height_for_display(poster_height: f32) -> f32 {
     };
 
     poster::SHADER_TEXT_ZONE_HEIGHT * scale.max(0.0)
+}
+
+fn instance_hash_for(image: &ImageFor) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    image.media_id.hash(&mut hasher);
+    image.iid.hash(&mut hasher);
+    image.request_size.hash(&mut hasher);
+    image.carousel_key.hash(&mut hasher);
+    image.item_identity.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn poster_instance_key(image: &ImageFor) -> PosterInstanceKey {
+    PosterInstanceKey::new(image.media_id, image.carousel_key.clone())
+        .with_item_identity(image.item_identity.clone())
 }
 
 /// Helper function to create an image widget
@@ -464,6 +512,28 @@ mod tests {
                 < f32::EPSILON
         );
     }
+
+    #[test]
+    fn explicit_shader_text_zone_height_is_clamped_to_non_negative() {
+        let image = ImageFor::new(Uuid::nil()).shader_text_zone_height(-8.0);
+
+        assert_eq!(image.shader_text_zone_height, Some(0.0));
+    }
+
+    #[test]
+    fn item_identity_participates_in_widget_identity() {
+        let media_id = Uuid::from_u128(1);
+        let image_id = Uuid::from_u128(2);
+        let base = ImageFor::new(media_id).iid(Some(image_id));
+        let first = base.clone().item_identity("rail-a:item-1");
+        let second = base.item_identity("rail-a:item-2");
+
+        assert_ne!(instance_hash_for(&first), instance_hash_for(&second));
+        assert_eq!(
+            poster_instance_key(&first).item_identity.as_deref(),
+            Some("rail-a:item-1")
+        );
+    }
 }
 
 // Note: From implementations for MediaID types are handled in api_types module
@@ -500,7 +570,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             AnimatedPosterBounds::new(width, height)
         };
         let text_zone_height = if image.layout_bounds.reserves_text_zone() {
-            shader_text_zone_height_for_display(height)
+            image
+                .shader_text_zone_height
+                .unwrap_or_else(|| shader_text_zone_height_for_display(height))
         } else {
             0.0
         };
@@ -511,17 +583,9 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
         });
 
         // Calculate instance hash for cache invalidation and widget identity.
-        // Includes carousel_key so the same media in different carousels gets
-        // unique primitive IDs for correct batch deduplication.
-        let instance_hash = {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            image.media_id.hash(&mut hasher);
-            image.iid.hash(&mut hasher);
-            image.request_size.hash(&mut hasher);
-            // Include carousel context for unique instance identity
-            image.carousel_key.hash(&mut hasher);
-            hasher.finish()
-        };
+        // Includes carousel_key and item identity so duplicate media/images in
+        // the same detail rail get unique primitive IDs for correct batching.
+        let instance_hash = instance_hash_for(&image);
 
         // Fast path: Check if we have cached data and it's still valid
         if let Some(cached) = &image.cached_data
@@ -560,10 +624,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
         if let Some(image_service) = image_service {
             let Some(request) = request.clone() else {
                 // No iid available; render placeholder only.
-                let instance_key = PosterInstanceKey::new(
-                    image.media_id,
-                    image.carousel_key.clone(),
-                );
+                let instance_key = poster_instance_key(&image);
                 return create_loading_placeholder(
                     bounds,
                     image.radius,
@@ -604,10 +665,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         None => image.animation,
                     };
 
-                    let instance_key = PosterInstanceKey::new(
-                        image.media_id,
-                        image.carousel_key.clone(),
-                    );
+                    let instance_key = poster_instance_key(&image);
 
                     let mut shader: Poster = apply_layout_bounds(
                         poster(handle, Some(instance_hash))
@@ -722,10 +780,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         }
                     }
 
-                    let instance_key = PosterInstanceKey::new(
-                        image.media_id,
-                        image.carousel_key.clone(),
-                    );
+                    let instance_key = poster_instance_key(&image);
                     create_loading_placeholder(
                         bounds,
                         image.radius,
@@ -742,10 +797,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             }
         } else {
             // Service not initialized, show loading state
-            let instance_key = PosterInstanceKey::new(
-                image.media_id,
-                image.carousel_key.clone(),
-            );
+            let instance_key = poster_instance_key(&image);
             create_loading_placeholder(
                 bounds,
                 image.radius,
@@ -799,9 +851,7 @@ fn create_shader_from_cached<'a>(
     bounds: AnimatedPosterBounds,
     text_zone_height: f32,
 ) -> Element<'a, UiMessage> {
-    // Create instance key from media_id and carousel_key
-    let instance_key =
-        PosterInstanceKey::new(image.media_id, image.carousel_key.clone());
+    let instance_key = poster_instance_key(image);
     // Check if we should skip atlas upload for VeryFast scrolling
     let mut shader = apply_layout_bounds(
         poster(handle, Some(instance_hash)).radius(image.radius),

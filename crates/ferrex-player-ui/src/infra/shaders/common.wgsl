@@ -105,44 +105,52 @@ fn render_drop_shadow(tex_coord: vec2<f32>, radius_normalized: f32, shadow_inten
     return vec4<f32>(shadow_color, shadow_alpha * shadow_intensity * 0.5);
 }
 
-// SDF for a circle that accounts for aspect ratio
-fn circle_sdf(p: vec2<f32>, center: vec2<f32>, radius: f32) -> f32 {
-    // Standard poster aspect ratio is 2:3 (width:height)
-    let aspect_ratio = 2.0 / 3.0;
-    // Adjust x coordinate to compensate for aspect ratio
-    let adjusted_p = vec2<f32>(p.x * aspect_ratio, p.y);
-    let adjusted_center = vec2<f32>(center.x * aspect_ratio, center.y);
+const POSTER_REFERENCE_ASPECT: f32 = 2.0 / 3.0;
+
+// SDF for a circle that accounts for the rendered card aspect ratio.
+fn circle_sdf_aspect(p: vec2<f32>, center: vec2<f32>, radius: f32, aspect_ratio: f32) -> f32 {
+    let aspect = max(aspect_ratio, 0.0001);
+    // Adjust x coordinate to compensate for aspect ratio.
+    let adjusted_p = vec2<f32>(p.x * aspect, p.y);
+    let adjusted_center = vec2<f32>(center.x * aspect, center.y);
     return length(adjusted_p - adjusted_center) - radius;
 }
 
+// Legacy poster-aspect wrapper used by older callers.
+fn circle_sdf(p: vec2<f32>, center: vec2<f32>, radius: f32) -> f32 {
+    return circle_sdf_aspect(p, center, radius, POSTER_REFERENCE_ASPECT);
+}
+
 // SDF for a rounded rectangle button that accounts for aspect ratio
-fn button_sdf(p: vec2<f32>, center: vec2<f32>, size: vec2<f32>, corner_radius: f32) -> f32 {
-    // Standard poster aspect ratio is 2:3 (width:height)
-    let aspect_ratio = 2.0 / 3.0;
+fn button_sdf_aspect(p: vec2<f32>, center: vec2<f32>, size: vec2<f32>, corner_radius: f32, aspect_ratio: f32) -> f32 {
+    let aspect = max(aspect_ratio, 0.0001);
     // Adjust coordinates and size to compensate for aspect ratio
-    let adjusted_p = vec2<f32>(p.x * aspect_ratio, p.y);
-    let adjusted_center = vec2<f32>(center.x * aspect_ratio, center.y);
-    let adjusted_size = vec2<f32>(size.x * aspect_ratio, size.y);
+    let adjusted_p = vec2<f32>(p.x * aspect, p.y);
+    let adjusted_center = vec2<f32>(center.x * aspect, center.y);
+    let adjusted_size = vec2<f32>(size.x * aspect, size.y);
 
     let half_size = adjusted_size * 0.5;
     let d = abs(adjusted_p - adjusted_center) - half_size + corner_radius;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - corner_radius;
 }
 
+fn button_sdf(p: vec2<f32>, center: vec2<f32>, size: vec2<f32>, corner_radius: f32) -> f32 {
+    return button_sdf_aspect(p, center, size, corner_radius, POSTER_REFERENCE_ASPECT);
+}
+
 // SDF for a square button that maintains aspect ratio correctly
-fn square_button_sdf(p: vec2<f32>, center: vec2<f32>, size: f32, corner_radius: f32) -> f32 {
-    // Standard poster aspect ratio is 2:3 (width:height)
-    let aspect_ratio = 2.0 / 3.0;
-    // To create a square button in screen space, we need to make it rectangular in texture space
-    // The button should be wider in texture coordinates to compensate for the poster's aspect ratio
-    let adjusted_p = vec2<f32>(p.x, p.y);
-    let adjusted_center = vec2<f32>(center.x, center.y);
-    // Make the button wider in texture space so it appears square in screen space
-    let adjusted_size = vec2<f32>(size / aspect_ratio, size);
+fn square_button_sdf_aspect(p: vec2<f32>, center: vec2<f32>, size: f32, corner_radius: f32, aspect_ratio: f32) -> f32 {
+    let aspect = max(aspect_ratio, 0.0001);
+    // To create a square button in screen space, we need to make it rectangular in texture space.
+    let adjusted_size = vec2<f32>(size / aspect, size);
 
     let half_size = adjusted_size * 0.5;
-    let d = abs(adjusted_p - adjusted_center) - half_size + corner_radius;
+    let d = abs(p - center) - half_size + corner_radius;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - corner_radius;
+}
+
+fn square_button_sdf(p: vec2<f32>, center: vec2<f32>, size: f32, corner_radius: f32) -> f32 {
+    return square_button_sdf_aspect(p, center, size, corner_radius, POSTER_REFERENCE_ASPECT);
 }
 
 // SDF for play triangle icon (symmetric triangle)
@@ -170,13 +178,12 @@ fn play_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
 }
 
 // SDF for edit pencil icon with aspect ratio correction
-fn edit_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
-    // Standard poster aspect ratio is 2:3 (width:height)
-    let aspect_ratio = 2.0 / 3.0;
+fn edit_icon_sdf_aspect(p: vec2<f32>, center: vec2<f32>, size: f32, aspect_ratio: f32) -> f32 {
+    let aspect = max(aspect_ratio, 0.0001);
 
     // Adjust coordinates to compensate for aspect ratio
-    let adjusted_p = vec2<f32>(p.x * aspect_ratio, p.y);
-    let adjusted_center = vec2<f32>(center.x * aspect_ratio, center.y);
+    let adjusted_p = vec2<f32>(p.x * aspect, p.y);
+    let adjusted_center = vec2<f32>(center.x * aspect, center.y);
 
     let rel_p = adjusted_p - adjusted_center;
     let half_size = size * 0.5;
@@ -187,20 +194,27 @@ fn edit_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
         -rel_p.x * 0.707 + rel_p.y * 0.707
     );
 
-    let rect_size = vec2<f32>(half_size * 0.3 * aspect_ratio, half_size * 1.5);
+    let rect_size = vec2<f32>(half_size * 0.3 * aspect, half_size * 1.5);
     let d = abs(rotated_p) - rect_size;
     return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
 }
 
+fn edit_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
+    return edit_icon_sdf_aspect(p, center, size, POSTER_REFERENCE_ASPECT);
+}
+
 // SDF for three dots (more options icon)
-fn dots_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
+fn dots_icon_sdf_aspect(p: vec2<f32>, center: vec2<f32>, size: f32, aspect_ratio: f32) -> f32 {
     let dot_radius = size * 0.15;
     let spacing = size * 0.45; // Increased spacing between dots
 
-    // Note: circle_sdf already handles aspect ratio internally
-    let d1 = circle_sdf(p, center + vec2<f32>(-spacing, 0.0), dot_radius);
-    let d2 = circle_sdf(p, center, dot_radius);
-    let d3 = circle_sdf(p, center + vec2<f32>(spacing, 0.0), dot_radius);
+    let d1 = circle_sdf_aspect(p, center + vec2<f32>(-spacing, 0.0), dot_radius, aspect_ratio);
+    let d2 = circle_sdf_aspect(p, center, dot_radius, aspect_ratio);
+    let d3 = circle_sdf_aspect(p, center + vec2<f32>(spacing, 0.0), dot_radius, aspect_ratio);
 
     return min(min(d1, d2), d3);
+}
+
+fn dots_icon_sdf(p: vec2<f32>, center: vec2<f32>, size: f32) -> f32 {
+    return dots_icon_sdf_aspect(p, center, size, POSTER_REFERENCE_ASPECT);
 }
