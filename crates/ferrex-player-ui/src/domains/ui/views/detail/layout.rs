@@ -1676,6 +1676,14 @@ mod tests {
                 typography.role(DetailTextRole::HeroTitle),
                 typography.hero_title
             );
+            assert_eq!(
+                typography.role(DetailTextRole::RailTitle),
+                typography.rail_title
+            );
+            assert_eq!(
+                typography.role(DetailTextRole::RailSubtitle),
+                typography.rail_subtitle
+            );
             assert_eq!(typography.metrics.fact_layout_mode, expected_fact_mode);
             assert_eq!(typography.metrics.hero_alignment, expected_alignment);
             assert!(typography.metrics.hero_copy_width <= plan.content_width);
@@ -1729,6 +1737,8 @@ mod tests {
             tenfoot.typography.metrics.caption_budgets.rail_title_lines,
             1
         );
+        assert_eq!(tenfoot.typography.rail_title.max_lines(), Some(1));
+        assert_eq!(tenfoot.typography.rail_subtitle.max_lines(), Some(1));
     }
 
     #[test]

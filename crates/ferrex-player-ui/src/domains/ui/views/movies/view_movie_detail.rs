@@ -9,10 +9,11 @@ use crate::{
                 DetailAction, DetailActionMenuItem, DetailArtwork,
                 DetailBackdropControl, DetailCastMember, DetailCastSection,
                 DetailContentKind, DetailFact, DetailFactPanel,
-                DetailLayoutPlan, DetailMetadataPill, DetailOverviewSection,
-                DetailPageModel, DetailSection, DetailTechnicalItem,
-                DetailTechnicalSection, DetailTone,
-                solve_detail_layout_from_runtime, view_detail_stage,
+                DetailLayoutPlan, DetailMetadataImportance, DetailMetadataPill,
+                DetailOverviewSection, DetailPageModel, DetailSection,
+                DetailTechnicalItem, DetailTechnicalSection, DetailTone,
+                prioritize_metadata_items, solve_detail_layout_from_runtime,
+                view_detail_stage,
             },
             grid::macros::parse_hex_color,
         },
@@ -237,7 +238,10 @@ fn movie_metadata_pills(
         .map(str::trim)
         .filter(|year| !year.is_empty())
     {
-        metadata.push(DetailMetadataPill::neutral(year.to_string()));
+        metadata.push(
+            DetailMetadataPill::neutral(year.to_string())
+                .with_importance(DetailMetadataImportance::Primary),
+        );
     }
 
     if let Some(runtime) = movie_details
@@ -245,7 +249,10 @@ fn movie_metadata_pills(
         .map(format_runtime_minutes)
         .or_else(|| file_duration_label(movie))
     {
-        metadata.push(DetailMetadataPill::neutral(runtime));
+        metadata.push(
+            DetailMetadataPill::neutral(runtime)
+                .with_importance(DetailMetadataImportance::Primary),
+        );
     }
 
     if let Some(content_rating) = movie_details
@@ -261,15 +268,15 @@ fn movie_metadata_pills(
         state.domains.media.state.get_media_progress(&media_id)
     {
         if state.domains.media.state.is_watched(&media_id) {
-            metadata.push(DetailMetadataPill {
-                label: "✓ Watched".to_string(),
-                tone: DetailTone::Success,
-            });
+            metadata.push(DetailMetadataPill::playback_state(
+                "✓ Watched",
+                DetailTone::Success,
+            ));
         } else {
-            metadata.push(DetailMetadataPill {
-                label: format!("{}% watched", (progress * 100.0) as u32),
-                tone: DetailTone::Accent,
-            });
+            metadata.push(DetailMetadataPill::playback_state(
+                format!("{}% watched", (progress * 100.0) as u32),
+                DetailTone::Accent,
+            ));
         }
     }
 
@@ -278,12 +285,10 @@ fn movie_metadata_pills(
         if let Some(votes) = movie_details.vote_count {
             label.push_str(&format!(" ({} votes)", votes));
         }
-        metadata.push(DetailMetadataPill {
-            label,
-            tone: DetailTone::Warning,
-        });
+        metadata.push(DetailMetadataPill::rating(label));
     }
 
+    prioritize_metadata_items(&mut metadata);
     metadata
 }
 
