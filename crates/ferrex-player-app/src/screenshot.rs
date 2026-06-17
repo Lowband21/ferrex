@@ -66,7 +66,7 @@ USAGE:
     ferrex-player screenshot --preset FirstRunAuth --viewport 1280x720 --output ./first-run.png [OPTIONS]
     ferrex-player screenshot list
     ferrex-player screenshot matrix list
-    ferrex-player screenshot matrix --output-dir ./artifacts/poster-qa [--only <CASE_OR_TAG>]
+    ferrex-player screenshot matrix --output-dir ./artifacts/theater-plate-qa [--only <CASE_OR_TAG>]
 
 OPTIONS:
     -p, --preset <NAME>         Named app preset to render. Run `ferrex-player screenshot list`
@@ -81,7 +81,7 @@ OPTIONS:
     -o, --output <PATH>         PNG output path. Required.
         --ice <PATH>            Optional .ice script to replay before capture. If the script has
                                 preset/viewport/mode metadata, explicit CLI values must match it.
-        matrix                  List or capture the poster containment visual QA matrix. Matrix
+        matrix                  List or capture the Theater Plate foreground visual QA matrix. Matrix
                                 captures write PNGs plus a JSON manifest to --output-dir. Use
                                 --only with a case id (for example rails-top-720) or coverage tag
                                 (for example surface:movie) to narrow the run.
@@ -102,11 +102,11 @@ pub enum CommandOutcome {
     HelpRequested,
     /// Scenario metadata was requested for agent discovery.
     ListedScenarios(Vec<presets::ScenarioInfo>),
-    /// Poster containment matrix metadata was requested for visual QA.
+    /// Theater Plate foreground matrix metadata was requested for visual QA.
     ListedVisualQaMatrix(Vec<visual_qa::VisualQaCase>),
     /// A screenshot was captured.
     Captured(CaptureOutput),
-    /// A poster containment visual QA matrix was captured.
+    /// A Theater Plate foreground visual QA matrix was captured.
     CapturedVisualQaMatrix(visual_qa::MatrixRunOutput),
 }
 

@@ -159,7 +159,12 @@ pub fn detail_foreground_surface_tokens(
     let (background, edge, border_width, radius, shadow_blur, padding_scale) =
         match surface {
             DetailForegroundSurface::StageField => (
-                Color::from_rgba(0.010, 0.010, 0.018, 0.06 + intensity * 0.10),
+                Color::from_rgba(
+                    0.010,
+                    0.010,
+                    0.018,
+                    0.035 + intensity * 0.065,
+                ),
                 Color::TRANSPARENT,
                 0.0,
                 0.0,
@@ -167,47 +172,47 @@ pub fn detail_foreground_surface_tokens(
                 1.00,
             ),
             DetailForegroundSurface::ProjectionShelf => (
-                Color::from_rgba(0.018, 0.016, 0.030, 0.30 + intensity * 0.30),
-                Color::from_rgba(accent.r, accent.g, accent.b, 0.10),
+                Color::from_rgba(0.018, 0.016, 0.030, 0.26 + intensity * 0.24),
+                Color::from_rgba(accent.r, accent.g, accent.b, 0.08),
                 0.0,
                 1.0,
-                18.0 + intensity * 18.0,
+                16.0 + intensity * 16.0,
                 1.05,
             ),
             DetailForegroundSurface::ControlShelf => (
-                Color::from_rgba(0.034, 0.026, 0.046, 0.42 + intensity * 0.30),
-                Color::from_rgba(accent.r, accent.g, accent.b, 0.20),
+                Color::from_rgba(0.034, 0.026, 0.046, 0.38 + intensity * 0.24),
+                Color::from_rgba(accent.r, accent.g, accent.b, 0.18),
                 0.0,
                 0.0,
-                14.0 + intensity * 14.0,
+                12.0 + intensity * 12.0,
                 0.82,
             ),
             DetailForegroundSurface::RailBand => (
-                Color::from_rgba(0.014, 0.014, 0.022, 0.28 + intensity * 0.34),
-                Color::from_rgba(1.0, 1.0, 1.0, 0.08),
-                0.0,
-                0.0,
-                12.0 + intensity * 18.0,
-                0.96,
-            ),
-            DetailForegroundSurface::CastBand => (
-                Color::from_rgba(0.020, 0.024, 0.030, 0.34 + intensity * 0.30),
-                Color::from_rgba(0.70, 0.82, 1.0, 0.10),
+                Color::from_rgba(0.014, 0.014, 0.022, 0.22 + intensity * 0.24),
+                Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 0.0,
                 0.0,
                 10.0 + intensity * 14.0,
+                0.96,
+            ),
+            DetailForegroundSurface::CastBand => (
+                Color::from_rgba(0.020, 0.024, 0.030, 0.28 + intensity * 0.24),
+                Color::from_rgba(0.70, 0.82, 1.0, 0.08),
+                0.0,
+                0.0,
+                8.0 + intensity * 12.0,
                 0.92,
             ),
             DetailForegroundSurface::FactRibbon => (
-                Color::from_rgba(0.050, 0.038, 0.064, 0.44 + intensity * 0.24),
-                Color::from_rgba(accent.r, accent.g, accent.b, 0.18),
+                Color::from_rgba(0.050, 0.038, 0.064, 0.34 + intensity * 0.22),
+                Color::from_rgba(accent.r, accent.g, accent.b, 0.14),
                 0.0,
                 2.0,
-                8.0 + intensity * 10.0,
+                7.0 + intensity * 9.0,
                 0.78,
             ),
             DetailForegroundSurface::MetadataRibbon => (
-                Color::from_rgba(1.0, 1.0, 1.0, 0.08 + intensity * 0.08),
+                Color::from_rgba(1.0, 1.0, 1.0, 0.07 + intensity * 0.07),
                 Color::TRANSPARENT,
                 0.0,
                 2.0,
@@ -215,11 +220,11 @@ pub fn detail_foreground_surface_tokens(
                 0.58,
             ),
             DetailForegroundSurface::TechnicalRibbon => (
-                Color::from_rgba(0.030, 0.050, 0.070, 0.42 + intensity * 0.24),
-                Color::from_rgba(0.36, 0.70, 1.0, 0.18),
+                Color::from_rgba(0.030, 0.050, 0.070, 0.34 + intensity * 0.22),
+                Color::from_rgba(0.36, 0.70, 1.0, 0.14),
                 0.0,
                 2.0,
-                8.0 + intensity * 10.0,
+                7.0 + intensity * 9.0,
                 0.74,
             ),
             DetailForegroundSurface::NoticeSlab => (
@@ -231,11 +236,11 @@ pub fn detail_foreground_surface_tokens(
                 0.90,
             ),
             DetailForegroundSurface::EmptyState => (
-                Color::from_rgba(0.026, 0.026, 0.034, 0.34 + intensity * 0.22),
-                Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+                Color::from_rgba(0.026, 0.026, 0.034, 0.28 + intensity * 0.18),
+                Color::from_rgba(1.0, 1.0, 1.0, 0.06),
                 0.0,
                 0.0,
-                6.0 + intensity * 8.0,
+                5.0 + intensity * 7.0,
                 1.00,
             ),
         };
@@ -1463,11 +1468,12 @@ fn view_action_button(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if !action.menu_items.is_empty() {
+    let surface_mode = detail_action_surface_mode(action);
+    if matches!(surface_mode, DetailActionSurfaceMode::Menu) {
         return view_action_menu(action, plan, sizes);
     }
 
-    let disabled = action.on_press.is_none();
+    let disabled = matches!(surface_mode, DetailActionSurfaceMode::Disabled);
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
@@ -1550,11 +1556,12 @@ fn view_action_button_on_surface(
     sizes: &SizeProvider,
     surface: DetailForegroundSurface,
 ) -> Element<'static, UiMessage> {
-    if !action.menu_items.is_empty() {
+    let surface_mode = detail_action_surface_mode(action);
+    if matches!(surface_mode, DetailActionSurfaceMode::Menu) {
         return view_action_menu_on_surface(action, plan, sizes, surface);
     }
 
-    let disabled = action.on_press.is_none();
+    let disabled = matches!(surface_mode, DetailActionSurfaceMode::Disabled);
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
