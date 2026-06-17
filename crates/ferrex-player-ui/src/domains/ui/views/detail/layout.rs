@@ -1739,6 +1739,23 @@ mod tests {
         );
         assert_eq!(tenfoot.typography.rail_title.max_lines(), Some(1));
         assert_eq!(tenfoot.typography.rail_subtitle.max_lines(), Some(1));
+        assert!(
+            tenfoot.typography.metadata.size > desktop.typography.metadata.size,
+            "10-foot metadata should be couch-readable without matching title scale"
+        );
+        assert!(
+            tenfoot.typography.metadata.size
+                < tenfoot.typography.hero_subtitle.size,
+            "10-foot metadata should remain secondary to title/subtitle copy"
+        );
+        assert!(
+            tenfoot.typography.caption.size >= tenfoot.typography.metadata.size,
+            "10-foot rail captions should be at least as legible as metadata"
+        );
+        assert!(
+            tenfoot.typography.action_label.size
+                > tenfoot.typography.action_subtitle.size
+        );
     }
 
     #[test]
