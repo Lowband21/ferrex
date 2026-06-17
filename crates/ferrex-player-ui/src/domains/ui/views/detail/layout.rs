@@ -1,7 +1,9 @@
+use super::typography::{DetailTypography, DetailTypographyInput};
+
 use crate::{
     infra::{
         constants::layout::{calculations::ScaledLayout, grid},
-        design_tokens::SizeProvider,
+        design_tokens::{ScalingContext, SizeProvider},
     },
     state::InterfaceMode,
 };
@@ -123,6 +125,7 @@ pub struct DetailLayoutPlan {
     pub action_cluster: DetailActionClusterLayout,
     pub section_grid: DetailSectionGridLayout,
     pub rail: DetailRailLayout,
+    pub typography: DetailTypography,
 }
 
 impl DetailLayoutPlan {
@@ -431,6 +434,17 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
         scale,
         input.scaled_poster_gap,
     );
+    let typography = DetailTypography::from_size_provider(
+        &SizeProvider::new(ScalingContext::new().with_user_scale(scale)),
+        DetailTypographyInput {
+            composition,
+            scale,
+            content_width,
+            hero_art_width: hero_art.width,
+            hero_gap,
+            rail_card_width: rail.card_width,
+        },
+    );
 
     DetailLayoutPlan {
         composition,
@@ -448,6 +462,7 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
         action_cluster,
         section_grid,
         rail,
+        typography,
     }
 }
 
@@ -1521,6 +1536,9 @@ fn theater_plate_controls(
 
 #[cfg(test)]
 mod tests {
+    use super::super::typography::{
+        DetailFactLayoutMode, DetailTextAlignment, DetailTextRole,
+    };
     use super::*;
     use crate::infra::{
         constants::layout::{calculations::ScaledLayout, grid},
@@ -1540,6 +1558,13 @@ mod tests {
         DetailLayoutInput::from_runtime(
             width, height, header, mode, &sizes, &layout,
         )
+    }
+
+    fn assert_near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "expected {actual} to be within 0.01 of {expected}"
+        );
     }
 
     #[test]
@@ -1580,6 +1605,157 @@ mod tests {
             assert!(plan.hero_art.width <= plan.content_width);
             assert!(plan.backdrop.height <= plan.available_height);
         }
+    }
+
+    #[test]
+    fn detail_typography_resolves_roles_and_measures_for_viewport_matrix() {
+        let cases = [
+            (
+                input(1_280.0, 720.0, 1.0, 50.0, DetailInterfaceMode::Desktop),
+                DetailComposition::BalancedDesktop,
+                32.0,
+                DetailFactLayoutMode::TwoColumn,
+                DetailTextAlignment::Start,
+            ),
+            (
+                input(
+                    1_920.0,
+                    1_080.0,
+                    1.0,
+                    50.0,
+                    DetailInterfaceMode::Desktop,
+                ),
+                DetailComposition::CinematicWide,
+                40.0,
+                DetailFactLayoutMode::TwoColumn,
+                DetailTextAlignment::Start,
+            ),
+            (
+                input(
+                    3_440.0,
+                    1_440.0,
+                    1.0,
+                    50.0,
+                    DetailInterfaceMode::Desktop,
+                ),
+                DetailComposition::CinematicWide,
+                40.0,
+                DetailFactLayoutMode::TwoColumn,
+                DetailTextAlignment::Start,
+            ),
+            (
+                input(390.0, 844.0, 1.0, 50.0, DetailInterfaceMode::Desktop),
+                DetailComposition::CompactPortrait,
+                24.0,
+                DetailFactLayoutMode::Stacked,
+                DetailTextAlignment::Center,
+            ),
+            (
+                input(1_280.0, 720.0, 1.0, 0.0, DetailInterfaceMode::TenFoot),
+                DetailComposition::TenFoot,
+                46.4,
+                DetailFactLayoutMode::TwoColumn,
+                DetailTextAlignment::Start,
+            ),
+        ];
+
+        for (
+            input,
+            expected_composition,
+            expected_title_size,
+            expected_fact_mode,
+            expected_alignment,
+        ) in cases
+        {
+            let plan = solve_detail_layout(input);
+            let typography = plan.typography;
+
+            assert_eq!(plan.composition, expected_composition);
+            assert_near(typography.hero_title.size, expected_title_size);
+            assert_eq!(
+                typography.role(DetailTextRole::HeroTitle),
+                typography.hero_title
+            );
+            assert_eq!(
+                typography.role(DetailTextRole::RailTitle),
+                typography.rail_title
+            );
+            assert_eq!(
+                typography.role(DetailTextRole::RailSubtitle),
+                typography.rail_subtitle
+            );
+            assert_eq!(typography.metrics.fact_layout_mode, expected_fact_mode);
+            assert_eq!(typography.metrics.hero_alignment, expected_alignment);
+            assert!(typography.metrics.hero_copy_width <= plan.content_width);
+            assert!(typography.metrics.overview_measure <= plan.content_width);
+            assert!(typography.metrics.fact_label_width > 0.0);
+            assert!(
+                typography.hero_title.line_height_px()
+                    > typography.hero_title.size
+            );
+            assert!(typography.metrics.metadata_spacing > 0.0);
+            assert!(typography.metrics.metadata_pill_gap > 0.0);
+            assert_eq!(typography.metadata.max_lines(), None);
+        }
+    }
+
+    #[test]
+    fn detail_typography_expands_tenfoot_roles_and_budgets() {
+        let desktop = solve_detail_layout(input(
+            1_280.0,
+            720.0,
+            1.0,
+            50.0,
+            DetailInterfaceMode::Desktop,
+        ));
+        let tenfoot = solve_detail_layout(input(
+            1_280.0,
+            720.0,
+            1.0,
+            0.0,
+            DetailInterfaceMode::TenFoot,
+        ));
+
+        assert!(
+            tenfoot.typography.hero_title.size
+                > desktop.typography.hero_title.size
+        );
+        assert!(
+            tenfoot.typography.tenfoot_focus_label.size
+                > desktop.typography.tenfoot_focus_label.size
+        );
+        assert!(
+            tenfoot.typography.metrics.hero_copy_width
+                > desktop.typography.metrics.hero_copy_width
+        );
+        assert_eq!(
+            tenfoot.typography.hero_title.max_lines(),
+            Some(tenfoot.typography.metrics.caption_budgets.hero_title_lines)
+        );
+        assert_eq!(tenfoot.typography.hero_title.max_lines(), Some(2));
+        assert_eq!(
+            tenfoot.typography.metrics.caption_budgets.rail_title_lines,
+            1
+        );
+        assert_eq!(tenfoot.typography.rail_title.max_lines(), Some(1));
+        assert_eq!(tenfoot.typography.rail_subtitle.max_lines(), Some(1));
+        assert!(
+            tenfoot.typography.metadata.size > desktop.typography.metadata.size,
+            "10-foot metadata should be couch-readable without matching title scale"
+        );
+        assert!(
+            tenfoot.typography.metadata.size
+                < tenfoot.typography.hero_subtitle.size,
+            "10-foot metadata should remain secondary to title/subtitle copy"
+        );
+        assert!(
+            tenfoot.typography.caption.size >= tenfoot.typography.metadata.size,
+            "10-foot rail captions should be at least as legible as metadata"
+        );
+        assert!(
+            tenfoot.typography.action_label.size
+                > tenfoot.typography.action_subtitle.size
+        );
     }
 
     #[test]

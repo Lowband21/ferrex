@@ -14,20 +14,22 @@ use crate::{
 use super::{
     DetailAction, DetailActionRole, DetailArtAspect, DetailArtLayout,
     DetailArtwork, DetailBackdropControl, DetailCastMember, DetailCastSection,
-    DetailComposition, DetailEmptyState, DetailFact, DetailFactPanel,
-    DetailLayoutPlan, DetailMetadataPill, DetailNotice, DetailOverviewSection,
-    DetailPageModel, DetailRailItem, DetailRelationshipRail, DetailSection,
+    DetailColorIntent, DetailComposition, DetailEmptyState, DetailFact,
+    DetailFactLayoutMode, DetailFactPanel, DetailLayoutPlan,
+    DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
+    DetailRailItem, DetailRelationshipRail, DetailSection,
     DetailSurfaceIntensityTokens, DetailTechnicalItem, DetailTechnicalSection,
+    DetailTextAlignment, DetailTextOverflow, DetailTextRole, DetailTextStyle,
     DetailTone,
 };
 use ferrex_core::player_prelude::Priority;
 use ferrex_model::ImageSize;
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
-    Vector,
+    Vector, alignment,
     widget::{
         Column, Row, Space, button, column, container, mouse_area, row,
-        scrollable, text,
+        scrollable, text, text::Wrapping,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
@@ -359,7 +361,9 @@ pub fn view_metadata_ribbons(
         return Space::new().into();
     }
 
-    let mut ribbons = Row::new().spacing(sizes.spacing.xs);
+    let style = plan.typography.role(DetailTextRole::Metadata);
+    let mut ribbons =
+        Row::new().spacing(plan.typography.metrics.metadata_pill_gap);
     for pill in metadata {
         let tokens = detail_foreground_surface_tokens(
             plan,
@@ -367,11 +371,13 @@ pub fn view_metadata_ribbons(
             pill.tone,
         );
         ribbons = ribbons.push(
-            container(
-                text(pill.label.clone())
-                    .size(sizes.font.small)
-                    .color(tone_text_color(pill.tone)),
-            )
+            container(styled_text(
+                pill.label.clone(),
+                style,
+                tone_text_color(pill.tone),
+                Length::Shrink,
+                false,
+            ))
             .padding([
                 sizes.spacing.xs * tokens.padding_scale,
                 sizes.spacing.sm * tokens.padding_scale,
@@ -380,7 +386,10 @@ pub fn view_metadata_ribbons(
         );
     }
 
-    horizontal_scroller(ribbons, sizes.font.small + sizes.spacing.lg)
+    horizontal_scroller(
+        ribbons,
+        style.line_height_px() + plan.typography.metrics.metadata_spacing,
+    )
 }
 
 pub fn view_control_shelf(
@@ -445,26 +454,19 @@ pub fn view_stage_sections(
 
     let columns = plan.section_grid.columns.max(1);
     let mut outer = Column::new().spacing(plan.section_grid.gap);
-    let mut current = Row::new()
-        .spacing(plan.section_grid.gap)
-        .align_y(Alignment::Start);
-    let mut count = 0usize;
+    let mut current: Vec<&DetailSection> = Vec::with_capacity(columns);
 
-    for section in sections
-        .iter()
-        .filter(|section| !matches!(section, DetailSection::Overview(_)))
-    {
+    for section in sections.iter() {
         let state = detail_stage_section_render_state(section);
         if state.full_width {
-            if count > 0 {
-                let completed = std::mem::replace(
-                    &mut current,
-                    Row::new()
-                        .spacing(plan.section_grid.gap)
-                        .align_y(Alignment::Start),
-                );
-                outer = outer.push(completed);
-                count = 0;
+            if !current.is_empty() {
+                outer = outer.push(view_stage_section_row(
+                    &current,
+                    plan,
+                    sizes,
+                    registered_rails,
+                ));
+                current.clear();
             }
             outer = outer.push(view_stage_section(
                 section,
@@ -475,30 +477,137 @@ pub fn view_stage_sections(
             continue;
         }
 
-        current = current.push(view_stage_section(
-            section,
+        current.push(section);
+        if current.len() == columns {
+            outer = outer.push(view_stage_section_row(
+                &current,
+                plan,
+                sizes,
+                registered_rails,
+            ));
+            current.clear();
+        }
+    }
+
+    if !current.is_empty() {
+        outer = outer.push(view_stage_section_row(
+            &current,
             plan,
             sizes,
             registered_rails,
         ));
-        count += 1;
-        if count == columns {
-            let completed = std::mem::replace(
-                &mut current,
-                Row::new()
-                    .spacing(plan.section_grid.gap)
-                    .align_y(Alignment::Start),
-            );
-            outer = outer.push(completed);
-            count = 0;
-        }
-    }
-
-    if count > 0 {
-        outer = outer.push(current);
     }
 
     outer.into()
+}
+
+fn view_stage_section_row(
+    sections: &[&DetailSection],
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    registered_rails: &[DetailRegisteredRailAdapter<'_>],
+) -> Element<'static, UiMessage> {
+    let matched_panel_height =
+        matched_stage_overview_fact_panel_height(sections, plan, sizes);
+    let mut row = Row::new()
+        .spacing(plan.section_grid.gap)
+        .align_y(Alignment::Start)
+        .width(Length::Fill);
+
+    for section in sections {
+        row = row.push(view_stage_section_with_height(
+            section,
+            plan,
+            sizes,
+            registered_rails,
+            matched_panel_height,
+        ));
+    }
+
+    row.into()
+}
+
+fn matched_stage_overview_fact_panel_height(
+    sections: &[&DetailSection],
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Option<f32> {
+    if sections.len() < 2 {
+        return None;
+    }
+
+    let row_columns = sections.len().max(1);
+    let overview_height =
+        sections.iter().find_map(|section| match section {
+            DetailSection::Overview(section) => Some(
+                stage_overview_panel_height(section, plan, sizes, row_columns),
+            ),
+            _ => None,
+        });
+    let fact_height = sections.iter().find_map(|section| match section {
+        DetailSection::Facts(section) => {
+            Some(stage_fact_panel_height(section, plan, sizes))
+        }
+        _ => None,
+    });
+
+    overview_height.zip(fact_height).map(|(overview, facts)| {
+        overview.max(facts).max(plan.section_grid.panel_min_height)
+    })
+}
+
+fn stage_overview_panel_height(
+    section: &DetailOverviewSection,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    row_columns: usize,
+) -> f32 {
+    let body_style = plan.typography.overview_body;
+    stage_surface_chrome_height(
+        plan,
+        sizes,
+        DetailForegroundSurface::ProjectionShelf,
+        DetailTone::Neutral,
+    ) + estimated_text_height(
+        &section.body,
+        body_style,
+        section_panel_body_width(plan, sizes, row_columns),
+    )
+}
+
+fn stage_fact_panel_height(
+    section: &DetailFactPanel,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    let tokens = detail_foreground_surface_tokens(
+        plan,
+        DetailForegroundSurface::FactRibbon,
+        DetailTone::Neutral,
+    );
+    let item_padding = stage_surface_padding(sizes.spacing.xs, tokens);
+    let row_count = section.facts.len();
+    let row_spacing = sizes.spacing.xs * row_count.saturating_sub(1) as f32;
+
+    stage_surface_chrome_height(
+        plan,
+        sizes,
+        DetailForegroundSurface::FactRibbon,
+        DetailTone::Neutral,
+    ) + row_count as f32 * (fact_row_height(plan, sizes) + item_padding * 2.0)
+        + row_spacing
+}
+
+fn stage_surface_chrome_height(
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    surface: DetailForegroundSurface,
+    tone: DetailTone,
+) -> f32 {
+    let tokens = detail_foreground_surface_tokens(plan, surface, tone);
+    stage_surface_padding(sizes.spacing.md, tokens) * 2.0
+        + text_budget_height(plan.typography.section_title)
+        + sizes.spacing.sm
 }
 
 pub fn view_stage_section(
@@ -507,18 +616,39 @@ pub fn view_stage_section(
     sizes: &SizeProvider,
     registered_rails: &[DetailRegisteredRailAdapter<'_>],
 ) -> Element<'static, UiMessage> {
+    view_stage_section_with_height(section, plan, sizes, registered_rails, None)
+}
+
+fn view_stage_section_with_height(
+    section: &DetailSection,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    registered_rails: &[DetailRegisteredRailAdapter<'_>],
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
     match section {
-        DetailSection::Overview(section) => view_projection_shelf(
-            Some(&section.title),
-            text(section.body.clone())
-                .size(sizes.font.body)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                .width(Length::Fill)
-                .into(),
+        DetailSection::Overview(section) => {
+            let body_style = plan.typography.overview_body;
+            view_projection_shelf_with_height(
+                Some(&section.title),
+                styled_text(
+                    section.body.clone(),
+                    body_style,
+                    detail_text_color(body_style.color_intent),
+                    Length::Fill,
+                    false,
+                ),
+                plan,
+                sizes,
+                matched_panel_height,
+            )
+        }
+        DetailSection::Facts(section) => view_fact_ribbon_with_height(
+            section,
             plan,
             sizes,
+            matched_panel_height,
         ),
-        DetailSection::Facts(section) => view_fact_ribbon(section, plan, sizes),
         DetailSection::Cast(section) => view_cast_band(section, plan, sizes),
         DetailSection::Technical(section) => {
             view_technical_ribbon(section, plan, sizes)
@@ -552,6 +682,16 @@ pub fn view_projection_shelf(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    view_projection_shelf_with_height(title, body, plan, sizes, None)
+}
+
+fn view_projection_shelf_with_height(
+    title: Option<&str>,
+    body: Element<'static, UiMessage>,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
     let tokens = detail_foreground_surface_tokens(
         plan,
         DetailForegroundSurface::ProjectionShelf,
@@ -569,7 +709,11 @@ pub fn view_projection_shelf(
 
     container(content)
         .width(Length::Fill)
-        .height(Length::Shrink)
+        .height(
+            matched_panel_height
+                .map(Length::Fixed)
+                .unwrap_or(Length::Shrink),
+        )
         .padding(stage_surface_padding(sizes.spacing.md, tokens))
         .clip(true)
         .style(foreground_surface_style(tokens))
@@ -580,6 +724,15 @@ pub fn view_fact_ribbon(
     section: &DetailFactPanel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    view_fact_ribbon_with_height(section, plan, sizes, None)
+}
+
+fn view_fact_ribbon_with_height(
+    section: &DetailFactPanel,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
 ) -> Element<'static, UiMessage> {
     if section.facts.is_empty() {
         return view_empty_stage_message(
@@ -599,19 +752,20 @@ pub fn view_fact_ribbon(
             fact.tone,
         );
         facts = facts.push(
-            container(view_fact(fact, sizes))
+            container(view_fact(fact, plan, sizes))
                 .padding(stage_surface_padding(sizes.spacing.xs, tokens))
                 .style(foreground_surface_style(tokens)),
         );
     }
 
-    view_stage_surface_shell(
+    view_stage_surface_shell_with_height(
         &section.title,
         facts.into(),
         DetailForegroundSurface::FactRibbon,
         DetailTone::Neutral,
         plan,
         sizes,
+        matched_panel_height,
     )
 }
 
@@ -799,51 +953,72 @@ fn view_stage_summary(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    let summary_width = stage_summary_width(plan, sizes);
     let mut summary =
-        Column::new().spacing(sizes.spacing.sm).width(Length::Fill);
+        Column::new().spacing(0).width(Length::Fixed(summary_width));
 
     if let Some(eyebrow) = &model.eyebrow {
-        summary = summary.push(
-            text(eyebrow.clone())
-                .size(sizes.font.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::HeroEyebrow,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            styled_text(
+                eyebrow.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fixed(style.measure),
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
-    summary = summary.push(
-        text(model.title.clone())
-            .size(match plan.composition {
-                DetailComposition::TenFoot => sizes.font.display * 1.45,
-                DetailComposition::CinematicWide => sizes.font.display * 1.25,
-                DetailComposition::CompactPortrait => sizes.font.title,
-                _ => sizes.font.display,
-            })
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    let title_style =
+        role_style_for_measure(plan, DetailTextRole::HeroTitle, summary_width);
+    summary = push_title_block_role(
+        summary,
+        styled_text(
+            model.title.clone(),
+            title_style,
+            detail_text_color(title_style.color_intent),
+            Length::Fixed(title_style.measure),
+            true,
+        ),
+        title_style.spacing_after,
     );
 
     if let Some(subtitle) = &model.subtitle {
-        summary = summary.push(
-            text(subtitle.clone())
-                .size(sizes.font.subtitle)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::HeroSubtitle,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            styled_text(
+                subtitle.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fixed(style.measure),
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
     if !model.metadata.is_empty() {
-        summary =
-            summary.push(view_metadata_ribbons(&model.metadata, plan, sizes));
-    }
-
-    if let Some(overview) = hero_overview(model) {
-        summary = summary.push(
-            text(overview.to_string())
-                .size(match plan.composition {
-                    DetailComposition::TenFoot => sizes.font.body * 1.12,
-                    DetailComposition::CinematicWide => sizes.font.body * 1.05,
-                    _ => sizes.font.body,
-                })
-                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                .width(Length::Fill),
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::Metadata,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            view_metadata_ribbons(&model.metadata, plan, sizes),
+            style.spacing_after,
         );
     }
 
@@ -851,7 +1026,42 @@ fn view_stage_summary(
         summary = summary.push(view_control_shelf(&model.actions, plan, sizes));
     }
 
-    summary.into()
+    container(summary)
+        .width(Length::Fixed(summary_width))
+        .align_x(horizontal_alignment(plan.typography.metrics.hero_alignment))
+        .into()
+}
+
+fn stage_summary_width(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    let shelf_padding = stage_surface_padding(
+        sizes.spacing.lg,
+        detail_foreground_surface_tokens(
+            plan,
+            DetailForegroundSurface::ProjectionShelf,
+            DetailTone::Neutral,
+        ),
+    );
+    let inner_width = (plan.content_width - shelf_padding * 2.0).max(1.0);
+    let available = match plan.composition {
+        DetailComposition::CompactPortrait => inner_width,
+        _ => (inner_width - plan.hero_art.width - plan.hero_gap).max(1.0),
+    };
+
+    plan.typography
+        .metrics
+        .hero_copy_width
+        .min(available)
+        .max(1.0)
+}
+
+fn role_style_for_measure(
+    plan: &DetailLayoutPlan,
+    role: DetailTextRole,
+    measure: f32,
+) -> DetailTextStyle {
+    let mut style = plan.typography.role(role);
+    style.measure = style.measure.min(measure.max(1.0)).max(1.0);
+    style
 }
 
 fn view_stage_surface_shell(
@@ -861,6 +1071,20 @@ fn view_stage_surface_shell(
     tone: DetailTone,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    view_stage_surface_shell_with_height(
+        title, body, surface, tone, plan, sizes, None,
+    )
+}
+
+fn view_stage_surface_shell_with_height(
+    title: &str,
+    body: Element<'static, UiMessage>,
+    surface: DetailForegroundSurface,
+    tone: DetailTone,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
 ) -> Element<'static, UiMessage> {
     let tokens = detail_foreground_surface_tokens(plan, surface, tone);
     let content = Column::new()
@@ -874,7 +1098,11 @@ fn view_stage_surface_shell(
 
     container(content)
         .width(Length::Fill)
-        .height(Length::Shrink)
+        .height(
+            matched_panel_height
+                .map(Length::Fixed)
+                .unwrap_or(Length::Shrink),
+        )
         .padding(stage_surface_padding(sizes.spacing.md, tokens))
         .clip(true)
         .style(foreground_surface_style(tokens))
@@ -1016,7 +1244,7 @@ pub fn view_detail_hero(
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
     let art = view_hero_art(&model.hero_art, plan, sizes);
-    let summary = view_summary(model, plan, sizes);
+    let summary = view_title_block(model, plan, sizes);
 
     let hero: Element<'static, UiMessage> = match plan.composition {
         DetailComposition::CompactPortrait => column![art, summary]
@@ -1055,20 +1283,82 @@ pub fn view_metadata_pills(
     metadata: &[DetailMetadataPill],
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    let mut pills = Row::new().spacing(sizes.spacing.xs);
-    for pill in metadata {
-        pills = pills.push(
-            container(
-                text(pill.label.clone())
-                    .size(sizes.font.small)
-                    .color(tone_text_color(pill.tone)),
-            )
-            .padding([sizes.spacing.xs, sizes.spacing.sm])
-            .style(pill_style(pill.tone)),
+    let mut row = Row::new()
+        .spacing(sizes.spacing.sm)
+        .align_y(Alignment::Center);
+    let groups = metadata_render_groups(metadata);
+
+    if !groups.inline_labels.is_empty() {
+        row = row.push(
+            text(groups.inline_labels.join(" • "))
+                .size(sizes.font.small)
+                .line_height(1.18)
+                .wrapping(Wrapping::None)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
         );
     }
 
-    horizontal_scroller(pills, sizes.font.small + sizes.spacing.lg)
+    for chip in groups.chips {
+        row = row.push(
+            container(
+                text(chip.label.clone())
+                    .size(sizes.font.small)
+                    .line_height(1.18)
+                    .wrapping(Wrapping::None)
+                    .color(tone_text_color(chip.tone)),
+            )
+            .padding([sizes.spacing.xs, sizes.spacing.sm])
+            .style(pill_style(chip.tone)),
+        );
+    }
+
+    horizontal_scroller(row, sizes.font.small * 1.18 + sizes.spacing.lg)
+}
+
+fn view_metadata_group_for_plan(
+    metadata: &[DetailMetadataPill],
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let style = plan.typography.metadata;
+    let mut row = Row::new()
+        .spacing(plan.typography.metrics.metadata_pill_gap)
+        .align_y(Alignment::Center);
+    let groups = metadata_render_groups(metadata);
+
+    if !groups.inline_labels.is_empty() {
+        row = row.push(
+            text(groups.inline_labels.join(" • "))
+                .size(style.size)
+                .line_height(style.line_height)
+                .wrapping(Wrapping::None)
+                .align_x(text_alignment(style.alignment))
+                .color(detail_text_color(style.color_intent)),
+        );
+    }
+
+    for chip in groups.chips {
+        row = row.push(
+            container(
+                text(chip.label.clone())
+                    .size(style.size)
+                    .line_height(style.line_height)
+                    .wrapping(Wrapping::None)
+                    .color(tone_text_color(chip.tone)),
+            )
+            .padding([
+                (plan.typography.metrics.metadata_spacing * 0.5)
+                    .max(sizes.spacing.xs),
+                sizes.spacing.sm,
+            ])
+            .style(pill_style(chip.tone)),
+        );
+    }
+
+    horizontal_scroller(
+        row,
+        style.line_height_px() + plan.typography.metrics.metadata_spacing,
+    )
 }
 
 pub fn view_action_cluster(
@@ -1107,49 +1397,214 @@ pub fn view_sections(
 
     let columns = plan.section_grid.columns.max(1);
     let mut outer = Column::new().spacing(plan.section_grid.gap);
-    let mut current = Row::new()
-        .spacing(plan.section_grid.gap)
-        .align_y(Alignment::Start);
-    let mut count = 0usize;
+    let mut current: Vec<&DetailSection> = Vec::with_capacity(columns);
 
-    for section in sections
-        .iter()
-        .filter(|section| !matches!(section, DetailSection::Overview(_)))
-    {
+    for section in sections.iter() {
         if matches!(section, DetailSection::Cast(_)) {
-            if count > 0 {
-                let completed = std::mem::replace(
-                    &mut current,
-                    Row::new()
-                        .spacing(plan.section_grid.gap)
-                        .align_y(Alignment::Start),
-                );
-                outer = outer.push(completed);
-                count = 0;
+            if !current.is_empty() {
+                outer = outer.push(view_section_row(&current, plan, sizes));
+                current.clear();
             }
             outer = outer.push(view_section(section, plan, sizes));
             continue;
         }
 
-        current = current.push(view_section(section, plan, sizes));
-        count += 1;
-        if count == columns {
-            let completed = std::mem::replace(
-                &mut current,
-                Row::new()
-                    .spacing(plan.section_grid.gap)
-                    .align_y(Alignment::Start),
-            );
-            outer = outer.push(completed);
-            count = 0;
+        current.push(section);
+        if current.len() == columns {
+            outer = outer.push(view_section_row(&current, plan, sizes));
+            current.clear();
         }
     }
 
-    if count > 0 {
-        outer = outer.push(current);
+    if !current.is_empty() {
+        outer = outer.push(view_section_row(&current, plan, sizes));
     }
 
     outer.into()
+}
+
+fn view_section_row(
+    sections: &[&DetailSection],
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let matched_panel_height =
+        matched_overview_fact_panel_height(sections, plan, sizes);
+    let mut row = Row::new()
+        .spacing(plan.section_grid.gap)
+        .align_y(Alignment::Start)
+        .width(Length::Fill);
+
+    for section in sections {
+        row = row.push(view_section_with_panel_height(
+            section,
+            plan,
+            sizes,
+            matched_panel_height,
+        ));
+    }
+
+    row.into()
+}
+
+fn matched_overview_fact_panel_height(
+    sections: &[&DetailSection],
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Option<f32> {
+    if sections.len() < 2 {
+        return None;
+    }
+
+    let row_columns = sections.len().max(1);
+    let overview_height = sections.iter().find_map(|section| match section {
+        DetailSection::Overview(section) => {
+            Some(overview_panel_height(section, plan, sizes, row_columns))
+        }
+        _ => None,
+    });
+    let fact_height = sections.iter().find_map(|section| match section {
+        DetailSection::Facts(section) => {
+            Some(fact_panel_height(section, plan, sizes))
+        }
+        _ => None,
+    });
+
+    overview_height.zip(fact_height).map(|(overview, facts)| {
+        overview.max(facts).max(plan.section_grid.panel_min_height)
+    })
+}
+
+fn overview_panel_height(
+    section: &DetailOverviewSection,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    row_columns: usize,
+) -> f32 {
+    let body_style = plan.typography.overview_body;
+    panel_chrome_height(plan, sizes)
+        + estimated_text_height(
+            &section.body,
+            body_style,
+            section_panel_body_width(plan, sizes, row_columns),
+        )
+}
+
+fn fact_panel_height(
+    section: &DetailFactPanel,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    let row_count = match plan.typography.metrics.fact_layout_mode {
+        DetailFactLayoutMode::TwoColumn if section.facts.len() > 1 => {
+            section.facts.len().div_ceil(2)
+        }
+        _ => section.facts.len(),
+    };
+    let row_spacing = sizes.spacing.sm * row_count.saturating_sub(1) as f32;
+
+    panel_chrome_height(plan, sizes)
+        + row_count as f32 * fact_row_height(plan, sizes)
+        + row_spacing
+}
+
+fn fact_row_height(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    let label_height = text_budget_height(plan.typography.fact_label);
+    let value_height = text_budget_height(plan.typography.fact_value);
+
+    match plan.typography.metrics.fact_layout_mode {
+        DetailFactLayoutMode::Stacked => {
+            label_height + sizes.spacing.xs + value_height
+        }
+        DetailFactLayoutMode::Inline | DetailFactLayoutMode::TwoColumn => {
+            label_height.max(value_height)
+        }
+    }
+}
+
+fn panel_chrome_height(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    sizes.spacing.md * 2.0
+        + text_budget_height(plan.typography.section_title)
+        + sizes.spacing.sm
+}
+
+fn section_panel_body_width(
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    row_columns: usize,
+) -> f32 {
+    let columns = row_columns.max(1);
+    let total_gap = plan.section_grid.gap * columns.saturating_sub(1) as f32;
+    let panel_width =
+        ((plan.content_width - total_gap) / columns as f32).max(1.0);
+
+    (panel_width - sizes.spacing.md * 2.0).max(1.0)
+}
+
+fn estimated_text_height(
+    content: &str,
+    style: DetailTextStyle,
+    width: f32,
+) -> f32 {
+    let budgeted_lines = style.max_lines().unwrap_or(1) as usize;
+    let estimated_lines = estimate_wrapped_lines(content, style, width);
+
+    style.line_height_px() * budgeted_lines.max(estimated_lines) as f32
+}
+
+fn estimate_wrapped_lines(
+    content: &str,
+    style: DetailTextStyle,
+    width: f32,
+) -> usize {
+    let content = content.trim();
+    if content.is_empty() {
+        return 1;
+    }
+
+    if matches!(
+        style.overflow,
+        DetailTextOverflow::SingleLineEllipsis
+            | DetailTextOverflow::HorizontalScroll
+    ) {
+        return 1;
+    }
+
+    let average_glyph_width = (style.size * 0.62).max(1.0);
+    let chars_per_line =
+        (width / average_glyph_width).floor().max(1.0) as usize;
+
+    content
+        .lines()
+        .map(|line| estimate_paragraph_lines(line, chars_per_line))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn estimate_paragraph_lines(line: &str, chars_per_line: usize) -> usize {
+    let mut lines = 1usize;
+    let mut current_len = 0usize;
+
+    for word in line.split_whitespace() {
+        let word_len = word.chars().count();
+        let separator = usize::from(current_len > 0);
+
+        if current_len > 0
+            && current_len + separator + word_len > chars_per_line
+        {
+            lines += 1;
+            current_len = word_len;
+        } else {
+            current_len += separator + word_len;
+        }
+
+        while current_len > chars_per_line {
+            lines += 1;
+            current_len -= chars_per_line;
+        }
+    }
+
+    lines
 }
 
 pub fn view_section(
@@ -1157,11 +1612,28 @@ pub fn view_section(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    view_section_with_panel_height(section, plan, sizes, None)
+}
+
+fn view_section_with_panel_height(
+    section: &DetailSection,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
     match section {
-        DetailSection::Overview(section) => {
-            view_overview_section(section, plan, sizes)
-        }
-        DetailSection::Facts(section) => view_fact_panel(section, plan, sizes),
+        DetailSection::Overview(section) => view_overview_section_with_height(
+            section,
+            plan,
+            sizes,
+            matched_panel_height,
+        ),
+        DetailSection::Facts(section) => view_fact_panel_with_height(
+            section,
+            plan,
+            sizes,
+            matched_panel_height,
+        ),
         DetailSection::Cast(section) => view_cast_section(section, plan, sizes),
         DetailSection::Technical(section) => {
             view_technical_section(section, plan, sizes)
@@ -1170,7 +1642,7 @@ pub fn view_section(
             view_relationship_rail(section, plan, sizes)
         }
         DetailSection::Empty(section) => view_empty_state(section, sizes),
-        DetailSection::Notice(section) => view_notice(section, sizes),
+        DetailSection::Notice(section) => view_notice(section, plan, sizes),
     }
 }
 
@@ -1179,15 +1651,28 @@ pub fn view_overview_section(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    view_panel_compat(
+    view_overview_section_with_height(section, plan, sizes, None)
+}
+
+fn view_overview_section_with_height(
+    section: &DetailOverviewSection,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
+    let body_style = plan.typography.overview_body;
+    view_panel_compat_with_height(
         &section.title,
-        text(section.body.clone())
-            .size(sizes.font.body)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY)
-            .width(Length::Fill)
-            .into(),
+        styled_text(
+            section.body.clone(),
+            body_style,
+            detail_text_color(body_style.color_intent),
+            Length::Fill,
+            false,
+        ),
         plan,
         sizes,
+        matched_panel_height,
     )
 }
 
@@ -1196,12 +1681,53 @@ pub fn view_fact_panel(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    let mut facts = Column::new().spacing(sizes.spacing.sm);
-    for fact in &section.facts {
-        facts = facts.push(view_fact(fact, sizes));
-    }
+    view_fact_panel_with_height(section, plan, sizes, None)
+}
 
-    view_panel_compat(&section.title, facts.into(), plan, sizes)
+fn view_fact_panel_with_height(
+    section: &DetailFactPanel,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
+    let facts: Element<'static, UiMessage> =
+        match plan.typography.metrics.fact_layout_mode {
+            DetailFactLayoutMode::TwoColumn if section.facts.len() > 1 => {
+                let mut rows = Column::new().spacing(sizes.spacing.sm);
+                for pair in section.facts.chunks(2) {
+                    let mut row = Row::new()
+                        .spacing(plan.section_grid.gap.min(sizes.spacing.lg))
+                        .align_y(Alignment::Start);
+                    for fact in pair {
+                        row = row.push(
+                            container(view_fact(fact, plan, sizes))
+                                .width(Length::FillPortion(1)),
+                        );
+                    }
+                    if pair.len() == 1 {
+                        row = row
+                            .push(Space::new().width(Length::FillPortion(1)));
+                    }
+                    rows = rows.push(row);
+                }
+                rows.into()
+            }
+            _ => {
+                let mut column = Column::new().spacing(sizes.spacing.sm);
+                for fact in &section.facts {
+                    column = column.push(view_fact(fact, plan, sizes));
+                }
+                column.into()
+            }
+        };
+
+    view_panel_compat_with_height(
+        &section.title,
+        facts,
+        plan,
+        sizes,
+        matched_panel_height,
+    )
 }
 
 pub fn view_cast_section(
@@ -1212,12 +1738,16 @@ pub fn view_cast_section(
     if section.members.is_empty() {
         return view_panel_compat(
             &section.title,
-            text(section.empty_message.clone().unwrap_or_else(|| {
-                "No cast information is available.".to_string()
-            }))
-            .size(sizes.font.caption)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY)
-            .into(),
+            {
+                let caption_style = plan.typography.caption;
+                text(section.empty_message.clone().unwrap_or_else(|| {
+                    "No cast information is available.".to_string()
+                }))
+                .size(caption_style.size)
+                .line_height(caption_style.line_height)
+                .color(detail_text_color(caption_style.color_intent))
+                .into()
+            },
             plan,
             sizes,
         );
@@ -1230,8 +1760,8 @@ pub fn view_cast_section(
 
     let image_width = (cast_card_width(plan) * 0.72).clamp(72.0, 180.0);
     let cast_card_height = image_width * 1.5
-        + sizes.font.small
-        + sizes.font.micro
+        + text_budget_height(plan.typography.cast_name)
+        + text_budget_height(plan.typography.cast_role)
         + sizes.spacing.xl;
 
     view_panel_compat(
@@ -1250,12 +1780,16 @@ pub fn view_technical_section(
     if section.items.is_empty() {
         return view_panel_compat(
             &section.title,
-            text(section.empty_message.clone().unwrap_or_else(|| {
-                "No technical metadata is available.".to_string()
-            }))
-            .size(sizes.font.caption)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY)
-            .into(),
+            {
+                let caption_style = plan.typography.caption;
+                text(section.empty_message.clone().unwrap_or_else(|| {
+                    "No technical metadata is available.".to_string()
+                }))
+                .size(caption_style.size)
+                .line_height(caption_style.line_height)
+                .color(detail_text_color(caption_style.color_intent))
+                .into()
+            },
             plan,
             sizes,
         );
@@ -1285,12 +1819,16 @@ pub fn view_relationship_rail(
     if section.items.is_empty() {
         return view_panel_compat(
             &section.title,
-            text(section.empty_message.clone().unwrap_or_else(|| {
-                "No related titles are available.".to_string()
-            }))
-            .size(sizes.font.caption)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY)
-            .into(),
+            {
+                let caption_style = plan.typography.caption;
+                text(section.empty_message.clone().unwrap_or_else(|| {
+                    "No related titles are available.".to_string()
+                }))
+                .size(caption_style.size)
+                .line_height(caption_style.line_height)
+                .color(detail_text_color(caption_style.color_intent))
+                .into()
+            },
             plan,
             sizes,
         );
@@ -1396,64 +1934,100 @@ pub fn view_backdrop_controls(
         .into()
 }
 
-fn view_summary(
+fn view_title_block(
     model: &DetailPageModel,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    let mut summary =
-        Column::new().spacing(sizes.spacing.sm).width(Length::Fill);
+    let mut block = Column::new()
+        .spacing(0)
+        .width(Length::Fixed(plan.typography.metrics.hero_copy_width));
 
     if let Some(eyebrow) = &model.eyebrow {
-        summary = summary.push(
-            text(eyebrow.clone())
-                .size(sizes.font.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = plan.typography.hero_eyebrow;
+        block = push_title_block_role(
+            block,
+            styled_text(
+                eyebrow.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fill,
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
-    summary = summary.push(
-        text(model.title.clone())
-            .size(match plan.composition {
-                DetailComposition::TenFoot => sizes.font.display * 1.45,
-                DetailComposition::CinematicWide => sizes.font.display * 1.25,
-                DetailComposition::CompactPortrait => sizes.font.title,
-                _ => sizes.font.display,
-            })
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    let title_style = plan.typography.hero_title;
+    block = push_title_block_role(
+        block,
+        styled_text(
+            model.title.clone(),
+            title_style,
+            detail_text_color(title_style.color_intent),
+            Length::Fill,
+            true,
+        ),
+        title_style.spacing_after,
     );
 
     if let Some(subtitle) = &model.subtitle {
-        summary = summary.push(
-            text(subtitle.clone())
-                .size(sizes.font.subtitle)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = plan.typography.hero_subtitle;
+        block = push_title_block_role(
+            block,
+            styled_text(
+                subtitle.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fill,
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
     if !model.metadata.is_empty() {
-        summary = summary.push(view_metadata_pills(&model.metadata, sizes));
+        let style = plan.typography.metadata;
+        block = push_title_block_role(
+            block,
+            view_metadata_group_for_plan(&model.metadata, plan, sizes),
+            style.spacing_after,
+        );
     }
 
     if let Some(overview) = hero_overview(model) {
-        summary = summary.push(
-            text(overview.to_string())
-                .size(match plan.composition {
-                    DetailComposition::TenFoot => sizes.font.body * 1.12,
-                    DetailComposition::CinematicWide => sizes.font.body * 1.05,
-                    _ => sizes.font.body,
-                })
-                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                .width(Length::Fill),
+        let style = plan.typography.hero_overview;
+        block = push_title_block_role(
+            block,
+            styled_text(
+                overview.to_string(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fill,
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
     if !model.actions.is_empty() {
-        summary =
-            summary.push(view_action_cluster(&model.actions, plan, sizes));
+        block = block.push(view_action_cluster(&model.actions, plan, sizes));
     }
 
-    summary.into()
+    container(block)
+        .width(Length::Fill)
+        .align_x(horizontal_alignment(plan.typography.metrics.hero_alignment))
+        .into()
+}
+
+fn push_title_block_role(
+    block: Column<'static, UiMessage>,
+    role: Element<'static, UiMessage>,
+    spacing_after: f32,
+) -> Column<'static, UiMessage> {
+    block
+        .push(role)
+        .push(Space::new().height(Length::Fixed(spacing_after)))
 }
 
 fn hero_overview(model: &DetailPageModel) -> Option<&str> {
@@ -1480,18 +2054,25 @@ fn view_action_button(
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    let label_style = plan.typography.action_label;
+    label_row = label_row.push(
+        text(action.label.clone())
+            .size(label_style.size)
+            .line_height(label_style.line_height)
+            .color(detail_text_color(label_style.color_intent)),
+    );
 
     let mut content = Column::new()
         .spacing(2.0)
         .align_x(Alignment::Center)
         .push(label_row);
     if let Some(subtitle) = &action.subtitle {
+        let subtitle_style = plan.typography.action_subtitle;
         content = content.push(
             text(subtitle.clone())
-                .size(sizes.font.small)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                .size(subtitle_style.size)
+                .line_height(subtitle_style.line_height)
+                .color(detail_text_color(subtitle_style.color_intent)),
         );
     }
 
@@ -1519,8 +2100,13 @@ fn view_action_menu(
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    let label_style = plan.typography.action_label;
+    label_row = label_row.push(
+        text(action.label.clone())
+            .size(label_style.size)
+            .line_height(label_style.line_height)
+            .color(detail_text_color(label_style.color_intent)),
+    );
 
     let trigger = button(label_row)
         .padding([sizes.spacing.xs, sizes.spacing.md])
@@ -1562,25 +2148,42 @@ fn view_action_button_on_surface(
     }
 
     let disabled = matches!(surface_mode, DetailActionSurfaceMode::Disabled);
+    let label_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionLabel,
+        action_label_text_width(action, plan, sizes),
+    );
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    label_row = label_row.push(styled_text(
+        action.label.clone(),
+        label_style,
+        detail_text_color(label_style.color_intent),
+        Length::Fixed(label_style.measure),
+        true,
+    ));
 
     let mut content = Column::new()
-        .spacing(2.0)
+        .spacing(action_text_spacing(plan, sizes))
         .align_x(Alignment::Center)
         .push(label_row);
     if let Some(subtitle) = &action.subtitle {
-        content = content.push(
-            text(subtitle.clone())
-                .size(sizes.font.small)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let subtitle_style = role_style_for_measure(
+            plan,
+            DetailTextRole::ActionSubtitle,
+            action_button_inner_width(plan, sizes),
         );
+        content = content.push(styled_text(
+            subtitle.clone(),
+            subtitle_style,
+            detail_text_color(subtitle_style.color_intent),
+            Length::Fixed(subtitle_style.measure),
+            true,
+        ));
     }
 
     let mut button = button(content)
@@ -1610,14 +2213,24 @@ fn view_action_menu_on_surface(
     sizes: &SizeProvider,
     surface: DetailForegroundSurface,
 ) -> Element<'static, UiMessage> {
+    let label_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionLabel,
+        action_label_text_width(action, plan, sizes),
+    );
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    label_row = label_row.push(styled_text(
+        action.label.clone(),
+        label_style,
+        detail_text_color(label_style.color_intent),
+        Length::Fixed(label_style.measure),
+        true,
+    ));
 
     let trigger = button(label_row)
         .padding([sizes.spacing.xs, sizes.spacing.md])
@@ -1633,13 +2246,23 @@ fn view_action_menu_on_surface(
             ),
         ));
 
+    let menu_item_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionSubtitle,
+        plan.action_cluster.button_width,
+    );
     let mut items: Vec<Item<'static, UiMessage, Theme, iced::Renderer>> =
         Vec::new();
     for item in &action.menu_items {
-        let item_button =
-            button(text(item.label.clone()).size(sizes.font.small))
-                .on_press(item.on_press.clone())
-                .style(theme::Button::HeaderMenuSecondary.style());
+        let item_button = button(styled_text(
+            item.label.clone(),
+            menu_item_style,
+            detail_text_color(menu_item_style.color_intent),
+            Length::Shrink,
+            false,
+        ))
+        .on_press(item.on_press.clone())
+        .style(theme::Button::HeaderMenuSecondary.style());
         items.push(Item::new(item_button));
     }
 
@@ -1655,23 +2278,76 @@ fn view_action_menu_on_surface(
         .into()
 }
 
+fn action_button_inner_width(
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    (plan.action_cluster.button_width - sizes.spacing.md * 2.0).max(1.0)
+}
+
+fn action_label_text_width(
+    action: &DetailAction,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    let icon_width = action
+        .icon
+        .map(|_| sizes.icon.sm + sizes.spacing.xs)
+        .unwrap_or(0.0);
+
+    (action_button_inner_width(plan, sizes) - icon_width).max(1.0)
+}
+
+fn action_text_spacing(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    plan.typography
+        .action_subtitle
+        .spacing_after
+        .min(plan.typography.action_label.spacing_after)
+        .clamp(2.0, sizes.spacing.sm.max(2.0))
+}
+
 fn view_fact(
     fact: &DetailFact,
+    plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    row![
-        text(fact.label.clone())
-            .size(sizes.font.small)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY)
-            .width(Length::FillPortion(1)),
-        text(fact.value.clone())
-            .size(sizes.font.caption)
-            .color(tone_text_color(fact.tone))
-            .width(Length::FillPortion(2)),
-    ]
-    .spacing(sizes.spacing.sm)
-    .align_y(Alignment::Center)
-    .into()
+    let label_style = plan.typography.fact_label;
+    let value_style = plan.typography.fact_value;
+    let label = styled_text(
+        fact.label.clone(),
+        label_style,
+        detail_text_color(label_style.color_intent),
+        Length::Fixed(plan.typography.metrics.fact_label_width),
+        true,
+    );
+    let value = styled_text(
+        fact.value.clone(),
+        value_style,
+        tone_text_color(fact.tone),
+        Length::Fill,
+        true,
+    );
+
+    match plan.typography.metrics.fact_layout_mode {
+        DetailFactLayoutMode::Stacked => column![
+            styled_text(
+                fact.label.clone(),
+                label_style,
+                detail_text_color(label_style.color_intent),
+                Length::Fill,
+                true,
+            ),
+            value,
+        ]
+        .spacing(sizes.spacing.xs)
+        .into(),
+        DetailFactLayoutMode::Inline | DetailFactLayoutMode::TwoColumn => {
+            row![label, value]
+                .spacing(sizes.spacing.sm)
+                .align_y(Alignment::Start)
+                .into()
+        }
+    }
 }
 
 fn cast_card_width(plan: &DetailLayoutPlan) -> f32 {
@@ -1726,22 +2402,26 @@ fn view_cast_member(
         .align_x(Alignment::Center)
         .width(Length::Fixed(card_width))
         .push(image)
-        .push(
-            text(member.name.clone())
-                .size(sizes.font.small)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                .width(Length::Fill)
-                .center(),
-        );
+        .push({
+            let style = plan.typography.cast_name;
+            styled_text(
+                member.name.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fill,
+                true,
+            )
+        });
 
     if let Some(role) = &member.role {
-        content = content.push(
-            text(role.clone())
-                .size(sizes.font.micro)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY)
-                .width(Length::Fill)
-                .center(),
-        );
+        let style = plan.typography.cast_role;
+        content = content.push(styled_text(
+            role.clone(),
+            style,
+            detail_text_color(style.color_intent),
+            Length::Fill,
+            true,
+        ));
     }
 
     content.into()
@@ -1786,7 +2466,10 @@ fn rail_scroll_height(
         .map(|item| rail_art_layout(&item.artwork, plan, sizes).height)
         .fold(plan.rail.card_height, f32::max);
 
-    max_image_height + sizes.font.caption + sizes.font.small + sizes.spacing.xl
+    max_image_height
+        + text_budget_height(plan.typography.rail_title)
+        + text_budget_height(plan.typography.rail_subtitle)
+        + sizes.spacing.xl
 }
 
 fn rail_art_layout(
@@ -1828,30 +2511,31 @@ fn view_rail_item(
         Length::Fixed(image_layout.height),
     );
 
+    let title_style = plan.typography.rail_title;
+    let subtitle_style = plan.typography.rail_subtitle;
     let content = Column::new()
         .spacing(sizes.spacing.xs)
         .width(Length::Fixed(plan.rail.card_width))
         .push(image)
-        .push(
-            text(item.title.clone())
-                .size(sizes.font.caption)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY)
-                .width(Length::Fill),
-        )
-        .push(
-            text(item.subtitle.clone().unwrap_or_default())
-                .size(sizes.font.small)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY)
-                .width(Length::Fill),
-        );
+        .push(styled_text(
+            item.title.clone(),
+            title_style,
+            detail_text_color(title_style.color_intent),
+            Length::Fill,
+            true,
+        ))
+        .push(styled_text(
+            item.subtitle.clone().unwrap_or_default(),
+            subtitle_style,
+            detail_text_color(subtitle_style.color_intent),
+            Length::Fill,
+            true,
+        ));
 
     if let Some(message) = &item.on_press {
         button(content)
             .padding(0)
-            .style(detail_action_button_style(
-                DetailActionRole::Secondary,
-                false,
-            ))
+            .style(detail_rail_card_button_style())
             .on_press(message.clone())
             .into()
     } else {
@@ -1861,20 +2545,27 @@ fn view_rail_item(
 
 fn view_notice(
     notice: &DetailNotice,
+    plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    let title_style = plan.typography.notice_title;
+    let body_style = plan.typography.notice_body;
     let content = Column::new()
         .spacing(sizes.spacing.xs)
-        .push(
-            text(notice.title.clone())
-                .size(sizes.font.subtitle)
-                .color(tone_text_color(notice.tone)),
-        )
-        .push(
-            text(notice.message.clone())
-                .size(sizes.font.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        );
+        .push(styled_text(
+            notice.title.clone(),
+            title_style,
+            tone_text_color(notice.tone),
+            Length::Fill,
+            true,
+        ))
+        .push(styled_text(
+            notice.message.clone(),
+            body_style,
+            detail_text_color(body_style.color_intent),
+            Length::Fill,
+            true,
+        ));
 
     container(content)
         .width(Length::Fill)
@@ -1889,21 +2580,38 @@ fn view_notice(
 fn view_panel_compat(
     title: &str,
     body: Element<'static, UiMessage>,
-    _plan: &DetailLayoutPlan,
+    plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    view_panel_compat_with_height(title, body, plan, sizes, None)
+}
+
+fn view_panel_compat_with_height(
+    title: &str,
+    body: Element<'static, UiMessage>,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    matched_panel_height: Option<f32>,
+) -> Element<'static, UiMessage> {
+    let title_style = plan.typography.section_title;
     let content = Column::new()
         .spacing(sizes.spacing.sm)
-        .push(
-            text(title.to_string())
-                .size(sizes.font.subtitle)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        )
+        .push(styled_text(
+            title.to_string(),
+            title_style,
+            detail_text_color(title_style.color_intent),
+            Length::Fill,
+            true,
+        ))
         .push(body);
 
     container(content)
         .width(Length::Fill)
-        .height(Length::Shrink)
+        .height(
+            matched_panel_height
+                .map(Length::Fixed)
+                .unwrap_or(Length::Shrink),
+        )
         .padding(sizes.spacing.md)
         .clip(true)
         .style(detail_panel_style(DetailTone::Neutral))
@@ -2119,6 +2827,116 @@ fn horizontal_scroller(
         .into()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MetadataRenderGroups {
+    inline_labels: Vec<String>,
+    chips: Vec<DetailMetadataPill>,
+}
+
+fn metadata_render_groups(
+    metadata: &[DetailMetadataPill],
+) -> MetadataRenderGroups {
+    let mut inline_labels = Vec::new();
+    let mut chips = Vec::new();
+
+    for item in metadata {
+        let label = item.label.trim();
+        if label.is_empty() {
+            continue;
+        }
+
+        if item.renders_as_chip() {
+            chips.push(item.clone());
+        } else {
+            inline_labels.push(label.to_string());
+        }
+    }
+
+    MetadataRenderGroups {
+        inline_labels,
+        chips,
+    }
+}
+
+fn styled_text(
+    content: String,
+    style: DetailTextStyle,
+    color: Color,
+    width: Length,
+    bounded: bool,
+) -> Element<'static, UiMessage> {
+    let max_lines = bounded.then(|| style.max_lines()).flatten();
+    let wrapping = text_wrapping(style.overflow, max_lines.is_some());
+    let mut label = text(content)
+        .size(style.size)
+        .line_height(style.line_height)
+        .width(width)
+        .wrapping(wrapping)
+        .align_x(text_alignment(style.alignment))
+        .color(color);
+
+    if let Some(lines) = max_lines {
+        let height = style.line_height_px() * f32::from(lines);
+        label = label.height(Length::Fixed(height));
+        container(label)
+            .width(width)
+            .height(Length::Fixed(height))
+            .clip(true)
+            .into()
+    } else {
+        label.into()
+    }
+}
+
+fn text_budget_height(style: DetailTextStyle) -> f32 {
+    style.line_height_px() * f32::from(style.max_lines().unwrap_or(1))
+}
+
+fn text_wrapping(overflow: DetailTextOverflow, bounded: bool) -> Wrapping {
+    match overflow {
+        DetailTextOverflow::SingleLineEllipsis
+        | DetailTextOverflow::HorizontalScroll => Wrapping::None,
+        DetailTextOverflow::Wrap => Wrapping::WordOrGlyph,
+        DetailTextOverflow::MultiLine { .. } if bounded => {
+            Wrapping::WordOrGlyph
+        }
+        DetailTextOverflow::MultiLine { .. } => Wrapping::Word,
+    }
+}
+
+fn text_alignment(
+    alignment: DetailTextAlignment,
+) -> iced::widget::text::Alignment {
+    match alignment {
+        DetailTextAlignment::Start => iced::widget::text::Alignment::Left,
+        DetailTextAlignment::Center => iced::widget::text::Alignment::Center,
+        DetailTextAlignment::End => iced::widget::text::Alignment::Right,
+    }
+}
+
+fn horizontal_alignment(
+    alignment: DetailTextAlignment,
+) -> alignment::Horizontal {
+    match alignment {
+        DetailTextAlignment::Start => alignment::Horizontal::Left,
+        DetailTextAlignment::Center => alignment::Horizontal::Center,
+        DetailTextAlignment::End => alignment::Horizontal::Right,
+    }
+}
+
+fn detail_text_color(intent: DetailColorIntent) -> Color {
+    match intent {
+        DetailColorIntent::Primary => theme::MediaServerTheme::TEXT_PRIMARY,
+        DetailColorIntent::Secondary => theme::MediaServerTheme::TEXT_SECONDARY,
+        DetailColorIntent::Subdued => theme::MediaServerTheme::TEXT_SUBDUED,
+        DetailColorIntent::Dimmed => theme::MediaServerTheme::TEXT_DIMMED,
+        DetailColorIntent::Accent => theme::MediaServerTheme::ACCENT,
+        DetailColorIntent::Success => theme::MediaServerTheme::SUCCESS,
+        DetailColorIntent::Warning => theme::MediaServerTheme::WARNING,
+        DetailColorIntent::Error => theme::MediaServerTheme::ERROR,
+    }
+}
+
 fn tone_text_color(tone: DetailTone) -> Color {
     match tone {
         DetailTone::Neutral => theme::MediaServerTheme::TEXT_PRIMARY,
@@ -2152,6 +2970,32 @@ fn detail_panel_style(
                 color: border_color,
                 width: 1.0,
                 radius: 0.0.into(),
+            },
+            shadow: Shadow::default(),
+            snap: false,
+        }
+    }
+}
+
+fn detail_rail_card_button_style()
+-> impl Fn(&Theme, button::Status) -> button::Style + Clone {
+    move |_, status| {
+        let hovered =
+            matches!(status, button::Status::Hovered | button::Status::Pressed);
+
+        button::Style {
+            text_color: theme::MediaServerTheme::TEXT_PRIMARY,
+            background: hovered.then_some(Background::Color(Color::from_rgba(
+                1.0, 1.0, 1.0, 0.06,
+            ))),
+            border: Border {
+                color: if hovered {
+                    Color::from_rgba(1.0, 1.0, 1.0, 0.18)
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: if hovered { 1.0 } else { 0.0 },
+                radius: 8.0.into(),
             },
             shadow: Shadow::default(),
             snap: false,
@@ -2313,8 +3157,12 @@ mod tests {
         },
     };
 
+    fn test_sizes() -> SizeProvider {
+        SizeProvider::new(ScalingContext::default())
+    }
+
     fn layout_plan() -> DetailLayoutPlan {
-        let sizes = SizeProvider::new(ScalingContext::default());
+        let sizes = test_sizes();
         let layout = ScaledLayout::new(sizes.scale, grid::EFFECTIVE_SPACING);
         solve_detail_layout(DetailLayoutInput::from_runtime(
             1_920.0,
@@ -2344,6 +3192,88 @@ mod tests {
                 })
                 .collect(),
         })
+    }
+
+    #[test]
+    fn overview_and_facts_share_side_by_side_panel_height() {
+        let plan = layout_plan();
+        let sizes = test_sizes();
+        let overview = DetailSection::Overview(DetailOverviewSection {
+            title: "Synopsis".to_string(),
+            body: "A long synopsis establishes the review pressure for the side-by-side detail grid so the details panel does not collapse shorter than the copy block beside it.".to_string(),
+        });
+        let facts = DetailSection::Facts(DetailFactPanel {
+            title: "Details".to_string(),
+            facts: vec![DetailFact::neutral("Runtime", "42 min")],
+        });
+
+        let matched_height = matched_overview_fact_panel_height(
+            &[&overview, &facts],
+            &plan,
+            &sizes,
+        )
+        .expect("overview and facts should height-match");
+        let expected_height = overview_panel_height(
+            match &overview {
+                DetailSection::Overview(section) => section,
+                _ => unreachable!(),
+            },
+            &plan,
+            &sizes,
+            2,
+        )
+        .max(fact_panel_height(
+            match &facts {
+                DetailSection::Facts(section) => section,
+                _ => unreachable!(),
+            },
+            &plan,
+            &sizes,
+        ))
+        .max(plan.section_grid.panel_min_height);
+
+        assert!((matched_height - expected_height).abs() < f32::EPSILON);
+
+        let matched_stage_height = matched_stage_overview_fact_panel_height(
+            &[&overview, &facts],
+            &plan,
+            &sizes,
+        )
+        .expect("stage overview and facts should height-match");
+        let expected_stage_height = stage_overview_panel_height(
+            match &overview {
+                DetailSection::Overview(section) => section,
+                _ => unreachable!(),
+            },
+            &plan,
+            &sizes,
+            2,
+        )
+        .max(stage_fact_panel_height(
+            match &facts {
+                DetailSection::Facts(section) => section,
+                _ => unreachable!(),
+            },
+            &plan,
+            &sizes,
+        ))
+        .max(plan.section_grid.panel_min_height);
+
+        assert!(
+            (matched_stage_height - expected_stage_height).abs() < f32::EPSILON
+        );
+        assert!(
+            matched_overview_fact_panel_height(&[&overview], &plan, &sizes)
+                .is_none()
+        );
+        assert!(
+            matched_stage_overview_fact_panel_height(
+                &[&overview],
+                &plan,
+                &sizes,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2483,6 +3413,46 @@ mod tests {
         assert_eq!(
             detail_action_surface_mode(&menu),
             DetailActionSurfaceMode::Menu
+        );
+    }
+
+    #[test]
+    fn metadata_render_groups_keep_neutral_values_inline() {
+        let groups = metadata_render_groups(&[
+            DetailMetadataPill::neutral("2024"),
+            DetailMetadataPill::neutral("1h 42m"),
+            DetailMetadataPill::playback_state(
+                "33% watched",
+                DetailTone::Accent,
+            ),
+            DetailMetadataPill::rating("★ 8.1"),
+        ]);
+
+        assert_eq!(groups.inline_labels, vec!["2024", "1h 42m"]);
+        assert_eq!(groups.chips.len(), 2);
+        assert_eq!(
+            groups.chips[0].kind,
+            super::super::DetailMetadataKind::PlaybackState
+        );
+        assert_eq!(
+            groups.chips[1].kind,
+            super::super::DetailMetadataKind::AudienceRating
+        );
+    }
+
+    #[test]
+    fn text_wrapping_honors_semantic_overflow_budgets() {
+        assert_eq!(
+            text_wrapping(DetailTextOverflow::SingleLineEllipsis, true),
+            Wrapping::None
+        );
+        assert_eq!(
+            text_wrapping(DetailTextOverflow::MultiLine { max_lines: 2 }, true),
+            Wrapping::WordOrGlyph
+        );
+        assert_eq!(
+            text_wrapping(DetailTextOverflow::HorizontalScroll, false),
+            Wrapping::None
         );
     }
 }

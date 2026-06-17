@@ -14,9 +14,11 @@ use crate::{
             theme,
             views::{
                 detail::{
-                    DetailArtAspect, DetailForegroundSurface,
-                    DetailForegroundSurfaceTokens, DetailInterfaceMode,
-                    DetailLayoutInput, DetailLayoutPlan, DetailTone,
+                    DetailArtAspect, DetailColorIntent,
+                    DetailForegroundSurface, DetailForegroundSurfaceTokens,
+                    DetailInterfaceMode, DetailLayoutInput, DetailLayoutPlan,
+                    DetailTextAlignment, DetailTextOverflow, DetailTextRole,
+                    DetailTextStyle, DetailTone,
                     detail_foreground_surface_tokens, solve_detail_layout,
                 },
                 virtual_carousel::types::CarouselKey,
@@ -36,6 +38,7 @@ use ferrex_core::player_prelude::{
 };
 use iced::{
     Background, Border, Color, Element, Length, Shadow, Task, Theme, Vector,
+    alignment,
     widget::{
         Column, Row, Space, button, column, container, mouse_area,
         operation::scroll_to, row, scrollable, text,
@@ -85,46 +88,6 @@ fn hero_height(plan: &DetailLayoutPlan) -> f32 {
     plan.backdrop
         .height
         .max(plan.hero_art.height + hero_padding(plan) * 2.0)
-}
-
-fn hero_text_scale(plan: &DetailLayoutPlan) -> f32 {
-    if plan.viewport_height <= 760.0 {
-        0.86
-    } else {
-        1.0
-    }
-}
-
-fn hero_spacing(plan: &DetailLayoutPlan) -> f32 {
-    (15.0 * hero_text_scale(plan)).clamp(11.0, 15.0)
-}
-
-fn hero_title_size(plan: &DetailLayoutPlan) -> f32 {
-    56.0 * hero_text_scale(plan)
-}
-
-fn hero_subtitle_size(plan: &DetailLayoutPlan) -> f32 {
-    24.0 * hero_text_scale(plan)
-}
-
-fn hero_overview_size(plan: &DetailLayoutPlan) -> f32 {
-    22.0 * hero_text_scale(plan)
-}
-
-fn action_label_size(plan: &DetailLayoutPlan) -> f32 {
-    25.0 * hero_text_scale(plan)
-}
-
-fn action_subtitle_size(plan: &DetailLayoutPlan) -> f32 {
-    15.0 * hero_text_scale(plan)
-}
-
-fn action_button_padding_y(plan: &DetailLayoutPlan) -> f32 {
-    if plan.viewport_height <= 760.0 {
-        7.0
-    } else {
-        10.0
-    }
 }
 
 fn panel_rows(plan: &DetailLayoutPlan) -> usize {
@@ -185,6 +148,227 @@ fn tenfoot_surface_tokens(
     tone: DetailTone,
 ) -> DetailForegroundSurfaceTokens {
     detail_foreground_surface_tokens(plan, surface, tone)
+}
+
+fn detail_text_color(intent: DetailColorIntent) -> Color {
+    match intent {
+        DetailColorIntent::Primary => theme::MediaServerTheme::TEXT_PRIMARY,
+        DetailColorIntent::Secondary => theme::MediaServerTheme::TEXT_SECONDARY,
+        DetailColorIntent::Subdued => theme::MediaServerTheme::TEXT_SUBDUED,
+        DetailColorIntent::Dimmed => theme::MediaServerTheme::TEXT_DIMMED,
+        DetailColorIntent::Accent => theme::MediaServerTheme::ACCENT,
+        DetailColorIntent::Success => theme::MediaServerTheme::SUCCESS,
+        DetailColorIntent::Warning => theme::MediaServerTheme::WARNING,
+        DetailColorIntent::Error => theme::MediaServerTheme::ERROR,
+    }
+}
+
+fn text_alignment(alignment: DetailTextAlignment) -> alignment::Horizontal {
+    match alignment {
+        DetailTextAlignment::Start => alignment::Horizontal::Left,
+        DetailTextAlignment::Center => alignment::Horizontal::Center,
+        DetailTextAlignment::End => alignment::Horizontal::Right,
+    }
+}
+
+fn text_wrapping(style: DetailTextStyle) -> iced::widget::text::Wrapping {
+    match style.overflow {
+        DetailTextOverflow::SingleLineEllipsis
+        | DetailTextOverflow::HorizontalScroll => {
+            iced::widget::text::Wrapping::None
+        }
+        DetailTextOverflow::Wrap | DetailTextOverflow::MultiLine { .. } => {
+            iced::widget::text::Wrapping::WordOrGlyph
+        }
+    }
+}
+
+fn text_budget_height(style: DetailTextStyle) -> Option<f32> {
+    style
+        .max_lines()
+        .map(|lines| style.line_height_px() * f32::from(lines))
+}
+
+fn with_text_measure(
+    mut style: DetailTextStyle,
+    measure: f32,
+) -> DetailTextStyle {
+    style.measure = style.measure.min(measure.max(1.0)).max(1.0);
+    style
+}
+
+fn role_text_style(
+    plan: &DetailLayoutPlan,
+    role: DetailTextRole,
+    measure: f32,
+) -> DetailTextStyle {
+    with_text_measure(plan.typography.role(role), measure)
+}
+
+fn styled_text<'a>(
+    content: impl Into<String>,
+    style: DetailTextStyle,
+) -> text::Text<'a> {
+    text(content.into())
+        .size(style.size)
+        .line_height(style.line_height)
+        .color(detail_text_color(style.color_intent))
+        .align_x(text_alignment(style.alignment))
+        .wrapping(text_wrapping(style))
+}
+
+fn budgeted_text<'a>(
+    content: impl Into<String>,
+    style: DetailTextStyle,
+    width: Length,
+) -> Element<'a, UiMessage> {
+    let height = text_budget_height(style);
+    let mut label = styled_text(content, style).width(width);
+    if let Some(height) = height {
+        label = label.height(Length::Fixed(height));
+    }
+
+    let mut wrapper = container(label).width(width);
+    if let Some(height) = height {
+        wrapper = wrapper.height(Length::Fixed(height)).clip(true);
+    }
+    wrapper.into()
+}
+
+fn hero_copy_measure(image: &DetailImage, plan: &DetailLayoutPlan) -> f32 {
+    let (image_width, _) = hero_image_size(image, plan);
+    let inner_width = (plan.content_width - hero_padding(plan) * 2.0).max(1.0);
+    (inner_width - image_width - plan.hero_gap)
+        .max(1.0)
+        .min(plan.typography.metrics.hero_copy_width)
+}
+
+fn action_button_padding(plan: &DetailLayoutPlan) -> [f32; 2] {
+    [
+        (plan.action_cluster.button_height * 0.14).clamp(8.0, 12.0),
+        (plan.action_cluster.gap * 1.8).clamp(16.0, 24.0),
+    ]
+}
+
+fn action_button_text_measure(plan: &DetailLayoutPlan) -> f32 {
+    let [_, horizontal] = action_button_padding(plan);
+    (plan.action_cluster.button_width - horizontal * 2.0).max(1.0)
+}
+
+fn action_text_spacing(plan: &DetailLayoutPlan) -> f32 {
+    plan.typography
+        .action_subtitle
+        .spacing_after
+        .min(plan.typography.action_label.spacing_after)
+        .clamp(2.0, 8.0)
+}
+
+fn action_label_style_for_focus(
+    plan: &DetailLayoutPlan,
+    focused: bool,
+) -> DetailTextStyle {
+    role_text_style(
+        plan,
+        if focused {
+            DetailTextRole::TenFootFocusLabel
+        } else {
+            DetailTextRole::ActionLabel
+        },
+        action_button_text_measure(plan),
+    )
+}
+
+fn action_subtitle_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
+    role_text_style(
+        plan,
+        DetailTextRole::ActionSubtitle,
+        action_button_text_measure(plan),
+    )
+}
+
+fn panel_header_title_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
+    let mut style = role_text_style(
+        plan,
+        DetailTextRole::SectionTitle,
+        plan.typography.metrics.overview_measure * 0.48,
+    );
+    style.overflow = DetailTextOverflow::SingleLineEllipsis;
+    style
+}
+
+fn panel_header_caption_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
+    let mut style = role_text_style(
+        plan,
+        DetailTextRole::Metadata,
+        plan.typography.metrics.overview_measure * 0.24,
+    );
+    style.overflow = DetailTextOverflow::SingleLineEllipsis;
+    style.alignment = DetailTextAlignment::Start;
+    style
+}
+
+fn panel_empty_message_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
+    let mut style = role_text_style(
+        plan,
+        DetailTextRole::NoticeBody,
+        (plan.content_width - panel_body_padding(plan) * 2.0).max(1.0),
+    );
+    style.color_intent = DetailColorIntent::Secondary;
+    style
+}
+
+fn panel_card_gap(plan: &DetailLayoutPlan) -> f32 {
+    plan.rail.gap.min(16.0)
+}
+
+fn panel_card_padding(plan: &DetailLayoutPlan) -> f32 {
+    (plan.rail.gap * 0.9).clamp(10.0, 16.0)
+}
+
+fn panel_card_text_measure(
+    image: &DetailImage,
+    plan: &DetailLayoutPlan,
+) -> f32 {
+    let (image_width, _) = panel_image_size(image, plan);
+    (plan.rail.card_width
+        - panel_card_padding(plan) * 2.0
+        - image_width
+        - panel_card_gap(plan))
+    .max(1.0)
+}
+
+fn panel_card_title_style(
+    plan: &DetailLayoutPlan,
+    measure: f32,
+) -> DetailTextStyle {
+    let mut style = role_text_style(plan, DetailTextRole::Caption, measure);
+    style.color_intent = DetailColorIntent::Primary;
+    style.overflow = DetailTextOverflow::MultiLine {
+        max_lines: plan.typography.metrics.caption_budgets.rail_title_lines,
+    };
+    style.alignment = DetailTextAlignment::Start;
+    style
+}
+
+fn panel_card_subtitle_style(
+    plan: &DetailLayoutPlan,
+    measure: f32,
+) -> DetailTextStyle {
+    let mut style = role_text_style(plan, DetailTextRole::Metadata, measure);
+    style.overflow = DetailTextOverflow::MultiLine {
+        max_lines: plan.typography.metrics.caption_budgets.rail_subtitle_lines,
+    };
+    style.alignment = DetailTextAlignment::Start;
+    style
+}
+
+fn panel_card_context_style(
+    plan: &DetailLayoutPlan,
+    measure: f32,
+) -> DetailTextStyle {
+    let mut style = panel_card_subtitle_style(plan, measure);
+    style.color_intent = DetailColorIntent::Subdued;
+    style
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1542,24 +1726,8 @@ fn view_hero<'a>(
     plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
     let image = view_detail_image(state, &data.image, plan, true);
-
-    let metadata_tokens = tenfoot_surface_tokens(
-        plan,
-        DetailForegroundSurface::MetadataRibbon,
-        DetailTone::Neutral,
-    );
-    let mut metadata_row: Row<'a, UiMessage> = Row::new().spacing(12);
-    for item in &data.metadata {
-        metadata_row = metadata_row.push(
-            container(
-                text(item.clone())
-                    .size(20)
-                    .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            )
-            .padding([6, 12])
-            .style(tenfoot_surface_style(metadata_tokens)),
-        );
-    }
+    let hero_measure = hero_copy_measure(&data.image, plan);
+    let hero_width = Length::Fixed(hero_measure);
 
     let mut action_row = Row::new()
         .spacing(plan.action_cluster.gap)
@@ -1580,35 +1748,92 @@ fn view_hero<'a>(
         .width(Length::Shrink)
         .style(tenfoot_surface_style(action_shelf_tokens));
 
-    let mut text_column = column![
-        text(data.eyebrow.clone())
-            .size(22)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        text(data.title.clone())
-            .size(hero_title_size(plan))
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        text(data.subtitle.clone())
-            .size(hero_subtitle_size(plan))
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        metadata_row,
-        text(data.overview.clone())
-            .size(hero_overview_size(plan))
-            .color(theme::MediaServerTheme::TEXT_PRIMARY)
-            .width(Length::Fill),
-        action_shelf,
-    ]
-    .spacing(hero_spacing(plan))
-    .width(Length::Fill);
+    let mut text_column = Column::new()
+        .spacing(
+            plan.typography
+                .hero_title
+                .spacing_after
+                .max(plan.typography.hero_eyebrow.spacing_after)
+                .clamp(8.0, 18.0),
+        )
+        .width(hero_width)
+        .push(budgeted_text(
+            data.eyebrow.clone(),
+            role_text_style(plan, DetailTextRole::HeroEyebrow, hero_measure),
+            hero_width,
+        ))
+        .push(budgeted_text(
+            data.title.clone(),
+            role_text_style(plan, DetailTextRole::HeroTitle, hero_measure),
+            hero_width,
+        ))
+        .push(budgeted_text(
+            data.subtitle.clone(),
+            role_text_style(plan, DetailTextRole::HeroSubtitle, hero_measure),
+            hero_width,
+        ));
+
+    if !data.metadata.is_empty() {
+        let metadata_style =
+            role_text_style(plan, DetailTextRole::Metadata, hero_measure);
+        let metadata_tokens = tenfoot_surface_tokens(
+            plan,
+            DetailForegroundSurface::MetadataRibbon,
+            DetailTone::Neutral,
+        );
+        let pill_padding_y =
+            (metadata_style.spacing_after * 0.34).clamp(4.0, 10.0);
+        let pill_padding_x =
+            plan.typography.metrics.metadata_pill_gap.clamp(8.0, 18.0);
+        let metadata_height = metadata_style.line_height_px()
+            + pill_padding_y * 2.0
+            + metadata_style.spacing_after * 0.20;
+        let mut metadata_row: Row<'a, UiMessage> =
+            Row::new().spacing(plan.typography.metrics.metadata_pill_gap);
+        for item in &data.metadata {
+            metadata_row = metadata_row.push(
+                container(
+                    styled_text(item.clone(), metadata_style)
+                        .width(Length::Shrink),
+                )
+                .padding([pill_padding_y, pill_padding_x])
+                .style(tenfoot_surface_style(metadata_tokens)),
+            );
+        }
+
+        let metadata_scroller = scrollable(metadata_row)
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::default().scroller_width(4).margin(2),
+            ))
+            .width(Length::Fill)
+            .height(Length::Fixed(metadata_height));
+        text_column = text_column.push(
+            container(metadata_scroller)
+                .width(hero_width)
+                .height(Length::Fixed(metadata_height))
+                .clip(true),
+        );
+    }
+
+    text_column = text_column
+        .push(budgeted_text(
+            data.overview.clone(),
+            role_text_style(plan, DetailTextRole::HeroOverview, hero_measure),
+            hero_width,
+        ))
+        .push(action_shelf);
 
     if let Some(notice) = data.notice.as_ref() {
+        let notice_text_style =
+            role_text_style(plan, DetailTextRole::NoticeBody, hero_measure);
         text_column = text_column.push(
-            container(
-                text(notice.clone())
-                    .size(19)
-                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            )
-            .padding(14)
-            .width(Length::Fill)
+            container(budgeted_text(
+                notice.clone(),
+                notice_text_style,
+                hero_width,
+            ))
+            .padding(notice_text_style.spacing_after)
+            .width(hero_width)
             .style(tenfoot_surface_style(tenfoot_surface_tokens(
                 plan,
                 DetailForegroundSurface::NoticeSlab,
@@ -1640,19 +1865,24 @@ fn focusable_action_button<'a>(
     focused: bool,
     plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
+    let text_width = Length::Fixed(action_button_text_measure(plan));
     let content = column![
-        text(spec.label.clone())
-            .size(action_label_size(plan))
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
-        text(spec.subtitle.clone())
-            .size(action_subtitle_size(plan))
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        budgeted_text(
+            spec.label.clone(),
+            action_label_style_for_focus(plan, focused),
+            text_width,
+        ),
+        budgeted_text(
+            spec.subtitle.clone(),
+            action_subtitle_style(plan),
+            text_width,
+        ),
     ]
-    .spacing(4)
+    .spacing(action_text_spacing(plan))
     .align_x(iced::Alignment::Center);
 
     let button_element = button(content)
-        .padding([action_button_padding_y(plan), 18.0])
+        .padding(action_button_padding(plan))
         .width(Length::Fixed(plan.action_cluster.button_width))
         .height(Length::Fixed(plan.action_cluster.button_height))
         .style(tenfoot_button_style(
@@ -1708,43 +1938,46 @@ fn view_panel<'a>(
     };
 
     let before_after = before_after_copy(start, end, total);
+    let header_title_style = panel_header_title_style(plan);
+    let header_caption_style = panel_header_caption_style(plan);
     let metadata_tokens = tenfoot_surface_tokens(
         plan,
         DetailForegroundSurface::MetadataRibbon,
         DetailTone::Neutral,
     );
-    let range_pill = container(
-        text(range_label)
-            .size(18)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    )
-    .padding([4, 10])
+    let header_title = container(budgeted_text(
+        panel.id.title(),
+        header_title_style,
+        Length::Fixed(header_title_style.measure),
+    ))
+    .width(Length::Fill);
+    let range_pill = container(budgeted_text(
+        range_label,
+        header_caption_style,
+        Length::Fixed(header_caption_style.measure),
+    ))
+    .padding([4.0, 10.0])
     .style(tenfoot_surface_style(metadata_tokens));
-    let before_after_pill = container(
-        text(before_after)
-            .size(18)
-            .color(theme::MediaServerTheme::TEXT_SECONDARY),
-    )
-    .padding([4, 10])
+    let before_after_pill = container(budgeted_text(
+        before_after,
+        header_caption_style,
+        Length::Fixed(header_caption_style.measure),
+    ))
+    .padding([4.0, 10.0])
     .style(tenfoot_surface_style(metadata_tokens));
-    let header = row![
-        text(panel.id.title())
-            .size(31)
-            .color(theme::MediaServerTheme::TEXT_PRIMARY)
-            .width(Length::Fill),
-        range_pill,
-        before_after_pill,
-    ]
-    .spacing(18)
-    .height(Length::Fixed(panel_header_height(plan)))
-    .align_y(iced::Alignment::Center);
+
+    let header = row![header_title, range_pill, before_after_pill]
+        .spacing(plan.typography.metrics.metadata_pill_gap)
+        .height(Length::Fixed(panel_header_height(plan)))
+        .align_y(iced::Alignment::Center);
 
     let body: Element<'a, UiMessage> = if panel.items.is_empty() {
-        container(
-            text(panel.empty_message.clone())
-                .size(22)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        )
+        let empty_style = panel_empty_message_style(plan);
+        container(budgeted_text(
+            panel.empty_message.clone(),
+            empty_style,
+            Length::Fixed(empty_style.measure),
+        ))
         .width(Length::Fill)
         .height(Length::Fixed(panel_body_height(plan)))
         .padding(panel_body_padding(plan))
@@ -1818,35 +2051,43 @@ fn view_panel_card<'a>(
         }
         TenFootDetailFocusId::Action(_) => None,
     };
-    let image = view_panel_item_image(
-        state,
-        &item.image(),
-        plan,
-        focused,
-        carousel_key,
-    );
+    let item_image = item.image();
+    let image =
+        view_panel_item_image(state, &item_image, plan, focused, carousel_key);
+    let text_measure = panel_card_text_measure(&item_image, plan);
+    let title_style = panel_card_title_style(plan, text_measure);
+    let subtitle_style = panel_card_subtitle_style(plan, text_measure);
+    let context_style = panel_card_context_style(plan, text_measure);
+    let text_width = Length::Fixed(text_measure);
     let content = row![
         image,
         column![
-            text(item.title().to_string())
-                .size(21)
-                .color(theme::MediaServerTheme::TEXT_PRIMARY),
-            text(item.subtitle().to_string())
-                .size(16)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            text(item.context().to_string())
-                .size(15)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+            budgeted_text(item.title().to_string(), title_style, text_width),
+            budgeted_text(
+                item.subtitle().to_string(),
+                subtitle_style,
+                text_width,
+            ),
+            budgeted_text(
+                item.context().to_string(),
+                context_style,
+                text_width
+            ),
         ]
-        .spacing(6)
-        .width(Length::Fill),
+        .spacing(
+            subtitle_style
+                .spacing_after
+                .min(title_style.spacing_after)
+                .clamp(4.0, 8.0),
+        )
+        .width(text_width),
     ]
-    .spacing(plan.rail.gap.min(16.0))
+    .spacing(panel_card_gap(plan))
     .align_y(iced::Alignment::Center);
 
     let button_element = button(
         container(content)
-            .padding((plan.rail.gap * 0.9).clamp(10.0, 16.0))
+            .padding(panel_card_padding(plan))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_y(iced::Alignment::Center),
@@ -1962,21 +2203,25 @@ fn view_detail_image<'a>(
             .tight_bounds()
             .no_animation()
             .into(),
-        DetailImage::None => container(
-            text("No local image")
-                .size(24)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        )
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center)
-        .style(tenfoot_surface_style(tenfoot_surface_tokens(
-            plan,
-            DetailForegroundSurface::EmptyState,
-            DetailTone::Muted,
-        )))
-        .into(),
+        DetailImage::None => {
+            let placeholder_style =
+                role_text_style(plan, DetailTextRole::TenFootHelper, width);
+            container(budgeted_text(
+                "No local image",
+                placeholder_style,
+                Length::Fixed(width),
+            ))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(height))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .style(tenfoot_surface_style(tenfoot_surface_tokens(
+                plan,
+                DetailForegroundSurface::EmptyState,
+                DetailTone::Muted,
+            )))
+            .into()
+        }
     }
 }
 
@@ -2697,10 +2942,7 @@ mod tests {
 
         for (width, height) in matrix {
             let plan = layout_plan(width, height, 1.0);
-            let copy_width = plan.content_width
-                - hero_padding(&plan) * 2.0
-                - plan.hero_art.width
-                - plan.hero_gap;
+            let copy_width = hero_copy_measure(&DetailImage::None, &plan);
             let action_row_width = 3.0 * plan.action_cluster.button_width
                 + 2.0 * plan.action_cluster.gap;
             let columns = visible_panel_columns_for_width(width, &plan);
@@ -2712,6 +2954,108 @@ mod tests {
             assert!(columns >= 3, "panel focus grid should stay readable");
             assert!(panel_rows(&plan) >= 1);
             assert!(panel_height(&plan) < height);
+        }
+    }
+
+    #[test]
+    fn tenfoot_detail_text_roles_keep_couch_distance_hierarchy() {
+        let plan = layout_plan(1_920.0, 1_080.0, 1.0);
+        let title = role_text_style(
+            &plan,
+            DetailTextRole::HeroTitle,
+            plan.typography.metrics.hero_copy_width,
+        );
+        let subtitle = role_text_style(
+            &plan,
+            DetailTextRole::HeroSubtitle,
+            plan.typography.metrics.hero_copy_width,
+        );
+        let metadata = role_text_style(
+            &plan,
+            DetailTextRole::Metadata,
+            plan.typography.metrics.hero_copy_width,
+        );
+        let overview = role_text_style(
+            &plan,
+            DetailTextRole::HeroOverview,
+            plan.typography.metrics.hero_copy_width,
+        );
+
+        assert_eq!(title.max_lines(), Some(2));
+        assert!(title.size > subtitle.size);
+        assert!(subtitle.size > metadata.size);
+        assert!(overview.size >= metadata.size);
+        assert!(metadata.size >= 16.0);
+        assert!(metadata.measure <= plan.typography.metrics.hero_copy_width);
+    }
+
+    #[test]
+    fn panel_caption_styles_use_semantic_budgets_and_measures() {
+        let plan = layout_plan(1_920.0, 1_080.0, 1.0);
+        let image = DetailImage::Still {
+            media_uuid: Uuid::from_u128(77),
+            iid: None,
+        };
+        let measure = panel_card_text_measure(&image, &plan);
+        let title = panel_card_title_style(&plan, measure);
+        let subtitle = panel_card_subtitle_style(&plan, measure);
+        let context = panel_card_context_style(&plan, measure);
+
+        assert_eq!(
+            title.max_lines(),
+            Some(plan.typography.metrics.caption_budgets.rail_title_lines)
+        );
+        assert_eq!(
+            subtitle.max_lines(),
+            Some(plan.typography.metrics.caption_budgets.rail_subtitle_lines)
+        );
+        assert_eq!(context.max_lines(), subtitle.max_lines());
+        assert!(title.measure <= measure + 0.01);
+        assert!(subtitle.measure <= measure + 0.01);
+        assert!(title.size > subtitle.size);
+        assert_eq!(title.color_intent, DetailColorIntent::Primary);
+        assert_eq!(context.color_intent, DetailColorIntent::Subdued);
+    }
+
+    #[test]
+    fn action_typography_fits_focus_safe_button_targets() {
+        let matrix = [
+            (1_280.0, 720.0, 1.0),
+            (1_920.0, 1_080.0, 1.0),
+            (1_920.0, 1_080.0, 1.25),
+        ];
+
+        for (width, height, scale) in matrix {
+            let plan = layout_plan(width, height, scale);
+            let label = action_label_style_for_focus(&plan, false);
+            let focused_label = action_label_style_for_focus(&plan, true);
+            let subtitle = action_subtitle_style(&plan);
+            let [vertical_padding, _] = action_button_padding(&plan);
+            let text_height = text_budget_height(label).expect("label budget")
+                + action_text_spacing(&plan)
+                + text_budget_height(subtitle).expect("subtitle budget");
+            let focused_text_height = text_budget_height(focused_label)
+                .expect("focused label budget")
+                + action_text_spacing(&plan)
+                + text_budget_height(subtitle).expect("subtitle budget");
+
+            assert!(label.size > subtitle.size);
+            assert!(focused_label.size >= label.size);
+            assert!(subtitle.size >= plan.typography.metadata.size * 0.90);
+            assert_eq!(label.max_lines(), Some(1));
+            assert_eq!(focused_label.max_lines(), Some(1));
+            assert_eq!(subtitle.max_lines(), Some(1));
+            assert!(action_button_text_measure(&plan) > 0.0);
+            assert!(
+                text_height + vertical_padding * 2.0
+                    <= plan.action_cluster.button_height + 0.01,
+                "action text stack should fit at {width}x{height} scale {scale}"
+            );
+            assert!(
+                focused_text_height + vertical_padding * 2.0
+                    <= plan.action_cluster.button_height + 0.01,
+                "focused action text stack should fit at {width}x{height} scale {scale}"
+            );
         }
     }
 
