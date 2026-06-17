@@ -14,20 +14,26 @@ use crate::{
             theme,
             views::{
                 detail::{
-                    DetailArtAspect, DetailColorIntent,
+                    DetailArtAspect, DetailArtwork, DetailColorIntent,
                     DetailForegroundSurface, DetailForegroundSurfaceTokens,
                     DetailInterfaceMode, DetailLayoutInput, DetailLayoutPlan,
-                    DetailTextAlignment, DetailTextOverflow, DetailTextRole,
-                    DetailTextStyle, DetailTone,
-                    detail_foreground_surface_tokens, solve_detail_layout,
+                    DetailMediaRail, DetailMediaRailItem,
+                    DetailRailActivationPolicy, DetailRailCardVariant,
+                    DetailRailKind, DetailRailMetrics, DetailTextAlignment,
+                    DetailTextOverflow, DetailTextRole, DetailTextStyle,
+                    DetailTone, detail_foreground_surface_tokens,
+                    solve_detail_layout, view_detail_media_rail_card,
                 },
                 virtual_carousel::types::CarouselKey,
             },
             widgets::image_for,
         },
     },
-    infra::shader_widgets::poster::{
-        PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+    infra::{
+        design_tokens::SizeProvider,
+        shader_widgets::poster::{
+            PosterFace, PosterInstanceKey, animation::AnimationBehavior,
+        },
     },
     state::State,
 };
@@ -40,7 +46,7 @@ use iced::{
     Background, Border, Color, Element, Length, Shadow, Task, Theme, Vector,
     alignment,
     widget::{
-        Column, Row, Space, button, column, container, mouse_area,
+        Column, Row, button, column, container, mouse_area,
         operation::scroll_to, row, scrollable, text,
     },
 };
@@ -49,8 +55,7 @@ use uuid::Uuid;
 const TENFOOT_HEADER_HEIGHT: f32 = 0.0;
 const HERO_STILL_ASPECT: f32 = 16.0 / 9.0;
 const HERO_STILL_MAX_CONTENT_FRACTION: f32 = 0.42;
-const PANEL_POSTER_ASPECT: f32 = 2.0 / 3.0;
-const PANEL_STILL_ASPECT: f32 = 16.0 / 9.0;
+const POSTER_CARD_ASPECT: f32 = 2.0 / 3.0;
 const TWO_ROW_PANEL_ROWS: usize = 2;
 
 fn tenfoot_detail_layout_plan(state: &State) -> DetailLayoutPlan {
@@ -90,8 +95,15 @@ fn hero_height(plan: &DetailLayoutPlan) -> f32 {
         .max(plan.hero_art.height + hero_padding(plan) * 2.0)
 }
 
+#[cfg(test)]
 fn panel_rows(plan: &DetailLayoutPlan) -> usize {
-    plan.rail.visible_rows.max(1)
+    panel_rows_for_metrics(
+        plan.rail.metrics_for(DetailRailCardVariant::StillWide),
+    )
+}
+
+fn panel_rows_for_metrics(metrics: DetailRailMetrics) -> usize {
+    metrics.visible_rows.max(1)
 }
 
 fn panel_body_padding(plan: &DetailLayoutPlan) -> f32 {
@@ -124,18 +136,32 @@ fn panel_header_body_gap(plan: &DetailLayoutPlan) -> f32 {
     (plan.section_grid.gap * 0.66).clamp(10.0, 18.0)
 }
 
-fn panel_body_height(plan: &DetailLayoutPlan) -> f32 {
-    let rows = panel_rows(plan);
-    rows as f32 * plan.rail.card_height
-        + rows.saturating_sub(1) as f32 * plan.rail.gap
+fn panel_body_height_for_metrics(
+    plan: &DetailLayoutPlan,
+    metrics: DetailRailMetrics,
+) -> f32 {
+    let rows = panel_rows_for_metrics(metrics);
+    rows as f32 * metrics.card_height
+        + rows.saturating_sub(1) as f32 * metrics.gap
         + panel_body_padding(plan) * 2.0
 }
 
-fn panel_height(plan: &DetailLayoutPlan) -> f32 {
+fn panel_height_for_metrics(
+    plan: &DetailLayoutPlan,
+    metrics: DetailRailMetrics,
+) -> f32 {
     panel_band_padding(plan) * 2.0
         + panel_header_height(plan)
         + panel_header_body_gap(plan)
-        + panel_body_height(plan)
+        + panel_body_height_for_metrics(plan, metrics)
+}
+
+#[cfg(test)]
+fn panel_height(plan: &DetailLayoutPlan) -> f32 {
+    panel_height_for_metrics(
+        plan,
+        plan.rail.metrics_for(DetailRailCardVariant::StillWide),
+    )
 }
 
 fn scroll_follow_margin(plan: &DetailLayoutPlan) -> f32 {
@@ -317,58 +343,49 @@ fn panel_empty_message_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
     style
 }
 
-fn panel_card_gap(plan: &DetailLayoutPlan) -> f32 {
-    plan.rail.gap.min(16.0)
-}
-
-fn panel_card_padding(plan: &DetailLayoutPlan) -> f32 {
-    (plan.rail.gap * 0.9).clamp(10.0, 16.0)
-}
-
-fn panel_card_text_measure(
-    image: &DetailImage,
+fn tenfoot_poster_panel_metrics(
     plan: &DetailLayoutPlan,
-) -> f32 {
-    let (image_width, _) = panel_image_size(image, plan);
-    (plan.rail.card_width
-        - panel_card_padding(plan) * 2.0
-        - image_width
-        - panel_card_gap(plan))
-    .max(1.0)
+    base: DetailRailMetrics,
+) -> DetailRailMetrics {
+    let card_width = (plan.rail.card_width * 0.72)
+        .clamp(220.0 * plan.scale, 252.0 * plan.scale)
+        .min(plan.content_width)
+        .max(1.0);
+    let art_height = (card_width / POSTER_CARD_ASPECT).max(1.0);
+    let text_zone_height = if base.art_height > 0.0 {
+        base.text_zone_height * (art_height / base.art_height)
+    } else {
+        base.text_zone_height
+    }
+    .max(0.0);
+    let card_height = art_height + text_zone_height;
+
+    DetailRailMetrics {
+        art_width: card_width,
+        art_height,
+        card_width,
+        card_height,
+        stride: card_width + base.gap,
+        text_zone_height,
+        scroll_height: card_height,
+        visible_rows: 1,
+        ..base
+    }
 }
 
-fn panel_card_title_style(
+fn panel_metrics_for_id(
+    panel: &TenFootDetailPanelId,
     plan: &DetailLayoutPlan,
-    measure: f32,
-) -> DetailTextStyle {
-    let mut style = role_text_style(plan, DetailTextRole::Caption, measure);
-    style.color_intent = DetailColorIntent::Primary;
-    style.overflow = DetailTextOverflow::MultiLine {
-        max_lines: plan.typography.metrics.caption_budgets.rail_title_lines,
-    };
-    style.alignment = DetailTextAlignment::Start;
-    style
-}
-
-fn panel_card_subtitle_style(
-    plan: &DetailLayoutPlan,
-    measure: f32,
-) -> DetailTextStyle {
-    let mut style = role_text_style(plan, DetailTextRole::Metadata, measure);
-    style.overflow = DetailTextOverflow::MultiLine {
-        max_lines: plan.typography.metrics.caption_budgets.rail_subtitle_lines,
-    };
-    style.alignment = DetailTextAlignment::Start;
-    style
-}
-
-fn panel_card_context_style(
-    plan: &DetailLayoutPlan,
-    measure: f32,
-) -> DetailTextStyle {
-    let mut style = panel_card_subtitle_style(plan, measure);
-    style.color_intent = DetailColorIntent::Subdued;
-    style
+) -> DetailRailMetrics {
+    let base = plan.rail.metrics_for(panel.card_variant());
+    match panel.card_variant() {
+        DetailRailCardVariant::Poster => {
+            tenfoot_poster_panel_metrics(plan, base)
+        }
+        DetailRailCardVariant::StillWide | DetailRailCardVariant::Profile => {
+            base
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -396,7 +413,42 @@ impl TenFootDetailPanelId {
         }
     }
 
-    fn poster_carousel_key(&self) -> CarouselKey {
+    fn stable_key(&self) -> String {
+        match self {
+            Self::SeriesSeasons(series_id) => {
+                format!("tenfoot:series:{}:seasons", series_id.to_uuid())
+            }
+            Self::SeriesEpisodes(series_id) => {
+                format!("tenfoot:series:{}:episodes", series_id.to_uuid())
+            }
+            Self::SeasonEpisodes(season_id) => {
+                format!("tenfoot:season:{}:episodes", season_id.to_uuid())
+            }
+            Self::EpisodeSiblings(season_id) => {
+                format!("tenfoot:season:{}:siblings", season_id.to_uuid())
+            }
+        }
+    }
+
+    fn rail_kind(&self) -> DetailRailKind {
+        match self {
+            Self::SeriesSeasons(_) => DetailRailKind::Seasons,
+            Self::SeriesEpisodes(_)
+            | Self::SeasonEpisodes(_)
+            | Self::EpisodeSiblings(_) => DetailRailKind::Episodes,
+        }
+    }
+
+    fn card_variant(&self) -> DetailRailCardVariant {
+        match self {
+            Self::SeriesSeasons(_) => DetailRailCardVariant::Poster,
+            Self::SeriesEpisodes(_)
+            | Self::SeasonEpisodes(_)
+            | Self::EpisodeSiblings(_) => DetailRailCardVariant::StillWide,
+        }
+    }
+
+    fn carousel_key(&self) -> CarouselKey {
         match self {
             Self::SeriesSeasons(series_id) => {
                 CarouselKey::ShowSeasons(series_id.to_uuid())
@@ -418,6 +470,15 @@ impl TenFootDetailPanelId {
 pub enum TenFootDetailItemId {
     Season(SeasonID),
     Episode(EpisodeID),
+}
+
+impl TenFootDetailItemId {
+    fn stable_id(&self) -> String {
+        match self {
+            Self::Season(id) => format!("season:{}", id.to_uuid()),
+            Self::Episode(id) => format!("episode:{}", id.to_uuid()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -597,84 +658,55 @@ struct TenFootDetailPanel {
     items: Vec<TenFootDetailPanelItem>,
 }
 
+impl TenFootDetailPanel {
+    fn media_rail(&self) -> DetailMediaRail {
+        DetailMediaRail {
+            stable_key: self.id.stable_key(),
+            kind: self.id.rail_kind(),
+            card_variant: self.id.card_variant(),
+            carousel_key: Some(self.id.carousel_key()),
+            title: self.id.title().to_string(),
+            items: self
+                .items
+                .iter()
+                .map(|item| item.media_rail_item(&self.id))
+                .collect(),
+            empty_message: Some(self.empty_message.clone()),
+            activation_policy: DetailRailActivationPolicy::Navigate,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-enum TenFootDetailPanelItem {
-    Season(SeasonPanelItem),
-    Episode(EpisodePanelItem),
+struct TenFootDetailPanelItem {
+    id: TenFootDetailItemId,
+    activation: TenFootDetailActivation,
+    rail_item: DetailMediaRailItem,
 }
 
 impl TenFootDetailPanelItem {
     fn id(&self) -> TenFootDetailItemId {
-        match self {
-            Self::Season(item) => TenFootDetailItemId::Season(item.id),
-            Self::Episode(item) => TenFootDetailItemId::Episode(item.id),
-        }
+        self.id.clone()
     }
 
     fn activation(&self) -> TenFootDetailActivation {
-        match self {
-            Self::Season(item) => {
-                TenFootDetailActivation::ViewSeason(item.series_id, item.id)
-            }
-            Self::Episode(item) => {
-                TenFootDetailActivation::ViewEpisode(item.id)
-            }
-        }
+        self.activation.clone()
     }
 
-    fn title(&self) -> &str {
-        match self {
-            Self::Season(item) => &item.title,
-            Self::Episode(item) => &item.title,
-        }
+    fn media_rail_item(
+        &self,
+        panel: &TenFootDetailPanelId,
+    ) -> DetailMediaRailItem {
+        let mut item = self.rail_item.clone();
+        item.on_press = Some(
+            TenFootDetailMessage::Activate(TenFootDetailFocusId::PanelItem {
+                panel: panel.clone(),
+                item: self.id(),
+            })
+            .into(),
+        );
+        item
     }
-
-    fn subtitle(&self) -> &str {
-        match self {
-            Self::Season(item) => &item.subtitle,
-            Self::Episode(item) => &item.subtitle,
-        }
-    }
-
-    fn context(&self) -> &str {
-        match self {
-            Self::Season(item) => &item.context,
-            Self::Episode(item) => &item.context,
-        }
-    }
-
-    fn image(&self) -> DetailImage {
-        match self {
-            Self::Season(item) => DetailImage::Poster {
-                media_uuid: item.id.to_uuid(),
-                iid: item.poster_iid,
-                placeholder: lucide_icons::Icon::Tv,
-            },
-            Self::Episode(item) => DetailImage::Still {
-                media_uuid: item.id.to_uuid(),
-                iid: item.still_iid,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SeasonPanelItem {
-    id: SeasonID,
-    series_id: SeriesID,
-    title: String,
-    subtitle: String,
-    context: String,
-    poster_iid: Option<Uuid>,
-}
-
-#[derive(Debug, Clone)]
-struct EpisodePanelItem {
-    id: EpisodeID,
-    title: String,
-    subtitle: String,
-    context: String,
-    still_iid: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -915,7 +947,14 @@ impl TenFootDetailData {
             },
             items: seasons
                 .iter()
-                .map(|season| season_panel_item(season))
+                .map(|season| {
+                    season_panel_item(
+                        season,
+                        ImageSize::Poster(
+                            state.domains.settings.display.library_poster_quality,
+                        ),
+                    )
+                })
                 .collect(),
         });
         panels.push(TenFootDetailPanel {
@@ -931,10 +970,7 @@ impl TenFootDetailData {
                     series_id.to_uuid()
                 )
             },
-            items: episodes
-                .iter()
-                .map(|episode| episode_panel_item(episode))
-                .collect(),
+            items: episodes.iter().map(episode_panel_item).collect(),
         });
 
         let primary_activation = next_episode
@@ -1118,10 +1154,7 @@ impl TenFootDetailData {
                         season_id.to_uuid()
                     )
                 },
-                items: episodes
-                    .iter()
-                    .map(|episode| episode_panel_item(episode))
-                    .collect(),
+                items: episodes.iter().map(episode_panel_item).collect(),
             }],
             notice,
         }
@@ -1251,10 +1284,7 @@ impl TenFootDetailData {
             panels: vec![TenFootDetailPanel {
                 id: TenFootDetailPanelId::EpisodeSiblings(episode.season_id),
                 empty_message: panel_empty,
-                items: siblings
-                    .iter()
-                    .map(|episode| episode_panel_item(episode))
-                    .collect(),
+                items: siblings.iter().map(episode_panel_item).collect(),
             }],
             notice: None,
         }
@@ -1409,12 +1439,48 @@ impl TenFootDetailData {
         }
     }
 
+    fn navigation_panel(
+        &self,
+        focus: Option<&TenFootDetailFocusId>,
+    ) -> Option<&TenFootDetailPanel> {
+        match focus {
+            Some(TenFootDetailFocusId::PanelItem { panel, .. }) => {
+                self.panel(panel)
+            }
+            Some(TenFootDetailFocusId::Action(_)) | None => self
+                .panels
+                .iter()
+                .find(|panel| !panel.items.is_empty())
+                .or_else(|| self.panels.first()),
+        }
+    }
+
+    fn panel_grid_for_focus(
+        &self,
+        focus: Option<&TenFootDetailFocusId>,
+        width: f32,
+        plan: &DetailLayoutPlan,
+    ) -> (usize, usize) {
+        let metrics = self
+            .navigation_panel(focus)
+            .map(|panel| panel_metrics_for_id(&panel.id, plan))
+            .unwrap_or_else(|| {
+                plan.rail.metrics_for(DetailRailCardVariant::StillWide)
+            });
+        (
+            visible_panel_columns_for_metrics(width, plan, metrics),
+            panel_rows_for_metrics(metrics),
+        )
+    }
+
     fn move_focus(
         &self,
         current: Option<&TenFootDetailFocusId>,
         direction: SpatialDirection,
         columns: usize,
+        rows: usize,
     ) -> Option<TenFootDetailFocusId> {
+        let rows = rows.max(1);
         let current = current
             .filter(|focus| self.contains_focus(focus))
             .cloned()
@@ -1482,7 +1548,7 @@ impl TenFootDetailData {
                         }
                     }
                     SpatialDirection::Up => {
-                        if item_index >= columns {
+                        if rows > 1 && item_index >= columns {
                             self.focus_for_panel_index(
                                 panel_ref,
                                 item_index - columns,
@@ -1511,7 +1577,9 @@ impl TenFootDetailData {
                         }
                     }
                     SpatialDirection::Down => {
-                        if item_index + columns < panel_ref.items.len() {
+                        if rows > 1
+                            && item_index + columns < panel_ref.items.len()
+                        {
                             self.focus_for_panel_index(
                                 panel_ref,
                                 item_index + columns,
@@ -1546,11 +1614,26 @@ impl TenFootDetailData {
             }
             TenFootDetailFocusId::PanelItem { panel, .. } => {
                 let panel_index = self.panel_index(panel)?;
-                let panel_height = panel_height(plan);
+                let panel_ref = self.panel(panel)?;
+                let panel_height = panel_height_for_metrics(
+                    plan,
+                    panel_metrics_for_id(&panel_ref.id, plan),
+                );
+                let preceding_height = self
+                    .panels
+                    .iter()
+                    .take(panel_index)
+                    .map(|candidate| {
+                        panel_height_for_metrics(
+                            plan,
+                            panel_metrics_for_id(&candidate.id, plan),
+                        ) + plan.hero_gap
+                    })
+                    .sum::<f32>();
                 let top = plan.page_padding_y
                     + hero_height(plan)
                     + plan.hero_gap
-                    + panel_index as f32 * (panel_height + plan.hero_gap);
+                    + preceding_height;
                 Some((top, panel_height))
             }
         }
@@ -1579,19 +1662,31 @@ pub fn update_tenfoot_detail(
             let plan = tenfoot_detail_layout_plan(state);
             let current =
                 state.domains.ui.state.tenfoot_detail.resolved_focus(&data);
-            let columns =
-                visible_panel_columns_for_width(state.window_size.width, &plan);
-            let rows = panel_rows(&plan);
+            let (columns, rows) = data.panel_grid_for_focus(
+                current.as_ref(),
+                state.window_size.width,
+                &plan,
+            );
             let Some(next) =
-                data.move_focus(current.as_ref(), direction, columns)
+                data.move_focus(current.as_ref(), direction, columns, rows)
             else {
                 return DomainUpdateResult::task(Task::none());
             };
+            let (next_columns, next_rows) = data.panel_grid_for_focus(
+                Some(&next),
+                state.window_size.width,
+                &plan,
+            );
             let fallback_height = state.window_size.height;
             let task = {
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
                 detail.focus_id = Some(next.clone());
-                detail.follow_focus_window(&data, &next, columns, rows);
+                detail.follow_focus_window(
+                    &data,
+                    &next,
+                    next_columns,
+                    next_rows,
+                );
                 detail.scroll_task_for_focus(
                     &data,
                     &next,
@@ -1607,9 +1702,11 @@ pub fn update_tenfoot_detail(
                 return DomainUpdateResult::task(Task::none());
             }
             let plan = tenfoot_detail_layout_plan(state);
-            let columns =
-                visible_panel_columns_for_width(state.window_size.width, &plan);
-            let rows = panel_rows(&plan);
+            let (columns, rows) = data.panel_grid_for_focus(
+                Some(&focus),
+                state.window_size.width,
+                &plan,
+            );
             let fallback_height = state.window_size.height;
             let task = {
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
@@ -1641,11 +1738,11 @@ pub fn update_tenfoot_detail(
             let activation = data.activation_for_focus(&focus);
             {
                 let plan = tenfoot_detail_layout_plan(state);
-                let columns = visible_panel_columns_for_width(
+                let (columns, rows) = data.panel_grid_for_focus(
+                    Some(&focus),
                     state.window_size.width,
                     &plan,
                 );
-                let rows = panel_rows(&plan);
                 let detail = &mut state.domains.ui.state.tenfoot_detail;
                 detail.focus_id = Some(focus.clone());
                 detail.follow_focus_window(&data, &focus, columns, rows);
@@ -1677,8 +1774,6 @@ pub fn view_tenfoot_detail(state: &State) -> Element<'_, UiMessage> {
     let detail_state = &state.domains.ui.state.tenfoot_detail;
     let focused = detail_state.resolved_focus(&data);
     let plan = tenfoot_detail_layout_plan(state);
-    let columns =
-        visible_panel_columns_for_width(state.window_size.width, &plan);
 
     let mut panels: Column<'_, UiMessage> = column![].spacing(plan.hero_gap);
     for panel in &data.panels {
@@ -1688,7 +1783,6 @@ pub fn view_tenfoot_detail(state: &State) -> Element<'_, UiMessage> {
             panel,
             focused.as_ref(),
             &plan,
-            columns,
         ));
     }
 
@@ -1907,8 +2001,15 @@ fn view_panel<'a>(
     panel: &TenFootDetailPanel,
     focused: Option<&TenFootDetailFocusId>,
     plan: &DetailLayoutPlan,
-    columns: usize,
 ) -> Element<'a, UiMessage> {
+    let metrics = panel_metrics_for_id(&panel.id, plan);
+    let columns = visible_panel_columns_for_metrics(
+        state.window_size.width,
+        plan,
+        metrics,
+    );
+    let rows = panel_rows_for_metrics(metrics);
+    let rail = panel.media_rail();
     let total = panel.items.len();
     let focused_index = focused.and_then(|focus| match focus {
         TenFootDetailFocusId::PanelItem {
@@ -1920,7 +2021,6 @@ fn view_panel<'a>(
             .position(|candidate| candidate.id() == *item),
         _ => None,
     });
-    let rows = panel_rows(plan);
     let start = bounded_panel_window_start(
         detail_state.panel_window_start(&panel.id, total, columns, rows),
         focused_index,
@@ -1971,15 +2071,18 @@ fn view_panel<'a>(
         .height(Length::Fixed(panel_header_height(plan)))
         .align_y(iced::Alignment::Center);
 
+    let body_height = panel_body_height_for_metrics(plan, metrics);
     let body: Element<'a, UiMessage> = if panel.items.is_empty() {
         let empty_style = panel_empty_message_style(plan);
         container(budgeted_text(
-            panel.empty_message.clone(),
+            rail.empty_message
+                .clone()
+                .unwrap_or_else(|| panel.empty_message.clone()),
             empty_style,
             Length::Fixed(empty_style.measure),
         ))
         .width(Length::Fill)
-        .height(Length::Fixed(panel_body_height(plan)))
+        .height(Length::Fixed(body_height))
         .padding(panel_body_padding(plan))
         .align_y(iced::Alignment::Center)
         .style(tenfoot_surface_style(tenfoot_surface_tokens(
@@ -1997,9 +2100,9 @@ fn view_panel<'a>(
             .take(visible_count)
             .collect::<Vec<_>>();
 
-        let mut grid = Column::new().spacing(plan.rail.gap);
+        let mut grid = Column::new().spacing(metrics.gap);
         for row_items in visible_items.chunks(columns.max(1)) {
-            let mut row = Row::new().spacing(plan.rail.gap);
+            let mut row = Row::new().spacing(metrics.gap);
             for (index, item) in row_items.iter().copied() {
                 let focus_id = TenFootDetailFocusId::PanelItem {
                     panel: panel.id.clone(),
@@ -2007,7 +2110,13 @@ fn view_panel<'a>(
                 };
                 let is_focused = focused == Some(&focus_id);
                 row = row.push(view_panel_card(
-                    state, item, focus_id, is_focused, index, plan,
+                    &rail,
+                    &rail.items[index],
+                    focus_id,
+                    is_focused,
+                    metrics,
+                    plan,
+                    &state.domains.ui.state.size_provider,
                 ));
             }
             grid = grid.push(row);
@@ -2015,7 +2124,7 @@ fn view_panel<'a>(
 
         container(grid)
             .width(Length::Fill)
-            .height(Length::Fixed(panel_body_height(plan)))
+            .height(Length::Fixed(body_height))
             .padding(panel_body_padding(plan))
             .into()
     };
@@ -2026,7 +2135,7 @@ fn view_panel<'a>(
 
     container(band)
         .width(Length::Fill)
-        .height(Length::Fixed(panel_height(plan)))
+        .height(Length::Fixed(panel_height_for_metrics(plan, metrics)))
         .padding(panel_band_padding(plan))
         .clip(true)
         .style(tenfoot_surface_style(tenfoot_surface_tokens(
@@ -2038,63 +2147,37 @@ fn view_panel<'a>(
 }
 
 fn view_panel_card<'a>(
-    state: &'a State,
-    item: &TenFootDetailPanelItem,
+    rail: &DetailMediaRail,
+    item: &DetailMediaRailItem,
     focus_id: TenFootDetailFocusId,
     focused: bool,
-    _index: usize,
+    metrics: DetailRailMetrics,
     plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
 ) -> Element<'a, UiMessage> {
-    let carousel_key = match &focus_id {
-        TenFootDetailFocusId::PanelItem { panel, .. } => {
-            Some(panel.poster_carousel_key())
-        }
-        TenFootDetailFocusId::Action(_) => None,
-    };
-    let item_image = item.image();
-    let image =
-        view_panel_item_image(state, &item_image, plan, focused, carousel_key);
-    let text_measure = panel_card_text_measure(&item_image, plan);
-    let title_style = panel_card_title_style(plan, text_measure);
-    let subtitle_style = panel_card_subtitle_style(plan, text_measure);
-    let context_style = panel_card_context_style(plan, text_measure);
-    let text_width = Length::Fixed(text_measure);
-    let content = row![
-        image,
-        column![
-            budgeted_text(item.title().to_string(), title_style, text_width),
-            budgeted_text(
-                item.subtitle().to_string(),
-                subtitle_style,
-                text_width,
-            ),
-            budgeted_text(
-                item.context().to_string(),
-                context_style,
-                text_width
-            ),
-        ]
-        .spacing(
-            subtitle_style
-                .spacing_after
-                .min(title_style.spacing_after)
-                .clamp(4.0, 8.0),
-        )
-        .width(text_width),
-    ]
-    .spacing(panel_card_gap(plan))
-    .align_y(iced::Alignment::Center);
+    let card = view_detail_media_rail_card(
+        rail,
+        item,
+        metrics,
+        plan,
+        sizes,
+        if focused {
+            Priority::Visible
+        } else {
+            Priority::Preload
+        },
+    );
 
     let button_element = button(
-        container(content)
-            .padding(panel_card_padding(plan))
+        container(card)
             .width(Length::Fill)
             .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
             .align_y(iced::Alignment::Center),
     )
     .padding(0)
-    .width(Length::Fixed(plan.rail.card_width))
-    .height(Length::Fixed(plan.rail.card_height))
+    .width(Length::Fixed(metrics.card_width))
+    .height(Length::Fixed(metrics.card_height))
     .style(tenfoot_button_style(
         tenfoot_surface_tokens(
             plan,
@@ -2128,24 +2211,6 @@ fn hero_image_size(image: &DetailImage, plan: &DetailLayoutPlan) -> (f32, f32) {
         }
         DetailImage::Poster { .. } | DetailImage::None => {
             (plan.hero_art.width, plan.hero_art.height)
-        }
-    }
-}
-
-fn panel_image_size(
-    image: &DetailImage,
-    plan: &DetailLayoutPlan,
-) -> (f32, f32) {
-    match image {
-        DetailImage::Still { .. } => {
-            let width = (plan.rail.card_height * 0.76).max(72.0);
-            (width, width / PANEL_STILL_ASPECT)
-        }
-        DetailImage::Poster { .. } | DetailImage::None => {
-            let height = (plan.rail.card_height * 0.72)
-                .min((plan.rail.card_height - 16.0).max(1.0))
-                .max(48.0);
-            (height * PANEL_POSTER_ASPECT, height)
         }
     }
 }
@@ -2222,69 +2287,6 @@ fn view_detail_image<'a>(
             )))
             .into()
         }
-    }
-}
-
-fn view_panel_item_image<'a>(
-    state: &'a State,
-    image: &DetailImage,
-    plan: &DetailLayoutPlan,
-    focused: bool,
-    carousel_key: Option<CarouselKey>,
-) -> Element<'a, UiMessage> {
-    let (width, height) = panel_image_size(image, plan);
-    let radius = (plan.hero_art.corner_radius * 0.55).clamp(2.0, 6.0);
-    match image {
-        DetailImage::Poster {
-            media_uuid,
-            iid,
-            placeholder,
-        } => {
-            let mut poster = image_for(*media_uuid)
-                .iid(*iid)
-                .skip_request(iid.is_none())
-                .request_size(ImageSize::Poster(
-                    state.domains.settings.display.library_poster_quality,
-                ))
-                .display_size(width, height)
-                .radius(radius)
-                .priority(if focused {
-                    Priority::Visible
-                } else {
-                    Priority::Preload
-                })
-                .placeholder(*placeholder)
-                .tight_bounds()
-                .no_animation();
-            if let Some(key) = carousel_key {
-                poster = poster.carousel_key(key);
-            }
-            poster.into()
-        }
-        DetailImage::Still { media_uuid, iid } => {
-            let mut still = image_for(*media_uuid)
-                .iid(*iid)
-                .skip_request(iid.is_none())
-                .request_size(ImageSize::thumbnail())
-                .display_size(width, height)
-                .radius(radius)
-                .priority(if focused {
-                    Priority::Visible
-                } else {
-                    Priority::Preload
-                })
-                .placeholder(lucide_icons::Icon::Clapperboard)
-                .tight_bounds()
-                .no_animation();
-            if let Some(key) = carousel_key {
-                still = still.carousel_key(key);
-            }
-            still.into()
-        }
-        DetailImage::None => Space::new()
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(height))
-            .into(),
     }
 }
 
@@ -2429,6 +2431,7 @@ pub fn start_over_available_for_watch_info(watch: TenFootWatchInfo) -> bool {
 
 fn season_panel_item(
     season: &ferrex_core::player_prelude::SeasonReference,
+    poster_request_size: ImageSize,
 ) -> TenFootDetailPanelItem {
     let number = season.season_number.value();
     let title = if number == 0 {
@@ -2438,47 +2441,70 @@ fn season_panel_item(
     } else {
         season.details.name.clone()
     };
+    let subtitle = if number == 0 {
+        "Specials".to_string()
+    } else {
+        format!("Season {number}")
+    };
+    let context = plural_label(
+        season.details.episode_count as usize,
+        "episode",
+        "episodes",
+    );
+    let id = TenFootDetailItemId::Season(season.id);
+    let artwork = DetailArtwork::tv_poster(
+        season.id.to_uuid(),
+        season.details.primary_poster_iid,
+        format!("{title} poster"),
+    )
+    .with_request_size(poster_request_size);
+    let rail_item = DetailMediaRailItem::new(id.stable_id(), title, artwork)
+        .with_meta(subtitle)
+        .with_badge(context);
 
-    TenFootDetailPanelItem::Season(SeasonPanelItem {
-        id: season.id,
-        series_id: season.series_id,
-        title,
-        subtitle: if number == 0 {
-            "Specials".to_string()
-        } else {
-            format!("Season {number}")
-        },
-        context: plural_label(
-            season.details.episode_count as usize,
-            "episode",
-            "episodes",
+    TenFootDetailPanelItem {
+        id,
+        activation: TenFootDetailActivation::ViewSeason(
+            season.series_id,
+            season.id,
         ),
-        poster_iid: season.details.primary_poster_iid,
-    })
+        rail_item,
+    }
 }
 
 fn episode_panel_item(
     episode: &ferrex_core::player_prelude::EpisodeReference,
 ) -> TenFootDetailPanelItem {
-    TenFootDetailPanelItem::Episode(EpisodePanelItem {
-        id: episode.id,
-        title: if episode.details.name.is_empty() {
-            format!("Episode {}", episode.episode_number.value())
-        } else {
-            episode.details.name.clone()
-        },
-        subtitle: format!(
-            "S{:02}E{:02}",
-            episode.season_number.value(),
-            episode.episode_number.value()
-        ),
-        context: episode
-            .details
-            .runtime
-            .map(|runtime| format!("{runtime} min • Open details"))
-            .unwrap_or_else(|| "Open details".to_string()),
-        still_iid: episode.details.primary_still_iid,
-    })
+    let title = if episode.details.name.is_empty() {
+        format!("Episode {}", episode.episode_number.value())
+    } else {
+        episode.details.name.clone()
+    };
+    let subtitle = format!(
+        "S{:02}E{:02}",
+        episode.season_number.value(),
+        episode.episode_number.value()
+    );
+    let context = episode
+        .details
+        .runtime
+        .map(|runtime| format!("{runtime} min • Open details"))
+        .unwrap_or_else(|| "Open details".to_string());
+    let id = TenFootDetailItemId::Episode(episode.id);
+    let artwork = DetailArtwork::still(
+        episode.id.to_uuid(),
+        episode.details.primary_still_iid,
+        format!("{title} still"),
+    );
+    let rail_item = DetailMediaRailItem::new(id.stable_id(), title, artwork)
+        .with_meta(subtitle)
+        .with_badge(context);
+
+    TenFootDetailPanelItem {
+        id,
+        activation: TenFootDetailActivation::ViewEpisode(episode.id),
+        rail_item,
+    }
 }
 
 fn season_title(
@@ -2535,16 +2561,28 @@ fn before_after_copy(start: usize, end: usize, total: usize) -> String {
     }
 }
 
-pub fn visible_panel_columns_for_width(
+fn visible_panel_columns_for_metrics(
     width: f32,
     plan: &DetailLayoutPlan,
+    metrics: DetailRailMetrics,
 ) -> usize {
     let available = (width - plan.page_padding_x * 2.0)
         .max(1.0)
         .min(plan.content_width);
-    let card_width = plan.rail.card_width.max(1.0);
-    let gap = plan.rail.gap.max(0.0);
+    let card_width = metrics.card_width.max(1.0);
+    let gap = metrics.gap.max(0.0);
     ((available + gap) / (card_width + gap)).floor().max(1.0) as usize
+}
+
+pub fn visible_panel_columns_for_width(
+    width: f32,
+    plan: &DetailLayoutPlan,
+) -> usize {
+    visible_panel_columns_for_metrics(
+        width,
+        plan,
+        plan.rail.metrics_for(DetailRailCardVariant::StillWide),
+    )
 }
 
 pub fn bounded_panel_window_start(
@@ -2743,14 +2781,54 @@ mod tests {
         }
     }
 
+    fn season_item(index: usize) -> TenFootDetailPanelItem {
+        let id = TenFootDetailItemId::Season(season_id(index as u128 + 1));
+        let title = format!("Season {index}");
+        let rail_item = DetailMediaRailItem::new(
+            id.stable_id(),
+            title.clone(),
+            DetailArtwork::tv_poster(
+                match &id {
+                    TenFootDetailItemId::Season(id) => id.to_uuid(),
+                    TenFootDetailItemId::Episode(_) => unreachable!(),
+                },
+                None,
+                format!("{title} poster"),
+            ),
+        )
+        .with_meta(format!("Season {index}"))
+        .with_badge("8 episodes");
+
+        TenFootDetailPanelItem {
+            id,
+            activation: TenFootDetailActivation::Back,
+            rail_item,
+        }
+    }
+
     fn episode_item(index: usize) -> TenFootDetailPanelItem {
-        TenFootDetailPanelItem::Episode(EpisodePanelItem {
-            id: episode_id(index as u128 + 1),
-            title: format!("Episode {index}"),
-            subtitle: format!("E{index}"),
-            context: "Open details".to_string(),
-            still_iid: None,
-        })
+        let id = TenFootDetailItemId::Episode(episode_id(index as u128 + 1));
+        let title = format!("Episode {index}");
+        let rail_item = DetailMediaRailItem::new(
+            id.stable_id(),
+            title.clone(),
+            DetailArtwork::still(
+                match &id {
+                    TenFootDetailItemId::Episode(id) => id.to_uuid(),
+                    TenFootDetailItemId::Season(_) => unreachable!(),
+                },
+                None,
+                format!("{title} still"),
+            ),
+        )
+        .with_meta(format!("E{index}"))
+        .with_badge("Open details");
+
+        TenFootDetailPanelItem {
+            id,
+            activation: TenFootDetailActivation::Back,
+            rail_item,
+        }
     }
 
     fn detail_data(panel_lengths: &[usize]) -> TenFootDetailData {
@@ -2804,25 +2882,54 @@ mod tests {
     }
 
     #[test]
-    fn panel_images_use_stable_carousel_identity() {
+    fn panel_rails_use_stable_unified_identity() {
         let series = SeriesID(Uuid::from_u128(11));
         let season = season_id(12);
+        let seasons_panel = TenFootDetailPanel {
+            id: TenFootDetailPanelId::SeriesSeasons(series),
+            empty_message: "No seasons".to_string(),
+            items: vec![season_item(0)],
+        };
+        let episodes_panel = TenFootDetailPanel {
+            id: TenFootDetailPanelId::SeasonEpisodes(season),
+            empty_message: "No episodes".to_string(),
+            items: vec![episode_item(0)],
+        };
 
+        let seasons_rail = seasons_panel.media_rail();
         assert_eq!(
-            TenFootDetailPanelId::SeriesSeasons(series).poster_carousel_key(),
-            CarouselKey::ShowSeasons(series.to_uuid())
+            seasons_rail.carousel_key,
+            Some(CarouselKey::ShowSeasons(series.to_uuid()))
+        );
+        assert_eq!(seasons_rail.kind, DetailRailKind::Seasons);
+        assert_eq!(seasons_rail.card_variant, DetailRailCardVariant::Poster);
+        assert!(seasons_rail.stable_key.contains("tenfoot:series:"));
+        assert!(seasons_rail.items[0].stable_id.starts_with("season:"));
+        assert_eq!(
+            seasons_rail.items[0].image_request_kind,
+            crate::domains::ui::views::detail::DetailRailImageRequestKind::Poster
+        );
+        assert!(seasons_rail.items[0].on_press.is_some());
+
+        let episodes_rail = episodes_panel.media_rail();
+        assert_eq!(
+            episodes_rail.carousel_key,
+            Some(CarouselKey::SeasonEpisodes(season.to_uuid()))
+        );
+        assert_eq!(episodes_rail.kind, DetailRailKind::Episodes);
+        assert_eq!(
+            episodes_rail.card_variant,
+            DetailRailCardVariant::StillWide
+        );
+        assert!(episodes_rail.stable_key.contains("tenfoot:season:"));
+        assert!(episodes_rail.items[0].stable_id.starts_with("episode:"));
+        assert_eq!(
+            episodes_rail.items[0].image_request_kind,
+            crate::domains::ui::views::detail::DetailRailImageRequestKind::Still
         );
         assert_eq!(
-            TenFootDetailPanelId::SeasonEpisodes(season).poster_carousel_key(),
-            CarouselKey::SeasonEpisodes(season.to_uuid())
-        );
-        assert_eq!(
-            TenFootDetailPanelId::SeriesEpisodes(series).poster_carousel_key(),
-            CarouselKey::DetailSeriesEpisodes(series.to_uuid())
-        );
-        assert_eq!(
-            TenFootDetailPanelId::EpisodeSiblings(season).poster_carousel_key(),
-            CarouselKey::DetailEpisodeSiblings(season.to_uuid())
+            episodes_rail.activation_policy,
+            DetailRailActivationPolicy::Navigate
         );
     }
 
@@ -2837,6 +2944,9 @@ mod tests {
 
         assert_eq!(hd_columns, 3);
         assert_eq!(full_hd_columns, 5);
+        let hd_rows = panel_rows(&hd);
+        let full_hd_rows = panel_rows(&full_hd);
+
         assert_eq!(
             data.move_focus(
                 Some(&TenFootDetailFocusId::Action(
@@ -2844,6 +2954,7 @@ mod tests {
                 )),
                 SpatialDirection::Down,
                 hd_columns,
+                hd_rows,
             ),
             Some(panel_focus(&data, 0, 0))
         );
@@ -2852,6 +2963,7 @@ mod tests {
                 Some(&panel_focus(&data, 0, 1)),
                 SpatialDirection::Up,
                 hd_columns,
+                hd_rows,
             ),
             Some(TenFootDetailFocusId::Action(TenFootDetailAction::StartOver))
         );
@@ -2860,6 +2972,7 @@ mod tests {
                 Some(&panel_focus(&data, 0, 2)),
                 SpatialDirection::Down,
                 hd_columns,
+                hd_rows,
             ),
             Some(panel_focus(&data, 0, 5))
         );
@@ -2868,6 +2981,7 @@ mod tests {
                 Some(&panel_focus(&data, 0, 5)),
                 SpatialDirection::Down,
                 hd_columns,
+                hd_rows,
             ),
             Some(panel_focus(&data, 1, 2))
         );
@@ -2876,8 +2990,52 @@ mod tests {
                 Some(&panel_focus(&data, 0, 2)),
                 SpatialDirection::Down,
                 full_hd_columns,
+                full_hd_rows,
             ),
             Some(panel_focus(&data, 0, 7))
+        );
+    }
+
+    #[test]
+    fn one_row_poster_panel_navigation_drops_to_next_panel() {
+        let data = TenFootDetailData {
+            eyebrow: "Details".to_string(),
+            title: "Mixed Fixture".to_string(),
+            subtitle: "Fixture".to_string(),
+            metadata: Vec::new(),
+            overview: "Overview".to_string(),
+            image: DetailImage::None,
+            actions: vec![action_spec(TenFootDetailAction::Primary)],
+            panels: vec![
+                TenFootDetailPanel {
+                    id: TenFootDetailPanelId::SeriesSeasons(SeriesID(
+                        Uuid::from_u128(1),
+                    )),
+                    empty_message: "No seasons".to_string(),
+                    items: (0..8).map(season_item).collect(),
+                },
+                TenFootDetailPanel {
+                    id: TenFootDetailPanelId::SeasonEpisodes(season_id(2)),
+                    empty_message: "No episodes".to_string(),
+                    items: (0..8).map(episode_item).collect(),
+                },
+            ],
+            notice: None,
+        };
+        let plan = layout_plan(1_280.0, 720.0, 1.0);
+        let first_focus = panel_focus(&data, 0, 0);
+        let (columns, rows) =
+            data.panel_grid_for_focus(Some(&first_focus), 1_280.0, &plan);
+
+        assert_eq!(rows, 1);
+        assert_eq!(
+            data.move_focus(
+                Some(&first_focus),
+                SpatialDirection::Down,
+                columns,
+                rows,
+            ),
+            Some(panel_focus(&data, 1, 0))
         );
     }
 
@@ -2990,31 +3148,36 @@ mod tests {
     }
 
     #[test]
-    fn panel_caption_styles_use_semantic_budgets_and_measures() {
-        let plan = layout_plan(1_920.0, 1_080.0, 1.0);
-        let image = DetailImage::Still {
-            media_uuid: Uuid::from_u128(77),
-            iid: None,
-        };
-        let measure = panel_card_text_measure(&image, &plan);
-        let title = panel_card_title_style(&plan, measure);
-        let subtitle = panel_card_subtitle_style(&plan, measure);
-        let context = panel_card_context_style(&plan, measure);
+    fn panel_card_metrics_keep_shader_cards_bounded_for_tv_viewports() {
+        for (width, height) in [(1_280.0, 720.0), (1_920.0, 1_080.0)] {
+            let plan = layout_plan(width, height, 1.0);
+            let poster_metrics = panel_metrics_for_id(
+                &TenFootDetailPanelId::SeriesSeasons(SeriesID(
+                    Uuid::from_u128(1),
+                )),
+                &plan,
+            );
+            let still_metrics = panel_metrics_for_id(
+                &TenFootDetailPanelId::SeasonEpisodes(season_id(2)),
+                &plan,
+            );
+            let poster_columns =
+                visible_panel_columns_for_metrics(width, &plan, poster_metrics);
+            let still_columns =
+                visible_panel_columns_for_metrics(width, &plan, still_metrics);
 
-        assert_eq!(
-            title.max_lines(),
-            Some(plan.typography.metrics.caption_budgets.rail_title_lines)
-        );
-        assert_eq!(
-            subtitle.max_lines(),
-            Some(plan.typography.metrics.caption_budgets.rail_subtitle_lines)
-        );
-        assert_eq!(context.max_lines(), subtitle.max_lines());
-        assert!(title.measure <= measure + 0.01);
-        assert!(subtitle.measure <= measure + 0.01);
-        assert!(title.size > subtitle.size);
-        assert_eq!(title.color_intent, DetailColorIntent::Primary);
-        assert_eq!(context.color_intent, DetailColorIntent::Subdued);
+            assert_eq!(poster_metrics.variant, DetailRailCardVariant::Poster);
+            assert_eq!(still_metrics.variant, DetailRailCardVariant::StillWide);
+            assert_eq!(poster_metrics.visible_rows, 1);
+            assert_eq!(still_metrics.visible_rows, panel_rows(&plan));
+            assert!(poster_metrics.text_zone_height > 0.0);
+            assert!(still_metrics.text_zone_height > 0.0);
+            assert!(poster_metrics.card_height < height * 0.65);
+            assert!(panel_height_for_metrics(&plan, poster_metrics) < height);
+            assert!(panel_height_for_metrics(&plan, still_metrics) < height);
+            assert!((3..=7).contains(&poster_columns));
+            assert!((3..=5).contains(&still_columns));
+        }
     }
 
     #[test]
