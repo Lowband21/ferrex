@@ -263,10 +263,17 @@ fn action_text_spacing(plan: &DetailLayoutPlan) -> f32 {
         .clamp(2.0, 8.0)
 }
 
-fn action_label_style(plan: &DetailLayoutPlan) -> DetailTextStyle {
+fn action_label_style_for_focus(
+    plan: &DetailLayoutPlan,
+    focused: bool,
+) -> DetailTextStyle {
     role_text_style(
         plan,
-        DetailTextRole::ActionLabel,
+        if focused {
+            DetailTextRole::TenFootFocusLabel
+        } else {
+            DetailTextRole::ActionLabel
+        },
         action_button_text_measure(plan),
     )
 }
@@ -1860,7 +1867,11 @@ fn focusable_action_button<'a>(
 ) -> Element<'a, UiMessage> {
     let text_width = Length::Fixed(action_button_text_measure(plan));
     let content = column![
-        budgeted_text(spec.label.clone(), action_label_style(plan), text_width),
+        budgeted_text(
+            spec.label.clone(),
+            action_label_style_for_focus(plan, focused),
+            text_width,
+        ),
         budgeted_text(
             spec.subtitle.clone(),
             action_subtitle_style(plan),
@@ -3016,22 +3027,34 @@ mod tests {
 
         for (width, height, scale) in matrix {
             let plan = layout_plan(width, height, scale);
-            let label = action_label_style(&plan);
+            let label = action_label_style_for_focus(&plan, false);
+            let focused_label = action_label_style_for_focus(&plan, true);
             let subtitle = action_subtitle_style(&plan);
             let [vertical_padding, _] = action_button_padding(&plan);
             let text_height = text_budget_height(label).expect("label budget")
                 + action_text_spacing(&plan)
                 + text_budget_height(subtitle).expect("subtitle budget");
+            let focused_text_height = text_budget_height(focused_label)
+                .expect("focused label budget")
+                + action_text_spacing(&plan)
+                + text_budget_height(subtitle).expect("subtitle budget");
 
             assert!(label.size > subtitle.size);
+            assert!(focused_label.size >= label.size);
             assert!(subtitle.size >= plan.typography.metadata.size * 0.90);
             assert_eq!(label.max_lines(), Some(1));
+            assert_eq!(focused_label.max_lines(), Some(1));
             assert_eq!(subtitle.max_lines(), Some(1));
             assert!(action_button_text_measure(&plan) > 0.0);
             assert!(
                 text_height + vertical_padding * 2.0
                     <= plan.action_cluster.button_height + 0.01,
                 "action text stack should fit at {width}x{height} scale {scale}"
+            );
+            assert!(
+                focused_text_height + vertical_padding * 2.0
+                    <= plan.action_cluster.button_height + 0.01,
+                "focused action text stack should fit at {width}x{height} scale {scale}"
             );
         }
     }

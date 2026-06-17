@@ -19,7 +19,8 @@ use super::{
     DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
     DetailRailItem, DetailRelationshipRail, DetailSection,
     DetailSurfaceIntensityTokens, DetailTechnicalItem, DetailTechnicalSection,
-    DetailTextAlignment, DetailTextOverflow, DetailTextStyle, DetailTone,
+    DetailTextAlignment, DetailTextOverflow, DetailTextRole, DetailTextStyle,
+    DetailTone,
 };
 use ferrex_core::player_prelude::Priority;
 use ferrex_model::ImageSize;
@@ -360,7 +361,9 @@ pub fn view_metadata_ribbons(
         return Space::new().into();
     }
 
-    let mut ribbons = Row::new().spacing(sizes.spacing.xs);
+    let style = plan.typography.role(DetailTextRole::Metadata);
+    let mut ribbons =
+        Row::new().spacing(plan.typography.metrics.metadata_pill_gap);
     for pill in metadata {
         let tokens = detail_foreground_surface_tokens(
             plan,
@@ -368,11 +371,13 @@ pub fn view_metadata_ribbons(
             pill.tone,
         );
         ribbons = ribbons.push(
-            container(
-                text(pill.label.clone())
-                    .size(sizes.font.small)
-                    .color(tone_text_color(pill.tone)),
-            )
+            container(styled_text(
+                pill.label.clone(),
+                style,
+                tone_text_color(pill.tone),
+                Length::Shrink,
+                false,
+            ))
             .padding([
                 sizes.spacing.xs * tokens.padding_scale,
                 sizes.spacing.sm * tokens.padding_scale,
@@ -381,7 +386,10 @@ pub fn view_metadata_ribbons(
         );
     }
 
-    horizontal_scroller(ribbons, sizes.font.small + sizes.spacing.lg)
+    horizontal_scroller(
+        ribbons,
+        style.line_height_px() + plan.typography.metrics.metadata_spacing,
+    )
 }
 
 pub fn view_control_shelf(
@@ -945,46 +953,115 @@ fn view_stage_summary(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
+    let summary_width = stage_summary_width(plan, sizes);
     let mut summary =
-        Column::new().spacing(sizes.spacing.sm).width(Length::Fill);
+        Column::new().spacing(0).width(Length::Fixed(summary_width));
 
     if let Some(eyebrow) = &model.eyebrow {
-        summary = summary.push(
-            text(eyebrow.clone())
-                .size(sizes.font.caption)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::HeroEyebrow,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            styled_text(
+                eyebrow.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fixed(style.measure),
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
-    summary = summary.push(
-        text(model.title.clone())
-            .size(match plan.composition {
-                DetailComposition::TenFoot => sizes.font.display * 1.45,
-                DetailComposition::CinematicWide => sizes.font.display * 1.25,
-                DetailComposition::CompactPortrait => sizes.font.title,
-                _ => sizes.font.display,
-            })
-            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    let title_style =
+        role_style_for_measure(plan, DetailTextRole::HeroTitle, summary_width);
+    summary = push_title_block_role(
+        summary,
+        styled_text(
+            model.title.clone(),
+            title_style,
+            detail_text_color(title_style.color_intent),
+            Length::Fixed(title_style.measure),
+            true,
+        ),
+        title_style.spacing_after,
     );
 
     if let Some(subtitle) = &model.subtitle {
-        summary = summary.push(
-            text(subtitle.clone())
-                .size(sizes.font.subtitle)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::HeroSubtitle,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            styled_text(
+                subtitle.clone(),
+                style,
+                detail_text_color(style.color_intent),
+                Length::Fixed(style.measure),
+                true,
+            ),
+            style.spacing_after,
         );
     }
 
     if !model.metadata.is_empty() {
-        summary =
-            summary.push(view_metadata_ribbons(&model.metadata, plan, sizes));
+        let style = role_style_for_measure(
+            plan,
+            DetailTextRole::Metadata,
+            summary_width,
+        );
+        summary = push_title_block_role(
+            summary,
+            view_metadata_ribbons(&model.metadata, plan, sizes),
+            style.spacing_after,
+        );
     }
 
     if !model.actions.is_empty() {
         summary = summary.push(view_control_shelf(&model.actions, plan, sizes));
     }
 
-    summary.into()
+    container(summary)
+        .width(Length::Fixed(summary_width))
+        .align_x(horizontal_alignment(plan.typography.metrics.hero_alignment))
+        .into()
+}
+
+fn stage_summary_width(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    let shelf_padding = stage_surface_padding(
+        sizes.spacing.lg,
+        detail_foreground_surface_tokens(
+            plan,
+            DetailForegroundSurface::ProjectionShelf,
+            DetailTone::Neutral,
+        ),
+    );
+    let inner_width = (plan.content_width - shelf_padding * 2.0).max(1.0);
+    let available = match plan.composition {
+        DetailComposition::CompactPortrait => inner_width,
+        _ => (inner_width - plan.hero_art.width - plan.hero_gap).max(1.0),
+    };
+
+    plan.typography
+        .metrics
+        .hero_copy_width
+        .min(available)
+        .max(1.0)
+}
+
+fn role_style_for_measure(
+    plan: &DetailLayoutPlan,
+    role: DetailTextRole,
+    measure: f32,
+) -> DetailTextStyle {
+    let mut style = plan.typography.role(role);
+    style.measure = style.measure.min(measure.max(1.0)).max(1.0);
+    style
 }
 
 fn view_stage_surface_shell(
@@ -2071,25 +2148,42 @@ fn view_action_button_on_surface(
     }
 
     let disabled = matches!(surface_mode, DetailActionSurfaceMode::Disabled);
+    let label_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionLabel,
+        action_label_text_width(action, plan, sizes),
+    );
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    label_row = label_row.push(styled_text(
+        action.label.clone(),
+        label_style,
+        detail_text_color(label_style.color_intent),
+        Length::Fixed(label_style.measure),
+        true,
+    ));
 
     let mut content = Column::new()
-        .spacing(2.0)
+        .spacing(action_text_spacing(plan, sizes))
         .align_x(Alignment::Center)
         .push(label_row);
     if let Some(subtitle) = &action.subtitle {
-        content = content.push(
-            text(subtitle.clone())
-                .size(sizes.font.small)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        let subtitle_style = role_style_for_measure(
+            plan,
+            DetailTextRole::ActionSubtitle,
+            action_button_inner_width(plan, sizes),
         );
+        content = content.push(styled_text(
+            subtitle.clone(),
+            subtitle_style,
+            detail_text_color(subtitle_style.color_intent),
+            Length::Fixed(subtitle_style.measure),
+            true,
+        ));
     }
 
     let mut button = button(content)
@@ -2119,14 +2213,24 @@ fn view_action_menu_on_surface(
     sizes: &SizeProvider,
     surface: DetailForegroundSurface,
 ) -> Element<'static, UiMessage> {
+    let label_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionLabel,
+        action_label_text_width(action, plan, sizes),
+    );
     let mut label_row = Row::new()
         .spacing(sizes.spacing.xs)
         .align_y(Alignment::Center);
     if let Some(icon) = action.icon {
         label_row = label_row.push(icon_text_with_size(icon, sizes.icon.sm));
     }
-    label_row =
-        label_row.push(text(action.label.clone()).size(sizes.font.body));
+    label_row = label_row.push(styled_text(
+        action.label.clone(),
+        label_style,
+        detail_text_color(label_style.color_intent),
+        Length::Fixed(label_style.measure),
+        true,
+    ));
 
     let trigger = button(label_row)
         .padding([sizes.spacing.xs, sizes.spacing.md])
@@ -2142,13 +2246,23 @@ fn view_action_menu_on_surface(
             ),
         ));
 
+    let menu_item_style = role_style_for_measure(
+        plan,
+        DetailTextRole::ActionSubtitle,
+        plan.action_cluster.button_width,
+    );
     let mut items: Vec<Item<'static, UiMessage, Theme, iced::Renderer>> =
         Vec::new();
     for item in &action.menu_items {
-        let item_button =
-            button(text(item.label.clone()).size(sizes.font.small))
-                .on_press(item.on_press.clone())
-                .style(theme::Button::HeaderMenuSecondary.style());
+        let item_button = button(styled_text(
+            item.label.clone(),
+            menu_item_style,
+            detail_text_color(menu_item_style.color_intent),
+            Length::Shrink,
+            false,
+        ))
+        .on_press(item.on_press.clone())
+        .style(theme::Button::HeaderMenuSecondary.style());
         items.push(Item::new(item_button));
     }
 
@@ -2162,6 +2276,34 @@ fn view_action_menu_on_surface(
         .height(Length::Shrink)
         .close_on_item_click(true)
         .into()
+}
+
+fn action_button_inner_width(
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    (plan.action_cluster.button_width - sizes.spacing.md * 2.0).max(1.0)
+}
+
+fn action_label_text_width(
+    action: &DetailAction,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    let icon_width = action
+        .icon
+        .map(|_| sizes.icon.sm + sizes.spacing.xs)
+        .unwrap_or(0.0);
+
+    (action_button_inner_width(plan, sizes) - icon_width).max(1.0)
+}
+
+fn action_text_spacing(plan: &DetailLayoutPlan, sizes: &SizeProvider) -> f32 {
+    plan.typography
+        .action_subtitle
+        .spacing_after
+        .min(plan.typography.action_label.spacing_after)
+        .clamp(2.0, sizes.spacing.sm.max(2.0))
 }
 
 fn view_fact(
