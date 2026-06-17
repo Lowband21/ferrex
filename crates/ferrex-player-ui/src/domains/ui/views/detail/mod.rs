@@ -23,10 +23,14 @@ pub use components::{
 };
 pub use layout::{
     DetailActionClusterLayout, DetailArtAspect, DetailArtLayout, DetailAxis,
-    DetailBackdropLayout, DetailComposition, DetailInterfaceMode,
-    DetailLayoutInput, DetailLayoutPlan, DetailRailLayout,
-    DetailSectionGridLayout, DetailTheaterPlateLayout, DetailTheaterPlateRect,
-    solve_detail_layout, solve_detail_layout_from_runtime,
+    DetailBackdropLayout, DetailComposition, DetailControlShelf,
+    DetailForegroundLayout, DetailForegroundRect, DetailForegroundStage,
+    DetailHeroArtAnchor, DetailInterfaceMode, DetailLayoutInput,
+    DetailLayoutPlan, DetailRailDeckLayout, DetailRailLayout,
+    DetailReadableCopyLobe, DetailSafeGutters, DetailSectionBandLayout,
+    DetailSectionGridLayout, DetailSurfaceIntensityTokens,
+    DetailTheaterPlateLayout, DetailTheaterPlateRect, solve_detail_layout,
+    solve_detail_layout_from_runtime,
 };
 pub use model::{
     DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,
