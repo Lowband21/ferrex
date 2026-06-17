@@ -10,7 +10,7 @@ use crate::{
             views::{
                 detail::{
                     DetailAction, DetailArtAspect, DetailArtwork,
-                    DetailBackdropControl, DetailContentKind,
+                    DetailBackdropControl, DetailContentKind, DetailEmptyState,
                     DetailLayoutInput, DetailMetadataImportance,
                     DetailMetadataPill, DetailNotice, DetailOverviewSection,
                     DetailPageModel, DetailRailActivationPolicy,
@@ -482,6 +482,44 @@ pub fn view_episode_detail(
         ));
     }
 
+    let season_id = SeasonID(episode.season_id.0);
+    match state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+    {
+        Ok(episodes) if episodes.is_empty() => {
+            model.sections.push(episode_siblings_empty_state(season_id));
+        }
+        Ok(episodes) => {
+            model.sections.push(DetailSection::RelationshipRail(
+                episode_siblings_relationship_rail(
+                    season_id,
+                    *episode_id,
+                    &episodes,
+                ),
+            ));
+        }
+        Err(error) => {
+            log::warn!(
+                "[TV] Failed to fetch sibling episodes for episode {} in season {}: {:?}",
+                episode_uuid,
+                season_id,
+                error
+            );
+            model.sections.push(warning_notice(
+                "Sibling episodes unavailable",
+                format!(
+                    "Local episode rows for season {} could not be read ({error:?}). Use Back or Home, then retry after the repository recovers.",
+                    season_id.to_uuid()
+                ),
+            ));
+            ensure_recovery_actions(&mut model.actions);
+        }
+    }
+
     view_adaptive_tv_detail(model, state)
 }
 
@@ -637,6 +675,80 @@ fn episodes_relationship_rail(
             })
             .collect(),
     }
+}
+
+fn episode_siblings_relationship_rail(
+    season_id: SeasonID,
+    current_episode_id: EpisodeID,
+    episodes: &[EpisodeReference],
+) -> DetailRelationshipRail {
+    let key = CarouselKey::DetailEpisodeSiblings(season_id.to_uuid());
+    DetailRelationshipRail {
+        id: carousel_key_id(&key),
+        kind: DetailRailKind::EpisodeSiblings,
+        card_variant: DetailRailCardVariant::StillWide,
+        activation_policy: DetailRailActivationPolicy::Navigate,
+        carousel_key: Some(key),
+        title: "This Season".to_string(),
+        empty_message: Some(format!(
+            "No local sibling episode rows were found for season {}.",
+            season_id.to_uuid()
+        )),
+        items: episodes
+            .iter()
+            .map(|episode| {
+                let title = episode_sibling_title(episode);
+                DetailRailItem {
+                    id: episode.id.to_uuid().to_string(),
+                    title: title.clone(),
+                    subtitle: Some(episode_sibling_subtitle(
+                        episode,
+                        current_episode_id,
+                    )),
+                    artwork: DetailArtwork::still(
+                        episode.id.to_uuid(),
+                        episode.details.primary_still_iid,
+                        format!("{title} still"),
+                    ),
+                    on_press: (episode.id != current_episode_id).then(|| {
+                        UiShellMessage::ViewEpisode(episode.id).into()
+                    }),
+                }
+            })
+            .collect(),
+    }
+}
+
+fn episode_siblings_empty_state(season_id: SeasonID) -> DetailSection {
+    DetailSection::Empty(DetailEmptyState {
+        title: "No sibling episodes".to_string(),
+        message: format!(
+            "No local episode rows were found for season {}. This episode can still be played directly.",
+            season_id.to_uuid()
+        ),
+        icon: None,
+    })
+}
+
+fn episode_sibling_title(episode: &EpisodeReference) -> String {
+    if episode.details.name.trim().is_empty() {
+        format!("Episode {}", episode.episode_number.value())
+    } else {
+        episode.details.name.clone()
+    }
+}
+
+fn episode_sibling_subtitle(
+    episode: &EpisodeReference,
+    current_episode_id: EpisodeID,
+) -> String {
+    let mut parts = vec![episode_code(episode)];
+    if episode.id == current_episode_id {
+        parts.push("Current".to_string());
+    } else if let Some(runtime) = episode.details.runtime {
+        parts.push(format!("{runtime} min"));
+    }
+    parts.join(" • ")
 }
 
 fn series_actions(
@@ -851,8 +963,11 @@ mod tests {
         let series_id = SeriesID(Uuid::nil());
         let season_id = SeasonID(Uuid::nil());
 
+        let episode_id = EpisodeID(Uuid::nil());
         let seasons = seasons_relationship_rail(series_id, &[]);
         let episodes = episodes_relationship_rail(season_id, &[]);
+        let siblings =
+            episode_siblings_relationship_rail(season_id, episode_id, &[]);
 
         assert_eq!(
             seasons.carousel_key,
@@ -862,8 +977,13 @@ mod tests {
             episodes.carousel_key,
             Some(CarouselKey::SeasonEpisodes(season_id.to_uuid()))
         );
+        assert_eq!(
+            siblings.carousel_key,
+            Some(CarouselKey::DetailEpisodeSiblings(season_id.to_uuid()))
+        );
         assert!(seasons.id.starts_with("ShowSeasons"));
         assert!(episodes.id.starts_with("SeasonEpisodes"));
+        assert!(siblings.id.starts_with("DetailEpisodeSiblings"));
     }
 
     #[test]

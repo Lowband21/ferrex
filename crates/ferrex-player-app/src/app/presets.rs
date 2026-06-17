@@ -643,7 +643,7 @@ fn desktop_season_detail_scrolled_state(config: &AppConfig) -> State {
 
 fn desktop_episode_detail_scrolled_state(config: &AppConfig) -> State {
     let mut state = desktop_episode_detail_state(config);
-    configure_detail_typography_scrolled_state(&mut state, false);
+    configure_detail_typography_scrolled_state(&mut state, true);
     state
 }
 
@@ -724,6 +724,11 @@ fn ensure_detail_relationship_carousels(state: &mut State) {
                     .unwrap_or(0);
                 vec![(CarouselKey::SeasonEpisodes(season_id.to_uuid()), total)]
             }
+            ViewState::EpisodeDetail { episode_id, .. } => {
+                episode_sibling_carousel_key_and_count(state, episode_id)
+                    .into_iter()
+                    .collect()
+            }
             _ => Vec::new(),
         };
 
@@ -748,8 +753,41 @@ fn detail_relationship_carousel_keys(state: &State) -> Vec<CarouselKey> {
         ViewState::SeasonDetail { season_id, .. } => {
             vec![CarouselKey::SeasonEpisodes(season_id.to_uuid())]
         }
+        ViewState::EpisodeDetail { episode_id, .. } => {
+            episode_sibling_carousel_key_and_count(state, episode_id)
+                .map(|(key, _)| vec![key])
+                .unwrap_or_default()
+        }
         _ => Vec::new(),
     }
+}
+
+fn episode_sibling_carousel_key_and_count(
+    state: &State,
+    episode_id: &EpisodeID,
+) -> Option<(CarouselKey, usize)> {
+    let Media::Episode(episode) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get(&MediaID::Episode(*episode_id))
+        .ok()?
+    else {
+        return None;
+    };
+    let total = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&episode.season_id)
+        .map(|episodes| episodes.len())
+        .unwrap_or(0);
+    Some((
+        CarouselKey::DetailEpisodeSiblings(episode.season_id.to_uuid()),
+        total,
+    ))
 }
 
 fn detail_scroll_restore_task(state: &State) -> Task<DomainMessage> {
@@ -2937,6 +2975,23 @@ mod tests {
             season_carousel.scroll_x > 0.0,
             "season scrolled preset should restore a horizontal episode rail offset"
         );
+
+        let sibling_key =
+            CarouselKey::DetailEpisodeSiblings(seed_season_id(0).to_uuid());
+        let sibling_carousel = episode
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&sibling_key)
+            .expect(
+                "episode scrolled preset should seed sibling rail carousel",
+            );
+        assert!(
+            sibling_carousel.scroll_x > 0.0,
+            "episode scrolled preset should restore a horizontal sibling rail offset"
+        );
+
         assert!(tenfoot.interface_mode.is_tenfoot());
         assert!(tenfoot.domains.ui.state.tenfoot_detail.scroll_y > 0.0);
     }

@@ -30,7 +30,7 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
     Vector, alignment,
     widget::{
-        Column, Row, Space, button, column, container, mouse_area, row,
+        Column, Row, Space, Stack, button, column, container, mouse_area, row,
         scrollable, text, text::Wrapping,
     },
 };
@@ -2468,11 +2468,10 @@ fn view_technical_item(
 }
 
 fn rail_item_uses_shader_text(
-    variant: DetailRailCardVariant,
+    _variant: DetailRailCardVariant,
     artwork: &DetailArtwork,
 ) -> bool {
-    !matches!(variant, DetailRailCardVariant::Profile)
-        && !matches!(artwork, DetailArtwork::None { .. })
+    !matches!(artwork, DetailArtwork::None { .. })
 }
 
 fn rail_art_layout(
@@ -2925,10 +2924,12 @@ fn registered_horizontal_scroller(
         })
         .width(Length::Fill)
         .height(Length::Fixed(height));
-    let scroll = container(scroll)
+    let scroll: Element<'static, UiMessage> = container(scroll)
         .width(Length::Fill)
         .height(Length::Fixed(height))
-        .clip(true);
+        .clip(true)
+        .into();
+    let scroll = detail_rail_scroller_with_edge_fades(scroll, height, metrics);
 
     mouse_area(scroll)
         .on_enter(UiMessage::VirtualCarousel(
@@ -2952,11 +2953,85 @@ fn media_rail_horizontal_scroller(
         .width(Length::Fill)
         .height(Length::Fixed(height));
 
-    container(scroll)
+    let scroll: Element<'static, UiMessage> = container(scroll)
         .width(Length::Fill)
         .height(Length::Fixed(height))
         .clip(true)
+        .into();
+
+    detail_rail_scroller_with_edge_fades(scroll, height, metrics)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RailEdgeFadeSide {
+    Left,
+    Right,
+}
+
+fn detail_rail_scroller_with_edge_fades(
+    scroll: Element<'static, UiMessage>,
+    height: f32,
+    metrics: DetailRailMetrics,
+) -> Element<'static, UiMessage> {
+    let fade_width = metrics
+        .edge_fade_width
+        .min(metrics.card_width * 0.5)
+        .max(0.0);
+    if fade_width <= 0.0 {
+        return scroll;
+    }
+
+    let fades = row![
+        rail_edge_fade(RailEdgeFadeSide::Left, fade_width, height),
+        Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(height)),
+        rail_edge_fade(RailEdgeFadeSide::Right, fade_width, height),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fixed(height));
+
+    Stack::new()
+        .push(scroll)
+        .push(fades)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
         .into()
+}
+
+fn rail_edge_fade(
+    side: RailEdgeFadeSide,
+    width: f32,
+    height: f32,
+) -> Element<'static, UiMessage> {
+    container(Space::new())
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .style(rail_edge_fade_style(side))
+        .into()
+}
+
+fn rail_edge_fade_style(
+    side: RailEdgeFadeSide,
+) -> impl Fn(&Theme) -> container::Style + Clone {
+    move |_| {
+        let solid = Color::from_rgba(0.010, 0.010, 0.018, 0.34);
+        let transparent = Color::from_rgba(0.010, 0.010, 0.018, 0.0);
+        let angle = match side {
+            RailEdgeFadeSide::Left => 0.0,
+            RailEdgeFadeSide::Right => std::f32::consts::PI,
+        };
+
+        container::Style {
+            background: Some(Background::Gradient(
+                iced::gradient::Linear::new(iced::Radians(angle))
+                    .add_stop(0.0, solid)
+                    .add_stop(1.0, transparent)
+                    .into(),
+            )),
+            ..Default::default()
+        }
+    }
 }
 
 fn horizontal_scroller(
@@ -3650,10 +3725,11 @@ mod tests {
         let profile_aspect = profile_layout.width / profile_layout.height;
         assert!((profile_aspect - 2.0 / 3.0).abs() < 0.001);
         assert_eq!(profile_layout.aspect, DetailArtAspect::Poster);
-        assert!(!rail_item_uses_shader_text(
+        assert!(rail_item_uses_shader_text(
             DetailRailCardVariant::Profile,
             &profile
         ));
+        assert!(profile_metrics.text_zone_height > 0.0);
     }
 
     #[test]

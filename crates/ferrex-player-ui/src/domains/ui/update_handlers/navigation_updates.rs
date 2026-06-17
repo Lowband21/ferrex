@@ -692,6 +692,34 @@ pub fn handle_view_episode(
         }
 
         state.domains.ui.state.view = new_view;
+
+        let season_id = SeasonID(episode.season_id.0);
+        if let Ok(episodes) = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_season_episodes(&season_id)
+        {
+            let siblings_key =
+                CarouselKey::DetailEpisodeSiblings(season_id.to_uuid());
+            ensure_detail_rail_carousel(
+                state,
+                siblings_key.clone(),
+                episodes.len(),
+                DetailRailCardVariant::StillWide,
+            );
+            emit_detail_rail_snapshot_for_visible(
+                state,
+                &siblings_key,
+                episodes.len(),
+                |i| episodes.get(i).and_then(|e| e.details.primary_still_iid),
+                planner::CarouselDemandImageKind::EpisodeStill {
+                    size: EpisodeSize::W512,
+                },
+            );
+        }
+
         state
             .domains
             .ui
