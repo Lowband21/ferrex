@@ -4,7 +4,8 @@ use crate::{
         messages::UiMessage,
         theme,
         views::virtual_carousel::{
-            CarouselKey, VirtualCarouselMessage, VirtualCarouselState,
+            CarouselKey, CarouselRegistry, VirtualCarouselMessage,
+            VirtualCarouselState,
         },
         widgets::image_for::{ImageFor, image_for},
     },
@@ -35,6 +36,7 @@ use iced::{
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
+use std::ops::Range;
 
 /// Semantic foreground surface families for Theater Plate detail stages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,6 +75,32 @@ pub struct DetailRegisteredRailAdapter<'a> {
     pub carousel_state: &'a VirtualCarouselState,
 }
 
+pub fn registered_detail_rail_adapters<'a>(
+    sections: &'a [DetailSection],
+    registry: &'a CarouselRegistry,
+) -> Vec<DetailRegisteredRailAdapter<'a>> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            DetailSection::Cast(section) => {
+                let key = section.carousel_key.as_ref()?;
+                Some(DetailRegisteredRailAdapter {
+                    key,
+                    carousel_state: registry.get(key)?,
+                })
+            }
+            DetailSection::RelationshipRail(rail) => {
+                let key = rail.carousel_key.as_ref()?;
+                Some(DetailRegisteredRailAdapter {
+                    key,
+                    carousel_state: registry.get(key)?,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DetailActionSurfaceMode {
     Pressable,
@@ -90,6 +118,7 @@ pub struct DetailStageSectionRenderState {
 #[derive(Debug, Clone, Copy, Default)]
 struct DetailArtworkRenderOptions<'a> {
     item_identity: Option<&'a str>,
+    carousel_key: Option<&'a CarouselKey>,
     shader_title: Option<&'a str>,
     shader_meta: Option<&'a str>,
     shader_text_zone_height: Option<f32>,
@@ -658,7 +687,22 @@ fn view_stage_section_with_height(
             sizes,
             matched_panel_height,
         ),
-        DetailSection::Cast(section) => view_cast_band(section, plan, sizes),
+        DetailSection::Cast(section) => {
+            if let Some(key) = section.carousel_key.as_ref()
+                && let Some(adapter) =
+                    registered_rails.iter().find(|adapter| adapter.key == key)
+            {
+                return view_registered_cast_band(
+                    section,
+                    key.clone(),
+                    adapter.carousel_state,
+                    plan,
+                    sizes,
+                );
+            }
+
+            view_cast_band(section, plan, sizes)
+        }
         DetailSection::Technical(section) => {
             view_technical_ribbon(section, plan, sizes)
         }
@@ -785,6 +829,36 @@ pub fn view_cast_band(
 ) -> Element<'static, UiMessage> {
     let rail = section.to_media_rail();
     view_media_rail_deck(&rail, plan, sizes)
+}
+
+pub fn view_registered_cast_band(
+    section: &DetailCastSection,
+    key: CarouselKey,
+    carousel_state: &VirtualCarouselState,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let rail = section.to_media_rail();
+    if rail.is_empty() {
+        return view_media_rail_deck(&rail, plan, sizes);
+    }
+
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let row = registered_media_rail_row(&rail, carousel_state, plan, sizes);
+    view_stage_surface_shell(
+        &rail.title,
+        registered_horizontal_scroller(
+            row,
+            metrics.scroll_height,
+            key,
+            carousel_state,
+            metrics,
+        ),
+        media_rail_surface(&rail),
+        DetailTone::Neutral,
+        plan,
+        sizes,
+    )
 }
 
 pub fn view_technical_ribbon(
@@ -2474,6 +2548,7 @@ fn view_media_rail_item(
         Length::Fixed(image_layout.height),
         DetailArtworkRenderOptions {
             item_identity: uses_shader_text.then_some(item_identity.as_str()),
+            carousel_key: rail.carousel_key.as_ref(),
             shader_title: uses_shader_text.then_some(item.title.as_str()),
             shader_meta: uses_shader_text.then_some(meta.as_deref()).flatten(),
             shader_text_zone_height: uses_shader_text
@@ -2610,6 +2685,9 @@ fn apply_artwork_render_options(
     if let Some(identity) = options.item_identity {
         image = image.item_identity(identity);
     }
+    if let Some(key) = options.carousel_key {
+        image = image.carousel_key(key.clone());
+    }
     if let Some(height) = options.shader_text_zone_height {
         image = image.shader_text_zone_height(height);
     }
@@ -2717,6 +2795,53 @@ fn view_artwork(
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct RegisteredRailWindow {
+    visible_range: Range<usize>,
+    leading_spacer: f32,
+    trailing_spacer: f32,
+    item_width: f32,
+    item_spacing: f32,
+}
+
+fn registered_rail_window(
+    item_count: usize,
+    carousel_state: &VirtualCarouselState,
+    metrics: DetailRailMetrics,
+) -> RegisteredRailWindow {
+    let item_width = metrics.card_width.max(1.0);
+    let item_spacing = metrics.gap.max(0.0);
+    let stride = (item_width + item_spacing).max(1.0);
+    let fallback_overscan = carousel_state.overscan_after.max(metrics.overscan);
+    let fallback_end = item_count.min(
+        carousel_state
+            .items_per_page
+            .saturating_add(fallback_overscan)
+            .max(1),
+    );
+    let visible_range =
+        if carousel_state.visible_range.is_empty() && item_count > 0 {
+            0..fallback_end
+        } else {
+            carousel_state.visible_range.start.min(item_count)
+                ..carousel_state.visible_range.end.min(item_count)
+        };
+    let leading_spacer = visible_range.start as f32 * stride;
+    let trailing_spacer = if visible_range.end < item_count {
+        (item_count - visible_range.end) as f32 * stride
+    } else {
+        0.0
+    };
+
+    RegisteredRailWindow {
+        visible_range,
+        leading_spacer,
+        trailing_spacer,
+        item_width,
+        item_spacing,
+    }
+}
+
 fn registered_media_rail_row(
     rail: &DetailMediaRail,
     carousel_state: &VirtualCarouselState,
@@ -2724,58 +2849,39 @@ fn registered_media_rail_row(
     sizes: &SizeProvider,
 ) -> Row<'static, UiMessage> {
     let metrics = plan.rail.metrics_for(rail.card_variant);
-    let item_width = carousel_state.item_width.max(metrics.card_width);
-    let item_spacing = carousel_state.item_spacing.max(metrics.gap);
-    let stride = (item_width + item_spacing).max(1.0);
-    let fallback_overscan = carousel_state.overscan_after.max(metrics.overscan);
-    let fallback_end = rail.items.len().min(
-        carousel_state
-            .items_per_page
-            .saturating_add(fallback_overscan)
-            .max(1),
-    );
-    let visible_range =
-        if carousel_state.visible_range.is_empty() && !rail.items.is_empty() {
-            0..fallback_end
-        } else {
-            carousel_state.visible_range.clone()
-        };
+    let window =
+        registered_rail_window(rail.items.len(), carousel_state, metrics);
 
     let mut item_row = Row::new().spacing(0);
 
-    if visible_range.start > 0 {
-        item_row = item_row.push(
-            Space::new()
-                .width(Length::Fixed(visible_range.start as f32 * stride)),
-        );
+    if window.leading_spacer > 0.0 {
+        item_row = item_row
+            .push(Space::new().width(Length::Fixed(window.leading_spacer)));
     }
 
     let mut first_item = true;
-    for idx in visible_range.clone() {
-        if idx < rail.items.len() {
-            if !first_item {
-                item_row = item_row
-                    .push(Space::new().width(Length::Fixed(item_spacing)));
-            }
-            item_row = item_row.push(
-                container(view_media_rail_item(
-                    rail,
-                    &rail.items[idx],
-                    plan,
-                    sizes,
-                    Priority::Visible,
-                ))
-                .width(Length::Fixed(item_width))
-                .align_x(iced::alignment::Horizontal::Center),
-            );
-            first_item = false;
+    for idx in window.visible_range.clone() {
+        if !first_item {
+            item_row = item_row
+                .push(Space::new().width(Length::Fixed(window.item_spacing)));
         }
+        item_row = item_row.push(
+            container(view_media_rail_item(
+                rail,
+                &rail.items[idx],
+                plan,
+                sizes,
+                Priority::Visible,
+            ))
+            .width(Length::Fixed(window.item_width))
+            .align_x(iced::alignment::Horizontal::Center),
+        );
+        first_item = false;
     }
 
-    if visible_range.end < rail.items.len() {
-        let remaining = rail.items.len() - visible_range.end;
+    if window.trailing_spacer > 0.0 {
         item_row = item_row
-            .push(Space::new().width(Length::Fixed(remaining as f32 * stride)));
+            .push(Space::new().width(Length::Fixed(window.trailing_spacer)));
     }
 
     item_row
@@ -3191,10 +3297,13 @@ fn detail_action_button_style(
 mod tests {
     use super::*;
     use crate::{
-        domains::ui::views::detail::{
-            DetailActionMenuItem, DetailCastMember, DetailInterfaceMode,
-            DetailLayoutInput, DetailRailActivationPolicy, DetailRailItem,
-            solve_detail_layout,
+        domains::ui::views::{
+            detail::{
+                DetailActionMenuItem, DetailCastMember, DetailInterfaceMode,
+                DetailLayoutInput, DetailRailActivationPolicy, DetailRailItem,
+                solve_detail_layout,
+            },
+            virtual_carousel::CarouselConfig,
         },
         infra::{
             constants::layout::{calculations::ScaledLayout, grid, poster},
@@ -3219,6 +3328,24 @@ mod tests {
         ))
     }
 
+    fn test_rail_metrics() -> DetailRailMetrics {
+        DetailRailMetrics {
+            variant: DetailRailCardVariant::StillWide,
+            art_width: 140.0,
+            art_height: 78.0,
+            card_width: 140.0,
+            card_height: 120.0,
+            stride: 152.0,
+            gap: 12.0,
+            text_zone_height: 42.0,
+            scroll_height: 128.0,
+            edge_fade_width: 24.0,
+            scrollbar_policy: DetailRailScrollbarPolicy::Overlay,
+            overscan: 2,
+            visible_rows: 1,
+        }
+    }
+
     fn rail_section(count: usize) -> DetailSection {
         DetailSection::RelationshipRail(DetailRelationshipRail {
             id: "rail".to_string(),
@@ -3240,6 +3367,43 @@ mod tests {
                 })
                 .collect(),
         })
+    }
+
+    #[test]
+    fn registered_rail_window_uses_detail_metrics_for_spacers() {
+        let metrics = test_rail_metrics();
+        let mut carousel_state = VirtualCarouselState::new_unscaled(
+            12,
+            456.0,
+            CarouselConfig::detail_rail(metrics.card_width, metrics.gap),
+        );
+
+        carousel_state.set_scroll_x(metrics.stride * 2.0);
+        let window = registered_rail_window(12, &carousel_state, metrics);
+
+        assert_eq!(window.visible_range, 1..8);
+        assert_eq!(window.item_width, metrics.card_width);
+        assert_eq!(window.item_spacing, metrics.gap);
+        assert_eq!(window.leading_spacer, metrics.stride);
+        assert_eq!(window.trailing_spacer, 4.0 * metrics.stride);
+    }
+
+    #[test]
+    fn registered_rail_window_right_aligned_end_has_no_trailing_spacer() {
+        let metrics = test_rail_metrics();
+        let mut carousel_state = VirtualCarouselState::new_unscaled(
+            8,
+            456.0,
+            CarouselConfig::detail_rail(metrics.card_width, metrics.gap),
+        );
+        carousel_state
+            .set_index_position(carousel_state.max_start_index() as f32);
+
+        let window = registered_rail_window(8, &carousel_state, metrics);
+
+        assert_eq!(carousel_state.scroll_x, carousel_state.max_scroll);
+        assert_eq!(window.visible_range.end, 8);
+        assert_eq!(window.trailing_spacer, 0.0);
     }
 
     #[test]
@@ -3375,6 +3539,7 @@ mod tests {
         });
         let cast = DetailSection::Cast(DetailCastSection {
             title: "Cast".to_string(),
+            carousel_key: None,
             members: vec![DetailCastMember {
                 id: "performer".to_string(),
                 name: "Performer".to_string(),

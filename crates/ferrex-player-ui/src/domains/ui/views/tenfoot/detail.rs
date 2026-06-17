@@ -401,14 +401,14 @@ impl TenFootDetailPanelId {
             Self::SeriesSeasons(series_id) => {
                 CarouselKey::ShowSeasons(series_id.to_uuid())
             }
-            Self::SeriesEpisodes(_) => {
-                CarouselKey::Custom("TenFootDetailSeriesEpisodes")
+            Self::SeriesEpisodes(series_id) => {
+                CarouselKey::DetailSeriesEpisodes(series_id.to_uuid())
             }
             Self::SeasonEpisodes(season_id) => {
                 CarouselKey::SeasonEpisodes(season_id.to_uuid())
             }
-            Self::EpisodeSiblings(_) => {
-                CarouselKey::Custom("TenFootDetailEpisodeSiblings")
+            Self::EpisodeSiblings(season_id) => {
+                CarouselKey::DetailEpisodeSiblings(season_id.to_uuid())
             }
         }
     }
@@ -2818,11 +2818,11 @@ mod tests {
         );
         assert_eq!(
             TenFootDetailPanelId::SeriesEpisodes(series).poster_carousel_key(),
-            CarouselKey::Custom("TenFootDetailSeriesEpisodes")
+            CarouselKey::DetailSeriesEpisodes(series.to_uuid())
         );
         assert_eq!(
             TenFootDetailPanelId::EpisodeSiblings(season).poster_carousel_key(),
-            CarouselKey::Custom("TenFootDetailEpisodeSiblings")
+            CarouselKey::DetailEpisodeSiblings(season.to_uuid())
         );
     }
 

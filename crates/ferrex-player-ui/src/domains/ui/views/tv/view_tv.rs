@@ -15,12 +15,12 @@ use crate::{
                     DetailMetadataPill, DetailNotice, DetailOverviewSection,
                     DetailPageModel, DetailRailActivationPolicy,
                     DetailRailCardVariant, DetailRailItem, DetailRailKind,
-                    DetailRegisteredRailAdapter, DetailRelationshipRail,
-                    DetailSection, DetailTone, prioritize_metadata_items,
+                    DetailRelationshipRail, DetailSection, DetailTone,
+                    prioritize_metadata_items, registered_detail_rail_adapters,
                     solve_detail_layout,
                     view_detail_stage_with_registered_rails,
                 },
-                virtual_carousel::{CarouselRegistry, types::CarouselKey},
+                virtual_carousel::types::CarouselKey,
             },
         },
     },
@@ -496,7 +496,7 @@ fn view_adaptive_tv_detail(
 
     let sizes = &state.domains.ui.state.size_provider;
     let plan = detail_layout_for_model(&model, state);
-    let registered_rails = registered_tv_rail_adapters(
+    let registered_rails = registered_detail_rail_adapters(
         &model.sections,
         &state.domains.ui.state.carousel_registry,
     );
@@ -507,25 +507,6 @@ fn view_adaptive_tv_detail(
         sizes,
         &registered_rails,
     )
-}
-
-fn registered_tv_rail_adapters<'a>(
-    sections: &'a [DetailSection],
-    registry: &'a CarouselRegistry,
-) -> Vec<DetailRegisteredRailAdapter<'a>> {
-    sections
-        .iter()
-        .filter_map(|section| match section {
-            DetailSection::RelationshipRail(rail) => {
-                let key = rail.carousel_key.as_ref()?;
-                Some(DetailRegisteredRailAdapter {
-                    key,
-                    carousel_state: registry.get(key)?,
-                })
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 fn detail_layout_for_model(
@@ -848,7 +829,9 @@ fn backdrop_control_label(state: &State) -> String {
 mod tests {
     use super::*;
 
-    use crate::domains::ui::views::virtual_carousel::CarouselConfig;
+    use crate::domains::ui::views::virtual_carousel::{
+        CarouselConfig, CarouselRegistry,
+    };
 
     #[test]
     fn season_title_names_specials_without_numeric_prefix() {
@@ -933,7 +916,7 @@ mod tests {
             1.0,
         );
 
-        let adapters = registered_tv_rail_adapters(&sections, &registry);
+        let adapters = registered_detail_rail_adapters(&sections, &registry);
 
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].key, &registered_key);
