@@ -7,12 +7,16 @@
 //! - [`layout`] resolves a pure viewport/scale/interface-mode plan using the
 //!   centralized size provider and scaled layout values, including the 10-foot
 //!   layout composition.
+//! - [`typography`] maps global font/spacing tokens to semantic detail text
+//!   roles, readable measures, overflow budgets, and composition-specific
+//!   alignment strategies.
 //! - [`components`] renders reusable Iced hero, metadata, action, section,
 //!   relationship, empty-state, and backdrop controls from the model and plan.
 
 pub mod components;
 pub mod layout;
 pub mod model;
+pub mod typography;
 
 pub use components::{
     DetailActionSurfaceMode, DetailForegroundSurface,
@@ -48,4 +52,9 @@ pub use model::{
     DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
     DetailRailItem, DetailRelationshipRail, DetailSection, DetailTechnicalItem,
     DetailTechnicalSection, DetailTone,
+};
+pub use typography::{
+    DetailCaptionBudgets, DetailColorIntent, DetailFactLayoutMode,
+    DetailTextAlignment, DetailTextMetrics, DetailTextOverflow, DetailTextRole,
+    DetailTextStyle, DetailTypography, DetailTypographyInput,
 };
