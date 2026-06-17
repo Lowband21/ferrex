@@ -636,6 +636,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     image.selected_menu_button,
                     image.layout_bounds,
                     text_zone_height,
+                    image.title.as_deref(),
+                    image.meta.as_deref(),
                 );
             };
 
@@ -792,6 +794,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         image.selected_menu_button,
                         image.layout_bounds,
                         text_zone_height,
+                        image.title.as_deref(),
+                        image.meta.as_deref(),
                     )
                 }
             }
@@ -809,6 +813,8 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 image.selected_menu_button,
                 image.layout_bounds,
                 text_zone_height,
+                image.title.as_deref(),
+                image.meta.as_deref(),
             )
         }
     }
@@ -932,6 +938,8 @@ fn create_loading_placeholder<'a>(
     selected_menu_button: Option<MenuButton>,
     layout_bounds: PosterLayoutBounds,
     text_zone_height: f32,
+    title: Option<&str>,
+    meta: Option<&str>,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -962,6 +970,12 @@ fn create_loading_placeholder<'a>(
 
     if let Some(rot) = rotation_override {
         poster = poster.rotation_y(rot);
+    }
+    if let Some(title) = title {
+        poster = poster.title(title.to_string());
+    }
+    if let Some(meta) = meta {
+        poster = poster.meta(meta.to_string());
     }
 
     poster.into()
