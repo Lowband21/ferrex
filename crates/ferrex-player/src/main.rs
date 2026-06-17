@@ -22,7 +22,7 @@ fn main() -> ferrex_player::Result {
                 cases,
             ),
         ) => {
-            println!("poster containment visual QA matrix:");
+            println!("Theater Plate foreground visual QA matrix:");
             for case in cases {
                 println!(
                     "  {:<28} {:<32} {:<10} {}",
@@ -45,7 +45,7 @@ fn main() -> ferrex_player::Result {
             ),
         ) => {
             println!(
-                "captured poster containment matrix: {} screenshots (manifest: {})",
+                "captured Theater Plate foreground matrix: {} screenshots (manifest: {})",
                 output.captures.len(),
                 output.manifest_path.display()
             );

@@ -1,8 +1,8 @@
-//! Poster containment visual QA matrix for screenshot artifacts.
+//! Theater Plate foreground visual QA matrix for screenshot artifacts.
 //!
 //! The matrix is intentionally executable instead of living in a durable process
 //! document: `ferrex-player screenshot matrix --output-dir <DIR>` captures the
-//! required poster-clipping review set and writes a JSON manifest next to the PNGs.
+//! required detail foreground review set and writes a JSON manifest next to the PNGs.
 
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -14,7 +14,7 @@ use super::{
     capture,
 };
 
-/// CLI command outcome for the poster containment matrix.
+/// CLI command outcome for the Theater Plate foreground matrix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatrixCommandOutcome {
     /// List the matrix cases without capturing screenshots.
@@ -41,7 +41,7 @@ pub struct MatrixRunOutput {
     pub captures: Vec<MatrixCaseCapture>,
 }
 
-/// A deterministic screenshot case in the poster containment QA matrix.
+/// A deterministic screenshot case in the Theater Plate foreground QA matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VisualQaCase {
     /// Stable artifact and filtering identifier.
@@ -58,6 +58,8 @@ pub struct VisualQaCase {
     pub tags: &'static [&'static str],
     /// Human-readable reviewer focus for this case.
     pub review_focus: &'static str,
+    /// Outcome-focused note that ties this case to the exceptional visual criteria.
+    pub review_note: &'static str,
 }
 
 impl VisualQaCase {
@@ -104,11 +106,20 @@ const REQUIRED_COVERAGE_TAGS: &[&str] = &[
     "viewport:10ft",
     "viewport:1280x720",
     "viewport:1920x1080",
+    "viewport:compact",
     "viewport:ultrawide",
 ];
 
-/// Return the full poster containment visual QA matrix.
-pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
+const EXCEPTIONAL_REVIEW_CRITERIA: &[&str] = &[
+    "cinematic stage fit",
+    "no app-panel/card feel",
+    "strong readability",
+    "aggressive but readable wide-space use",
+    "physical poster/controller anchoring",
+];
+
+/// Return the full Theater Plate foreground visual QA matrix.
+pub fn theater_plate_foreground_matrix() -> Vec<VisualQaCase> {
     vec![
         VisualQaCase {
             id: "rails-top-720",
@@ -132,6 +143,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1280x720",
             ],
             review_focus: "stacked movie/series rails with one back-face menu and one hovered front-face poster",
+            review_note: "Top-of-page rail evidence keeps poster depth physically anchored while proving shader hover and menu states do not bleed into adjacent cards.",
         },
         VisualQaCase {
             id: "rails-scrolled-1080",
@@ -156,6 +168,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1920x1080",
             ],
             review_focus: "same stacked rails after vertical page and horizontal rail scroll restoration so edge clipping can be checked",
+            review_note: "Scrolled rail evidence stresses restored vertical and horizontal offsets so wide rows stay readable without wrong-face or edge-clipping artifacts.",
         },
         VisualQaCase {
             id: "movie-detail-1080",
@@ -174,6 +187,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1920x1080",
             ],
             review_focus: "movie detail hero poster and related surfaces at desktop full HD",
+            review_note: "Full-HD movie detail evidence checks the foreground stage reads as a cinematic shelf anchored by the poster instead of a detached app card.",
         },
         VisualQaCase {
             id: "movie-detail-ultrawide",
@@ -192,6 +206,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:ultrawide",
             ],
             review_focus: "movie detail composition at ultrawide viewport boundaries",
+            review_note: "Ultrawide movie detail evidence verifies the stage uses broad horizontal space aggressively while keeping copy inside a readable lobe.",
         },
         VisualQaCase {
             id: "series-detail-720",
@@ -210,6 +225,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1280x720",
             ],
             review_focus: "series detail with seasons rail inside the vertical detail scroller",
+            review_note: "Series evidence keeps the poster, next-episode controls, and season rail visually tied to the Theater Plate stage at 720p.",
         },
         VisualQaCase {
             id: "season-detail-1080",
@@ -228,6 +244,27 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1920x1080",
             ],
             review_focus: "season detail episode rail inside the vertical detail scroller",
+            review_note: "Season evidence checks the episode rail remains anchored under the hero shelf while still-art cards stay legible across the full-HD span.",
+        },
+        VisualQaCase {
+            id: "season-detail-scrolled-rail-1080",
+            preset: ScreenshotPreset::DesktopSeasonDetailScrolledRail,
+            viewport: Viewport {
+                width: 1920,
+                height: 1080,
+            },
+            mode: Mode::Immediate,
+            settle_ms: 200,
+            tags: &[
+                "assertion:zero-bleed",
+                "scroll:nested-vertical-horizontal",
+                "scroll:stacked-horizontal",
+                "state:scrolled-rail",
+                "surface:season",
+                "viewport:1920x1080",
+            ],
+            review_focus: "season detail episode rail after horizontal scroll restoration",
+            review_note: "Scrolled season rail evidence proves relationship cards keep physical alignment and readable labels after the rail is restored away from the first item.",
         },
         VisualQaCase {
             id: "episode-detail-720",
@@ -245,6 +282,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1280x720",
             ],
             review_focus: "episode detail still-art surface and action layout at 720p",
+            review_note: "Episode evidence verifies the still-art anchor and action shelf stay readable at 720p without turning the stage into a generic panel.",
         },
         VisualQaCase {
             id: "bright-fixture-720",
@@ -263,6 +301,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1280x720",
             ],
             review_focus: "bright art pressure without poster-depth or shader bleed artifacts",
+            review_note: "Bright fixture evidence confirms the foreground plate compresses glare enough for strong readability while preserving a cinematic backdrop wash.",
         },
         VisualQaCase {
             id: "busy-fixture-1080",
@@ -281,6 +320,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1920x1080",
             ],
             review_focus: "busy/text-like art behind poster and readable detail copy",
+            review_note: "Busy fixture evidence checks synthetic text stays behind real UI copy and does not defeat the foreground readability lobe.",
         },
         VisualQaCase {
             id: "low-quality-fixture-720",
@@ -299,6 +339,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1280x720",
             ],
             review_focus: "low-detail/low-quality art remains contained and intentional",
+            review_note: "Low-quality fixture evidence verifies muted art still feels intentionally staged instead of a raw wallpaper or empty app panel.",
         },
         VisualQaCase {
             id: "missing-art-fixture-1080",
@@ -317,6 +358,26 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:1920x1080",
             ],
             review_focus: "missing poster/backdrop fallback without stale wrong-face or bleed artifacts",
+            review_note: "Missing-art evidence proves fallback color and empty artwork remain deliberate, readable, and free of stale poster-depth artifacts.",
+        },
+        VisualQaCase {
+            id: "long-text-compact",
+            preset: ScreenshotPreset::TheaterPlateCompact,
+            viewport: Viewport {
+                width: 480,
+                height: 900,
+            },
+            mode: Mode::Immediate,
+            settle_ms: 150,
+            tags: &[
+                "assertion:zero-bleed",
+                "fixture:long-text",
+                "state:top",
+                "surface:movie",
+                "viewport:compact",
+            ],
+            review_focus: "compact/tall detail layout with long copy and stacked actions",
+            review_note: "Compact evidence checks long copy wraps inside the plate, actions remain touchable, and the poster stays physically anchored above the text.",
         },
         VisualQaCase {
             id: "long-text-ultrawide",
@@ -335,6 +396,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:ultrawide",
             ],
             review_focus: "long title/overview text and shader poster text zone at ultrawide size",
+            review_note: "Long-text ultrawide evidence keeps the readable copy lobe bounded while the surrounding stage uses wide space without becoming a web-app panel.",
         },
         VisualQaCase {
             id: "tenfoot-detail-10ft",
@@ -353,6 +415,7 @@ pub fn poster_containment_matrix() -> Vec<VisualQaCase> {
                 "viewport:10ft",
             ],
             review_focus: "10-foot detail layout at couch-distance full HD",
+            review_note: "10-foot evidence verifies couch-distance typography, controller focus, and poster anchoring hold without busy backdrop interference.",
         },
     ]
 }
@@ -376,7 +439,7 @@ pub fn run_matrix_command(
     args: &[String],
 ) -> Result<MatrixCommandOutcome, ScreenshotError> {
     let spec = MatrixCliSpec::parse(args)?;
-    let cases = select_cases(&poster_containment_matrix(), spec.only)?;
+    let cases = select_cases(&theater_plate_foreground_matrix(), spec.only)?;
 
     if spec.list || spec.dry_run {
         return Ok(MatrixCommandOutcome::Listed(cases));
@@ -411,7 +474,7 @@ fn select_cases(
     if selected.is_empty() {
         return Err(ScreenshotError::MatrixArgument {
             message: format!(
-                "unknown poster QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix list`"
+                "unknown Theater Plate foreground QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix list`"
             ),
         });
     }
@@ -445,7 +508,7 @@ fn capture_matrix(
     }
 
     let manifest_path =
-        output_dir.join("poster-containment-visual-qa-matrix.json");
+        output_dir.join("theater-plate-foreground-visual-qa-matrix.json");
     write_manifest(&manifest_path, cases, &captures, settle_ms_override)?;
 
     Ok(MatrixRunOutput {
@@ -461,7 +524,8 @@ fn write_manifest(
     settle_ms_override: Option<u64>,
 ) -> Result<(), ScreenshotError> {
     let manifest = MatrixManifest {
-        matrix: "poster-containment-visual-qa",
+        matrix: "theater-plate-foreground-visual-qa",
+        exceptional_review_criteria: EXCEPTIONAL_REVIEW_CRITERIA.to_vec(),
         missing_required_coverage: missing_required_coverage(cases),
         cases: cases
             .iter()
@@ -581,6 +645,7 @@ where
 #[derive(Debug, Serialize)]
 struct MatrixManifest {
     matrix: &'static str,
+    exceptional_review_criteria: Vec<&'static str>,
     missing_required_coverage: Vec<&'static str>,
     cases: Vec<MatrixManifestCase>,
     captures: Vec<MatrixManifestCapture>,
@@ -595,6 +660,7 @@ struct MatrixManifestCase {
     settle_ms: u64,
     tags: Vec<&'static str>,
     review_focus: &'static str,
+    review_note: &'static str,
 }
 
 impl MatrixManifestCase {
@@ -607,6 +673,7 @@ impl MatrixManifestCase {
             settle_ms: settle_ms_override.unwrap_or(case.settle_ms),
             tags: case.tags.to_vec(),
             review_focus: case.review_focus,
+            review_note: case.review_note,
         }
     }
 }
@@ -633,13 +700,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn poster_containment_matrix_covers_required_tags() {
-        let cases = poster_containment_matrix();
+    fn theater_plate_foreground_matrix_covers_required_tags() {
+        let cases = theater_plate_foreground_matrix();
         let missing = missing_required_coverage(&cases);
 
         assert!(
             missing.is_empty(),
-            "missing poster QA coverage tags: {missing:?}"
+            "missing Theater Plate foreground QA coverage tags: {missing:?}"
         );
     }
 
@@ -650,6 +717,7 @@ mod tests {
             panic!("expected list outcome");
         };
         assert!(cases.len() > 4);
+        assert!(cases.iter().all(|case| !case.review_note.is_empty()));
 
         let outcome = run_matrix_command(&[
             "--dry-run".to_string(),

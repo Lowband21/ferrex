@@ -12,8 +12,7 @@ use crate::{
                 DetailLayoutPlan, DetailMetadataPill, DetailOverviewSection,
                 DetailPageModel, DetailSection, DetailTechnicalItem,
                 DetailTechnicalSection, DetailTone,
-                solve_detail_layout_from_runtime, view_backdrop_controls,
-                view_detail_hero, view_sections,
+                solve_detail_layout_from_runtime, view_detail_stage,
             },
             grid::macros::parse_hex_color,
         },
@@ -34,7 +33,7 @@ use ferrex_model::{
 };
 use iced::{
     Element, Length,
-    widget::{Column, Space, Stack, column, container, text},
+    widget::{Space, column, container, text},
 };
 use lucide_icons::Icon;
 use rkyv::{deserialize, option::ArchivedOption, rancor::Error};
@@ -106,47 +105,7 @@ fn view_movie_detail_model(
     plan: &DetailLayoutPlan,
 ) -> Element<'static, UiMessage> {
     let sizes = &state.domains.ui.state.size_provider;
-    let window_width = state.window_size.width;
-    let window_height = state.window_size.height;
-    let mut body = Column::new()
-        .spacing(plan.section_grid.gap)
-        .padding([plan.page_padding_y, plan.page_padding_x])
-        .width(Length::Fill)
-        .max_width(plan.content_width);
-
-    body = body.push(view_detail_hero(model, plan, sizes));
-    if !model.sections.is_empty() {
-        body = body.push(view_sections(&model.sections, plan, sizes));
-    }
-
-    let content_container = container(body)
-        .width(Length::Fill)
-        .align_x(iced::alignment::Horizontal::Center);
-    let mut layered = Stack::new().push(content_container);
-
-    if !model.backdrop_controls.is_empty() {
-        let backdrop_dims = state
-            .domains
-            .ui
-            .state
-            .background_shader_state
-            .calculate_backdrop_dimensions(window_width, window_height);
-        let controls =
-            view_backdrop_controls(&model.backdrop_controls, plan, sizes);
-        let button_container = container(controls)
-            .padding([0.0, plan.page_padding_x])
-            .width(Length::Fill)
-            .height(Length::Fixed(
-                backdrop_dims
-                    .button_height
-                    .max(plan.backdrop.control_height),
-            ))
-            .align_x(iced::alignment::Horizontal::Right)
-            .align_y(iced::alignment::Vertical::Bottom);
-        layered = layered.push(button_container);
-    }
-
-    layered.into()
+    view_detail_stage(model, plan, sizes)
 }
 
 fn movie_detail_layout_plan(state: &State) -> DetailLayoutPlan {
