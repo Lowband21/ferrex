@@ -948,4 +948,287 @@ mod tests {
         assert_eq!(instance.position_and_size[3], 150.0);
         assert_eq!(instance.text_params[2], 0.0);
     }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestRect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    }
+
+    impl TestRect {
+        fn right(self) -> f32 {
+            self.x + self.width
+        }
+
+        fn bottom(self) -> f32 {
+            self.y + self.height
+        }
+
+        fn contains(self, other: Self, tolerance: f32) -> bool {
+            other.x >= self.x - tolerance
+                && other.y >= self.y - tolerance
+                && other.right() <= self.right() + tolerance
+                && other.bottom() <= self.bottom() + tolerance
+        }
+
+        fn from_layout(layout: &Rectangle) -> Self {
+            Self {
+                x: layout.x,
+                y: layout.y,
+                width: layout.width,
+                height: layout.height,
+            }
+        }
+    }
+
+    fn scaled_poster_rect(instance: &PosterInstance) -> TestRect {
+        let [x, y, width, height] = instance.position_and_size;
+        let scale = instance.scale_shadow_glow_type[0];
+        let scaled_width = width * scale;
+        let scaled_height = height * scale;
+        TestRect {
+            x: x - (scaled_width - width) / 2.0,
+            y: y - (scaled_height - height) / 2.0,
+            width: scaled_width,
+            height: scaled_height,
+        }
+    }
+
+    fn scaled_text_rect(instance: &PosterInstance) -> Option<TestRect> {
+        let text_zone_height = instance.text_params[2];
+        if text_zone_height <= 0.0 {
+            return None;
+        }
+
+        let poster_rect = scaled_poster_rect(instance);
+        Some(TestRect {
+            x: poster_rect.x,
+            y: poster_rect.bottom(),
+            width: poster_rect.width,
+            height: text_zone_height,
+        })
+    }
+
+    fn assert_rect_inside(label: &str, outer: TestRect, inner: TestRect) {
+        assert!(
+            outer.contains(inner, 0.01),
+            "{label} escaped clip: outer={outer:?} inner={inner:?}"
+        );
+    }
+
+    #[test]
+    fn clipping_regression_keeps_scaled_faces_inside_rail_clips() {
+        let config = animation::AnimationConfig {
+            hover_scale: 1.16,
+            ..animation::AnimationConfig::default()
+        };
+        let animated_bounds = animation::AnimatedPosterBounds::new_with_config(
+            160.0, 240.0, &config,
+        )
+        .with_text_zone_height(54.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let rail_gap = 18.0;
+        let first_layout = Rectangle {
+            x: 24.0,
+            y: 12.0,
+            width: layout_width,
+            height: layout_height,
+        };
+        let second_layout = Rectangle {
+            x: 24.0,
+            y: first_layout.y + layout_height + rail_gap,
+            width: layout_width,
+            height: layout_height,
+        };
+        let first_clip = TestRect::from_layout(&Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 900.0,
+            height: layout_height + 24.0,
+        });
+        let second_clip = TestRect::from_layout(&Rectangle {
+            x: 0.0,
+            y: layout_height + rail_gap,
+            width: 900.0,
+            height: layout_height + 24.0,
+        });
+
+        let hovered_front = create_batch_instance(
+            Some(atlas_region()),
+            &first_layout,
+            12.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            true,
+            1.0,
+            true,
+            None,
+            Some(0.4),
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Hover Scale Lattice"),
+            Some("2024"),
+        );
+        let back_menu = create_batch_instance(
+            Some(atlas_region()),
+            &second_layout,
+            12.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            Some(std::f32::consts::PI),
+            PosterFace::Back,
+            Some(MenuButton::Details),
+            Some("Back Face Grove"),
+            Some("TV-14"),
+        );
+
+        assert!(hovered_front.scale_shadow_glow_type[0] > 1.0);
+        assert_eq!(hovered_front.radius_opacity_rotation_anim[2], 0.0);
+        assert_eq!(
+            back_menu.radius_opacity_rotation_anim[2],
+            std::f32::consts::PI
+        );
+        assert_eq!(
+            back_menu.mouse_pos_and_padding[2],
+            MenuButton::Details.shader_index() as f32
+        );
+
+        assert_rect_inside(
+            "hovered poster",
+            first_clip,
+            scaled_poster_rect(&hovered_front),
+        );
+        assert_rect_inside(
+            "hovered shader text",
+            first_clip,
+            scaled_text_rect(&hovered_front).expect("text zone"),
+        );
+        assert_rect_inside(
+            "back-face poster",
+            second_clip,
+            scaled_poster_rect(&back_menu),
+        );
+        assert_rect_inside(
+            "back-face shader text",
+            second_clip,
+            scaled_text_rect(&back_menu).expect("text zone"),
+        );
+    }
+
+    #[test]
+    fn clipping_regression_handles_nested_scroll_art_edges() {
+        let animated_bounds =
+            animation::AnimatedPosterBounds::new(132.0, 198.0)
+                .with_text_zone_height(44.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let vertical_viewport_clip = TestRect {
+            x: 0.0,
+            y: 96.0,
+            width: 1280.0,
+            height: 560.0,
+        };
+        let horizontal_rail_clip = TestRect {
+            x: 36.0,
+            y: 360.0,
+            width: 760.0,
+            height: layout_height,
+        };
+        let nested_clip = TestRect {
+            x: horizontal_rail_clip.x.max(vertical_viewport_clip.x),
+            y: horizontal_rail_clip.y.max(vertical_viewport_clip.y),
+            width: horizontal_rail_clip
+                .right()
+                .min(vertical_viewport_clip.right())
+                - horizontal_rail_clip.x.max(vertical_viewport_clip.x),
+            height: horizontal_rail_clip
+                .bottom()
+                .min(vertical_viewport_clip.bottom())
+                - horizontal_rail_clip.y.max(vertical_viewport_clip.y),
+        };
+        let layout = Rectangle {
+            x: horizontal_rail_clip.x + 16.0,
+            y: horizontal_rail_clip.y,
+            width: layout_width,
+            height: layout_height,
+        };
+
+        let missing_art = create_placeholder_instance(
+            &layout,
+            10.0,
+            Color::from_rgb(0.25, 0.2, 0.18),
+            Some(&animated_bounds),
+            None,
+            Color::WHITE,
+            PosterFace::Back,
+            Some(MenuButton::Watched),
+        );
+        assert!(missing_art.atlas_uvs.iter().all(|uv| *uv < 0.0));
+        assert_eq!(
+            missing_art.mouse_pos_and_padding[2],
+            MenuButton::Watched.shader_index() as f32
+        );
+        assert_rect_inside(
+            "missing-art placeholder",
+            nested_clip,
+            scaled_poster_rect(&missing_art),
+        );
+
+        let low_quality_region = AtlasRegion {
+            uv_min: [0.0001, 0.0001],
+            uv_max: [0.012, 0.018],
+            layer: 0,
+        };
+        let low_quality = create_batch_instance(
+            Some(low_quality_region),
+            &layout,
+            10.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Low Bitrate Key Art"),
+            Some("2024"),
+        );
+
+        assert!(low_quality.atlas_uvs[0] > 0.0);
+        assert!(low_quality.atlas_uvs[1] > 0.0);
+        assert!(low_quality.atlas_uvs[2] > low_quality.atlas_uvs[0]);
+        assert!(low_quality.atlas_uvs[3] > low_quality.atlas_uvs[1]);
+        assert_rect_inside(
+            "low-quality poster",
+            nested_clip,
+            scaled_poster_rect(&low_quality),
+        );
+        assert_rect_inside(
+            "low-quality shader text",
+            nested_clip,
+            scaled_text_rect(&low_quality).expect("text zone"),
+        );
+    }
 }

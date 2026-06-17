@@ -21,16 +21,22 @@ use crate::{
             update_handlers::{
                 handle_view_movie_details, recompute_and_init_curated_carousels,
             },
-            views::tenfoot::{
-                detail::{TenFootDetailAction, TenFootDetailFocusId},
-                home::{
-                    TenFootCardId, TenFootFocusId, TenFootMediaKind,
-                    TenFootRailId,
+            views::{
+                tenfoot::{
+                    detail::{TenFootDetailAction, TenFootDetailFocusId},
+                    home::{
+                        TenFootCardId, TenFootFocusId, TenFootMediaKind,
+                        TenFootRailId,
+                    },
                 },
+                virtual_carousel::types::{CarouselConfig, CarouselKey},
             },
         },
     },
-    infra::repository::media_repo::MediaRepo,
+    infra::{
+        repository::media_repo::MediaRepo,
+        shader_widgets::poster::PosterInstanceKey,
+    },
     state::State,
 };
 
@@ -51,7 +57,10 @@ use ferrex_model::{
     titles::{MovieTitle, SeriesTitle},
     urls::{EpisodeURL, MovieURL, SeasonURL, SeriesURL},
 };
-use iced::{Preset, Task, widget::image::Handle};
+use iced::{
+    Preset, Task,
+    widget::{image::Handle, operation::scroll_to, scrollable::AbsoluteOffset},
+};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -91,6 +100,10 @@ pub enum PlayerScenario {
     TenFootDetail,
     /// 10-foot loading/player overlay surface.
     PlayerLoadingOverlay,
+    /// Poster clipping regression harness with stacked rails at the top of the page.
+    PosterClippingStackedRailsTop,
+    /// Poster clipping regression harness with horizontally scrolled stacked rails.
+    PosterClippingStackedRailsScrolled,
     /// Theater Plate desktop detail fixture with balanced, review-friendly art.
     TheaterPlateGood,
     /// Theater Plate fixture for bright backdrop readability pressure.
@@ -115,7 +128,7 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 20] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
@@ -127,6 +140,8 @@ impl PlayerScenario {
         Self::TenFootHome,
         Self::TenFootDetail,
         Self::PlayerLoadingOverlay,
+        Self::PosterClippingStackedRailsTop,
+        Self::PosterClippingStackedRailsScrolled,
         Self::TheaterPlateGood,
         Self::TheaterPlateBright,
         Self::TheaterPlateBusyText,
@@ -150,6 +165,12 @@ impl PlayerScenario {
             Self::TenFootHome => "TenFootHome",
             Self::TenFootDetail => "TenFootDetail",
             Self::PlayerLoadingOverlay => "PlayerLoadingOverlay",
+            Self::PosterClippingStackedRailsTop => {
+                "PosterClippingStackedRailsTop"
+            }
+            Self::PosterClippingStackedRailsScrolled => {
+                "PosterClippingStackedRailsScrolled"
+            }
             Self::TheaterPlateGood => "TheaterPlateGood",
             Self::TheaterPlateBright => "TheaterPlateBright",
             Self::TheaterPlateBusyText => "TheaterPlateBusyText",
@@ -195,6 +216,12 @@ impl PlayerScenario {
             }
             Self::PlayerLoadingOverlay => {
                 "10-foot player/loading overlay for a seeded movie stream"
+            }
+            Self::PosterClippingStackedRailsTop => {
+                "Poster clipping regression harness with stacked movie/series rails, shader text, hover scale, and one back-face menu"
+            }
+            Self::PosterClippingStackedRailsScrolled => {
+                "Poster clipping regression harness with the same stacked rails restored to horizontal scrolled positions"
             }
             Self::TheaterPlateGood => {
                 "Theater Plate desktop detail fixture with balanced cinematic backdrop analysis"
@@ -258,6 +285,15 @@ impl PlayerScenario {
                 "playerloading" | "loadingoverlay" => {
                     Some(Self::PlayerLoadingOverlay)
                 }
+                "posterclipping"
+                | "posterclippingrails"
+                | "posterclippingstackedrails" => {
+                    Some(Self::PosterClippingStackedRailsTop)
+                }
+                "posterclippingscrolled"
+                | "posterclippingstackedrailsscrolled" => {
+                    Some(Self::PosterClippingStackedRailsScrolled)
+                }
                 "theaterplatebusy" | "theaterplatetext" => {
                     Some(Self::TheaterPlateBusyText)
                 }
@@ -290,6 +326,12 @@ impl PlayerScenario {
             Self::TenFootHome => tenfoot_home_state(config),
             Self::TenFootDetail => tenfoot_detail_state(config),
             Self::PlayerLoadingOverlay => player_loading_overlay_state(config),
+            Self::PosterClippingStackedRailsTop => {
+                poster_clipping_regression_state(config, false)
+            }
+            Self::PosterClippingStackedRailsScrolled => {
+                poster_clipping_regression_state(config, true)
+            }
             Self::TheaterPlateGood => theater_plate_fixture_state(
                 config,
                 TheaterPlateFixture::Good,
@@ -329,10 +371,21 @@ impl PlayerScenario {
     }
 
     fn preset(self, config: Arc<AppConfig>) -> Preset<State, DomainMessage> {
-        Preset::new(self.as_str(), move || {
-            let state = self.build(&config);
-            (state, Task::none())
-        })
+        Preset::new(self.as_str(), move || self.build_with_task(&config))
+    }
+
+    fn build_with_task(
+        self,
+        config: &AppConfig,
+    ) -> (State, Task<DomainMessage>) {
+        let state = self.build(config);
+        let task = match self {
+            Self::PosterClippingStackedRailsScrolled => {
+                poster_clipping_scroll_restore_task(&state)
+            }
+            _ => Task::none(),
+        };
+        (state, task)
     }
 }
 
@@ -553,6 +606,363 @@ fn player_loading_overlay_state(config: &AppConfig) -> State {
     state.loading = false;
 
     state
+}
+
+fn poster_clipping_regression_state(
+    config: &AppConfig,
+    scrolled: bool,
+) -> State {
+    let mut state = authenticated_base_state(config, false);
+    seed_library_state(&mut state);
+    seed_poster_clipping_extra_media(&mut state);
+    recompute_and_init_curated_carousels(&mut state);
+    configure_poster_clipping_home_lists(&mut state);
+
+    state.domains.ui.state.view = ViewState::Library;
+    state.domains.ui.state.scope = Scope::Home;
+    state.tab_manager.set_active_tab(TabId::Home);
+    state.loading = false;
+
+    configure_poster_clipping_menu_and_hover(&mut state);
+    if scrolled {
+        configure_poster_clipping_scrolled_rails(&mut state);
+    }
+
+    state
+}
+
+fn seed_poster_clipping_extra_media(state: &mut State) {
+    let movies_library_id = seed_library_id(0);
+    let series_library_id = seed_library_id(1);
+    let library_poster_size = ImageSize::Poster(
+        state.domains.settings.display.library_poster_quality,
+    );
+    let detail_poster_size =
+        ImageSize::Poster(state.domains.settings.display.detail_poster_quality);
+
+    const EXTRA_MOVIES: [(&str, &str, &str); 8] = [
+        (
+            "Blue Noise Boundary",
+            "A dark poster built from high-contrast edges for rail clipping review.",
+            "#27364f",
+        ),
+        (
+            "Right Edge Bloom",
+            "A bright card that should not bleed into neighboring rail gutters.",
+            "#8ca6ce",
+        ),
+        (
+            "Glyph Storm Menu",
+            "Text-like poster detail exercises shader text and back-face menu containment.",
+            "#5a4871",
+        ),
+        (
+            "Missing Poster Sentinel",
+            "This fixture deliberately has no poster id so the placeholder path is covered.",
+            "#6d4b35",
+        ),
+        (
+            "Low Bitrate Key Art",
+            "A deliberately tiny loaded poster checks low-quality art upscaling inside rails.",
+            "#5f666e",
+        ),
+        (
+            "Hover Scale Lattice",
+            "Hover scale and glow must remain inside the rail clip rect.",
+            "#3f5f5d",
+        ),
+        (
+            "Long Shader Title That Truncates Cleanly",
+            "A long title verifies the shader text reservation below poster cards.",
+            "#514263",
+        ),
+        (
+            "Rail End Cap",
+            "Rightmost content provides a visible edge for scrolled carousel screenshots.",
+            "#334b38",
+        ),
+    ];
+
+    for (offset, (title, overview, color)) in EXTRA_MOVIES.iter().enumerate() {
+        let index = offset + 2;
+        let mut movie = seeded_movie(
+            index,
+            movies_library_id,
+            title,
+            overview,
+            "2024-06-01",
+            100 + index as u32,
+            7.0 + offset as f32 * 0.1,
+            color,
+        );
+
+        if *title == "Missing Poster Sentinel" {
+            movie.details.poster_path = None;
+            movie.details.primary_poster_iid = None;
+        }
+
+        state
+            .domains
+            .library
+            .state
+            .repo_accessor
+            .upsert(Media::Movie(Box::new(movie.clone())), &movies_library_id)
+            .expect("upsert poster clipping movie");
+
+        if *title == "Low Bitrate Key Art" {
+            seed_low_quality_poster_artwork(
+                state,
+                movie.details.primary_poster_iid,
+                movie.details.primary_backdrop_iid,
+                library_poster_size,
+                detail_poster_size,
+                (80 + offset) as u8,
+            );
+        } else {
+            seed_media_artwork(
+                state,
+                movie.details.primary_poster_iid,
+                movie.details.primary_backdrop_iid,
+                library_poster_size,
+                detail_poster_size,
+                (80 + offset) as u8,
+            );
+        }
+    }
+
+    const EXTRA_SERIES: [(&str, &str, &str); 6] = [
+        (
+            "Back Face Grove",
+            "Series art used for the open poster menu regression target.",
+            "#4b5d79",
+        ),
+        (
+            "Nested Rail Signal",
+            "A series card with busy details for stacked rail comparison.",
+            "#5b4765",
+        ),
+        (
+            "Placeholder Orchard",
+            "Series row coverage for poster placeholders and fallback color.",
+            "#6d573b",
+        ),
+        (
+            "Wide Couch Index",
+            "Series art that remains contained at full HD and ultrawide widths.",
+            "#345b54",
+        ),
+        (
+            "Scaled Hover Borough",
+            "Rail content behind the hovered movie confirms no wrong-face artifacts.",
+            "#453c66",
+        ),
+        (
+            "Rail Terminus Anthology",
+            "Rightmost series content exercises scrolled horizontal offsets.",
+            "#3c5366",
+        ),
+    ];
+
+    for (offset, (title, overview, color)) in EXTRA_SERIES.iter().enumerate() {
+        let index = offset + 1;
+        let mut series = seeded_series(
+            index,
+            series_library_id,
+            title,
+            overview,
+            "2024-04-12",
+            1,
+            8,
+            7.4 + offset as f32 * 0.12,
+            color,
+        );
+
+        if *title == "Placeholder Orchard" {
+            series.details.poster_path = None;
+            series.details.primary_poster_iid = None;
+        }
+
+        state
+            .domains
+            .library
+            .state
+            .repo_accessor
+            .upsert(Media::Series(Box::new(series.clone())), &series_library_id)
+            .expect("upsert poster clipping series");
+        seed_media_artwork(
+            state,
+            series.details.primary_poster_iid,
+            series.details.primary_backdrop_iid,
+            library_poster_size,
+            detail_poster_size,
+            (100 + offset) as u8,
+        );
+    }
+
+    state.tab_manager.refresh_all_tabs();
+}
+
+fn configure_poster_clipping_home_lists(state: &mut State) {
+    let movie_ids: Vec<Uuid> = (0..10)
+        .map(|index| seed_movie_id(index).to_uuid())
+        .collect();
+    let series_ids: Vec<Uuid> = (0..7)
+        .map(|index| seed_series_id(index).to_uuid())
+        .collect();
+
+    if let TabState::Home(home) =
+        state.tab_manager.get_or_create_tab(TabId::Home)
+    {
+        home.continue_watching = vec![movie_ids[0], movie_ids[1], movie_ids[2]];
+        home.recent_movies = movie_ids.clone();
+        home.released_movies = movie_ids.iter().rev().copied().collect();
+        home.recent_series = series_ids.clone();
+        home.released_series = series_ids.iter().rev().copied().collect();
+    }
+
+    let width = state.window_size.width.max(1.0);
+    let scale = state.domains.ui.state.scaled_layout.scale;
+    for (key, total) in [
+        (CarouselKey::Custom("ContinueWatching"), 3),
+        (CarouselKey::Custom("RecentlyAddedMovies"), movie_ids.len()),
+        (CarouselKey::Custom("RecentlyAddedSeries"), series_ids.len()),
+        (
+            CarouselKey::Custom("RecentlyReleasedMovies"),
+            movie_ids.len(),
+        ),
+        (
+            CarouselKey::Custom("RecentlyReleasedSeries"),
+            series_ids.len(),
+        ),
+    ] {
+        state.domains.ui.state.carousel_registry.ensure_default(
+            key,
+            total,
+            width,
+            CarouselConfig::poster_defaults(),
+            scale,
+        );
+    }
+}
+
+fn seed_low_quality_poster_artwork(
+    state: &State,
+    poster_iid: Option<Uuid>,
+    backdrop_iid: Option<Uuid>,
+    library_poster_size: ImageSize,
+    detail_poster_size: ImageSize,
+    seed: u8,
+) {
+    if let Some(iid) = poster_iid {
+        mark_artwork_loaded(state, iid, library_poster_size, 24, 36, seed);
+        mark_artwork_loaded(state, iid, detail_poster_size, 39, 59, seed + 17);
+        mark_artwork_loaded(
+            state,
+            iid,
+            ImageSize::Poster(PosterSize::W342),
+            33,
+            50,
+            seed + 29,
+        );
+    }
+
+    if let Some(iid) = backdrop_iid {
+        mark_artwork_loaded(
+            state,
+            iid,
+            ImageSize::Backdrop(BackdropSize::W780),
+            48,
+            27,
+            seed + 43,
+        );
+        mark_artwork_loaded(
+            state,
+            iid,
+            ImageSize::Backdrop(BackdropSize::W1280),
+            64,
+            36,
+            seed + 47,
+        );
+    }
+}
+
+fn configure_poster_clipping_menu_and_hover(state: &mut State) {
+    let hovered_key = PosterInstanceKey::new(
+        seed_movie_id(7).to_uuid(),
+        Some(CarouselKey::Custom("RecentlyAddedMovies")),
+    );
+    let backface_key = PosterInstanceKey::new(
+        seed_series_id(1).to_uuid(),
+        Some(CarouselKey::Custom("RecentlyAddedSeries")),
+    );
+
+    state.domains.ui.state.hovered_media_id = Some(hovered_key);
+    state.domains.ui.state.poster_menu_open = Some(backface_key);
+}
+
+fn configure_poster_clipping_scrolled_rails(state: &mut State) {
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_vertical_scroll_px(420.0);
+
+    for key in poster_clipping_scroll_keys() {
+        if let Some(carousel) =
+            state.domains.ui.state.carousel_registry.get_mut(&key)
+        {
+            carousel.set_index_position(2.0);
+            carousel.set_reference_index(2.0);
+        }
+    }
+}
+
+fn poster_clipping_scroll_restore_task(state: &State) -> Task<DomainMessage> {
+    let mut tasks = Vec::new();
+
+    if let Some(TabState::Home(home)) = state.tab_manager.get_tab(TabId::Home) {
+        tasks.push(scroll_to::<crate::domains::ui::messages::UiMessage>(
+            home.focus.scrollable_id.clone(),
+            AbsoluteOffset {
+                x: 0.0,
+                y: state.domains.ui.state.background_shader_state.scroll_offset,
+            },
+        ));
+    }
+
+    tasks.extend(poster_clipping_scroll_keys().into_iter().filter_map(|key| {
+        state
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&key)
+            .map(|carousel| {
+                scroll_to::<crate::domains::ui::messages::UiMessage>(
+                    carousel.scrollable_id.clone(),
+                    AbsoluteOffset {
+                        x: carousel.scroll_x,
+                        y: 0.0,
+                    },
+                )
+            })
+    }));
+
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks).map(DomainMessage::from)
+    }
+}
+
+fn poster_clipping_scroll_keys() -> [CarouselKey; 4] {
+    [
+        CarouselKey::Custom("RecentlyAddedMovies"),
+        CarouselKey::Custom("RecentlyAddedSeries"),
+        CarouselKey::Custom("RecentlyReleasedMovies"),
+        CarouselKey::Custom("RecentlyReleasedSeries"),
+    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1694,6 +2104,15 @@ mod tests {
                 .any(|scenario| scenario.name == "TenFootDetail")
         );
         assert!(
+            scenarios.iter().any(
+                |scenario| scenario.name == "PosterClippingStackedRailsTop"
+            )
+        );
+        assert!(
+            scenarios.iter().any(|scenario| scenario.name
+                == "PosterClippingStackedRailsScrolled")
+        );
+        assert!(
             scenarios
                 .iter()
                 .any(|scenario| scenario.name == "TheaterPlateGood")
@@ -1713,6 +2132,63 @@ mod tests {
                 .iter()
                 .all(|scenario| !scenario.description.is_empty())
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn poster_clipping_scenarios_seed_menu_hover_scroll_state() {
+        let top =
+            PlayerScenario::PosterClippingStackedRailsTop.build(&test_config());
+        let scrolled = PlayerScenario::PosterClippingStackedRailsScrolled
+            .build(&test_config());
+
+        assert!(matches!(top.domains.ui.state.view, ViewState::Library));
+        assert_eq!(top.tab_manager.active_tab_id(), TabId::Home);
+        assert!(top.domains.ui.state.hovered_media_id.is_some());
+        assert!(top.domains.ui.state.poster_menu_open.is_some());
+        assert_eq!(
+            top.domains.ui.state.background_shader_state.scroll_offset,
+            0.0
+        );
+        assert!(
+            scrolled
+                .domains
+                .ui
+                .state
+                .background_shader_state
+                .scroll_offset
+                > 0.0,
+            "scrolled harness should seed a vertical scroll offset"
+        );
+
+        let Some(TabState::Home(home)) = top.tab_manager.get_tab(TabId::Home)
+        else {
+            panic!("home tab should exist");
+        };
+        assert!(home.recent_movies.len() >= 8);
+        assert!(home.recent_series.len() >= 6);
+
+        for key in poster_clipping_scroll_keys() {
+            let top_carousel = top
+                .domains
+                .ui
+                .state
+                .carousel_registry
+                .get(&key)
+                .unwrap_or_else(|| panic!("missing top carousel {key:?}"));
+            assert_eq!(top_carousel.scroll_x, 0.0);
+
+            let scrolled_carousel = scrolled
+                .domains
+                .ui
+                .state
+                .carousel_registry
+                .get(&key)
+                .unwrap_or_else(|| panic!("missing scrolled carousel {key:?}"));
+            assert!(
+                scrolled_carousel.scroll_x > 0.0,
+                "{key:?} should have a horizontal scrolled offset"
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
