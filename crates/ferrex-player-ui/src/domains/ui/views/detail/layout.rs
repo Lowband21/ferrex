@@ -651,7 +651,7 @@ fn backdrop_layout(
         DetailComposition::CompactLandscape => available_height * 0.24,
         DetailComposition::BalancedDesktop => available_height * 0.36,
         DetailComposition::CinematicWide => available_height * 0.48,
-        DetailComposition::TenFoot => available_height * 0.52,
+        DetailComposition::TenFoot => available_height * 0.62,
     };
     let height =
         clamp_to_available(desired, 96.0 * scale, 520.0 * scale, max_height);
@@ -1008,7 +1008,9 @@ fn readable_copy_width_cap(plan: &DetailLayoutPlan, stage_width: f32) -> f32 {
             (stage_width * 0.48).min(840.0 * plan.scale)
         }
         DetailComposition::TenFoot => {
-            (stage_width * 0.52).min(1_080.0 * plan.scale)
+            // The TV control shelf must cover the full primary/start-over/back
+            // action row at 720p while still staying bounded on 1080p+ stages.
+            (stage_width * 0.72).min(1_080.0 * plan.scale)
         }
     };
 
@@ -1636,7 +1638,7 @@ mod tests {
         assert_eq!(short_scaled.action_cluster.axis, DetailAxis::Horizontal);
         assert!(
             short_scaled.backdrop.height
-                <= short_scaled.available_height * 0.52 + 0.01
+                <= short_scaled.available_height * 0.62 + 0.01
         );
         assert_eq!(full_hd.rail.visible_rows, 2);
     }
