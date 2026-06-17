@@ -48,6 +48,7 @@ pub use layout::{
     DetailForegroundLayout, DetailForegroundRect, DetailForegroundStage,
     DetailHeroArtAnchor, DetailInterfaceMode, DetailLayoutInput,
     DetailLayoutPlan, DetailRailDeckLayout, DetailRailLayout,
+    DetailRailMetrics, DetailRailScrollbarPolicy, DetailRailVariantMetrics,
     DetailReadableCopyLobe, DetailSafeGutters, DetailSectionBandLayout,
     DetailSectionGridLayout, DetailSurfaceIntensityTokens,
     DetailTheaterPlateLayout, DetailTheaterPlateRect, solve_detail_layout,
@@ -57,9 +58,11 @@ pub use model::{
     DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,
     DetailBackdropControl, DetailCastMember, DetailCastSection,
     DetailContentKind, DetailEmptyState, DetailFact, DetailFactPanel,
-    DetailMetadataImportance, DetailMetadataKind, DetailMetadataPill,
-    DetailNotice, DetailOverviewSection, DetailPageModel, DetailRailItem,
-    DetailRelationshipRail, DetailSection, DetailTechnicalItem,
+    DetailMediaRail, DetailMediaRailItem, DetailMetadataImportance,
+    DetailMetadataKind, DetailMetadataPill, DetailNotice,
+    DetailOverviewSection, DetailPageModel, DetailRailActivationPolicy,
+    DetailRailCardVariant, DetailRailImageRequestKind, DetailRailItem,
+    DetailRailKind, DetailRelationshipRail, DetailSection, DetailTechnicalItem,
     DetailTechnicalSection, DetailTone, prioritize_metadata_items,
 };
 pub use typography::{

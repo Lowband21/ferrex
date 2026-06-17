@@ -1,8 +1,11 @@
-use super::typography::{DetailTypography, DetailTypographyInput};
+use super::{
+    model::DetailRailCardVariant,
+    typography::{DetailTextStyle, DetailTypography, DetailTypographyInput},
+};
 
 use crate::{
     infra::{
-        constants::layout::{calculations::ScaledLayout, grid},
+        constants::layout::{calculations::ScaledLayout, grid, poster},
         design_tokens::{ScalingContext, SizeProvider},
     },
     state::InterfaceMode,
@@ -357,10 +360,69 @@ pub struct DetailSectionGridLayout {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DetailRailLayout {
+    /// Compatibility card width used by older detail-panel call sites.
+    pub card_width: f32,
+    /// Compatibility card height used by older detail-panel call sites.
+    pub card_height: f32,
+    /// Shared inter-card gap for detail rails.
+    pub gap: f32,
+    /// Number of card rows the current viewport family can expose.
+    pub visible_rows: usize,
+    /// Variant-aware metrics for unified detail media rails.
+    pub variant_metrics: DetailRailVariantMetrics,
+}
+
+impl DetailRailLayout {
+    pub fn metrics_for(
+        &self,
+        variant: DetailRailCardVariant,
+    ) -> DetailRailMetrics {
+        self.variant_metrics.metrics_for(variant)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailRailVariantMetrics {
+    pub profile: DetailRailMetrics,
+    pub poster: DetailRailMetrics,
+    pub still_wide: DetailRailMetrics,
+}
+
+impl DetailRailVariantMetrics {
+    pub fn metrics_for(
+        &self,
+        variant: DetailRailCardVariant,
+    ) -> DetailRailMetrics {
+        match variant {
+            DetailRailCardVariant::Profile => self.profile,
+            DetailRailCardVariant::Poster => self.poster,
+            DetailRailCardVariant::StillWide => self.still_wide,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetailRailMetrics {
+    pub variant: DetailRailCardVariant,
+    pub art_width: f32,
+    pub art_height: f32,
     pub card_width: f32,
     pub card_height: f32,
+    pub stride: f32,
     pub gap: f32,
+    pub text_zone_height: f32,
+    pub scroll_height: f32,
+    pub edge_fade_width: f32,
+    pub scrollbar_policy: DetailRailScrollbarPolicy,
+    pub overscan: usize,
     pub visible_rows: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailRailScrollbarPolicy {
+    Hidden,
+    Overlay,
+    Always,
 }
 
 /// Resolve a detail layout without reading application state or repositories.
@@ -427,7 +489,7 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
     let action_cluster =
         action_cluster_layout(composition, content_width, scale);
     let section_grid = section_grid_layout(composition, content_width, scale);
-    let rail = rail_layout(
+    let mut rail = rail_layout(
         composition,
         content_width,
         available_height,
@@ -444,6 +506,15 @@ pub fn solve_detail_layout(input: DetailLayoutInput) -> DetailLayoutPlan {
             hero_gap,
             rail_card_width: rail.card_width,
         },
+    );
+    rail.variant_metrics = rail_variant_metrics(
+        composition,
+        content_width,
+        scale,
+        rail.card_width,
+        rail.gap,
+        rail.visible_rows,
+        typography,
     );
 
     DetailLayoutPlan {
@@ -792,6 +863,244 @@ fn rail_layout(
         card_height,
         gap,
         visible_rows,
+        variant_metrics: placeholder_rail_variant_metrics(
+            card_width,
+            card_height,
+            gap,
+            visible_rows,
+        ),
+    }
+}
+
+fn placeholder_rail_variant_metrics(
+    card_width: f32,
+    card_height: f32,
+    gap: f32,
+    visible_rows: usize,
+) -> DetailRailVariantMetrics {
+    let metrics = DetailRailMetrics {
+        variant: DetailRailCardVariant::StillWide,
+        art_width: card_width,
+        art_height: card_height,
+        card_width,
+        card_height,
+        stride: card_width + gap,
+        gap,
+        text_zone_height: 0.0,
+        scroll_height: card_height,
+        edge_fade_width: 0.0,
+        scrollbar_policy: DetailRailScrollbarPolicy::Overlay,
+        overscan: 1,
+        visible_rows,
+    };
+
+    DetailRailVariantMetrics {
+        profile: DetailRailMetrics {
+            variant: DetailRailCardVariant::Profile,
+            ..metrics
+        },
+        poster: DetailRailMetrics {
+            variant: DetailRailCardVariant::Poster,
+            ..metrics
+        },
+        still_wide: metrics,
+    }
+}
+
+fn rail_variant_metrics(
+    composition: DetailComposition,
+    content_width: f32,
+    scale: f32,
+    base_card_width: f32,
+    gap: f32,
+    visible_rows: usize,
+    typography: DetailTypography,
+) -> DetailRailVariantMetrics {
+    let edge_fade_width = rail_edge_fade_width(composition, scale);
+    let scrollbar_policy = rail_scrollbar_policy(composition);
+    let overscan = rail_overscan(composition);
+    let inline_text_zone = rail_inline_text_zone_height(typography, gap);
+
+    let still_art_width = base_card_width;
+    let still_art_height = still_art_width / STILL_ASPECT;
+    let still_text_zone = rail_shader_text_zone_height(still_art_height, scale);
+    let still_wide = detail_rail_metrics(
+        DetailRailCardVariant::StillWide,
+        still_art_width,
+        still_art_height,
+        still_art_width,
+        still_text_zone,
+        gap,
+        edge_fade_width,
+        scrollbar_policy,
+        overscan,
+        visible_rows,
+    );
+
+    let poster_card_width = base_card_width.min(content_width).max(1.0);
+    let poster_art_height = poster_card_width / POSTER_ASPECT;
+    let poster_text_zone =
+        rail_shader_text_zone_height(poster_art_height, scale);
+    let poster = detail_rail_metrics(
+        DetailRailCardVariant::Poster,
+        poster_card_width,
+        poster_art_height,
+        poster_card_width,
+        poster_text_zone,
+        gap,
+        edge_fade_width,
+        scrollbar_policy,
+        overscan,
+        visible_rows,
+    );
+
+    let profile_card_width = profile_rail_card_width(
+        composition,
+        content_width,
+        scale,
+        base_card_width,
+    );
+    let profile_art_width = (profile_card_width * 0.72)
+        .clamp(72.0 * scale, 180.0 * scale)
+        .min(profile_card_width);
+    let profile_art_height = profile_art_width / POSTER_ASPECT;
+    let profile = detail_rail_metrics(
+        DetailRailCardVariant::Profile,
+        profile_art_width,
+        profile_art_height,
+        profile_card_width,
+        inline_text_zone,
+        gap,
+        edge_fade_width,
+        scrollbar_policy,
+        overscan,
+        visible_rows,
+    );
+
+    DetailRailVariantMetrics {
+        profile,
+        poster,
+        still_wide,
+    }
+}
+
+fn detail_rail_metrics(
+    variant: DetailRailCardVariant,
+    art_width: f32,
+    art_height: f32,
+    card_width: f32,
+    text_zone_height: f32,
+    gap: f32,
+    edge_fade_width: f32,
+    scrollbar_policy: DetailRailScrollbarPolicy,
+    overscan: usize,
+    visible_rows: usize,
+) -> DetailRailMetrics {
+    let card_height = art_height + text_zone_height;
+    DetailRailMetrics {
+        variant,
+        art_width,
+        art_height,
+        card_width,
+        card_height,
+        stride: card_width + gap,
+        gap,
+        text_zone_height,
+        scroll_height: card_height
+            + rail_scrollbar_clearance(gap, scrollbar_policy),
+        edge_fade_width,
+        scrollbar_policy,
+        overscan,
+        visible_rows,
+    }
+}
+
+fn profile_rail_card_width(
+    composition: DetailComposition,
+    content_width: f32,
+    scale: f32,
+    base_card_width: f32,
+) -> f32 {
+    let width = match composition {
+        DetailComposition::CompactPortrait => (content_width * 0.46)
+            .min(base_card_width)
+            .max(112.0 * scale),
+        DetailComposition::CompactLandscape => {
+            base_card_width.max(140.0 * scale)
+        }
+        DetailComposition::BalancedDesktop => {
+            base_card_width.max(170.0 * scale)
+        }
+        DetailComposition::CinematicWide => base_card_width.max(200.0 * scale),
+        DetailComposition::TenFoot => base_card_width.max(220.0 * scale),
+    };
+    width.min(content_width).max(1.0)
+}
+
+fn rail_inline_text_zone_height(typography: DetailTypography, gap: f32) -> f32 {
+    text_style_budget_height(typography.rail_title)
+        + text_style_budget_height(typography.rail_subtitle)
+        + gap.min(12.0)
+}
+
+fn text_style_budget_height(style: DetailTextStyle) -> f32 {
+    style.line_height_px() * f32::from(style.max_lines().unwrap_or(1))
+}
+
+fn rail_shader_text_zone_height(art_height: f32, scale: f32) -> f32 {
+    let display_scaled = if poster::BASE_HEIGHT > 0.0 {
+        poster::SHADER_TEXT_ZONE_HEIGHT * (art_height / poster::BASE_HEIGHT)
+    } else {
+        poster::SHADER_TEXT_ZONE_HEIGHT
+    };
+    display_scaled
+        .max(poster::SHADER_TEXT_ZONE_HEIGHT * scale)
+        .max(0.0)
+}
+
+fn rail_scrollbar_policy(
+    composition: DetailComposition,
+) -> DetailRailScrollbarPolicy {
+    match composition {
+        DetailComposition::CompactPortrait | DetailComposition::TenFoot => {
+            DetailRailScrollbarPolicy::Hidden
+        }
+        DetailComposition::CompactLandscape
+        | DetailComposition::BalancedDesktop
+        | DetailComposition::CinematicWide => {
+            DetailRailScrollbarPolicy::Overlay
+        }
+    }
+}
+
+fn rail_edge_fade_width(composition: DetailComposition, scale: f32) -> f32 {
+    let width = match composition {
+        DetailComposition::CompactPortrait => 16.0,
+        DetailComposition::CompactLandscape => 20.0,
+        DetailComposition::BalancedDesktop => 24.0,
+        DetailComposition::CinematicWide => 32.0,
+        DetailComposition::TenFoot => 48.0,
+    };
+    width * scale
+}
+
+fn rail_overscan(composition: DetailComposition) -> usize {
+    match composition {
+        DetailComposition::CompactPortrait => 1,
+        DetailComposition::CompactLandscape
+        | DetailComposition::BalancedDesktop => 2,
+        DetailComposition::CinematicWide | DetailComposition::TenFoot => 3,
+    }
+}
+
+fn rail_scrollbar_clearance(
+    gap: f32,
+    policy: DetailRailScrollbarPolicy,
+) -> f32 {
+    match policy {
+        DetailRailScrollbarPolicy::Hidden => 0.0,
+        DetailRailScrollbarPolicy::Overlay => gap.min(16.0),
+        DetailRailScrollbarPolicy::Always => gap.min(16.0) + 6.0,
     }
 }
 
@@ -1817,6 +2126,89 @@ mod tests {
                 <= short_scaled.available_height * 0.62 + 0.01
         );
         assert_eq!(full_hd.rail.visible_rows, 2);
+    }
+
+    #[test]
+    fn detail_rail_metrics_cover_required_viewport_families_and_variants() {
+        let cases = [
+            (
+                "compact",
+                input(390.0, 844.0, 1.0, 50.0, DetailInterfaceMode::Desktop),
+                DetailComposition::CompactPortrait,
+                1,
+            ),
+            (
+                "desktop-720p",
+                input(1_280.0, 720.0, 1.0, 50.0, DetailInterfaceMode::Desktop),
+                DetailComposition::BalancedDesktop,
+                1,
+            ),
+            (
+                "desktop-1080p",
+                input(
+                    1_920.0,
+                    1_080.0,
+                    1.0,
+                    50.0,
+                    DetailInterfaceMode::Desktop,
+                ),
+                DetailComposition::CinematicWide,
+                1,
+            ),
+            (
+                "ultrawide",
+                input(
+                    3_440.0,
+                    1_440.0,
+                    1.0,
+                    50.0,
+                    DetailInterfaceMode::Desktop,
+                ),
+                DetailComposition::CinematicWide,
+                1,
+            ),
+            (
+                "tenfoot",
+                input(1_920.0, 1_080.0, 1.0, 0.0, DetailInterfaceMode::TenFoot),
+                DetailComposition::TenFoot,
+                2,
+            ),
+        ];
+
+        for (name, input, expected, visible_rows) in cases {
+            let plan = solve_detail_layout(input);
+            assert_eq!(plan.composition, expected, "{name} composition");
+            assert_eq!(plan.rail.visible_rows, visible_rows, "{name} rows");
+
+            for variant in [
+                DetailRailCardVariant::Profile,
+                DetailRailCardVariant::Poster,
+                DetailRailCardVariant::StillWide,
+            ] {
+                let metrics = plan.rail.metrics_for(variant);
+                assert_eq!(metrics.variant, variant, "{name} {variant:?}");
+                assert_eq!(metrics.visible_rows, visible_rows);
+                assert!(
+                    metrics.art_width > 0.0,
+                    "{name} {variant:?} art width"
+                );
+                assert!(
+                    metrics.art_height > 0.0,
+                    "{name} {variant:?} art height"
+                );
+                assert!(metrics.card_width >= metrics.art_width);
+                assert!(metrics.card_height >= metrics.art_height);
+                assert!(metrics.text_zone_height >= 0.0);
+                assert!(metrics.gap > 0.0);
+                assert!(
+                    (metrics.stride - (metrics.card_width + metrics.gap)).abs()
+                        < 0.01
+                );
+                assert!(metrics.scroll_height >= metrics.card_height);
+                assert!(metrics.edge_fade_width >= 0.0);
+                assert!(metrics.overscan >= 1);
+            }
+        }
     }
 
     #[test]

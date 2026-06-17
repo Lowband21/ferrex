@@ -13,7 +13,8 @@ use crate::{
                     DetailBackdropControl, DetailContentKind,
                     DetailLayoutInput, DetailMetadataImportance,
                     DetailMetadataPill, DetailNotice, DetailOverviewSection,
-                    DetailPageModel, DetailRailItem,
+                    DetailPageModel, DetailRailActivationPolicy,
+                    DetailRailCardVariant, DetailRailItem, DetailRailKind,
                     DetailRegisteredRailAdapter, DetailRelationshipRail,
                     DetailSection, DetailTone, prioritize_metadata_items,
                     solve_detail_layout,
@@ -577,6 +578,9 @@ fn seasons_relationship_rail(
     let key = CarouselKey::ShowSeasons(series_id.to_uuid());
     DetailRelationshipRail {
         id: carousel_key_id(&key),
+        kind: DetailRailKind::Seasons,
+        card_variant: DetailRailCardVariant::Poster,
+        activation_policy: DetailRailActivationPolicy::Navigate,
         carousel_key: Some(key),
         title: "Seasons".to_string(),
         empty_message: Some(format!(
@@ -617,6 +621,9 @@ fn episodes_relationship_rail(
     let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
     DetailRelationshipRail {
         id: carousel_key_id(&key),
+        kind: DetailRailKind::Episodes,
+        card_variant: DetailRailCardVariant::StillWide,
+        activation_policy: DetailRailActivationPolicy::Play,
         carousel_key: Some(key),
         title: "Episodes".to_string(),
         empty_message: Some(format!(
@@ -888,6 +895,9 @@ mod tests {
             )),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "registered-seasons".to_string(),
+                kind: DetailRailKind::Seasons,
+                card_variant: DetailRailCardVariant::Poster,
+                activation_policy: DetailRailActivationPolicy::Navigate,
                 carousel_key: Some(registered_key.clone()),
                 title: "Seasons".to_string(),
                 items: Vec::new(),
@@ -895,6 +905,9 @@ mod tests {
             }),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "missing-episodes".to_string(),
+                kind: DetailRailKind::Episodes,
+                card_variant: DetailRailCardVariant::StillWide,
+                activation_policy: DetailRailActivationPolicy::Play,
                 carousel_key: Some(missing_key),
                 title: "Episodes".to_string(),
                 items: Vec::new(),
@@ -902,6 +915,9 @@ mod tests {
             }),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "anonymous".to_string(),
+                kind: DetailRailKind::Related,
+                card_variant: DetailRailCardVariant::StillWide,
+                activation_policy: DetailRailActivationPolicy::ActivateItem,
                 carousel_key: None,
                 title: "Related".to_string(),
                 items: Vec::new(),

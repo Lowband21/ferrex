@@ -500,6 +500,10 @@ fn movie_cast_members(
             };
 
             DetailCastMember {
+                id: actor
+                    .person_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| actor.id.to_string()),
                 name,
                 role,
                 artwork,
