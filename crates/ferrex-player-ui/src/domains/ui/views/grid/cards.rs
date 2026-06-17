@@ -104,6 +104,22 @@ pub fn create_series_card<'a>(
     )
 }
 
+fn poster_card_priority(
+    is_hovered: bool,
+    is_visible: bool,
+    carousel_key: Option<&CarouselKey>,
+) -> Priority {
+    // Virtual carousels only instantiate the current render window. Treat those
+    // poster cards as immediately visible so shader restores do not regress
+    // carousel image demand while grid callers continue to pass explicit
+    // visibility with no carousel key.
+    if is_hovered || is_visible || carousel_key.is_some() {
+        Priority::Visible
+    } else {
+        Priority::Preload
+    }
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -194,11 +210,11 @@ pub fn movie_reference_card_with_state<'a>(
                         .radius(scaled_layout.corner_radius)
                         .animation_behavior(AnimationBehavior::default())
                         .placeholder(lucide_icons::Icon::Film)
-                        .priority(if is_hovered || is_visible {
-                            Priority::Visible
-                        } else {
-                            Priority::Preload
-                        })
+                        .priority(poster_card_priority(
+                            is_hovered,
+                            is_visible,
+                            carousel_key,
+                        ))
                         .is_hovered(is_hovered)
                         .hover_scale_enabled(false)
                         .on_click(
@@ -256,12 +272,8 @@ pub fn movie_reference_card_with_state<'a>(
         ArchivedOption::None => None,
     };
 
-    // Determine priority based on visibility and hover state
-    let priority = if is_hovered || is_visible {
-        Priority::Visible
-    } else {
-        Priority::Preload
-    };
+    // Determine priority based on visibility, hover, and carousel windowing.
+    let priority = poster_card_priority(is_hovered, is_visible, carousel_key);
 
     // Create image with watch progress and scroll tier
     let mut img = image_for(media_id.to_uuid())
@@ -448,11 +460,11 @@ pub fn series_reference_card_with_state<'a>(
                         .radius(scaled_layout.corner_radius)
                         .animation_behavior(AnimationBehavior::default())
                         .placeholder(lucide_icons::Icon::Tv)
-                        .priority(if is_hovered || is_visible {
-                            Priority::Visible
-                        } else {
-                            Priority::Preload
-                        })
+                        .priority(poster_card_priority(
+                            is_hovered,
+                            is_visible,
+                            carousel_key,
+                        ))
                         .is_hovered(is_hovered)
                         .hover_scale_enabled(false)
                         .on_click(UiShellMessage::ViewTvShow(series_id).into());
@@ -505,12 +517,8 @@ pub fn series_reference_card_with_state<'a>(
         ArchivedOption::None => None,
     };
 
-    // Determine priority based on visibility and hover state
-    let priority = if is_hovered || is_visible {
-        Priority::Visible
-    } else {
-        Priority::Preload
-    };
+    // Determine priority based on visibility, hover, and carousel windowing.
+    let priority = poster_card_priority(is_hovered, is_visible, carousel_key);
 
     // Create image with scroll tier
     let mut img = image_for(series_id.to_uuid())
@@ -750,4 +758,22 @@ fn truncate(text: &mut String) -> String {
         text.push_str("...");
     }
     text.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poster_card_priority_keeps_carousel_window_visible() {
+        let carousel_key = CarouselKey::LibraryMovies(Uuid::from_u128(7));
+
+        assert_eq!(
+            poster_card_priority(false, false, Some(&carousel_key)),
+            Priority::Visible
+        );
+        assert_eq!(poster_card_priority(false, true, None), Priority::Visible);
+        assert_eq!(poster_card_priority(true, false, None), Priority::Visible);
+        assert_eq!(poster_card_priority(false, false, None), Priority::Preload);
+    }
 }

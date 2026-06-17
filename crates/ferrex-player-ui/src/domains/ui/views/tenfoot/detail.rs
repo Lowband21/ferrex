@@ -12,9 +12,12 @@ use crate::{
             playback_ui::PlaybackMessage,
             shell_ui::UiShellMessage,
             theme,
-            views::detail::{
-                DetailArtAspect, DetailInterfaceMode, DetailLayoutInput,
-                DetailLayoutPlan, solve_detail_layout,
+            views::{
+                detail::{
+                    DetailArtAspect, DetailInterfaceMode, DetailLayoutInput,
+                    DetailLayoutPlan, solve_detail_layout,
+                },
+                virtual_carousel::types::CarouselKey,
             },
             widgets::image_for,
         },
@@ -137,6 +140,23 @@ impl TenFootDetailPanelId {
             Self::SeriesEpisodes(_) => "Episodes",
             Self::SeasonEpisodes(_) => "Episodes",
             Self::EpisodeSiblings(_) => "This Season",
+        }
+    }
+
+    fn poster_carousel_key(&self) -> CarouselKey {
+        match self {
+            Self::SeriesSeasons(series_id) => {
+                CarouselKey::ShowSeasons(series_id.to_uuid())
+            }
+            Self::SeriesEpisodes(_) => {
+                CarouselKey::Custom("TenFootDetailSeriesEpisodes")
+            }
+            Self::SeasonEpisodes(season_id) => {
+                CarouselKey::SeasonEpisodes(season_id.to_uuid())
+            }
+            Self::EpisodeSiblings(_) => {
+                CarouselKey::Custom("TenFootDetailEpisodeSiblings")
+            }
         }
     }
 }
@@ -1656,7 +1676,19 @@ fn view_panel_card<'a>(
     _index: usize,
     plan: &DetailLayoutPlan,
 ) -> Element<'a, UiMessage> {
-    let image = view_panel_item_image(state, &item.image(), plan, focused);
+    let carousel_key = match &focus_id {
+        TenFootDetailFocusId::PanelItem { panel, .. } => {
+            Some(panel.poster_carousel_key())
+        }
+        TenFootDetailFocusId::Action(_) => None,
+    };
+    let image = view_panel_item_image(
+        state,
+        &item.image(),
+        plan,
+        focused,
+        carousel_key,
+    );
     let content = row![
         image,
         column![
@@ -1805,6 +1837,7 @@ fn view_panel_item_image<'a>(
     image: &DetailImage,
     plan: &DetailLayoutPlan,
     focused: bool,
+    carousel_key: Option<CarouselKey>,
 ) -> Element<'a, UiMessage> {
     let (width, height) = panel_image_size(image, plan);
     let radius = (plan.hero_art.corner_radius * 0.55).clamp(2.0, 6.0);
@@ -1813,38 +1846,48 @@ fn view_panel_item_image<'a>(
             media_uuid,
             iid,
             placeholder,
-        } => image_for(*media_uuid)
-            .iid(*iid)
-            .skip_request(iid.is_none())
-            .request_size(ImageSize::Poster(
-                state.domains.settings.display.library_poster_quality,
-            ))
-            .display_size(width, height)
-            .radius(radius)
-            .priority(if focused {
-                Priority::Visible
-            } else {
-                Priority::Preload
-            })
-            .placeholder(*placeholder)
-            .tight_bounds()
-            .no_animation()
-            .into(),
-        DetailImage::Still { media_uuid, iid } => image_for(*media_uuid)
-            .iid(*iid)
-            .skip_request(iid.is_none())
-            .request_size(ImageSize::thumbnail())
-            .display_size(width, height)
-            .radius(radius)
-            .priority(if focused {
-                Priority::Visible
-            } else {
-                Priority::Preload
-            })
-            .placeholder(lucide_icons::Icon::Clapperboard)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let mut poster = image_for(*media_uuid)
+                .iid(*iid)
+                .skip_request(iid.is_none())
+                .request_size(ImageSize::Poster(
+                    state.domains.settings.display.library_poster_quality,
+                ))
+                .display_size(width, height)
+                .radius(radius)
+                .priority(if focused {
+                    Priority::Visible
+                } else {
+                    Priority::Preload
+                })
+                .placeholder(*placeholder)
+                .tight_bounds()
+                .no_animation();
+            if let Some(key) = carousel_key {
+                poster = poster.carousel_key(key);
+            }
+            poster.into()
+        }
+        DetailImage::Still { media_uuid, iid } => {
+            let mut still = image_for(*media_uuid)
+                .iid(*iid)
+                .skip_request(iid.is_none())
+                .request_size(ImageSize::thumbnail())
+                .display_size(width, height)
+                .radius(radius)
+                .priority(if focused {
+                    Priority::Visible
+                } else {
+                    Priority::Preload
+                })
+                .placeholder(lucide_icons::Icon::Clapperboard)
+                .tight_bounds()
+                .no_animation();
+            if let Some(key) = carousel_key {
+                still = still.carousel_key(key);
+            }
+            still.into()
+        }
         DetailImage::None => Space::new()
             .width(Length::Fixed(width))
             .height(Length::Fixed(height))
@@ -2388,6 +2431,29 @@ mod tests {
             panel: panel.id.clone(),
             item: panel.items[item_index].id(),
         }
+    }
+
+    #[test]
+    fn panel_images_use_stable_carousel_identity() {
+        let series = SeriesID(Uuid::from_u128(11));
+        let season = season_id(12);
+
+        assert_eq!(
+            TenFootDetailPanelId::SeriesSeasons(series).poster_carousel_key(),
+            CarouselKey::ShowSeasons(series.to_uuid())
+        );
+        assert_eq!(
+            TenFootDetailPanelId::SeasonEpisodes(season).poster_carousel_key(),
+            CarouselKey::SeasonEpisodes(season.to_uuid())
+        );
+        assert_eq!(
+            TenFootDetailPanelId::SeriesEpisodes(series).poster_carousel_key(),
+            CarouselKey::Custom("TenFootDetailSeriesEpisodes")
+        );
+        assert_eq!(
+            TenFootDetailPanelId::EpisodeSiblings(season).poster_carousel_key(),
+            CarouselKey::Custom("TenFootDetailEpisodeSiblings")
+        );
     }
 
     #[test]
