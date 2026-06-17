@@ -219,16 +219,25 @@ impl DetailTypography {
             DetailComposition::TenFoot => 1.04,
         };
         let hero_overview_size = match composition {
-            DetailComposition::TenFoot => font.body * 1.12,
+            DetailComposition::TenFoot => font.body_lg * 1.12,
             DetailComposition::CinematicWide => font.body * 1.05,
             _ => font.body,
         };
+        let metadata_size = match composition {
+            DetailComposition::TenFoot => font.caption * 1.15,
+            DetailComposition::CinematicWide => font.caption,
+            _ => font.small,
+        };
         let action_label_size = match composition {
-            DetailComposition::TenFoot => font.body_lg,
+            DetailComposition::TenFoot => font.subtitle,
             _ => font.body,
         };
+        let action_subtitle_size = match composition {
+            DetailComposition::TenFoot => font.caption * 1.10,
+            _ => font.small,
+        };
         let caption_size = match composition {
-            DetailComposition::TenFoot => font.caption * 1.08,
+            DetailComposition::TenFoot => font.body_lg,
             _ => font.caption,
         };
         let cast_name_size = match composition {
@@ -299,7 +308,7 @@ impl DetailTypography {
                 hero_alignment,
             ),
             metadata: style(
-                font.small,
+                metadata_size,
                 1.18,
                 DetailColorIntent::Secondary,
                 metrics.metadata_spacing,
@@ -361,7 +370,7 @@ impl DetailTypography {
                 DetailTextAlignment::Center,
             ),
             action_subtitle: style(
-                font.small,
+                action_subtitle_size,
                 1.12,
                 DetailColorIntent::Secondary,
                 spacing.xs,
