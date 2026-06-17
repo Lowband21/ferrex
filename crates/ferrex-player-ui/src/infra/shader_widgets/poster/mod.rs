@@ -186,30 +186,55 @@ impl Poster {
         self
     }
 
-    /// Sets animated bounds and reserves layout space for effect overflow.
-    pub fn with_animated_bounds(
+    fn with_layout_bounds(
         mut self,
         bounds: animation::AnimatedPosterBounds,
     ) -> Self {
         self.bounds = Some(bounds);
-        // Use layout bounds for stable grid positioning when hover/glow/scale
-        // effects are allowed to draw outside the base poster rectangle.
         let (width, height) = bounds.layout_bounds();
         self.width = Length::Fixed(width);
         self.height = Length::Fixed(height);
         self
     }
 
-    /// Sets animated bounds while keeping the layout box equal to the visible poster.
-    pub fn with_tight_bounds(
-        mut self,
+    /// Sets animated bounds and reserves layout space for effect overflow.
+    pub fn with_animated_bounds(
+        self,
         bounds: animation::AnimatedPosterBounds,
     ) -> Self {
-        self.bounds = Some(bounds);
-        self.width = Length::Fixed(bounds.base_width * bounds.ui_scale_factor);
-        self.height =
-            Length::Fixed(bounds.base_height * bounds.ui_scale_factor);
-        self
+        // Use layout bounds for stable grid positioning when hover/glow/scale
+        // effects are allowed to draw outside the base poster rectangle.
+        self.with_layout_bounds(bounds)
+    }
+
+    /// Sets animated bounds while keeping the layout box equal to the visible poster.
+    pub fn with_tight_bounds(
+        self,
+        bounds: animation::AnimatedPosterBounds,
+    ) -> Self {
+        self.with_layout_bounds(bounds.without_effect_padding())
+    }
+
+    /// Sets bounds that reserve only the shader title/meta zone below the poster.
+    pub fn with_text_bounds(
+        self,
+        bounds: animation::AnimatedPosterBounds,
+        text_zone_height: f32,
+    ) -> Self {
+        self.with_layout_bounds(
+            bounds
+                .without_effect_padding()
+                .with_text_zone_height(text_zone_height),
+        )
+    }
+
+    /// Sets bounds that reserve both effect overflow and shader title/meta text.
+    pub fn with_animated_text_bounds(
+        self,
+        bounds: animation::AnimatedPosterBounds,
+        text_zone_height: f32,
+    ) -> Self {
+        self.with_layout_bounds(bounds.with_text_zone_height(text_zone_height))
     }
 
     /// Sets the hover state
@@ -346,6 +371,32 @@ mod tests {
         );
         assert!(layout_width > bounds.base_width);
         assert!(layout_height > bounds.base_height);
+    }
+
+    #[test]
+    fn text_bounds_reserve_shader_text_zone_without_effect_padding() {
+        let bounds = animation::AnimatedPosterBounds::new(100.0, 150.0);
+        let poster = Poster::new(transparent_handle(), None)
+            .with_text_bounds(bounds, 50.0);
+
+        assert!(
+            matches!(poster.width, Length::Fixed(width) if (width - 100.0).abs() < f32::EPSILON)
+        );
+        assert!(
+            matches!(poster.height, Length::Fixed(height) if (height - 200.0).abs() < f32::EPSILON)
+        );
+    }
+
+    #[test]
+    fn animated_text_bounds_reserve_effect_padding_and_shader_text_zone() {
+        let bounds = animation::AnimatedPosterBounds::new(100.0, 150.0);
+        let effect_height = bounds.layout_bounds().1;
+        let poster = Poster::new(transparent_handle(), None)
+            .with_animated_text_bounds(bounds, 50.0);
+
+        assert!(
+            matches!(poster.height, Length::Fixed(height) if (height - (effect_height + 50.0)).abs() < f32::EPSILON)
+        );
     }
 }
 

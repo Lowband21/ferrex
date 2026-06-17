@@ -76,18 +76,25 @@ impl Default for AnimationConfig {
     }
 }
 
-/// Dynamic bounds for animated posters
+/// Dynamic bounds for animated posters.
+///
+/// `base_width`/`base_height` are the visible poster rectangle. Optional
+/// `horizontal_padding`/`vertical_padding` reserve layout room for intentional
+/// scale/glow/shadow effects around that visible rectangle. Optional
+/// `text_zone_height` reserves the shader title/meta zone below the poster.
 #[derive(Debug, Clone, Copy)]
 pub struct AnimatedPosterBounds {
     pub base_height: f32,
-    /// Base size of the poster
+    /// Base size of the visible poster.
     pub base_width: f32,
-    /// Extra horizontal padding for animation overflow (e.g., scale and shadows)
+    /// Extra horizontal layout padding for animation overflow (e.g., scale and shadows).
     pub horizontal_padding: f32,
-    /// Global UI scale factor for DPI independence
+    /// Global UI scale factor for DPI independence.
     pub ui_scale_factor: f32,
-    /// Extra vertical padding for animation overflow
+    /// Extra vertical layout padding for animation overflow.
     pub vertical_padding: f32,
+    /// Layout space reserved below the visible poster for shader title/meta text.
+    pub text_zone_height: f32,
     /// Hover scale factor for render-time use (stored from AnimationConfig)
     pub hover_scale: f32,
     /// Hover transition duration in milliseconds (stored from AnimationConfig)
@@ -125,6 +132,7 @@ impl AnimatedPosterBounds {
             horizontal_padding,
             vertical_padding,
             ui_scale_factor: 1.0,
+            text_zone_height: 0.0,
             hover_scale: config.hover_scale,
             hover_transition_ms: config.hover_transition_ms,
             hover_scale_down_delay_ms: config.hover_scale_down_delay_ms,
@@ -136,25 +144,68 @@ impl AnimatedPosterBounds {
         Self::new_with_config(width, height, &AnimationConfig::default())
     }
 
-    /// Get the layout bounds - includes padding for effects
+    /// Return a copy that does not reserve layout padding for effects.
+    ///
+    /// Render-time hover scale is preserved; only the widget's claimed layout
+    /// bounds become tight to the visible poster (plus any text zone added
+    /// separately).
+    pub fn without_effect_padding(mut self) -> Self {
+        self.horizontal_padding = 0.0;
+        self.vertical_padding = 0.0;
+        self
+    }
+
+    /// Return a copy that reserves a shader title/meta zone below the poster.
+    pub fn with_text_zone_height(mut self, text_zone_height: f32) -> Self {
+        self.text_zone_height = text_zone_height.max(0.0);
+        self
+    }
+
+    /// Get the layout bounds: visible poster + optional effect padding + optional text zone.
     pub fn layout_bounds(&self) -> (f32, f32) {
-        // Return size with padding included - this is what the layout system sees
+        // Return size with reservations included - this is what the layout system sees.
         (
             (self.base_width + self.horizontal_padding * 2.0)
                 * self.ui_scale_factor,
-            (self.base_height + self.vertical_padding * 2.0)
+            (self.base_height
+                + self.vertical_padding * 2.0
+                + self.text_zone_height)
                 * self.ui_scale_factor,
         )
     }
 
-    /// Get the render bounds including animation overflow space
+    /// Offset of the visible poster inside the layout bounds.
+    pub fn poster_offset(&self) -> (f32, f32) {
+        (
+            self.horizontal_padding * self.ui_scale_factor,
+            self.vertical_padding * self.ui_scale_factor,
+        )
+    }
+
+    /// Size of the visible poster inside the layout bounds.
+    pub fn poster_size(&self) -> (f32, f32) {
+        (
+            self.base_width * self.ui_scale_factor,
+            self.base_height * self.ui_scale_factor,
+        )
+    }
+
+    /// Reserved shader text zone height in layout pixels.
+    pub fn text_zone_height(&self) -> f32 {
+        self.text_zone_height * self.ui_scale_factor
+    }
+
+    /// Get the render bounds including animation overflow and shader text space.
     pub fn render_bounds(&self) -> Rectangle {
-        // Center the base bounds within the padded area
+        // Keep the visible poster at (0, 0) in local coordinates, with negative
+        // origin only for effect overflow. The text zone sits below the poster.
         Rectangle {
             x: -self.horizontal_padding,
             y: -self.vertical_padding,
             width: self.base_width + (self.horizontal_padding * 2.0),
-            height: self.base_height + (self.vertical_padding * 2.0),
+            height: self.base_height
+                + (self.vertical_padding * 2.0)
+                + self.text_zone_height,
         }
     }
 }
