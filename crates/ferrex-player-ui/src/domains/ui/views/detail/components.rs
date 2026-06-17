@@ -8,25 +8,25 @@ use crate::{
         },
         widgets::image_for::image_for,
     },
-    infra::{design_tokens::SizeProvider, service_registry},
+    infra::design_tokens::SizeProvider,
 };
 
 use super::{
-    DetailAction, DetailActionRole, DetailArtLayout, DetailArtwork,
-    DetailBackdropControl, DetailCastMember, DetailCastSection,
+    DetailAction, DetailActionRole, DetailArtAspect, DetailArtLayout,
+    DetailArtwork, DetailBackdropControl, DetailCastMember, DetailCastSection,
     DetailComposition, DetailEmptyState, DetailFact, DetailFactPanel,
     DetailLayoutPlan, DetailMetadataPill, DetailNotice, DetailOverviewSection,
     DetailPageModel, DetailRailItem, DetailRelationshipRail, DetailSection,
     DetailTechnicalItem, DetailTechnicalSection, DetailTone,
 };
-use ferrex_core::player_prelude::{ImageRequest, Priority};
+use ferrex_core::player_prelude::Priority;
 use ferrex_model::ImageSize;
 use iced::{
-    Alignment, Background, Border, Color, ContentFit, Element, Length, Shadow,
-    Theme, Vector,
+    Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
+    Vector,
     widget::{
-        Column, Row, Space, button, column, container, image as iced_image,
-        mouse_area, row, scrollable, text,
+        Column, Row, Space, button, column, container, mouse_area, row,
+        scrollable, text,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
@@ -322,7 +322,7 @@ pub fn view_relationship_rail(
 
     let mut row = Row::new().spacing(plan.rail.gap);
     for item in &section.items {
-        row = row.push(view_rail_item(item, plan, sizes));
+        row = row.push(view_rail_item(item, plan, sizes, Priority::Preload));
     }
 
     view_panel(
@@ -610,53 +610,18 @@ fn view_cast_profile_image(
     height: f32,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if let DetailArtwork::Profile { image_id, alt, .. } = artwork
-        && let Some(iid) = image_id
-    {
-        let request = ImageRequest::new(*iid, ImageSize::profile())
-            .with_priority(Priority::Preload);
-        if let Some(service) = service_registry::get_image_service() {
-            if let Some(handle) = service.get(&request) {
-                return iced_image(handle)
-                    .width(Length::Fixed(width))
-                    .height(Length::Fixed(height))
-                    .content_fit(ContentFit::Cover)
-                    .border_radius(sizes.scale(3.0))
-                    .into();
-            }
-            service.request_image(request);
-        }
-
-        return cast_profile_placeholder(alt, width, height, sizes);
-    }
-
-    cast_profile_placeholder(artwork.label(), width, height, sizes)
-}
-
-fn cast_profile_placeholder(
-    label: &str,
-    width: f32,
-    height: f32,
-    sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    container(
-        column![
-            icon_text_with_size(Icon::User, sizes.icon.lg)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-            text(label.to_string())
-                .size(sizes.font.micro)
-                .color(theme::MediaServerTheme::TEXT_SECONDARY),
-        ]
-        .spacing(sizes.spacing.xs)
-        .align_x(Alignment::Center),
+    view_artwork(
+        artwork,
+        DetailArtLayout {
+            width,
+            height,
+            corner_radius: sizes.scale(3.0),
+            aspect: DetailArtAspect::Poster,
+        },
+        Priority::Preload,
+        Length::Fixed(width),
+        Length::Fixed(height),
     )
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(height))
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .clip(true)
-    .style(detail_panel_style(DetailTone::Muted))
-    .into()
 }
 
 fn view_cast_member(
@@ -770,12 +735,13 @@ fn view_rail_item(
     item: &DetailRailItem,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
+    priority: Priority,
 ) -> Element<'static, UiMessage> {
     let image_layout = rail_art_layout(&item.artwork, plan, sizes);
     let image = view_artwork(
         &item.artwork,
         image_layout,
-        Priority::Preload,
+        priority,
         Length::Fixed(image_layout.width),
         Length::Fixed(image_layout.height),
     );
@@ -990,9 +956,14 @@ fn registered_relationship_rail_row(
                 );
             }
             item_row = item_row.push(
-                container(view_rail_item(&section.items[idx], plan, sizes))
-                    .width(Length::Fixed(item_width))
-                    .align_x(iced::alignment::Horizontal::Center),
+                container(view_rail_item(
+                    &section.items[idx],
+                    plan,
+                    sizes,
+                    Priority::Visible,
+                ))
+                .width(Length::Fixed(item_width))
+                .align_x(iced::alignment::Horizontal::Center),
             );
             first_item = false;
         }
@@ -1030,6 +1001,10 @@ fn registered_horizontal_scroller(
         })
         .width(Length::Fill)
         .height(Length::Fixed(height));
+    let scroll = container(scroll)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .clip(true);
 
     mouse_area(scroll)
         .on_enter(UiMessage::VirtualCarousel(
@@ -1045,12 +1020,17 @@ fn horizontal_scroller(
     row: Row<'static, UiMessage>,
     height: f32,
 ) -> Element<'static, UiMessage> {
-    scrollable(row)
+    let scroll = scrollable(row)
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::default().scroller_width(4).margin(2),
         ))
         .width(Length::Fill)
+        .height(Length::Fixed(height));
+
+    container(scroll)
+        .width(Length::Fill)
         .height(Length::Fixed(height))
+        .clip(true)
         .into()
 }
 

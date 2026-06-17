@@ -33,6 +33,7 @@ use wgpu::util::DeviceExt;
 
 use std::{
     collections::HashMap,
+    ops::Range,
     sync::{
         Arc,
         atomic::{AtomicU32, Ordering},
@@ -158,7 +159,7 @@ pub struct PosterInstance {
     // Each u32 contains 4 character indices (8 bits each)
     pub title_chars: [u32; 6], // 24 chars max
     pub meta_chars: [u32; 4],  // 16 chars max
-    pub text_params: [f32; 4], // [title_len, meta_len, reserved, reserved]
+    pub text_params: [f32; 4], // [title_len, meta_len, text_zone_height, reserved]
 }
 
 /// Batched primitive metadata captured during encoding.
@@ -229,6 +230,7 @@ pub struct PosterBatchState {
     previous_hover_states: HashMap<u64, bool>,
     groups_front: Vec<PosterGroup>,
     groups_back: Vec<PosterGroup>,
+    logical_slots: Vec<LogicalBatchSlot>,
     // Font atlas for SDF text rendering
     font_atlas: Option<FontAtlas>,
     font_atlas_texture: Option<wgpu::Texture>,
@@ -549,10 +551,35 @@ impl PosterBatchState {
             pending.selected_menu_button,
         );
 
-        match pending.face {
+        self.push_pending_instance(pending.face, instance);
+    }
+
+    fn push_pending_instance(
+        &mut self,
+        face: PosterFace,
+        instance: PosterInstance,
+    ) {
+        let face_local_index = match face {
+            PosterFace::Front => self.pending_instances_front.len(),
+            PosterFace::Back => self.pending_instances_back.len(),
+        } as u32;
+
+        self.logical_slots.push(LogicalBatchSlot {
+            face,
+            face_local_index: Some(face_local_index),
+        });
+
+        match face {
             PosterFace::Front => self.pending_instances_front.push(instance),
             PosterFace::Back => self.pending_instances_back.push(instance),
         }
+    }
+
+    fn push_unrendered_logical_slot(&mut self, face: PosterFace) {
+        self.logical_slots.push(LogicalBatchSlot {
+            face,
+            face_local_index: None,
+        });
     }
 
     fn push_group_instance(
@@ -639,6 +666,82 @@ impl PosterBatchState {
 struct PosterGroup {
     atlas: Arc<wgpu::BindGroup>,
     instance_count: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LogicalBatchSlot {
+    face: PosterFace,
+    face_local_index: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FaceLocalRanges {
+    front: Option<Range<u32>>,
+    back: Option<Range<u32>>,
+}
+
+impl FaceLocalRanges {
+    fn from_logical_slots(
+        slots: &[LogicalBatchSlot],
+        range: Range<u32>,
+    ) -> Self {
+        let start = (range.start as usize).min(slots.len());
+        let end = (range.end as usize).min(slots.len());
+        if start >= end {
+            return Self::default();
+        }
+
+        let mut ranges = Self::default();
+        for slot in &slots[start..end] {
+            let Some(face_local_index) = slot.face_local_index else {
+                continue;
+            };
+
+            match slot.face {
+                PosterFace::Front => {
+                    Self::extend(&mut ranges.front, face_local_index)
+                }
+                PosterFace::Back => {
+                    Self::extend(&mut ranges.back, face_local_index)
+                }
+            }
+        }
+
+        ranges
+    }
+
+    fn from_physical_counts(
+        front_count: u32,
+        back_count: u32,
+        range: Range<u32>,
+    ) -> Self {
+        let total_count = front_count.saturating_add(back_count);
+        let start = range.start.min(total_count);
+        let end = range.end.min(total_count);
+        if start >= end {
+            return Self::default();
+        }
+
+        let front_start = start.min(front_count);
+        let front_end = end.min(front_count);
+        let front = (front_start < front_end).then_some(front_start..front_end);
+
+        let back_start = start.saturating_sub(front_count).min(back_count);
+        let back_end = end.saturating_sub(front_count).min(back_count);
+        let back = (back_start < back_end).then_some(back_start..back_end);
+
+        Self { front, back }
+    }
+
+    fn extend(range: &mut Option<Range<u32>>, face_local_index: u32) {
+        match range {
+            Some(existing) => {
+                debug_assert!(face_local_index >= existing.start);
+                existing.end = existing.end.max(face_local_index + 1);
+            }
+            None => *range = Some(face_local_index..face_local_index + 1),
+        }
+    }
 }
 
 impl std::fmt::Debug for PosterBatchState {
@@ -828,6 +931,7 @@ impl PrimitiveBatchState for PosterBatchState {
             previous_hover_states: HashMap::new(),
             groups_front: Vec::new(),
             groups_back: Vec::new(),
+            logical_slots: Vec::new(),
             font_atlas,
             font_atlas_texture,
             font_atlas_view,
@@ -844,6 +948,7 @@ impl PrimitiveBatchState for PosterBatchState {
     fn prepare(&mut self, context: &mut PrepareContext<'_>) {
         self.groups_front.clear();
         self.groups_back.clear();
+        self.logical_slots.clear();
         self.upload_budget.begin_frame();
 
         if let Some(image_cache) = context.resources.image_cache() {
@@ -910,14 +1015,7 @@ impl PrimitiveBatchState for PosterBatchState {
                             pending.face,
                             pending.selected_menu_button,
                         );
-                        match pending.face {
-                            PosterFace::Front => {
-                                self.pending_instances_front.push(instance)
-                            }
-                            PosterFace::Back => {
-                                self.pending_instances_back.push(instance)
-                            }
-                        }
+                        self.push_pending_instance(pending.face, instance);
 
                         let group_arc = match &last_group {
                             Some(group) => Arc::clone(group),
@@ -965,14 +1063,7 @@ impl PrimitiveBatchState for PosterBatchState {
                         pending.face,
                         pending.selected_menu_button,
                     );
-                    match pending.face {
-                        PosterFace::Front => {
-                            self.pending_instances_front.push(instance)
-                        }
-                        PosterFace::Back => {
-                            self.pending_instances_back.push(instance)
-                        }
-                    }
+                    self.push_pending_instance(pending.face, instance);
 
                     let group_arc = match &last_group {
                         Some(group) => Arc::clone(group),
@@ -1106,19 +1197,14 @@ impl PrimitiveBatchState for PosterBatchState {
                 // with the last known group (placeholders use invalid UVs).
                 let Some(group_arc) = bind_group.or_else(|| last_group.clone())
                 else {
-                    // No group available this frame (can happen on first frame before any textures load)
+                    // Keep the logical range stable even if no atlas bind group is
+                    // available yet for the resolved region.
+                    self.push_unrendered_logical_slot(pending.face);
                     continue;
                 };
 
                 // Append instance and update grouping for render segmentation
-                match pending.face {
-                    PosterFace::Front => {
-                        self.pending_instances_front.push(instance)
-                    }
-                    PosterFace::Back => {
-                        self.pending_instances_back.push(instance)
-                    }
-                }
+                self.push_pending_instance(pending.face, instance);
 
                 last_group = Some(group_arc.clone());
                 self.push_group_instance(pending.face, group_arc);
@@ -1151,6 +1237,11 @@ impl PrimitiveBatchState for PosterBatchState {
                 .iter()
                 .map(|g| g.instance_count as usize)
                 .sum();
+            let rendered_logical_slot_count = self
+                .logical_slots
+                .iter()
+                .filter(|slot| slot.face_local_index.is_some())
+                .count();
 
             debug_assert_eq!(
                 front_instance_count, front_group_total,
@@ -1161,6 +1252,13 @@ impl PrimitiveBatchState for PosterBatchState {
                 back_instance_count, back_group_total,
                 "Back instance count mismatch: {} instances vs {} in groups",
                 back_instance_count, back_group_total
+            );
+            debug_assert_eq!(
+                front_instance_count + back_instance_count,
+                rendered_logical_slot_count,
+                "Rendered instance count mismatch: {} instances vs {} renderable logical slots",
+                front_instance_count + back_instance_count,
+                rendered_logical_slot_count
             );
         }
 
@@ -1417,48 +1515,46 @@ impl PrimitiveBatchState for PosterBatchState {
         &self,
         render_pass: &mut wgpu::RenderPass<'_>,
         context: &mut RenderContext<'_>,
-        _range: std::ops::Range<u32>,
+        range: Range<u32>,
     ) {
-        // IMPORTANT: We ignore the range parameter and always render ALL instances.
-        //
-        // When a poster flips from front to back face, the front buffer indices shift
-        // (what was at index 8 might now be at index 7). Iced's batching system splits
-        // rendering into passes with different scissor rects based on instance indices.
-        // If we used the range, flipped posters would cause adjacent carousels' first
-        // posters to render in the wrong scissor region and get clipped.
-        //
-        // By rendering all instances every pass, each instance renders at its correct
-        // position and the scissor rect naturally clips what's off-screen.
         let front_count = self.instance_manager_front.instance_count() as u32;
         let back_count = self.instance_manager_back.instance_count() as u32;
+        let face_ranges = if self.logical_slots.is_empty() {
+            FaceLocalRanges::from_physical_counts(
+                front_count,
+                back_count,
+                range,
+            )
+        } else {
+            FaceLocalRanges::from_logical_slots(&self.logical_slots, range)
+        };
 
-        // Use full range for both faces
-        let full_front_range = 0..front_count;
-        let full_back_range = 0..back_count;
+        if let Some(front_range) = face_ranges.front.clone() {
+            Self::render_face(
+                &self.instance_manager_front,
+                &self.groups_front,
+                self.render_pipeline_front.as_ref(),
+                self.globals_bind_group.as_ref(),
+                render_pass,
+                context,
+                front_range,
+            );
+        }
 
-        Self::render_face(
-            &self.instance_manager_front,
-            &self.groups_front,
-            self.render_pipeline_front.as_ref(),
-            self.globals_bind_group.as_ref(),
-            render_pass,
-            context,
-            full_front_range,
-        );
+        if let Some(back_range) = face_ranges.back.clone() {
+            Self::render_face(
+                &self.instance_manager_back,
+                &self.groups_back,
+                self.render_pipeline_back.as_ref(),
+                self.globals_bind_group.as_ref(),
+                render_pass,
+                context,
+                back_range,
+            );
+        }
 
-        Self::render_face(
-            &self.instance_manager_back,
-            &self.groups_back,
-            self.render_pipeline_back.as_ref(),
-            self.globals_bind_group.as_ref(),
-            render_pass,
-            context,
-            full_back_range,
-        );
-
-        // Render text (title/meta) after poster faces - also use full range
-        let total_count = front_count + back_count;
-        self.render_text(render_pass, context, 0..total_count);
+        // Render text (title/meta) after poster faces using the same logical mapping.
+        self.render_text(render_pass, context, &face_ranges);
     }
 
     fn trim(&mut self) {
@@ -1479,16 +1575,24 @@ impl PrimitiveBatchState for PosterBatchState {
         self.upload_budget.end_frame();
         self.groups_front.clear();
         self.groups_back.clear();
+        self.logical_slots.clear();
     }
 
     fn instance_count(&self) -> usize {
+        if !self.pending_primitives.is_empty() {
+            return self.pending_primitives.len();
+        }
+
+        if !self.logical_slots.is_empty() {
+            return self.logical_slots.len();
+        }
+
         let uploaded = self.instance_manager_front.instance_count()
             + self.instance_manager_back.instance_count();
         let staged = self.instance_manager_front.pending_count()
             + self.instance_manager_back.pending_count()
             + self.pending_instances_front.len()
-            + self.pending_instances_back.len()
-            + self.pending_primitives.len();
+            + self.pending_instances_back.len();
 
         uploaded + staged
     }
@@ -1502,7 +1606,7 @@ impl PosterBatchState {
         globals: Option<&wgpu::BindGroup>,
         render_pass: &mut wgpu::RenderPass<'_>,
         context: &mut RenderContext<'_>,
-        range: std::ops::Range<u32>,
+        range: Range<u32>,
     ) {
         let instance_count = manager.instance_count() as u32;
         if instance_count == 0 {
@@ -1563,7 +1667,7 @@ impl PosterBatchState {
         &self,
         render_pass: &mut wgpu::RenderPass<'_>,
         context: &mut RenderContext<'_>,
-        range: std::ops::Range<u32>,
+        face_ranges: &FaceLocalRanges,
     ) {
         let (Some(globals_bind_group), Some(pipeline)) = (
             self.globals_bind_group.as_ref(),
@@ -1584,29 +1688,172 @@ impl PosterBatchState {
         );
 
         // Render text for FRONT instances
-        if let Some(buffer) = self.instance_manager_front.buffer() {
+        if let (Some(buffer), Some(range)) = (
+            self.instance_manager_front.buffer(),
+            face_ranges.front.as_ref(),
+        ) {
             let count = self.instance_manager_front.instance_count() as u32;
-            if count > 0 {
-                let start = range.start.min(count);
-                let end = range.end.min(count);
-                if start < end {
-                    render_pass.set_vertex_buffer(0, buffer.slice(..));
-                    render_pass.draw(0..4, start..end);
-                }
+            let start = range.start.min(count);
+            let end = range.end.min(count);
+            if start < end {
+                render_pass.set_vertex_buffer(0, buffer.slice(..));
+                render_pass.draw(0..4, start..end);
             }
         }
 
         // Render text for BACK instances (text stays visible when poster is flipped)
-        if let Some(buffer) = self.instance_manager_back.buffer() {
+        if let (Some(buffer), Some(range)) = (
+            self.instance_manager_back.buffer(),
+            face_ranges.back.as_ref(),
+        ) {
             let count = self.instance_manager_back.instance_count() as u32;
-            if count > 0 {
-                let start = range.start.min(count);
-                let end = range.end.min(count);
-                if start < end {
-                    render_pass.set_vertex_buffer(0, buffer.slice(..));
-                    render_pass.draw(0..4, start..end);
-                }
+            let start = range.start.min(count);
+            let end = range.end.min(count);
+            if start < end {
+                render_pass.set_vertex_buffer(0, buffer.slice(..));
+                render_pass.draw(0..4, start..end);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FaceLocalRanges, LogicalBatchSlot};
+    use crate::infra::shader_widgets::poster::PosterFace;
+    use std::ops::Range;
+
+    fn rendered_slots(faces: &[PosterFace]) -> Vec<LogicalBatchSlot> {
+        let mut front_count = 0;
+        let mut back_count = 0;
+
+        faces
+            .iter()
+            .copied()
+            .map(|face| {
+                let face_local_index = match face {
+                    PosterFace::Front => {
+                        let index = front_count;
+                        front_count += 1;
+                        index
+                    }
+                    PosterFace::Back => {
+                        let index = back_count;
+                        back_count += 1;
+                        index
+                    }
+                };
+
+                LogicalBatchSlot {
+                    face,
+                    face_local_index: Some(face_local_index),
+                }
+            })
+            .collect()
+    }
+
+    fn assert_face_ranges(
+        faces: &[PosterFace],
+        logical_range: Range<u32>,
+        front: Option<Range<u32>>,
+        back: Option<Range<u32>>,
+    ) {
+        assert_eq!(
+            FaceLocalRanges::from_logical_slots(
+                &rendered_slots(faces),
+                logical_range,
+            ),
+            FaceLocalRanges { front, back }
+        );
+    }
+
+    #[test]
+    fn maps_all_front_logical_range_to_front_local_range() {
+        assert_face_ranges(
+            &[PosterFace::Front, PosterFace::Front, PosterFace::Front],
+            0..3,
+            Some(0..3),
+            None,
+        );
+        assert_face_ranges(
+            &[PosterFace::Front, PosterFace::Front, PosterFace::Front],
+            1..3,
+            Some(1..3),
+            None,
+        );
+    }
+
+    #[test]
+    fn maps_all_back_logical_range_to_back_local_range() {
+        assert_face_ranges(
+            &[PosterFace::Back, PosterFace::Back, PosterFace::Back],
+            0..2,
+            None,
+            Some(0..2),
+        );
+        assert_face_ranges(
+            &[PosterFace::Back, PosterFace::Back, PosterFace::Back],
+            2..3,
+            None,
+            Some(2..3),
+        );
+    }
+
+    #[test]
+    fn maps_interleaved_logical_range_to_face_local_ranges() {
+        assert_face_ranges(
+            &[
+                PosterFace::Front,
+                PosterFace::Back,
+                PosterFace::Front,
+                PosterFace::Back,
+                PosterFace::Front,
+            ],
+            1..4,
+            Some(1..2),
+            Some(0..2),
+        );
+    }
+
+    #[test]
+    fn maps_empty_logical_range_to_no_face_ranges() {
+        assert_face_ranges(
+            &[PosterFace::Front, PosterFace::Back, PosterFace::Front],
+            1..1,
+            None,
+            None,
+        );
+        assert_face_ranges(
+            &[PosterFace::Front, PosterFace::Back, PosterFace::Front],
+            8..9,
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn maps_partial_logical_range_to_selected_face_local_ranges() {
+        assert_face_ranges(
+            &[
+                PosterFace::Front,
+                PosterFace::Back,
+                PosterFace::Front,
+                PosterFace::Back,
+                PosterFace::Front,
+            ],
+            2..5,
+            Some(1..3),
+            Some(1..2),
+        );
+    }
+
+    #[test]
+    fn keeps_menu_flip_ranges_on_original_logical_slots() {
+        let flipped_sequence =
+            [PosterFace::Front, PosterFace::Back, PosterFace::Front];
+
+        assert_face_ranges(&flipped_sequence, 0..1, Some(0..1), None);
+        assert_face_ranges(&flipped_sequence, 1..2, None, Some(0..1));
+        assert_face_ranges(&flipped_sequence, 2..3, Some(1..2), None);
     }
 }

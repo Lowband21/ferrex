@@ -17,11 +17,37 @@ fn main() -> ferrex_player::Result {
             }
             Ok(())
         }
+        Ok(
+            ferrex_player::screenshot::CommandOutcome::ListedVisualQaMatrix(
+                cases,
+            ),
+        ) => {
+            println!("poster containment visual QA matrix:");
+            for case in cases {
+                println!(
+                    "  {:<28} {:<32} {:<10} {}",
+                    case.id, case.preset, case.viewport, case.review_focus
+                );
+            }
+            Ok(())
+        }
         Ok(ferrex_player::screenshot::CommandOutcome::Captured(output)) => {
             println!(
                 "captured screenshot: {} (metadata: {})",
                 output.png_path.display(),
                 output.metadata_path.display()
+            );
+            Ok(())
+        }
+        Ok(
+            ferrex_player::screenshot::CommandOutcome::CapturedVisualQaMatrix(
+                output,
+            ),
+        ) => {
+            println!(
+                "captured poster containment matrix: {} screenshots (manifest: {})",
+                output.captures.len(),
+                output.manifest_path.display()
             );
             Ok(())
         }

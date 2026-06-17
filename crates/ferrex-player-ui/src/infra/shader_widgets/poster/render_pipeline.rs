@@ -309,6 +309,27 @@ impl Pipeline {
     }
 }
 
+fn poster_position_and_size(
+    bounds: &Rectangle,
+    animated_bounds: Option<&animation::AnimatedPosterBounds>,
+) -> ([f32; 2], [f32; 2]) {
+    if let Some(animated_bounds) = animated_bounds {
+        let (offset_x, offset_y) = animated_bounds.poster_offset();
+        let (poster_width, poster_height) = animated_bounds.poster_size();
+        return (
+            [bounds.x + offset_x, bounds.y + offset_y],
+            [poster_width, poster_height],
+        );
+    }
+
+    let border_padding = 3.0;
+    let poster_x = bounds.x + border_padding;
+    let poster_y = bounds.y + border_padding;
+    let poster_width = bounds.width - (border_padding * 2.0);
+    let poster_height = bounds.height - (border_padding * 2.0);
+    ([poster_x, poster_y], [poster_width, poster_height])
+}
+
 /// Helper function to create an instance from image data
 #[cfg_attr(
     any(
@@ -428,25 +449,9 @@ pub(crate) fn create_batch_instance(
         )
     };
 
-    // Calculate poster position and size
+    // Calculate visible poster position and size inside the reserved layout bounds.
     let (poster_position, poster_size) =
-        if let Some(animated_bounds) = animated_bounds {
-            let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
-            let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
-            let poster_x = bounds.x + offset_x;
-            let poster_y = bounds.y + offset_y;
-            (
-                [poster_x, poster_y],
-                [animated_bounds.base_width, animated_bounds.base_height],
-            )
-        } else {
-            let border_padding = 3.0;
-            let poster_x = bounds.x + border_padding;
-            let poster_y = bounds.y + border_padding;
-            let poster_width = bounds.width - (border_padding * 2.0);
-            let poster_height = bounds.height - (border_padding * 2.0);
-            ([poster_x, poster_y], [poster_width, poster_height])
-        };
+        poster_position_and_size(bounds, animated_bounds);
 
     // Calculate overlay state
     let animation_complete = match animation {
@@ -489,16 +494,12 @@ pub(crate) fn create_batch_instance(
     let mouse_pos_normalized = if let Some(mouse_pos) = mouse_position {
         let scaled_poster_width = poster_size[0] * effective_scale;
         let scaled_poster_height = poster_size[1] * effective_scale;
-        let widget_to_poster_offset_x = if animated_bounds.is_some() {
-            (bounds.width - scaled_poster_width) / 2.0
-        } else {
-            0.0
-        };
-        let widget_to_poster_offset_y = if animated_bounds.is_some() {
-            (bounds.height - scaled_poster_height) / 2.0
-        } else {
-            0.0
-        };
+        let widget_to_poster_offset_x = poster_position[0]
+            - bounds.x
+            - (scaled_poster_width - poster_size[0]) / 2.0;
+        let widget_to_poster_offset_y = poster_position[1]
+            - bounds.y
+            - (scaled_poster_height - poster_size[1]) / 2.0;
         let mouse_x_relative = mouse_pos.x - widget_to_poster_offset_x;
         let mouse_y_relative = mouse_pos.y - widget_to_poster_offset_y;
         let norm_x = mouse_x_relative / scaled_poster_width;
@@ -524,6 +525,9 @@ pub(crate) fn create_batch_instance(
         title.map(pack_title).unwrap_or(([0xFFFFFFFF; 6], 0));
     let (meta_chars, meta_len) =
         meta.map(pack_meta).unwrap_or(([0xFFFFFFFF; 4], 0));
+    let text_zone_height = animated_bounds
+        .map(|bounds| bounds.text_zone_height())
+        .unwrap_or(0.0);
 
     PosterInstance {
         position_and_size: [
@@ -563,7 +567,7 @@ pub(crate) fn create_batch_instance(
         _pad_atlas_layer: [0, 0, 0],
         title_chars,
         meta_chars,
-        text_params: [title_len as f32, meta_len as f32, 0.0, 0.0],
+        text_params: [title_len as f32, meta_len as f32, text_zone_height, 0.0],
     }
 }
 
@@ -580,7 +584,7 @@ pub fn create_placeholder_instance(
     bounds: &Rectangle,
     radius: f32,
     theme_color: Color,
-    _animated_bounds: Option<&animation::AnimatedPosterBounds>,
+    animated_bounds: Option<&animation::AnimatedPosterBounds>,
     progress: Option<f32>,
     progress_color: Color,
     _face: PosterFace,
@@ -608,26 +612,9 @@ pub fn create_placeholder_instance(
         0.0f32,
     );
 
-    // Calculate poster position and size
+    // Calculate visible poster position and size inside the reserved layout bounds.
     let (poster_position, poster_size) =
-        /*if let Some(animated_bounds) = animated_bounds {
-        let offset_x = (bounds.width - animated_bounds.base_width) / 2.0;
-        let offset_y = (bounds.height - animated_bounds.base_height) / 2.0;
-        let poster_x = bounds.x + offset_x;
-        let poster_y = bounds.y + offset_y;
-        (
-            [poster_x, poster_y],
-            [animated_bounds.base_width, animated_bounds.base_height],
-        )
-    } else {*/
-    {
-        let border_padding = 3.0;
-        let poster_x = bounds.x + border_padding;
-        let poster_y = bounds.y + border_padding;
-        let poster_width = bounds.width - (border_padding * 2.0);
-        let poster_height = bounds.height - (border_padding * 2.0);
-        ([poster_x, poster_y], [poster_width, poster_height])
-    };
+        poster_position_and_size(bounds, animated_bounds);
 
     let show_overlay = 0.0;
     let show_border = 1.0; // Always show border
@@ -766,10 +753,18 @@ mod tests {
         let animated_bounds = animation::AnimatedPosterBounds::new_with_config(
             100.0, 150.0, &config,
         );
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let layout = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: layout_width,
+            height: layout_height,
+        };
+        let (offset_x, offset_y) = animated_bounds.poster_offset();
 
         let instance = create_batch_instance(
             Some(atlas_region()),
-            &bounds(),
+            &layout,
             8.0,
             PosterAnimationType::None,
             None,
@@ -779,7 +774,7 @@ mod tests {
             true,
             1.0,
             false,
-            Some(Point::new(50.0, 75.0)),
+            Some(Point::new(offset_x + 50.0, offset_y + 75.0)),
             None,
             Color::WHITE,
             None,
@@ -834,5 +829,406 @@ mod tests {
         );
         assert_eq!(instance.hover_overlay_border_progress[0], 1.0);
         assert_eq!(instance.hover_overlay_border_progress[1], 1.0);
+    }
+
+    #[test]
+    fn text_reserved_bounds_keep_visible_poster_above_shader_text_zone() {
+        let animated_bounds =
+            animation::AnimatedPosterBounds::new(100.0, 150.0)
+                .without_effect_padding()
+                .with_text_zone_height(50.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let layout = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: layout_width,
+            height: layout_height,
+        };
+
+        let instance = create_batch_instance(
+            Some(atlas_region()),
+            &layout,
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Title"),
+            Some("2024"),
+        );
+
+        assert_eq!(instance.position_and_size[0], layout.x);
+        assert_eq!(instance.position_and_size[1], layout.y);
+        assert_eq!(instance.position_and_size[2], 100.0);
+        assert_eq!(instance.position_and_size[3], 150.0);
+        assert_eq!(instance.text_params[2], 50.0);
+    }
+
+    #[test]
+    fn effect_and_text_reserved_bounds_offset_poster_but_not_text_height() {
+        let animated_bounds =
+            animation::AnimatedPosterBounds::new(100.0, 150.0)
+                .with_text_zone_height(50.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let layout = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: layout_width,
+            height: layout_height,
+        };
+        let (offset_x, offset_y) = animated_bounds.poster_offset();
+
+        let instance = create_batch_instance(
+            Some(atlas_region()),
+            &layout,
+            8.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Title"),
+            None,
+        );
+
+        assert_eq!(instance.position_and_size[0], layout.x + offset_x);
+        assert_eq!(instance.position_and_size[1], layout.y + offset_y);
+        assert_eq!(instance.position_and_size[2], 100.0);
+        assert_eq!(instance.position_and_size[3], 150.0);
+        assert_eq!(instance.text_params[2], 50.0);
+    }
+
+    #[test]
+    fn placeholders_use_visible_poster_bounds_inside_reserved_layout() {
+        let animated_bounds =
+            animation::AnimatedPosterBounds::new(100.0, 150.0)
+                .with_text_zone_height(50.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let layout = Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: layout_width,
+            height: layout_height,
+        };
+        let (offset_x, offset_y) = animated_bounds.poster_offset();
+
+        let instance = create_placeholder_instance(
+            &layout,
+            8.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            None,
+            Color::WHITE,
+            PosterFace::Front,
+            None,
+        );
+
+        assert_eq!(instance.position_and_size[0], layout.x + offset_x);
+        assert_eq!(instance.position_and_size[1], layout.y + offset_y);
+        assert_eq!(instance.position_and_size[2], 100.0);
+        assert_eq!(instance.position_and_size[3], 150.0);
+        assert_eq!(instance.text_params[2], 0.0);
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestRect {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    }
+
+    impl TestRect {
+        fn right(self) -> f32 {
+            self.x + self.width
+        }
+
+        fn bottom(self) -> f32 {
+            self.y + self.height
+        }
+
+        fn contains(self, other: Self, tolerance: f32) -> bool {
+            other.x >= self.x - tolerance
+                && other.y >= self.y - tolerance
+                && other.right() <= self.right() + tolerance
+                && other.bottom() <= self.bottom() + tolerance
+        }
+
+        fn from_layout(layout: &Rectangle) -> Self {
+            Self {
+                x: layout.x,
+                y: layout.y,
+                width: layout.width,
+                height: layout.height,
+            }
+        }
+    }
+
+    fn scaled_poster_rect(instance: &PosterInstance) -> TestRect {
+        let [x, y, width, height] = instance.position_and_size;
+        let scale = instance.scale_shadow_glow_type[0];
+        let scaled_width = width * scale;
+        let scaled_height = height * scale;
+        TestRect {
+            x: x - (scaled_width - width) / 2.0,
+            y: y - (scaled_height - height) / 2.0,
+            width: scaled_width,
+            height: scaled_height,
+        }
+    }
+
+    fn scaled_text_rect(instance: &PosterInstance) -> Option<TestRect> {
+        let text_zone_height = instance.text_params[2];
+        if text_zone_height <= 0.0 {
+            return None;
+        }
+
+        let poster_rect = scaled_poster_rect(instance);
+        Some(TestRect {
+            x: poster_rect.x,
+            y: poster_rect.bottom(),
+            width: poster_rect.width,
+            height: text_zone_height,
+        })
+    }
+
+    fn assert_rect_inside(label: &str, outer: TestRect, inner: TestRect) {
+        assert!(
+            outer.contains(inner, 0.01),
+            "{label} escaped clip: outer={outer:?} inner={inner:?}"
+        );
+    }
+
+    #[test]
+    fn clipping_regression_keeps_scaled_faces_inside_rail_clips() {
+        let config = animation::AnimationConfig {
+            hover_scale: 1.16,
+            ..animation::AnimationConfig::default()
+        };
+        let animated_bounds = animation::AnimatedPosterBounds::new_with_config(
+            160.0, 240.0, &config,
+        )
+        .with_text_zone_height(54.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let rail_gap = 18.0;
+        let first_layout = Rectangle {
+            x: 24.0,
+            y: 12.0,
+            width: layout_width,
+            height: layout_height,
+        };
+        let second_layout = Rectangle {
+            x: 24.0,
+            y: first_layout.y + layout_height + rail_gap,
+            width: layout_width,
+            height: layout_height,
+        };
+        let first_clip = TestRect::from_layout(&Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 900.0,
+            height: layout_height + 24.0,
+        });
+        let second_clip = TestRect::from_layout(&Rectangle {
+            x: 0.0,
+            y: layout_height + rail_gap,
+            width: 900.0,
+            height: layout_height + 24.0,
+        });
+
+        let hovered_front = create_batch_instance(
+            Some(atlas_region()),
+            &first_layout,
+            12.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            true,
+            1.0,
+            true,
+            None,
+            Some(0.4),
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Hover Scale Lattice"),
+            Some("2024"),
+        );
+        let back_menu = create_batch_instance(
+            Some(atlas_region()),
+            &second_layout,
+            12.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            Some(std::f32::consts::PI),
+            PosterFace::Back,
+            Some(MenuButton::Details),
+            Some("Back Face Grove"),
+            Some("TV-14"),
+        );
+
+        assert!(hovered_front.scale_shadow_glow_type[0] > 1.0);
+        assert_eq!(hovered_front.radius_opacity_rotation_anim[2], 0.0);
+        assert_eq!(
+            back_menu.radius_opacity_rotation_anim[2],
+            std::f32::consts::PI
+        );
+        assert_eq!(
+            back_menu.mouse_pos_and_padding[2],
+            MenuButton::Details.shader_index() as f32
+        );
+
+        assert_rect_inside(
+            "hovered poster",
+            first_clip,
+            scaled_poster_rect(&hovered_front),
+        );
+        assert_rect_inside(
+            "hovered shader text",
+            first_clip,
+            scaled_text_rect(&hovered_front).expect("text zone"),
+        );
+        assert_rect_inside(
+            "back-face poster",
+            second_clip,
+            scaled_poster_rect(&back_menu),
+        );
+        assert_rect_inside(
+            "back-face shader text",
+            second_clip,
+            scaled_text_rect(&back_menu).expect("text zone"),
+        );
+    }
+
+    #[test]
+    fn clipping_regression_handles_nested_scroll_art_edges() {
+        let animated_bounds =
+            animation::AnimatedPosterBounds::new(132.0, 198.0)
+                .with_text_zone_height(44.0);
+        let (layout_width, layout_height) = animated_bounds.layout_bounds();
+        let vertical_viewport_clip = TestRect {
+            x: 0.0,
+            y: 96.0,
+            width: 1280.0,
+            height: 560.0,
+        };
+        let horizontal_rail_clip = TestRect {
+            x: 36.0,
+            y: 360.0,
+            width: 760.0,
+            height: layout_height,
+        };
+        let nested_clip = TestRect {
+            x: horizontal_rail_clip.x.max(vertical_viewport_clip.x),
+            y: horizontal_rail_clip.y.max(vertical_viewport_clip.y),
+            width: horizontal_rail_clip
+                .right()
+                .min(vertical_viewport_clip.right())
+                - horizontal_rail_clip.x.max(vertical_viewport_clip.x),
+            height: horizontal_rail_clip
+                .bottom()
+                .min(vertical_viewport_clip.bottom())
+                - horizontal_rail_clip.y.max(vertical_viewport_clip.y),
+        };
+        let layout = Rectangle {
+            x: horizontal_rail_clip.x + 16.0,
+            y: horizontal_rail_clip.y,
+            width: layout_width,
+            height: layout_height,
+        };
+
+        let missing_art = create_placeholder_instance(
+            &layout,
+            10.0,
+            Color::from_rgb(0.25, 0.2, 0.18),
+            Some(&animated_bounds),
+            None,
+            Color::WHITE,
+            PosterFace::Back,
+            Some(MenuButton::Watched),
+        );
+        assert!(missing_art.atlas_uvs.iter().all(|uv| *uv < 0.0));
+        assert_eq!(
+            missing_art.mouse_pos_and_padding[2],
+            MenuButton::Watched.shader_index() as f32
+        );
+        assert_rect_inside(
+            "missing-art placeholder",
+            nested_clip,
+            scaled_poster_rect(&missing_art),
+        );
+
+        let low_quality_region = AtlasRegion {
+            uv_min: [0.0001, 0.0001],
+            uv_max: [0.012, 0.018],
+            layer: 0,
+        };
+        let low_quality = create_batch_instance(
+            Some(low_quality_region),
+            &layout,
+            10.0,
+            PosterAnimationType::None,
+            None,
+            1.0,
+            Color::from_rgb(0.2, 0.3, 0.4),
+            Some(&animated_bounds),
+            false,
+            0.0,
+            true,
+            None,
+            None,
+            Color::WHITE,
+            None,
+            PosterFace::Front,
+            None,
+            Some("Low Bitrate Key Art"),
+            Some("2024"),
+        );
+
+        assert!(low_quality.atlas_uvs[0] > 0.0);
+        assert!(low_quality.atlas_uvs[1] > 0.0);
+        assert!(low_quality.atlas_uvs[2] > low_quality.atlas_uvs[0]);
+        assert!(low_quality.atlas_uvs[3] > low_quality.atlas_uvs[1]);
+        assert_rect_inside(
+            "low-quality poster",
+            nested_clip,
+            scaled_poster_rect(&low_quality),
+        );
+        assert_rect_inside(
+            "low-quality shader text",
+            nested_clip,
+            scaled_text_rect(&low_quality).expect("text zone"),
+        );
     }
 }

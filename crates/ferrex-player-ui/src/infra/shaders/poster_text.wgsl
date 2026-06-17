@@ -26,7 +26,7 @@ struct VertexInput {
     @location(9) title_chars_0: vec4<u32>,   // title chars 0-15
     @location(10) title_chars_1: vec2<u32>,  // title chars 16-23
     @location(11) meta_chars: vec4<u32>,     // meta chars 0-15
-    @location(12) text_params: vec4<f32>,    // [title_len, meta_len, reserved, reserved]
+    @location(12) text_params: vec4<f32>,    // [title_len, meta_len, reserved_text_zone_height, reserved]
 }
 
 struct VertexOutput {
@@ -92,9 +92,13 @@ fn vs_text(input: VertexInput) -> VertexOutput {
     let scaled_size = size * scale;
     let scaled_position = center - scaled_size * 0.5;
 
-    // Text zone is BELOW the SCALED poster, same width as scaled poster, no rotation applied
-    // Scale text zone height with text_scale to accommodate larger text at high scales
-    let scaled_text_zone_height = TEXT_ZONE_HEIGHT * globals.text_scale;
+    // Text zone is BELOW the SCALED poster, same width as scaled poster, no rotation applied.
+    // CPU layout passes the reserved zone height per instance; fall back to the
+    // shader constant for direct Poster callers that do not provide one.
+    var scaled_text_zone_height = input.text_params.z;
+    if scaled_text_zone_height <= 0.0 {
+        scaled_text_zone_height = TEXT_ZONE_HEIGHT * globals.text_scale;
+    }
     let text_zone_start = vec2<f32>(scaled_position.x, scaled_position.y + scaled_size.y);
     let text_zone_size = vec2<f32>(scaled_size.x, scaled_text_zone_height);
     let position_final = text_zone_start + vertex_pos * text_zone_size;

@@ -5,6 +5,8 @@
 //! instructions, and writes a PNG plus a JSON metadata sidecar. It is designed
 //! for CLI use without requiring a running display server.
 
+pub mod visual_qa;
+
 use std::{
     ffi::OsString,
     fmt, fs,
@@ -63,6 +65,8 @@ pub const HELP: &str = r#"Capture a headless ferrex-player screenshot.
 USAGE:
     ferrex-player screenshot --preset FirstRunAuth --viewport 1280x720 --output ./first-run.png [OPTIONS]
     ferrex-player screenshot list
+    ferrex-player screenshot matrix list
+    ferrex-player screenshot matrix --output-dir ./artifacts/poster-qa [--only <CASE_OR_TAG>]
 
 OPTIONS:
     -p, --preset <NAME>         Named app preset to render. Run `ferrex-player screenshot list`
@@ -77,6 +81,10 @@ OPTIONS:
     -o, --output <PATH>         PNG output path. Required.
         --ice <PATH>            Optional .ice script to replay before capture. If the script has
                                 preset/viewport/mode metadata, explicit CLI values must match it.
+        matrix                  List or capture the poster containment visual QA matrix. Matrix
+                                captures write PNGs plus a JSON manifest to --output-dir. Use
+                                --only with a case id (for example rails-top-720) or coverage tag
+                                (for example surface:movie) to narrow the run.
     -h, --help                  Print this help text.
 
 EXAMPLE:
@@ -94,8 +102,12 @@ pub enum CommandOutcome {
     HelpRequested,
     /// Scenario metadata was requested for agent discovery.
     ListedScenarios(Vec<presets::ScenarioInfo>),
+    /// Poster containment matrix metadata was requested for visual QA.
+    ListedVisualQaMatrix(Vec<visual_qa::VisualQaCase>),
     /// A screenshot was captured.
     Captured(CaptureOutput),
+    /// A poster containment visual QA matrix was captured.
+    CapturedVisualQaMatrix(visual_qa::MatrixRunOutput),
 }
 
 /// Logical viewport requested by a screenshot spec.
@@ -961,6 +973,16 @@ where
     if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
         return Ok(CommandOutcome::HelpRequested);
     }
+    if is_matrix_request(&rest) {
+        return match visual_qa::run_matrix_command(&rest[1..])? {
+            visual_qa::MatrixCommandOutcome::Listed(cases) => {
+                Ok(CommandOutcome::ListedVisualQaMatrix(cases))
+            }
+            visual_qa::MatrixCommandOutcome::Captured(output) => {
+                Ok(CommandOutcome::CapturedVisualQaMatrix(output))
+            }
+        };
+    }
     if is_list_request(&rest) {
         return Ok(CommandOutcome::ListedScenarios(available_scenarios()));
     }
@@ -976,6 +998,10 @@ fn is_list_request(args: &[String]) -> bool {
         [command]
             if matches!(command.as_str(), "list" | "ls" | "--list")
     )
+}
+
+fn is_matrix_request(args: &[String]) -> bool {
+    args.first().is_some_and(|command| command == "matrix")
 }
 
 fn display_path(path: &PathBuf) -> String {
@@ -1098,6 +1124,12 @@ pub enum ScreenshotError {
         path: Option<PathBuf>,
         /// Instruction display text.
         instruction: String,
+    },
+    /// Matrix command arguments are invalid.
+    #[error("invalid screenshot matrix request: {message}\n\n{HELP}")]
+    MatrixArgument {
+        /// Human-readable parse failure.
+        message: String,
     },
     /// Emulator stopped unexpectedly.
     #[error("headless screenshot emulator stopped before it became ready")]
