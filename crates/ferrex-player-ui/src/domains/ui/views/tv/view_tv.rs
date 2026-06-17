@@ -11,10 +11,12 @@ use crate::{
                 detail::{
                     DetailAction, DetailArtAspect, DetailArtwork,
                     DetailBackdropControl, DetailContentKind,
-                    DetailLayoutInput, DetailMetadataPill, DetailNotice,
-                    DetailOverviewSection, DetailPageModel, DetailRailItem,
+                    DetailLayoutInput, DetailMetadataImportance,
+                    DetailMetadataPill, DetailNotice, DetailOverviewSection,
+                    DetailPageModel, DetailRailItem,
                     DetailRegisteredRailAdapter, DetailRelationshipRail,
-                    DetailSection, DetailTone, solve_detail_layout,
+                    DetailSection, DetailTone, prioritize_metadata_items,
+                    solve_detail_layout,
                     view_detail_stage_with_registered_rails,
                 },
                 virtual_carousel::{CarouselRegistry, types::CarouselKey},
@@ -127,32 +129,48 @@ pub fn view_series_detail(
         && let Some(year) = first_air_date.split('-').next()
         && !year.is_empty()
     {
-        metadata.push(year.to_string());
+        metadata.push(
+            DetailMetadataPill::neutral(year.to_string())
+                .with_importance(DetailMetadataImportance::Primary),
+        );
     }
     if !seasons.is_empty() {
-        metadata.push(plural_label(seasons.len(), "season", "seasons"));
+        metadata.push(DetailMetadataPill::neutral(plural_label(
+            seasons.len(),
+            "season",
+            "seasons",
+        )));
         let total_eps: u16 = seasons
             .iter()
             .map(|season| season.details.episode_count)
             .sum();
         if total_eps > 0 {
-            metadata.push(plural_label(
+            metadata.push(DetailMetadataPill::neutral(plural_label(
                 total_eps as usize,
                 "episode",
                 "episodes",
-            ));
+            )));
         }
     } else {
         if let Some(count) = series_details.num_seasons() {
-            metadata.push(plural_label(count as usize, "season", "seasons"));
+            metadata.push(DetailMetadataPill::neutral(plural_label(
+                count as usize,
+                "season",
+                "seasons",
+            )));
         }
         if let Some(count) = series_details.num_episodes() {
-            metadata.push(plural_label(count as usize, "episode", "episodes"));
+            metadata.push(DetailMetadataPill::neutral(plural_label(
+                count as usize,
+                "episode",
+                "episodes",
+            )));
         }
     }
     if let Some(rating) = series_details.vote_average() {
-        metadata.push(format!("★ {:.1}", rating));
+        metadata.push(DetailMetadataPill::rating(format!("★ {:.1}", rating)));
     }
+    prioritize_metadata_items(&mut metadata);
 
     let mut model = DetailPageModel::new(
         DetailContentKind::Series,
@@ -165,7 +183,7 @@ pub fn view_series_detail(
         poster_iid,
         format!("{} poster", series.title()),
     ));
-    model.metadata = metadata_pills(metadata);
+    model.metadata = metadata;
     model.actions = series_actions(series_id, next_episode);
 
     if let Some(overview) = series_details.overview() {
@@ -289,17 +307,21 @@ pub fn view_season_detail(
         }
     };
 
-    let mut metadata = vec![plural_label(
-        season.num_episodes() as usize,
-        "episode",
-        "episodes",
-    )];
+    let mut metadata = vec![
+        DetailMetadataPill::neutral(plural_label(
+            season.num_episodes() as usize,
+            "episode",
+            "episodes",
+        ))
+        .with_importance(DetailMetadataImportance::Primary),
+    ];
     if let Some(air_date) = season.details.air_date.as_ref()
         && let Some(year) = air_date.split('-').next()
         && !year.is_empty()
     {
-        metadata.push(year.to_string());
+        metadata.push(DetailMetadataPill::neutral(year.to_string()));
     }
+    prioritize_metadata_items(&mut metadata);
 
     let mut model =
         DetailPageModel::new(DetailContentKind::Season, title.clone())
@@ -310,7 +332,7 @@ pub fn view_season_detail(
                 poster_iid,
                 format!("{title} poster"),
             ));
-    model.metadata = metadata_pills(metadata);
+    model.metadata = metadata;
     model.actions = season_actions(*season_id, next_episode);
 
     if let Some(overview) = season.details.overview.as_ref() {
@@ -421,16 +443,20 @@ pub fn view_episode_detail(
         episode.details.season_number, episode.details.episode_number
     );
 
-    let mut metadata = vec![episode_code.clone()];
+    let mut metadata = vec![
+        DetailMetadataPill::neutral(episode_code.clone())
+            .with_importance(DetailMetadataImportance::Primary),
+    ];
     if let Some(air_date) = episode.details.air_date.as_ref() {
-        metadata.push(air_date.to_string());
+        metadata.push(DetailMetadataPill::neutral(air_date.to_string()));
     }
     if let Some(runtime) = episode.details.runtime.as_ref() {
-        metadata.push(format!("{} min", runtime));
+        metadata.push(DetailMetadataPill::neutral(format!("{} min", runtime)));
     }
     if let Some(rating) = episode.details.vote_average.as_ref() {
-        metadata.push(format!("★ {:.1}", rating));
+        metadata.push(DetailMetadataPill::rating(format!("★ {:.1}", rating)));
     }
+    prioritize_metadata_items(&mut metadata);
 
     let mut model =
         DetailPageModel::new(DetailContentKind::Episode, episode_title.clone())
@@ -441,7 +467,7 @@ pub fn view_episode_detail(
                 still_iid,
                 format!("{episode_title} still"),
             ));
-    model.metadata = metadata_pills(metadata);
+    model.metadata = metadata;
     model.actions = episode_actions(*episode_id);
 
     if let Some(overview) = episode.details.overview.as_ref() {
@@ -726,14 +752,6 @@ fn back_action() -> DetailAction {
 
 fn home_action() -> DetailAction {
     DetailAction::secondary("home", "Home", UiShellMessage::NavigateHome.into())
-}
-
-fn metadata_pills(labels: Vec<String>) -> Vec<DetailMetadataPill> {
-    labels
-        .into_iter()
-        .filter(|label| !label.trim().is_empty())
-        .map(DetailMetadataPill::neutral)
-        .collect()
 }
 
 fn warning_notice(

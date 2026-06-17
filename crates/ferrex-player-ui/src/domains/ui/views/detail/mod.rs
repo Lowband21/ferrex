@@ -49,9 +49,10 @@ pub use model::{
     DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,
     DetailBackdropControl, DetailCastMember, DetailCastSection,
     DetailContentKind, DetailEmptyState, DetailFact, DetailFactPanel,
-    DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
-    DetailRailItem, DetailRelationshipRail, DetailSection, DetailTechnicalItem,
-    DetailTechnicalSection, DetailTone,
+    DetailMetadataImportance, DetailMetadataKind, DetailMetadataPill,
+    DetailNotice, DetailOverviewSection, DetailPageModel, DetailRailItem,
+    DetailRelationshipRail, DetailSection, DetailTechnicalItem,
+    DetailTechnicalSection, DetailTone, prioritize_metadata_items,
 };
 pub use typography::{
     DetailCaptionBudgets, DetailColorIntent, DetailFactLayoutMode,
