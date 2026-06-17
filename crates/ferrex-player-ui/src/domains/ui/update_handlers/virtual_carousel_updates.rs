@@ -8,11 +8,14 @@ use crate::{
             shell_ui::Scope,
             tabs::{TabId, TabState},
             utils::bump_keep_alive,
-            views::virtual_carousel::{
-                messages::VirtualCarouselMessage as VCM,
-                planner,
-                registry::MotionState,
-                types::{CarouselKey, DetailCarouselOwnerKind},
+            views::{
+                detail::DetailRailImageRequestKind,
+                virtual_carousel::{
+                    messages::VirtualCarouselMessage as VCM,
+                    planner,
+                    registry::MotionState,
+                    types::{CarouselKey, DetailCarouselOwnerKind},
+                },
             },
         },
     },
@@ -186,13 +189,7 @@ pub fn handle_virtual_carousel_message(
                                 .iter()
                                 .map(|season| season.details.primary_poster_iid)
                                 .collect::<Vec<_>>(),
-                            planner::CarouselDemandImageKind::Poster {
-                                size: state
-                                    .domains
-                                    .settings
-                                    .display
-                                    .detail_poster_quality,
-                            },
+                            DetailRailImageRequestKind::Poster,
                         );
                     }
                 }
@@ -202,9 +199,7 @@ pub fn handle_virtual_carousel_message(
                         state,
                         &key,
                         &slots,
-                        planner::CarouselDemandImageKind::EpisodeStill {
-                            size: EpisodeSize::W512,
-                        },
+                        DetailRailImageRequestKind::Still,
                     );
                 }
                 CarouselKey::DetailCast {
@@ -217,9 +212,7 @@ pub fn handle_virtual_carousel_message(
                         state,
                         &key,
                         &slots,
-                        planner::CarouselDemandImageKind::Profile {
-                            size: ProfileSize::W185,
-                        },
+                        DetailRailImageRequestKind::Profile,
                     );
                 }
                 CarouselKey::DetailSeriesEpisodes(series_uuid) => {
@@ -228,9 +221,7 @@ pub fn handle_virtual_carousel_message(
                         state,
                         &key,
                         &slots,
-                        planner::CarouselDemandImageKind::EpisodeStill {
-                            size: EpisodeSize::W512,
-                        },
+                        DetailRailImageRequestKind::Still,
                     );
                 }
                 CarouselKey::DetailEpisodeSiblings(season_uuid) => {
@@ -239,9 +230,7 @@ pub fn handle_virtual_carousel_message(
                         state,
                         &key,
                         &slots,
-                        planner::CarouselDemandImageKind::EpisodeStill {
-                            size: EpisodeSize::W512,
-                        },
+                        DetailRailImageRequestKind::Still,
                     );
                 }
                 CarouselKey::LibraryMovies(lib_uuid) => {
@@ -907,12 +896,41 @@ fn ensure_scroller_for_key<'a>(
         .ensure_scroller_with_config(key, cfg)
 }
 
+fn detail_rail_demand_image_kind(
+    state: &State,
+    request_kind: DetailRailImageRequestKind,
+) -> Option<planner::CarouselDemandImageKind> {
+    match request_kind {
+        DetailRailImageRequestKind::Poster => {
+            Some(planner::CarouselDemandImageKind::Poster {
+                size: state.domains.settings.display.detail_poster_quality,
+            })
+        }
+        DetailRailImageRequestKind::Still => {
+            Some(planner::CarouselDemandImageKind::EpisodeStill {
+                size: EpisodeSize::W512,
+            })
+        }
+        DetailRailImageRequestKind::Profile => {
+            Some(planner::CarouselDemandImageKind::Profile {
+                size: ProfileSize::W185,
+            })
+        }
+        DetailRailImageRequestKind::None => None,
+    }
+}
+
 fn emit_snapshot_from_slots(
     state: &State,
     key: &CarouselKey,
     image_slots: &[Option<uuid::Uuid>],
-    image_kind: planner::CarouselDemandImageKind,
+    request_kind: DetailRailImageRequestKind,
 ) {
+    let Some(image_kind) = detail_rail_demand_image_kind(state, request_kind)
+    else {
+        return;
+    };
+
     if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
         && let Some(vc) = state.domains.ui.state.carousel_registry.get(key)
     {
@@ -1645,13 +1663,7 @@ pub(super) fn maybe_send_snapshot_for_key(
                     state,
                     key,
                     &slots,
-                    planner::CarouselDemandImageKind::Poster {
-                        size: state
-                            .domains
-                            .settings
-                            .display
-                            .detail_poster_quality,
-                    },
+                    DetailRailImageRequestKind::Poster,
                 );
             }
         }
@@ -1661,9 +1673,7 @@ pub(super) fn maybe_send_snapshot_for_key(
                 state,
                 key,
                 &slots,
-                planner::CarouselDemandImageKind::EpisodeStill {
-                    size: EpisodeSize::W512,
-                },
+                DetailRailImageRequestKind::Still,
             );
         }
         CarouselKey::DetailCast {
@@ -1676,9 +1686,7 @@ pub(super) fn maybe_send_snapshot_for_key(
                 state,
                 key,
                 &slots,
-                planner::CarouselDemandImageKind::Profile {
-                    size: ProfileSize::W185,
-                },
+                DetailRailImageRequestKind::Profile,
             );
         }
         CarouselKey::DetailSeriesEpisodes(series_uuid) => {
@@ -1687,9 +1695,7 @@ pub(super) fn maybe_send_snapshot_for_key(
                 state,
                 key,
                 &slots,
-                planner::CarouselDemandImageKind::EpisodeStill {
-                    size: EpisodeSize::W512,
-                },
+                DetailRailImageRequestKind::Still,
             );
         }
         CarouselKey::DetailEpisodeSiblings(season_uuid) => {
@@ -1698,9 +1704,7 @@ pub(super) fn maybe_send_snapshot_for_key(
                 state,
                 key,
                 &slots,
-                planner::CarouselDemandImageKind::EpisodeStill {
-                    size: EpisodeSize::W512,
-                },
+                DetailRailImageRequestKind::Still,
             );
         }
         CarouselKey::LibraryMovies(lib_uuid) => {

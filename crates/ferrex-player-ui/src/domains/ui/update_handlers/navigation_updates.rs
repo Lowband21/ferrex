@@ -9,7 +9,7 @@ use super::super::views::carousel::CarouselState;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::views::{
     detail::{
-        DetailRailCardVariant, DetailRailMetrics,
+        DetailRailCardVariant, DetailRailImageRequestKind, DetailRailMetrics,
         solve_detail_layout_from_runtime,
     },
     virtual_carousel::{
@@ -90,15 +90,44 @@ fn ensure_detail_rail_carousel(
     );
 }
 
+fn detail_rail_demand_image_kind(
+    state: &State,
+    request_kind: DetailRailImageRequestKind,
+) -> Option<planner::CarouselDemandImageKind> {
+    match request_kind {
+        DetailRailImageRequestKind::Poster => {
+            Some(planner::CarouselDemandImageKind::Poster {
+                size: state.domains.settings.display.detail_poster_quality,
+            })
+        }
+        DetailRailImageRequestKind::Still => {
+            Some(planner::CarouselDemandImageKind::EpisodeStill {
+                size: EpisodeSize::W512,
+            })
+        }
+        DetailRailImageRequestKind::Profile => {
+            Some(planner::CarouselDemandImageKind::Profile {
+                size: ProfileSize::W185,
+            })
+        }
+        DetailRailImageRequestKind::None => None,
+    }
+}
+
 fn emit_detail_rail_snapshot_for_visible<F>(
     state: &State,
     key: &CarouselKey,
     total_items: usize,
     ids_fn: F,
-    image_kind: planner::CarouselDemandImageKind,
+    request_kind: DetailRailImageRequestKind,
 ) where
     F: Fn(usize) -> Option<uuid::Uuid>,
 {
+    let Some(image_kind) = detail_rail_demand_image_kind(state, request_kind)
+    else {
+        return;
+    };
+
     if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
         && let Some(vc) = state.domains.ui.state.carousel_registry.get(key)
     {
@@ -275,9 +304,7 @@ pub fn handle_view_movie_details(
             &cast_key,
             cast_total,
             |i| cast_profile_image_ids.get(i).copied(),
-            planner::CarouselDemandImageKind::Profile {
-                size: ProfileSize::W185,
-            },
+            DetailRailImageRequestKind::Profile,
         );
 
         //// Start backdrop transition animation (Broken)
@@ -435,9 +462,7 @@ pub fn handle_view_series(
                 &seasons_key,
                 seasons.len(),
                 |i| seasons.get(i).and_then(|s| s.details.primary_poster_iid),
-                planner::CarouselDemandImageKind::Poster {
-                    size: state.domains.settings.display.detail_poster_quality,
-                },
+                DetailRailImageRequestKind::Poster,
             );
         }
 
@@ -586,9 +611,7 @@ pub fn handle_view_season(
             &episodes_key,
             episodes.len(),
             |i| episodes.get(i).and_then(|e| e.details.primary_still_iid),
-            planner::CarouselDemandImageKind::EpisodeStill {
-                size: EpisodeSize::W512,
-            },
+            DetailRailImageRequestKind::Still,
         );
 
         state
@@ -714,9 +737,7 @@ pub fn handle_view_episode(
                 &siblings_key,
                 episodes.len(),
                 |i| episodes.get(i).and_then(|e| e.details.primary_still_iid),
-                planner::CarouselDemandImageKind::EpisodeStill {
-                    size: EpisodeSize::W512,
-                },
+                DetailRailImageRequestKind::Still,
             );
         }
 

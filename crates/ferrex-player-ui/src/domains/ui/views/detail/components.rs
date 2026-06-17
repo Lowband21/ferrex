@@ -119,6 +119,8 @@ pub struct DetailStageSectionRenderState {
 struct DetailArtworkRenderOptions<'a> {
     item_identity: Option<&'a str>,
     carousel_key: Option<&'a CarouselKey>,
+    request_size: Option<ImageSize>,
+    skip_request: bool,
     shader_title: Option<&'a str>,
     shader_meta: Option<&'a str>,
     shader_text_zone_height: Option<f32>,
@@ -2538,6 +2540,7 @@ pub fn view_detail_media_rail_card(
     let uses_shader_text =
         rail_item_uses_shader_text(rail.card_variant, &item.artwork);
     let item_identity = format!("{}:{}", rail.stable_key, item.stable_id);
+    let image_request_size = item.request_size();
     let meta = media_rail_item_meta(item);
     let image = view_artwork(
         &item.artwork,
@@ -2548,6 +2551,8 @@ pub fn view_detail_media_rail_card(
         DetailArtworkRenderOptions {
             item_identity: uses_shader_text.then_some(item_identity.as_str()),
             carousel_key: rail.carousel_key.as_ref(),
+            request_size: image_request_size,
+            skip_request: image_request_size.is_none(),
             shader_title: uses_shader_text.then_some(item.title.as_str()),
             shader_meta: uses_shader_text.then_some(meta.as_deref()).flatten(),
             shader_text_zone_height: uses_shader_text
@@ -2733,10 +2738,11 @@ fn view_artwork(
             rotation_y,
             ..
         } => {
+            let request_size = options.request_size.unwrap_or(*request_size);
             let mut image = image_for(*media_uuid)
                 .iid(*image_id)
-                .skip_request(image_id.is_none())
-                .request_size(*request_size)
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
                 .display_size(layout.width, layout.height)
                 .radius(layout.corner_radius)
                 .priority(priority)
@@ -2765,10 +2771,12 @@ fn view_artwork(
             image_id,
             ..
         } => {
+            let request_size =
+                options.request_size.unwrap_or_else(ImageSize::thumbnail);
             let image = image_for(*media_uuid)
                 .iid(*image_id)
-                .skip_request(image_id.is_none())
-                .request_size(ImageSize::thumbnail())
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
                 .display_size(layout.width, layout.height)
                 .radius(layout.corner_radius)
                 .priority(priority)
@@ -2782,10 +2790,12 @@ fn view_artwork(
             image_id,
             ..
         } => {
+            let request_size =
+                options.request_size.unwrap_or_else(ImageSize::profile);
             let image = image_for(*media_uuid)
                 .iid(*image_id)
-                .skip_request(image_id.is_none())
-                .request_size(ImageSize::profile())
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
                 .display_size(layout.width, layout.height)
                 .radius(layout.corner_radius)
                 .priority(priority)

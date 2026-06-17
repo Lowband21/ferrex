@@ -127,17 +127,28 @@ where
 {
     let (visible_ids, prefetch_ids, background_ids) =
         collect_ranges_ids(state, total_items, ids_fn, rc);
-    let context = image_kind.request_kind().map(|request_kind| {
-        let mut context = DemandContext::default();
-        for id in visible_ids
-            .iter()
-            .chain(prefetch_ids.iter())
-            .chain(background_ids.iter())
-        {
-            context.override_request(*id, request_kind.clone());
+    let context = match image_kind {
+        CarouselDemandImageKind::Profile { size } => {
+            let image_ids = visible_ids
+                .iter()
+                .chain(prefetch_ids.iter())
+                .chain(background_ids.iter())
+                .copied()
+                .collect::<Vec<_>>();
+            Some(build_profile_context(&image_ids, size))
         }
-        context
-    });
+        _ => image_kind.request_kind().map(|request_kind| {
+            let mut context = DemandContext::default();
+            for id in visible_ids
+                .iter()
+                .chain(prefetch_ids.iter())
+                .chain(background_ids.iter())
+            {
+                context.override_request(*id, request_kind.clone());
+            }
+            context
+        }),
+    };
 
     DemandSnapshot {
         visible_ids,

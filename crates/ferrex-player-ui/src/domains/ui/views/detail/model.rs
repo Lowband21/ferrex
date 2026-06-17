@@ -493,6 +493,19 @@ impl DetailRailImageRequestKind {
             DetailArtwork::None { .. } => Self::None,
         }
     }
+
+    /// Resolve the cache/fetch size represented by this rail image kind.
+    pub fn request_size(
+        self,
+        poster_request_size: ImageSize,
+    ) -> Option<ImageSize> {
+        match self {
+            Self::Poster => Some(poster_request_size),
+            Self::Still => Some(ImageSize::thumbnail()),
+            Self::Profile => Some(ImageSize::profile()),
+            Self::None => None,
+        }
+    }
 }
 
 /// Rail-level activation semantics for remote and pointer surfaces.
@@ -582,6 +595,17 @@ impl DetailMediaRailItem {
     pub fn with_activation(mut self, on_press: UiMessage) -> Self {
         self.on_press = Some(on_press);
         self
+    }
+
+    /// Cache/fetch size requested by this rail item's typed image metadata.
+    pub fn request_size(&self) -> Option<ImageSize> {
+        let poster_request_size = match &self.artwork {
+            DetailArtwork::Poster { request_size, .. } => *request_size,
+            DetailArtwork::Still { .. }
+            | DetailArtwork::Profile { .. }
+            | DetailArtwork::None { .. } => ImageSize::poster(),
+        };
+        self.image_request_kind.request_size(poster_request_size)
     }
 }
 
