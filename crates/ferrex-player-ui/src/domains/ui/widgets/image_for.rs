@@ -53,16 +53,48 @@ struct CachedImageData {
 /// How much layout space the poster widget should claim.
 ///
 /// This is intentionally independent from the requested image/cache size and
-/// the visible display size. Use [`PosterLayoutBounds::ReserveEffects`] when
-/// the caller wants hover/glow/scale effects to have dedicated overflow room in
-/// layout. Use [`PosterLayoutBounds::Tight`] when the widget should occupy only
-/// the visible poster rectangle.
+/// the visible display size. The policy separates three regions:
+///
+/// - the visible poster bounds (rounded corners, placeholder, progress bar);
+/// - optional effect-reserved bounds for hover/glow/scale overflow;
+/// - optional shader title/meta text zone below the poster.
+///
+/// Callers that use native Iced text should keep shader text unset and choose
+/// [`PosterLayoutBounds::Tight`] or [`PosterLayoutBounds::ReserveEffects`].
+/// Callers that set shader title/meta text must reserve one of the text-zone
+/// variants so text cannot draw into unrelated rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PosterLayoutBounds {
     /// Layout bounds equal the visible poster size.
     Tight,
-    /// Layout bounds include padding for hover/glow/scale effects.
+    /// Layout bounds include padding for hover/glow/scale effects only.
     ReserveEffects,
+    /// Layout bounds include the shader title/meta zone below the visible poster.
+    ReserveText,
+    /// Layout bounds include both effect padding and the shader title/meta zone.
+    ReserveEffectsAndText,
+}
+
+impl PosterLayoutBounds {
+    fn reserve_text_zone(self) -> Self {
+        match self {
+            PosterLayoutBounds::Tight | PosterLayoutBounds::ReserveText => {
+                PosterLayoutBounds::ReserveText
+            }
+            PosterLayoutBounds::ReserveEffects
+            | PosterLayoutBounds::ReserveEffectsAndText => {
+                PosterLayoutBounds::ReserveEffectsAndText
+            }
+        }
+    }
+
+    fn reserves_text_zone(self) -> bool {
+        matches!(
+            self,
+            PosterLayoutBounds::ReserveText
+                | PosterLayoutBounds::ReserveEffectsAndText
+        )
+    }
 }
 
 /// A declarative image widget that integrates with UnifiedImageService
@@ -344,15 +376,29 @@ impl ImageFor {
         self
     }
 
-    /// Set the title text to render below the poster (max 24 chars)
+    /// Set the title text to render below the poster (max 24 chars).
+    ///
+    /// Enabling shader text upgrades the current layout policy to reserve the
+    /// shader text zone, preserving any existing effect reservation choice.
     pub fn title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
+        let title = title.into();
+        self.title = if title.is_empty() { None } else { Some(title) };
+        if self.title.is_some() {
+            self.layout_bounds = self.layout_bounds.reserve_text_zone();
+        }
         self
     }
 
-    /// Set the meta text (year, rating, etc.) to render below the title (max 16 chars)
+    /// Set the meta text (year, rating, etc.) to render below the title (max 16 chars).
+    ///
+    /// Enabling shader text upgrades the current layout policy to reserve the
+    /// shader text zone, preserving any existing effect reservation choice.
     pub fn meta(mut self, meta: impl Into<String>) -> Self {
-        self.meta = Some(meta.into());
+        let meta = meta.into();
+        self.meta = if meta.is_empty() { None } else { Some(meta) };
+        if self.meta.is_some() {
+            self.layout_bounds = self.layout_bounds.reserve_text_zone();
+        }
         self
     }
 
@@ -362,6 +408,18 @@ impl ImageFor {
         self.carousel_key = Some(key);
         self
     }
+}
+
+fn shader_text_zone_height_for_display(poster_height: f32) -> f32 {
+    use crate::infra::constants::layout::poster;
+
+    let scale = if poster::BASE_HEIGHT > 0.0 {
+        poster_height / poster::BASE_HEIGHT
+    } else {
+        1.0
+    };
+
+    poster::SHADER_TEXT_ZONE_HEIGHT * scale.max(0.0)
 }
 
 /// Helper function to create an image widget
@@ -381,6 +439,30 @@ mod tests {
         let image = image.is_hovered(true).hover_scale_enabled(false);
         assert!(image.is_hovered);
         assert!(!image.hover_scale_enabled);
+    }
+
+    #[test]
+    fn shader_title_meta_reserve_text_zone_without_changing_effect_policy() {
+        let image = ImageFor::new(Uuid::nil()).title("A title");
+        assert_eq!(
+            image.layout_bounds,
+            PosterLayoutBounds::ReserveEffectsAndText
+        );
+
+        let image = ImageFor::new(Uuid::nil()).tight_bounds().meta("2024");
+        assert_eq!(image.layout_bounds, PosterLayoutBounds::ReserveText);
+    }
+
+    #[test]
+    fn shader_text_zone_height_scales_with_display_height() {
+        assert!(
+            (shader_text_zone_height_for_display(300.0) - 50.0).abs()
+                < f32::EPSILON
+        );
+        assert!(
+            (shader_text_zone_height_for_display(450.0) - 75.0).abs()
+                < f32::EPSILON
+        );
     }
 }
 
@@ -416,6 +498,11 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
             AnimatedPosterBounds::new_with_config(width, height, &config)
         } else {
             AnimatedPosterBounds::new(width, height)
+        };
+        let text_zone_height = if image.layout_bounds.reserves_text_zone() {
+            shader_text_zone_height_for_display(height)
+        } else {
+            0.0
         };
 
         let request = image.iid.map(|iid| {
@@ -456,6 +543,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 image.animation,
                 &image,
                 bounds,
+                text_zone_height,
             );
         }
 
@@ -486,6 +574,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                     image.rotation_y,
                     image.selected_menu_button,
                     image.layout_bounds,
+                    text_zone_height,
                 );
             };
 
@@ -525,6 +614,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                             .radius(image.radius),
                         bounds,
                         image.layout_bounds,
+                        text_zone_height,
                     )
                     .is_hovered(image.is_hovered)
                     .hover_scale_enabled(image.hover_scale_enabled)
@@ -646,6 +736,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                         image.rotation_y,
                         image.selected_menu_button,
                         image.layout_bounds,
+                        text_zone_height,
                     )
                 }
             }
@@ -665,6 +756,7 @@ impl<'a> From<ImageFor> for Element<'a, UiMessage> {
                 image.rotation_y,
                 image.selected_menu_button,
                 image.layout_bounds,
+                text_zone_height,
             )
         }
     }
@@ -674,11 +766,18 @@ fn apply_layout_bounds(
     poster: Poster,
     bounds: AnimatedPosterBounds,
     layout_bounds: PosterLayoutBounds,
+    text_zone_height: f32,
 ) -> Poster {
     match layout_bounds {
         PosterLayoutBounds::Tight => poster.with_tight_bounds(bounds),
         PosterLayoutBounds::ReserveEffects => {
             poster.with_animated_bounds(bounds)
+        }
+        PosterLayoutBounds::ReserveText => {
+            poster.with_text_bounds(bounds, text_zone_height)
+        }
+        PosterLayoutBounds::ReserveEffectsAndText => {
+            poster.with_animated_text_bounds(bounds, text_zone_height)
         }
     }
 }
@@ -698,6 +797,7 @@ fn create_shader_from_cached<'a>(
     animation: AnimationBehavior,
     image: &ImageFor,
     bounds: AnimatedPosterBounds,
+    text_zone_height: f32,
 ) -> Element<'a, UiMessage> {
     // Create instance key from media_id and carousel_key
     let instance_key =
@@ -707,6 +807,7 @@ fn create_shader_from_cached<'a>(
         poster(handle, Some(instance_hash)).radius(image.radius),
         bounds,
         image.layout_bounds,
+        text_zone_height,
     )
     .is_hovered(image.is_hovered)
     .hover_scale_enabled(image.hover_scale_enabled)
@@ -780,6 +881,7 @@ fn create_loading_placeholder<'a>(
     rotation_override: Option<f32>,
     selected_menu_button: Option<MenuButton>,
     layout_bounds: PosterLayoutBounds,
+    text_zone_height: f32,
 ) -> Element<'a, UiMessage> {
     // Create a placeholder handle - we'll use a 1x1 transparent pixel
     // The shader will render the theme color on the backface
@@ -799,6 +901,7 @@ fn create_loading_placeholder<'a>(
         poster(placeholder_handle, Some(instance_hash)).radius(radius),
         bounds,
         layout_bounds,
+        text_zone_height,
     )
     .theme_color(color)
     .with_animation(PosterAnimationType::PlaceholderSunken)

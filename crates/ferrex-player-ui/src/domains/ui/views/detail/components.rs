@@ -1030,6 +1030,10 @@ fn registered_horizontal_scroller(
         })
         .width(Length::Fill)
         .height(Length::Fixed(height));
+    let scroll = container(scroll)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .clip(true);
 
     mouse_area(scroll)
         .on_enter(UiMessage::VirtualCarousel(
@@ -1045,12 +1049,17 @@ fn horizontal_scroller(
     row: Row<'static, UiMessage>,
     height: f32,
 ) -> Element<'static, UiMessage> {
-    scrollable(row)
+    let scroll = scrollable(row)
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::default().scroller_width(4).margin(2),
         ))
         .width(Length::Fill)
+        .height(Length::Fixed(height));
+
+    container(scroll)
+        .width(Length::Fill)
         .height(Length::Fixed(height))
+        .clip(true)
         .into()
 }
 
