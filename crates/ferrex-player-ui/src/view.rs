@@ -190,6 +190,7 @@ pub fn view(
             | ViewState::EpisodeDetail { .. } => {
                 // Wrap content in scrollable for detail views
                 scrollable(content)
+                    .id(crate::domains::ui::views::detail::desktop_detail_scrollable_id())
                     .on_scroll(|viewport| {
                         DomainMessage::Ui(
                             InteractionMessage::DetailViewScrolled(viewport)

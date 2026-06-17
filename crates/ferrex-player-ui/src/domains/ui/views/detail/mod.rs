@@ -18,6 +18,14 @@ pub mod layout;
 pub mod model;
 pub mod typography;
 
+const DESKTOP_DETAIL_SCROLLABLE_ID: &str = "ferrex.detail.desktop.scrollable";
+
+/// Return the stable desktop detail-page scrollable id used by deterministic
+/// screenshot presets to restore top and below-hero review states.
+pub fn desktop_detail_scrollable_id() -> iced::widget::Id {
+    iced::widget::Id::new(DESKTOP_DETAIL_SCROLLABLE_ID)
+}
+
 pub use components::{
     DetailActionSurfaceMode, DetailForegroundSurface,
     DetailForegroundSurfaceTokens, DetailRegisteredRailAdapter,
