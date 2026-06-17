@@ -110,8 +110,10 @@ impl CarouselRegistry {
         });
 
         // Always bring dynamic properties up to date even if the state already exists.
-        // This ensures initial carousels reflect current counts and viewport without
-        // waiting for a scroll event to trigger recalculation.
+        // This ensures initial carousels reflect current counts, layout metrics, and
+        // viewport without waiting for a scroll event to trigger recalculation.
+        state.apply_config(config, scale);
+
         if state.total_items != total_items {
             state.set_total_items(total_items);
         }

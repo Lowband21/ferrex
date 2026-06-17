@@ -12,10 +12,12 @@ use crate::{
                 DetailLayoutPlan, DetailMetadataImportance, DetailMetadataPill,
                 DetailOverviewSection, DetailPageModel, DetailSection,
                 DetailTechnicalItem, DetailTechnicalSection, DetailTone,
-                prioritize_metadata_items, solve_detail_layout_from_runtime,
-                view_detail_stage,
+                prioritize_metadata_items, registered_detail_rail_adapters,
+                solve_detail_layout_from_runtime,
+                view_detail_stage_with_registered_rails,
             },
             grid::macros::parse_hex_color,
+            virtual_carousel::{CarouselKey, DetailCarouselOwnerKind},
         },
     },
     infra::{
@@ -106,7 +108,16 @@ fn view_movie_detail_model(
     plan: &DetailLayoutPlan,
 ) -> Element<'static, UiMessage> {
     let sizes = &state.domains.ui.state.size_provider;
-    view_detail_stage(model, plan, sizes)
+    let registered_rails = registered_detail_rail_adapters(
+        &model.sections,
+        &state.domains.ui.state.carousel_registry,
+    );
+    view_detail_stage_with_registered_rails(
+        model,
+        plan,
+        sizes,
+        &registered_rails,
+    )
 }
 
 fn movie_detail_layout_plan(state: &State) -> DetailLayoutPlan {
@@ -217,6 +228,10 @@ fn build_movie_detail_model(
     if !cast.is_empty() {
         model.sections.push(DetailSection::Cast(DetailCastSection {
             title: "Cast".to_string(),
+            carousel_key: Some(CarouselKey::DetailCast {
+                owner_kind: DetailCarouselOwnerKind::Movie,
+                owner_id: media_uuid,
+            }),
             members: cast,
             empty_message: None,
         }));

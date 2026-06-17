@@ -3,7 +3,7 @@
 use iced::widget::{Id as ScrollableId, scrollable};
 use std::ops::Range;
 
-use super::types::{CarouselConfig, WrapMode};
+use super::types::{CarouselConfig, OverscanPolicy, WrapMode};
 
 #[derive(Debug, Clone)]
 pub struct VirtualCarouselState {
@@ -19,6 +19,7 @@ pub struct VirtualCarouselState {
     // Windowing
     pub overscan_before: usize,
     pub overscan_after: usize,
+    overscan_policy: OverscanPolicy,
     pub visible_range: Range<usize>,
 
     // Scrolling
@@ -51,20 +52,7 @@ impl VirtualCarouselState {
         config: CarouselConfig,
         scale: f32,
     ) -> Self {
-        let computed_item_width = {
-            if let Some(card_size) = config.card_size {
-                let (w, _h) = card_size.scaled_dimensions(scale);
-                if config.include_animation_padding {
-                    let pad = crate::infra::constants::animation::calculate_horizontal_padding(w);
-                    w + 2.0 * pad
-                } else {
-                    w
-                }
-            } else {
-                // Scale the explicit item_width as well
-                config.item_width * scale
-            }
-        };
+        let computed_item_width = config.effective_item_width(scale);
         let mut s = Self {
             total_items,
             viewport_width,
@@ -73,6 +61,7 @@ impl VirtualCarouselState {
             items_per_page: 1, // computed below
             overscan_before: config.overscan_items_before,
             overscan_after: config.overscan_items_after,
+            overscan_policy: config.overscan_policy,
             visible_range: 0..0,
             index_position: 0.0,
             reference_index: 0.0,
@@ -124,16 +113,52 @@ impl VirtualCarouselState {
     /// Update total items and recompute visible ranges where needed.
     pub fn set_total_items(&mut self, total: usize) {
         self.total_items = total;
-        self.recompute_visible_range();
-        self.recompute_max_scroll();
-        // Keep index as the source of truth after metrics change
-        self.scroll_x = self.index_to_scroll(self.index_position);
+        self.recompute_metrics();
     }
 
     /// Update viewport width; recompute items/page and max scroll.
-    pub fn update_dimensions(&mut self, viewport_width: f32) {
+    /// Returns true when the visible window or page metrics changed.
+    pub fn update_dimensions(&mut self, viewport_width: f32) -> bool {
+        let previous_range = self.visible_range.clone();
+        let previous_items_per_page = self.items_per_page;
+        let previous_overscan = (self.overscan_before, self.overscan_after);
         self.viewport_width = viewport_width;
         self.recompute_metrics();
+        self.visible_range != previous_range
+            || self.items_per_page != previous_items_per_page
+            || (self.overscan_before, self.overscan_after) != previous_overscan
+    }
+
+    /// Apply new layout metrics while preserving the current index position.
+    pub fn apply_config(&mut self, config: CarouselConfig, scale: f32) -> bool {
+        let previous_range = self.visible_range.clone();
+        let previous_items_per_page = self.items_per_page;
+        let previous_metrics = (
+            self.item_width,
+            self.item_spacing,
+            self.overscan_before,
+            self.overscan_after,
+            self.overscan_policy,
+            self.wrap_mode,
+        );
+        self.item_width = config.effective_item_width(scale);
+        self.item_spacing = config.item_spacing;
+        self.overscan_before = config.overscan_items_before;
+        self.overscan_after = config.overscan_items_after;
+        self.overscan_policy = config.overscan_policy;
+        self.wrap_mode = config.wrap_mode;
+        self.recompute_metrics();
+        self.visible_range != previous_range
+            || self.items_per_page != previous_items_per_page
+            || previous_metrics
+                != (
+                    self.item_width,
+                    self.item_spacing,
+                    self.overscan_before,
+                    self.overscan_after,
+                    self.overscan_policy,
+                    self.wrap_mode,
+                )
     }
 
     /// Handle scroll viewport reporting (from Iced on_scroll viewport).
@@ -224,7 +249,7 @@ impl VirtualCarouselState {
         target_i as f32
     }
 
-    /// Recompute items/page, visible range, and max scroll from current dimensions.
+    /// Recompute items/page, overscan, visible range, and max scroll from current dimensions.
     fn recompute_metrics(&mut self) {
         let w = self.item_width.max(1.0);
         let s = self.item_spacing.max(0.0);
@@ -232,10 +257,19 @@ impl VirtualCarouselState {
         // Count of fully visible items: floor((viewport + s) / (w + s))
         let raw = ((self.viewport_width + s) / stride).floor() as usize;
         self.items_per_page = raw.max(1);
-        self.recompute_visible_range();
+        self.recompute_overscan();
         self.recompute_max_scroll();
-        // Re-derive scroll position from index after metric changes
-        self.scroll_x = self.index_to_scroll(self.index_position);
+        self.recompute_visible_range();
+    }
+
+    fn recompute_overscan(&mut self) {
+        match self.overscan_policy {
+            OverscanPolicy::Fixed => {}
+            OverscanPolicy::DetailRailAdaptive => {
+                self.overscan_before = (self.items_per_page / 2).clamp(1, 4);
+                self.overscan_after = self.items_per_page.clamp(2, 6);
+            }
+        }
     }
 
     fn recompute_visible_range(&mut self) {
@@ -247,7 +281,7 @@ impl VirtualCarouselState {
         let viewport_end = self.scroll_x + self.viewport_width;
         let first_start_idx = (self.scroll_x / stride).floor() as usize;
         // Items are included if their start < viewport_end (right-partial included)
-        let last_start_idx = ((viewport_end - 1e-6) / stride).floor() as usize;
+        let last_start_idx = ((viewport_end - 1e-3) / stride).floor() as usize;
         let start = first_start_idx.saturating_sub(self.overscan_before);
         let end_base = last_start_idx.saturating_add(1);
         let end = (end_base + self.overscan_after).min(self.total_items);
@@ -331,5 +365,73 @@ impl VirtualCarouselState {
             return self.max_start_index() as f32;
         }
         (scroll / stride).clamp(0.0, self.max_start_index() as f32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn detail_state(
+        total_items: usize,
+        viewport_width: f32,
+    ) -> VirtualCarouselState {
+        VirtualCarouselState::new_unscaled(
+            total_items,
+            viewport_width,
+            CarouselConfig::detail_rail(100.0, 10.0),
+        )
+    }
+
+    #[test]
+    fn detail_rail_config_uses_layout_solved_metrics_without_second_scaling() {
+        let state = VirtualCarouselState::new(
+            5,
+            500.0,
+            CarouselConfig::detail_rail(180.0, 12.0),
+            1.5,
+        );
+
+        assert_eq!(state.item_width, 180.0);
+        assert_eq!(state.item_spacing, 12.0);
+    }
+
+    #[test]
+    fn detail_rail_range_uses_viewport_and_adaptive_overscan() {
+        let mut state = detail_state(20, 320.0);
+
+        assert_eq!(state.items_per_page, 3);
+        assert_eq!(state.overscan_before, 1);
+        assert_eq!(state.overscan_after, 3);
+
+        state.set_scroll_x(220.0);
+
+        assert_eq!(state.visible_range, 1..8);
+    }
+
+    #[test]
+    fn detail_rail_end_alignment_keeps_last_item_visible() {
+        let mut state = detail_state(10, 350.0);
+        let max_index = state.max_start_index() as f32;
+
+        state.set_index_position(max_index);
+
+        assert_eq!(state.scroll_x, state.max_scroll);
+        assert_eq!(state.visible_range.end, 10);
+        assert!(state.visible_range.contains(&9));
+    }
+
+    #[test]
+    fn detail_rail_resize_reports_range_and_overscan_changes() {
+        let mut state = detail_state(30, 220.0);
+        let original_range = state.visible_range.clone();
+
+        let changed = state.update_dimensions(650.0);
+
+        assert!(changed);
+        assert_eq!(state.items_per_page, 6);
+        assert_eq!(state.overscan_before, 3);
+        assert_eq!(state.overscan_after, 6);
+        assert_ne!(state.visible_range, original_range);
     }
 }

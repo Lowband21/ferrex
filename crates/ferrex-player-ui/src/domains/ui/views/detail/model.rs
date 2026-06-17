@@ -626,6 +626,7 @@ impl DetailFact {
 #[derive(Debug, Clone)]
 pub struct DetailCastSection {
     pub title: String,
+    pub carousel_key: Option<CarouselKey>,
     pub members: Vec<DetailCastMember>,
     pub empty_message: Option<String>,
 }
@@ -636,7 +637,7 @@ impl DetailCastSection {
             stable_key: "cast".to_string(),
             kind: DetailRailKind::Cast,
             card_variant: DetailRailCardVariant::Profile,
-            carousel_key: None,
+            carousel_key: self.carousel_key.clone(),
             title: self.title.clone(),
             items: self
                 .members
@@ -865,6 +866,7 @@ mod tests {
     fn cast_section_adapts_to_unified_profile_media_rail() {
         let section = DetailCastSection {
             title: "Cast".to_string(),
+            carousel_key: None,
             empty_message: Some("No cast".to_string()),
             members: vec![DetailCastMember {
                 id: "person-42".to_string(),
