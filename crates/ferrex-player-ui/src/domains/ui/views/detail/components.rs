@@ -2527,14 +2527,14 @@ fn media_rail_item_meta(item: &DetailMediaRailItem) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" • "))
 }
 
-fn view_media_rail_item(
+pub fn view_detail_media_rail_card(
     rail: &DetailMediaRail,
     item: &DetailMediaRailItem,
+    metrics: DetailRailMetrics,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
     priority: Priority,
 ) -> Element<'static, UiMessage> {
-    let metrics = plan.rail.metrics_for(rail.card_variant);
     let image_layout = rail_art_layout(rail.card_variant, metrics, sizes);
     let uses_shader_text =
         rail_item_uses_shader_text(rail.card_variant, &item.artwork);
@@ -2589,6 +2589,20 @@ fn view_media_rail_item(
                 true,
             ));
     }
+
+    content.into()
+}
+
+fn view_media_rail_item(
+    rail: &DetailMediaRail,
+    item: &DetailMediaRailItem,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    priority: Priority,
+) -> Element<'static, UiMessage> {
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let content =
+        view_detail_media_rail_card(rail, item, metrics, plan, sizes, priority);
 
     if rail.activation_policy.allows_item_activation() {
         if let Some(message) = &item.on_press {
