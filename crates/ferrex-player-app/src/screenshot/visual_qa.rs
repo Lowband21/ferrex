@@ -1,8 +1,8 @@
-//! Theater Plate foreground visual QA matrix for screenshot artifacts.
+//! Detail typography visual QA matrix for deterministic screenshot artifacts.
 //!
-//! The matrix is intentionally executable instead of living in a durable process
-//! document: `ferrex-player screenshot matrix --output-dir <DIR>` captures the
-//! required detail foreground review set and writes a JSON manifest next to the PNGs.
+//! The matrix is executable instead of living in a durable process document:
+//! `ferrex-player screenshot matrix --output-dir <DIR>` captures the detail
+//! typography review set and writes a JSON manifest next to the PNGs.
 
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -14,7 +14,23 @@ use super::{
     capture,
 };
 
-/// CLI command outcome for the Theater Plate foreground matrix.
+const DETAIL_TYPOGRAPHY_MATRIX_NAME: &str = "detail-typography-visual-qa";
+const DETAIL_TYPOGRAPHY_MANIFEST: &str =
+    "detail-typography-visual-qa-matrix.json";
+
+const DETAIL_TYPOGRAPHY_REVIEW_NOTES: &[&str] = &[
+    "Title hierarchy: verify the title remains the dominant text role, with eyebrow/subtitle supporting rather than competing.",
+    "Metadata competition: verify inline metadata and rating chips do not overpower the title, overview, or primary action.",
+    "Overview measure: verify synopsis width, wrapping, and line budget stay readable without long-measure fatigue.",
+    "Fact alignment: verify fact labels and values align cleanly in the active viewport composition.",
+    "Rail/cast captions: verify rail titles, rail subtitles, cast names, and roles remain legible and correctly truncated.",
+    "Contrast/readability: verify foreground copy stays readable against the Theater Plate/background condition.",
+    "No unintended app-card rectangles: verify legacy app-card panels or square artifacts do not appear around detail art, rails, or cast cards.",
+    "Missing-art fallback: verify missing poster/backdrop/still states render intentional placeholders without stale art.",
+    "10-foot readability: verify couch-distance text scale, spacing, and focus affordances remain readable in 10-foot rows.",
+];
+
+/// CLI command outcome for the detail typography matrix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatrixCommandOutcome {
     /// List the matrix cases without capturing screenshots.
@@ -41,7 +57,7 @@ pub struct MatrixRunOutput {
     pub captures: Vec<MatrixCaseCapture>,
 }
 
-/// A deterministic screenshot case in the Theater Plate foreground QA matrix.
+/// A deterministic screenshot case in the detail typography QA matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VisualQaCase {
     /// Stable artifact and filtering identifier.
@@ -58,8 +74,8 @@ pub struct VisualQaCase {
     pub tags: &'static [&'static str],
     /// Human-readable reviewer focus for this case.
     pub review_focus: &'static str,
-    /// Outcome-focused note that ties this case to the exceptional visual criteria.
-    pub review_note: &'static str,
+    /// Review notes/checks that must be evaluated for this case.
+    pub review_notes: &'static [&'static str],
 }
 
 impl VisualQaCase {
@@ -83,341 +99,410 @@ impl VisualQaCase {
 }
 
 const REQUIRED_COVERAGE_TAGS: &[&str] = &[
-    "assertion:no-wrong-face",
-    "assertion:zero-bleed",
+    "assertion:no-unintended-app-card-rectangles",
+    "criteria:10ft-readability",
+    "criteria:cast-captions",
+    "criteria:contrast-readability",
+    "criteria:fact-alignment",
+    "criteria:metadata-competition",
+    "criteria:missing-art-fallback",
+    "criteria:overview-measure",
+    "criteria:rail-captions",
+    "criteria:title-hierarchy",
     "fixture:bright",
     "fixture:busy",
     "fixture:dark",
     "fixture:long-text",
     "fixture:low-quality",
     "fixture:missing-art",
-    "scroll:nested-vertical-horizontal",
-    "scroll:stacked-horizontal",
-    "shader:front-back-menu",
-    "shader:hover-scale",
-    "shader:text",
+    "state:scrolled-detail",
     "state:scrolled-rail",
     "state:top",
     "surface:episode",
     "surface:movie",
-    "surface:rails",
     "surface:season",
     "surface:series",
     "viewport:10ft",
     "viewport:1280x720",
     "viewport:1920x1080",
-    "viewport:compact",
     "viewport:ultrawide",
 ];
 
-const EXCEPTIONAL_REVIEW_CRITERIA: &[&str] = &[
-    "cinematic stage fit",
-    "no app-panel/card feel",
-    "strong readability",
-    "aggressive but readable wide-space use",
-    "physical poster/controller anchoring",
-];
-
-/// Return the full Theater Plate foreground visual QA matrix.
-pub fn theater_plate_foreground_matrix() -> Vec<VisualQaCase> {
+/// Return the full detail typography visual QA matrix.
+pub fn detail_typography_matrix() -> Vec<VisualQaCase> {
     vec![
-        VisualQaCase {
-            id: "rails-top-720",
-            preset: ScreenshotPreset::PosterClippingStackedRailsTop,
-            viewport: Viewport {
+        case(
+            "movie-detail-720-top",
+            ScreenshotPreset::DesktopMovieDetail,
+            Viewport {
                 width: 1280,
                 height: 720,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:no-wrong-face",
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:cast-captions",
+                "criteria:contrast-readability",
+                "criteria:fact-alignment",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:title-hierarchy",
                 "fixture:dark",
-                "scroll:stacked-horizontal",
-                "shader:front-back-menu",
-                "shader:hover-scale",
-                "shader:text",
                 "state:top",
-                "surface:rails",
+                "surface:movie",
                 "viewport:1280x720",
             ],
-            review_focus: "stacked movie/series rails with one back-face menu and one hovered front-face poster",
-            review_note: "Top-of-page rail evidence keeps poster depth physically anchored while proving shader hover and menu states do not bleed into adjacent cards.",
-        },
-        VisualQaCase {
-            id: "rails-scrolled-1080",
-            preset: ScreenshotPreset::PosterClippingStackedRailsScrolled,
-            viewport: Viewport {
-                width: 1920,
-                height: 1080,
-            },
-            mode: Mode::Immediate,
-            settle_ms: 200,
-            tags: &[
-                "assertion:no-wrong-face",
-                "assertion:zero-bleed",
-                "fixture:dark",
-                "scroll:nested-vertical-horizontal",
-                "scroll:stacked-horizontal",
-                "shader:front-back-menu",
-                "shader:hover-scale",
-                "shader:text",
-                "state:scrolled-rail",
-                "surface:rails",
-                "viewport:1920x1080",
-            ],
-            review_focus: "same stacked rails after vertical page and horizontal rail scroll restoration so edge clipping can be checked",
-            review_note: "Scrolled rail evidence stresses restored vertical and horizontal offsets so wide rows stay readable without wrong-face or edge-clipping artifacts.",
-        },
-        VisualQaCase {
-            id: "movie-detail-1080",
-            preset: ScreenshotPreset::DesktopMovieDetail,
-            viewport: Viewport {
-                width: 1920,
-                height: 1080,
-            },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
-                "fixture:dark",
-                "state:top",
-                "surface:movie",
-                "viewport:1920x1080",
-            ],
-            review_focus: "movie detail hero poster and related surfaces at desktop full HD",
-            review_note: "Full-HD movie detail evidence checks the foreground stage reads as a cinematic shelf anchored by the poster instead of a detached app card.",
-        },
-        VisualQaCase {
-            id: "movie-detail-ultrawide",
-            preset: ScreenshotPreset::DesktopMovieDetail,
-            viewport: Viewport {
-                width: 3440,
-                height: 1440,
-            },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
-                "fixture:dark",
-                "state:top",
-                "surface:movie",
-                "viewport:ultrawide",
-            ],
-            review_focus: "movie detail composition at ultrawide viewport boundaries",
-            review_note: "Ultrawide movie detail evidence verifies the stage uses broad horizontal space aggressively while keeping copy inside a readable lobe.",
-        },
-        VisualQaCase {
-            id: "series-detail-720",
-            preset: ScreenshotPreset::DesktopSeriesDetail,
-            viewport: Viewport {
+            "movie detail hero hierarchy, metadata chip restraint, overview measure, facts, and cast availability at 720p",
+        ),
+        case(
+            "movie-detail-720-scrolled-cast",
+            ScreenshotPreset::DesktopMovieDetailScrolled,
+            Viewport {
                 width: 1280,
                 height: 720,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
-                "scroll:nested-vertical-horizontal",
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:cast-captions",
+                "criteria:contrast-readability",
+                "fixture:dark",
+                "state:scrolled-detail",
+                "surface:movie",
+                "viewport:1280x720",
+            ],
+            "lower movie detail sections after deterministic vertical restoration, including cast caption readability",
+        ),
+        case(
+            "movie-detail-1080-top",
+            ScreenshotPreset::DesktopMovieDetail,
+            Viewport {
+                width: 1920,
+                height: 1080,
+            },
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:fact-alignment",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:title-hierarchy",
+                "fixture:dark",
+                "state:top",
+                "surface:movie",
+                "viewport:1920x1080",
+            ],
+            "movie detail title and metadata hierarchy at desktop full HD",
+        ),
+        case(
+            "series-detail-720-top",
+            ScreenshotPreset::DesktopSeriesDetail,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:rail-captions",
+                "criteria:title-hierarchy",
+                "fixture:dark",
                 "state:top",
                 "surface:series",
                 "viewport:1280x720",
             ],
-            review_focus: "series detail with seasons rail inside the vertical detail scroller",
-            review_note: "Series evidence keeps the poster, next-episode controls, and season rail visually tied to the Theater Plate stage at 720p.",
-        },
-        VisualQaCase {
-            id: "season-detail-1080",
-            preset: ScreenshotPreset::DesktopSeasonDetail,
-            viewport: Viewport {
+            "series detail hero and seasons rail typography at 720p",
+        ),
+        case(
+            "series-detail-720-scrolled-rail",
+            ScreenshotPreset::DesktopSeriesDetailScrolled,
+            Viewport {
+                width: 1280,
+                height: 720,
+            },
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:rail-captions",
+                "fixture:dark",
+                "state:scrolled-detail",
+                "surface:series",
+                "viewport:1280x720",
+            ],
+            "series detail restored to the seasons section so rail captions can be reviewed below the hero",
+        ),
+        case(
+            "season-detail-1080-top",
+            ScreenshotPreset::DesktopSeasonDetail,
+            Viewport {
                 width: 1920,
                 height: 1080,
             },
-            mode: Mode::Immediate,
-            settle_ms: 200,
-            tags: &[
-                "assertion:zero-bleed",
-                "scroll:nested-vertical-horizontal",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:rail-captions",
+                "criteria:title-hierarchy",
+                "fixture:dark",
                 "state:top",
                 "surface:season",
                 "viewport:1920x1080",
             ],
-            review_focus: "season detail episode rail inside the vertical detail scroller",
-            review_note: "Season evidence checks the episode rail remains anchored under the hero shelf while still-art cards stay legible across the full-HD span.",
-        },
-        VisualQaCase {
-            id: "season-detail-scrolled-rail-1080",
-            preset: ScreenshotPreset::DesktopSeasonDetailScrolledRail,
-            viewport: Viewport {
+            "season detail hero hierarchy and episode rail setup at full HD",
+        ),
+        case(
+            "season-detail-1080-scrolled-rail",
+            ScreenshotPreset::DesktopSeasonDetailScrolled,
+            Viewport {
                 width: 1920,
                 height: 1080,
             },
-            mode: Mode::Immediate,
-            settle_ms: 200,
-            tags: &[
-                "assertion:zero-bleed",
-                "scroll:nested-vertical-horizontal",
-                "scroll:stacked-horizontal",
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:rail-captions",
+                "fixture:dark",
+                "state:scrolled-detail",
                 "state:scrolled-rail",
                 "surface:season",
                 "viewport:1920x1080",
             ],
-            review_focus: "season detail episode rail after horizontal scroll restoration",
-            review_note: "Scrolled season rail evidence proves relationship cards keep physical alignment and readable labels after the rail is restored away from the first item.",
-        },
-        VisualQaCase {
-            id: "episode-detail-720",
-            preset: ScreenshotPreset::DesktopEpisodeDetail,
-            viewport: Viewport {
+            "season detail restored to a horizontally offset episode rail for caption truncation and alignment review",
+        ),
+        case(
+            "season-detail-ultrawide-scrolled-rail",
+            ScreenshotPreset::DesktopSeasonDetailScrolled,
+            Viewport {
+                width: 3440,
+                height: 1440,
+            },
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:rail-captions",
+                "fixture:dark",
+                "state:scrolled-detail",
+                "state:scrolled-rail",
+                "surface:season",
+                "viewport:ultrawide",
+            ],
+            "ultrawide season detail restored to the episode rail for caption measure and couch-width alignment review",
+        ),
+        case(
+            "episode-detail-720-top",
+            ScreenshotPreset::DesktopEpisodeDetail,
+            Viewport {
                 width: 1280,
                 height: 720,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:title-hierarchy",
+                "fixture:dark",
                 "state:top",
                 "surface:episode",
                 "viewport:1280x720",
             ],
-            review_focus: "episode detail still-art surface and action layout at 720p",
-            review_note: "Episode evidence verifies the still-art anchor and action shelf stay readable at 720p without turning the stage into a generic panel.",
-        },
-        VisualQaCase {
-            id: "bright-fixture-720",
-            preset: ScreenshotPreset::TheaterPlateBright,
-            viewport: Viewport {
+            "episode detail still-art surface, metadata, and overview hierarchy at 720p",
+        ),
+        case(
+            "episode-detail-1080-scrolled",
+            ScreenshotPreset::DesktopEpisodeDetailScrolled,
+            Viewport {
+                width: 1920,
+                height: 1080,
+            },
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:overview-measure",
+                "fixture:dark",
+                "state:scrolled-detail",
+                "surface:episode",
+                "viewport:1920x1080",
+            ],
+            "episode detail below-hero readability where no relationship rail applies",
+        ),
+        case(
+            "bright-fixture-720",
+            ScreenshotPreset::TheaterPlateBright,
+            Viewport {
                 width: 1280,
                 height: 720,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:title-hierarchy",
                 "fixture:bright",
                 "state:top",
                 "surface:movie",
                 "viewport:1280x720",
             ],
-            review_focus: "bright art pressure without poster-depth or shader bleed artifacts",
-            review_note: "Bright fixture evidence confirms the foreground plate compresses glare enough for strong readability while preserving a cinematic backdrop wash.",
-        },
-        VisualQaCase {
-            id: "busy-fixture-1080",
-            preset: ScreenshotPreset::TheaterPlateBusyText,
-            viewport: Viewport {
+            "bright Theater Plate pressure against title, metadata, and action readability",
+        ),
+        case(
+            "busy-fixture-1080",
+            ScreenshotPreset::TheaterPlateBusyText,
+            Viewport {
                 width: 1920,
                 height: 1080,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:title-hierarchy",
                 "fixture:busy",
                 "state:top",
                 "surface:movie",
                 "viewport:1920x1080",
             ],
-            review_focus: "busy/text-like art behind poster and readable detail copy",
-            review_note: "Busy fixture evidence checks synthetic text stays behind real UI copy and does not defeat the foreground readability lobe.",
-        },
-        VisualQaCase {
-            id: "low-quality-fixture-720",
-            preset: ScreenshotPreset::TheaterPlateLowDetail,
-            viewport: Viewport {
+            "busy text-like backdrop behind real title and metadata copy at full HD",
+        ),
+        case(
+            "low-quality-fixture-720",
+            ScreenshotPreset::TheaterPlateLowDetail,
+            Viewport {
                 width: 1280,
                 height: 720,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:title-hierarchy",
                 "fixture:low-quality",
                 "state:top",
                 "surface:movie",
                 "viewport:1280x720",
             ],
-            review_focus: "low-detail/low-quality art remains contained and intentional",
-            review_note: "Low-quality fixture evidence verifies muted art still feels intentionally staged instead of a raw wallpaper or empty app panel.",
-        },
-        VisualQaCase {
-            id: "missing-art-fixture-1080",
-            preset: ScreenshotPreset::TheaterPlateMissingBackdrop,
-            viewport: Viewport {
+            "low-detail backdrop and poster upscaling pressure without raw app-card rectangles",
+        ),
+        case(
+            "missing-art-fixture-1080",
+            ScreenshotPreset::TheaterPlateMissingBackdrop,
+            Viewport {
                 width: 1920,
                 height: 1080,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:missing-art-fallback",
+                "criteria:title-hierarchy",
                 "fixture:missing-art",
                 "state:top",
                 "surface:movie",
                 "viewport:1920x1080",
             ],
-            review_focus: "missing poster/backdrop fallback without stale wrong-face or bleed artifacts",
-            review_note: "Missing-art evidence proves fallback color and empty artwork remain deliberate, readable, and free of stale poster-depth artifacts.",
-        },
-        VisualQaCase {
-            id: "long-text-compact",
-            preset: ScreenshotPreset::TheaterPlateCompact,
-            viewport: Viewport {
-                width: 480,
-                height: 900,
-            },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
-                "fixture:long-text",
-                "state:top",
-                "surface:movie",
-                "viewport:compact",
-            ],
-            review_focus: "compact/tall detail layout with long copy and stacked actions",
-            review_note: "Compact evidence checks long copy wraps inside the plate, actions remain touchable, and the poster stays physically anchored above the text.",
-        },
-        VisualQaCase {
-            id: "long-text-ultrawide",
-            preset: ScreenshotPreset::TheaterPlateCompact,
-            viewport: Viewport {
+            "missing poster/backdrop fallback with title hierarchy and intentional placeholder treatment",
+        ),
+        case(
+            "long-text-ultrawide",
+            ScreenshotPreset::TheaterPlateCompact,
+            Viewport {
                 width: 3440,
                 height: 1440,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:overview-measure",
+                "criteria:title-hierarchy",
                 "fixture:long-text",
                 "state:top",
                 "surface:movie",
                 "viewport:ultrawide",
             ],
-            review_focus: "long title/overview text and shader poster text zone at ultrawide size",
-            review_note: "Long-text ultrawide evidence keeps the readable copy lobe bounded while the surrounding stage uses wide space without becoming a web-app panel.",
-        },
-        VisualQaCase {
-            id: "tenfoot-detail-10ft",
-            preset: ScreenshotPreset::TheaterPlateTenFoot,
-            viewport: Viewport {
+            "long title and overview measure at ultrawide boundaries",
+        ),
+        case(
+            "tenfoot-detail-10ft-top",
+            ScreenshotPreset::TheaterPlateTenFoot,
+            Viewport {
                 width: 1920,
                 height: 1080,
             },
-            mode: Mode::Immediate,
-            settle_ms: 150,
-            tags: &[
-                "assertion:zero-bleed",
+            150,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:10ft-readability",
+                "criteria:contrast-readability",
+                "criteria:metadata-competition",
+                "criteria:title-hierarchy",
                 "fixture:dark",
                 "state:top",
                 "surface:movie",
                 "viewport:10ft",
+                "viewport:1920x1080",
             ],
-            review_focus: "10-foot detail layout at couch-distance full HD",
-            review_note: "10-foot evidence verifies couch-distance typography, controller focus, and poster anchoring hold without busy backdrop interference.",
-        },
+            "10-foot detail title, metadata, action focus, and couch-distance readability at full HD",
+        ),
+        case(
+            "tenfoot-season-10ft-scrolled-rail",
+            ScreenshotPreset::TenFootSeasonDetailScrolled,
+            Viewport {
+                width: 1920,
+                height: 1080,
+            },
+            200,
+            &[
+                "assertion:no-unintended-app-card-rectangles",
+                "criteria:10ft-readability",
+                "criteria:contrast-readability",
+                "criteria:rail-captions",
+                "fixture:dark",
+                "state:scrolled-detail",
+                "state:scrolled-rail",
+                "surface:season",
+                "viewport:10ft",
+                "viewport:1920x1080",
+            ],
+            "10-foot season detail restored to the episode rail for couch-distance caption and focus readability review",
+        ),
     ]
+}
+
+fn case(
+    id: &'static str,
+    preset: ScreenshotPreset,
+    viewport: Viewport,
+    settle_ms: u64,
+    tags: &'static [&'static str],
+    review_focus: &'static str,
+) -> VisualQaCase {
+    VisualQaCase {
+        id,
+        preset,
+        viewport,
+        mode: Mode::Immediate,
+        settle_ms,
+        tags,
+        review_focus,
+        review_notes: DETAIL_TYPOGRAPHY_REVIEW_NOTES,
+    }
 }
 
 /// Return required coverage tags missing from a matrix.
@@ -439,7 +524,7 @@ pub fn run_matrix_command(
     args: &[String],
 ) -> Result<MatrixCommandOutcome, ScreenshotError> {
     let spec = MatrixCliSpec::parse(args)?;
-    let cases = select_cases(&theater_plate_foreground_matrix(), spec.only)?;
+    let cases = select_cases(&detail_typography_matrix(), spec.only)?;
 
     if spec.list || spec.dry_run {
         return Ok(MatrixCommandOutcome::Listed(cases));
@@ -474,7 +559,7 @@ fn select_cases(
     if selected.is_empty() {
         return Err(ScreenshotError::MatrixArgument {
             message: format!(
-                "unknown Theater Plate foreground QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix list`"
+                "unknown detail typography QA matrix case or tag {only:?}; run `ferrex-player screenshot matrix list`"
             ),
         });
     }
@@ -507,8 +592,7 @@ fn capture_matrix(
         });
     }
 
-    let manifest_path =
-        output_dir.join("theater-plate-foreground-visual-qa-matrix.json");
+    let manifest_path = output_dir.join(DETAIL_TYPOGRAPHY_MANIFEST);
     write_manifest(&manifest_path, cases, &captures, settle_ms_override)?;
 
     Ok(MatrixRunOutput {
@@ -524,9 +608,9 @@ fn write_manifest(
     settle_ms_override: Option<u64>,
 ) -> Result<(), ScreenshotError> {
     let manifest = MatrixManifest {
-        matrix: "theater-plate-foreground-visual-qa",
-        exceptional_review_criteria: EXCEPTIONAL_REVIEW_CRITERIA.to_vec(),
+        matrix: DETAIL_TYPOGRAPHY_MATRIX_NAME,
         missing_required_coverage: missing_required_coverage(cases),
+        required_review_notes: DETAIL_TYPOGRAPHY_REVIEW_NOTES.to_vec(),
         cases: cases
             .iter()
             .map(|case| {
@@ -645,8 +729,8 @@ where
 #[derive(Debug, Serialize)]
 struct MatrixManifest {
     matrix: &'static str,
-    exceptional_review_criteria: Vec<&'static str>,
     missing_required_coverage: Vec<&'static str>,
+    required_review_notes: Vec<&'static str>,
     cases: Vec<MatrixManifestCase>,
     captures: Vec<MatrixManifestCapture>,
 }
@@ -660,7 +744,7 @@ struct MatrixManifestCase {
     settle_ms: u64,
     tags: Vec<&'static str>,
     review_focus: &'static str,
-    review_note: &'static str,
+    review_notes: Vec<&'static str>,
 }
 
 impl MatrixManifestCase {
@@ -673,7 +757,7 @@ impl MatrixManifestCase {
             settle_ms: settle_ms_override.unwrap_or(case.settle_ms),
             tags: case.tags.to_vec(),
             review_focus: case.review_focus,
-            review_note: case.review_note,
+            review_notes: case.review_notes.to_vec(),
         }
     }
 }
@@ -700,13 +784,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn theater_plate_foreground_matrix_covers_required_tags() {
-        let cases = theater_plate_foreground_matrix();
+    fn detail_typography_matrix_covers_required_tags() {
+        let cases = detail_typography_matrix();
         let missing = missing_required_coverage(&cases);
 
         assert!(
             missing.is_empty(),
-            "missing Theater Plate foreground QA coverage tags: {missing:?}"
+            "missing detail typography QA coverage tags: {missing:?}"
         );
     }
 
@@ -716,8 +800,7 @@ mod tests {
         let MatrixCommandOutcome::Listed(cases) = outcome else {
             panic!("expected list outcome");
         };
-        assert!(cases.len() > 4);
-        assert!(cases.iter().all(|case| !case.review_note.is_empty()));
+        assert!(cases.len() > 8);
 
         let outcome = run_matrix_command(&[
             "--dry-run".to_string(),
@@ -728,15 +811,50 @@ mod tests {
         let MatrixCommandOutcome::Listed(cases) = outcome else {
             panic!("expected list outcome");
         };
-        assert_eq!(cases.len(), 1);
-        assert_eq!(cases[0].id, "episode-detail-720");
+        assert!(cases.iter().any(|case| case.id == "episode-detail-720-top"));
+        assert!(cases.iter().all(|case| case.has_tag("surface:episode")));
+
+        let outcome = run_matrix_command(&[
+            "--dry-run".to_string(),
+            "--only".to_string(),
+            "state:scrolled-rail".to_string(),
+        ])
+        .expect("filter scrolled rail tag");
+        let MatrixCommandOutcome::Listed(cases) = outcome else {
+            panic!("expected list outcome");
+        };
+        assert!(
+            cases
+                .iter()
+                .any(|case| case.id == "season-detail-1080-scrolled-rail")
+        );
+        assert!(cases.iter().all(|case| case.has_tag("state:scrolled-rail")));
     }
 
     #[test]
     fn matrix_cli_requires_output_dir_for_capture() {
-        let error = run_matrix_command(&["--only=rails-top-720".to_string()])
-            .expect_err("capture without output dir should fail");
+        let error =
+            run_matrix_command(&["--only=movie-detail-720-top".to_string()])
+                .expect_err("capture without output dir should fail");
 
         assert!(matches!(error, ScreenshotError::MatrixArgument { .. }));
+    }
+
+    #[test]
+    fn matrix_cases_include_review_notes_for_each_row() {
+        let cases = detail_typography_matrix();
+
+        for case in cases {
+            assert_eq!(
+                case.review_notes, DETAIL_TYPOGRAPHY_REVIEW_NOTES,
+                "{} should carry the full human-review note set",
+                case.id
+            );
+            assert!(
+                !case.review_focus.trim().is_empty(),
+                "{} should have a reviewer focus",
+                case.id
+            );
+        }
     }
 }

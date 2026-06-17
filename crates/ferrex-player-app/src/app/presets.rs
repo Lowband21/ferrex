@@ -23,7 +23,10 @@ use crate::{
             },
             views::{
                 tenfoot::{
-                    detail::{TenFootDetailAction, TenFootDetailFocusId},
+                    detail::{
+                        TenFootDetailAction, TenFootDetailFocusId,
+                        TenFootDetailItemId, TenFootDetailPanelId,
+                    },
                     home::{
                         TenFootCardId, TenFootFocusId, TenFootMediaKind,
                         TenFootRailId,
@@ -51,7 +54,7 @@ use ferrex_core::player_prelude::{
 use ferrex_model::{
     EnhancedMovieDetails, EnhancedSeriesDetails, EpisodeDetails, EpisodeID,
     EpisodeReference, SeasonDetails, SeasonID, SeasonReference,
-    details::ExternalIds,
+    details::{CastMember, CrewMember, ExternalIds, PersonExternalIds},
     image::metadata::MediaImages,
     numbers::{EpisodeNumber, SeasonNumber},
     titles::{MovieTitle, SeriesTitle},
@@ -86,20 +89,30 @@ pub enum PlayerScenario {
     DesktopLibraryHome,
     /// Desktop movie detail surface with seeded media and artwork.
     DesktopMovieDetail,
+    /// Desktop movie detail surface restored to its lower cast/review section.
+    DesktopMovieDetailScrolled,
     /// Desktop series detail surface with seeded seasons and artwork.
     DesktopSeriesDetail,
+    /// Desktop series detail surface restored to the seasons rail.
+    DesktopSeriesDetailScrolled,
     /// Desktop season detail surface with seeded episodes and artwork.
     DesktopSeasonDetail,
     /// Desktop season detail surface with the episode rail restored to a scrolled state.
     DesktopSeasonDetailScrolledRail,
+    /// Desktop season detail surface restored to the episode rail.
+    DesktopSeasonDetailScrolled,
     /// Desktop episode detail surface with seeded still artwork.
     DesktopEpisodeDetail,
+    /// Desktop episode detail surface restored below the hero.
+    DesktopEpisodeDetailScrolled,
     /// Authenticated settings/device-management surface.
     SettingsDevices,
     /// 10-foot home surface with seeded rails.
     TenFootHome,
     /// 10-foot movie detail surface with seeded media.
     TenFootDetail,
+    /// 10-foot season detail surface restored to its episode rail.
+    TenFootSeasonDetailScrolled,
     /// 10-foot loading/player overlay surface.
     PlayerLoadingOverlay,
     /// Poster clipping regression harness with stacked rails at the top of the page.
@@ -130,18 +143,23 @@ impl std::fmt::Display for PlayerScenario {
 
 impl PlayerScenario {
     /// Canonical scenarios exposed to agents.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 26] = [
         Self::FirstRunAuth,
         Self::UserSelection,
         Self::DesktopLibraryHome,
         Self::DesktopMovieDetail,
+        Self::DesktopMovieDetailScrolled,
         Self::DesktopSeriesDetail,
+        Self::DesktopSeriesDetailScrolled,
         Self::DesktopSeasonDetail,
         Self::DesktopSeasonDetailScrolledRail,
+        Self::DesktopSeasonDetailScrolled,
         Self::DesktopEpisodeDetail,
+        Self::DesktopEpisodeDetailScrolled,
         Self::SettingsDevices,
         Self::TenFootHome,
         Self::TenFootDetail,
+        Self::TenFootSeasonDetailScrolled,
         Self::PlayerLoadingOverlay,
         Self::PosterClippingStackedRailsTop,
         Self::PosterClippingStackedRailsScrolled,
@@ -161,15 +179,22 @@ impl PlayerScenario {
             Self::UserSelection => "UserSelection",
             Self::DesktopLibraryHome => "DesktopLibraryHome",
             Self::DesktopMovieDetail => "DesktopMovieDetail",
+            Self::DesktopMovieDetailScrolled => "DesktopMovieDetailScrolled",
             Self::DesktopSeriesDetail => "DesktopSeriesDetail",
+            Self::DesktopSeriesDetailScrolled => "DesktopSeriesDetailScrolled",
             Self::DesktopSeasonDetail => "DesktopSeasonDetail",
             Self::DesktopSeasonDetailScrolledRail => {
                 "DesktopSeasonDetailScrolledRail"
             }
+            Self::DesktopSeasonDetailScrolled => "DesktopSeasonDetailScrolled",
             Self::DesktopEpisodeDetail => "DesktopEpisodeDetail",
+            Self::DesktopEpisodeDetailScrolled => {
+                "DesktopEpisodeDetailScrolled"
+            }
             Self::SettingsDevices => "SettingsDevices",
             Self::TenFootHome => "TenFootHome",
             Self::TenFootDetail => "TenFootDetail",
+            Self::TenFootSeasonDetailScrolled => "TenFootSeasonDetailScrolled",
             Self::PlayerLoadingOverlay => "PlayerLoadingOverlay",
             Self::PosterClippingStackedRailsTop => {
                 "PosterClippingStackedRailsTop"
@@ -202,8 +227,14 @@ impl PlayerScenario {
             Self::DesktopMovieDetail => {
                 "Desktop movie detail page for a seeded deterministic movie"
             }
+            Self::DesktopMovieDetailScrolled => {
+                "Desktop movie detail page restored to the lower cast/review section for typography QA"
+            }
             Self::DesktopSeriesDetail => {
                 "Desktop series detail page with seeded seasons and recovery-safe actions"
+            }
+            Self::DesktopSeriesDetailScrolled => {
+                "Desktop series detail page restored to the seasons rail for typography QA"
             }
             Self::DesktopSeasonDetail => {
                 "Desktop season detail page with seeded episode relationship rail"
@@ -211,8 +242,14 @@ impl PlayerScenario {
             Self::DesktopSeasonDetailScrolledRail => {
                 "Desktop season detail page with the episode relationship rail restored to a horizontal scrolled state"
             }
+            Self::DesktopSeasonDetailScrolled => {
+                "Desktop season detail page restored to the episode rail for typography QA"
+            }
             Self::DesktopEpisodeDetail => {
                 "Desktop episode detail page with seeded still artwork and playback actions"
+            }
+            Self::DesktopEpisodeDetailScrolled => {
+                "Desktop episode detail page restored below the hero for typography QA"
             }
             Self::SettingsDevices => {
                 "Authenticated settings surface showing deterministic devices"
@@ -222,6 +259,9 @@ impl PlayerScenario {
             }
             Self::TenFootDetail => {
                 "10-foot movie detail page for a seeded deterministic movie"
+            }
+            Self::TenFootSeasonDetailScrolled => {
+                "10-foot season detail page restored to the episode rail for couch-distance typography QA"
             }
             Self::PlayerLoadingOverlay => {
                 "10-foot player/loading overlay for a seeded movie stream"
@@ -282,19 +322,30 @@ impl PlayerScenario {
                 "desktopmoviedetail" | "moviedetail" => {
                     Some(Self::DesktopMovieDetail)
                 }
+                "desktopmoviedetailscrolled" | "moviedetailscrolled" => {
+                    Some(Self::DesktopMovieDetailScrolled)
+                }
                 "desktopseriesdetail" | "seriesdetail" => {
                     Some(Self::DesktopSeriesDetail)
+                }
+                "desktopseriesdetailscrolled" | "seriesdetailscrolled" => {
+                    Some(Self::DesktopSeriesDetailScrolled)
                 }
                 "desktopseasondetail" | "seasondetail" => {
                     Some(Self::DesktopSeasonDetail)
                 }
                 "desktopseasondetailscrolledrail"
-                | "seasondetailscrolledrail"
-                | "seasondetailscrolled" => {
+                | "seasondetailscrolledrail" => {
                     Some(Self::DesktopSeasonDetailScrolledRail)
+                }
+                "desktopseasondetailscrolled" | "seasondetailscrolled" => {
+                    Some(Self::DesktopSeasonDetailScrolled)
                 }
                 "desktopepisodedetail" | "episodedetail" => {
                     Some(Self::DesktopEpisodeDetail)
+                }
+                "desktopepisodedetailscrolled" | "episodedetailscrolled" => {
+                    Some(Self::DesktopEpisodeDetailScrolled)
                 }
                 "playerloading" | "loadingoverlay" => {
                     Some(Self::PlayerLoadingOverlay)
@@ -313,6 +364,9 @@ impl PlayerScenario {
                 }
                 "theaterplatenobackdrop" | "theaterplatemissing" => {
                     Some(Self::TheaterPlateMissingBackdrop)
+                }
+                "tenfootseasondetailscrolled" | "tenfootdetailscrolled" => {
+                    Some(Self::TenFootSeasonDetailScrolled)
                 }
                 _ => None,
             })
@@ -333,15 +387,30 @@ impl PlayerScenario {
             Self::UserSelection => user_selection_state(config),
             Self::DesktopLibraryHome => desktop_library_home_state(config),
             Self::DesktopMovieDetail => desktop_movie_detail_state(config),
+            Self::DesktopMovieDetailScrolled => {
+                desktop_movie_detail_scrolled_state(config)
+            }
             Self::DesktopSeriesDetail => desktop_series_detail_state(config),
+            Self::DesktopSeriesDetailScrolled => {
+                desktop_series_detail_scrolled_state(config)
+            }
             Self::DesktopSeasonDetail => desktop_season_detail_state(config),
             Self::DesktopSeasonDetailScrolledRail => {
                 desktop_season_detail_scrolled_rail_state(config)
             }
+            Self::DesktopSeasonDetailScrolled => {
+                desktop_season_detail_scrolled_state(config)
+            }
             Self::DesktopEpisodeDetail => desktop_episode_detail_state(config),
+            Self::DesktopEpisodeDetailScrolled => {
+                desktop_episode_detail_scrolled_state(config)
+            }
             Self::SettingsDevices => settings_devices_state(config),
             Self::TenFootHome => tenfoot_home_state(config),
             Self::TenFootDetail => tenfoot_detail_state(config),
+            Self::TenFootSeasonDetailScrolled => {
+                tenfoot_season_detail_scrolled_state(config)
+            }
             Self::PlayerLoadingOverlay => player_loading_overlay_state(config),
             Self::PosterClippingStackedRailsTop => {
                 poster_clipping_regression_state(config, false)
@@ -405,6 +474,13 @@ impl PlayerScenario {
                     &state,
                     season_detail_scrolled_rail_key(),
                 )
+            }
+            Self::DesktopMovieDetailScrolled
+            | Self::DesktopSeriesDetailScrolled
+            | Self::DesktopSeasonDetailScrolled
+            | Self::DesktopEpisodeDetailScrolled
+            | Self::TenFootSeasonDetailScrolled => {
+                detail_scroll_restore_task(&state)
             }
             _ => Task::none(),
         };
@@ -542,6 +618,175 @@ fn desktop_episode_detail_state(config: &AppConfig) -> State {
     };
     state.loading = false;
     state
+}
+
+const DETAIL_TYPOGRAPHY_SCROLL_Y: f32 = 560.0;
+const DETAIL_TYPOGRAPHY_RAIL_INDEX: f32 = 2.0;
+
+fn desktop_movie_detail_scrolled_state(config: &AppConfig) -> State {
+    let mut state = desktop_movie_detail_state(config);
+    configure_detail_typography_scrolled_state(&mut state, false);
+    state
+}
+
+fn desktop_series_detail_scrolled_state(config: &AppConfig) -> State {
+    let mut state = desktop_series_detail_state(config);
+    configure_detail_typography_scrolled_state(&mut state, true);
+    state
+}
+
+fn desktop_season_detail_scrolled_state(config: &AppConfig) -> State {
+    let mut state = desktop_season_detail_state(config);
+    configure_detail_typography_scrolled_state(&mut state, true);
+    state
+}
+
+fn desktop_episode_detail_scrolled_state(config: &AppConfig) -> State {
+    let mut state = desktop_episode_detail_state(config);
+    configure_detail_typography_scrolled_state(&mut state, false);
+    state
+}
+
+fn tenfoot_season_detail_scrolled_state(config: &AppConfig) -> State {
+    let mut state = authenticated_base_state(config, true);
+    seed_library_state(&mut state);
+
+    let season_id = seed_season_id(0);
+    state.domains.ui.state.view = ViewState::SeasonDetail {
+        series_id: seed_series_id(0),
+        season_id,
+        backdrop_handle: None,
+    };
+    state.domains.ui.state.tenfoot_detail.focus_id =
+        Some(TenFootDetailFocusId::PanelItem {
+            panel: TenFootDetailPanelId::SeasonEpisodes(season_id),
+            item: TenFootDetailItemId::Episode(seed_episode_id(4)),
+        });
+    state.loading = false;
+
+    configure_detail_typography_scrolled_state(&mut state, true);
+    state
+}
+
+fn configure_detail_typography_scrolled_state(
+    state: &mut State,
+    scroll_relationship_rails: bool,
+) {
+    state
+        .domains
+        .ui
+        .state
+        .background_shader_state
+        .set_vertical_scroll_px(DETAIL_TYPOGRAPHY_SCROLL_Y);
+
+    if state.interface_mode.is_tenfoot() {
+        state.domains.ui.state.tenfoot_detail.scroll_y =
+            DETAIL_TYPOGRAPHY_SCROLL_Y;
+        state.domains.ui.state.tenfoot_detail.viewport_height =
+            state.window_size.height;
+    }
+
+    ensure_detail_relationship_carousels(state);
+    if scroll_relationship_rails {
+        for key in detail_relationship_carousel_keys(state) {
+            if let Some(carousel) =
+                state.domains.ui.state.carousel_registry.get_mut(&key)
+            {
+                carousel.set_index_position(DETAIL_TYPOGRAPHY_RAIL_INDEX);
+                carousel.set_reference_index(DETAIL_TYPOGRAPHY_RAIL_INDEX);
+            }
+        }
+    }
+}
+
+fn ensure_detail_relationship_carousels(state: &mut State) {
+    let keys_with_counts: Vec<(CarouselKey, usize)> =
+        match &state.domains.ui.state.view {
+            ViewState::SeriesDetail { series_id, .. } => {
+                let total = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_series_seasons(series_id)
+                    .map(|seasons| seasons.len())
+                    .unwrap_or(0);
+                vec![(CarouselKey::ShowSeasons(series_id.to_uuid()), total)]
+            }
+            ViewState::SeasonDetail { season_id, .. } => {
+                let total = state
+                    .domains
+                    .ui
+                    .state
+                    .repo_accessor
+                    .get_season_episodes(season_id)
+                    .map(|episodes| episodes.len())
+                    .unwrap_or(0);
+                vec![(CarouselKey::SeasonEpisodes(season_id.to_uuid()), total)]
+            }
+            _ => Vec::new(),
+        };
+
+    let width = state.window_size.width.max(1.0);
+    let scale = state.domains.ui.state.scaled_layout.scale;
+    for (key, total) in keys_with_counts {
+        state.domains.ui.state.carousel_registry.ensure_default(
+            key,
+            total,
+            width,
+            CarouselConfig::poster_defaults(),
+            scale,
+        );
+    }
+}
+
+fn detail_relationship_carousel_keys(state: &State) -> Vec<CarouselKey> {
+    match &state.domains.ui.state.view {
+        ViewState::SeriesDetail { series_id, .. } => {
+            vec![CarouselKey::ShowSeasons(series_id.to_uuid())]
+        }
+        ViewState::SeasonDetail { season_id, .. } => {
+            vec![CarouselKey::SeasonEpisodes(season_id.to_uuid())]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn detail_scroll_restore_task(state: &State) -> Task<DomainMessage> {
+    let scroll_y = state.domains.ui.state.background_shader_state.scroll_offset;
+    let detail_scrollable_id = if state.interface_mode.is_tenfoot() {
+        state.domains.ui.state.tenfoot_detail.scrollable_id.clone()
+    } else {
+        crate::domains::ui::views::detail::desktop_detail_scrollable_id()
+    };
+
+    let mut tasks = vec![scroll_to::<crate::domains::ui::messages::UiMessage>(
+        detail_scrollable_id,
+        AbsoluteOffset {
+            x: 0.0,
+            y: scroll_y,
+        },
+    )];
+
+    tasks.extend(
+        detail_relationship_carousel_keys(state)
+            .into_iter()
+            .filter_map(|key| {
+                state.domains.ui.state.carousel_registry.get(&key).map(
+                    |carousel| {
+                        scroll_to::<crate::domains::ui::messages::UiMessage>(
+                            carousel.scrollable_id.clone(),
+                            AbsoluteOffset {
+                                x: carousel.scroll_x,
+                                y: 0.0,
+                            },
+                        )
+                    },
+                )
+            }),
+    );
+
+    Task::batch(tasks).map(DomainMessage::from)
 }
 
 fn settings_devices_state(config: &AppConfig) -> State {
@@ -1673,8 +1918,8 @@ fn seeded_movie(
             primary_poster_iid: Some(poster_iid),
             primary_backdrop_iid: Some(backdrop_iid),
             images: MediaImages::default(),
-            cast: Vec::new(),
-            crew: Vec::new(),
+            cast: seeded_cast_members(index),
+            crew: seeded_crew_members(index),
             videos: Vec::new(),
             keywords: Vec::new(),
             external_ids: ExternalIds::default(),
@@ -1694,6 +1939,72 @@ fn seeded_movie(
         ),
         theme_color: Some(theme_color.to_string()),
     }
+}
+
+fn seeded_cast_members(movie_index: usize) -> Vec<CastMember> {
+    const CAST: [(&str, &str); 8] = [
+        ("Mara Vale", "Transit pilot Mara Vale"),
+        ("Jonas Reed", "Harbor engineer Jonas"),
+        ("Ilya Stone", "Signal cartographer Ilya"),
+        ("Ren Park", "Archive lead Ren"),
+        ("Sofia Hale", "Night-shift medic Sofia"),
+        ("Tomas Venn", "Station keeper Tomas"),
+        ("Nadia Cross", "Navigation analyst Nadia"),
+        ("Eli North", "Courier Eli"),
+    ];
+
+    CAST.iter()
+        .enumerate()
+        .map(|(slot, (name, character))| CastMember {
+            id: 100_000 + movie_index as u64 * 100 + slot as u64,
+            person_id: Some(seed_person_id(movie_index * 16 + slot)),
+            credit_id: Some(format!("fixture-cast-{movie_index}-{slot}")),
+            cast_id: Some(slot as u64),
+            name: (*name).to_string(),
+            original_name: Some((*name).to_string()),
+            character: (*character).to_string(),
+            profile_path: Some(format!(
+                "/screenshot/movie-{movie_index}-cast-{slot}.png"
+            )),
+            order: slot as u32,
+            gender: None,
+            known_for_department: Some("Acting".to_string()),
+            adult: Some(false),
+            popularity: Some(30.0 - slot as f32),
+            also_known_as: Vec::new(),
+            external_ids: PersonExternalIds::default(),
+            image_slot: slot as u32,
+            image_id: Some(seed_profile_iid(movie_index * 16 + slot)),
+        })
+        .collect()
+}
+
+fn seeded_crew_members(movie_index: usize) -> Vec<CrewMember> {
+    let director_name = match movie_index % 3 {
+        0 => "Nia Calder",
+        1 => "Owen Finch",
+        _ => "Amara Sol",
+    };
+
+    vec![CrewMember {
+        id: 120_000 + movie_index as u64,
+        person_id: Some(seed_person_id(500 + movie_index)),
+        credit_id: Some(format!("fixture-crew-{movie_index}")),
+        name: director_name.to_string(),
+        job: "Director".to_string(),
+        department: "Directing".to_string(),
+        profile_path: Some(format!(
+            "/screenshot/movie-{movie_index}-director.png"
+        )),
+        gender: None,
+        known_for_department: Some("Directing".to_string()),
+        adult: Some(false),
+        popularity: Some(42.0),
+        original_name: Some(director_name.to_string()),
+        also_known_as: Vec::new(),
+        external_ids: PersonExternalIds::default(),
+        profile_iid: Some(seed_profile_iid(500 + movie_index)),
+    }]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1923,6 +2234,19 @@ fn seed_artwork(state: &mut State, seed: &SeededLibraryState) {
             detail_poster_size,
             index as u8,
         );
+
+        for (cast_index, member) in movie.details.cast.iter().enumerate() {
+            if let Some(iid) = member.image_id {
+                mark_artwork_loaded(
+                    state,
+                    iid,
+                    ImageSize::profile(),
+                    92,
+                    138,
+                    (150 + index * 16 + cast_index) as u8,
+                );
+            }
+        }
     }
 
     for (index, series) in seed.series.iter().enumerate() {
@@ -2085,6 +2409,14 @@ fn seed_still_iid(index: usize) -> Uuid {
     uuid_from(0x6100_0000_0000_7000_8000_0000_0000_0000, index)
 }
 
+fn seed_profile_iid(index: usize) -> Uuid {
+    uuid_from(0x6200_0000_0000_7000_8000_0000_0000_0000, index)
+}
+
+fn seed_person_id(index: usize) -> Uuid {
+    uuid_from(0x6300_0000_0000_7000_8000_0000_0000_0000, index)
+}
+
 fn seed_user_id(index: usize) -> Uuid {
     uuid_from(0x7000_0000_0000_7000_8000_0000_0000_0000, index)
 }
@@ -2171,7 +2503,17 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name == "DesktopMovieDetailScrolled")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "DesktopSeriesDetail")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "DesktopSeriesDetailScrolled")
         );
         assert!(
             scenarios
@@ -2187,8 +2529,15 @@ mod tests {
         assert!(
             scenarios
                 .iter()
+                .any(|scenario| scenario.name == "DesktopSeasonDetailScrolled")
+        );
+        assert!(
+            scenarios
+                .iter()
                 .any(|scenario| scenario.name == "DesktopEpisodeDetail")
         );
+        assert!(scenarios.iter().any(|scenario| scenario.name
+            == "DesktopEpisodeDetailScrolled"));
         assert!(
             scenarios
                 .iter()
@@ -2217,6 +2566,11 @@ mod tests {
             scenarios
                 .iter()
                 .any(|scenario| scenario.name == "TheaterPlateTenFoot")
+        );
+        assert!(
+            scenarios
+                .iter()
+                .any(|scenario| scenario.name == "TenFootSeasonDetailScrolled")
         );
         assert!(
             scenarios
@@ -2550,6 +2904,44 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn detail_typography_scrolled_scenarios_seed_scroll_state() {
+        let movie =
+            PlayerScenario::DesktopMovieDetailScrolled.build(&test_config());
+        let series =
+            PlayerScenario::DesktopSeriesDetailScrolled.build(&test_config());
+        let season =
+            PlayerScenario::DesktopSeasonDetailScrolled.build(&test_config());
+        let episode =
+            PlayerScenario::DesktopEpisodeDetailScrolled.build(&test_config());
+        let tenfoot =
+            PlayerScenario::TenFootSeasonDetailScrolled.build(&test_config());
+
+        for state in [&movie, &series, &season, &episode, &tenfoot] {
+            assert!(
+                state.domains.ui.state.background_shader_state.scroll_offset
+                    > 0.0,
+                "scrolled detail presets should seed the Theater Plate scroll offset"
+            );
+        }
+
+        let season_key =
+            CarouselKey::SeasonEpisodes(seed_season_id(0).to_uuid());
+        let season_carousel = season
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&season_key)
+            .expect("season scrolled preset should seed episode rail carousel");
+        assert!(
+            season_carousel.scroll_x > 0.0,
+            "season scrolled preset should restore a horizontal episode rail offset"
+        );
+        assert!(tenfoot.interface_mode.is_tenfoot());
+        assert!(tenfoot.domains.ui.state.tenfoot_detail.scroll_y > 0.0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn tenfoot_detail_scenario_selects_seeded_movie_detail() {
         let state = PlayerScenario::TenFootDetail.build(&test_config());
 
@@ -2628,6 +3020,9 @@ mod tests {
             .details
             .primary_still_iid
             .expect("episode still iid");
+        let cast_profile_iid = movie.details.cast[0]
+            .image_id
+            .expect("movie cast profile iid");
         let library_poster_size = ImageSize::Poster(
             state.domains.settings.display.library_poster_quality,
         );
@@ -2663,6 +3058,12 @@ mod tests {
                     backdrop_iid,
                     ImageSize::Backdrop(BackdropSize::W1280)
                 ))
+                .is_some()
+        );
+        assert!(
+            state
+                .image_service
+                .get(&ImageRequest::new(cast_profile_iid, ImageSize::profile()))
                 .is_some()
         );
         assert!(

@@ -221,10 +221,15 @@ impl DetailArtwork {
 }
 
 /// A compact metadata value displayed near the title.
+///
+/// Neutral descriptive metadata is rendered inline. Playback state and
+/// audience metadata can still render as accent chips.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DetailMetadataPill {
     pub label: String,
     pub tone: DetailTone,
+    pub kind: DetailMetadataKind,
+    pub importance: DetailMetadataImportance,
 }
 
 impl DetailMetadataPill {
@@ -232,8 +237,79 @@ impl DetailMetadataPill {
         Self {
             label: label.into(),
             tone: DetailTone::Neutral,
+            kind: DetailMetadataKind::Descriptive,
+            importance: DetailMetadataImportance::Secondary,
         }
     }
+
+    pub fn playback_state(label: impl Into<String>, tone: DetailTone) -> Self {
+        Self {
+            label: label.into(),
+            tone,
+            kind: DetailMetadataKind::PlaybackState,
+            importance: DetailMetadataImportance::Primary,
+        }
+    }
+
+    pub fn rating(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            tone: DetailTone::Warning,
+            kind: DetailMetadataKind::AudienceRating,
+            importance: DetailMetadataImportance::Tertiary,
+        }
+    }
+
+    pub fn with_importance(
+        mut self,
+        importance: DetailMetadataImportance,
+    ) -> Self {
+        self.importance = importance;
+        self
+    }
+
+    pub fn renders_as_chip(&self) -> bool {
+        self.tone != DetailTone::Neutral
+            || !matches!(self.kind, DetailMetadataKind::Descriptive)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailMetadataKind {
+    Descriptive,
+    PlaybackState,
+    AudienceRating,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailMetadataImportance {
+    Primary,
+    Secondary,
+    Tertiary,
+}
+
+impl DetailMetadataImportance {
+    fn rank(self) -> u8 {
+        match self {
+            Self::Primary => 0,
+            Self::Secondary => 1,
+            Self::Tertiary => 2,
+        }
+    }
+}
+
+impl DetailMetadataKind {
+    fn rank(self) -> u8 {
+        match self {
+            Self::Descriptive => 0,
+            Self::PlaybackState => 1,
+            Self::AudienceRating => 2,
+        }
+    }
+}
+
+pub fn prioritize_metadata_items(items: &mut [DetailMetadataPill]) {
+    items.sort_by_key(|item| (item.importance.rank(), item.kind.rank()));
 }
 
 /// Semantic tone shared by pills, facts, and notices.
@@ -548,5 +624,39 @@ mod tests {
         }
 
         assert_eq!(still.label(), "Episode still");
+    }
+
+    #[test]
+    fn metadata_semantics_keep_descriptive_values_inline() {
+        let year = DetailMetadataPill::neutral("2024");
+        let progress = DetailMetadataPill::playback_state(
+            "52% watched",
+            DetailTone::Accent,
+        );
+        let rating = DetailMetadataPill::rating("★ 8.4");
+
+        assert!(!year.renders_as_chip());
+        assert!(progress.renders_as_chip());
+        assert!(rating.renders_as_chip());
+        assert_eq!(year.kind, DetailMetadataKind::Descriptive);
+        assert_eq!(progress.importance, DetailMetadataImportance::Primary);
+    }
+
+    #[test]
+    fn metadata_prioritization_preserves_editorial_importance() {
+        let mut metadata = vec![
+            DetailMetadataPill::rating("★ 8.4"),
+            DetailMetadataPill::neutral("PG-13"),
+            DetailMetadataPill::neutral("2024")
+                .with_importance(DetailMetadataImportance::Primary),
+            DetailMetadataPill::playback_state("Watched", DetailTone::Success),
+        ];
+
+        prioritize_metadata_items(&mut metadata);
+
+        assert_eq!(metadata[0].label, "2024");
+        assert_eq!(metadata[1].label, "Watched");
+        assert_eq!(metadata[2].label, "PG-13");
+        assert_eq!(metadata[3].label, "★ 8.4");
     }
 }

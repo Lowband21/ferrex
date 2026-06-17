@@ -7,12 +7,24 @@
 //! - [`layout`] resolves a pure viewport/scale/interface-mode plan using the
 //!   centralized size provider and scaled layout values, including the 10-foot
 //!   layout composition.
+//! - [`typography`] maps global font/spacing tokens to semantic detail text
+//!   roles, readable measures, overflow budgets, and composition-specific
+//!   alignment strategies.
 //! - [`components`] renders reusable Iced hero, metadata, action, section,
 //!   relationship, empty-state, and backdrop controls from the model and plan.
 
 pub mod components;
 pub mod layout;
 pub mod model;
+pub mod typography;
+
+const DESKTOP_DETAIL_SCROLLABLE_ID: &str = "ferrex.detail.desktop.scrollable";
+
+/// Return the stable desktop detail-page scrollable id used by deterministic
+/// screenshot presets to restore top and below-hero review states.
+pub fn desktop_detail_scrollable_id() -> iced::widget::Id {
+    iced::widget::Id::new(DESKTOP_DETAIL_SCROLLABLE_ID)
+}
 
 pub use components::{
     DetailActionSurfaceMode, DetailForegroundSurface,
@@ -45,7 +57,13 @@ pub use model::{
     DetailAction, DetailActionMenuItem, DetailActionRole, DetailArtwork,
     DetailBackdropControl, DetailCastMember, DetailCastSection,
     DetailContentKind, DetailEmptyState, DetailFact, DetailFactPanel,
-    DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
-    DetailRailItem, DetailRelationshipRail, DetailSection, DetailTechnicalItem,
-    DetailTechnicalSection, DetailTone,
+    DetailMetadataImportance, DetailMetadataKind, DetailMetadataPill,
+    DetailNotice, DetailOverviewSection, DetailPageModel, DetailRailItem,
+    DetailRelationshipRail, DetailSection, DetailTechnicalItem,
+    DetailTechnicalSection, DetailTone, prioritize_metadata_items,
+};
+pub use typography::{
+    DetailCaptionBudgets, DetailColorIntent, DetailFactLayoutMode,
+    DetailTextAlignment, DetailTextMetrics, DetailTextOverflow, DetailTextRole,
+    DetailTextStyle, DetailTypography, DetailTypographyInput,
 };
