@@ -42,6 +42,7 @@ struct VertexOutput {
     @location(12) progress_color: vec3<f32>,    // Progress bar color
     // Pass layer as float varying for wider backend compatibility
     @location(13) layer: f32,
+    @location(14) aspect_ratio: f32,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -224,12 +225,13 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     // Pass atlas layer as float varying; cast in fragment when sampling
     output.layer = f32(input.atlas_layer);
+    output.aspect_ratio = size.x / max(size.y, 0.0001);
 
     return output;
 }
 
 // Render overlay buttons with hover states
-fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2<f32>, theme_color: vec3<f32>, progress_color: vec3<f32>) -> vec4<f32> {
+fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2<f32>, theme_color: vec3<f32>, progress_color: vec3<f32>, aspect_ratio: f32) -> vec4<f32> {
     // Only render inside poster bounds
     if hover_dist >= 0.0 {
         return vec4<f32>(0.0);
@@ -243,10 +245,10 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     // Center play button - using circle for cleaner appearance
     let center_button_pos = vec2<f32>(0.5, 0.5);
     let center_button_radius = 0.08; // 8% of poster size (circle radius)
-    let center_button_dist = circle_sdf(tex_coord, center_button_pos, center_button_radius);
+    let center_button_dist = circle_sdf_aspect(tex_coord, center_button_pos, center_button_radius, aspect_ratio);
 
     // Check if mouse is over center button
-    let center_hover = has_mouse && circle_sdf(mouse_pos, center_button_pos, center_button_radius) < 0.0;
+    let center_hover = has_mouse && circle_sdf_aspect(mouse_pos, center_button_pos, center_button_radius, aspect_ratio) < 0.0;
 
     // For circles, we need proper anti-aliasing
     let aa_width = max(1e-3, fwidth(center_button_dist));
@@ -260,7 +262,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
             // Not hovered - transparent grey with white border
             let border_thickness = 0.004; // Slightly thicker border for visibility
             let inner_radius = center_button_radius - border_thickness;
-            let inner_dist = circle_sdf(tex_coord, center_button_pos, inner_radius);
+            let inner_dist = circle_sdf_aspect(tex_coord, center_button_pos, inner_radius, aspect_ratio);
 
             if inner_dist < -aa_width {
                 // Inside transparent grey area
@@ -306,7 +308,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     let edit_button_pos = vec2<f32>(0.85, 0.15);
     let edit_base_radius = 0.06;
     // Check hover at full size for consistent hit area
-    let edit_hover = has_mouse && circle_sdf(mouse_pos, edit_button_pos, edit_base_radius) < 0.0;
+    let edit_hover = has_mouse && circle_sdf_aspect(mouse_pos, edit_button_pos, edit_base_radius, aspect_ratio) < 0.0;
 
     // Scale and opacity based on hover - larger base size
     let edit_scale = select(0.9, 1.1, edit_hover); // 90% when not hovered, 110% when hovered
@@ -314,7 +316,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
 
     // Edit icon only - no background
     let edit_icon_scale = 0.045 * edit_scale; // Slightly larger base size
-    let edit_dist = edit_icon_sdf(tex_coord, edit_button_pos, edit_icon_scale);
+    let edit_dist = edit_icon_sdf_aspect(tex_coord, edit_button_pos, edit_icon_scale, aspect_ratio);
     if edit_dist < 0.0 {
         let edit_aa = max(1e-3, fwidth(edit_dist));
         let icon_alpha = smoothstep(edit_aa, -edit_aa, edit_dist) * edit_opacity;
@@ -326,7 +328,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
     let dots_button_pos = vec2<f32>(0.85, 0.85);
     let dots_base_radius = 0.06;
     // Check hover at full size for consistent hit area
-    let dots_hover = has_mouse && circle_sdf(mouse_pos, dots_button_pos, dots_base_radius) < 0.0;
+    let dots_hover = has_mouse && circle_sdf_aspect(mouse_pos, dots_button_pos, dots_base_radius, aspect_ratio) < 0.0;
 
     // Scale and opacity based on hover - larger base size
     let dots_scale = select(0.9, 1.1, dots_hover); // 90% when not hovered, 110% when hovered
@@ -334,7 +336,7 @@ fn render_overlay_buttons(tex_coord: vec2<f32>, hover_dist: f32, mouse_pos: vec2
 
     // Dots icon only - no background
     let dots_icon_scale = 0.045 * dots_scale; // Slightly larger base size
-    let dots_dist = dots_icon_sdf(tex_coord, dots_button_pos, dots_icon_scale);
+    let dots_dist = dots_icon_sdf_aspect(tex_coord, dots_button_pos, dots_icon_scale, aspect_ratio);
     if dots_dist < 0.0 {
         let dots_aa = max(1e-3, fwidth(dots_dist));
         let icon_alpha = smoothstep(dots_aa, -dots_aa, dots_dist) * dots_opacity;
@@ -429,7 +431,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         // Watch status corner indicator (top-right) after animation completes
         if input.progress >= 0.0 && dist < 0.0 && input.animation_progress >= 0.99 {
-            let aspect_ratio = 2.0 / 3.0;
+            let aspect_ratio = input.aspect_ratio;
             let fold_size_x = input.corner_radius_normalized * 2.5;
             let fold_size_y = fold_size_x * aspect_ratio;
             let corner_origin = vec2<f32>(1.0, 0.0);
@@ -457,7 +459,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         // Progress bar at bottom after animation completes (extends to bottom edge)
         if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
-            let bar_height = 0.03;  // 3% of poster height
+            let bar_height = clamp(0.03 * (input.aspect_ratio / POSTER_REFERENCE_ASPECT), 0.02, 0.08);
             // Small epsilon buffer to avoid floating-point precision issues at boundary
             // (when geometry is pixel-aligned, some pixels exactly at the boundary may fail >= check)
             let bar_start_y = 1.0 - bar_height - 0.001;
@@ -538,7 +540,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         // Overlay buttons composed in pre-multiplied space
-        let button_color = render_overlay_buttons(input.local_pos, hover_dist, input.mouse_position, input.theme_color, input.progress_color);
+        let button_color = render_overlay_buttons(input.local_pos, hover_dist, input.mouse_position, input.theme_color, input.progress_color, input.aspect_ratio);
         if button_color.a > 0.0 {
             let button_pm = to_premul(button_color);
             final_color = over(button_pm, final_color);
@@ -563,7 +565,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Render watch status corner indicator for unwatched and in-progress items once animation completes
     if input.progress >= 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
-        let aspect_ratio = 2.0 / 3.0;
+        let aspect_ratio = input.aspect_ratio;
 
         // Create a triangular indicator shaped like a folded corner
         let fold_size_x = input.corner_radius_normalized * 3.0;
@@ -602,7 +604,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Render progress bar at bottom for in-progress media (extends to bottom edge)
     if input.progress > 0.0 && input.progress < 0.95 && input.animation_progress >= 0.99 {
-        let bar_height = 0.03;  // 3% of poster height (no bottom margin)
+        let bar_height = clamp(0.03 * (input.aspect_ratio / POSTER_REFERENCE_ASPECT), 0.02, 0.08);
         // Small epsilon buffer to avoid floating-point precision issues at boundary
         // (when geometry is pixel-aligned, some pixels exactly at the boundary may fail >= check)
         let bar_start_y = 1.0 - bar_height - 0.001;

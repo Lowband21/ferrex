@@ -8,7 +8,7 @@ use rkyv::option::ArchivedOption;
 use super::super::views::carousel::CarouselState;
 use crate::domains::ui::shell_ui::Scope;
 use crate::domains::ui::views::virtual_carousel::{
-    CarouselConfig, CarouselKey,
+    CarouselConfig, CarouselKey, planner,
 };
 use crate::infra::constants::layout::carousel::{
     HORIZONTAL_PADDING_TOTAL, ITEM_SPACING,
@@ -45,6 +45,52 @@ fn detail_backdrop_request_size(state: &State) -> ImageSize {
             state.window_size.height,
         ),
     )
+}
+
+fn detail_cast_prefetch_count(state: &State) -> usize {
+    let (card_w, _) = ImageSize::profile().dimensions().unwrap_or((180, 270));
+    let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
+    let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
+    let visible = (((state.window_size.width - lr_padding)
+        / (card_w as f32 + spacing))
+        .floor()
+        .max(1.0)) as usize;
+    let prefetch_cap = 24usize; // safety cap
+    (visible + 3).min(prefetch_cap) // small buffer for smoothness
+}
+
+fn queue_profile_image_preloads(state: &State, image_ids: Vec<uuid::Uuid>) {
+    if image_ids.is_empty() {
+        return;
+    }
+
+    let mut prefetch_ids = image_ids;
+    // Stagger direction: left-to-right by enqueueing rightmost first.
+    prefetch_ids.reverse();
+
+    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
+        let context =
+            planner::build_profile_context(&prefetch_ids, ProfileSize::W185);
+        handle.send(crate::domains::metadata::demand_planner::DemandSnapshot {
+            visible_ids: Vec::new(),
+            prefetch_ids,
+            background_ids: Vec::new(),
+            timestamp: std::time::Instant::now(),
+            context: Some(context),
+            poster_size: state.domains.settings.display.detail_poster_quality,
+        });
+        return;
+    }
+
+    for iid in prefetch_ids {
+        let cast_request =
+            ImageRequest::new(iid, ImageSize::Profile(ProfileSize::W185))
+                .with_priority(Priority::Preload);
+
+        if state.image_service.get(&cast_request).is_none() {
+            state.image_service.request_image(cast_request);
+        }
+    }
 }
 
 fn prepare_depth_regions_for_transition(
@@ -182,42 +228,21 @@ pub fn handle_view_movie_details(
             log::warn!("Movie missing primary_poster_iid");
         }
 
-        // Preload primary cast portraits for the carousel
-        // Order: pictured cast first (preserve original importance), then others
-        // Stagger direction: left-to-right by enqueueing rightmost first
-        // Determine count dynamically from viewport and card size (+ small buffer),
-        // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
-        let (card_w, _) =
-            ImageSize::profile().dimensions().unwrap_or((180, 270));
-        let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
-        let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
-        let visible = (((state.window_size.width - lr_padding)
-            / (card_w as f32 + spacing))
-            .floor()
-            .max(1.0)) as usize;
-        let prefetch_cap = 24usize; // safety cap
-        let prefetch_count = (visible + 3).min(prefetch_cap); // small buffer for smoothness
-        let pictured_cast: Vec<_> = movie
+        // Preload primary cast portraits for the carousel through the demand
+        // planner when it is available, preserving the direct image-service
+        // fallback for early startup.
+        let prefetch_count = detail_cast_prefetch_count(state);
+        let pictured_cast_image_ids: Vec<_> = movie
             .details
             .cast
             .iter()
-            .filter(|c| matches!(c.image_id, ArchivedOption::Some(_)))
+            .filter_map(|c| match &c.image_id {
+                ArchivedOption::Some(iid) => Some(*iid),
+                ArchivedOption::None => None,
+            })
             .take(prefetch_count)
             .collect();
-
-        for cast_member in pictured_cast.into_iter().rev() {
-            let iid = match &cast_member.image_id {
-                ArchivedOption::Some(iid) => *iid,
-                ArchivedOption::None => continue,
-            };
-            let cast_request =
-                ImageRequest::new(iid, ImageSize::Profile(ProfileSize::W185))
-                    .with_priority(Priority::Preload);
-
-            if state.image_service.get(&cast_request).is_none() {
-                state.image_service.request_image(cast_request);
-            }
-        }
+        queue_profile_image_preloads(state, pictured_cast_image_ids);
 
         //// Start backdrop transition animation (Broken)
         //state
@@ -338,42 +363,21 @@ pub fn handle_view_series(
             log::warn!("Series missing primary_poster_iid");
         }
 
-        // Prefetch lead cast portraits for the detail view carousel
-        // Order: pictured cast first (preserve original importance), then others
-        // Stagger direction: left-to-right by enqueueing rightmost first
-        // Determine count dynamically from viewport and card size (+ small buffer),
-        // and clamp to a reasonable max to avoid over-requesting on ultra-wide screens.
-        let (card_w, _) =
-            ImageSize::profile().dimensions().unwrap_or((180, 270));
-        let spacing = ITEM_SPACING; // matches row spacing in create_cast_scrollable
-        let lr_padding = HORIZONTAL_PADDING_TOTAL; // container padding [5,10] -> 10 per side
-        let visible = (((state.window_size.width - lr_padding)
-            / (card_w as f32 + spacing))
-            .floor()
-            .max(1.0)) as usize;
-        let prefetch_cap = 24usize; // safety cap
-        let prefetch_count = (visible + 3).min(prefetch_cap); // small buffer for smoothness
-        let pictured_cast: Vec<_> = series
+        // Prefetch lead cast portraits for the detail view carousel through
+        // the demand planner when it is available, preserving the direct
+        // image-service fallback for early startup.
+        let prefetch_count = detail_cast_prefetch_count(state);
+        let pictured_cast_image_ids: Vec<_> = series
             .details
             .cast
             .iter()
-            .filter(|c| matches!(c.image_id, ArchivedOption::Some(_)))
+            .filter_map(|c| match &c.image_id {
+                ArchivedOption::Some(iid) => Some(*iid),
+                ArchivedOption::None => None,
+            })
             .take(prefetch_count)
             .collect();
-
-        for cast_member in pictured_cast.into_iter().rev() {
-            let iid = match &cast_member.image_id {
-                ArchivedOption::Some(iid) => *iid,
-                ArchivedOption::None => continue,
-            };
-            let cast_request =
-                ImageRequest::new(iid, ImageSize::Profile(ProfileSize::W185))
-                    .with_priority(Priority::Preload);
-
-            if state.image_service.get(&cast_request).is_none() {
-                state.image_service.request_image(cast_request);
-            }
-        }
+        queue_profile_image_preloads(state, pictured_cast_image_ids);
         // Finally change the view state
         state.domains.ui.state.view = new_view;
 

@@ -12,7 +12,7 @@ use crate::{
     infra::runtime_config::RuntimeConfig,
 };
 
-use ferrex_core::player_prelude::{EpisodeSize, PosterSize};
+use ferrex_core::player_prelude::{EpisodeSize, PosterSize, ProfileSize};
 
 use uuid::Uuid;
 
@@ -98,6 +98,15 @@ pub fn build_episode_still_context(ids: &[Uuid]) -> DemandContext {
                 size: EpisodeSize::W512,
             },
         );
+    }
+    context
+}
+
+/// Build a DemandContext overriding requests for profile/cast images.
+pub fn build_profile_context(ids: &[Uuid], size: ProfileSize) -> DemandContext {
+    let mut context = DemandContext::default();
+    for id in ids {
+        context.override_request(*id, DemandRequestKind::Profile { size });
     }
     context
 }

@@ -6,7 +6,9 @@ use crate::{
         views::virtual_carousel::{
             CarouselKey, VirtualCarouselMessage, VirtualCarouselState,
         },
-        widgets::image_for::image_for,
+        widgets::image_for::{
+            ImageFor, image_for, shader_text_zone_height_for_display,
+        },
     },
     infra::design_tokens::SizeProvider,
 };
@@ -84,6 +86,14 @@ pub struct DetailStageSectionRenderState {
     pub surface: DetailForegroundSurface,
     pub empty: bool,
     pub full_width: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DetailArtworkRenderOptions<'a> {
+    item_identity: Option<&'a str>,
+    shader_title: Option<&'a str>,
+    shader_meta: Option<&'a str>,
+    shader_text_zone_height: Option<f32>,
 }
 
 pub fn detail_action_surface_mode(
@@ -863,7 +873,13 @@ pub fn view_relationship_rail_deck(
 
     let mut row = Row::new().spacing(plan.rail.gap);
     for item in &section.items {
-        row = row.push(view_rail_item(item, plan, sizes, Priority::Preload));
+        row = row.push(view_rail_item(
+            &section.id,
+            item,
+            plan,
+            sizes,
+            Priority::Preload,
+        ));
     }
 
     view_stage_surface_shell(
@@ -1276,6 +1292,7 @@ pub fn view_hero_art(
         Priority::Visible,
         Length::Fixed(plan.hero_art.width),
         Length::Fixed(plan.hero_art.height),
+        DetailArtworkRenderOptions::default(),
     )
 }
 
@@ -1836,7 +1853,13 @@ pub fn view_relationship_rail(
 
     let mut row = Row::new().spacing(plan.rail.gap);
     for item in &section.items {
-        row = row.push(view_rail_item(item, plan, sizes, Priority::Preload));
+        row = row.push(view_rail_item(
+            &section.id,
+            item,
+            plan,
+            sizes,
+            Priority::Preload,
+        ));
     }
 
     view_panel_compat(
@@ -2379,6 +2402,7 @@ fn view_cast_profile_image(
         Priority::Preload,
         Length::Fixed(width),
         Length::Fixed(height),
+        DetailArtworkRenderOptions::default(),
     )
 }
 
@@ -2460,16 +2484,45 @@ fn rail_scroll_height(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> f32 {
-    let max_image_height = section
+    let max_card_height = section
         .items
         .iter()
-        .map(|item| rail_art_layout(&item.artwork, plan, sizes).height)
+        .map(|item| {
+            let layout = rail_art_layout(&item.artwork, plan, sizes);
+            layout.height
+                + rail_text_zone_height(&item.artwork, layout, plan, sizes)
+        })
         .fold(plan.rail.card_height, f32::max);
 
-    max_image_height
-        + text_budget_height(plan.typography.rail_title)
-        + text_budget_height(plan.typography.rail_subtitle)
-        + sizes.spacing.xl
+    max_card_height + sizes.spacing.md
+}
+
+fn rail_shader_text_zone_height(
+    layout: DetailArtLayout,
+    sizes: &SizeProvider,
+) -> f32 {
+    shader_text_zone_height_for_display(layout.height).max(sizes.scale(
+        crate::infra::constants::layout::poster::SHADER_TEXT_ZONE_HEIGHT,
+    ))
+}
+
+fn rail_text_zone_height(
+    artwork: &DetailArtwork,
+    layout: DetailArtLayout,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> f32 {
+    if rail_item_uses_shader_text(artwork) {
+        rail_shader_text_zone_height(layout, sizes)
+    } else {
+        text_budget_height(plan.typography.rail_title)
+            + text_budget_height(plan.typography.rail_subtitle)
+            + sizes.spacing.xs
+    }
+}
+
+fn rail_item_uses_shader_text(artwork: &DetailArtwork) -> bool {
+    !matches!(artwork, DetailArtwork::None { .. })
 }
 
 fn rail_art_layout(
@@ -2497,40 +2550,60 @@ fn rail_art_layout(
 }
 
 fn view_rail_item(
+    rail_id: &str,
     item: &DetailRailItem,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
     priority: Priority,
 ) -> Element<'static, UiMessage> {
     let image_layout = rail_art_layout(&item.artwork, plan, sizes);
+    let uses_shader_text = rail_item_uses_shader_text(&item.artwork);
+    let item_identity = format!("{rail_id}:{}", item.id);
     let image = view_artwork(
         &item.artwork,
         image_layout,
         priority,
         Length::Fixed(image_layout.width),
         Length::Fixed(image_layout.height),
+        DetailArtworkRenderOptions {
+            item_identity: uses_shader_text.then_some(item_identity.as_str()),
+            shader_title: uses_shader_text.then_some(item.title.as_str()),
+            shader_meta: uses_shader_text
+                .then_some(item.subtitle.as_deref())
+                .flatten(),
+            shader_text_zone_height: uses_shader_text
+                .then_some(rail_shader_text_zone_height(image_layout, sizes)),
+        },
     );
 
     let title_style = plan.typography.rail_title;
     let subtitle_style = plan.typography.rail_subtitle;
-    let content = Column::new()
-        .spacing(sizes.spacing.xs)
+    let mut content = Column::new()
+        .spacing(if uses_shader_text {
+            0.0
+        } else {
+            sizes.spacing.xs
+        })
         .width(Length::Fixed(plan.rail.card_width))
-        .push(image)
-        .push(styled_text(
-            item.title.clone(),
-            title_style,
-            detail_text_color(title_style.color_intent),
-            Length::Fill,
-            true,
-        ))
-        .push(styled_text(
-            item.subtitle.clone().unwrap_or_default(),
-            subtitle_style,
-            detail_text_color(subtitle_style.color_intent),
-            Length::Fill,
-            true,
-        ));
+        .push(image);
+
+    if !uses_shader_text {
+        content = content
+            .push(styled_text(
+                item.title.clone(),
+                title_style,
+                detail_text_color(title_style.color_intent),
+                Length::Fill,
+                true,
+            ))
+            .push(styled_text(
+                item.subtitle.clone().unwrap_or_default(),
+                subtitle_style,
+                detail_text_color(subtitle_style.color_intent),
+                Length::Fill,
+                true,
+            ));
+    }
 
     if let Some(message) = &item.on_press {
         button(content)
@@ -2618,12 +2691,32 @@ fn view_panel_compat_with_height(
         .into()
 }
 
+fn apply_artwork_render_options(
+    mut image: ImageFor,
+    options: DetailArtworkRenderOptions<'_>,
+) -> ImageFor {
+    if let Some(identity) = options.item_identity {
+        image = image.item_identity(identity);
+    }
+    if let Some(height) = options.shader_text_zone_height {
+        image = image.shader_text_zone_height(height);
+    }
+    if let Some(title) = options.shader_title {
+        image = image.title(title);
+    }
+    if let Some(meta) = options.shader_meta {
+        image = image.meta(meta);
+    }
+    image
+}
+
 fn view_artwork(
     artwork: &DetailArtwork,
     layout: DetailArtLayout,
     priority: Priority,
     width: Length,
     height: Length,
+    options: DetailArtworkRenderOptions<'_>,
 ) -> Element<'static, UiMessage> {
     match artwork {
         DetailArtwork::Poster {
@@ -2662,38 +2755,42 @@ fn view_artwork(
                 image = image.rotation_y(*rotation_y);
             }
 
-            image.into()
+            apply_artwork_render_options(image, options).into()
         }
         DetailArtwork::Still {
             media_uuid,
             image_id,
             ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::thumbnail())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(Icon::Clapperboard)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let image = image_for(*media_uuid)
+                .iid(*image_id)
+                .skip_request(image_id.is_none())
+                .request_size(ImageSize::thumbnail())
+                .display_size(layout.width, layout.height)
+                .radius(layout.corner_radius)
+                .priority(priority)
+                .placeholder(Icon::Clapperboard)
+                .tight_bounds()
+                .no_animation();
+            apply_artwork_render_options(image, options).into()
+        }
         DetailArtwork::Profile {
             media_uuid,
             image_id,
             ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::profile())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(Icon::User)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let image = image_for(*media_uuid)
+                .iid(*image_id)
+                .skip_request(image_id.is_none())
+                .request_size(ImageSize::profile())
+                .display_size(layout.width, layout.height)
+                .radius(layout.corner_radius)
+                .priority(priority)
+                .placeholder(Icon::User)
+                .tight_bounds()
+                .no_animation();
+            apply_artwork_render_options(image, options).into()
+        }
         DetailArtwork::None { label } => container(
             text(label.clone())
                 .size(14)
@@ -2750,6 +2847,7 @@ fn registered_relationship_rail_row(
             }
             item_row = item_row.push(
                 container(view_rail_item(
+                    &section.id,
                     &section.items[idx],
                     plan,
                     sizes,
@@ -3152,7 +3250,7 @@ mod tests {
             solve_detail_layout,
         },
         infra::{
-            constants::layout::{calculations::ScaledLayout, grid},
+            constants::layout::{calculations::ScaledLayout, grid, poster},
             design_tokens::{ScalingContext, SizeProvider},
         },
     };
@@ -3390,6 +3488,38 @@ mod tests {
             DetailForegroundSurface::EmptyState
         );
         assert!(detail_stage_section_render_state(&rail_section(1)).full_width);
+    }
+
+    #[test]
+    fn rail_shader_media_cards_reserve_bounded_text_zone() {
+        let plan = layout_plan();
+        let sizes = SizeProvider::new(ScalingContext::default());
+        let still = DetailArtwork::still(
+            uuid::Uuid::from_u128(1),
+            Some(uuid::Uuid::from_u128(2)),
+            "Episode still",
+        );
+        let profile = DetailArtwork::Profile {
+            media_uuid: uuid::Uuid::from_u128(3),
+            image_id: Some(uuid::Uuid::from_u128(4)),
+            alt: "Cast profile".to_string(),
+        };
+
+        let still_layout = rail_art_layout(&still, &plan, &sizes);
+        let still_aspect = still_layout.width / still_layout.height;
+        assert!((still_aspect - 16.0 / 9.0).abs() < 0.001);
+        assert_eq!(still_layout.aspect, DetailArtAspect::Still);
+        assert!(rail_item_uses_shader_text(&still));
+        assert!(
+            rail_text_zone_height(&still, still_layout, &plan, &sizes)
+                >= sizes.scale(poster::SHADER_TEXT_ZONE_HEIGHT)
+        );
+
+        let profile_layout = rail_art_layout(&profile, &plan, &sizes);
+        let profile_aspect = profile_layout.width / profile_layout.height;
+        assert!((profile_aspect - 2.0 / 3.0).abs() < 0.001);
+        assert_eq!(profile_layout.aspect, DetailArtAspect::Poster);
+        assert!(rail_item_uses_shader_text(&profile));
     }
 
     #[test]
