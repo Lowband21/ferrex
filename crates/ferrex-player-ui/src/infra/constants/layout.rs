@@ -15,8 +15,18 @@ pub mod poster {
     /// Corner radius for poster/media card corners in pixels
     pub const CORNER_RADIUS: f32 = 6.0;
 
-    /// Text area height below poster
-    pub const TEXT_AREA_HEIGHT: f32 = 30.0;
+    /// Shader-rendered title/meta zone reserved below a poster.
+    ///
+    /// This must match `TEXT_ZONE_HEIGHT` in `poster_text.wgsl`; layout code
+    /// that enables shader title/meta text reserves this zone so text does not
+    /// draw into adjacent grid rows or carousel rails.
+    pub const SHADER_TEXT_ZONE_HEIGHT: f32 = 50.0;
+
+    /// Text area height below poster.
+    ///
+    /// Kept as the general card text reservation and aligned with the shader
+    /// text zone so native-text and shader-text cards occupy compatible rows.
+    pub const TEXT_AREA_HEIGHT: f32 = SHADER_TEXT_ZONE_HEIGHT;
 
     /// Total card height including text area
     pub const TOTAL_CARD_HEIGHT: f32 = BASE_HEIGHT + TEXT_AREA_HEIGHT;
@@ -505,5 +515,53 @@ pub mod calculations {
 
         // Container must fit the base poster plus animation padding
         (base_width + h_padding * 2.0, base_height + v_padding * 2.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{calculations::ScaledLayout, grid, poster};
+
+    fn extract_f32_const(shader_src: &str, name: &str) -> f32 {
+        let needle = format!("const {name}: f32 = ");
+        let line = shader_src
+            .lines()
+            .find(|line| line.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("missing WGSL const {name}"));
+        let value = line
+            .split_once('=')
+            .expect("WGSL const assignment")
+            .1
+            .split(';')
+            .next()
+            .expect("WGSL const terminator")
+            .trim();
+        value.parse().expect("parse WGSL f32 const")
+    }
+
+    #[test]
+    fn shader_text_zone_constant_matches_layout_policy() {
+        let shader_src = include_str!("../shaders/poster_text.wgsl");
+        assert_eq!(
+            extract_f32_const(shader_src, "TEXT_ZONE_HEIGHT"),
+            poster::SHADER_TEXT_ZONE_HEIGHT
+        );
+    }
+
+    #[test]
+    fn scaled_layout_reserves_shader_text_zone_in_card_rows() {
+        let scale = 1.25;
+        let layout = ScaledLayout::new(scale, grid::EFFECTIVE_SPACING);
+
+        assert!(
+            (layout.text_area_height - poster::SHADER_TEXT_ZONE_HEIGHT * scale)
+                .abs()
+                < f32::EPSILON
+        );
+        assert!(layout.row_height > layout.container_height);
+        assert!(
+            layout.row_height
+                >= layout.container_height + layout.text_area_height
+        );
     }
 }

@@ -354,8 +354,7 @@ pub fn movie_reference_card_with_state<'a>(
         .on_enter(InteractionMessage::MediaHovered(instance_key.clone()).into())
         .on_exit(InteractionMessage::MediaUnhovered(instance_key).into());
 
-    // Return just the poster with shader-rendered text below
-    // The shader text zone extends below the poster bounds
+    // Return the poster card; ImageFor reserves the shader title/meta zone in layout.
     image_with_hover.into()
 }
 
@@ -616,8 +615,7 @@ pub fn series_reference_card_with_state<'a>(
         .on_enter(InteractionMessage::MediaHovered(instance_key.clone()).into())
         .on_exit(InteractionMessage::MediaUnhovered(instance_key).into());
 
-    // Return just the poster with shader-rendered text below
-    // The shader text zone extends below the poster bounds
+    // Return the poster card; ImageFor reserves the shader title/meta zone in layout.
     image_with_hover.into()
 }
 

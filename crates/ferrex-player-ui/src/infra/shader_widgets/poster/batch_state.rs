@@ -159,7 +159,7 @@ pub struct PosterInstance {
     // Each u32 contains 4 character indices (8 bits each)
     pub title_chars: [u32; 6], // 24 chars max
     pub meta_chars: [u32; 4],  // 16 chars max
-    pub text_params: [f32; 4], // [title_len, meta_len, reserved, reserved]
+    pub text_params: [f32; 4], // [title_len, meta_len, text_zone_height, reserved]
 }
 
 /// Batched primitive metadata captured during encoding.
