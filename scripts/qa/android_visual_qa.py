@@ -9,6 +9,7 @@ manifest plus redacted failure logcat snippets under target/android-visual-qa.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import datetime as dt
 import hashlib
 import json
@@ -29,6 +30,8 @@ VISUAL_QA_ACTIVITY = "com.ferrex.android.qa.FerrexVisualQaActivity"
 DEFAULT_OUTPUT_DIR = Path("target/android-visual-qa")
 DEFAULT_SETTLE_MS = 1500
 DEFAULT_LOG_LINES = 240
+GATE_MODES = ("smoke", "complete")
+SMOKE_SCENARIO_IDS = ("phone-home", "tv-home-focus")
 
 PHONE_EXPECTED_SIZE = (1080, 2400)
 TV_EXPECTED_SIZE = (1920, 1080)
@@ -135,12 +138,52 @@ class RunResult:
     returncode: int
 
 
+@dataclass(frozen=True)
+class VerifiedCapture:
+    target: str
+    scenario_id: str
+    screenshot_path: Path
+    dimensions: PngDimensions
+
+
+@dataclass(frozen=True)
+class ManifestSummary:
+    manifest_path: Path
+    output_dir: Path
+    mode: str | None
+    captures: tuple[VerifiedCapture, ...]
+
+    @property
+    def capture_count(self) -> int:
+        return len(self.captures)
+
+    @property
+    def target_counts(self) -> Counter[str]:
+        return Counter(capture.target for capture in self.captures)
+
+
 def utc_now() -> str:
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def default_gate_output_dir(mode: str) -> Path:
+    return DEFAULT_OUTPUT_DIR / mode
+
+
+def resolve_output_dir(
+    repo_root: Path,
+    output_dir: str | os.PathLike[str] | None,
+    mode: str | None = None,
+) -> Path:
+    default = default_gate_output_dir(mode) if mode else DEFAULT_OUTPUT_DIR
+    resolved = Path(output_dir) if output_dir else default
+    if not resolved.is_absolute():
+        resolved = repo_root / resolved
+    return resolved
 
 
 def redact_text(text: str) -> str:
@@ -178,6 +221,13 @@ def run_command(
     if check and completed.returncode != 0:
         raise CommandError(string_args, completed.returncode, stdout, stderr)
     return RunResult(stdout=stdout, stderr=stderr, returncode=completed.returncode)
+
+
+def run_gate_command(args: Sequence[str | os.PathLike[str]], *, timeout: int | float | None = None) -> None:
+    string_args = [os.fspath(arg) for arg in args]
+    completed = subprocess.run(string_args, check=False, timeout=timeout)
+    if completed.returncode != 0:
+        raise CommandError(string_args, completed.returncode, "", "")
 
 
 def run_command_to_file(
@@ -332,6 +382,32 @@ class ScenarioRegistry:
             "required_scenario_ids": [scenario.id for scenario in self.scenarios],
             "scenario_count": len(self.scenarios),
         }
+
+
+def scenarios_for_gate_mode(registry: ScenarioRegistry, mode: str) -> list[Scenario]:
+    if mode == "smoke":
+        scenarios = []
+        for scenario_id in SMOKE_SCENARIO_IDS:
+            scenario = registry.by_id.get(scenario_id)
+            if scenario is None:
+                raise VisualQaError(f"smoke gate scenario is missing from registry: {scenario_id}")
+            scenarios.append(scenario)
+        targets = {scenario.target for scenario in scenarios}
+        if targets != {"phone", "tv"}:
+            raise VisualQaError("smoke gate must include at least one phone and one TV scenario")
+        return scenarios
+    if mode == "complete":
+        return list(registry.scenarios)
+    raise VisualQaError(f"unknown gate mode {mode!r}; expected smoke or complete")
+
+
+def capture_plan_json(mode: str | None, selected: Sequence[Scenario]) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "scenario_count": len(selected),
+        "scenario_ids": [scenario.id for scenario in selected],
+        "target_counts": dict(Counter(scenario.target for scenario in selected)),
+    }
 
 
 def target_for_scenario_id(scenario_id: str) -> str:
@@ -615,6 +691,134 @@ def write_json(path: Path, data: Mapping[str, object]) -> None:
     tmp.replace(path)
 
 
+def read_json_object(path: Path) -> dict[str, object]:
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise VisualQaError(f"failed to read manifest {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise VisualQaError(f"manifest is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise VisualQaError(f"manifest root must be a JSON object: {path}")
+    return parsed
+
+
+def dimension_tuple(raw: object, field_name: str) -> tuple[int, int]:
+    if not isinstance(raw, dict):
+        raise VisualQaError(f"capture {field_name} must be an object")
+    width = raw.get("width")
+    height = raw.get("height")
+    if not isinstance(width, int) or not isinstance(height, int):
+        raise VisualQaError(f"capture {field_name} must contain integer width and height")
+    if width <= 0 or height <= 0:
+        raise VisualQaError(f"capture {field_name} dimensions must be positive")
+    return (width, height)
+
+
+def verify_manifest(
+    manifest_path: Path,
+    *,
+    mode: str | None = None,
+    repo_root: Path | None = None,
+) -> ManifestSummary:
+    data = read_json_object(manifest_path)
+    if data.get("status") != "passed":
+        raise VisualQaError(f"manifest did not pass: {manifest_path} status={data.get('status')!r}")
+    failures = data.get("failures", [])
+    if failures:
+        raise VisualQaError(f"manifest contains {len(failures)} failure record(s): {manifest_path}")
+    captures_raw = data.get("captures")
+    if not isinstance(captures_raw, list) or not captures_raw:
+        raise VisualQaError(f"manifest contains no capture records: {manifest_path}")
+
+    verified: list[VerifiedCapture] = []
+    seen_ids: set[str] = set()
+    for index, capture in enumerate(captures_raw):
+        if not isinstance(capture, dict):
+            raise VisualQaError(f"capture record {index} must be an object")
+        if capture.get("status") != "passed":
+            raise VisualQaError(
+                f"capture record {index} did not pass: scenario={capture.get('scenario_id')!r} status={capture.get('status')!r}"
+            )
+        target = capture.get("target")
+        scenario_id = capture.get("scenario_id")
+        screenshot_raw = capture.get("screenshot_path")
+        if not isinstance(target, str) or target not in {"phone", "tv"}:
+            raise VisualQaError(f"capture record {index} has invalid target: {target!r}")
+        if not isinstance(scenario_id, str) or not scenario_id:
+            raise VisualQaError(f"capture record {index} has invalid scenario_id: {scenario_id!r}")
+        if not isinstance(screenshot_raw, str) or not screenshot_raw:
+            raise VisualQaError(f"capture record {index} has invalid screenshot_path: {screenshot_raw!r}")
+        expected_size = dimension_tuple(capture.get("expected_dimensions"), "expected_dimensions")
+        screenshot_path = Path(screenshot_raw)
+        if not screenshot_path.is_absolute():
+            screenshot_path = manifest_path.parent / screenshot_path
+        dimensions = validate_png(screenshot_path, expected_size)
+        manifest_dimensions = capture.get("dimensions")
+        if manifest_dimensions is not None and dimension_tuple(manifest_dimensions, "dimensions") != (
+            dimensions.width,
+            dimensions.height,
+        ):
+            raise VisualQaError(f"capture dimensions disagree with PNG header for {screenshot_path}")
+        verified.append(
+            VerifiedCapture(
+                target=target,
+                scenario_id=scenario_id,
+                screenshot_path=screenshot_path,
+                dimensions=dimensions,
+            )
+        )
+        seen_ids.add(scenario_id)
+
+    if mode is not None:
+        if mode not in GATE_MODES:
+            raise VisualQaError(f"unknown verify mode {mode!r}; expected smoke or complete")
+        registry = ScenarioRegistry.load(repo_root or repo_root_from_script())
+        required_ids = {scenario.id for scenario in scenarios_for_gate_mode(registry, mode)}
+        missing = sorted(required_ids - seen_ids)
+        if missing:
+            raise VisualQaError(f"{mode} manifest is missing required scenario(s): {', '.join(missing)}")
+        if mode == "smoke":
+            targets = {capture.target for capture in verified if capture.scenario_id in required_ids}
+            if targets != {"phone", "tv"}:
+                raise VisualQaError("smoke manifest must include at least one phone and one TV capture")
+        elif mode == "complete":
+            unexpected = sorted(seen_ids - required_ids)
+            if unexpected:
+                raise VisualQaError(
+                    f"complete manifest contains scenario(s) outside the required registry: {', '.join(unexpected)}"
+                )
+
+    output_raw = data.get("output_dir")
+    output_dir = Path(output_raw) if isinstance(output_raw, str) and output_raw else manifest_path.parent
+    return ManifestSummary(
+        manifest_path=manifest_path,
+        output_dir=output_dir,
+        mode=mode,
+        captures=tuple(verified),
+    )
+
+
+def print_artifact_summary(summary: ManifestSummary) -> None:
+    mode_label = f" {summary.mode}" if summary.mode else ""
+    counts = summary.target_counts
+    print(
+        f"android-visual-qa:{mode_label} passed; captures={summary.capture_count} "
+        f"phone={counts.get('phone', 0)} tv={counts.get('tv', 0)}",
+        file=sys.stderr,
+    )
+    print(f"android-visual-qa: artifacts {summary.output_dir}", file=sys.stderr)
+    print(f"android-visual-qa: manifest {summary.manifest_path}", file=sys.stderr)
+    for capture in summary.captures:
+        print(
+            "android-visual-qa: "
+            f"{capture.target}/{capture.scenario_id} "
+            f"{capture.dimensions.width}x{capture.dimensions.height} "
+            f"{capture.screenshot_path}",
+            file=sys.stderr,
+        )
+
+
 def capture_one(
     *,
     adb: str,
@@ -660,25 +864,29 @@ def capture_one(
     return record
 
 
-def run_capture(args: argparse.Namespace) -> int:
-    repo_root = repo_root_from_script()
-    registry = ScenarioRegistry.load(repo_root)
-    selected = registry.select(args.target, args.scenario)
+def run_capture_plan(
+    *,
+    args: argparse.Namespace,
+    repo_root: Path,
+    registry: ScenarioRegistry,
+    selected: Sequence[Scenario],
+    output_dir: Path,
+    command_name: str,
+    mode: str | None = None,
+) -> int:
     configs = target_configs(repo_root, args)
     adb = resolve_executable(args.adb)
-    output_dir = Path(args.output_dir)
-    if not output_dir.is_absolute():
-        output_dir = repo_root / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest: dict[str, object] = {
         "schema_version": 1,
-        "command": "android-visual-qa capture",
-        "argv": sys.argv[1:],
+        "command": command_name,
+        "argv": getattr(args, "effective_argv", sys.argv[1:]),
         "started_at": utc_now(),
         "output_dir": str(output_dir),
         "hardware_confirmation": bool(args.hardware),
         "registry": registry.to_json(),
+        "capture_plan": capture_plan_json(mode, selected),
         "command_versions": collect_command_versions(adb, Path(__file__).resolve()),
         "captures": [],
         "failures": [],
@@ -714,6 +922,82 @@ def run_capture(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def run_capture(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    registry = ScenarioRegistry.load(repo_root)
+    selected = registry.select(args.target, args.scenario)
+    output_dir = resolve_output_dir(repo_root, args.output_dir)
+    return run_capture_plan(
+        args=args,
+        repo_root=repo_root,
+        registry=registry,
+        selected=selected,
+        output_dir=output_dir,
+        command_name="android-visual-qa capture",
+    )
+
+
+def run_gate(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    registry = ScenarioRegistry.load(repo_root)
+    selected = scenarios_for_gate_mode(registry, args.mode)
+    output_dir = resolve_output_dir(repo_root, args.output_dir, args.mode)
+    qa_script = repo_root / "scripts/qa/android-emulator-qa.sh"
+
+    steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = (
+        ("build", (qa_script, "build")),
+        ("start", (qa_script, "start")),
+        ("doctor", (qa_script, "doctor")),
+        ("install", (qa_script, "install", "all")),
+    )
+    for label, command in steps:
+        print(f"android-visual-qa: step {label}", file=sys.stderr)
+        run_gate_command(command)
+
+    capture_args = argparse.Namespace(
+        target="all",
+        scenario="all",
+        output_dir=str(output_dir),
+        settle_ms=args.settle_ms,
+        log_lines=args.log_lines,
+        adb=args.adb,
+        no_nix_screenshot=args.no_nix_screenshot,
+        hardware=False,
+        hardware_serial=None,
+        expected_size=None,
+        effective_argv=getattr(args, "effective_argv", sys.argv[1:]),
+    )
+    print(f"android-visual-qa: step capture ({args.mode})", file=sys.stderr)
+    capture_status = run_capture_plan(
+        args=capture_args,
+        repo_root=repo_root,
+        registry=registry,
+        selected=selected,
+        output_dir=output_dir,
+        command_name="android-visual-qa gate",
+        mode=args.mode,
+    )
+    if capture_status != 0:
+        return capture_status
+
+    print("android-visual-qa: step verify", file=sys.stderr)
+    run_gate_command((qa_script, "check", "all"))
+    summary = verify_manifest(output_dir / "manifest.json", mode=args.mode, repo_root=repo_root)
+    print_artifact_summary(summary)
+    return 0
+
+
+def run_verify(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    output_dir = resolve_output_dir(repo_root, args.output_dir, args.mode)
+    manifest_path = Path(args.manifest) if args.manifest else output_dir / "manifest.json"
+    if not manifest_path.is_absolute():
+        manifest_path = repo_root / manifest_path
+    summary = verify_manifest(manifest_path, mode=args.mode, repo_root=repo_root)
+    print_artifact_summary(summary)
+    return 0
+
+
 def run_list(args: argparse.Namespace) -> int:
     repo_root = repo_root_from_script()
     registry = ScenarioRegistry.load(repo_root)
@@ -736,9 +1020,49 @@ def positive_int(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="android-visual-qa",
-        description="Capture Ferrex Android debug visual QA scenario screenshots with metadata.",
+        description=(
+            "Run the Ferrex Android visual QA gate or capture debug scenario screenshots with metadata. "
+            "No arguments defaults to the smoke gate."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    gate = subparsers.add_parser(
+        "gate",
+        help="Run build/start/doctor/install/capture/verify acceptance gate (default mode: smoke)",
+    )
+    gate.add_argument(
+        "--mode",
+        choices=GATE_MODES,
+        default="smoke",
+        help="smoke captures phone-home and tv-home-focus; complete captures the full required registry",
+    )
+    gate.add_argument(
+        "--output-dir",
+        help="Output directory for PNGs and manifest; defaults to target/android-visual-qa/<mode>",
+    )
+    gate.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
+    gate.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
+    gate.add_argument(
+        "--adb",
+        default=os.environ.get("ADB", "adb"),
+        help="adb executable to use for screenshot capture",
+    )
+    gate.add_argument(
+        "--no-nix-screenshot",
+        action="store_true",
+        help="Do not use ferrex-android-screenshot-phone/tv helpers; always use adb -s exec-out screencap",
+    )
+    gate.set_defaults(func=run_gate, hardware=False)
+
+    verify = subparsers.add_parser("verify", help="Verify a captured manifest and print a concise artifact summary")
+    verify.add_argument("--mode", choices=GATE_MODES, help="Enforce the smoke or complete acceptance matrix")
+    verify.add_argument("--manifest", help="Manifest path; defaults to <output-dir>/manifest.json")
+    verify.add_argument(
+        "--output-dir",
+        help="Output directory containing manifest; defaults to target/android-visual-qa[/<mode>]",
+    )
+    verify.set_defaults(func=run_verify)
 
     list_parser = subparsers.add_parser("list", help="List scenario IDs from the debug registry")
     list_parser.add_argument("--target", choices=("phone", "mobile", "tv", "all"), default="all")
@@ -778,9 +1102,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def effective_argv(argv: Sequence[str] | None) -> list[str]:
+    provided = list(sys.argv[1:] if argv is None else argv)
+    if not provided:
+        return ["gate", "--mode", "smoke"]
+    if len(provided) == 1 and provided[0] in GATE_MODES:
+        return ["gate", "--mode", provided[0]]
+    return provided
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    parsed_argv = effective_argv(argv)
+    args = parser.parse_args(parsed_argv)
+    args.effective_argv = parsed_argv
     try:
         return args.func(args)
     except VisualQaError as exc:

@@ -153,6 +153,8 @@ alias aqi := android-qa-install
 alias aql := android-qa-launch
 alias aqc := android-qa-check
 alias aqv := android-visual-qa
+alias aqvs := android-visual-qa-smoke
+alias aqvc := android-visual-qa-complete
 alias aqcap := android-visual-qa-capture
 
 [no-cd]
@@ -182,6 +184,18 @@ android-qa-check target="all":
 [no-cd]
 android-visual-qa *args:
     ./scripts/qa/android-visual-qa.sh {{ args }}
+
+[no-cd]
+android-visual-qa-smoke:
+    ./scripts/qa/android-visual-qa.sh gate --mode smoke
+
+[no-cd]
+android-visual-qa-complete:
+    ./scripts/qa/android-visual-qa.sh gate --mode complete
+
+[no-cd]
+android-visual-qa-verify mode="smoke":
+    ./scripts/qa/android-visual-qa.sh verify --mode {{ mode }}
 
 [no-cd]
 android-visual-qa-capture target="all" scenario="all":

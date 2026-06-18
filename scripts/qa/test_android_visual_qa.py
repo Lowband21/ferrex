@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import struct
 import sys
@@ -22,6 +23,30 @@ SPEC.loader.exec_module(android_visual_qa)
 class AndroidVisualQaTest(unittest.TestCase):
     def repo_root(self) -> Path:
         return Path(__file__).resolve().parents[2]
+
+    def write_png(self, path: Path, width: int, height: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(
+            android_visual_qa.PNG_SIGNATURE
+            + b"\x00\x00\x00\rIHDR"
+            + struct.pack(">II", width, height)
+            + b"\x08\x06\x00\x00\x00"
+        )
+
+    def write_manifest(self, path: Path, captures: list[dict[str, object]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "status": "passed",
+                    "output_dir": str(path.parent),
+                    "captures": captures,
+                    "failures": [],
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def test_registry_parses_required_phone_and_tv_scenarios(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
@@ -103,6 +128,145 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertEqual(configs["tv"].serial, "ABC123")
         self.assertEqual(configs["tv"].expected_size, (1280, 720))
         self.assertEqual(configs["phone"].serial, "emulator-5554")
+
+    def test_gate_smoke_selection_includes_phone_and_tv(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
+
+        selected = android_visual_qa.scenarios_for_gate_mode(registry, "smoke")
+
+        self.assertEqual([scenario.id for scenario in selected], ["phone-home", "tv-home-focus"])
+        self.assertEqual({scenario.target for scenario in selected}, {"phone", "tv"})
+
+    def test_gate_complete_selection_matches_required_registry(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
+
+        selected = android_visual_qa.scenarios_for_gate_mode(registry, "complete")
+
+        self.assertEqual(
+            [scenario.id for scenario in selected],
+            [scenario.id for scenario in registry.scenarios],
+        )
+
+    def test_verify_manifest_accepts_smoke_phone_and_tv_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone = root / "phone" / "phone-home.png"
+            tv = root / "tv" / "tv-home-focus.png"
+            self.write_png(phone, 1080, 2400)
+            self.write_png(tv, 1920, 1080)
+            manifest = root / "manifest.json"
+            self.write_manifest(
+                manifest,
+                [
+                    {
+                        "status": "passed",
+                        "target": "phone",
+                        "scenario_id": "phone-home",
+                        "screenshot_path": str(phone),
+                        "expected_dimensions": {"width": 1080, "height": 2400},
+                        "dimensions": {"width": 1080, "height": 2400},
+                    },
+                    {
+                        "status": "passed",
+                        "target": "tv",
+                        "scenario_id": "tv-home-focus",
+                        "screenshot_path": str(tv),
+                        "expected_dimensions": {"width": 1920, "height": 1080},
+                        "dimensions": {"width": 1920, "height": 1080},
+                    },
+                ],
+            )
+
+            summary = android_visual_qa.verify_manifest(
+                manifest,
+                mode="smoke",
+                repo_root=self.repo_root(),
+            )
+
+            self.assertEqual(summary.capture_count, 2)
+            self.assertEqual(summary.target_counts["phone"], 1)
+            self.assertEqual(summary.target_counts["tv"], 1)
+
+    def test_verify_manifest_rejects_incomplete_smoke_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone = root / "phone" / "phone-home.png"
+            self.write_png(phone, 1080, 2400)
+            manifest = root / "manifest.json"
+            self.write_manifest(
+                manifest,
+                [
+                    {
+                        "status": "passed",
+                        "target": "phone",
+                        "scenario_id": "phone-home",
+                        "screenshot_path": str(phone),
+                        "expected_dimensions": {"width": 1080, "height": 2400},
+                        "dimensions": {"width": 1080, "height": 2400},
+                    }
+                ],
+            )
+
+            with self.assertRaises(android_visual_qa.VisualQaError):
+                android_visual_qa.verify_manifest(manifest, mode="smoke", repo_root=self.repo_root())
+
+    def test_gate_runs_primitives_capture_and_verify_in_order(self) -> None:
+        calls: list[str] = []
+
+        def fake_gate_command(command: tuple[object, ...]) -> None:
+            command_parts = [os.fspath(part) for part in command]
+            calls.append(f"primitive:{Path(command_parts[0]).name}:{':'.join(command_parts[1:])}")
+
+        def fake_capture_plan(**kwargs: object) -> int:
+            calls.append(f"capture:{kwargs['mode']}")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = android_visual_qa.ManifestSummary(
+                manifest_path=Path(tmp) / "manifest.json",
+                output_dir=Path(tmp),
+                mode="smoke",
+                captures=(),
+            )
+            args = SimpleNamespace(
+                mode="smoke",
+                output_dir=tmp,
+                settle_ms=1,
+                log_lines=1,
+                adb="adb",
+                no_nix_screenshot=True,
+                effective_argv=["gate", "--mode", "smoke"],
+            )
+            with mock.patch.object(
+                android_visual_qa,
+                "run_gate_command",
+                side_effect=fake_gate_command,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_capture_plan",
+                side_effect=fake_capture_plan,
+            ), mock.patch.object(
+                android_visual_qa,
+                "verify_manifest",
+                return_value=summary,
+            ), mock.patch.object(
+                android_visual_qa,
+                "print_artifact_summary",
+            ):
+                status = android_visual_qa.run_gate(args)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "primitive:android-emulator-qa.sh:build",
+                "primitive:android-emulator-qa.sh:start",
+                "primitive:android-emulator-qa.sh:doctor",
+                "primitive:android-emulator-qa.sh:install:all",
+                "capture:smoke",
+                "primitive:android-emulator-qa.sh:check:all",
+            ],
+        )
 
 
 if __name__ == "__main__":
