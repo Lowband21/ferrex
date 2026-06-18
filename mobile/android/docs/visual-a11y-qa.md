@@ -81,6 +81,15 @@ Theater Plate debug tags are generated for both `phone` and `tv` targets:
 
 The required Theater Plate state IDs are `bright`, `dark`, `busy`, `missing-backdrop`, `long-title`, `missing-artwork`, `stale-offline`, `recovery`, `search`, `browse`, `detail`, `rails`, and `playback-entry`. TV focusable surfaces also set explicit semantic content descriptions through `TvFocusableSurface`/`TvFocusableButton`; shared phone action buttons set button content descriptions from their labels.
 
+## Theater Plate migration seams
+
+Route-level redesign remains out of scope for this QA lane. The source-level migration notes in `TheaterPlateComponentMigrationNotes` document the safe seams that LOW-447/LOW-448/LOW-449 should consume later:
+
+- `FerrexStatusCard` can be replaced by `FerrexStageSurface(StatusSlab)` + Theater Plate text roles while preserving `FerrexStatusAction.onClick`, loading, tags, and content descriptions.
+- `FerrexActionButton` can be restyled into Theater Plate control shelves while preserving `onClick`, enabled, subtitle, tag, and content-description callbacks for retry/reset/cache/diagnostics/playback actions.
+- `FerrexPosterCard` and rail/detail successors can migrate to projection/rail stage surfaces while preserving media-open callbacks and fallback artwork labels for LOW-447 data/rail parity.
+- TV focus actions should keep existing D-pad focus restoration keys, action callbacks, tags, and content descriptions while LOW-449 adopts the ten-foot Theater Plate surfaces.
+
 ## Manual phone runbook
 
 Prerequisites:

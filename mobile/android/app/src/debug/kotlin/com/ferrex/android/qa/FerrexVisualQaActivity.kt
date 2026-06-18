@@ -51,6 +51,8 @@ import com.ferrex.android.core.auth.connectionRecoveryUi
 import com.ferrex.android.core.library.CachedMediaReference
 import com.ferrex.android.core.library.CachedMediaResyncSummary
 import com.ferrex.android.core.library.LibraryFreshness
+import com.ferrex.android.core.image.BrowseImageCategory
+import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.search.MediaSearchCache
 import com.ferrex.android.core.search.MediaSearchRepository
@@ -58,6 +60,16 @@ import com.ferrex.android.core.search.MediaSearchTransport
 import com.ferrex.android.core.search.SearchMediaId
 import com.ferrex.android.core.search.SearchMediaType
 import com.ferrex.android.core.search.SearchMediaWithStatus
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalysis
+import com.ferrex.android.core.theaterplate.TheaterPlateColor
+import com.ferrex.android.core.theaterplate.TheaterPlateDownsample
+import com.ferrex.android.core.theaterplate.TheaterPlateGrade
+import com.ferrex.android.core.theaterplate.TheaterPlateGradeClass
+import com.ferrex.android.core.theaterplate.TheaterPlateGradeControls
+import com.ferrex.android.core.theaterplate.TheaterPlateLocalLuma
+import com.ferrex.android.core.theaterplate.TheaterPlatePalette
+import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexPosterCard
@@ -84,6 +96,12 @@ import com.ferrex.android.ui.qa.VisualQaScenarioKind
 import com.ferrex.android.ui.qa.VisualQaTheaterPlateState
 import com.ferrex.android.ui.recovery.PhoneRecoverableScreen
 import com.ferrex.android.ui.search.PhoneSearchPanel
+import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
+import com.ferrex.android.ui.theaterplate.FerrexStageSurface
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
+import com.ferrex.android.ui.theaterplate.TheaterPlateStage
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import com.ferrex.android.ui.theme.FerrexTheme
 
@@ -441,40 +459,82 @@ private fun TheaterPlateScenario(
     val tv = scenario.device == VisualQaDevice.Tv
     val target = if (tv) "tv" else "phone"
     val densityRole = if (tv) TheaterPlateDensityRole.Tv1080p else TheaterPlateDensityRole.PhonePortrait
-    QaScrollableScenario(scenario = scenario, tv = tv) {
-        ScenarioTitle(scenario, centered = tv)
-        if (tv) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+    val analysis = remember(state, tv) { qaTheaterPlateAnalysis(state, tv) }
+    val stageDensity = remember(analysis) { FerrexStageDensityFamily.forViewport(analysis.context.viewport) }
+    val adaptation = state.theaterPlateBackdropAdaptation()
+    TheaterPlateStage(
+        analysis = analysis,
+        adaptation = adaptation,
+        density = stageDensity,
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag(scenario.testTag),
+        contentDescription = scenario.description,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = if (tv) Alignment.CenterHorizontally else Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(if (tv) FerrexDesignTokens.Space.Xl else FerrexDesignTokens.Space.Lg),
+        ) {
+            ScenarioTitle(scenario, centered = tv)
+            if (tv) {
+                val recoveryFirst = state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    TheaterPlateStatus(target = target, state = state)
-                    TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
-                    TheaterPlateRail(target = target, state = state, tv = true, densityRole = densityRole)
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
-                ) {
-                    if (state == VisualQaTheaterPlateState.Search) {
-                        TheaterPlateSearchField(target = target, state = state, tv = true)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+                    ) {
+                        if (recoveryFirst) {
+                            TheaterPlateRail(
+                                target = target,
+                                state = state,
+                                tv = true,
+                                densityRole = densityRole,
+                                density = stageDensity,
+                                compact = true,
+                            )
+                            TheaterPlateStatus(target = target, state = state, density = stageDensity)
+                        } else {
+                            TheaterPlateStatus(target = target, state = state, density = stageDensity)
+                            TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
+                            TheaterPlateRail(target = target, state = state, tv = true, densityRole = densityRole, density = stageDensity)
+                        }
                     }
-                    TheaterPlateActions(target = target, state = state, tv = true)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+                    ) {
+                        if (state == VisualQaTheaterPlateState.Search) {
+                            TheaterPlateSearchField(target = target, state = state, tv = true)
+                        }
+                        if (recoveryFirst) {
+                            TheaterPlateActions(target = target, state = state, tv = true, includeSupportingActions = false)
+                            TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
+                            TheaterPlateActions(target = target, state = state, tv = true, includePrimary = false)
+                        } else {
+                            TheaterPlateActions(target = target, state = state, tv = true)
+                        }
+                    }
                 }
+            } else {
+                val recoveryFirst = state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline
+                TheaterPlateStatus(target = target, state = state, density = stageDensity)
+                if (recoveryFirst) {
+                    TheaterPlateActions(target = target, state = state, tv = false, includeSupportingActions = false)
+                }
+                TheaterPlateMediaCard(target = target, state = state, tv = false, densityRole = densityRole)
+                if (state == VisualQaTheaterPlateState.Search) {
+                    TheaterPlateSearchField(target = target, state = state, tv = false)
+                }
+                TheaterPlateActions(target = target, state = state, tv = false, includePrimary = !recoveryFirst)
+                TheaterPlateRail(target = target, state = state, tv = false, densityRole = densityRole, density = stageDensity)
             }
-        } else {
-            TheaterPlateStatus(target = target, state = state)
-            TheaterPlateMediaCard(target = target, state = state, tv = false, densityRole = densityRole)
-            if (state == VisualQaTheaterPlateState.Search) {
-                TheaterPlateSearchField(target = target, state = state, tv = false)
-            }
-            TheaterPlateActions(target = target, state = state, tv = false)
-            TheaterPlateRail(target = target, state = state, tv = false, densityRole = densityRole)
         }
     }
 }
@@ -483,14 +543,29 @@ private fun TheaterPlateScenario(
 private fun TheaterPlateStatus(
     target: String,
     state: VisualQaTheaterPlateState,
+    density: FerrexStageDensityFamily,
 ) {
-    FerrexStatusCard(
-        modifier = Modifier.testTag(FerrexQaTags.TheaterPlate.status(target, state.key)),
-        title = state.label,
-        body = state.statusCopy,
-        tone = state.tone,
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.StatusSlab,
+        density = density,
+        tone = state.tone.toStageSurfaceTone(),
+        testTag = FerrexQaTags.TheaterPlate.status(target, state.key),
         contentDescription = "${state.label} status: ${state.statusCopy}",
-    )
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
+            TheaterPlateText(
+                text = state.label,
+                role = TheaterPlateTypographyRole.StatusTitle,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            TheaterPlateText(
+                text = state.statusCopy,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = if (density == FerrexStageDensityFamily.TenFoot) 2 else 4,
+            )
+        }
+    }
 }
 
 @Composable
@@ -608,17 +683,21 @@ private fun TheaterPlateActions(
     target: String,
     state: VisualQaTheaterPlateState,
     tv: Boolean,
+    includePrimary: Boolean = true,
+    includeSupportingActions: Boolean = true,
 ) {
     val primary = VisualQaRecoveryActionSample("primary", state.primaryActionLabel, FerrexActionRole.Primary)
     val actions = buildList {
-        add(primary)
-        if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
-            addAll(FerrexVisualQaFixtures.noWipeCacheRecoveryActions)
-        } else {
-            add(VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary))
-        }
-        if (state == VisualQaTheaterPlateState.PlaybackEntry) {
-            add(VisualQaRecoveryActionSample("start-over", "Start over", FerrexActionRole.Secondary))
+        if (includePrimary) add(primary)
+        if (includeSupportingActions) {
+            if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
+                addAll(FerrexVisualQaFixtures.noWipeCacheRecoveryActions)
+            } else {
+                add(VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary))
+            }
+            if (state == VisualQaTheaterPlateState.PlaybackEntry) {
+                add(VisualQaRecoveryActionSample("start-over", "Start over", FerrexActionRole.Secondary))
+            }
         }
     }
     if (tv) {
@@ -627,8 +706,8 @@ private fun TheaterPlateActions(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
         ) {
-            actions.forEachIndexed { index, action ->
-                val key = if (index == 0) "primary" else action.key
+            actions.forEach { action ->
+                val key = action.key
                 QaTvFocusableAction(
                     surfaceKey = "theater-${state.key}",
                     action = action,
@@ -642,8 +721,8 @@ private fun TheaterPlateActions(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
         ) {
-            actions.forEachIndexed { index, action ->
-                val key = if (index == 0) "primary" else action.key
+            actions.forEach { action ->
+                val key = action.key
                 FerrexActionButton(
                     label = action.label,
                     role = action.role,
@@ -663,28 +742,219 @@ private fun TheaterPlateRail(
     state: VisualQaTheaterPlateState,
     tv: Boolean,
     densityRole: TheaterPlateDensityRole,
+    density: FerrexStageDensityFamily,
+    compact: Boolean = false,
 ) {
     val tag = FerrexQaTags.TheaterPlate.rail(target, state.key, "primary")
     val description = "${state.label} rail with ${state.mediaTitle} and fallback artwork"
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = if (tv) FerrexDesignTokens.Tv.DetailMaxWidth else 640.dp)
-            .testTag(tag)
-            .semantics(mergeDescendants = true) { contentDescription = description },
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+    FerrexStageSurface(
+        variant = if (compact) FerrexStageSurfaceVariant.FactRibbon else FerrexStageSurfaceVariant.RailBand,
+        density = density,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = Modifier.widthIn(max = if (tv) FerrexDesignTokens.Tv.DetailMaxWidth else 640.dp),
+        testTag = tag,
+        contentDescription = description,
     ) {
-        Column(
-            modifier = Modifier.padding(if (tv) FerrexDesignTokens.Space.Xl else FerrexDesignTokens.Space.Lg),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-        ) {
-            TheaterPlateText(text = "Theater Plate rail", role = TheaterPlateTypographyRole.SectionTitle, densityRole = densityRole)
-            TheaterPlateText(text = state.mediaTitle, role = TheaterPlateTypographyRole.RailTitle, densityRole = densityRole)
-            TheaterPlateText(text = state.mediaSubtitle, role = TheaterPlateTypographyRole.RailSubtitle, densityRole = densityRole)
+        Column(verticalArrangement = Arrangement.spacedBy(if (compact) FerrexDesignTokens.Space.Xs else FerrexDesignTokens.Space.Sm)) {
+            if (compact) {
+                TheaterPlateText(
+                    text = "Theater Plate rail • ${state.mediaTitle}",
+                    role = TheaterPlateTypographyRole.RailTitle,
+                    densityRole = densityRole,
+                    maxLines = 1,
+                )
+                TheaterPlateText(
+                    text = state.mediaSubtitle,
+                    role = TheaterPlateTypographyRole.RailSubtitle,
+                    densityRole = densityRole,
+                    maxLines = 1,
+                )
+            } else {
+                TheaterPlateText(text = "Theater Plate rail", role = TheaterPlateTypographyRole.SectionTitle, densityRole = densityRole)
+                TheaterPlateText(text = state.mediaTitle, role = TheaterPlateTypographyRole.RailTitle, densityRole = densityRole)
+                TheaterPlateText(text = state.mediaSubtitle, role = TheaterPlateTypographyRole.RailSubtitle, densityRole = densityRole)
+            }
         }
     }
+}
+
+private fun qaTheaterPlateAnalysis(state: VisualQaTheaterPlateState, tv: Boolean): TheaterPlateAnalysis {
+    val viewport = if (tv) TheaterPlateViewport.of(1920, 1080) else TheaterPlateViewport.of(393, 852)
+    val gradeClass = state.qaGradeClass()
+    val palette = state.qaPalette()
+    val context = if (gradeClass == TheaterPlateGradeClass.MissingBackdrop) {
+        TheaterPlateSourceContext.missingBackdrop(viewport).copy(
+            posterColor = palette.dominant,
+            themeColor = palette.accent,
+            defaultColor = palette.stage,
+        )
+    } else {
+        TheaterPlateSourceContext.backdrop(
+            request = ImageRequestKey("qa-theater-plate-${state.key}", BrowseImageCategory.Backdrop),
+            token = "qa-theater-plate-${state.key}",
+            viewport = viewport,
+        )
+    }
+    val controls = qaControlsFor(gradeClass)
+    val grade = TheaterPlateGrade(
+        gradeClass = gradeClass,
+        isMissingBackdrop = gradeClass == TheaterPlateGradeClass.MissingBackdrop,
+        isBright = gradeClass == TheaterPlateGradeClass.Bright,
+        isDark = gradeClass == TheaterPlateGradeClass.Dark,
+        isBusy = gradeClass == TheaterPlateGradeClass.Busy,
+        isSaturated = gradeClass == TheaterPlateGradeClass.Saturated,
+        isLowDetail = gradeClass == TheaterPlateGradeClass.LowDetail,
+        controls = controls,
+        stageColor = palette.stage,
+    )
+    return TheaterPlateAnalysis(
+        context = context,
+        sourceDimensions = viewport.width to viewport.height,
+        downsample = qaDownsampleFor(gradeClass, palette),
+        palette = palette,
+        averageLuminance = when (gradeClass) {
+            TheaterPlateGradeClass.Bright -> 0.84f
+            TheaterPlateGradeClass.Dark -> 0.10f
+            TheaterPlateGradeClass.Busy -> 0.48f
+            TheaterPlateGradeClass.MissingBackdrop -> 0.22f
+            else -> 0.38f
+        },
+        medianLuminance = when (gradeClass) {
+            TheaterPlateGradeClass.Bright -> 0.82f
+            TheaterPlateGradeClass.Dark -> 0.08f
+            else -> 0.36f
+        },
+        p95Luminance = when (gradeClass) {
+            TheaterPlateGradeClass.Bright -> 0.96f
+            TheaterPlateGradeClass.Dark -> 0.18f
+            else -> 0.72f
+        },
+        averageSaturation = if (gradeClass == TheaterPlateGradeClass.Saturated) 0.88f else 0.52f,
+        edgeDensity = if (gradeClass == TheaterPlateGradeClass.Busy) 0.34f else 0.10f,
+        edgeEnergy = if (gradeClass == TheaterPlateGradeClass.Busy) 0.20f else 0.06f,
+        localLuma = qaLocalLumaFor(gradeClass),
+        grade = grade,
+    )
+}
+
+private fun VisualQaTheaterPlateState.qaGradeClass(): TheaterPlateGradeClass = when (this) {
+    VisualQaTheaterPlateState.Bright -> TheaterPlateGradeClass.Bright
+    VisualQaTheaterPlateState.Dark -> TheaterPlateGradeClass.Dark
+    VisualQaTheaterPlateState.Busy -> TheaterPlateGradeClass.Busy
+    VisualQaTheaterPlateState.MissingBackdrop -> TheaterPlateGradeClass.MissingBackdrop
+    VisualQaTheaterPlateState.MissingArtwork -> TheaterPlateGradeClass.LowDetail
+    VisualQaTheaterPlateState.StaleOffline,
+    VisualQaTheaterPlateState.Recovery -> TheaterPlateGradeClass.Dark
+    VisualQaTheaterPlateState.LongTitle,
+    VisualQaTheaterPlateState.Search,
+    VisualQaTheaterPlateState.Browse,
+    VisualQaTheaterPlateState.Detail,
+    VisualQaTheaterPlateState.Rails,
+    VisualQaTheaterPlateState.PlaybackEntry -> TheaterPlateGradeClass.Balanced
+}
+
+private fun VisualQaTheaterPlateState.theaterPlateBackdropAdaptation(): TheaterPlateBackdropAdaptation = when (this) {
+    VisualQaTheaterPlateState.MissingBackdrop -> TheaterPlateBackdropAdaptation.MissingBackdrop
+    VisualQaTheaterPlateState.MissingArtwork -> TheaterPlateBackdropAdaptation.LowQuality
+    VisualQaTheaterPlateState.StaleOffline,
+    VisualQaTheaterPlateState.Recovery -> TheaterPlateBackdropAdaptation.StaleOffline
+    else -> TheaterPlateBackdropAdaptation.Ready
+}
+
+private fun VisualQaTheaterPlateState.qaPalette(): TheaterPlatePalette = when (this) {
+    VisualQaTheaterPlateState.Bright -> qaPalette(236, 244, 255, 103, 232, 249, 48, 65, 86, 22, 28, 36)
+    VisualQaTheaterPlateState.Dark -> qaPalette(10, 14, 24, 167, 139, 250, 30, 41, 59, 8, 12, 18)
+    VisualQaTheaterPlateState.Busy -> qaPalette(55, 65, 81, 251, 191, 36, 30, 41, 59, 14, 20, 28)
+    VisualQaTheaterPlateState.MissingBackdrop -> qaPalette(49, 46, 129, 103, 232, 249, 30, 41, 59, 18, 20, 24)
+    VisualQaTheaterPlateState.MissingArtwork -> qaPalette(31, 41, 55, 148, 163, 184, 15, 23, 42, 11, 18, 32)
+    VisualQaTheaterPlateState.StaleOffline -> qaPalette(51, 65, 85, 148, 163, 184, 30, 41, 59, 12, 18, 28)
+    VisualQaTheaterPlateState.Recovery -> qaPalette(127, 29, 29, 251, 113, 133, 49, 46, 129, 15, 23, 42)
+    VisualQaTheaterPlateState.Search -> qaPalette(22, 78, 99, 103, 232, 249, 49, 46, 129, 9, 16, 28)
+    VisualQaTheaterPlateState.Browse -> qaPalette(49, 46, 129, 167, 139, 250, 15, 23, 42, 11, 18, 32)
+    VisualQaTheaterPlateState.Detail -> qaPalette(30, 64, 175, 103, 232, 249, 49, 46, 129, 8, 13, 23)
+    VisualQaTheaterPlateState.Rails -> qaPalette(15, 23, 42, 167, 139, 250, 30, 41, 59, 8, 12, 18)
+    VisualQaTheaterPlateState.PlaybackEntry -> qaPalette(12, 74, 110, 103, 232, 249, 49, 46, 129, 7, 13, 22)
+    VisualQaTheaterPlateState.LongTitle -> qaPalette(30, 41, 59, 103, 232, 249, 49, 46, 129, 10, 16, 28)
+}
+
+private fun qaPalette(
+    dominantR: Int,
+    dominantG: Int,
+    dominantB: Int,
+    accentR: Int,
+    accentG: Int,
+    accentB: Int,
+    mutedR: Int,
+    mutedG: Int,
+    mutedB: Int,
+    stageR: Int,
+    stageG: Int,
+    stageB: Int,
+): TheaterPlatePalette = TheaterPlatePalette(
+    dominant = TheaterPlateColor.rgb(dominantR, dominantG, dominantB),
+    accent = TheaterPlateColor.rgb(accentR, accentG, accentB),
+    muted = TheaterPlateColor.rgb(mutedR, mutedG, mutedB),
+    stage = TheaterPlateColor.rgb(stageR, stageG, stageB),
+)
+
+private fun qaControlsFor(gradeClass: TheaterPlateGradeClass): TheaterPlateGradeControls = when (gradeClass) {
+    TheaterPlateGradeClass.MissingBackdrop -> TheaterPlateGradeControls(0.25f, 0.48f, 0.62f, 0.0f, 0.05f, 0.015f)
+    TheaterPlateGradeClass.Busy -> TheaterPlateGradeControls(0.70f, 0.72f, 0.54f, 0.38f, 0.28f, 0.035f)
+    TheaterPlateGradeClass.Bright -> TheaterPlateGradeControls(0.78f, 0.66f, 0.40f, 0.50f, 0.16f, 0.020f)
+    TheaterPlateGradeClass.Dark -> TheaterPlateGradeControls(0.18f, 0.34f, 0.48f, 0.66f, 0.04f, 0.012f)
+    TheaterPlateGradeClass.Saturated -> TheaterPlateGradeControls(0.38f, 0.54f, 0.50f, 0.58f, 0.22f, 0.018f)
+    TheaterPlateGradeClass.LowDetail -> TheaterPlateGradeControls(0.30f, 0.46f, 0.62f, 0.34f, 0.08f, 0.020f)
+    TheaterPlateGradeClass.Balanced -> TheaterPlateGradeControls(0.34f, 0.50f, 0.46f, 0.60f, 0.08f, 0.016f)
+}
+
+private fun qaDownsampleFor(
+    gradeClass: TheaterPlateGradeClass,
+    palette: TheaterPlatePalette,
+): TheaterPlateDownsample {
+    val colors = if (gradeClass == TheaterPlateGradeClass.Busy) {
+        listOf(
+            palette.dominant,
+            palette.accent,
+            palette.muted,
+            palette.stage,
+            TheaterPlateColor.rgb(226, 232, 240),
+            palette.dominant,
+            palette.accent,
+            palette.muted,
+            palette.stage,
+            palette.accent,
+            palette.muted,
+            palette.dominant,
+        )
+    } else {
+        List(12) { index ->
+            when (index % 4) {
+                0 -> palette.dominant
+                1 -> palette.dominant.mix(palette.accent, 0.24f)
+                2 -> palette.muted
+                else -> palette.stage
+            }
+        }
+    }
+    return TheaterPlateDownsample(width = 4, height = 3, pixels = colors)
+}
+
+private fun qaLocalLumaFor(gradeClass: TheaterPlateGradeClass): TheaterPlateLocalLuma = when (gradeClass) {
+    TheaterPlateGradeClass.Bright -> TheaterPlateLocalLuma(2, 2, listOf(0.78f, 0.86f, 0.72f, 0.82f), 0.72f, 0.86f)
+    TheaterPlateGradeClass.Dark -> TheaterPlateLocalLuma(2, 2, listOf(0.08f, 0.12f, 0.06f, 0.10f), 0.06f, 0.12f)
+    TheaterPlateGradeClass.Busy -> TheaterPlateLocalLuma(2, 2, listOf(0.16f, 0.78f, 0.68f, 0.22f), 0.16f, 0.78f)
+    TheaterPlateGradeClass.MissingBackdrop -> TheaterPlateLocalLuma(2, 2, listOf(0.18f, 0.20f, 0.16f, 0.19f), 0.16f, 0.20f)
+    else -> TheaterPlateLocalLuma(2, 2, listOf(0.24f, 0.42f, 0.34f, 0.48f), 0.24f, 0.48f)
+}
+
+private fun FerrexStatusTone.toStageSurfaceTone(): FerrexStageSurfaceTone = when (this) {
+    FerrexStatusTone.Primary,
+    FerrexStatusTone.Retry -> FerrexStageSurfaceTone.Primary
+    FerrexStatusTone.Secondary -> FerrexStageSurfaceTone.Neutral
+    FerrexStatusTone.Cache -> FerrexStageSurfaceTone.Cache
+    FerrexStatusTone.StaleOffline -> FerrexStageSurfaceTone.StaleOffline
+    FerrexStatusTone.DestructiveReset,
+    FerrexStatusTone.Error -> FerrexStageSurfaceTone.Error
 }
 
 @Composable

@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.dp
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexRecoveryActionKind
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.TheaterPlateComponentMigrationNotes
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateTypographyGroup
 import com.ferrex.android.ui.components.TheaterPlateTypographyRole
@@ -122,6 +123,28 @@ class FerrexDesignTokensTest {
             listOf("retry", "sign-out", "change-server", "reset-connection", "diagnostics"),
             requiredTheaterPlateRecoveryActions(includeCacheClear = false).map { it.key },
         )
+    }
+
+    @Test
+    fun theaterPlateMigrationNotesPreserveRouteCallbacksForFutureStacks() {
+        val notes = TheaterPlateComponentMigrationNotes.all.associateBy { it.componentName }
+
+        assertEquals(
+            setOf("FerrexStatusCard", "FerrexActionButton", "FerrexPosterCard", "TV focus actions"),
+            notes.keys,
+        )
+        assertTrue(notes.getValue("FerrexStatusCard").preservedCallbacks.contains("FerrexStatusAction.onClick"))
+        assertTrue(notes.getValue("FerrexActionButton").preservedCallbacks.contains("onClick"))
+        assertTrue(notes.getValue("FerrexPosterCard").preservedCallbacks.contains("onClick"))
+        assertTrue(notes.getValue("TV focus actions").preservedCallbacks.contains("focus restoration key"))
+        assertTrue(notes.getValue("FerrexPosterCard").migrationNote.contains("LOW-447"))
+        assertTrue(notes.getValue("FerrexStatusCard").migrationNote.contains("LOW-448"))
+        assertTrue(notes.getValue("TV focus actions").migrationNote.contains("LOW-449"))
+        notes.values.forEach { note ->
+            assertTrue(note.foundationSeam.isNotBlank())
+            assertTrue(note.preservedCallbacks.size >= 4)
+            assertTrue(note.migrationNote.isNotBlank())
+        }
     }
 
     @Test

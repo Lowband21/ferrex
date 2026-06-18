@@ -314,6 +314,54 @@ fun requiredTheaterPlateRecoveryActions(includeCacheClear: Boolean = true): List
     add(FerrexRecoveryActionKind.Diagnostics.descriptor())
 }
 
+/**
+ * Migration notes for route-level adopters of the Theater Plate foundation.
+ *
+ * These are intentionally source-level notes instead of route rewrites: LOW-447/LOW-448/LOW-449
+ * can replace individual surfaces with Theater Plate stage primitives later while keeping the
+ * current callbacks and accessibility hooks visible during the transition.
+ */
+@Immutable
+data class TheaterPlateComponentMigrationNote(
+    val componentName: String,
+    val foundationSeam: String,
+    val preservedCallbacks: List<String>,
+    val migrationNote: String,
+)
+
+object TheaterPlateComponentMigrationNotes {
+    val all: List<TheaterPlateComponentMigrationNote> = listOf(
+        TheaterPlateComponentMigrationNote(
+            componentName = "FerrexStatusCard",
+            foundationSeam = "FerrexStageSurface(StatusSlab) plus TheaterPlateText status roles",
+            preservedCallbacks = listOf("FerrexStatusAction.onClick", "loading", "testTag", "contentDescription"),
+            migrationNote = "Use for status/recovery copy until LOW-448 and LOW-449 migrate route shells; keep embedded action callbacks intact.",
+        ),
+        TheaterPlateComponentMigrationNote(
+            componentName = "FerrexActionButton",
+            foundationSeam = "FerrexActionRole/FerrexStatusTone mapped onto Theater Plate control shelves",
+            preservedCallbacks = listOf("onClick", "enabled", "testTag", "contentDescription", "subtitle"),
+            migrationNote = "Route migrations should wrap or restyle actions without dropping retry, reset, cache, diagnostics, or playback callbacks.",
+        ),
+        TheaterPlateComponentMigrationNote(
+            componentName = "FerrexPosterCard",
+            foundationSeam = "FerrexStageSurface(ProjectionShelf/RailBand) and media-art identity tags",
+            preservedCallbacks = listOf("onClick", "testTag", "contentDescription", "content"),
+            migrationNote = "LOW-447 detail/rail parity can migrate cards incrementally while retaining existing media open callbacks and fallback artwork labels.",
+        ),
+        TheaterPlateComponentMigrationNote(
+            componentName = "TV focus actions",
+            foundationSeam = "FerrexDesignTokens.Focus.tvTreatment and focusable Theater Plate action shelves",
+            preservedCallbacks = listOf("onClick", "focus restoration key", "testTag", "contentDescription"),
+            migrationNote = "LOW-449 should keep D-pad focus restoration/actions stable while adopting Theater Plate ten-foot surfaces.",
+        ),
+    )
+
+    fun forComponent(componentName: String): TheaterPlateComponentMigrationNote? = all.firstOrNull {
+        it.componentName == componentName
+    }
+}
+
 @Composable
 fun FerrexRecoveryActionPanel(
     title: String,
