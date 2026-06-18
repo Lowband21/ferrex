@@ -6,6 +6,67 @@ enum class AuthenticatedConnectionSurface {
     Detail,
 }
 
+enum class NoWipeRecoveryActionKind(
+    val key: String,
+    val label: String,
+    val subtitle: String,
+) {
+    Retry(
+        key = "retry",
+        label = "Retry",
+        subtitle = "Try the failed request again without changing saved Ferrex data.",
+    ),
+    SignOut(
+        key = "sign-out",
+        label = "Sign out",
+        subtitle = "Clear only the local Ferrex session and return to sign in.",
+    ),
+    ChangeServer(
+        key = "change-server",
+        label = "Change server",
+        subtitle = "Open the Ferrex server picker while keeping local recovery controls available.",
+    ),
+    ResetConnection(
+        key = "reset-connection",
+        label = "Reset connection",
+        subtitle = "Reset saved Ferrex connection metadata and scoped caches while preserving Android app data.",
+    ),
+    Diagnostics(
+        key = "diagnostics",
+        label = "Diagnostics / Export diagnostics",
+        subtitle = "Export redacted diagnostics for support without exposing tokens.",
+    ),
+    ClearCache(
+        key = "clear-cache",
+        label = "Clear cache",
+        subtitle = "Clear scoped Ferrex media or image cache entries while preserving Android app data.",
+    ),
+}
+
+data class NoWipeRecoveryActionDescriptor(
+    val kind: NoWipeRecoveryActionKind,
+    val key: String = kind.key,
+    val label: String = kind.label,
+    val subtitle: String = kind.subtitle,
+) {
+    init {
+        require(key.isNotBlank()) { "recovery action key must not be blank" }
+        require(label.isNotBlank()) { "recovery action label must not be blank" }
+        require(subtitle.isNotBlank()) { "recovery action subtitle must not be blank" }
+    }
+
+    val requiresOsAppDataClear: Boolean = false
+}
+
+fun noWipeRecoveryActions(includeCacheClear: Boolean): List<NoWipeRecoveryActionDescriptor> = buildList {
+    add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.Retry))
+    add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.SignOut))
+    add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.ChangeServer))
+    add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.ResetConnection))
+    add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.Diagnostics))
+    if (includeCacheClear) add(NoWipeRecoveryActionDescriptor(NoWipeRecoveryActionKind.ClearCache))
+}
+
 data class AuthenticatedConnectionUi(
     val health: AuthConnectionHealth,
     val visible: Boolean,

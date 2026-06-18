@@ -33,6 +33,25 @@ class WatchRepositoryTest {
     }
 
     @Test
+    fun refreshFailureKeepsPreviousProgressAndPublishesRetryableStatus() = runTest {
+        val transport = FakeWatchStateTransport()
+        val repository = WatchRepository(
+            transport,
+            WatchStateInvalidationBus(),
+            UnconfinedTestDispatcher(testScheduler),
+        )
+        transport.mediaProgress = ApiResult.Success(WatchMediaProgress("movie-id", positionSeconds = 30.0, durationSeconds = 300.0))
+        repository.refreshMediaProgress("movie-id")
+        transport.mediaProgress = ApiResult.NetworkError("offline")
+
+        repository.refreshMediaProgress("movie-id")
+
+        val state = repository.state.value
+        assertEquals(30.0, state.media["movie-id"]!!.positionSeconds, 0.0)
+        assertTrue(state.lastError!!.contains("offline"))
+    }
+
+    @Test
     fun successfulClearProgressCommitsUnwatchedStateAndInvalidatesWatchState() = runTest {
         val transport = FakeWatchStateTransport()
         val bus = WatchStateInvalidationBus()

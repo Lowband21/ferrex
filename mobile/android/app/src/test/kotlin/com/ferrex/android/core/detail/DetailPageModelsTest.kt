@@ -56,6 +56,21 @@ class DetailPageModelsTest {
     }
 
     @Test
+    fun watchRefreshFailureShowsStatusAndRetryWithoutDroppingPlaybackActions() {
+        val movie = movieDetail(progressFile = "movie-file")
+        val page = DetailPageMapper.toPage(
+            DetailLoadResult.Movie(route(BrowseMediaType.Movie, movie.id, movie.libraryId), movie),
+            watchState = WatchRepositoryState(lastError = "offline"),
+        )
+
+        assertEquals(DetailWatchStateKind.Unknown, page.watchState?.state)
+        assertTrue(page.watchState!!.message.contains("offline"))
+        assertTrue(page.watchState!!.message.contains("playback actions visible"))
+        assertTrue(page.actions.any { it.kind == DetailPageActionKind.Play && it.playbackContract != null })
+        assertTrue(page.actions.any { it.kind == DetailPageActionKind.RetryWatch })
+    }
+
+    @Test
     fun imageStatesRepresentPendingFailedStaleAndNoArt() {
         val movie = movieDetail(progressFile = "movie-file")
         val page = DetailPageMapper.toPage(

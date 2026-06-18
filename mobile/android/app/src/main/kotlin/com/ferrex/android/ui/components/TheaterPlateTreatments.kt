@@ -261,13 +261,13 @@ enum class FerrexRecoveryActionKind(
     ClearCache(
         key = "clear-cache",
         defaultLabel = "Clear cache",
-        defaultSubtitle = "Remove scoped media or image cache only.",
+        defaultSubtitle = "Remove scoped media or image cache only; Android app data is preserved.",
         role = FerrexActionRole.Cache,
     ),
     ResetConnection(
         key = "reset-connection",
         defaultLabel = "Reset connection",
-        defaultSubtitle = "Clear saved connection state and scoped caches, not OS app data.",
+        defaultSubtitle = "Clear saved Ferrex connection state and scoped caches while preserving Android app data.",
         role = FerrexActionRole.DestructiveReset,
     ),
     Diagnostics(
