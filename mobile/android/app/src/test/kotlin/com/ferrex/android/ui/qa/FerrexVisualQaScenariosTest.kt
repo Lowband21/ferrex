@@ -115,6 +115,9 @@ class FerrexVisualQaScenariosTest {
         recoveryScenarios.forEach { scenario ->
             val labels = scenario.recoveryActions.map { it.label }.toSet()
             assertTrue("${scenario.id} labels $labels", labels.containsAll(requiredLabels))
+            if (scenario.kind == VisualQaScenarioKind.TheaterPlate) {
+                assertTrue("${scenario.id} cache recovery labels $labels", labels.contains("Clear cache"))
+            }
             scenario.recoveryActions.forEach { action ->
                 assertFalse("${scenario.id} ${action.key} must not require app data wipes", action.requiresDataWipe)
                 assertFalse(action.label.contains("pm clear", ignoreCase = true))

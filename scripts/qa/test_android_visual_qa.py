@@ -169,6 +169,7 @@ class AndroidVisualQaTest(unittest.TestCase):
           <node resource-id="phone.theater-plate.media.recovery.hero" content-desc="Theater Plate media Recovery Queue: Server unreachable" clickable="true" focusable="false" />
           <node resource-id="phone.theater-plate.rail.recovery.primary" content-desc="Recovery rail" clickable="false" focusable="false" />
           <node content-desc="Change server" clickable="true" focusable="false" />
+          <node content-desc="Clear cache" clickable="true" focusable="false" />
           <node content-desc="Reset connection" clickable="true" focusable="false" />
           <node content-desc="Diagnostics / Export diagnostics" clickable="true" focusable="false" />
         </hierarchy>

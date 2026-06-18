@@ -3,7 +3,28 @@ package com.ferrex.android.ui.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/** TV focus treatment families used by Theater Plate action, recovery, helper, and media-art surfaces. */
+enum class TvFocusTreatmentRole {
+    Action,
+    MediaArt,
+    Recovery,
+    Destructive,
+    Helper,
+}
+
+/** Deterministic D-pad focus geometry that keeps media-art grounding separate from focus chrome. */
+data class TvFocusTreatmentTokens(
+    val role: TvFocusTreatmentRole,
+    val restingScale: Float,
+    val focusedScale: Float,
+    val restingBorder: Dp,
+    val focusedBorder: Dp,
+    val focusedElevation: Dp,
+    val mediaGroundingClearance: Dp,
+)
 
 /**
  * Shared Android design tokens for the Ferrex Signal / private-cinema identity.
@@ -134,6 +155,54 @@ object FerrexDesignTokens {
         val TvRestingBorder = 1.dp
         val TvFocusedElevation = 6.dp
         val TvButtonMinHeight = 58.dp
+
+        fun tvTreatment(role: TvFocusTreatmentRole): TvFocusTreatmentTokens = when (role) {
+            TvFocusTreatmentRole.Action -> TvFocusTreatmentTokens(
+                role = role,
+                restingScale = TvRestingScale,
+                focusedScale = TvFocusedScale,
+                restingBorder = TvRestingBorder,
+                focusedBorder = TvFocusedBorder,
+                focusedElevation = TvFocusedElevation,
+                mediaGroundingClearance = Space.None,
+            )
+            TvFocusTreatmentRole.MediaArt -> TvFocusTreatmentTokens(
+                role = role,
+                restingScale = TvRestingScale,
+                focusedScale = 1.025f,
+                restingBorder = TvRestingBorder,
+                focusedBorder = 2.dp,
+                focusedElevation = 4.dp,
+                mediaGroundingClearance = Space.Sm,
+            )
+            TvFocusTreatmentRole.Recovery -> TvFocusTreatmentTokens(
+                role = role,
+                restingScale = TvRestingScale,
+                focusedScale = 1.04f,
+                restingBorder = TvRestingBorder,
+                focusedBorder = TvFocusedBorder,
+                focusedElevation = TvFocusedElevation,
+                mediaGroundingClearance = Space.None,
+            )
+            TvFocusTreatmentRole.Destructive -> TvFocusTreatmentTokens(
+                role = role,
+                restingScale = TvRestingScale,
+                focusedScale = 1.035f,
+                restingBorder = TvRestingBorder,
+                focusedBorder = TvFocusedBorder,
+                focusedElevation = TvFocusedElevation,
+                mediaGroundingClearance = Space.None,
+            )
+            TvFocusTreatmentRole.Helper -> TvFocusTreatmentTokens(
+                role = role,
+                restingScale = TvRestingScale,
+                focusedScale = 1.02f,
+                restingBorder = TvRestingBorder,
+                focusedBorder = 2.dp,
+                focusedElevation = 2.dp,
+                mediaGroundingClearance = Space.None,
+            )
+        }
     }
 
     fun privateCinemaGradient(): Brush = Brush.horizontalGradient(

@@ -65,6 +65,9 @@ import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusAction
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.TheaterPlateDensityRole
+import com.ferrex.android.ui.components.TheaterPlateText
+import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.detail.PhoneDetailScreen
@@ -437,6 +440,7 @@ private fun TheaterPlateScenario(
 ) {
     val tv = scenario.device == VisualQaDevice.Tv
     val target = if (tv) "tv" else "phone"
+    val densityRole = if (tv) TheaterPlateDensityRole.Tv1080p else TheaterPlateDensityRole.PhonePortrait
     QaScrollableScenario(scenario = scenario, tv = tv) {
         ScenarioTitle(scenario, centered = tv)
         if (tv) {
@@ -450,8 +454,8 @@ private fun TheaterPlateScenario(
                     verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
                 ) {
                     TheaterPlateStatus(target = target, state = state)
-                    TheaterPlateMediaCard(target = target, state = state, tv = true)
-                    TheaterPlateRail(target = target, state = state, tv = true)
+                    TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
+                    TheaterPlateRail(target = target, state = state, tv = true, densityRole = densityRole)
                 }
                 Column(
                     modifier = Modifier.weight(1f),
@@ -465,12 +469,12 @@ private fun TheaterPlateScenario(
             }
         } else {
             TheaterPlateStatus(target = target, state = state)
-            TheaterPlateMediaCard(target = target, state = state, tv = false)
+            TheaterPlateMediaCard(target = target, state = state, tv = false, densityRole = densityRole)
             if (state == VisualQaTheaterPlateState.Search) {
                 TheaterPlateSearchField(target = target, state = state, tv = false)
             }
             TheaterPlateActions(target = target, state = state, tv = false)
-            TheaterPlateRail(target = target, state = state, tv = false)
+            TheaterPlateRail(target = target, state = state, tv = false, densityRole = densityRole)
         }
     }
 }
@@ -494,6 +498,7 @@ private fun TheaterPlateMediaCard(
     target: String,
     state: VisualQaTheaterPlateState,
     tv: Boolean,
+    densityRole: TheaterPlateDensityRole,
 ) {
     val tag = FerrexQaTags.TheaterPlate.media(target, state.key, "hero")
     val description = "Theater Plate media ${state.mediaTitle}: ${state.mediaSubtitle}"
@@ -504,6 +509,7 @@ private fun TheaterPlateMediaCard(
             title = state.mediaTitle,
             subtitle = state.mediaSubtitle,
             artworkLabel = state.artworkLabel,
+            densityRole = densityRole,
         )
     } else {
         FerrexPosterCard(
@@ -519,9 +525,9 @@ private fun TheaterPlateMediaCard(
             ) {
                 FerrexPosterPlaceholder(label = state.artworkLabel, modifier = Modifier.width(104.dp))
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-                    Text(text = state.mediaTitle, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(text = state.mediaSubtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(text = state.summary, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    TheaterPlateText(text = state.mediaTitle, role = TheaterPlateTypographyRole.HeroTitle, densityRole = densityRole)
+                    TheaterPlateText(text = state.mediaSubtitle, role = TheaterPlateTypographyRole.HeroSubtitle, densityRole = densityRole)
+                    TheaterPlateText(text = state.summary, role = TheaterPlateTypographyRole.HeroBody, densityRole = densityRole, maxLines = 3)
                 }
             }
         }
@@ -535,6 +541,7 @@ private fun QaTvTheaterPlateMediaCard(
     title: String,
     subtitle: String,
     artworkLabel: String,
+    densityRole: TheaterPlateDensityRole,
 ) {
     var focused by remember { mutableStateOf(false) }
     Card(
@@ -562,8 +569,8 @@ private fun QaTvTheaterPlateMediaCard(
         ) {
             FerrexPosterPlaceholder(label = artworkLabel, modifier = Modifier.width(154.dp))
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                Text(text = title, style = MaterialTheme.typography.displaySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(text = subtitle, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TheaterPlateText(text = title, role = TheaterPlateTypographyRole.HeroTitle, densityRole = densityRole)
+                TheaterPlateText(text = subtitle, role = TheaterPlateTypographyRole.HeroSubtitle, densityRole = densityRole)
             }
         }
     }
@@ -606,7 +613,7 @@ private fun TheaterPlateActions(
     val actions = buildList {
         add(primary)
         if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
-            addAll(FerrexVisualQaFixtures.noWipeRecoveryActions)
+            addAll(FerrexVisualQaFixtures.noWipeCacheRecoveryActions)
         } else {
             add(VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary))
         }
@@ -655,6 +662,7 @@ private fun TheaterPlateRail(
     target: String,
     state: VisualQaTheaterPlateState,
     tv: Boolean,
+    densityRole: TheaterPlateDensityRole,
 ) {
     val tag = FerrexQaTags.TheaterPlate.rail(target, state.key, "primary")
     val description = "${state.label} rail with ${state.mediaTitle} and fallback artwork"
@@ -672,9 +680,9 @@ private fun TheaterPlateRail(
             modifier = Modifier.padding(if (tv) FerrexDesignTokens.Space.Xl else FerrexDesignTokens.Space.Lg),
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
         ) {
-            Text(text = "Theater Plate rail", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            Text(text = state.mediaTitle, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(text = state.mediaSubtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TheaterPlateText(text = "Theater Plate rail", role = TheaterPlateTypographyRole.SectionTitle, densityRole = densityRole)
+            TheaterPlateText(text = state.mediaTitle, role = TheaterPlateTypographyRole.RailTitle, densityRole = densityRole)
+            TheaterPlateText(text = state.mediaSubtitle, role = TheaterPlateTypographyRole.RailSubtitle, densityRole = densityRole)
         }
     }
 }
