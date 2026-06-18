@@ -1,12 +1,19 @@
 package com.ferrex.android.tv.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
@@ -25,6 +32,9 @@ import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalyzer
+import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.tvfocus.TvHomeFocusPolicy
 import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.ContinueWatchingStatus
@@ -32,12 +42,19 @@ import com.ferrex.android.tv.ui.foundation.TvActionPanel
 import com.ferrex.android.tv.ui.foundation.TvActionPanelAction
 import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
-import com.ferrex.android.tv.ui.foundation.TvScaffold
-import com.ferrex.android.tv.ui.foundation.TvTitle
-import com.ferrex.android.ui.components.FerrexStatusCard
-import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.TheaterPlateDensityRole
+import com.ferrex.android.ui.components.TheaterPlateText
+import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.qa.FerrexQaTags
+import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
+import com.ferrex.android.ui.theaterplate.FerrexStageSurface
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
+import com.ferrex.android.ui.theaterplate.TheaterPlateStage
 import com.ferrex.android.ui.theme.FerrexDesignTokens
+
+private val tvHomeTheaterPlateViewport = TheaterPlateViewport.of(1920, 1080)
 
 @Composable
 internal fun TvHomeContent(
@@ -100,8 +117,8 @@ internal fun TvHomeContent(
         add("reset-connection")
     }
     val homeActionKeys = buildList {
-        if (connectionStatus.visible) add("retry-connection")
         if (searchAvailable) add(TvHomeFocusPolicy.ITEM_SEARCH)
+        if (connectionStatus.visible) add("retry-connection")
         add(TvHomeFocusPolicy.ITEM_DIAGNOSTICS)
     }
     val initialTarget = TvHomeFocusPolicy.initialHomeTarget(
@@ -123,139 +140,244 @@ internal fun TvHomeContent(
     }
     val lastHomeTarget = focusRestorer.state.lastTarget(TvHomeFocusPolicy.SCREEN_HOME)
     val preferredSurface = lastHomeTarget?.surface?.takeIf { it in availableSurfaces } ?: initialTarget.surface
+    val stageContext = remember {
+        TheaterPlateSourceContext.missingBackdrop(viewport = tvHomeTheaterPlateViewport)
+    }
+    val stageAnalysis = remember(stageContext) { TheaterPlateAnalyzer().analyzeMissingBackdrop(stageContext) }
+    val stageAdaptation = when {
+        connectionStatus.visible -> TheaterPlateBackdropAdaptation.StaleOffline
+        repositoryState?.freshness is LibraryFreshness.StaleOffline -> TheaterPlateBackdropAdaptation.StaleOffline
+        continueState.status is ContinueWatchingStatus.StaleOffline -> TheaterPlateBackdropAdaptation.StaleOffline
+        continueEntries.isEmpty() && shelves.isEmpty() -> TheaterPlateBackdropAdaptation.MissingBackdrop
+        else -> TheaterPlateBackdropAdaptation.Ready
+    }
 
-    TvScaffold(
+    TheaterPlateStage(
         modifier = Modifier.testTag(FerrexQaTags.Tv.Home),
+        analysis = stageAnalysis,
+        adaptation = stageAdaptation,
+        density = FerrexStageDensityFamily.TenFoot,
+        contentDescription = "Ferrex Android TV Theater Plate home stage",
         contentMaxWidth = FerrexDesignTokens.Tv.HomeMaxWidth,
-        horizontalPadding = FerrexDesignTokens.Space.ScreenTvHorizontal,
-        verticalPadding = FerrexDesignTokens.Space.ScreenTvVertical,
-        verticalArrangement = Arrangement.Top,
-        scrollable = true,
     ) {
-        TvTitle(FerrexShellCopy.TV_TITLE, FerrexShellCopy.TV_SUBTITLE)
-        Text("Signed in as ${state.user.displayName ?: state.user.username}", style = MaterialTheme.typography.headlineSmall)
-        Text("Server: ${state.serverUrl}", style = MaterialTheme.typography.titleMedium)
-        if (connectionStatus.visible) {
-            Text(
-                connectionStatus.message,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl, Alignment.Top),
+        ) {
+            TvHomeHeroPlate(
+                userCopy = "Signed in as ${state.user.displayName ?: state.user.username}",
+                serverCopy = "Server: ${state.serverUrl}",
             )
-        }
-        Text(FerrexShellCopy.TV_BODY, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        if (state.requiresPinSetup) {
-            Text(
-                text = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server.",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-            )
-        }
-        playbackNotice?.let {
-            Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
-        }
-        Spacer(Modifier.height(FerrexDesignTokens.Space.Xxxl))
-        TvButtonRow(
-            title = "Home actions",
-            actions = buildList {
-                if (connectionStatus.visible) {
-                    add(
-                        TvButtonAction(
-                            key = "retry-connection",
-                            label = connectionStatus.retryLabel,
-                            role = TvActionRole.Retry,
-                            enabled = connectionStatus.retryEnabled,
-                            onSelect = onRetryConnection,
-                        ),
-                    )
-                }
-                if (searchAvailable) {
-                    add(
-                        TvButtonAction(
-                            key = TvHomeFocusPolicy.ITEM_SEARCH,
-                            label = "Search cached media",
-                            role = TvActionRole.Primary,
-                            onSelect = onOpenSearch,
-                        ),
-                    )
-                }
-                add(
-                    TvButtonAction(
-                        key = TvHomeFocusPolicy.ITEM_DIAGNOSTICS,
-                        label = "Settings & Diagnostics",
-                        role = TvActionRole.SettingsExit,
-                        onSelect = onOpenDiagnostics,
-                    ),
-                )
-            },
-            focusRestorer = focusRestorer,
-            surfaceKey = TvHomeFocusPolicy.SURFACE_HOME_ACTIONS,
-            autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_HOME_ACTIONS,
-        )
-        ContinueWatchingSection(
-            continueState = continueState,
-            entries = continueEntries,
-            imageResolutions = imageResolutions,
-            imageLoader = imageLoader,
-            scope = scope,
-            focusRestorer = focusRestorer,
-            autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING,
-            onRetry = onRetryContinueWatching,
-            onSelect = { it.route?.let(onOpenDetail) },
-        )
-        if (shelves.isEmpty()) {
-            TvStateCopy(
-                title = "Local shelves are waiting for cached datasets",
-                body = "Home shelves are built from cached complete movie batches and series bundles. Browse all remains available once a library cache exists.",
-            )
-        } else {
-            shelves.forEach { shelf ->
-                TvShelfSection(
-                    shelf = shelf,
-                    imageResolutions = imageResolutions,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                    focusRestorer = focusRestorer,
-                    autoFocus = preferredSurface == shelfSurfaceKey(shelf),
-                    onSelect = { it.route?.let(onOpenDetail) },
+            if (connectionStatus.visible) {
+                TvHomeStatusSlab(
+                    title = "Connection recovery",
+                    body = connectionStatus.message,
+                    tone = FerrexStageSurfaceTone.Warning,
+                    tagKey = "home-connection-status",
                 )
             }
+            if (state.requiresPinSetup) {
+                TvHomeStatusSlab(
+                    title = "PIN setup required",
+                    body = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server.",
+                    tone = FerrexStageSurfaceTone.Warning,
+                    tagKey = "home-pin-required",
+                )
+            }
+            playbackNotice?.let {
+                TvHomeStatusSlab(
+                    title = "Playback notice",
+                    body = it,
+                    tone = FerrexStageSurfaceTone.Primary,
+                    tagKey = "home-playback-notice",
+                )
+            }
+            TvButtonRow(
+                title = "Home actions",
+                actions = buildList {
+                    if (searchAvailable) {
+                        add(
+                            TvButtonAction(
+                                key = TvHomeFocusPolicy.ITEM_SEARCH,
+                                label = "Search cached media",
+                                role = TvActionRole.Primary,
+                                onSelect = onOpenSearch,
+                            ),
+                        )
+                    }
+                    if (connectionStatus.visible) {
+                        add(
+                            TvButtonAction(
+                                key = "retry-connection",
+                                label = connectionStatus.retryLabel,
+                                role = TvActionRole.Retry,
+                                enabled = connectionStatus.retryEnabled,
+                                onSelect = onRetryConnection,
+                            ),
+                        )
+                    }
+                    add(
+                        TvButtonAction(
+                            key = TvHomeFocusPolicy.ITEM_DIAGNOSTICS,
+                            label = "Settings & Diagnostics",
+                            role = TvActionRole.SettingsExit,
+                            onSelect = onOpenDiagnostics,
+                        ),
+                    )
+                },
+                focusRestorer = focusRestorer,
+                surfaceKey = TvHomeFocusPolicy.SURFACE_HOME_ACTIONS,
+                autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_HOME_ACTIONS,
+            )
+            ContinueWatchingSection(
+                continueState = continueState,
+                entries = continueEntries,
+                imageResolutions = imageResolutions,
+                imageLoader = imageLoader,
+                scope = scope,
+                focusRestorer = focusRestorer,
+                autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING,
+                onRetry = onRetryContinueWatching,
+                onSelect = { it.route?.let(onOpenDetail) },
+            )
+            if (shelves.isEmpty()) {
+                TvStateCopy(
+                    title = "Local shelves are waiting for cached datasets",
+                    body = "Home shelves are built from cached complete movie batches and series bundles. Browse all remains available once a library cache exists.",
+                )
+            } else {
+                shelves.forEach { shelf ->
+                    TvShelfSection(
+                        shelf = shelf,
+                        imageResolutions = imageResolutions,
+                        imageLoader = imageLoader,
+                        scope = scope,
+                        focusRestorer = focusRestorer,
+                        autoFocus = preferredSurface == shelfSurfaceKey(shelf),
+                        onSelect = { it.route?.let(onOpenDetail) },
+                    )
+                }
+            }
+            TvLibraryEntrySection(
+                selectedTab = selectedTab,
+                onSelectedTab = onSelectedTab,
+                movieLibraryInfos = movieLibraryInfos.ifEmpty { movieLibraries.map { it.library } },
+                seriesLibraryInfos = seriesLibraryInfos.ifEmpty { seriesLibraries.map { it.library } },
+                selectedMovieLibraryId = selectedMovieLibraryId,
+                selectedSeriesLibraryId = selectedSeriesLibraryId,
+                cachedIds = cachedIds,
+                selectedMovieInfo = selectedMovieInfo,
+                selectedSeriesInfo = selectedSeriesInfo,
+                movieCount = movieLibraries.firstOrNull { it.library.id == selectedMovieLibraryId }?.accessor?.movieCount,
+                seriesCount = seriesLibraries.firstOrNull { it.library.id == selectedSeriesLibraryId }?.accessor?.seriesReferenceCount,
+                onSelectedMovieLibrary = onSelectedMovieLibrary,
+                onSelectedSeriesLibrary = onSelectedSeriesLibrary,
+                focusRestorer = focusRestorer,
+                chooserAutoFocus = preferredSurface == "library-chooser",
+                tabAutoFocus = preferredSurface == "library-tabs",
+                actionsAutoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_LIBRARY_ACTIONS,
+                onOpenGrid = onOpenGrid,
+                onSyncSelected = onSyncSelected,
+            )
+            TvLibraryRecoveryPanel(
+                freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+                selectedLibraryId = selectedLibraryId,
+                focusRestorer = focusRestorer,
+                autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_RECOVERY_ACTIONS,
+                onRetry = onRetryLibraries,
+                onClearSelected = onClearSelected,
+                onClearAll = onClearAll,
+                onSignOut = onSignOut,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
         }
-        TvLibraryEntrySection(
-            selectedTab = selectedTab,
-            onSelectedTab = onSelectedTab,
-            movieLibraryInfos = movieLibraryInfos.ifEmpty { movieLibraries.map { it.library } },
-            seriesLibraryInfos = seriesLibraryInfos.ifEmpty { seriesLibraries.map { it.library } },
-            selectedMovieLibraryId = selectedMovieLibraryId,
-            selectedSeriesLibraryId = selectedSeriesLibraryId,
-            cachedIds = cachedIds,
-            selectedMovieInfo = selectedMovieInfo,
-            selectedSeriesInfo = selectedSeriesInfo,
-            movieCount = movieLibraries.firstOrNull { it.library.id == selectedMovieLibraryId }?.accessor?.movieCount,
-            seriesCount = seriesLibraries.firstOrNull { it.library.id == selectedSeriesLibraryId }?.accessor?.seriesReferenceCount,
-            onSelectedMovieLibrary = onSelectedMovieLibrary,
-            onSelectedSeriesLibrary = onSelectedSeriesLibrary,
-            focusRestorer = focusRestorer,
-            chooserAutoFocus = preferredSurface == "library-chooser",
-            tabAutoFocus = preferredSurface == "library-tabs",
-            actionsAutoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_LIBRARY_ACTIONS,
-            onOpenGrid = onOpenGrid,
-            onSyncSelected = onSyncSelected,
-        )
-        TvLibraryRecoveryPanel(
-            freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
-            selectedLibraryId = selectedLibraryId,
-            focusRestorer = focusRestorer,
-            autoFocus = preferredSurface == TvHomeFocusPolicy.SURFACE_RECOVERY_ACTIONS,
-            onRetry = onRetryLibraries,
-            onClearSelected = onClearSelected,
-            onClearAll = onClearAll,
-            onSignOut = onSignOut,
-            onChangeServer = onChangeServer,
-            onResetConnection = onResetConnection,
-            onOpenDiagnostics = onOpenDiagnostics,
-        )
+    }
+}
+
+@Composable
+private fun TvHomeHeroPlate(
+    userCopy: String,
+    serverCopy: String,
+) {
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.ProjectionShelf,
+        density = FerrexStageDensityFamily.TenFoot,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "Theater Plate home hero",
+        testTag = FerrexQaTags.Tv.surface("home-hero"),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            TheaterPlateText(
+                text = "Theater Plate home",
+                role = TheaterPlateTypographyRole.HeroEyebrow,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+            TheaterPlateText(
+                text = FerrexShellCopy.TV_TITLE,
+                role = TheaterPlateTypographyRole.HeroTitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                maxLines = 2,
+            )
+            TheaterPlateText(
+                text = FerrexShellCopy.TV_SUBTITLE,
+                role = TheaterPlateTypographyRole.HeroSubtitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+            TheaterPlateText(
+                text = FerrexShellCopy.TV_BODY,
+                role = TheaterPlateTypographyRole.HeroBody,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                maxLines = 3,
+            )
+            TheaterPlateText(
+                text = userCopy,
+                role = TheaterPlateTypographyRole.Metadata,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+            TheaterPlateText(
+                text = serverCopy,
+                role = TheaterPlateTypographyRole.Metadata,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvHomeStatusSlab(
+    title: String,
+    body: String,
+    tone: FerrexStageSurfaceTone,
+    tagKey: String,
+) {
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.StatusSlab,
+        density = FerrexStageDensityFamily.TenFoot,
+        tone = tone,
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = title,
+        testTag = FerrexQaTags.Tv.surface(tagKey),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
+            TheaterPlateText(
+                text = title,
+                role = TheaterPlateTypographyRole.StatusTitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+            TheaterPlateText(
+                text = body,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -299,14 +421,17 @@ internal fun ContinueWatchingSection(
             surfaceKey = TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING,
             autoFocus = autoFocus,
         )
-        is ContinueWatchingStatus.StaleOffline -> FerrexStatusCard(
+        is ContinueWatchingStatus.StaleOffline -> TvHomeStatusSlab(
             title = "Stale/offline Continue Watching",
             body = "Showing ${status.itemCount} stale/offline item(s): ${status.message}",
-            tone = FerrexStatusTone.StaleOffline,
+            tone = FerrexStageSurfaceTone.StaleOffline,
+            tagKey = "continue-watching-status",
         )
-        is ContinueWatchingStatus.Fresh -> Text(
-            text = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
-            style = MaterialTheme.typography.titleMedium,
+        is ContinueWatchingStatus.Fresh -> TvHomeStatusSlab(
+            title = "Continue Watching ready",
+            body = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
+            tone = FerrexStageSurfaceTone.Primary,
+            tagKey = "continue-watching-status",
         )
     }
     if (entries.isNotEmpty()) {
@@ -431,7 +556,20 @@ internal fun TvLibraryEntrySection(
             "Full series grid for ${it.name}: ${seriesCount ?: 0} cached series."
         } ?: "No series library selected."
     }
-    Text(countCopy, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.FactRibbon,
+        density = FerrexStageDensityFamily.TenFoot,
+        tone = FerrexStageSurfaceTone.Cache,
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "Selected library count",
+    ) {
+        TheaterPlateText(
+            text = countCopy,
+            role = TheaterPlateTypographyRole.FactValue,
+            densityRole = TheaterPlateDensityRole.Tv1080p,
+            textAlign = TextAlign.Center,
+        )
+    }
     TvButtonRow(
         actions = buildList {
             if (movieLibraryInfos.isNotEmpty()) {

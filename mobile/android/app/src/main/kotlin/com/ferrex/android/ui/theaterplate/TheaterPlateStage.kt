@@ -418,6 +418,7 @@ fun TheaterPlateStage(
     adaptation: TheaterPlateBackdropAdaptation = TheaterPlateBackdropAdaptation.fromAnalysis(analysis),
     density: FerrexStageDensityFamily = FerrexStageDensityFamily.forViewport(analysis.context.viewport),
     contentDescription: String? = null,
+    contentMaxWidth: Dp? = null,
     showStateLabel: Boolean = true,
     backdrop: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
@@ -446,7 +447,7 @@ fun TheaterPlateStage(
                     horizontal = layoutSpec.horizontalPadding,
                     vertical = layoutSpec.verticalPadding,
                 )
-                .widthIn(max = layoutSpec.contentMaxWidth),
+                .widthIn(max = contentMaxWidth ?: layoutSpec.contentMaxWidth),
             content = content,
         )
     }
