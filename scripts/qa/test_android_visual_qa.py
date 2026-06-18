@@ -53,8 +53,12 @@ class AndroidVisualQaTest(unittest.TestCase):
 
         self.assertIn("phone-home", registry.by_id)
         self.assertIn("tv-home-focus", registry.by_id)
+        self.assertIn("phone-theater-plate-bright", registry.by_id)
+        self.assertIn("tv-theater-plate-playback-entry", registry.by_id)
         self.assertEqual("phone", registry.by_id["phone-home"].target)
         self.assertEqual("tv", registry.by_id["tv-home-focus"].target)
+        self.assertEqual("phone", registry.by_id["phone-theater-plate-bright"].target)
+        self.assertEqual("tv", registry.by_id["tv-theater-plate-playback-entry"].target)
         self.assertEqual(registry.scenarios[0].id, "phone-home")
         self.assertEqual(len(registry.scenarios), len({scenario.id for scenario in registry.scenarios}))
 
@@ -128,6 +132,55 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertEqual(configs["tv"].serial, "ABC123")
         self.assertEqual(configs["tv"].expected_size, (1280, 720))
         self.assertEqual(configs["phone"].serial, "emulator-5554")
+
+    def test_default_viewport_profiles_cover_phone_tv_and_scaled_dimensions(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
+        selected = [registry.by_id["phone-home"], registry.by_id["tv-home-focus"]]
+        args = SimpleNamespace(
+            target="all",
+            hardware=False,
+            hardware_serial=None,
+            expected_size=None,
+            profile=None,
+        )
+        configs = android_visual_qa.target_configs(self.repo_root(), args)
+
+        profiles = android_visual_qa.selected_viewport_profiles(args, configs, selected)
+        plan = android_visual_qa.capture_plan_json("smoke", selected, profiles)
+
+        self.assertEqual([profile.name for profile in profiles["phone"]], ["phone-portrait", "phone-landscape-foldable"])
+        self.assertEqual([profile.expected_size for profile in profiles["tv"]], [(1920, 1080), (1920, 1080)])
+        self.assertEqual(profiles["tv"][1].wm_size, (3840, 2160))
+        self.assertEqual(plan["capture_count"], 4)
+        self.assertEqual(
+            plan["viewport_profiles"]["phone"][1]["expected_dimensions"],
+            {"width": 1800, "height": 1200},
+        )
+        self.assertEqual(plan["viewport_profiles"]["tv"][1]["wm_size"], "3840x2160")
+
+    def test_accessibility_requirements_match_tags_labels_and_actions(self) -> None:
+        scenario = android_visual_qa.Scenario("phone-theater-plate-recovery", "phone")
+        requirements = android_visual_qa.accessibility_requirements_for_scenario(scenario)
+        xml = """
+        <hierarchy>
+          <node resource-id="phone.theater-plate.recovery" content-desc="Recovery root" clickable="false" focusable="false" />
+          <node resource-id="phone.theater-plate.status.recovery" content-desc="Recovery status: Recovery paths remain visible without clearing app data." clickable="false" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.primary" content-desc="Retry" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.media.recovery.hero" content-desc="Theater Plate media Recovery Queue: Server unreachable" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.rail.recovery.primary" content-desc="Recovery rail" clickable="false" focusable="false" />
+          <node content-desc="Change server" clickable="true" focusable="false" />
+          <node content-desc="Reset connection" clickable="true" focusable="false" />
+          <node content-desc="Diagnostics / Export diagnostics" clickable="true" focusable="false" />
+        </hierarchy>
+        """
+        nodes = android_visual_qa.parse_accessibility_nodes(xml)
+
+        checks = android_visual_qa.verify_accessibility_requirements(nodes, requirements)
+
+        self.assertTrue(all(check["status"] == "passed" for check in checks), checks)
+        missing_label_nodes = [node for node in nodes if node.get("content-desc") != "Reset connection"]
+        missing_label_checks = android_visual_qa.verify_accessibility_requirements(missing_label_nodes, requirements)
+        self.assertTrue(any(check["status"] == "failed" for check in missing_label_checks))
 
     def test_gate_smoke_selection_includes_phone_and_tv(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
