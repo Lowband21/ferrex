@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
@@ -38,6 +39,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,6 +78,7 @@ import com.ferrex.android.ui.qa.VisualQaMediaCardSample
 import com.ferrex.android.ui.qa.VisualQaRecoveryActionSample
 import com.ferrex.android.ui.qa.VisualQaScenario
 import com.ferrex.android.ui.qa.VisualQaScenarioKind
+import com.ferrex.android.ui.qa.VisualQaTheaterPlateState
 import com.ferrex.android.ui.recovery.PhoneRecoverableScreen
 import com.ferrex.android.ui.search.PhoneSearchPanel
 import com.ferrex.android.ui.theme.FerrexDesignTokens
@@ -101,12 +104,14 @@ class FerrexVisualQaActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FerrexVisualQaRoot(initialScenario: VisualQaScenario) {
     var selectedScenario by remember { mutableStateOf(initialScenario) }
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .semantics { testTagsAsResourceId = true }
             .background(MaterialTheme.colorScheme.background),
     ) {
         ScenarioHeader(
@@ -128,6 +133,7 @@ private fun ScenarioHeader(
     scenario: VisualQaScenario,
     onScenarioSelected: (VisualQaScenario) -> Unit,
 ) {
+    val compact = scenario.device == VisualQaDevice.Tv
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -141,26 +147,28 @@ private fun ScenarioHeader(
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
         )
-        Text(
-            text = "Launch with action ${FerrexVisualQaLaunch.ACTION_VISUAL_QA} and extra ${FerrexVisualQaLaunch.EXTRA_SCENARIO_ID}.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-        ) {
-            FerrexVisualQaScenarios.all.forEach { candidate ->
-                FerrexActionButton(
-                    label = candidate.id,
-                    role = if (candidate.id == scenario.id) FerrexActionRole.Primary else FerrexActionRole.Secondary,
-                    onClick = { onScenarioSelected(candidate) },
-                ) {
-                    Text(
-                        text = candidate.id,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        if (!compact) {
+            Text(
+                text = "Launch with action ${FerrexVisualQaLaunch.ACTION_VISUAL_QA} and extra ${FerrexVisualQaLaunch.EXTRA_SCENARIO_ID}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                FerrexVisualQaScenarios.all.forEach { candidate ->
+                    FerrexActionButton(
+                        label = candidate.id,
+                        role = if (candidate.id == scenario.id) FerrexActionRole.Primary else FerrexActionRole.Secondary,
+                        onClick = { onScenarioSelected(candidate) },
+                    ) {
+                        Text(
+                            text = candidate.id,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -258,6 +266,10 @@ private fun FerrexVisualQaScenarioContent(scenario: VisualQaScenario) {
             actions = FerrexVisualQaFixtures.noWipeRecoveryActions,
             statusTone = FerrexStatusTone.StaleOffline,
         )
+        VisualQaScenarioKind.TheaterPlate -> TheaterPlateScenario(
+            scenario = scenario,
+            state = requireNotNull(scenario.theaterPlateState) { "Theater Plate scenario requires state metadata" },
+        )
     }
 }
 
@@ -269,7 +281,8 @@ private fun PhoneScenarioFrame(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .testTag(scenario.testTag),
+            .testTag(scenario.testTag)
+            .semantics { contentDescription = scenario.description },
     ) {
         content()
     }
@@ -327,6 +340,7 @@ private fun PhoneBrowseGridScenario(scenario: VisualQaScenario) {
             title = "Stale cache recovery",
             body = "Retry sync, clear selected cache, change server, reset connection, and diagnostics remain visible without OS app-data wipes.",
             tone = FerrexStatusTone.StaleOffline,
+            contentDescription = "Stale cache recovery: retry sync, cache repair, server change, reset connection, and diagnostics remain visible.",
             action = FerrexStatusAction(
                 label = "Retry sync",
                 role = FerrexActionRole.Retry,
@@ -381,7 +395,8 @@ private fun PhoneDetailScenario(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .testTag(scenario.testTag),
+            .testTag(scenario.testTag)
+            .semantics { contentDescription = scenario.description },
     ) {
         PhoneDetailScreen(
             detailResult = detailResult,
@@ -412,6 +427,255 @@ private fun PhoneDetailScenario(
             onPlaybackContract = {},
             onOpenDiagnostics = {},
         )
+    }
+}
+
+@Composable
+private fun TheaterPlateScenario(
+    scenario: VisualQaScenario,
+    state: VisualQaTheaterPlateState,
+) {
+    val tv = scenario.device == VisualQaDevice.Tv
+    val target = if (tv) "tv" else "phone"
+    QaScrollableScenario(scenario = scenario, tv = tv) {
+        ScenarioTitle(scenario, centered = tv)
+        if (tv) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+                ) {
+                    TheaterPlateStatus(target = target, state = state)
+                    TheaterPlateMediaCard(target = target, state = state, tv = true)
+                    TheaterPlateRail(target = target, state = state, tv = true)
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+                ) {
+                    if (state == VisualQaTheaterPlateState.Search) {
+                        TheaterPlateSearchField(target = target, state = state, tv = true)
+                    }
+                    TheaterPlateActions(target = target, state = state, tv = true)
+                }
+            }
+        } else {
+            TheaterPlateStatus(target = target, state = state)
+            TheaterPlateMediaCard(target = target, state = state, tv = false)
+            if (state == VisualQaTheaterPlateState.Search) {
+                TheaterPlateSearchField(target = target, state = state, tv = false)
+            }
+            TheaterPlateActions(target = target, state = state, tv = false)
+            TheaterPlateRail(target = target, state = state, tv = false)
+        }
+    }
+}
+
+@Composable
+private fun TheaterPlateStatus(
+    target: String,
+    state: VisualQaTheaterPlateState,
+) {
+    FerrexStatusCard(
+        modifier = Modifier.testTag(FerrexQaTags.TheaterPlate.status(target, state.key)),
+        title = state.label,
+        body = state.statusCopy,
+        tone = state.tone,
+        contentDescription = "${state.label} status: ${state.statusCopy}",
+    )
+}
+
+@Composable
+private fun TheaterPlateMediaCard(
+    target: String,
+    state: VisualQaTheaterPlateState,
+    tv: Boolean,
+) {
+    val tag = FerrexQaTags.TheaterPlate.media(target, state.key, "hero")
+    val description = "Theater Plate media ${state.mediaTitle}: ${state.mediaSubtitle}"
+    if (tv) {
+        QaTvTheaterPlateMediaCard(
+            tag = tag,
+            contentDescription = description,
+            title = state.mediaTitle,
+            subtitle = state.mediaSubtitle,
+            artworkLabel = state.artworkLabel,
+        )
+    } else {
+        FerrexPosterCard(
+            modifier = Modifier.fillMaxWidth(),
+            testTag = tag,
+            contentDescription = description,
+            onClick = {},
+        ) {
+            Row(
+                modifier = Modifier.padding(FerrexDesignTokens.Space.Md),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FerrexPosterPlaceholder(label = state.artworkLabel, modifier = Modifier.width(104.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
+                    Text(text = state.mediaTitle, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(text = state.mediaSubtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = state.summary, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QaTvTheaterPlateMediaCard(
+    tag: String,
+    contentDescription: String,
+    title: String,
+    subtitle: String,
+    artworkLabel: String,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = FerrexDesignTokens.Tv.DetailMaxWidth)
+            .testTag(tag)
+            .onFocusChanged { focused = it.isFocused }
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                this.contentDescription = contentDescription
+            }
+            .focusable(),
+        shape = FerrexDesignTokens.Shapes.PosterCard,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        border = BorderStroke(
+            width = if (focused) FerrexDesignTokens.Focus.TvFocusedBorder else FerrexDesignTokens.Focus.TvRestingBorder,
+            color = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FerrexPosterPlaceholder(label = artworkLabel, modifier = Modifier.width(154.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                Text(text = title, style = MaterialTheme.typography.displaySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(text = subtitle, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TheaterPlateSearchField(
+    target: String,
+    state: VisualQaTheaterPlateState,
+    tv: Boolean,
+) {
+    val tag = FerrexQaTags.TheaterPlate.search(target, state.key, "field")
+    val action = VisualQaRecoveryActionSample("search-field", "Search Theater Plate", FerrexActionRole.Primary)
+    if (tv) {
+        QaTvFocusableAction(
+            surfaceKey = "theater-${state.key}",
+            action = action,
+            testTag = tag,
+            contentDescription = "Search Theater Plate",
+        )
+    } else {
+        FerrexActionButton(
+            label = "Search Theater Plate",
+            role = FerrexActionRole.Primary,
+            onClick = {},
+            modifier = Modifier.fillMaxWidth(),
+            testTag = tag,
+            contentDescription = "Search Theater Plate",
+        )
+    }
+}
+
+@Composable
+private fun TheaterPlateActions(
+    target: String,
+    state: VisualQaTheaterPlateState,
+    tv: Boolean,
+) {
+    val primary = VisualQaRecoveryActionSample("primary", state.primaryActionLabel, FerrexActionRole.Primary)
+    val actions = buildList {
+        add(primary)
+        if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
+            addAll(FerrexVisualQaFixtures.noWipeRecoveryActions)
+        } else {
+            add(VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary))
+        }
+        if (state == VisualQaTheaterPlateState.PlaybackEntry) {
+            add(VisualQaRecoveryActionSample("start-over", "Start over", FerrexActionRole.Secondary))
+        }
+    }
+    if (tv) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        ) {
+            actions.forEachIndexed { index, action ->
+                val key = if (index == 0) "primary" else action.key
+                QaTvFocusableAction(
+                    surfaceKey = "theater-${state.key}",
+                    action = action,
+                    testTag = FerrexQaTags.TheaterPlate.action(target, state.key, key),
+                    contentDescription = action.label,
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        ) {
+            actions.forEachIndexed { index, action ->
+                val key = if (index == 0) "primary" else action.key
+                FerrexActionButton(
+                    label = action.label,
+                    role = action.role,
+                    onClick = {},
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = FerrexQaTags.TheaterPlate.action(target, state.key, key),
+                    contentDescription = action.label,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TheaterPlateRail(
+    target: String,
+    state: VisualQaTheaterPlateState,
+    tv: Boolean,
+) {
+    val tag = FerrexQaTags.TheaterPlate.rail(target, state.key, "primary")
+    val description = "${state.label} rail with ${state.mediaTitle} and fallback artwork"
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = if (tv) FerrexDesignTokens.Tv.DetailMaxWidth else 640.dp)
+            .testTag(tag)
+            .semantics(mergeDescendants = true) { contentDescription = description },
+        shape = FerrexDesignTokens.Shapes.RecoveryCard,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(if (tv) FerrexDesignTokens.Space.Xl else FerrexDesignTokens.Space.Lg),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        ) {
+            Text(text = "Theater Plate rail", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Text(text = state.mediaTitle, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = state.mediaSubtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -487,6 +751,8 @@ private fun QaTvActionPanel(
 private fun QaTvFocusableAction(
     surfaceKey: String,
     action: VisualQaRecoveryActionSample,
+    testTag: String = FerrexQaTags.Tv.action(surfaceKey, action.key),
+    contentDescription: String = action.label,
 ) {
     var focused by remember { mutableStateOf(false) }
     val tone = action.role.statusTone()
@@ -496,11 +762,11 @@ private fun QaTvFocusableAction(
             .widthIn(max = FerrexDesignTokens.Tv.ActionPanelMaxWidth)
             .fillMaxWidth()
             .heightIn(min = FerrexDesignTokens.Focus.TvButtonMinHeight)
-            .testTag(FerrexQaTags.Tv.action(surfaceKey, action.key))
+            .testTag(testTag)
             .onFocusChanged { focused = it.isFocused }
             .semantics(mergeDescendants = true) {
                 role = Role.Button
-                contentDescription = action.label
+                this.contentDescription = contentDescription
             }
             .focusable(),
         shape = FerrexDesignTokens.Shapes.FocusSurface,
@@ -565,7 +831,8 @@ private fun QaScrollableScenario(
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .testTag(scenario.testTag),
+            .testTag(scenario.testTag)
+            .semantics { contentDescription = scenario.description },
         color = MaterialTheme.colorScheme.background,
     ) {
         Column(
