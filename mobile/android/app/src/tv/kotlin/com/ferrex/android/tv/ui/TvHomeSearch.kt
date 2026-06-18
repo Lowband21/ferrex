@@ -26,7 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,10 +48,12 @@ import com.ferrex.android.core.search.SearchDetailTarget
 import com.ferrex.android.core.search.SearchFailureKind
 import com.ferrex.android.core.search.SearchMediaType
 import com.ferrex.android.core.search.SearchResultRow
+import com.ferrex.android.core.tvfocus.TvSearchFocusPolicy
 import com.ferrex.android.tv.ui.foundation.TvActionPanel
 import com.ferrex.android.tv.ui.foundation.TvActionPanelAction
 import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvFocusableSurface
+import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
@@ -60,17 +65,25 @@ internal fun TvSearchScreen(
     searchRepository: MediaSearchRepository?,
     imageRepository: ImageRepository?,
     imagePipeline: FerrexImagePipeline?,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    focusRestorer: TvFocusRestorer,
     onOpenResult: (SearchDetailTarget) -> Unit,
     onBack: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    var query by remember(scope.directoryName) { mutableStateOf("") }
     var retryNonce by remember(scope.directoryName) { mutableStateOf(0) }
     var uiState by remember(scope.directoryName) { mutableStateOf<TvSearchUiState>(TvSearchUiState.Idle) }
     val focusRequester = remember { FocusRequester() }
+    val lastSearchTarget = focusRestorer.state.lastTarget(focusRestorer.screen)
+    val preferredSurface = lastSearchTarget?.surface ?: TvSearchFocusPolicy.SURFACE_FIELD
 
-    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    LaunchedEffect(preferredSurface) {
+        if (preferredSurface == TvSearchFocusPolicy.SURFACE_FIELD) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
     LaunchedEffect(searchRepository, scope.directoryName, query, retryNonce) {
         val trimmed = query.trim()
         if (searchRepository == null) {
@@ -120,9 +133,15 @@ internal fun TvSearchScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(FerrexQaTags.Tv.SearchField)
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            focusRestorer.record(TvSearchFocusPolicy.SURFACE_FIELD, TvSearchFocusPolicy.ITEM_QUERY)
+                        }
+                    }
+                    .semantics { contentDescription = "Search movies, shows, seasons, and episodes" },
                 value = query,
-                onValueChange = { query = it },
+                onValueChange = onQueryChange,
                 label = { Text("Movies, shows, seasons, episodes…") },
                 singleLine = true,
                 enabled = searchRepository != null,
@@ -134,12 +153,15 @@ internal fun TvSearchScreen(
                     TvButtonAction("back", "Back to Home", TvActionRole.Back, onSelect = onBack),
                     TvButtonAction("retry", "Retry search", TvActionRole.Retry, enabled = query.trim().length >= 2, onSelect = { retryNonce += 1 }),
                     TvButtonAction("clear", "Clear search", TvActionRole.Cache, enabled = query.isNotEmpty(), onSelect = {
-                        query = ""
+                        onQueryChange("")
                         uiState = TvSearchUiState.Idle
+                        focusRestorer.record(TvSearchFocusPolicy.SURFACE_FIELD, TvSearchFocusPolicy.ITEM_QUERY)
+                        runCatching { focusRequester.requestFocus() }
                     }),
                 ),
-                surfaceKey = "search-actions",
-                autoFocus = false,
+                focusRestorer = focusRestorer,
+                surfaceKey = TvSearchFocusPolicy.SURFACE_ACTIONS,
+                autoFocus = preferredSurface == TvSearchFocusPolicy.SURFACE_ACTIONS,
             )
             when (val state = uiState) {
                 TvSearchUiState.Idle -> TvStateCopy("Ready to search", "Enter at least two characters to search the current server.")
@@ -154,6 +176,8 @@ internal fun TvSearchScreen(
                     resolutions = resolutions,
                     onOpenResult = onOpenResult,
                     onRetry = { retryNonce += 1 },
+                    focusRestorer = focusRestorer,
+                    preferredSurface = preferredSurface,
                     onOpenDiagnostics = onOpenDiagnostics,
                     modifier = Modifier.weight(1f),
                 )
@@ -171,6 +195,8 @@ internal fun TvSearchOutcome(
     resolutions: Map<ImageRequestKey, ImageResolution>,
     onOpenResult: (SearchDetailTarget) -> Unit,
     onRetry: () -> Unit,
+    focusRestorer: TvFocusRestorer,
+    preferredSurface: String,
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -180,7 +206,9 @@ internal fun TvSearchOutcome(
             title = "No results for “${outcome.query}”",
             supportingText = "Try a shorter title or alternate spelling.",
             actions = listOf(TvActionPanelAction("retry", "Retry", TvActionRole.Retry, onSelect = onRetry)),
-            autoFocus = false,
+            focusRestorer = focusRestorer,
+            surfaceKey = TvSearchFocusPolicy.SURFACE_RESULTS_RECOVERY,
+            autoFocus = TvSearchFocusPolicy.shouldAutoFocusRecovery(preferredSurface),
         )
         is MediaSearchOutcome.Failure -> {
             val prefix = when (outcome.kind) {
@@ -196,7 +224,9 @@ internal fun TvSearchOutcome(
                     TvActionPanelAction("retry", "Retry", TvActionRole.Retry, enabled = outcome.retryable, onSelect = onRetry),
                     TvActionPanelAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
                 ),
-                autoFocus = false,
+                focusRestorer = focusRestorer,
+                surfaceKey = TvSearchFocusPolicy.SURFACE_RESULTS_RECOVERY,
+                autoFocus = TvSearchFocusPolicy.shouldAutoFocusRecovery(preferredSurface),
             )
         }
         is MediaSearchOutcome.Results -> {
@@ -214,6 +244,17 @@ internal fun TvSearchOutcome(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            val visibleRows = rows.take(SEARCH_RESULT_DISPLAY_LIMIT)
+            val rowKeys = visibleRows.map { it.searchStableKey() }
+            val rowRequesters = remember(rowKeys) { rowKeys.associateWith { FocusRequester() } }
+            val restoredRowKey = rowKeys.firstOrNull()?.let { fallback ->
+                focusRestorer.restoreItem(TvSearchFocusPolicy.SURFACE_RESULTS, rowKeys, fallback)
+            }
+            LaunchedEffect(preferredSurface, restoredRowKey, rowKeys) {
+                if (preferredSurface == TvSearchFocusPolicy.SURFACE_RESULTS && restoredRowKey != null) {
+                    runCatching { rowRequesters[restoredRowKey]?.requestFocus() }
+                }
+            }
             LazyColumn(
                 modifier = modifier
                     .fillMaxWidth()
@@ -221,16 +262,25 @@ internal fun TvSearchOutcome(
                 verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
                 contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Sm),
             ) {
-                items(rows.take(SEARCH_RESULT_DISPLAY_LIMIT), key = { it.searchStableKey() }) { row ->
+                items(visibleRows, key = { it.searchStableKey() }) { row ->
+                    val rowKey = row.searchStableKey()
                     when (row) {
                         is SearchResultRow.Resolved -> TvSearchResolvedRow(
                             row = row,
                             resolution = row.imageKey?.let { resolutions[it] },
                             imageLoader = imageLoader,
                             scope = scope,
+                            focusRequester = rowRequesters[rowKey],
+                            onFocused = { focusRestorer.record(TvSearchFocusPolicy.SURFACE_RESULTS, rowKey) },
                             onOpenResult = onOpenResult,
                         )
-                        is SearchResultRow.CacheMiss -> TvSearchCacheMissRow(row = row, onRetry = onRetry, onOpenDiagnostics = onOpenDiagnostics)
+                        is SearchResultRow.CacheMiss -> TvSearchCacheMissRow(
+                            row = row,
+                            focusRestorer = focusRestorer,
+                            autoFocus = preferredSurface == TvSearchFocusPolicy.cacheMissSurface(rowKey),
+                            onRetry = onRetry,
+                            onOpenDiagnostics = onOpenDiagnostics,
+                        )
                     }
                 }
             }
@@ -244,14 +294,18 @@ internal fun TvSearchResolvedRow(
     resolution: ImageResolution?,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
+    focusRequester: FocusRequester?,
+    onFocused: () -> Unit,
     onOpenResult: (SearchDetailTarget) -> Unit,
 ) {
     TvFocusableSurface(
         onClick = { onOpenResult(row.target) },
         semanticLabel = "Open ${row.title}",
         minHeight = FerrexDesignTokens.Tv.SearchResultMinHeight,
-        testTag = FerrexQaTags.Tv.action("search-results", row.searchStableKey()),
+        testTag = FerrexQaTags.Tv.action(TvSearchFocusPolicy.SURFACE_RESULTS, row.searchStableKey()),
         modifier = Modifier.fillMaxWidth(),
+        focusRequester = focusRequester,
+        onFocused = onFocused,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.width(FerrexDesignTokens.Tv.SearchThumbnailWidth)) {
@@ -269,17 +323,23 @@ internal fun TvSearchResolvedRow(
 @Composable
 internal fun TvSearchCacheMissRow(
     row: SearchResultRow.CacheMiss,
+    focusRestorer: TvFocusRestorer,
+    autoFocus: Boolean,
     onRetry: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
+    val rowKey = row.searchStableKey()
+    val surfaceKey = TvSearchFocusPolicy.cacheMissSurface(rowKey)
     TvActionPanel(
         title = row.title,
         supportingText = row.message,
         actions = listOf(
-            TvActionPanelAction("retry-${row.searchStableKey()}", "Retry sync / search", TvActionRole.Retry, enabled = row.retryable, onSelect = onRetry),
-            TvActionPanelAction("diagnostics-${row.searchStableKey()}", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
+            TvActionPanelAction(TvSearchFocusPolicy.cacheMissRetryAction(rowKey), "Retry sync / search", TvActionRole.Retry, enabled = row.retryable, onSelect = onRetry),
+            TvActionPanelAction(TvSearchFocusPolicy.cacheMissDiagnosticsAction(rowKey), "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
         ),
-        autoFocus = false,
+        focusRestorer = focusRestorer,
+        surfaceKey = surfaceKey,
+        autoFocus = autoFocus,
         buttonMaxWidth = FerrexDesignTokens.Tv.PlayerActionMaxWidth,
     )
 }
@@ -325,8 +385,8 @@ internal fun SearchDetailTarget.toMediaRouteArgs(): MediaRouteArgs? {
 }
 
 internal fun SearchResultRow.searchStableKey(): String = when (this) {
-    is SearchResultRow.Resolved -> "resolved:${sourceId.type.routeSegment}:${sourceId.id}:${libraryId}"
-    is SearchResultRow.CacheMiss -> "miss:${sourceId.type.routeSegment}:${sourceId.id}"
+    is SearchResultRow.Resolved -> TvSearchFocusPolicy.resolvedRowKey(sourceId.type.routeSegment, sourceId.id, libraryId)
+    is SearchResultRow.CacheMiss -> TvSearchFocusPolicy.cacheMissRowKey(sourceId.type.routeSegment, sourceId.id)
 }
 
 internal sealed interface TvSearchUiState {

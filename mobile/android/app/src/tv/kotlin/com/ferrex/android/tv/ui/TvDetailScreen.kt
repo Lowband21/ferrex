@@ -533,6 +533,7 @@ private fun TvDetailRail(
                 )
                 TvDetailTextBadge(presentation.stateLabel)
                 TvDetailTextBadge(presentation.activationPolicyLabel)
+                TvDetailTextBadge(presentation.containmentLabel)
             }
             presentation.emptyOrUnavailableMessage?.let { message ->
                 TheaterPlateText(
@@ -661,7 +662,7 @@ private fun TvDetailRailItemCard(
                     )
                 }
                 item.progress?.let { progress ->
-                    TvDetailProgressBar(progress = progress, label = "${item.title} progress")
+                    TvDetailProgressBar(progress = progress, label = presentation.progressLabel ?: "${item.title} progress")
                 }
                 if (!presentation.activatable) {
                     Text(

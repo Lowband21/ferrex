@@ -2,6 +2,7 @@ package com.ferrex.android.core.tvfocus
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,6 +94,50 @@ class TvFocusRestoreModelTest {
         assertEquals("detail:movie:alpha", movieTarget.screen)
         assertEquals("detail:episode:pilot", episodeTarget.screen)
         assertEquals("detail-rail:series:alpha:episodes", TvDetailFocusPolicy.railSurface("series:alpha:episodes"))
+    }
+
+    @Test
+    fun tvGridFocusMovesFromDisappearingCardsToEmptyRecovery() {
+        val state = TvFocusRestoreState()
+            .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_CARDS, "movie:library:item"))
+
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
+            TvGridFocusPolicy.preferredSurface(lastTarget = null, hasCards = false),
+        )
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
+            TvGridFocusPolicy.preferredSurface(state.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = false),
+        )
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_CARDS,
+            TvGridFocusPolicy.preferredSurface(state.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+        )
+    }
+
+    @Test
+    fun tvSearchFocusKeysKeepCacheMissRowsRecoverableAndResolvedRowsUniqueByLibrary() {
+        val sameMediaLibraryA = TvSearchFocusPolicy.resolvedRowKey("movie", "same-media", "library-a")
+        val sameMediaLibraryB = TvSearchFocusPolicy.resolvedRowKey("movie", "same-media", "library-b")
+        val missKey = TvSearchFocusPolicy.cacheMissRowKey("episode", "missing-episode")
+        val missSurface = TvSearchFocusPolicy.cacheMissSurface(missKey)
+        val retryAction = TvSearchFocusPolicy.cacheMissRetryAction(missKey)
+        val diagnosticsAction = TvSearchFocusPolicy.cacheMissDiagnosticsAction(missKey)
+        val state = TvFocusRestoreState()
+            .record(TvFocusKey(TvSearchFocusPolicy.SCREEN_SEARCH, missSurface, retryAction))
+
+        assertNotEquals(sameMediaLibraryA, sameMediaLibraryB)
+        assertEquals("miss:episode:missing-episode", missKey)
+        assertTrue(TvSearchFocusPolicy.shouldAutoFocusRecovery(missSurface))
+        assertEquals(
+            TvFocusKey(TvSearchFocusPolicy.SCREEN_SEARCH, missSurface, retryAction),
+            state.restore(
+                screen = TvSearchFocusPolicy.SCREEN_SEARCH,
+                surface = missSurface,
+                availableItems = listOf(retryAction, diagnosticsAction),
+                fallbackItem = diagnosticsAction,
+            ).target,
+        )
     }
 
     @Test

@@ -34,6 +34,7 @@ import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.tv.ui.foundation.TvActionPanel
 import com.ferrex.android.tv.ui.foundation.TvActionPanelAction
 import com.ferrex.android.tv.ui.foundation.TvActionRole
@@ -91,8 +92,8 @@ internal fun TvLibraryGridScreen(
         HomeLibraryTab.Movies -> fullMovieCount
         HomeLibraryTab.Series -> fullSeriesCount
     }
-    val lastGridTarget = focusRestorer.state.lastTarget("library-grid")
-    val preferredSurface = lastGridTarget?.surface ?: "grid-cards"
+    val lastGridTarget = focusRestorer.state.lastTarget(TvGridFocusPolicy.SCREEN_GRID)
+    val preferredSurface = TvGridFocusPolicy.preferredSurface(lastGridTarget, hasCards = cards.isNotEmpty())
     TvFullScreenSurface {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -101,8 +102,8 @@ internal fun TvLibraryGridScreen(
             TvButtonRow(
                 actions = listOf(TvButtonAction("back", "Back to Home", TvActionRole.Back, onSelect = onBack)),
                 focusRestorer = focusRestorer,
-                surfaceKey = "grid-header",
-                autoFocus = preferredSurface == "grid-header",
+                surfaceKey = TvGridFocusPolicy.SURFACE_HEADER,
+                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_HEADER,
             )
             Text(
                 text = selectedLibrary?.name ?: "${tab.label} library",
@@ -119,6 +120,11 @@ internal fun TvLibraryGridScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                text = "D-pad focus is contained at the poster-grid edges; Back and recovery rows remain reachable if items disappear.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             TvButtonRow(
                 actions = HomeLibraryTab.entries.map { entry ->
                     TvButtonAction(
@@ -129,8 +135,8 @@ internal fun TvLibraryGridScreen(
                     )
                 },
                 focusRestorer = focusRestorer,
-                surfaceKey = "grid-tabs",
-                autoFocus = preferredSurface == "grid-tabs",
+                surfaceKey = TvGridFocusPolicy.SURFACE_TABS,
+                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_TABS,
             )
             val libraries = when (tab) {
                 HomeLibraryTab.Movies -> movieLibraryInfos
@@ -160,8 +166,8 @@ internal fun TvLibraryGridScreen(
                         )
                     },
                     focusRestorer = focusRestorer,
-                    surfaceKey = "grid-library-chooser",
-                    autoFocus = preferredSurface == "grid-library-chooser",
+                    surfaceKey = TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
                 )
             }
             when (tab) {
@@ -193,8 +199,8 @@ internal fun TvLibraryGridScreen(
                     TvButtonAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
                 ),
                 focusRestorer = focusRestorer,
-                surfaceKey = "grid-recovery-actions",
-                autoFocus = preferredSurface == "grid-recovery-actions",
+                surfaceKey = TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
+                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
             )
             if (cards.isEmpty()) {
                 TvActionPanel(
@@ -207,8 +213,8 @@ internal fun TvLibraryGridScreen(
                         TvActionPanelAction("diagnostics-empty", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
                     ),
                     focusRestorer = focusRestorer,
-                    surfaceKey = "grid-empty-actions",
-                    autoFocus = preferredSurface == "grid-cards",
+                    surfaceKey = TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
                 )
             } else {
                 TvPosterGrid(
@@ -217,7 +223,7 @@ internal fun TvLibraryGridScreen(
                     imageLoader = imageLoader,
                     scope = scope,
                     focusRestorer = focusRestorer,
-                    autoFocus = preferredSurface == "grid-cards",
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_CARDS,
                     onSelect = onSelect,
                     modifier = Modifier.weight(1f),
                 )
@@ -255,8 +261,8 @@ internal fun TvMovieGridControls(
             )
         },
         focusRestorer = focusRestorer,
-        surfaceKey = "movie-sort-controls",
-        autoFocus = preferredSurface == "movie-sort-controls",
+        surfaceKey = TvGridFocusPolicy.SURFACE_MOVIE_SORT,
+        autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_MOVIE_SORT,
     )
     TvButtonRow(
         title = "Filter movies",
@@ -269,8 +275,8 @@ internal fun TvMovieGridControls(
             )
         },
         focusRestorer = focusRestorer,
-        surfaceKey = "movie-filter-controls",
-        autoFocus = preferredSurface == "movie-filter-controls",
+        surfaceKey = TvGridFocusPolicy.SURFACE_MOVIE_FILTER,
+        autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_MOVIE_FILTER,
     )
     val copy = when (movieIndexState) {
         MovieIndexUiState.Idle -> "Movie index idle. Showing cached batch order."
@@ -316,7 +322,7 @@ internal fun TvPosterGrid(
     val gridItems = remember(cards) {
         cards.zip(
             MediaRailIdentityResolver.assign(
-                railKey = "grid-cards",
+                railKey = TvGridFocusPolicy.SURFACE_CARDS,
                 stableIds = cards.map { it.stableKey },
             ),
         )
@@ -324,7 +330,7 @@ internal fun TvPosterGrid(
     val keys = gridItems.map { it.second.renderKey }
     val requesters = remember(keys) { keys.associateWith { FocusRequester() } }
     val restoredKey = keys.firstOrNull()?.let { fallback ->
-        focusRestorer.restoreItem("grid-cards", keys, fallback)
+        focusRestorer.restoreItem(TvGridFocusPolicy.SURFACE_CARDS, keys, fallback)
     }
     LaunchedEffect(autoFocus, restoredKey, keys) {
         if (autoFocus && restoredKey != null) {
@@ -335,7 +341,7 @@ internal fun TvPosterGrid(
         columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.TvGridMin),
         modifier = modifier
             .fillMaxWidth()
-            .testTag(FerrexQaTags.Tv.surface("grid-cards")),
+            .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)),
         contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Md),
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
@@ -349,10 +355,10 @@ internal fun TvPosterGrid(
                 scope = scope,
                 focusRequester = requesters[itemKey],
                 semanticLabel = identity.semanticLabel(card.title),
-                onFocused = { focusRestorer.record("grid-cards", itemKey) },
+                onFocused = { focusRestorer.record(TvGridFocusPolicy.SURFACE_CARDS, itemKey) },
                 onSelect = { onSelect(card) },
                 modifier = Modifier.fillMaxWidth(),
-                testTag = FerrexQaTags.Tv.poster("grid-cards", itemKey),
+                testTag = FerrexQaTags.Tv.poster(TvGridFocusPolicy.SURFACE_CARDS, itemKey),
             )
         }
     }

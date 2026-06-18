@@ -119,7 +119,7 @@ class FerrexDetailPrimitivesTest {
             cardKind = DetailRailCardKind.Still,
             activationPolicy = DetailRailActivationPolicy.Play,
             items = listOf(
-                railItem("episode-1", DetailImageState.Pending("pending", staleOffline = true, retryAfterMillis = 5_000)),
+                railItem("episode-1", DetailImageState.Pending("pending", staleOffline = true, retryAfterMillis = 5_000), progress = 0.5f),
                 railItem("episode-1", DetailImageState.Failed("failed", staleOffline = false, reason = "manifest failed", retryable = true)),
                 railItem("episode-3", DetailImageState.NoArt("missing", "No still cached"), playback = null),
                 railItem("episode-4", DetailImageState.Ready("ready", staleOffline = true, offlineMessage = null)),
@@ -132,6 +132,10 @@ class FerrexDetailPrimitivesTest {
         assertEquals("Plays media", presentation.activationPolicyLabel)
         assertEquals("episode-1", presentation.items[0].renderKey)
         assertEquals("episode-1-2", presentation.items[1].renderKey)
+        assertEquals("D-pad contained", presentation.containmentLabel)
+        assertEquals("Episode episode-1 progress 50%", presentation.items[0].progressLabel)
+        assertTrue(presentation.contentDescription.contains("Left/right rail edges are contained"))
+        assertTrue(presentation.items[0].contentDescription.contains("progress 50%"))
         assertTrue(presentation.items[0].testTag.contains("episodes-season-1.episode-1"))
         assertTrue(presentation.items[1].testTag.contains("episodes-season-1.episode-1-2"))
         assertTrue(allBadges.contains("Pending"))
@@ -317,12 +321,13 @@ class FerrexDetailPrimitivesTest {
         stableId: String,
         state: DetailImageState,
         playback: PlaybackRouteContract? = playbackContract(stableId),
+        progress: Float? = null,
     ): DetailRailItem = DetailRailItem(
         stableId = stableId,
         title = "Episode $stableId",
         subtitle = "42 min",
         badge = null,
-        progress = null,
+        progress = progress,
         art = art(
             role = DetailArtRole.Still,
             category = BrowseImageCategory.Episode,

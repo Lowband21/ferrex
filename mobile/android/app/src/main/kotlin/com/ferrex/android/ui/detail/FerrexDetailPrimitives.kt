@@ -192,6 +192,7 @@ data class DetailRailItemPresentation(
     val activationLabel: String,
     val activatable: Boolean,
     val badges: List<String>,
+    val progressLabel: String?,
     val media: DetailMediaPresentation,
 )
 
@@ -202,6 +203,7 @@ data class DetailRailPresentation(
     val title: String,
     val stateLabel: String,
     val activationPolicyLabel: String,
+    val containmentLabel: String,
     val contentDescription: String,
     val items: List<DetailRailItemPresentation>,
     val emptyOrUnavailableMessage: String?,
@@ -375,12 +377,24 @@ object DetailPrimitivePresenter {
             DetailRailState.Empty -> rail.emptyMessage ?: "No ${rail.title.lowercase()} are cached yet."
             DetailRailState.Unavailable -> rail.unavailableMessage ?: "${rail.title} is unavailable."
         }
+        val containmentLabel = when {
+            itemPresentations.isEmpty() && mode == DetailSurfaceInteractionMode.TvDpad -> "No D-pad targets"
+            itemPresentations.isEmpty() -> "No rail targets"
+            mode == DetailSurfaceInteractionMode.TvDpad -> "D-pad contained"
+            else -> "Bounded rail"
+        }
+        val containmentDescription = if (mode == DetailSurfaceInteractionMode.TvDpad) {
+            "Left/right rail edges are contained before focus moves to neighboring rows."
+        } else {
+            "Rail edges are bounded by the visible scroll container."
+        }
         return DetailRailPresentation(
             stableKey = rail.stableKey,
             testTag = FerrexQaTags.TheaterPlate.rail(mode.targetKey, pageKey, rail.stableKey),
             title = rail.title,
             stateLabel = stateLabel,
             activationPolicyLabel = activationPolicyLabel,
+            containmentLabel = containmentLabel,
             contentDescription = buildString {
                 append(rail.title)
                 append(" rail. ")
@@ -391,7 +405,10 @@ object DetailPrimitivePresenter {
                 append(itemPresentations.size)
                 append(" item")
                 if (itemPresentations.size != 1) append("s")
-                append(".")
+                append(". ")
+                append(containmentLabel)
+                append(". ")
+                append(containmentDescription)
                 stateMessage?.let { append(" ").append(it) }
             },
             items = itemPresentations,
@@ -409,6 +426,7 @@ object DetailPrimitivePresenter {
     ): DetailRailItemPresentation {
         val renderKey = item.renderKey(occurrence)
         val badges = item.badges()
+        val progressLabel = item.progressLabel()
         val activatable = rail.state == DetailRailState.Available && rail.activationPolicy.isSatisfiedBy(item)
         val activationLabel = rail.activationPolicy.activationLabel(mode, activatable)
         val media = media(
@@ -426,11 +444,13 @@ object DetailPrimitivePresenter {
                 append(item.title)
                 item.subtitle?.let { append(". ").append(it) }
                 if (badges.isNotEmpty()) append(". ").append(badges.joinToString(". "))
+                progressLabel?.let { append(". ").append(it) }
                 append(". ").append(activationLabel)
             },
             activationLabel = activationLabel,
             activatable = activatable,
             badges = badges,
+            progressLabel = progressLabel,
             media = media,
         )
     }
@@ -1106,6 +1126,7 @@ fun FerrexDetailRail(
                 )
                 DetailTextBadge(label = presentation.stateLabel)
                 DetailTextBadge(label = presentation.activationPolicyLabel)
+                DetailTextBadge(label = presentation.containmentLabel)
             }
             presentation.emptyOrUnavailableMessage?.let { message ->
                 TheaterPlateText(
@@ -1196,7 +1217,7 @@ private fun FerrexDetailRailItem(
                 )
             }
             if (item.progress != null) {
-                DetailProgressBar(progress = item.progress, label = "${item.title} progress")
+                DetailProgressBar(progress = item.progress, label = presentation.progressLabel ?: "${item.title} progress")
             }
         }
     }
@@ -1440,6 +1461,10 @@ private fun DetailRailItem.badges(): List<String> = buildList {
     progress?.let { add("${(it.coerceIn(0f, 1f) * 100f).roundToInt()}%") }
     addAll(art.imageState.badges())
 }.distinct()
+
+private fun DetailRailItem.progressLabel(): String? = progress?.let {
+    "$title progress ${(it.coerceIn(0f, 1f) * 100f).roundToInt()}%"
+}
 
 private fun DetailImageState.badges(): List<String> = when (this) {
     is DetailImageState.Ready -> buildList {

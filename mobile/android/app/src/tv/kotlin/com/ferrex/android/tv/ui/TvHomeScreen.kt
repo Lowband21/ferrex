@@ -40,7 +40,9 @@ import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.core.search.MediaSearchRepository
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.core.tvfocus.TvHomeFocusPolicy
+import com.ferrex.android.core.tvfocus.TvSearchFocusPolicy
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.WatchRepository
@@ -82,9 +84,11 @@ fun TvHomeScreen(
     val watchState by watchRepository?.state?.collectAsState() ?: emptyWatchState
     val coroutineScope = rememberCoroutineScope()
     val homeFocusRestorer = rememberTvFocusRestorer(TvHomeFocusPolicy.SCREEN_HOME)
-    val gridFocusRestorer = rememberTvFocusRestorer("library-grid")
+    val gridFocusRestorer = rememberTvFocusRestorer(TvGridFocusPolicy.SCREEN_GRID)
+    val searchFocusRestorer = rememberTvFocusRestorer(TvSearchFocusPolicy.SCREEN_SEARCH)
 
     var childScreen by remember { mutableStateOf<TvHomeChild?>(null) }
+    var searchQuery by remember(scope.directoryName) { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(HomeLibraryTab.Movies) }
     var selectedMovieLibraryId by remember { mutableStateOf<String?>(null) }
     var selectedSeriesLibraryId by remember { mutableStateOf<String?>(null) }
@@ -368,6 +372,9 @@ fun TvHomeScreen(
             searchRepository = searchRepository,
             imageRepository = imageRepository,
             imagePipeline = imagePipeline,
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            focusRestorer = searchFocusRestorer,
             onOpenResult = { target ->
                 target.toMediaRouteArgs()?.let { openDetail(it, TvReturnTarget.Search) }
             },
