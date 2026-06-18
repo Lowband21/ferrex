@@ -1,5 +1,6 @@
 //! Conversions for `ferrex_model` detail structs.
 
+use ferrex_model::details::{CastMember, CrewMember, RelatedMediaRef};
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::fb::details as fb;
@@ -53,6 +54,181 @@ fn build_genre_vector<'a>(
     Some(builder.create_vector(&items))
 }
 
+fn build_credit_profile<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    person_id: Option<&uuid::Uuid>,
+    profile_path: Option<&str>,
+    profile_iid: Option<&uuid::Uuid>,
+) -> Option<WIPOffset<fb::CreditProfile<'a>>> {
+    if person_id.is_none() && profile_path.is_none() && profile_iid.is_none() {
+        return None;
+    }
+
+    let person_id = person_id.map(uuid_to_fb);
+    let profile_path = string_opt(builder, profile_path);
+    let profile_iid = profile_iid.map(uuid_to_fb);
+
+    Some(fb::CreditProfile::create(
+        builder,
+        &fb::CreditProfileArgs {
+            person_id: person_id.as_ref(),
+            profile_path,
+            profile_iid: profile_iid.as_ref(),
+        },
+    ))
+}
+
+/// Build a FlatBuffers `CastCredit` table.
+pub fn build_cast_credit<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    member: &CastMember,
+) -> WIPOffset<fb::CastCredit<'a>> {
+    let credit_id = string_opt(builder, member.credit_id.as_deref());
+    let name = builder.create_string(&member.name);
+    let original_name = string_opt(builder, member.original_name.as_deref());
+    let character = string_opt(builder, Some(member.character.as_str()));
+    let profile = build_credit_profile(
+        builder,
+        member.person_id.as_ref(),
+        member.profile_path.as_deref(),
+        member.image_id.as_ref(),
+    );
+    let known_for_department =
+        string_opt(builder, member.known_for_department.as_deref());
+
+    fb::CastCredit::create(
+        builder,
+        &fb::CastCreditArgs {
+            id: member.id,
+            credit_id,
+            cast_id: member.cast_id.unwrap_or(0),
+            name: Some(name),
+            original_name,
+            character,
+            profile,
+            order: member.order,
+            gender: member.gender.unwrap_or(0),
+            known_for_department,
+        },
+    )
+}
+
+fn build_cast_credit_vector<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    members: &[CastMember],
+) -> Option<
+    flatbuffers::WIPOffset<
+        flatbuffers::Vector<
+            'a,
+            flatbuffers::ForwardsUOffset<fb::CastCredit<'a>>,
+        >,
+    >,
+> {
+    if members.is_empty() {
+        return None;
+    }
+
+    let items: Vec<_> = members
+        .iter()
+        .map(|member| build_cast_credit(builder, member))
+        .collect();
+    Some(builder.create_vector(&items))
+}
+
+/// Build a FlatBuffers `CrewCredit` table.
+pub fn build_crew_credit<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    member: &CrewMember,
+) -> WIPOffset<fb::CrewCredit<'a>> {
+    let credit_id = string_opt(builder, member.credit_id.as_deref());
+    let name = builder.create_string(&member.name);
+    let job = builder.create_string(&member.job);
+    let department = builder.create_string(&member.department);
+    let profile = build_credit_profile(
+        builder,
+        member.person_id.as_ref(),
+        member.profile_path.as_deref(),
+        member.profile_iid.as_ref(),
+    );
+    let known_for_department =
+        string_opt(builder, member.known_for_department.as_deref());
+    let original_name = string_opt(builder, member.original_name.as_deref());
+
+    fb::CrewCredit::create(
+        builder,
+        &fb::CrewCreditArgs {
+            id: member.id,
+            credit_id,
+            name: Some(name),
+            job: Some(job),
+            department: Some(department),
+            profile,
+            gender: member.gender.unwrap_or(0),
+            known_for_department,
+            original_name,
+        },
+    )
+}
+
+fn build_crew_credit_vector<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    members: &[CrewMember],
+) -> Option<
+    flatbuffers::WIPOffset<
+        flatbuffers::Vector<
+            'a,
+            flatbuffers::ForwardsUOffset<fb::CrewCredit<'a>>,
+        >,
+    >,
+> {
+    if members.is_empty() {
+        return None;
+    }
+
+    let items: Vec<_> = members
+        .iter()
+        .map(|member| build_crew_credit(builder, member))
+        .collect();
+    Some(builder.create_vector(&items))
+}
+
+/// Build a FlatBuffers `RelatedMediaRef` table.
+pub fn build_related_media_ref<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    related: &RelatedMediaRef,
+) -> WIPOffset<fb::RelatedMediaRef<'a>> {
+    let title = string_opt(builder, related.title.as_deref());
+    fb::RelatedMediaRef::create(
+        builder,
+        &fb::RelatedMediaRefArgs {
+            tmdb_id: related.tmdb_id,
+            title,
+        },
+    )
+}
+
+fn build_related_media_ref_vector<'a>(
+    builder: &mut FlatBufferBuilder<'a>,
+    related: &[RelatedMediaRef],
+) -> Option<
+    flatbuffers::WIPOffset<
+        flatbuffers::Vector<
+            'a,
+            flatbuffers::ForwardsUOffset<fb::RelatedMediaRef<'a>>,
+        >,
+    >,
+> {
+    if related.is_empty() {
+        return None;
+    }
+
+    let items: Vec<_> = related
+        .iter()
+        .map(|related| build_related_media_ref(builder, related))
+        .collect();
+    Some(builder.create_vector(&items))
+}
+
 /// Build a FlatBuffers `EnhancedMovieDetails` table.
 pub fn build_enhanced_movie_details<'a>(
     builder: &mut FlatBufferBuilder<'a>,
@@ -72,6 +248,11 @@ pub fn build_enhanced_movie_details<'a>(
     let primary_poster_iid = uuid_opt(details.primary_poster_iid.as_ref());
     let primary_backdrop_iid = uuid_opt(details.primary_backdrop_iid.as_ref());
     let genres = build_genre_vector(builder, &details.genres);
+    let cast = build_cast_credit_vector(builder, &details.cast);
+    let crew = build_crew_credit_vector(builder, &details.crew);
+    let recommendations =
+        build_related_media_ref_vector(builder, &details.recommendations);
+    let similar = build_related_media_ref_vector(builder, &details.similar);
 
     fb::EnhancedMovieDetails::create(
         builder,
@@ -97,6 +278,10 @@ pub fn build_enhanced_movie_details<'a>(
             logo_path,
             primary_poster_iid: primary_poster_iid.as_ref(),
             primary_backdrop_iid: primary_backdrop_iid.as_ref(),
+            cast,
+            crew,
+            recommendations,
+            similar,
         },
     )
 }
@@ -121,6 +306,11 @@ pub fn build_enhanced_series_details<'a>(
     let primary_poster_iid = uuid_opt(details.primary_poster_iid.as_ref());
     let primary_backdrop_iid = uuid_opt(details.primary_backdrop_iid.as_ref());
     let genres = build_genre_vector(builder, &details.genres);
+    let cast = build_cast_credit_vector(builder, &details.cast);
+    let crew = build_crew_credit_vector(builder, &details.crew);
+    let recommendations =
+        build_related_media_ref_vector(builder, &details.recommendations);
+    let similar = build_related_media_ref_vector(builder, &details.similar);
 
     fb::EnhancedSeriesDetails::create(
         builder,
@@ -149,6 +339,10 @@ pub fn build_enhanced_series_details<'a>(
             logo_path,
             primary_poster_iid: primary_poster_iid.as_ref(),
             primary_backdrop_iid: primary_backdrop_iid.as_ref(),
+            cast,
+            crew,
+            recommendations,
+            similar,
         },
     )
 }
@@ -192,6 +386,8 @@ pub fn build_episode_details<'a>(
     let production_code =
         string_opt(builder, details.production_code.as_deref());
     let primary_still_iid = uuid_opt(details.primary_still_iid.as_ref());
+    let guest_stars = build_cast_credit_vector(builder, &details.guest_stars);
+    let crew = build_crew_credit_vector(builder, &details.crew);
 
     fb::EpisodeDetails::create(
         builder,
@@ -208,6 +404,8 @@ pub fn build_episode_details<'a>(
             vote_average: details.vote_average.unwrap_or(0.0),
             vote_count: details.vote_count.unwrap_or(0),
             production_code,
+            guest_stars,
+            crew,
         },
     )
 }

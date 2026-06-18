@@ -4,6 +4,7 @@ import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
 import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.image.BrowseImageCategory
+import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryFlatBuffers
@@ -18,9 +19,13 @@ import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
 import com.ferrex.android.core.watch.WatchRepositoryState
 import com.google.flatbuffers.FlatBufferBuilder
+import ferrex.details.CastCredit
+import ferrex.details.CreditProfile
+import ferrex.details.CrewCredit
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
 import ferrex.details.EpisodeDetails
+import ferrex.details.RelatedMediaRef
 import ferrex.details.SeasonDetails
 import ferrex.files.MediaFile
 import ferrex.library.MediaBatchData
@@ -71,6 +76,85 @@ class DetailCacheModelsTest {
         assertEquals(120.0, resume.startPositionSeconds!!, 0.0)
         assertFalse(resume.startOver)
         assertTrue(startOver.startOver)
+    }
+
+    @Test
+    fun legacyDetailPayloadsWithoutRelationshipRailsParseSafely() {
+        val ids = Ids()
+        val movieLibrary = LibraryInfo(ids.movieLibrary.toString(), "Movies", LibraryKind.Movies)
+        val seriesLibrary = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
+        val state = LibraryRepositoryState(
+            movieLibraries = listOf(CachedMovieLibrary(movieLibrary, MovieLibraryAccessor(moviePayload(ids)))),
+            seriesLibraries = listOf(CachedSeriesLibrary(seriesLibrary, SeriesLibraryAccessor(seriesPayload(ids, includeEpisode = true)))),
+        )
+
+        val movie = DetailCache.resolve(
+            state,
+            MediaRouteArgs(BrowseMediaType.Movie, ids.movie.toString(), movieLibrary.id, BrowseSourceSurface.LibraryGrid),
+        ) as DetailLoadResult.Movie
+        val series = DetailCache.resolve(
+            state,
+            MediaRouteArgs(BrowseMediaType.Series, ids.series.toString(), seriesLibrary.id, BrowseSourceSurface.LibraryGrid),
+        ) as DetailLoadResult.Series
+
+        assertTrue(movie.detail.cast.isEmpty())
+        assertTrue(movie.detail.crew.isEmpty())
+        assertTrue(movie.detail.recommendations.isEmpty())
+        assertTrue(movie.detail.similar.isEmpty())
+        assertTrue(series.detail.series.cast.isEmpty())
+        assertTrue(series.detail.series.crew.isEmpty())
+        assertTrue(series.detail.series.recommendations.isEmpty())
+        assertTrue(series.detail.series.similar.isEmpty())
+        assertTrue(series.detail.episodes.single().guestStars.isEmpty())
+        assertTrue(series.detail.episodes.single().crew.isEmpty())
+        assertFalse(DetailCache.imageKeys(movie).any { it.category == BrowseImageCategory.Profile })
+    }
+
+    @Test
+    fun detailCreditsProfilesAndRelatedRailsLoadFromCachedPayloads() {
+        val ids = Ids()
+        val movieLibrary = LibraryInfo(ids.movieLibrary.toString(), "Movies", LibraryKind.Movies)
+        val seriesLibrary = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
+        val state = LibraryRepositoryState(
+            movieLibraries = listOf(CachedMovieLibrary(movieLibrary, MovieLibraryAccessor(moviePayload(ids, includeCredits = true)))),
+            seriesLibraries = listOf(
+                CachedSeriesLibrary(
+                    seriesLibrary,
+                    SeriesLibraryAccessor(seriesPayload(ids, includeEpisode = true, includeCredits = true)),
+                ),
+            ),
+        )
+
+        val movie = DetailCache.resolve(
+            state,
+            MediaRouteArgs(BrowseMediaType.Movie, ids.movie.toString(), movieLibrary.id, BrowseSourceSurface.LibraryGrid),
+        ) as DetailLoadResult.Movie
+        val series = DetailCache.resolve(
+            state,
+            MediaRouteArgs(BrowseMediaType.Series, ids.series.toString(), seriesLibrary.id, BrowseSourceSurface.LibraryGrid),
+        ) as DetailLoadResult.Series
+
+        val actor = movie.detail.cast.single()
+        assertEquals("Actor One", actor.name)
+        assertEquals("Hero", actor.character)
+        assertEquals(ids.actorPerson.toString(), actor.personId)
+        assertEquals(ImageRequestKey(ids.actorProfile.toString(), BrowseImageCategory.Profile), actor.profileImages.profile)
+        assertEquals("/profiles/actor.jpg", actor.profileImages.profileFallbackPath)
+        assertEquals("Director", movie.detail.crew.single().job)
+        assertEquals("Recommended Movie", movie.detail.recommendations.single().title)
+        assertEquals(9001L, movie.detail.recommendations.single().tmdbId)
+        assertEquals("Similar Movie", movie.detail.similar.single().title)
+        assertTrue(DetailCache.imageKeys(movie).contains(ImageRequestKey(ids.actorProfile.toString(), BrowseImageCategory.Profile)))
+        assertTrue(DetailCache.imageKeys(movie).contains(ImageRequestKey(ids.crewProfile.toString(), BrowseImageCategory.Profile)))
+
+        assertEquals("Series Actor", series.detail.series.cast.single().name)
+        assertEquals("Recommended Series", series.detail.series.recommendations.single().title)
+        assertEquals("Similar Series", series.detail.series.similar.single().title)
+        val episode = series.detail.episodes.single()
+        assertEquals("Guest Star", episode.guestStars.single().name)
+        assertEquals("Episode Writer", episode.crew.single().job)
+        assertTrue(DetailCache.imageKeys(series).contains(ImageRequestKey(ids.guestProfile.toString(), BrowseImageCategory.Profile)))
+        assertTrue(DetailCache.imageKeys(series).contains(ImageRequestKey(ids.crewProfile.toString(), BrowseImageCategory.Profile)))
     }
 
     @Test
@@ -252,11 +336,21 @@ class DetailCacheModelsTest {
         val poster: UUID = uuid(30)
         val backdrop: UUID = uuid(31)
         val still: UUID = uuid(32)
+        val actorPerson: UUID = uuid(40)
+        val actorProfile: UUID = uuid(41)
+        val crewPerson: UUID = uuid(42)
+        val crewProfile: UUID = uuid(43)
+        val guestPerson: UUID = uuid(44)
+        val guestProfile: UUID = uuid(45)
     }
 
-    private fun moviePayload(ids: Ids, includeFile: Boolean = true): List<com.ferrex.android.core.library.ParsedMovieBatch> {
-        val builder = FlatBufferBuilder(1024)
-        val details = movieDetails(builder, ids)
+    private fun moviePayload(
+        ids: Ids,
+        includeFile: Boolean = true,
+        includeCredits: Boolean = false,
+    ): List<com.ferrex.android.core.library.ParsedMovieBatch> {
+        val builder = FlatBufferBuilder(2048)
+        val details = movieDetails(builder, ids, includeCredits)
         val file = if (includeFile) mediaFile(builder, ids.movieFile, "movie.mkv") else null
         val title = builder.createString("Cache Movie")
         MovieReference.startMovieReference(builder)
@@ -279,12 +373,13 @@ class DetailCacheModelsTest {
         ids: Ids,
         includeEpisode: Boolean,
         includeEpisodeFile: Boolean = true,
+        includeCredits: Boolean = false,
     ): List<com.ferrex.android.core.library.ParsedSeriesBundle> {
-        val builder = FlatBufferBuilder(2048)
+        val builder = FlatBufferBuilder(4096)
         val media = buildList {
-            add(seriesReference(builder, ids))
+            add(seriesReference(builder, ids, includeCredits))
             add(seasonReference(builder, ids))
-            if (includeEpisode) add(episodeReference(builder, ids, includeFile = includeEpisodeFile))
+            if (includeEpisode) add(episodeReference(builder, ids, includeFile = includeEpisodeFile, includeCredits = includeCredits))
         }.toIntArray()
         val items = SeriesBundleData.createItemsVector(builder, media)
         SeriesBundleData.startSeriesBundleData(builder)
@@ -296,10 +391,36 @@ class DetailCacheModelsTest {
         return LibraryFlatBuffers.parseSeriesPayload(builder.sizedByteArray().wrap(), expectedSeriesId = ids.series.toString()).getOrThrow()
     }
 
-    private fun movieDetails(builder: FlatBufferBuilder, ids: Ids): Int {
+    private fun movieDetails(builder: FlatBufferBuilder, ids: Ids, includeCredits: Boolean = false): Int {
         val title = builder.createString("Cache Movie")
         val overview = builder.createString("cached overview")
         val release = builder.createString("2024-01-02")
+        val cast = if (includeCredits) {
+            EnhancedMovieDetails.createCastVector(
+                builder,
+                intArrayOf(castCredit(builder, ids.actorPerson, ids.actorProfile, "Actor One", "Hero", "/profiles/actor.jpg", 7001UL)),
+            )
+        } else {
+            null
+        }
+        val crew = if (includeCredits) {
+            EnhancedMovieDetails.createCrewVector(
+                builder,
+                intArrayOf(crewCredit(builder, ids.crewPerson, ids.crewProfile, "Director One", "Director", "Directing", "/profiles/crew.jpg", 7002UL)),
+            )
+        } else {
+            null
+        }
+        val recommendations = if (includeCredits) {
+            EnhancedMovieDetails.createRecommendationsVector(builder, intArrayOf(relatedRef(builder, 9001UL, "Recommended Movie")))
+        } else {
+            null
+        }
+        val similar = if (includeCredits) {
+            EnhancedMovieDetails.createSimilarVector(builder, intArrayOf(relatedRef(builder, 9002UL, "Similar Movie")))
+        } else {
+            null
+        }
         EnhancedMovieDetails.startEnhancedMovieDetails(builder)
         EnhancedMovieDetails.addTitle(builder, title)
         EnhancedMovieDetails.addOverview(builder, overview)
@@ -308,12 +429,42 @@ class DetailCacheModelsTest {
         EnhancedMovieDetails.addVoteAverage(builder, 7.5f)
         EnhancedMovieDetails.addPrimaryPosterIid(builder, ids.poster.toFlatBufferUuid(builder))
         EnhancedMovieDetails.addPrimaryBackdropIid(builder, ids.backdrop.toFlatBufferUuid(builder))
+        cast?.let { EnhancedMovieDetails.addCast(builder, it) }
+        crew?.let { EnhancedMovieDetails.addCrew(builder, it) }
+        recommendations?.let { EnhancedMovieDetails.addRecommendations(builder, it) }
+        similar?.let { EnhancedMovieDetails.addSimilar(builder, it) }
         return EnhancedMovieDetails.endEnhancedMovieDetails(builder)
     }
 
-    private fun seriesDetails(builder: FlatBufferBuilder, ids: Ids): Int {
+    private fun seriesDetails(builder: FlatBufferBuilder, ids: Ids, includeCredits: Boolean = false): Int {
         val name = builder.createString("Cache Series")
         val overview = builder.createString("series overview")
+        val cast = if (includeCredits) {
+            EnhancedSeriesDetails.createCastVector(
+                builder,
+                intArrayOf(castCredit(builder, ids.actorPerson, ids.actorProfile, "Series Actor", "Lead", "/profiles/series-actor.jpg", 8001UL)),
+            )
+        } else {
+            null
+        }
+        val crew = if (includeCredits) {
+            EnhancedSeriesDetails.createCrewVector(
+                builder,
+                intArrayOf(crewCredit(builder, ids.crewPerson, ids.crewProfile, "Showrunner One", "Showrunner", "Production", "/profiles/showrunner.jpg", 8002UL)),
+            )
+        } else {
+            null
+        }
+        val recommendations = if (includeCredits) {
+            EnhancedSeriesDetails.createRecommendationsVector(builder, intArrayOf(relatedRef(builder, 9101UL, "Recommended Series")))
+        } else {
+            null
+        }
+        val similar = if (includeCredits) {
+            EnhancedSeriesDetails.createSimilarVector(builder, intArrayOf(relatedRef(builder, 9102UL, "Similar Series")))
+        } else {
+            null
+        }
         EnhancedSeriesDetails.startEnhancedSeriesDetails(builder)
         EnhancedSeriesDetails.addName(builder, name)
         EnhancedSeriesDetails.addOverview(builder, overview)
@@ -321,6 +472,10 @@ class DetailCacheModelsTest {
         EnhancedSeriesDetails.addAvailableEpisodes(builder, 1.toUShort())
         EnhancedSeriesDetails.addPrimaryPosterIid(builder, ids.poster.toFlatBufferUuid(builder))
         EnhancedSeriesDetails.addPrimaryBackdropIid(builder, ids.backdrop.toFlatBufferUuid(builder))
+        cast?.let { EnhancedSeriesDetails.addCast(builder, it) }
+        crew?.let { EnhancedSeriesDetails.addCrew(builder, it) }
+        recommendations?.let { EnhancedSeriesDetails.addRecommendations(builder, it) }
+        similar?.let { EnhancedSeriesDetails.addSimilar(builder, it) }
         return EnhancedSeriesDetails.endEnhancedSeriesDetails(builder)
     }
 
@@ -333,20 +488,38 @@ class DetailCacheModelsTest {
         return SeasonDetails.endSeasonDetails(builder)
     }
 
-    private fun episodeDetails(builder: FlatBufferBuilder, ids: Ids): Int {
+    private fun episodeDetails(builder: FlatBufferBuilder, ids: Ids, includeCredits: Boolean = false): Int {
         val name = builder.createString("Pilot")
+        val guestStars = if (includeCredits) {
+            EpisodeDetails.createGuestStarsVector(
+                builder,
+                intArrayOf(castCredit(builder, ids.guestPerson, ids.guestProfile, "Guest Star", "Guest", "/profiles/guest.jpg", 9201UL)),
+            )
+        } else {
+            null
+        }
+        val crew = if (includeCredits) {
+            EpisodeDetails.createCrewVector(
+                builder,
+                intArrayOf(crewCredit(builder, ids.crewPerson, ids.crewProfile, "Episode Writer", "Episode Writer", "Writing", "/profiles/episode-writer.jpg", 9202UL)),
+            )
+        } else {
+            null
+        }
         EpisodeDetails.startEpisodeDetails(builder)
         EpisodeDetails.addName(builder, name)
         EpisodeDetails.addSeasonNumber(builder, 1.toUShort())
         EpisodeDetails.addEpisodeNumber(builder, 1.toUShort())
         EpisodeDetails.addRuntime(builder, 42u)
         EpisodeDetails.addPrimaryStillIid(builder, ids.still.toFlatBufferUuid(builder))
+        guestStars?.let { EpisodeDetails.addGuestStars(builder, it) }
+        crew?.let { EpisodeDetails.addCrew(builder, it) }
         return EpisodeDetails.endEpisodeDetails(builder)
     }
 
-    private fun seriesReference(builder: FlatBufferBuilder, ids: Ids): Int {
+    private fun seriesReference(builder: FlatBufferBuilder, ids: Ids, includeCredits: Boolean = false): Int {
         val title = builder.createString("Cache Series")
-        val details = seriesDetails(builder, ids)
+        val details = seriesDetails(builder, ids, includeCredits)
         SeriesReference.startSeriesReference(builder)
         SeriesReference.addTmdbId(builder, 1234UL)
         SeriesReference.addTitle(builder, title)
@@ -370,8 +543,13 @@ class DetailCacheModelsTest {
         return Media.createMedia(builder, MediaVariant.SeasonReference, season)
     }
 
-    private fun episodeReference(builder: FlatBufferBuilder, ids: Ids, includeFile: Boolean = true): Int {
-        val details = episodeDetails(builder, ids)
+    private fun episodeReference(
+        builder: FlatBufferBuilder,
+        ids: Ids,
+        includeFile: Boolean = true,
+        includeCredits: Boolean = false,
+    ): Int {
+        val details = episodeDetails(builder, ids, includeCredits)
         val file = if (includeFile) mediaFile(builder, ids.episodeFile, "episode.mkv") else null
         EpisodeReference.startEpisodeReference(builder)
         EpisodeReference.addSeasonNumber(builder, 1.toUShort())
@@ -385,6 +563,75 @@ class DetailCacheModelsTest {
         EpisodeReference.addId(builder, ids.episode.toFlatBufferUuid(builder))
         val episode = EpisodeReference.endEpisodeReference(builder)
         return Media.createMedia(builder, MediaVariant.EpisodeReference, episode)
+    }
+
+    private fun creditProfile(
+        builder: FlatBufferBuilder,
+        personId: UUID,
+        profileId: UUID,
+        profilePathValue: String,
+    ): Int {
+        val profilePath = builder.createString(profilePathValue)
+        CreditProfile.startCreditProfile(builder)
+        CreditProfile.addProfilePath(builder, profilePath)
+        CreditProfile.addProfileIid(builder, profileId.toFlatBufferUuid(builder))
+        CreditProfile.addPersonId(builder, personId.toFlatBufferUuid(builder))
+        return CreditProfile.endCreditProfile(builder)
+    }
+
+    private fun castCredit(
+        builder: FlatBufferBuilder,
+        personId: UUID,
+        profileId: UUID,
+        nameValue: String,
+        characterValue: String,
+        profilePathValue: String,
+        tmdbId: ULong,
+    ): Int {
+        val profile = creditProfile(builder, personId, profileId, profilePathValue)
+        val name = builder.createString(nameValue)
+        val character = builder.createString(characterValue)
+        val knownFor = builder.createString("Acting")
+        CastCredit.startCastCredit(builder)
+        CastCredit.addId(builder, tmdbId)
+        CastCredit.addName(builder, name)
+        CastCredit.addCharacter(builder, character)
+        CastCredit.addProfile(builder, profile)
+        CastCredit.addKnownForDepartment(builder, knownFor)
+        return CastCredit.endCastCredit(builder)
+    }
+
+    private fun crewCredit(
+        builder: FlatBufferBuilder,
+        personId: UUID,
+        profileId: UUID,
+        nameValue: String,
+        jobValue: String,
+        departmentValue: String,
+        profilePathValue: String,
+        tmdbId: ULong,
+    ): Int {
+        val profile = creditProfile(builder, personId, profileId, profilePathValue)
+        val name = builder.createString(nameValue)
+        val job = builder.createString(jobValue)
+        val department = builder.createString(departmentValue)
+        val knownFor = builder.createString(departmentValue)
+        CrewCredit.startCrewCredit(builder)
+        CrewCredit.addId(builder, tmdbId)
+        CrewCredit.addName(builder, name)
+        CrewCredit.addJob(builder, job)
+        CrewCredit.addDepartment(builder, department)
+        CrewCredit.addProfile(builder, profile)
+        CrewCredit.addKnownForDepartment(builder, knownFor)
+        return CrewCredit.endCrewCredit(builder)
+    }
+
+    private fun relatedRef(builder: FlatBufferBuilder, tmdbId: ULong, titleValue: String): Int {
+        val title = builder.createString(titleValue)
+        RelatedMediaRef.startRelatedMediaRef(builder)
+        RelatedMediaRef.addTmdbId(builder, tmdbId)
+        RelatedMediaRef.addTitle(builder, title)
+        return RelatedMediaRef.endRelatedMediaRef(builder)
     }
 
     private fun mediaFile(builder: FlatBufferBuilder, fileId: UUID, filenameValue: String): Int {
