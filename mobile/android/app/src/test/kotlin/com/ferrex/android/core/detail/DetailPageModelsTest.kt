@@ -119,6 +119,52 @@ class DetailPageModelsTest {
     }
 
     @Test
+    fun disabledPlaybackActionsCarryExplicitReasonsWithoutDroppingWatchActions() {
+        val movie = movieDetail(progressFile = null)
+        val page = DetailPageMapper.toPage(
+            DetailLoadResult.Movie(route(BrowseMediaType.Movie, movie.id, movie.libraryId), movie),
+            networkActionsEnabled = false,
+            networkActionMessage = "Reconnect before playback.",
+        )
+
+        val play = page.actions.single { it.kind == DetailPageActionKind.Play }
+        val markWatched = page.actions.single { it.kind == DetailPageActionKind.MarkWatched }
+        val retryWatch = page.actions.single { it.kind == DetailPageActionKind.RetryWatch }
+
+        assertFalse(play.enabled)
+        assertEquals("Playback is unavailable because this movie does not have a playable file in the cache.", play.disabledReason)
+        assertFalse(markWatched.enabled)
+        assertEquals("Reconnect before playback.", markWatched.disabledReason)
+        assertFalse(retryWatch.enabled)
+        assertEquals("Reconnect before playback.", retryWatch.disabledReason)
+    }
+
+    @Test
+    fun missingDetailPageKeepsStatusCopyAndFullRecoveryActions() {
+        val missing = DetailLoadResult.Missing(
+            route = route(BrowseMediaType.Season, "missing-season", "library"),
+            title = "Season not cached",
+            message = "Season not found in the selected cache.",
+            selectedLibraryId = "library",
+        )
+        val page = DetailPageMapper.toPage(
+            missing,
+            libraryFreshness = LibraryFreshness.StaleOffline("server unreachable", itemCount = 12, lastSyncedAtMillis = null),
+        )
+
+        assertEquals(DetailPageKind.MissingDetail, page.kind)
+        assertEquals("Season not cached", page.emptyState?.title)
+        assertTrue(page.hero.background.imageState is DetailImageState.NoArt)
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.Back })
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.RetryCache })
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.ClearSelectedCache })
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.ChangeServer })
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.ResetConnection })
+        assertTrue(page.recovery.actions.any { it.kind == DetailPageActionKind.Diagnostics })
+        assertEquals(DetailFreshnessKind.StaleOffline, page.recovery.freshness?.kind)
+    }
+
+    @Test
     fun seriesPrefetchIncludesHeroAndBoundedVisibleRailImages() {
         val episodes = (1..20).map { index ->
             episodeDetail(

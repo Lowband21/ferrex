@@ -24,6 +24,8 @@ import com.ferrex.android.core.detail.DetailRailKind
 import com.ferrex.android.core.detail.DetailRailState
 import com.ferrex.android.core.detail.DetailRecoveryState
 import com.ferrex.android.core.detail.DetailTone
+import com.ferrex.android.core.detail.DetailWatchState
+import com.ferrex.android.core.detail.DetailWatchStateKind
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.mediaart.MediaArtFitPolicy
@@ -195,11 +197,75 @@ class FerrexDetailPrimitivesTest {
         assertTrue(slabs[1].actions.any { it.label == "Diagnostics / Export diagnostics" })
     }
 
+    @Test
+    fun tvStageSummarizesDetailSurfacesAndImageRecoveryStates() {
+        val page = page(
+            actions = listOf(
+                DetailPageAction(
+                    kind = DetailPageActionKind.Play,
+                    label = "Play",
+                    role = DetailActionRole.Primary,
+                    enabled = false,
+                    disabledReason = "Reconnect before playback.",
+                    playbackContract = playbackContract("movie"),
+                ),
+            ),
+            rails = listOf(playRail()),
+            recovery = DetailRecoveryState(
+                freshness = DetailFreshnessNotice(
+                    kind = DetailFreshnessKind.StaleOffline,
+                    title = "Offline cache",
+                    message = "Showing stale library data.",
+                ),
+                actions = fullRecoveryActions(),
+            ),
+            watchState = DetailWatchState(
+                scopeKey = "movie",
+                label = "Movie watch state",
+                state = DetailWatchStateKind.Unknown,
+                progress = 0f,
+                pendingMutation = false,
+                message = "Watch state has not loaded yet.",
+            ),
+            heroBackgroundState = DetailImageState.Failed("failed", staleOffline = true, reason = "decode failed", retryable = true),
+            heroForegroundState = DetailImageState.NoArt("missing", "No poster cached"),
+        )
+
+        val stage = DetailPrimitivePresenter.stage(page, DetailSurfaceInteractionMode.TvDpad)
+
+        assertEquals(DetailSurfaceInteractionMode.TvDpad.density, stage.density)
+        assertTrue(stage.contentDescription.contains("Hero media:"))
+        assertTrue(stage.contentDescription.contains("Media objects:"))
+        assertTrue(stage.contentDescription.contains("Metadata:"))
+        assertTrue(stage.contentDescription.contains("Actions:"))
+        assertTrue(stage.contentDescription.contains("Status slabs:"))
+        assertTrue(stage.heroMedia.any { it.grounding == MediaArtGrounding.TheaterPlateContactShadow })
+        assertTrue(stage.actionShelf.contentDescription.contains("Play disabled: Reconnect before playback."))
+
+        val slabTitles = stage.slabs.map { it.title }
+        assertTrue(slabTitles.contains("Movie watch state"))
+        assertTrue(slabTitles.contains("Missing artwork"))
+        assertTrue(slabTitles.contains("Image load failed"))
+        assertTrue(slabTitles.contains("Stale/offline artwork"))
+
+        val imageSlabActions = stage.slabs.first { it.title == "Image load failed" }.actions.map { it.label }
+        assertTrue(imageSlabActions.contains("Back"))
+        assertTrue(imageSlabActions.contains("Retry cache sync"))
+        assertTrue(imageSlabActions.contains("Clear selected cache"))
+        assertTrue(imageSlabActions.contains("Change server"))
+        assertTrue(imageSlabActions.contains("Reset connection"))
+        assertTrue(imageSlabActions.contains("Diagnostics / Export diagnostics"))
+        assertTrue(stage.slabs.first { it.title == "Movie watch state" }.actions.any { it.label == "Back" })
+    }
+
     private fun page(
         actions: List<DetailPageAction> = emptyList(),
         rails: List<DetailRail> = emptyList(),
         emptyState: DetailEmptyState? = null,
         recovery: DetailRecoveryState = DetailRecoveryState(freshness = null, actions = emptyList()),
+        watchState: DetailWatchState? = null,
+        heroBackgroundState: DetailImageState = DetailImageState.Ready("ready", staleOffline = false),
+        heroForegroundState: DetailImageState? = DetailImageState.Pending("queued", staleOffline = false),
     ): DetailPageModel = DetailPageModel(
         stableKey = "movie:1",
         kind = DetailPageKind.Movie,
@@ -212,20 +278,22 @@ class FerrexDetailPrimitivesTest {
                 role = DetailArtRole.Backdrop,
                 category = BrowseImageCategory.Backdrop,
                 label = "Cache Movie backdrop",
-                state = DetailImageState.Ready("ready", staleOffline = false),
+                state = heroBackgroundState,
                 grounding = MediaArtGrounding.Flat,
             ),
-            foreground = art(
-                role = DetailArtRole.Poster,
-                category = BrowseImageCategory.Poster,
-                label = "Cache Movie poster",
-                state = DetailImageState.Pending("queued", staleOffline = false),
-                grounding = MediaArtGrounding.TheaterPlateContactShadow,
-            ),
+            foreground = heroForegroundState?.let { state ->
+                art(
+                    role = DetailArtRole.Poster,
+                    category = BrowseImageCategory.Poster,
+                    label = "Cache Movie poster",
+                    state = state,
+                    grounding = MediaArtGrounding.TheaterPlateContactShadow,
+                )
+            },
         ),
         metadata = listOf(DetailMetadataItem("PG-13", tone = DetailTone.Neutral)),
         facts = listOf(DetailFactItem("Runtime", "95 min", tone = DetailTone.Accent)),
-        watchState = null,
+        watchState = watchState,
         actions = actions,
         recovery = recovery,
         rails = rails,
@@ -233,14 +301,16 @@ class FerrexDetailPrimitivesTest {
         imagePrefetch = DetailImagePrefetchPlan(keys = emptySet(), visibleRailItemWindow = 0, maxImageKeys = 0),
     )
 
-    private fun playRail(): DetailRail = DetailRail(
+    private fun playRail(
+        itemState: DetailImageState = DetailImageState.Ready("ready", staleOffline = false),
+    ): DetailRail = DetailRail(
         stableKey = "related",
         kind = DetailRailKind.Recommendations,
         title = "Related",
         state = DetailRailState.Available,
         cardKind = DetailRailCardKind.Poster,
         activationPolicy = DetailRailActivationPolicy.Play,
-        items = listOf(railItem("related-1", DetailImageState.Ready("ready", staleOffline = false))),
+        items = listOf(railItem("related-1", itemState)),
     )
 
     private fun railItem(
@@ -288,6 +358,20 @@ class FerrexDetailPrimitivesTest {
             imageState = state,
         )
     }
+
+    private fun fullRecoveryActions(): List<DetailPageAction> = listOf(
+        DetailPageAction(DetailPageActionKind.Back, "Back", DetailActionRole.Back),
+        DetailPageAction(DetailPageActionKind.RetryCache, "Retry cache sync", DetailActionRole.Retry),
+        DetailPageAction(
+            kind = DetailPageActionKind.ClearSelectedCache,
+            label = "Clear selected cache",
+            role = DetailActionRole.Cache,
+            targetId = "library",
+        ),
+        DetailPageAction(DetailPageActionKind.ChangeServer, "Change server", DetailActionRole.Secondary),
+        DetailPageAction(DetailPageActionKind.ResetConnection, "Reset connection", DetailActionRole.DestructiveReset),
+        DetailPageAction(DetailPageActionKind.Diagnostics, "Diagnostics / Export diagnostics", DetailActionRole.Diagnostics),
+    )
 
     private fun playbackContract(id: String): PlaybackRouteContract = PlaybackRouteContract(
         targetMediaId = "file-$id",
