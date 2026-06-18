@@ -62,12 +62,14 @@ fun PhoneSearchPanel(
     onOpenResult: (SearchDetailTarget) -> Unit,
     modifier: Modifier = Modifier,
     onOpenDiagnostics: (() -> Unit)? = null,
+    initialQuery: String = "",
+    searchDebounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
 ) {
-    var query by remember(scope.directoryName) { mutableStateOf("") }
+    var query by remember(scope.directoryName, initialQuery) { mutableStateOf(initialQuery) }
     var retryNonce by remember(scope.directoryName) { mutableStateOf(0) }
     var uiState by remember(scope.directoryName) { mutableStateOf<PhoneSearchUiState>(PhoneSearchUiState.Idle) }
 
-    LaunchedEffect(searchRepository, scope.directoryName, query, retryNonce) {
+    LaunchedEffect(searchRepository, scope.directoryName, query, retryNonce, searchDebounceMillis) {
         val trimmed = query.trim()
         if (searchRepository == null) {
             uiState = PhoneSearchUiState.Unavailable
@@ -81,7 +83,9 @@ fun PhoneSearchPanel(
             uiState = PhoneSearchUiState.KeepTyping
             return@LaunchedEffect
         }
-        delay(SEARCH_DEBOUNCE_MILLIS)
+        if (searchDebounceMillis > 0L) {
+            delay(searchDebounceMillis)
+        }
         uiState = PhoneSearchUiState.Loading(trimmed)
         uiState = PhoneSearchUiState.Loaded(searchRepository.search(scope, trimmed))
     }
