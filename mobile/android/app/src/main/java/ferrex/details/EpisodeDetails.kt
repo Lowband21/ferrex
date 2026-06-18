@@ -122,6 +122,32 @@ class EpisodeDetails : Table() {
         }
     val productionCodeAsByteBuffer : ByteBuffer? get() = __vector_as_bytebuffer(26, 1)
     fun productionCodeInByteBuffer(_bb: ByteBuffer) : ByteBuffer? = __vector_in_bytebuffer(_bb, 26, 1)
+    fun guestStars(j: Int) : ferrex.details.CastCredit? = guestStars(ferrex.details.CastCredit(), j)
+    fun guestStars(obj: ferrex.details.CastCredit, j: Int) : ferrex.details.CastCredit? {
+        val o = __offset(28)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val guestStarsLength : Int
+        get() {
+            val o = __offset(28); return if (o != 0) __vector_len(o) else 0
+        }
+    fun crew(j: Int) : ferrex.details.CrewCredit? = crew(ferrex.details.CrewCredit(), j)
+    fun crew(obj: ferrex.details.CrewCredit, j: Int) : ferrex.details.CrewCredit? {
+        val o = __offset(30)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val crewLength : Int
+        get() {
+            val o = __offset(30); return if (o != 0) __vector_len(o) else 0
+        }
     companion object {
         fun validateVersion() = Constants.FLATBUFFERS_25_2_10()
         fun getRootAsEpisodeDetails(_bb: ByteBuffer): EpisodeDetails = getRootAsEpisodeDetails(_bb, EpisodeDetails())
@@ -129,7 +155,7 @@ class EpisodeDetails : Table() {
             _bb.order(ByteOrder.LITTLE_ENDIAN)
             return (obj.__assign(_bb.getInt(_bb.position()) + _bb.position(), _bb))
         }
-        fun startEpisodeDetails(builder: FlatBufferBuilder) = builder.startTable(12)
+        fun startEpisodeDetails(builder: FlatBufferBuilder) = builder.startTable(14)
         fun addId(builder: FlatBufferBuilder, id: ULong) = builder.addLong(0, id.toLong(), 0)
         fun addEpisodeNumber(builder: FlatBufferBuilder, episodeNumber: UShort) = builder.addShort(1, episodeNumber.toShort(), 0)
         fun addSeasonNumber(builder: FlatBufferBuilder, seasonNumber: UShort) = builder.addShort(2, seasonNumber.toShort(), 0)
@@ -142,6 +168,24 @@ class EpisodeDetails : Table() {
         fun addVoteAverage(builder: FlatBufferBuilder, voteAverage: Float) = builder.addFloat(9, voteAverage, 0.0)
         fun addVoteCount(builder: FlatBufferBuilder, voteCount: UInt) = builder.addInt(10, voteCount.toInt(), 0)
         fun addProductionCode(builder: FlatBufferBuilder, productionCode: Int) = builder.addOffset(11, productionCode, 0)
+        fun addGuestStars(builder: FlatBufferBuilder, guestStars: Int) = builder.addOffset(12, guestStars, 0)
+        fun createGuestStarsVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startGuestStarsVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
+        fun addCrew(builder: FlatBufferBuilder, crew: Int) = builder.addOffset(13, crew, 0)
+        fun createCrewVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startCrewVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
         fun endEpisodeDetails(builder: FlatBufferBuilder) : Int {
             val o = builder.endTable()
             return o

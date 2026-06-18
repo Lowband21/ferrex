@@ -32,6 +32,8 @@ impl<'a> EpisodeDetails<'a> {
     pub const VT_VOTE_AVERAGE: ::flatbuffers::VOffsetT = 22;
     pub const VT_VOTE_COUNT: ::flatbuffers::VOffsetT = 24;
     pub const VT_PRODUCTION_CODE: ::flatbuffers::VOffsetT = 26;
+    pub const VT_GUEST_STARS: ::flatbuffers::VOffsetT = 28;
+    pub const VT_CREW: ::flatbuffers::VOffsetT = 30;
 
     #[inline]
     pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -49,6 +51,12 @@ impl<'a> EpisodeDetails<'a> {
     ) -> ::flatbuffers::WIPOffset<EpisodeDetails<'bldr>> {
         let mut builder = EpisodeDetailsBuilder::new(_fbb);
         builder.add_id(args.id);
+        if let Some(x) = args.crew {
+            builder.add_crew(x);
+        }
+        if let Some(x) = args.guest_stars {
+            builder.add_guest_stars(x);
+        }
         if let Some(x) = args.production_code {
             builder.add_production_code(x);
         }
@@ -213,6 +221,48 @@ impl<'a> EpisodeDetails<'a> {
             )
         }
     }
+    #[inline]
+    pub fn guest_stars(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CastCredit<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CastCredit>,
+                >,
+            >>(EpisodeDetails::VT_GUEST_STARS, None)
+        }
+    }
+    #[inline]
+    pub fn crew(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CrewCredit<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CrewCredit>,
+                >,
+            >>(EpisodeDetails::VT_CREW, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EpisodeDetails<'_> {
@@ -262,6 +312,18 @@ impl ::flatbuffers::Verifiable for EpisodeDetails<'_> {
                 Self::VT_PRODUCTION_CODE,
                 false,
             )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CastCredit>,
+                >,
+            >>("guest_stars", Self::VT_GUEST_STARS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CrewCredit>,
+                >,
+            >>("crew", Self::VT_CREW, false)?
             .finish();
         Ok(())
     }
@@ -279,6 +341,22 @@ pub struct EpisodeDetailsArgs<'a> {
     pub vote_average: f32,
     pub vote_count: u32,
     pub production_code: Option<::flatbuffers::WIPOffset<&'a str>>,
+    pub guest_stars: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CastCredit<'a>>,
+            >,
+        >,
+    >,
+    pub crew: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CrewCredit<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for EpisodeDetailsArgs<'a> {
     #[inline]
@@ -296,6 +374,8 @@ impl<'a> Default for EpisodeDetailsArgs<'a> {
             vote_average: 0.0,
             vote_count: 0,
             production_code: None,
+            guest_stars: None,
+            crew: None,
         }
     }
 }
@@ -406,6 +486,36 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
         );
     }
     #[inline]
+    pub fn add_guest_stars(
+        &mut self,
+        guest_stars: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CastCredit<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EpisodeDetails::VT_GUEST_STARS,
+            guest_stars,
+        );
+    }
+    #[inline]
+    pub fn add_crew(
+        &mut self,
+        crew: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CrewCredit<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EpisodeDetails::VT_CREW,
+            crew,
+        );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> EpisodeDetailsBuilder<'a, 'b, A> {
@@ -437,6 +547,8 @@ impl ::core::fmt::Debug for EpisodeDetails<'_> {
         ds.field("vote_average", &self.vote_average());
         ds.field("vote_count", &self.vote_count());
         ds.field("production_code", &self.production_code());
+        ds.field("guest_stars", &self.guest_stars());
+        ds.field("crew", &self.crew());
         ds.finish()
     }
 }

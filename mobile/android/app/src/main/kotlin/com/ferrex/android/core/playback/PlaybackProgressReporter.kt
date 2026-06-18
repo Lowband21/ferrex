@@ -84,6 +84,7 @@ class OkHttpPlaybackProgressReporter(
 private fun BrowseMediaType.watchApiValue(): String = when (this) {
     BrowseMediaType.Movie -> "Movie"
     BrowseMediaType.Series -> "Series"
+    BrowseMediaType.Season -> "Series"
     BrowseMediaType.Episode -> "Episode"
     BrowseMediaType.Unknown -> "Movie"
 }

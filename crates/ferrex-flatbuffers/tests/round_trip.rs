@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use ferrex_flatbuffers::conversions::{
-    auth, batch_data, batch_sync, image, library,
+    auth, batch_data, batch_sync, details, image, library,
 };
 use ferrex_flatbuffers::fb;
 use ferrex_flatbuffers::uuid_helpers::{fb_to_uuid, uuid_to_fb};
@@ -163,6 +163,59 @@ fn make_episode_details() -> ferrex_model::EpisodeDetails {
         guest_stars: Vec::new(),
         crew: Vec::new(),
         content_ratings: Vec::new(),
+    }
+}
+
+fn make_cast_credit(
+    name: &str,
+    character: &str,
+    person_id: Uuid,
+    profile_iid: Uuid,
+) -> ferrex_model::details::CastMember {
+    ferrex_model::details::CastMember {
+        id: 7_001,
+        person_id: Some(person_id),
+        credit_id: Some(format!("{name}-credit")),
+        cast_id: Some(17),
+        name: name.to_string(),
+        original_name: Some(format!("{name} Original")),
+        character: character.to_string(),
+        profile_path: Some(format!("/profiles/{name}.jpg")),
+        order: 0,
+        gender: Some(2),
+        known_for_department: Some("Acting".to_string()),
+        adult: Some(false),
+        popularity: Some(12.5),
+        also_known_as: Vec::new(),
+        external_ids: ferrex_model::details::PersonExternalIds::default(),
+        image_slot: 1,
+        image_id: Some(profile_iid),
+    }
+}
+
+fn make_crew_credit(
+    name: &str,
+    job: &str,
+    department: &str,
+    person_id: Uuid,
+    profile_iid: Uuid,
+) -> ferrex_model::details::CrewMember {
+    ferrex_model::details::CrewMember {
+        id: 8_001,
+        person_id: Some(person_id),
+        credit_id: Some(format!("{name}-credit")),
+        name: name.to_string(),
+        job: job.to_string(),
+        department: department.to_string(),
+        profile_path: Some(format!("/profiles/{name}.jpg")),
+        gender: Some(1),
+        known_for_department: Some(department.to_string()),
+        adult: Some(false),
+        popularity: Some(10.0),
+        original_name: Some(format!("{name} Original")),
+        also_known_as: Vec::new(),
+        external_ids: ferrex_model::details::PersonExternalIds::default(),
+        profile_iid: Some(profile_iid),
     }
 }
 
@@ -777,6 +830,152 @@ fn movie_batch_sync_and_fetch_round_trip() {
         .variant_as_parsed_movie_info()
         .expect("parsed movie info");
     assert_eq!(parsed.year(), 2026);
+}
+
+#[test]
+fn detail_credit_profile_and_related_fields_serialize() {
+    let cast_person_id = Uuid::now_v7();
+    let cast_profile_iid = Uuid::now_v7();
+    let crew_person_id = Uuid::now_v7();
+    let crew_profile_iid = Uuid::now_v7();
+    let guest_profile_iid = Uuid::now_v7();
+
+    let cast =
+        make_cast_credit("Actor One", "Hero", cast_person_id, cast_profile_iid);
+    let crew = make_crew_credit(
+        "Director One",
+        "Director",
+        "Directing",
+        crew_person_id,
+        crew_profile_iid,
+    );
+    let related = ferrex_model::details::RelatedMediaRef {
+        tmdb_id: 9_001,
+        title: Some("Recommended Title".to_string()),
+    };
+    let similar = ferrex_model::details::RelatedMediaRef {
+        tmdb_id: 9_002,
+        title: Some("Similar Title".to_string()),
+    };
+
+    let mut movie = make_movie_details("Credit Movie");
+    movie.cast = vec![cast.clone()];
+    movie.crew = vec![crew.clone()];
+    movie.recommendations = vec![related.clone()];
+    movie.similar = vec![similar.clone()];
+    let mut movie_builder = flatbuffers::FlatBufferBuilder::new();
+    let movie_root =
+        details::build_enhanced_movie_details(&mut movie_builder, &movie);
+    movie_builder.finish(movie_root, None);
+    let movie = flatbuffers::root::<fb::details::EnhancedMovieDetails>(
+        movie_builder.finished_data(),
+    )
+    .expect("movie details root");
+    let actor = movie.cast().expect("movie cast").get(0);
+    assert_eq!(actor.name(), Some("Actor One"));
+    assert_eq!(actor.character(), Some("Hero"));
+    let actor_profile = actor.profile().expect("actor profile");
+    assert_eq!(
+        fb_to_uuid(actor_profile.person_id().expect("person id")),
+        cast_person_id
+    );
+    assert_eq!(
+        actor_profile.profile_path(),
+        Some("/profiles/Actor One.jpg")
+    );
+    assert_eq!(
+        fb_to_uuid(actor_profile.profile_iid().expect("profile iid")),
+        cast_profile_iid
+    );
+    let movie_crew = movie.crew().expect("movie crew").get(0);
+    assert_eq!(movie_crew.job(), Some("Director"));
+    assert_eq!(
+        fb_to_uuid(
+            movie_crew
+                .profile()
+                .expect("crew profile")
+                .profile_iid()
+                .expect("crew profile iid"),
+        ),
+        crew_profile_iid
+    );
+    assert_eq!(
+        movie
+            .recommendations()
+            .expect("recommendations")
+            .get(0)
+            .tmdb_id(),
+        9_001
+    );
+    assert_eq!(
+        movie.similar().expect("similar").get(0).title(),
+        Some("Similar Title")
+    );
+
+    let mut series = make_series_details("Credit Series");
+    series.cast = vec![cast];
+    series.crew = vec![crew];
+    series.recommendations = vec![related];
+    series.similar = vec![similar];
+    let mut series_builder = flatbuffers::FlatBufferBuilder::new();
+    let series_root =
+        details::build_enhanced_series_details(&mut series_builder, &series);
+    series_builder.finish(series_root, None);
+    let series = flatbuffers::root::<fb::details::EnhancedSeriesDetails>(
+        series_builder.finished_data(),
+    )
+    .expect("series details root");
+    assert_eq!(
+        series.cast().expect("series cast").get(0).name(),
+        Some("Actor One")
+    );
+    assert_eq!(
+        series
+            .recommendations()
+            .expect("series recommendations")
+            .get(0)
+            .title(),
+        Some("Recommended Title")
+    );
+
+    let mut episode = make_episode_details();
+    episode.guest_stars = vec![make_cast_credit(
+        "Guest Star",
+        "Guest",
+        Uuid::now_v7(),
+        guest_profile_iid,
+    )];
+    episode.crew = vec![make_crew_credit(
+        "Writer One",
+        "Writer",
+        "Writing",
+        Uuid::now_v7(),
+        crew_profile_iid,
+    )];
+    let mut episode_builder = flatbuffers::FlatBufferBuilder::new();
+    let episode_root =
+        details::build_episode_details(&mut episode_builder, &episode);
+    episode_builder.finish(episode_root, None);
+    let episode = flatbuffers::root::<fb::details::EpisodeDetails>(
+        episode_builder.finished_data(),
+    )
+    .expect("episode details root");
+    let guest = episode.guest_stars().expect("guest stars").get(0);
+    assert_eq!(guest.name(), Some("Guest Star"));
+    assert_eq!(
+        fb_to_uuid(
+            guest
+                .profile()
+                .expect("guest profile")
+                .profile_iid()
+                .expect("guest profile iid"),
+        ),
+        guest_profile_iid
+    );
+    assert_eq!(
+        episode.crew().expect("episode crew").get(0).job(),
+        Some("Writer")
+    );
 }
 
 #[test]

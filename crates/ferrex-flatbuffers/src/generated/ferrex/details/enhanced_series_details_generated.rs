@@ -44,6 +44,10 @@ impl<'a> EnhancedSeriesDetails<'a> {
     pub const VT_LOGO_PATH: ::flatbuffers::VOffsetT = 46;
     pub const VT_PRIMARY_POSTER_IID: ::flatbuffers::VOffsetT = 48;
     pub const VT_PRIMARY_BACKDROP_IID: ::flatbuffers::VOffsetT = 50;
+    pub const VT_CAST: ::flatbuffers::VOffsetT = 52;
+    pub const VT_CREW: ::flatbuffers::VOffsetT = 54;
+    pub const VT_RECOMMENDATIONS: ::flatbuffers::VOffsetT = 56;
+    pub const VT_SIMILAR: ::flatbuffers::VOffsetT = 58;
 
     #[inline]
     pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -61,6 +65,18 @@ impl<'a> EnhancedSeriesDetails<'a> {
     ) -> ::flatbuffers::WIPOffset<EnhancedSeriesDetails<'bldr>> {
         let mut builder = EnhancedSeriesDetailsBuilder::new(_fbb);
         builder.add_id(args.id);
+        if let Some(x) = args.similar {
+            builder.add_similar(x);
+        }
+        if let Some(x) = args.recommendations {
+            builder.add_recommendations(x);
+        }
+        if let Some(x) = args.crew {
+            builder.add_crew(x);
+        }
+        if let Some(x) = args.cast {
+            builder.add_cast(x);
+        }
         if let Some(x) = args.primary_backdrop_iid {
             builder.add_primary_backdrop_iid(x);
         }
@@ -420,6 +436,92 @@ impl<'a> EnhancedSeriesDetails<'a> {
             )
         }
     }
+    #[inline]
+    pub fn cast(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CastCredit<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CastCredit>,
+                >,
+            >>(EnhancedSeriesDetails::VT_CAST, None)
+        }
+    }
+    #[inline]
+    pub fn crew(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<CrewCredit<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<CrewCredit>,
+                >,
+            >>(EnhancedSeriesDetails::VT_CREW, None)
+        }
+    }
+    #[inline]
+    pub fn recommendations(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>(
+                EnhancedSeriesDetails::VT_RECOMMENDATIONS, None
+            )
+        }
+    }
+    #[inline]
+    pub fn similar(
+        &self,
+    ) -> Option<
+        ::flatbuffers::Vector<
+            'a,
+            ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+        >,
+    > {
+        // Safety:
+        // Created from valid Table for this object
+        // which contains a valid value in this slot
+        unsafe {
+            self._tab.get::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    'a,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>(EnhancedSeriesDetails::VT_SIMILAR, None)
+        }
+    }
 }
 
 impl ::flatbuffers::Verifiable for EnhancedSeriesDetails<'_> {
@@ -534,6 +636,30 @@ impl ::flatbuffers::Verifiable for EnhancedSeriesDetails<'_> {
                 Self::VT_PRIMARY_BACKDROP_IID,
                 false,
             )?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CastCredit>,
+                >,
+            >>("cast", Self::VT_CAST, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<CrewCredit>,
+                >,
+            >>("crew", Self::VT_CREW, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>("recommendations", Self::VT_RECOMMENDATIONS, false)?
+            .visit_field::<::flatbuffers::ForwardsUOffset<
+                ::flatbuffers::Vector<
+                    '_,
+                    ::flatbuffers::ForwardsUOffset<RelatedMediaRef>,
+                >,
+            >>("similar", Self::VT_SIMILAR, false)?
             .finish();
         Ok(())
     }
@@ -570,6 +696,38 @@ pub struct EnhancedSeriesDetailsArgs<'a> {
     pub logo_path: Option<::flatbuffers::WIPOffset<&'a str>>,
     pub primary_poster_iid: Option<&'a super::ids::Uuid>,
     pub primary_backdrop_iid: Option<&'a super::ids::Uuid>,
+    pub cast: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CastCredit<'a>>,
+            >,
+        >,
+    >,
+    pub crew: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<CrewCredit<'a>>,
+            >,
+        >,
+    >,
+    pub recommendations: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+            >,
+        >,
+    >,
+    pub similar: Option<
+        ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'a,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'a>>,
+            >,
+        >,
+    >,
 }
 impl<'a> Default for EnhancedSeriesDetailsArgs<'a> {
     #[inline]
@@ -599,6 +757,10 @@ impl<'a> Default for EnhancedSeriesDetailsArgs<'a> {
             logo_path: None,
             primary_poster_iid: None,
             primary_backdrop_iid: None,
+            cast: None,
+            crew: None,
+            recommendations: None,
+            similar: None,
         }
     }
 }
@@ -830,6 +992,66 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a>
         );
     }
     #[inline]
+    pub fn add_cast(
+        &mut self,
+        cast: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CastCredit<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedSeriesDetails::VT_CAST,
+            cast,
+        );
+    }
+    #[inline]
+    pub fn add_crew(
+        &mut self,
+        crew: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<CrewCredit<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedSeriesDetails::VT_CREW,
+            crew,
+        );
+    }
+    #[inline]
+    pub fn add_recommendations(
+        &mut self,
+        recommendations: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedSeriesDetails::VT_RECOMMENDATIONS,
+            recommendations,
+        );
+    }
+    #[inline]
+    pub fn add_similar(
+        &mut self,
+        similar: ::flatbuffers::WIPOffset<
+            ::flatbuffers::Vector<
+                'b,
+                ::flatbuffers::ForwardsUOffset<RelatedMediaRef<'b>>,
+            >,
+        >,
+    ) {
+        self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+            EnhancedSeriesDetails::VT_SIMILAR,
+            similar,
+        );
+    }
+    #[inline]
     pub fn new(
         _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
     ) -> EnhancedSeriesDetailsBuilder<'a, 'b, A> {
@@ -873,6 +1095,10 @@ impl ::core::fmt::Debug for EnhancedSeriesDetails<'_> {
         ds.field("logo_path", &self.logo_path());
         ds.field("primary_poster_iid", &self.primary_poster_iid());
         ds.field("primary_backdrop_iid", &self.primary_backdrop_iid());
+        ds.field("cast", &self.cast());
+        ds.field("crew", &self.crew());
+        ds.field("recommendations", &self.recommendations());
+        ds.field("similar", &self.similar());
         ds.finish()
     }
 }

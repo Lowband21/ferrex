@@ -13,9 +13,13 @@ import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
 import com.ferrex.android.core.watch.WatchRepositoryState
+import ferrex.details.CastCredit as FlatCastCredit
+import ferrex.details.CreditProfile as FlatCreditProfile
+import ferrex.details.CrewCredit as FlatCrewCredit
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
 import ferrex.details.EpisodeDetails
+import ferrex.details.RelatedMediaRef as FlatRelatedMediaRef
 import ferrex.details.SeasonDetails
 import ferrex.files.MediaFile
 import ferrex.media.EpisodeReference
@@ -36,10 +40,18 @@ sealed interface DetailLoadResult {
         val detail: SeriesBundleDetail,
     ) : DetailLoadResult
 
+    data class Season(
+        override val route: MediaRouteArgs,
+        val series: SeriesDetail?,
+        val season: SeasonDetail,
+        val episodes: List<EpisodeDetail>,
+    ) : DetailLoadResult
+
     data class Episode(
         override val route: MediaRouteArgs,
         val detail: EpisodeDetail,
         val parentSeries: SeriesDetail?,
+        val siblingEpisodes: List<EpisodeDetail> = emptyList(),
     ) : DetailLoadResult
 
     data class Missing(
@@ -69,6 +81,45 @@ data class DetailImageSet(
     val keys: Set<ImageRequestKey> = setOfNotNull(poster, backdrop, still)
 }
 
+data class DetailProfileImageSet(
+    val profile: ImageRequestKey? = null,
+    val profileFallbackPath: String? = null,
+) {
+    val keys: Set<ImageRequestKey> = setOfNotNull(profile)
+}
+
+data class DetailCastCredit(
+    val personTmdbId: Long?,
+    val personId: String?,
+    val creditId: String?,
+    val castId: Long?,
+    val name: String,
+    val originalName: String?,
+    val character: String?,
+    val order: Int,
+    val gender: Int?,
+    val knownForDepartment: String?,
+    val profileImages: DetailProfileImageSet = DetailProfileImageSet(),
+)
+
+data class DetailCrewCredit(
+    val personTmdbId: Long?,
+    val personId: String?,
+    val creditId: String?,
+    val name: String,
+    val job: String,
+    val department: String,
+    val gender: Int?,
+    val knownForDepartment: String?,
+    val originalName: String?,
+    val profileImages: DetailProfileImageSet = DetailProfileImageSet(),
+)
+
+data class DetailRelatedMediaRef(
+    val tmdbId: Long?,
+    val title: String?,
+)
+
 data class MovieDetail(
     val id: String,
     val libraryId: String,
@@ -86,6 +137,10 @@ data class MovieDetail(
     val fileId: String?,
     val fileName: String?,
     val images: DetailImageSet,
+    val cast: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
+    val recommendations: List<DetailRelatedMediaRef> = emptyList(),
+    val similar: List<DetailRelatedMediaRef> = emptyList(),
 )
 
 data class SeriesDetail(
@@ -108,6 +163,10 @@ data class SeriesDetail(
     val inProduction: Boolean,
     val tmdbId: Long?,
     val images: DetailImageSet,
+    val cast: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
+    val recommendations: List<DetailRelatedMediaRef> = emptyList(),
+    val similar: List<DetailRelatedMediaRef> = emptyList(),
 )
 
 data class SeasonDetail(
@@ -135,6 +194,8 @@ data class EpisodeDetail(
     val fileId: String?,
     val fileName: String?,
     val images: DetailImageSet,
+    val guestStars: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
 ) {
     val episodeKey: String = "S$seasonNumber:E$episodeNumber"
 }
@@ -171,6 +232,9 @@ object DetailRouteContracts {
             nextEpisode = result.detail.series.tmdbId?.let { watchState.seriesStatus(it)?.nextEpisode ?: watchState.nextEpisodes[it] },
             sourceRoute = result.route,
         ) ?: seriesStartOver(result.detail, result.route)
+        is DetailLoadResult.Season -> result.episodes.firstNotNullOfOrNull { episode ->
+            episodeResume(episode, watchState.mediaProgress(episode.id), result.route)
+        } ?: result.episodes.firstOrNull { it.playbackTargetId != null }?.let { episodeStartOver(it, result.route) }
         is DetailLoadResult.Missing -> null
     }
 
@@ -281,6 +345,7 @@ object DetailCache {
         return when (route.mediaType) {
             BrowseMediaType.Movie -> resolveMovie(state, route)
             BrowseMediaType.Series -> resolveSeries(state, route)
+            BrowseMediaType.Season -> resolveSeason(state, route)
             BrowseMediaType.Episode -> resolveEpisode(state, route)
             BrowseMediaType.Unknown -> missing(route, "This media type is not supported by the detail cache.")
         }
@@ -290,20 +355,7 @@ object DetailCache {
         clearSelectedCache = route.libraryId != null,
     )
 
-    fun imageKeys(result: DetailLoadResult?): Set<ImageRequestKey> = when (result) {
-        is DetailLoadResult.Movie -> result.detail.images.keys
-        is DetailLoadResult.Series -> buildSet {
-            addAll(result.detail.series.images.keys)
-            result.detail.seasons.flatMapTo(this) { it.images.keys }
-            result.detail.episodes.flatMapTo(this) { it.images.keys }
-        }
-        is DetailLoadResult.Episode -> buildSet {
-            addAll(result.detail.images.keys)
-            result.parentSeries?.images?.keys?.let(::addAll)
-        }
-        is DetailLoadResult.Missing,
-        null -> emptySet()
-    }
+    fun imageKeys(result: DetailLoadResult?): Set<ImageRequestKey> = DetailPageMapper.imageKeys(result)
 
     private fun resolveMovie(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {
         matchingMovieLibraries(state, route.libraryId).forEach { cached ->
@@ -322,12 +374,31 @@ object DetailCache {
         return missing(route, "Series not found in the selected repository cache. Retry cache sync or recover the connection.")
     }
 
+    private fun resolveSeason(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {
+        matchingSeriesLibraries(state, route.libraryId).forEach { cached ->
+            for (index in 0 until cached.accessor.seasonCount) {
+                val season = cached.accessor.seasonAt(index) ?: continue
+                if (season.id.toUuidString() != route.mediaId) continue
+                val parentSeriesId = season.seriesId.toUuidString()
+                val parent = cached.accessor.seriesById(parentSeriesId)?.toDetail()
+                val episodes = cached.accessor.episodesForSeason(parentSeriesId, season.seasonNumber.toInt())
+                    .map(EpisodeReference::toDetail)
+                    .sortedWith(compareBy<EpisodeDetail> { it.seasonNumber }.thenBy { it.episodeNumber })
+                return DetailLoadResult.Season(route, parent, season.toDetail(), episodes)
+            }
+        }
+        return missing(route, "Season not found in cached series bundles. Retry episodes or recover the connection.")
+    }
+
     private fun resolveEpisode(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {
         matchingSeriesLibraries(state, route.libraryId).forEach { cached ->
             val episode = cached.accessor.episodeById(route.mediaId) ?: return@forEach
             val parentSeriesId = episode.seriesId.toUuidString()
             val parent = cached.accessor.seriesById(parentSeriesId)?.toDetail()
-            return DetailLoadResult.Episode(route, episode.toDetail(), parent)
+            val siblingEpisodes = cached.accessor.episodesForSeason(parentSeriesId, episode.seasonNumber.toInt())
+                .map(EpisodeReference::toDetail)
+                .sortedWith(compareBy<EpisodeDetail> { it.seasonNumber }.thenBy { it.episodeNumber })
+            return DetailLoadResult.Episode(route, episode.toDetail(), parent, siblingEpisodes)
         }
         return missing(route, "Episode not found in cached series bundles. Retry episodes or recover the connection.")
     }
@@ -390,6 +461,10 @@ private fun MovieReference.toDetail(@Suppress("UNUSED_PARAMETER") libraryName: S
         fileId = file?.safeId(),
         fileName = file?.filename,
         images = details.movieImages(),
+        cast = details?.castCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
+        recommendations = details?.recommendationRefs().orEmpty(),
+        similar = details?.similarRefs().orEmpty(),
     )
 }
 
@@ -415,6 +490,10 @@ private fun SeriesReference.toDetail(): SeriesDetail {
         inProduction = details?.inProduction ?: false,
         tmdbId = tmdbId.toLong().takeIf { it > 0L },
         images = details.seriesImages(),
+        cast = details?.castCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
+        recommendations = details?.recommendationRefs().orEmpty(),
+        similar = details?.similarRefs().orEmpty(),
     )
 }
 
@@ -452,6 +531,8 @@ private fun EpisodeReference.toDetail(): EpisodeDetail {
         fileId = file?.safeId(),
         fileName = file?.filename,
         images = details.episodeImages(),
+        guestStars = details?.guestStarCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
     )
 }
 
@@ -480,6 +561,115 @@ private fun EpisodeDetails?.episodeImages(): DetailImageSet = DetailImageSet(
     still = this?.primaryStillIid?.toUuidString()?.let { ImageRequestKey(it, BrowseImageCategory.Episode) },
     stillFallbackPath = this?.stillPath.cleanOrNull(),
 )
+
+private fun FlatCreditProfile?.profileImages(): DetailProfileImageSet = DetailProfileImageSet(
+    profile = this?.profileIid?.toUuidString()?.let { ImageRequestKey(it, BrowseImageCategory.Profile) },
+    profileFallbackPath = this?.profilePath.cleanOrNull(),
+)
+
+private fun FlatCastCredit.toDetailCastCredit(): DetailCastCredit {
+    val profile = profile
+    return DetailCastCredit(
+        personTmdbId = id.toPositiveLongOrNull(),
+        personId = profile?.personId?.toUuidString(),
+        creditId = creditId.cleanOrNull(),
+        castId = castId.toPositiveLongOrNull(),
+        name = name.cleanOrNull() ?: "Unknown cast member",
+        originalName = originalName.cleanOrNull(),
+        character = character.cleanOrNull(),
+        order = order.toClampedInt(),
+        gender = gender.toInt().takeIf { it > 0 },
+        knownForDepartment = knownForDepartment.cleanOrNull(),
+        profileImages = profile.profileImages(),
+    )
+}
+
+private fun FlatCrewCredit.toDetailCrewCredit(): DetailCrewCredit {
+    val profile = profile
+    return DetailCrewCredit(
+        personTmdbId = id.toPositiveLongOrNull(),
+        personId = profile?.personId?.toUuidString(),
+        creditId = creditId.cleanOrNull(),
+        name = name.cleanOrNull() ?: "Unknown crew member",
+        job = job.cleanOrNull() ?: "Crew",
+        department = department.cleanOrNull() ?: "Crew",
+        gender = gender.toInt().takeIf { it > 0 },
+        knownForDepartment = knownForDepartment.cleanOrNull(),
+        originalName = originalName.cleanOrNull(),
+        profileImages = profile.profileImages(),
+    )
+}
+
+private fun FlatRelatedMediaRef.toDetailRelatedMediaRef(): DetailRelatedMediaRef = DetailRelatedMediaRef(
+    tmdbId = tmdbId.toPositiveLongOrNull(),
+    title = title.cleanOrNull(),
+)
+
+private fun EnhancedMovieDetails.castCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until castLength) {
+        cast(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.recommendationRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until recommendationsLength) {
+        recommendations(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.similarRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until similarLength) {
+        similar(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.castCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until castLength) {
+        cast(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.recommendationRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until recommendationsLength) {
+        recommendations(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.similarRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until similarLength) {
+        similar(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EpisodeDetails.guestStarCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until guestStarsLength) {
+        guestStars(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EpisodeDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun ULong.toPositiveLongOrNull(): Long? = takeIf { value ->
+    value > 0UL && value <= Long.MAX_VALUE.toULong()
+}?.toLong()
+
+private fun UInt.toClampedInt(): Int = coerceAtMost(Int.MAX_VALUE.toUInt()).toInt()
 
 private fun EnhancedMovieDetails.genreNames(): List<String> = buildList {
     for (index in 0 until genresLength) {
