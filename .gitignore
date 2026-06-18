@@ -82,6 +82,8 @@ tarpaulin-report.html
 
 # Cache
 cache/
+__pycache__/
+*.pyc
 !**/src/**/cache/
 !**/src/**/cache/**
 

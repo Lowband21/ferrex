@@ -27,6 +27,25 @@ ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sd
 
 No generated screenshots, videos, bugreports, logcats, or local Gradle artifacts should be committed.
 
+## Host-side scenario screenshot runner
+
+After building and installing the debug APKs with `just android-qa-build` and `just android-qa-install all`, capture the deterministic debug scenario matrix from the repository root:
+
+```bash
+just android-visual-qa-capture all all
+# equivalent direct form:
+./scripts/qa/android-visual-qa.sh capture --target all --scenario all
+```
+
+The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches each scenario through `com.ferrex.android.action.VISUAL_QA` on explicit phone/TV serials, drives TV D-pad focus keys for the TV focus scenarios, and writes stable PNG paths plus `manifest.json` under `target/android-visual-qa/`:
+
+- `target/android-visual-qa/phone/<scenario-id>.png` must validate as `1080x2400`.
+- `target/android-visual-qa/tv/<scenario-id>.png` must validate as `1920x1080`.
+- `target/android-visual-qa/manifest.json` records command/tool versions, APK/package metadata, serial metadata, scenario IDs, dimensions, paths, and timestamps.
+- Failed captures include bounded redacted logcat snippets under `target/android-visual-qa/logs/`; redaction removes authorization values, bearer/basic tokens, token/ticket/password fields, URL origins, and private LAN origins.
+
+Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
+
 ## Stable tag map for UI tests/manual QA
 
 The shared tag constants live in `mobile/android/app/src/main/kotlin/com/ferrex/android/ui/qa/FerrexVisualQa.kt`.

@@ -152,6 +152,8 @@ alias aqs := android-qa-start
 alias aqi := android-qa-install
 alias aql := android-qa-launch
 alias aqc := android-qa-check
+alias aqv := android-visual-qa
+alias aqcap := android-visual-qa-capture
 
 [no-cd]
 android-qa-doctor *args:
@@ -176,6 +178,14 @@ android-qa-launch target="all":
 [no-cd]
 android-qa-check target="all":
     ./scripts/qa/android-emulator-qa.sh check {{ target }}
+
+[no-cd]
+android-visual-qa *args:
+    ./scripts/qa/android-visual-qa.sh {{ args }}
+
+[no-cd]
+android-visual-qa-capture target="all" scenario="all":
+    ./scripts/qa/android-visual-qa.sh capture --target {{ target }} --scenario {{ scenario }}
 
 default:
     @just --list
