@@ -84,6 +84,18 @@ class TvFocusRestoreModelTest {
     }
 
     @Test
+    fun tvDetailInitialFocusIsPageScopedBackWithStableSurfaces() {
+        val movieTarget = TvDetailFocusPolicy.initialDetailTarget("movie:alpha")
+        val episodeTarget = TvDetailFocusPolicy.initialDetailTarget("episode:pilot")
+
+        assertEquals(TvDetailFocusPolicy.SURFACE_BACK, movieTarget.surface)
+        assertEquals(TvDetailFocusPolicy.ITEM_BACK, movieTarget.item)
+        assertEquals("detail:movie:alpha", movieTarget.screen)
+        assertEquals("detail:episode:pilot", episodeTarget.screen)
+        assertEquals("detail-rail:series:alpha:episodes", TvDetailFocusPolicy.railSurface("series:alpha:episodes"))
+    }
+
+    @Test
     fun tvHomeInitialFocusPrefersContinueThenSearchThenLibraryThenRecovery() {
         assertEquals(
             TvFocusKey("home", "continue-watching", "continue-1"),
