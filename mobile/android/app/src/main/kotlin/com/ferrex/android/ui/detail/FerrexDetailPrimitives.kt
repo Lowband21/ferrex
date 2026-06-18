@@ -62,6 +62,8 @@ import com.ferrex.android.core.detail.DetailRailCardKind
 import com.ferrex.android.core.detail.DetailRailItem
 import com.ferrex.android.core.detail.DetailRailState
 import com.ferrex.android.core.detail.DetailTone
+import com.ferrex.android.core.detail.DetailWatchState
+import com.ferrex.android.core.detail.DetailWatchStateKind
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.mediaart.MediaArtFallbackPolicy
@@ -94,6 +96,12 @@ enum class DetailSurfaceInteractionMode(
         density = FerrexStageDensityFamily.Standard,
         activationVerb = "Tap",
         actionMinWidth = 120.dp,
+    ),
+    PhoneLandscapeTouch(
+        targetKey = "phone",
+        density = FerrexStageDensityFamily.Standard,
+        activationVerb = "Tap",
+        actionMinWidth = 132.dp,
     ),
     TvDpad(
         targetKey = "tv",
@@ -309,11 +317,12 @@ object DetailPrimitivePresenter {
                 add(
                     DetailMetadataChipPresentation(
                         label = watch.label,
-                        tone = when (watch.state.name) {
-                            "Watched" -> FerrexStageSurfaceTone.Primary
-                            "InProgress" -> FerrexStageSurfaceTone.Cache
-                            "Unavailable" -> FerrexStageSurfaceTone.Warning
-                            else -> FerrexStageSurfaceTone.Neutral
+                        tone = when (watch.state) {
+                            DetailWatchStateKind.Watched -> FerrexStageSurfaceTone.Primary
+                            DetailWatchStateKind.InProgress -> FerrexStageSurfaceTone.Cache
+                            DetailWatchStateKind.Unavailable,
+                            DetailWatchStateKind.Unknown -> FerrexStageSurfaceTone.Warning
+                            DetailWatchStateKind.Unwatched -> FerrexStageSurfaceTone.Neutral
                         },
                         contentDescription = watch.message,
                     ),
@@ -328,7 +337,8 @@ object DetailPrimitivePresenter {
     }
 
     fun slabs(page: DetailPageModel, mode: DetailSurfaceInteractionMode): List<DetailSlabPresentation> = buildList {
-        page.emptyState?.let { add(emptySlab(page.stableKey, it, mode)) }
+        page.watchState?.let { add(watchSlab(page.stableKey, it, mode)) }
+        page.emptyState?.let { add(emptySlab(page.stableKey, it, page.recovery.actions, mode)) }
         page.recovery.freshness?.let { add(freshnessSlab(page.stableKey, it, page.recovery.actions, mode)) }
     }
 
@@ -434,15 +444,38 @@ object DetailPrimitivePresenter {
         )
     }
 
-    private fun emptySlab(pageKey: String, empty: DetailEmptyState, mode: DetailSurfaceInteractionMode): DetailSlabPresentation =
-        DetailSlabPresentation(
-            testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "empty"),
-            title = empty.title,
-            message = empty.message,
-            tone = FerrexStageSurfaceTone.StaleOffline,
-            contentDescription = "${empty.title}. ${empty.message}",
-            actions = emptyList(),
-        )
+    private fun watchSlab(
+        pageKey: String,
+        watch: DetailWatchState,
+        mode: DetailSurfaceInteractionMode,
+    ): DetailSlabPresentation = DetailSlabPresentation(
+        testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "watch"),
+        title = watch.label,
+        message = watch.message,
+        tone = when (watch.state) {
+            DetailWatchStateKind.Watched -> FerrexStageSurfaceTone.Primary
+            DetailWatchStateKind.InProgress -> FerrexStageSurfaceTone.Cache
+            DetailWatchStateKind.Unavailable,
+            DetailWatchStateKind.Unknown -> FerrexStageSurfaceTone.Warning
+            DetailWatchStateKind.Unwatched -> FerrexStageSurfaceTone.Neutral
+        },
+        contentDescription = "${watch.label}. ${watch.message}",
+        actions = emptyList(),
+    )
+
+    private fun emptySlab(
+        pageKey: String,
+        empty: DetailEmptyState,
+        recoveryActions: List<DetailPageAction>,
+        mode: DetailSurfaceInteractionMode,
+    ): DetailSlabPresentation = DetailSlabPresentation(
+        testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "empty"),
+        title = empty.title,
+        message = empty.message,
+        tone = FerrexStageSurfaceTone.StaleOffline,
+        contentDescription = "${empty.title}. ${empty.message}",
+        actions = recoveryActions.map { action(pageKey, it, mode) },
+    )
 
     private fun freshnessSlab(
         pageKey: String,
@@ -475,6 +508,7 @@ fun FerrexDetailStage(
     interactionMode: DetailSurfaceInteractionMode = DetailSurfaceInteractionMode.PhoneTouch,
     callbacks: DetailPrimitiveCallbacks = DetailPrimitiveCallbacks(),
     fallbackPolicy: MediaArtFallbackPolicy = MediaArtFallbackPolicy(),
+    header: (@Composable () -> Unit)? = null,
 ) {
     val presentation = remember(page, interactionMode) { DetailPrimitivePresenter.stage(page, interactionMode) }
     LazyColumn(
@@ -485,18 +519,23 @@ fun FerrexDetailStage(
             .semantics { contentDescription = presentation.contentDescription },
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
         contentPadding = PaddingValues(
-            horizontal = if (interactionMode == DetailSurfaceInteractionMode.TvDpad) {
-                FerrexDesignTokens.Space.ScreenTvHorizontal
-            } else {
-                FerrexDesignTokens.Space.ScreenPhoneHorizontal
+            horizontal = when (interactionMode) {
+                DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvHorizontal
+                DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 32.dp
+                DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneHorizontal
             },
-            vertical = if (interactionMode == DetailSurfaceInteractionMode.TvDpad) {
-                FerrexDesignTokens.Space.ScreenTvVertical
-            } else {
-                FerrexDesignTokens.Space.ScreenPhoneVertical
+            vertical = when (interactionMode) {
+                DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvVertical
+                DetailSurfaceInteractionMode.PhoneLandscapeTouch -> FerrexDesignTokens.Space.Xxl
+                DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneVertical
             },
         ),
     ) {
+        if (header != null) {
+            item(key = "detail-header") {
+                header()
+            }
+        }
         item(key = "hero") {
             FerrexDetailHero(
                 page = page,
@@ -572,7 +611,7 @@ fun FerrexDetailHero(
     ) {
         val foreground = page.hero.foreground
         val heroArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg)
-        if (interactionMode == DetailSurfaceInteractionMode.TvDpad && foreground != null) {
+        if (interactionMode.prefersWideHeroLayout() && foreground != null) {
             Row(horizontalArrangement = heroArrangement, verticalAlignment = Alignment.Top) {
                 FerrexDetailMediaObject(
                     art = foreground,
@@ -698,22 +737,32 @@ fun FerrexDetailActionShelf(
         contentDescription = presentation.contentDescription,
         testTag = presentation.testTag,
     ) {
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .then(if (interactionMode == DetailSurfaceInteractionMode.TvDpad) Modifier.focusGroup() else Modifier),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            actions.zip(presentation.actions).forEach { (action, actionPresentation) ->
-                FerrexActionButton(
-                    label = actionPresentation.label,
-                    role = actionPresentation.role,
-                    enabled = actionPresentation.enabled,
-                    onClick = { action.dispatch(callbacks) },
-                    testTag = actionPresentation.testTag,
-                    contentDescription = actionPresentation.contentDescription,
-                    modifier = Modifier.widthIn(min = interactionMode.actionMinWidth),
+        val disabledReasons = presentation.actions.mapNotNull { it.disabledReason }.distinct()
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .then(if (interactionMode == DetailSurfaceInteractionMode.TvDpad) Modifier.focusGroup() else Modifier),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                actions.zip(presentation.actions).forEach { (action, actionPresentation) ->
+                    FerrexActionButton(
+                        label = actionPresentation.label,
+                        role = actionPresentation.role,
+                        enabled = actionPresentation.enabled,
+                        onClick = { action.dispatch(callbacks) },
+                        testTag = actionPresentation.testTag,
+                        contentDescription = actionPresentation.contentDescription,
+                        modifier = Modifier.widthIn(min = interactionMode.actionMinWidth),
+                    )
+                }
+            }
+            disabledReasons.forEach { reason ->
+                TheaterPlateText(
+                    text = reason,
+                    role = TheaterPlateTypographyRole.ActionSubtitle,
+                    densityRole = interactionMode.toTypographyDensity(),
                 )
             }
         }
@@ -904,7 +953,7 @@ private fun DetailHeroCopy(
             text = page.title,
             role = TheaterPlateTypographyRole.HeroTitle,
             densityRole = interactionMode.toTypographyDensity(),
-            maxLines = if (interactionMode == DetailSurfaceInteractionMode.TvDpad) 2 else 3,
+            maxLines = if (interactionMode == DetailSurfaceInteractionMode.PhoneTouch) 3 else 2,
         )
         page.subtitle?.let {
             TheaterPlateText(
@@ -1199,10 +1248,22 @@ fun DetailRailCardKind.sizing(mode: DetailSurfaceInteractionMode): DetailMediaSi
 
 private fun DetailArtRole.heroWidth(mode: DetailSurfaceInteractionMode): Dp = when (this) {
     DetailArtRole.Poster,
-    DetailArtRole.Profile -> if (mode == DetailSurfaceInteractionMode.TvDpad) 240.dp else 180.dp
+    DetailArtRole.Profile -> when (mode) {
+        DetailSurfaceInteractionMode.TvDpad -> 240.dp
+        DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 196.dp
+        DetailSurfaceInteractionMode.PhoneTouch -> 180.dp
+    }
     DetailArtRole.Backdrop,
-    DetailArtRole.Still -> if (mode == DetailSurfaceInteractionMode.TvDpad) 640.dp else 360.dp
-    DetailArtRole.None -> if (mode == DetailSurfaceInteractionMode.TvDpad) 320.dp else 200.dp
+    DetailArtRole.Still -> when (mode) {
+        DetailSurfaceInteractionMode.TvDpad -> 640.dp
+        DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 520.dp
+        DetailSurfaceInteractionMode.PhoneTouch -> 360.dp
+    }
+    DetailArtRole.None -> when (mode) {
+        DetailSurfaceInteractionMode.TvDpad -> 320.dp
+        DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 260.dp
+        DetailSurfaceInteractionMode.PhoneTouch -> 200.dp
+    }
 }
 
 private fun DetailTone.toStageTone(): FerrexStageSurfaceTone = when (this) {
@@ -1233,5 +1294,12 @@ private fun factDescription(item: DetailFactItem): String = if (item.value.isBla
 
 private fun DetailSurfaceInteractionMode.toTypographyDensity(): com.ferrex.android.ui.components.TheaterPlateDensityRole = when (this) {
     DetailSurfaceInteractionMode.PhoneTouch -> com.ferrex.android.ui.components.TheaterPlateDensityRole.PhonePortrait
+    DetailSurfaceInteractionMode.PhoneLandscapeTouch -> com.ferrex.android.ui.components.TheaterPlateDensityRole.PhoneLandscape
     DetailSurfaceInteractionMode.TvDpad -> com.ferrex.android.ui.components.TheaterPlateDensityRole.Tv1080p
+}
+
+private fun DetailSurfaceInteractionMode.prefersWideHeroLayout(): Boolean = when (this) {
+    DetailSurfaceInteractionMode.PhoneTouch -> false
+    DetailSurfaceInteractionMode.PhoneLandscapeTouch,
+    DetailSurfaceInteractionMode.TvDpad -> true
 }

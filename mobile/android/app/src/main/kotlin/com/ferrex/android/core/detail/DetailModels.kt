@@ -40,6 +40,13 @@ sealed interface DetailLoadResult {
         val detail: SeriesBundleDetail,
     ) : DetailLoadResult
 
+    data class Season(
+        override val route: MediaRouteArgs,
+        val series: SeriesDetail?,
+        val season: SeasonDetail,
+        val episodes: List<EpisodeDetail>,
+    ) : DetailLoadResult
+
     data class Episode(
         override val route: MediaRouteArgs,
         val detail: EpisodeDetail,
@@ -225,6 +232,9 @@ object DetailRouteContracts {
             nextEpisode = result.detail.series.tmdbId?.let { watchState.seriesStatus(it)?.nextEpisode ?: watchState.nextEpisodes[it] },
             sourceRoute = result.route,
         ) ?: seriesStartOver(result.detail, result.route)
+        is DetailLoadResult.Season -> result.episodes.firstNotNullOfOrNull { episode ->
+            episodeResume(episode, watchState.mediaProgress(episode.id), result.route)
+        } ?: result.episodes.firstOrNull { it.playbackTargetId != null }?.let { episodeStartOver(it, result.route) }
         is DetailLoadResult.Missing -> null
     }
 
@@ -335,6 +345,7 @@ object DetailCache {
         return when (route.mediaType) {
             BrowseMediaType.Movie -> resolveMovie(state, route)
             BrowseMediaType.Series -> resolveSeries(state, route)
+            BrowseMediaType.Season -> resolveSeason(state, route)
             BrowseMediaType.Episode -> resolveEpisode(state, route)
             BrowseMediaType.Unknown -> missing(route, "This media type is not supported by the detail cache.")
         }
@@ -361,6 +372,22 @@ object DetailCache {
             return DetailLoadResult.Series(route, bundle.toDetail(series))
         }
         return missing(route, "Series not found in the selected repository cache. Retry cache sync or recover the connection.")
+    }
+
+    private fun resolveSeason(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {
+        matchingSeriesLibraries(state, route.libraryId).forEach { cached ->
+            for (index in 0 until cached.accessor.seasonCount) {
+                val season = cached.accessor.seasonAt(index) ?: continue
+                if (season.id.toUuidString() != route.mediaId) continue
+                val parentSeriesId = season.seriesId.toUuidString()
+                val parent = cached.accessor.seriesById(parentSeriesId)?.toDetail()
+                val episodes = cached.accessor.episodesForSeason(parentSeriesId, season.seasonNumber.toInt())
+                    .map(EpisodeReference::toDetail)
+                    .sortedWith(compareBy<EpisodeDetail> { it.seasonNumber }.thenBy { it.episodeNumber })
+                return DetailLoadResult.Season(route, parent, season.toDetail(), episodes)
+            }
+        }
+        return missing(route, "Season not found in cached series bundles. Retry episodes or recover the connection.")
     }
 
     private fun resolveEpisode(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {

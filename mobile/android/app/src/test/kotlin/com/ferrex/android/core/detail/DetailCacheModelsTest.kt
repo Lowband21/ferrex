@@ -297,6 +297,27 @@ class DetailCacheModelsTest {
     }
 
     @Test
+    fun seasonDetailLoadsFromCachedSeriesBundleAsStandaloneSurface() {
+        val ids = Ids()
+        val library = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)
+        val state = LibraryRepositoryState(
+            seriesLibraries = listOf(CachedSeriesLibrary(library, SeriesLibraryAccessor(seriesPayload(ids, includeEpisode = true)))),
+        )
+        val route = MediaRouteArgs(BrowseMediaType.Season, ids.season.toString(), library.id, BrowseSourceSurface.LibraryGrid)
+
+        val result = DetailCache.resolve(state, route) as DetailLoadResult.Season
+        val page = DetailPageMapper.toPage(result)
+
+        assertEquals("Season 1", result.season.title)
+        assertEquals("Cache Series", result.series?.title)
+        assertEquals(listOf(ids.episode.toString()), result.episodes.map { it.id })
+        assertEquals(DetailPageKind.Season, page.kind)
+        assertEquals(DetailRailState.Available, page.rail(DetailRailKind.Episodes)?.state)
+        assertTrue(page.actions.any { it.kind == DetailPageActionKind.Play })
+        assertTrue(DetailCache.imageKeys(result).any { it.category == BrowseImageCategory.Episode })
+    }
+
+    @Test
     fun seriesWithoutParsedEpisodesShowsRetryableUnavailableStateNotIndefiniteLoading() {
         val ids = Ids()
         val library = LibraryInfo(ids.seriesLibrary.toString(), "Series", LibraryKind.Series)

@@ -152,6 +152,39 @@ class DetailPageModelsTest {
     }
 
     @Test
+    fun seriesSeasonRailItemsNavigateToStandaloneSeasonRoutes() {
+        val series = seriesDetail()
+        val season = SeasonDetail(
+            id = "season-1",
+            seasonNumber = 1,
+            title = "Season 1",
+            overview = null,
+            airDate = "2024-02-01",
+            episodeCount = 2,
+            runtimeMinutes = null,
+            images = DetailImageSet(poster = key("season-poster", BrowseImageCategory.Poster)),
+        )
+        val route = route(BrowseMediaType.Series, series.id, series.libraryId)
+
+        val page = DetailPageMapper.toPage(
+            DetailLoadResult.Series(
+                route = route,
+                detail = SeriesBundleDetail(
+                    series = series,
+                    seasons = listOf(season),
+                    episodesBySeason = emptyMap(),
+                    episodesAvailability = EpisodesAvailability.Unavailable("Episodes unavailable."),
+                ),
+            ),
+        )
+
+        val itemRoute = page.rail(DetailRailKind.Seasons)?.items?.single()?.route
+        assertEquals(BrowseMediaType.Season, itemRoute?.mediaType)
+        assertEquals("season-1", itemRoute?.mediaId)
+        assertEquals(route.libraryId, itemRoute?.libraryId)
+    }
+
+    @Test
     fun seasonPageBuildsSeasonSurfaceWithEpisodeRailAndWatchActions() {
         val series = seriesDetail()
         val season = SeasonDetail(
