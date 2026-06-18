@@ -44,6 +44,7 @@ sealed interface DetailLoadResult {
         override val route: MediaRouteArgs,
         val detail: EpisodeDetail,
         val parentSeries: SeriesDetail?,
+        val siblingEpisodes: List<EpisodeDetail> = emptyList(),
     ) : DetailLoadResult
 
     data class Missing(
@@ -343,36 +344,7 @@ object DetailCache {
         clearSelectedCache = route.libraryId != null,
     )
 
-    fun imageKeys(result: DetailLoadResult?): Set<ImageRequestKey> = when (result) {
-        is DetailLoadResult.Movie -> buildSet {
-            addAll(result.detail.images.keys)
-            addCastProfileKeys(result.detail.cast)
-            addCrewProfileKeys(result.detail.crew)
-        }
-        is DetailLoadResult.Series -> buildSet {
-            addAll(result.detail.series.images.keys)
-            addCastProfileKeys(result.detail.series.cast)
-            addCrewProfileKeys(result.detail.series.crew)
-            result.detail.seasons.flatMapTo(this) { it.images.keys }
-            result.detail.episodes.forEach { episode ->
-                addAll(episode.images.keys)
-                addCastProfileKeys(episode.guestStars)
-                addCrewProfileKeys(episode.crew)
-            }
-        }
-        is DetailLoadResult.Episode -> buildSet {
-            addAll(result.detail.images.keys)
-            addCastProfileKeys(result.detail.guestStars)
-            addCrewProfileKeys(result.detail.crew)
-            result.parentSeries?.let { series ->
-                addAll(series.images.keys)
-                addCastProfileKeys(series.cast)
-                addCrewProfileKeys(series.crew)
-            }
-        }
-        is DetailLoadResult.Missing,
-        null -> emptySet()
-    }
+    fun imageKeys(result: DetailLoadResult?): Set<ImageRequestKey> = DetailPageMapper.imageKeys(result)
 
     private fun resolveMovie(state: LibraryRepositoryState, route: MediaRouteArgs): DetailLoadResult {
         matchingMovieLibraries(state, route.libraryId).forEach { cached ->
@@ -396,7 +368,10 @@ object DetailCache {
             val episode = cached.accessor.episodeById(route.mediaId) ?: return@forEach
             val parentSeriesId = episode.seriesId.toUuidString()
             val parent = cached.accessor.seriesById(parentSeriesId)?.toDetail()
-            return DetailLoadResult.Episode(route, episode.toDetail(), parent)
+            val siblingEpisodes = cached.accessor.episodesForSeason(parentSeriesId, episode.seasonNumber.toInt())
+                .map(EpisodeReference::toDetail)
+                .sortedWith(compareBy<EpisodeDetail> { it.seasonNumber }.thenBy { it.episodeNumber })
+            return DetailLoadResult.Episode(route, episode.toDetail(), parent, siblingEpisodes)
         }
         return missing(route, "Episode not found in cached series bundles. Retry episodes or recover the connection.")
     }
@@ -661,14 +636,6 @@ private fun EpisodeDetails.crewCredits(): List<DetailCrewCredit> = buildList {
     for (index in 0 until crewLength) {
         crew(index)?.toDetailCrewCredit()?.let(::add)
     }
-}
-
-private fun MutableSet<ImageRequestKey>.addCastProfileKeys(credits: Iterable<DetailCastCredit>) {
-    credits.forEach { addAll(it.profileImages.keys) }
-}
-
-private fun MutableSet<ImageRequestKey>.addCrewProfileKeys(credits: Iterable<DetailCrewCredit>) {
-    credits.forEach { addAll(it.profileImages.keys) }
 }
 
 private fun ULong.toPositiveLongOrNull(): Long? = takeIf { value ->
