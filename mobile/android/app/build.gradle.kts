@@ -91,6 +91,9 @@ android {
         getByName("tv") {
             java.srcDirs("src/tv/kotlin")
         }
+        getByName("debug") {
+            java.srcDirs("src/debug/kotlin")
+        }
     }
 }
 
