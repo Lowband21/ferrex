@@ -77,6 +77,19 @@ class FerrexVisualQaScenariosTest {
     }
 
     @Test
+    fun phoneHomeScenarioDocumentsTheaterPlateViewportCoverage() {
+        val home = FerrexVisualQaScenarios.find(FerrexQaScenarioIds.PhoneHome)!!
+
+        assertEquals(FerrexQaTags.Phone.Home, home.testTag)
+        assertTrue(home.title.contains("Theater Plate"))
+        assertTrue(home.description.contains("portrait"))
+        assertTrue(home.description.contains("landscape/foldable"))
+        assertTrue(home.description.contains("recovery"))
+        assertTrue(home.fixtureSamples.contains("phone-portrait"))
+        assertTrue(home.fixtureSamples.contains("phone-landscape-foldable"))
+    }
+
+    @Test
     fun scenarioIdsTagsAndFixtureSamplesAreUniqueAndStable() {
         val scenarios = FerrexVisualQaScenarios.all
 
