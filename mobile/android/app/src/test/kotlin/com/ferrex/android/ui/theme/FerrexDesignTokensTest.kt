@@ -95,6 +95,7 @@ class FerrexDesignTokensTest {
     fun dynamicQaTagsAreSanitizedAndNamespaced() {
         assertEquals("tv.action.library-tabs.tab-movies", FerrexQaTags.Tv.action("library tabs", "tab:Movies"))
         assertEquals("tv.poster.continue-watching.movie-101", FerrexQaTags.Tv.poster("Continue Watching", "movie:101"))
+        assertEquals("phone.theater-plate.action.playback-entry.primary", FerrexQaTags.TheaterPlate.action("phone", "Playback Entry", "Primary"))
         assertEquals("phone.shell.nav.accountserver", FerrexQaTags.Phone.navItem("AccountServer"))
         assertEquals("status-card.stale-offline", FerrexQaTags.Shared.statusCard("Stale / Offline"))
     }

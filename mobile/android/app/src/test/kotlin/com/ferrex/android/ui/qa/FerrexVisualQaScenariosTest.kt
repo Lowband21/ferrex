@@ -35,6 +35,34 @@ class FerrexVisualQaScenariosTest {
     }
 
     @Test
+    fun theaterPlateScenariosCoverRequiredStatesForPhoneAndTv() {
+        val theaterScenarios = FerrexVisualQaScenarios.all.filter { it.kind == VisualQaScenarioKind.TheaterPlate }
+        val expectedStates = VisualQaTheaterPlateState.entries.toSet()
+
+        assertEquals(expectedStates.size * 2, theaterScenarios.size)
+        assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Phone }.mapNotNull { it.theaterPlateState }.toSet())
+        assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Tv }.mapNotNull { it.theaterPlateState }.toSet())
+        assertEquals(
+            setOf(
+                "bright",
+                "dark",
+                "busy",
+                "missing-backdrop",
+                "long-title",
+                "missing-artwork",
+                "stale-offline",
+                "recovery",
+                "search",
+                "browse",
+                "detail",
+                "rails",
+                "playback-entry",
+            ),
+            expectedStates.map { it.key }.toSet(),
+        )
+    }
+
+    @Test
     fun scenarioIdsTagsAndFixtureSamplesAreUniqueAndStable() {
         val scenarios = FerrexVisualQaScenarios.all
 

@@ -76,6 +76,19 @@ object FerrexQaTags {
         fun poster(surfaceKey: String, itemKey: String): String = namespaced("tv", "poster", surfaceKey, itemKey)
     }
 
+    object TheaterPlate {
+        fun root(target: String, stateKey: String): String = namespaced(target, "theater-plate", stateKey)
+        fun status(target: String, stateKey: String): String = namespaced(target, "theater-plate", "status", stateKey)
+        fun action(target: String, stateKey: String, actionKey: String): String =
+            namespaced(target, "theater-plate", "action", stateKey, actionKey)
+        fun media(target: String, stateKey: String, mediaKey: String): String =
+            namespaced(target, "theater-plate", "media", stateKey, mediaKey)
+        fun rail(target: String, stateKey: String, railKey: String): String =
+            namespaced(target, "theater-plate", "rail", stateKey, railKey)
+        fun search(target: String, stateKey: String, searchKey: String): String =
+            namespaced(target, "theater-plate", "search", stateKey, searchKey)
+    }
+
     object Shared {
         fun statusCard(id: String): String = namespaced("status-card", id)
     }
@@ -128,6 +141,163 @@ enum class VisualQaScenarioKind {
     TvDetailFocus,
     TvSearchFocus,
     TvRecoveryFocus,
+    TheaterPlate,
+}
+
+enum class VisualQaTheaterPlateState(
+    val key: String,
+    val label: String,
+    val summary: String,
+    val statusCopy: String,
+    val primaryActionLabel: String,
+    val mediaTitle: String,
+    val mediaSubtitle: String,
+    val artworkLabel: String,
+    val tone: FerrexStatusTone,
+) {
+    Bright(
+        key = "bright",
+        label = "Bright backdrop",
+        summary = "High-key artwork with cyan action contrast and readable foreground plate copy.",
+        statusCopy = "Bright backdrops keep the Theater Plate scrim and controls legible.",
+        primaryActionLabel = "Review bright contrast",
+        mediaTitle = "Aurora Station",
+        mediaSubtitle = "Bright nebula backdrop • 118 min",
+        artworkLabel = "Bright backdrop",
+        tone = FerrexStatusTone.Primary,
+    ),
+    Dark(
+        key = "dark",
+        label = "Dark backdrop",
+        summary = "Low-key artwork with preserved edge separation and visible metadata.",
+        statusCopy = "Dark backdrops keep the title, progress, and action row visible.",
+        primaryActionLabel = "Review dark contrast",
+        mediaTitle = "Night Relay",
+        mediaSubtitle = "Dark corridor backdrop • 52 min",
+        artworkLabel = "Dark backdrop",
+        tone = FerrexStatusTone.Secondary,
+    ),
+    Busy(
+        key = "busy",
+        label = "Busy backdrop",
+        summary = "Noisy artwork stress case for foreground grammar, text truncation, and control contrast.",
+        statusCopy = "Busy backdrops must not overpower action/status nodes.",
+        primaryActionLabel = "Reduce backdrop noise",
+        mediaTitle = "Signal Bloom",
+        mediaSubtitle = "Busy poster treatment • 44 min",
+        artworkLabel = "Busy backdrop",
+        tone = FerrexStatusTone.Cache,
+    ),
+    MissingBackdrop(
+        key = "missing-backdrop",
+        label = "Missing backdrop",
+        summary = "Fallback gradient state when backdrop artwork is absent.",
+        statusCopy = "Missing backdrops use the fallback plate instead of a blank surface.",
+        primaryActionLabel = "Use fallback backdrop",
+        mediaTitle = "Fallback Horizon",
+        mediaSubtitle = "No backdrop available",
+        artworkLabel = "Backdrop fallback",
+        tone = FerrexStatusTone.StaleOffline,
+    ),
+    LongTitle(
+        key = "long-title",
+        label = "Long title",
+        summary = "Long localized title wraps and truncates without hiding recovery or playback actions.",
+        statusCopy = "The title block keeps hierarchy stable when copy is unusually long.",
+        primaryActionLabel = "Open long-title detail",
+        mediaTitle = "The Extremely Long Voyage of the Little Relay Ship That Kept Every Recovery Action Visible",
+        mediaSubtitle = "Long title stress case • 126 min",
+        artworkLabel = "Long title poster",
+        tone = FerrexStatusTone.Primary,
+    ),
+    MissingArtwork(
+        key = "missing-artwork",
+        label = "Missing artwork",
+        summary = "Poster and still fallbacks stay labeled when all artwork is unavailable.",
+        statusCopy = "Missing artwork shows stable placeholders and semantic media labels.",
+        primaryActionLabel = "Use artwork fallback",
+        mediaTitle = "Placeholder Run",
+        mediaSubtitle = "Poster and still unavailable",
+        artworkLabel = "Artwork fallback",
+        tone = FerrexStatusTone.Cache,
+    ),
+    StaleOffline(
+        key = "stale-offline",
+        label = "Stale/offline",
+        summary = "Cached detail remains readable while offline status and retry paths stay visible.",
+        statusCopy = "Stale offline data preserves context and no-wipe recovery actions.",
+        primaryActionLabel = "Retry offline data",
+        mediaTitle = "Cloudline Archives",
+        mediaSubtitle = "Stale cache • last synced earlier",
+        artworkLabel = "Offline cache poster",
+        tone = FerrexStatusTone.StaleOffline,
+    ),
+    Recovery(
+        key = "recovery",
+        label = "Recovery",
+        summary = "No-wipe recovery surface with retry, server change, reset, and diagnostics exits.",
+        statusCopy = "Recovery paths remain visible without clearing app data.",
+        primaryActionLabel = "Retry",
+        mediaTitle = "Recovery Queue",
+        mediaSubtitle = "Server unreachable",
+        artworkLabel = "Recovery poster",
+        tone = FerrexStatusTone.Error,
+    ),
+    Search(
+        key = "search",
+        label = "Search",
+        summary = "Search entry, retry, clear, result, and diagnostics actions remain reachable.",
+        statusCopy = "Search keeps field and results semantics stable across viewports.",
+        primaryActionLabel = "Search again",
+        mediaTitle = "Search Result: Aurora Station",
+        mediaSubtitle = "Result row • Movie",
+        artworkLabel = "Search result poster",
+        tone = FerrexStatusTone.Primary,
+    ),
+    Browse(
+        key = "browse",
+        label = "Browse",
+        summary = "Browse grid and related title entry points remain labeled in compact and 10-foot layouts.",
+        statusCopy = "Browse surfaces expose deterministic media cards and actions.",
+        primaryActionLabel = "Browse related titles",
+        mediaTitle = "Browse: Cloudline Archives",
+        mediaSubtitle = "Series • 1 season",
+        artworkLabel = "Browse poster",
+        tone = FerrexStatusTone.Secondary,
+    ),
+    Detail(
+        key = "detail",
+        label = "Detail",
+        summary = "Detail action/status region with media metadata, progress, and repair actions.",
+        statusCopy = "Detail semantics cover status, media, and action nodes.",
+        primaryActionLabel = "Open detail actions",
+        mediaTitle = "Detail: Signals in the Static",
+        mediaSubtitle = "S1 E1 • resume available",
+        artworkLabel = "Detail still",
+        tone = FerrexStatusTone.Cache,
+    ),
+    Rails(
+        key = "rails",
+        label = "Rails",
+        summary = "Rail cards keep focus, labels, and poster fallback semantics visible.",
+        statusCopy = "Rails expose deterministic media nodes for visual and accessibility review.",
+        primaryActionLabel = "Browse rail item",
+        mediaTitle = "Rail: Continue Watching",
+        mediaSubtitle = "Next episode rail",
+        artworkLabel = "Rail poster",
+        tone = FerrexStatusTone.Secondary,
+    ),
+    PlaybackEntry(
+        key = "playback-entry",
+        label = "Playback entry",
+        summary = "Playback-entry state keeps resume, start over, and recovery exits available.",
+        statusCopy = "Playback entry uses a prepared route while preserving no-wipe exits.",
+        primaryActionLabel = "Resume playback",
+        mediaTitle = "Aurora Station",
+        mediaSubtitle = "Resume at 30:42",
+        artworkLabel = "Playback poster",
+        tone = FerrexStatusTone.Primary,
+    ),
 }
 
 data class VisualQaScenario(
@@ -140,6 +310,7 @@ data class VisualQaScenario(
     val evidencePath: String,
     val fixtureSamples: List<String>,
     val recoveryActions: List<VisualQaRecoveryActionSample> = emptyList(),
+    val theaterPlateState: VisualQaTheaterPlateState? = null,
 )
 
 data class VisualQaRecoveryActionSample(
@@ -173,6 +344,32 @@ object FerrexQaScenarioIds {
     const val TvDetailFocus = "tv-detail-focus"
     const val TvSearchFocus = "tv-search-focus"
     const val TvRecoveryFocus = "tv-recovery-focus"
+    const val PhoneTheaterPlateBright = "phone-theater-plate-bright"
+    const val PhoneTheaterPlateDark = "phone-theater-plate-dark"
+    const val PhoneTheaterPlateBusy = "phone-theater-plate-busy"
+    const val PhoneTheaterPlateMissingBackdrop = "phone-theater-plate-missing-backdrop"
+    const val PhoneTheaterPlateLongTitle = "phone-theater-plate-long-title"
+    const val PhoneTheaterPlateMissingArtwork = "phone-theater-plate-missing-artwork"
+    const val PhoneTheaterPlateStaleOffline = "phone-theater-plate-stale-offline"
+    const val PhoneTheaterPlateRecovery = "phone-theater-plate-recovery"
+    const val PhoneTheaterPlateSearch = "phone-theater-plate-search"
+    const val PhoneTheaterPlateBrowse = "phone-theater-plate-browse"
+    const val PhoneTheaterPlateDetail = "phone-theater-plate-detail"
+    const val PhoneTheaterPlateRails = "phone-theater-plate-rails"
+    const val PhoneTheaterPlatePlaybackEntry = "phone-theater-plate-playback-entry"
+    const val TvTheaterPlateBright = "tv-theater-plate-bright"
+    const val TvTheaterPlateDark = "tv-theater-plate-dark"
+    const val TvTheaterPlateBusy = "tv-theater-plate-busy"
+    const val TvTheaterPlateMissingBackdrop = "tv-theater-plate-missing-backdrop"
+    const val TvTheaterPlateLongTitle = "tv-theater-plate-long-title"
+    const val TvTheaterPlateMissingArtwork = "tv-theater-plate-missing-artwork"
+    const val TvTheaterPlateStaleOffline = "tv-theater-plate-stale-offline"
+    const val TvTheaterPlateRecovery = "tv-theater-plate-recovery"
+    const val TvTheaterPlateSearch = "tv-theater-plate-search"
+    const val TvTheaterPlateBrowse = "tv-theater-plate-browse"
+    const val TvTheaterPlateDetail = "tv-theater-plate-detail"
+    const val TvTheaterPlateRails = "tv-theater-plate-rails"
+    const val TvTheaterPlatePlaybackEntry = "tv-theater-plate-playback-entry"
 }
 
 object FerrexVisualQaLaunch {
@@ -204,6 +401,32 @@ object FerrexVisualQaScenarios {
         FerrexQaScenarioIds.TvDetailFocus,
         FerrexQaScenarioIds.TvSearchFocus,
         FerrexQaScenarioIds.TvRecoveryFocus,
+        FerrexQaScenarioIds.PhoneTheaterPlateBright,
+        FerrexQaScenarioIds.PhoneTheaterPlateDark,
+        FerrexQaScenarioIds.PhoneTheaterPlateBusy,
+        FerrexQaScenarioIds.PhoneTheaterPlateMissingBackdrop,
+        FerrexQaScenarioIds.PhoneTheaterPlateLongTitle,
+        FerrexQaScenarioIds.PhoneTheaterPlateMissingArtwork,
+        FerrexQaScenarioIds.PhoneTheaterPlateStaleOffline,
+        FerrexQaScenarioIds.PhoneTheaterPlateRecovery,
+        FerrexQaScenarioIds.PhoneTheaterPlateSearch,
+        FerrexQaScenarioIds.PhoneTheaterPlateBrowse,
+        FerrexQaScenarioIds.PhoneTheaterPlateDetail,
+        FerrexQaScenarioIds.PhoneTheaterPlateRails,
+        FerrexQaScenarioIds.PhoneTheaterPlatePlaybackEntry,
+        FerrexQaScenarioIds.TvTheaterPlateBright,
+        FerrexQaScenarioIds.TvTheaterPlateDark,
+        FerrexQaScenarioIds.TvTheaterPlateBusy,
+        FerrexQaScenarioIds.TvTheaterPlateMissingBackdrop,
+        FerrexQaScenarioIds.TvTheaterPlateLongTitle,
+        FerrexQaScenarioIds.TvTheaterPlateMissingArtwork,
+        FerrexQaScenarioIds.TvTheaterPlateStaleOffline,
+        FerrexQaScenarioIds.TvTheaterPlateRecovery,
+        FerrexQaScenarioIds.TvTheaterPlateSearch,
+        FerrexQaScenarioIds.TvTheaterPlateBrowse,
+        FerrexQaScenarioIds.TvTheaterPlateDetail,
+        FerrexQaScenarioIds.TvTheaterPlateRails,
+        FerrexQaScenarioIds.TvTheaterPlatePlaybackEntry,
     )
 
     val all: List<VisualQaScenario> = listOf(
@@ -339,13 +562,77 @@ object FerrexVisualQaScenarios {
             fixtureSamples = listOf("tv.action.recovery-actions.retry", "tv.action.recovery-actions.reset-connection"),
             recoveryActions = FerrexVisualQaFixtures.noWipeRecoveryActions,
         ),
-    )
+    ) + theaterPlateScenarios(VisualQaDevice.Phone) + theaterPlateScenarios(VisualQaDevice.Tv)
 
     val defaultScenario: VisualQaScenario = all.first()
 
     fun find(id: String?): VisualQaScenario? = id?.trim()?.takeIf { it.isNotEmpty() }?.let { requested ->
         all.firstOrNull { it.id == requested }
     }
+
+    private fun theaterPlateScenarios(device: VisualQaDevice): List<VisualQaScenario> = VisualQaTheaterPlateState.entries.map { state ->
+        scenario(
+            id = theaterPlateScenarioId(device, state),
+            device = device,
+            kind = VisualQaScenarioKind.TheaterPlate,
+            title = "${device.label} Theater Plate • ${state.label}",
+            description = state.summary,
+            testTag = FerrexQaTags.TheaterPlate.root(device.targetKey, state.key),
+            evidencePath = "Debug Visual QA → ${device.label} Theater Plate → ${state.label}",
+            fixtureSamples = listOf(state.key, state.mediaTitle, state.primaryActionLabel),
+            recoveryActions = if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
+                FerrexVisualQaFixtures.noWipeRecoveryActions
+            } else {
+                emptyList()
+            },
+            theaterPlateState = state,
+        )
+    }
+
+    private fun theaterPlateScenarioId(device: VisualQaDevice, state: VisualQaTheaterPlateState): String = when (device) {
+        VisualQaDevice.Phone -> when (state) {
+            VisualQaTheaterPlateState.Bright -> FerrexQaScenarioIds.PhoneTheaterPlateBright
+            VisualQaTheaterPlateState.Dark -> FerrexQaScenarioIds.PhoneTheaterPlateDark
+            VisualQaTheaterPlateState.Busy -> FerrexQaScenarioIds.PhoneTheaterPlateBusy
+            VisualQaTheaterPlateState.MissingBackdrop -> FerrexQaScenarioIds.PhoneTheaterPlateMissingBackdrop
+            VisualQaTheaterPlateState.LongTitle -> FerrexQaScenarioIds.PhoneTheaterPlateLongTitle
+            VisualQaTheaterPlateState.MissingArtwork -> FerrexQaScenarioIds.PhoneTheaterPlateMissingArtwork
+            VisualQaTheaterPlateState.StaleOffline -> FerrexQaScenarioIds.PhoneTheaterPlateStaleOffline
+            VisualQaTheaterPlateState.Recovery -> FerrexQaScenarioIds.PhoneTheaterPlateRecovery
+            VisualQaTheaterPlateState.Search -> FerrexQaScenarioIds.PhoneTheaterPlateSearch
+            VisualQaTheaterPlateState.Browse -> FerrexQaScenarioIds.PhoneTheaterPlateBrowse
+            VisualQaTheaterPlateState.Detail -> FerrexQaScenarioIds.PhoneTheaterPlateDetail
+            VisualQaTheaterPlateState.Rails -> FerrexQaScenarioIds.PhoneTheaterPlateRails
+            VisualQaTheaterPlateState.PlaybackEntry -> FerrexQaScenarioIds.PhoneTheaterPlatePlaybackEntry
+        }
+        VisualQaDevice.Tv -> when (state) {
+            VisualQaTheaterPlateState.Bright -> FerrexQaScenarioIds.TvTheaterPlateBright
+            VisualQaTheaterPlateState.Dark -> FerrexQaScenarioIds.TvTheaterPlateDark
+            VisualQaTheaterPlateState.Busy -> FerrexQaScenarioIds.TvTheaterPlateBusy
+            VisualQaTheaterPlateState.MissingBackdrop -> FerrexQaScenarioIds.TvTheaterPlateMissingBackdrop
+            VisualQaTheaterPlateState.LongTitle -> FerrexQaScenarioIds.TvTheaterPlateLongTitle
+            VisualQaTheaterPlateState.MissingArtwork -> FerrexQaScenarioIds.TvTheaterPlateMissingArtwork
+            VisualQaTheaterPlateState.StaleOffline -> FerrexQaScenarioIds.TvTheaterPlateStaleOffline
+            VisualQaTheaterPlateState.Recovery -> FerrexQaScenarioIds.TvTheaterPlateRecovery
+            VisualQaTheaterPlateState.Search -> FerrexQaScenarioIds.TvTheaterPlateSearch
+            VisualQaTheaterPlateState.Browse -> FerrexQaScenarioIds.TvTheaterPlateBrowse
+            VisualQaTheaterPlateState.Detail -> FerrexQaScenarioIds.TvTheaterPlateDetail
+            VisualQaTheaterPlateState.Rails -> FerrexQaScenarioIds.TvTheaterPlateRails
+            VisualQaTheaterPlateState.PlaybackEntry -> FerrexQaScenarioIds.TvTheaterPlatePlaybackEntry
+        }
+    }
+
+    private val VisualQaDevice.targetKey: String
+        get() = when (this) {
+            VisualQaDevice.Phone -> "phone"
+            VisualQaDevice.Tv -> "tv"
+        }
+
+    private val VisualQaDevice.label: String
+        get() = when (this) {
+            VisualQaDevice.Phone -> "Phone"
+            VisualQaDevice.Tv -> "TV"
+        }
 
     private fun scenario(
         id: String,
@@ -357,6 +644,7 @@ object FerrexVisualQaScenarios {
         evidencePath: String,
         fixtureSamples: List<String>,
         recoveryActions: List<VisualQaRecoveryActionSample> = emptyList(),
+        theaterPlateState: VisualQaTheaterPlateState? = null,
     ): VisualQaScenario = VisualQaScenario(
         id = id,
         device = device,
@@ -367,6 +655,7 @@ object FerrexVisualQaScenarios {
         evidencePath = evidencePath,
         fixtureSamples = fixtureSamples,
         recoveryActions = recoveryActions,
+        theaterPlateState = theaterPlateState,
     )
 }
 
@@ -666,6 +955,16 @@ object FerrexVisualQaFixtures {
         noWipeRecoveryActions.forEach { action ->
             add(action.key)
             add(action.label)
+        }
+        VisualQaTheaterPlateState.entries.forEach { state ->
+            add(state.key)
+            add(state.label)
+            add(state.summary)
+            add(state.statusCopy)
+            add(state.primaryActionLabel)
+            add(state.mediaTitle)
+            add(state.mediaSubtitle)
+            add(state.artworkLabel)
         }
     }
 
