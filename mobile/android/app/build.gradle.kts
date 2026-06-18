@@ -12,6 +12,7 @@ fun localOrEnv(key: String): String? =
 android {
     namespace = "com.ferrex.android"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.ferrex.android"
@@ -89,6 +90,9 @@ android {
         }
         getByName("tv") {
             java.srcDirs("src/tv/kotlin")
+        }
+        getByName("debug") {
+            java.srcDirs("src/debug/kotlin")
         }
     }
 }

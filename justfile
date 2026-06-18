@@ -146,6 +146,60 @@ alias rpr := run-player-release
 alias rs := run-server
 alias rsr := run-server-release
 alias gs := gstat
+alias aqd := android-qa-doctor
+alias aqb := android-qa-build
+alias aqs := android-qa-start
+alias aqi := android-qa-install
+alias aql := android-qa-launch
+alias aqc := android-qa-check
+alias aqv := android-visual-qa
+alias aqvs := android-visual-qa-smoke
+alias aqvc := android-visual-qa-complete
+alias aqcap := android-visual-qa-capture
+
+[no-cd]
+android-qa-doctor *args:
+    ./scripts/qa/android-emulator-qa.sh doctor {{ args }}
+
+[no-cd]
+android-qa-build:
+    ./scripts/qa/android-emulator-qa.sh build
+
+[no-cd]
+android-qa-start:
+    ./scripts/qa/android-emulator-qa.sh start
+
+[no-cd]
+android-qa-install target="all":
+    ./scripts/qa/android-emulator-qa.sh install {{ target }}
+
+[no-cd]
+android-qa-launch target="all":
+    ./scripts/qa/android-emulator-qa.sh launch {{ target }}
+
+[no-cd]
+android-qa-check target="all":
+    ./scripts/qa/android-emulator-qa.sh check {{ target }}
+
+[no-cd]
+android-visual-qa *args:
+    ./scripts/qa/android-visual-qa.sh {{ args }}
+
+[no-cd]
+android-visual-qa-smoke:
+    ./scripts/qa/android-visual-qa.sh gate --mode smoke
+
+[no-cd]
+android-visual-qa-complete:
+    ./scripts/qa/android-visual-qa.sh gate --mode complete
+
+[no-cd]
+android-visual-qa-verify mode="smoke":
+    ./scripts/qa/android-visual-qa.sh verify --mode {{ mode }}
+
+[no-cd]
+android-visual-qa-capture target="all" scenario="all":
+    ./scripts/qa/android-visual-qa.sh capture --target {{ target }} --scenario {{ scenario }}
 
 default:
     @just --list
