@@ -32,6 +32,39 @@ class ContinueWatchingRepositoryTest {
     }
 
     @Test
+    fun mapsProgressFractionAndWatchedStateForCardPresentation() {
+        val inProgress = ContinueWatchingMapper.toCard(
+            ContinueWatchingApiItem(
+                mediaId = "movie-id",
+                mediaType = "Movie",
+                cardMediaId = "movie-id",
+                actionTarget = ContinueWatchingActionTarget("movie-id", "Movie"),
+                actionHint = "resume",
+                position = 180f,
+                duration = 600f,
+                title = "Movie",
+            ),
+        )
+        val watched = ContinueWatchingMapper.toCard(
+            ContinueWatchingApiItem(
+                mediaId = "movie-id",
+                mediaType = "Movie",
+                cardMediaId = "movie-id",
+                actionTarget = ContinueWatchingActionTarget("movie-id", "Movie"),
+                actionHint = "resume",
+                position = 590f,
+                duration = 600f,
+                title = "Movie",
+            ),
+        )
+
+        assertEquals(0.3f, inProgress.progressFraction!!, 0.001f)
+        assertEquals(ContinueWatchingProgressState.InProgress, inProgress.progressState)
+        assertTrue(inProgress.progressLabel.contains("30% watched"))
+        assertEquals(ContinueWatchingProgressState.Watched, watched.progressState)
+    }
+
+    @Test
     fun staleOfflineStateKeepsPreviousContinueWatchingCards() = runTest {
         val transport = FakeContinueWatchingTransport()
         val repository = ContinueWatchingRepository(transport)
