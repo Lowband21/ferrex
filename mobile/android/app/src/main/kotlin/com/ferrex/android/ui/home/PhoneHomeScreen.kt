@@ -39,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
@@ -70,6 +72,7 @@ import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
+import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
 import com.ferrex.android.core.playback.PlaybackLaunchDecision
 import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
@@ -1156,14 +1159,23 @@ private fun ContinueWatchingSection(
         }
         if (remainingCards.isNotEmpty()) {
             Text("More in progress", style = MaterialTheme.typography.titleSmall)
+            val railItems = remember(remainingCards) {
+                remainingCards.zip(
+                    MediaRailIdentityResolver.assign(
+                        railKey = "continue-watching-more",
+                        stableIds = remainingCards.map { it.stableKey },
+                    ),
+                )
+            }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(remainingCards, key = { it.stableKey }) { card ->
+                items(railItems, key = { it.second.renderKey }) { (card, identity) ->
                     ContinueWatchingCardView(
                         card = card,
                         imageResolutions = imageResolutions,
                         imageLoaderAvailable = imageLoaderAvailable,
                         imageLoader = imageLoader,
                         scope = scope,
+                        semanticLabel = identity.semanticLabel(card.title),
                         onClick = { onSelect(card) },
                     )
                 }
@@ -1185,8 +1197,16 @@ private fun HomeShelfSection(
         SectionTitle(shelf.title)
         Text(shelf.subtitle, style = MaterialTheme.typography.bodyMedium)
         Text(shelf.limitCopy, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val railItems = remember(shelf.title, shelf.items) {
+            shelf.items.zip(
+                MediaRailIdentityResolver.assign(
+                    railKey = shelf.title,
+                    stableIds = shelf.items.map { it.stableKey },
+                ),
+            )
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(shelf.items, key = { it.stableKey }) { card ->
+            items(railItems, key = { it.second.renderKey }) { (card, identity) ->
                 MediaCardView(
                     card = card,
                     imageResolutions = imageResolutions,
@@ -1194,6 +1214,7 @@ private fun HomeShelfSection(
                     imageLoader = imageLoader,
                     scope = scope,
                     compact = true,
+                    semanticLabel = identity.semanticLabel(card.title),
                     onClick = { onSelect(card) },
                 )
             }
@@ -1564,6 +1585,7 @@ private fun ContinueWatchingCardView(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    semanticLabel: String = card.title,
     onClick: () -> Unit,
 ) {
     FerrexPosterCard(
@@ -1579,6 +1601,7 @@ private fun ContinueWatchingCardView(
                 imageLoaderAvailable = imageLoaderAvailable,
                 imageLoader = imageLoader,
                 scope = scope,
+                semanticLabel = semanticLabel,
             )
             Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(card.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1595,6 +1618,7 @@ private fun MediaCardView(
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
     compact: Boolean,
+    semanticLabel: String = card.title,
     onClick: () -> Unit,
 ) {
     FerrexPosterCard(
@@ -1610,6 +1634,7 @@ private fun MediaCardView(
                 imageLoaderAvailable = imageLoaderAvailable,
                 imageLoader = imageLoader,
                 scope = scope,
+                semanticLabel = semanticLabel,
             )
             Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(card.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1628,9 +1653,13 @@ private fun Poster(
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
     modifier: Modifier = Modifier,
+    semanticLabel: String = title,
 ) {
     if (imageKey == null || !imageLoaderAvailable || imageLoader == null) {
-        FerrexPosterPlaceholder(if (imageKey == null) "No poster" else "Images unavailable", modifier = modifier)
+        FerrexPosterPlaceholder(
+            if (imageKey == null) "No poster" else "Images unavailable",
+            modifier = modifier.semantics(mergeDescendants = true) { contentDescription = semanticLabel },
+        )
         return
     }
     val resolution = imageResolutions[imageKey]
@@ -1647,7 +1676,7 @@ private fun Poster(
     FerrexAsyncImage(
         resolution = resolution,
         imageLoader = imageLoader,
-        contentDescription = title,
+        contentDescription = semanticLabel,
         modifier = modifier,
         category = imageKey.category,
         fallback = fallback,
