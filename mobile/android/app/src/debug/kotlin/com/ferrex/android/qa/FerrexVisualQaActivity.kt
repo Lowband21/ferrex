@@ -323,11 +323,27 @@ private fun PhoneSearchScenario(scenario: VisualQaScenario) {
     val scope = rememberQaScope()
     QaScrollableScenario(scenario = scenario) {
         ScenarioTitle(scenario)
-        FerrexStatusCard(
-            title = "Deterministic search fixture",
-            body = "The query is preloaded with qa and resolves entirely from in-memory rows, including one cache miss with retry actions.",
-            tone = FerrexStatusTone.Cache,
-        )
+        FerrexStageSurface(
+            variant = FerrexStageSurfaceVariant.StatusSlab,
+            density = FerrexStageDensityFamily.Standard,
+            tone = FerrexStageSurfaceTone.Cache,
+            modifier = Modifier.fillMaxWidth(),
+            contentDescription = "Deterministic search fixture",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                TheaterPlateText(
+                    text = "Deterministic search fixture",
+                    role = TheaterPlateTypographyRole.StatusTitle,
+                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
+                )
+                TheaterPlateText(
+                    text = "The query is preloaded with qa and resolves entirely from in-memory rows, including one cache miss with retry actions.",
+                    role = TheaterPlateTypographyRole.StatusCopy,
+                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
+                    maxLines = 4,
+                )
+            }
+        }
         PhoneSearchPanel(
             scope = scope,
             searchRepository = searchRepository,
@@ -345,37 +361,69 @@ private fun PhoneSearchScenario(scenario: VisualQaScenario) {
 private fun PhoneBrowseGridScenario(scenario: VisualQaScenario) {
     QaScrollableScenario(scenario = scenario) {
         ScenarioTitle(scenario)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(FerrexQaTags.Phone.LibraryTabs),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        FerrexStageSurface(
+            variant = FerrexStageSurfaceVariant.ControlShelf,
+            density = FerrexStageDensityFamily.Standard,
+            tone = FerrexStageSurfaceTone.Primary,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = FerrexQaTags.Phone.LibraryTabs,
+            contentDescription = "Phone browse Theater Plate tab controls",
         ) {
-            FerrexActionButton(label = "Movies", role = FerrexActionRole.Primary, onClick = {}, modifier = Modifier.weight(1f))
-            FerrexActionButton(label = "Series", role = FerrexActionRole.Secondary, onClick = {}, modifier = Modifier.weight(1f))
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(FerrexQaTags.Phone.LibraryGrid),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-        ) {
-            FerrexVisualQaFixtures.browseCards.forEach { card ->
-                PhoneBrowseCard(card)
+            Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                FerrexActionButton(label = "Movies", role = FerrexActionRole.Primary, onClick = {}, modifier = Modifier.weight(1f))
+                FerrexActionButton(label = "Series", role = FerrexActionRole.Secondary, onClick = {}, modifier = Modifier.weight(1f))
             }
         }
-        FerrexStatusCard(
-            modifier = Modifier.testTag(FerrexQaTags.Phone.LibraryRecovery),
-            title = "Stale cache recovery",
-            body = "Retry sync, clear selected cache, change server, reset connection, and diagnostics remain visible without OS app-data wipes.",
-            tone = FerrexStatusTone.StaleOffline,
+        FerrexStageSurface(
+            variant = FerrexStageSurfaceVariant.RailBand,
+            density = FerrexStageDensityFamily.Standard,
+            tone = FerrexStageSurfaceTone.Neutral,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = FerrexQaTags.Phone.LibraryGrid,
+            contentDescription = "Phone browse Theater Plate library grid",
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+            ) {
+                TheaterPlateText(
+                    text = "Full grid",
+                    role = TheaterPlateTypographyRole.SectionTitle,
+                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
+                )
+                FerrexVisualQaFixtures.browseCards.forEach { card ->
+                    PhoneBrowseCard(card)
+                }
+            }
+        }
+        FerrexStageSurface(
+            variant = FerrexStageSurfaceVariant.StatusSlab,
+            density = FerrexStageDensityFamily.Standard,
+            tone = FerrexStageSurfaceTone.StaleOffline,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = FerrexQaTags.Phone.LibraryRecovery,
             contentDescription = "Stale cache recovery: retry sync, cache repair, server change, reset connection, and diagnostics remain visible.",
-            action = FerrexStatusAction(
-                label = "Retry sync",
-                role = FerrexActionRole.Retry,
-                onClick = {},
-            ),
-        )
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                TheaterPlateText(
+                    text = "Stale cache recovery",
+                    role = TheaterPlateTypographyRole.StatusTitle,
+                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
+                )
+                TheaterPlateText(
+                    text = "Retry sync, clear selected cache, change server, reset connection, and diagnostics remain visible without OS app-data wipes.",
+                    role = TheaterPlateTypographyRole.StatusCopy,
+                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
+                    maxLines = 4,
+                )
+                FerrexActionButton(
+                    label = "Retry sync",
+                    role = FerrexActionRole.Retry,
+                    onClick = {},
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
             FerrexActionButton(label = "Clear selected cache", role = FerrexActionRole.Cache, onClick = {}, modifier = Modifier.weight(1f))
             FerrexActionButton(label = "Change server", role = FerrexActionRole.Secondary, onClick = {}, modifier = Modifier.weight(1f))
