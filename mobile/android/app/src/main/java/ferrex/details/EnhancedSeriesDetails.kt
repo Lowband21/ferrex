@@ -236,6 +236,58 @@ class EnhancedSeriesDetails : Table() {
             null
         }
     }
+    fun cast(j: Int) : ferrex.details.CastCredit? = cast(ferrex.details.CastCredit(), j)
+    fun cast(obj: ferrex.details.CastCredit, j: Int) : ferrex.details.CastCredit? {
+        val o = __offset(52)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val castLength : Int
+        get() {
+            val o = __offset(52); return if (o != 0) __vector_len(o) else 0
+        }
+    fun crew(j: Int) : ferrex.details.CrewCredit? = crew(ferrex.details.CrewCredit(), j)
+    fun crew(obj: ferrex.details.CrewCredit, j: Int) : ferrex.details.CrewCredit? {
+        val o = __offset(54)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val crewLength : Int
+        get() {
+            val o = __offset(54); return if (o != 0) __vector_len(o) else 0
+        }
+    fun recommendations(j: Int) : ferrex.details.RelatedMediaRef? = recommendations(ferrex.details.RelatedMediaRef(), j)
+    fun recommendations(obj: ferrex.details.RelatedMediaRef, j: Int) : ferrex.details.RelatedMediaRef? {
+        val o = __offset(56)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val recommendationsLength : Int
+        get() {
+            val o = __offset(56); return if (o != 0) __vector_len(o) else 0
+        }
+    fun similar(j: Int) : ferrex.details.RelatedMediaRef? = similar(ferrex.details.RelatedMediaRef(), j)
+    fun similar(obj: ferrex.details.RelatedMediaRef, j: Int) : ferrex.details.RelatedMediaRef? {
+        val o = __offset(58)
+        return if (o != 0) {
+            obj.__assign(__indirect(__vector(o) + j * 4), bb)
+        } else {
+            null
+        }
+    }
+    val similarLength : Int
+        get() {
+            val o = __offset(58); return if (o != 0) __vector_len(o) else 0
+        }
     companion object {
         fun validateVersion() = Constants.FLATBUFFERS_25_2_10()
         fun getRootAsEnhancedSeriesDetails(_bb: ByteBuffer): EnhancedSeriesDetails = getRootAsEnhancedSeriesDetails(_bb, EnhancedSeriesDetails())
@@ -243,7 +295,7 @@ class EnhancedSeriesDetails : Table() {
             _bb.order(ByteOrder.LITTLE_ENDIAN)
             return (obj.__assign(_bb.getInt(_bb.position()) + _bb.position(), _bb))
         }
-        fun startEnhancedSeriesDetails(builder: FlatBufferBuilder) = builder.startTable(24)
+        fun startEnhancedSeriesDetails(builder: FlatBufferBuilder) = builder.startTable(28)
         fun addId(builder: FlatBufferBuilder, id: ULong) = builder.addLong(0, id.toLong(), 0)
         fun addName(builder: FlatBufferBuilder, name: Int) = builder.addOffset(1, name, 0)
         fun addOriginalName(builder: FlatBufferBuilder, originalName: Int) = builder.addOffset(2, originalName, 0)
@@ -276,6 +328,42 @@ class EnhancedSeriesDetails : Table() {
         fun addLogoPath(builder: FlatBufferBuilder, logoPath: Int) = builder.addOffset(21, logoPath, 0)
         fun addPrimaryPosterIid(builder: FlatBufferBuilder, primaryPosterIid: Int) = builder.addStruct(22, primaryPosterIid, 0)
         fun addPrimaryBackdropIid(builder: FlatBufferBuilder, primaryBackdropIid: Int) = builder.addStruct(23, primaryBackdropIid, 0)
+        fun addCast(builder: FlatBufferBuilder, cast: Int) = builder.addOffset(24, cast, 0)
+        fun createCastVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startCastVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
+        fun addCrew(builder: FlatBufferBuilder, crew: Int) = builder.addOffset(25, crew, 0)
+        fun createCrewVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startCrewVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
+        fun addRecommendations(builder: FlatBufferBuilder, recommendations: Int) = builder.addOffset(26, recommendations, 0)
+        fun createRecommendationsVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startRecommendationsVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
+        fun addSimilar(builder: FlatBufferBuilder, similar: Int) = builder.addOffset(27, similar, 0)
+        fun createSimilarVector(builder: FlatBufferBuilder, data: IntArray) : Int {
+            builder.startVector(4, data.size, 4)
+            for (i in data.size - 1 downTo 0) {
+                builder.addOffset(data[i])
+            }
+            return builder.endVector()
+        }
+        fun startSimilarVector(builder: FlatBufferBuilder, numElems: Int) = builder.startVector(4, numElems, 4)
         fun endEnhancedSeriesDetails(builder: FlatBufferBuilder) : Int {
             val o = builder.endTable()
             return o

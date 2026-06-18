@@ -10,6 +10,46 @@ table GenreInfo {
   name: string (required);
 }
 
+/// Person/profile metadata shared by cast and crew credits.
+table CreditProfile {
+  person_id:   ferrex.ids.Uuid;
+  profile_path: string;
+  profile_iid:  ferrex.ids.Uuid;
+}
+
+/// Cast credit metadata for detail pages and profile-image rails.
+table CastCredit {
+  id:                   ulong;
+  credit_id:            string;
+  cast_id:              ulong;
+  name:                 string;
+  original_name:        string;
+  character:            string;
+  profile:              CreditProfile;
+  order:                uint;
+  gender:               ubyte;
+  known_for_department: string;
+}
+
+/// Crew credit metadata for detail pages and profile-image rails.
+table CrewCredit {
+  id:                   ulong;
+  credit_id:            string;
+  name:                 string;
+  job:                  string;
+  department:           string;
+  profile:              CreditProfile;
+  gender:               ubyte;
+  known_for_department: string;
+  original_name:        string;
+}
+
+/// Related TMDB media reference used by recommendations/similar rails.
+table RelatedMediaRef {
+  tmdb_id: ulong;
+  title:   string;
+}
+
 table EnhancedMovieDetails {
   id:                   ulong;
   title:                string;
@@ -32,6 +72,10 @@ table EnhancedMovieDetails {
   logo_path:            string;
   primary_poster_iid:   ferrex.ids.Uuid;
   primary_backdrop_iid: ferrex.ids.Uuid;
+  cast:                 [CastCredit];
+  crew:                 [CrewCredit];
+  recommendations:      [RelatedMediaRef];
+  similar:              [RelatedMediaRef];
 }
 
 table EnhancedSeriesDetails {
@@ -59,6 +103,10 @@ table EnhancedSeriesDetails {
   logo_path:             string;
   primary_poster_iid:    ferrex.ids.Uuid;
   primary_backdrop_iid:  ferrex.ids.Uuid;
+  cast:                  [CastCredit];
+  crew:                  [CrewCredit];
+  recommendations:       [RelatedMediaRef];
+  similar:               [RelatedMediaRef];
 }
 
 table SeasonDetails {
@@ -86,4 +134,6 @@ table EpisodeDetails {
   vote_average:      float;
   vote_count:        uint;
   production_code:   string;
+  guest_stars:       [CastCredit];
+  crew:              [CrewCredit];
 }

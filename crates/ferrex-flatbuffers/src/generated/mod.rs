@@ -72,6 +72,12 @@ pub mod ferrex {
     }
     pub mod details {
         use super::*;
+        mod cast_credit_generated;
+        pub use self::cast_credit_generated::*;
+        mod credit_profile_generated;
+        pub use self::credit_profile_generated::*;
+        mod crew_credit_generated;
+        pub use self::crew_credit_generated::*;
         mod enhanced_movie_details_generated;
         pub use self::enhanced_movie_details_generated::*;
         mod enhanced_series_details_generated;
@@ -80,6 +86,8 @@ pub mod ferrex {
         pub use self::episode_details_generated::*;
         mod genre_info_generated;
         pub use self::genre_info_generated::*;
+        mod related_media_ref_generated;
+        pub use self::related_media_ref_generated::*;
         mod season_details_generated;
         pub use self::season_details_generated::*;
     }

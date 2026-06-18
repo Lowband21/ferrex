@@ -13,9 +13,13 @@ import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.watch.WatchMediaProgress
 import com.ferrex.android.core.watch.WatchNextEpisode
 import com.ferrex.android.core.watch.WatchRepositoryState
+import ferrex.details.CastCredit as FlatCastCredit
+import ferrex.details.CreditProfile as FlatCreditProfile
+import ferrex.details.CrewCredit as FlatCrewCredit
 import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
 import ferrex.details.EpisodeDetails
+import ferrex.details.RelatedMediaRef as FlatRelatedMediaRef
 import ferrex.details.SeasonDetails
 import ferrex.files.MediaFile
 import ferrex.media.EpisodeReference
@@ -69,6 +73,45 @@ data class DetailImageSet(
     val keys: Set<ImageRequestKey> = setOfNotNull(poster, backdrop, still)
 }
 
+data class DetailProfileImageSet(
+    val profile: ImageRequestKey? = null,
+    val profileFallbackPath: String? = null,
+) {
+    val keys: Set<ImageRequestKey> = setOfNotNull(profile)
+}
+
+data class DetailCastCredit(
+    val personTmdbId: Long?,
+    val personId: String?,
+    val creditId: String?,
+    val castId: Long?,
+    val name: String,
+    val originalName: String?,
+    val character: String?,
+    val order: Int,
+    val gender: Int?,
+    val knownForDepartment: String?,
+    val profileImages: DetailProfileImageSet = DetailProfileImageSet(),
+)
+
+data class DetailCrewCredit(
+    val personTmdbId: Long?,
+    val personId: String?,
+    val creditId: String?,
+    val name: String,
+    val job: String,
+    val department: String,
+    val gender: Int?,
+    val knownForDepartment: String?,
+    val originalName: String?,
+    val profileImages: DetailProfileImageSet = DetailProfileImageSet(),
+)
+
+data class DetailRelatedMediaRef(
+    val tmdbId: Long?,
+    val title: String?,
+)
+
 data class MovieDetail(
     val id: String,
     val libraryId: String,
@@ -86,6 +129,10 @@ data class MovieDetail(
     val fileId: String?,
     val fileName: String?,
     val images: DetailImageSet,
+    val cast: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
+    val recommendations: List<DetailRelatedMediaRef> = emptyList(),
+    val similar: List<DetailRelatedMediaRef> = emptyList(),
 )
 
 data class SeriesDetail(
@@ -108,6 +155,10 @@ data class SeriesDetail(
     val inProduction: Boolean,
     val tmdbId: Long?,
     val images: DetailImageSet,
+    val cast: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
+    val recommendations: List<DetailRelatedMediaRef> = emptyList(),
+    val similar: List<DetailRelatedMediaRef> = emptyList(),
 )
 
 data class SeasonDetail(
@@ -135,6 +186,8 @@ data class EpisodeDetail(
     val fileId: String?,
     val fileName: String?,
     val images: DetailImageSet,
+    val guestStars: List<DetailCastCredit> = emptyList(),
+    val crew: List<DetailCrewCredit> = emptyList(),
 ) {
     val episodeKey: String = "S$seasonNumber:E$episodeNumber"
 }
@@ -291,15 +344,31 @@ object DetailCache {
     )
 
     fun imageKeys(result: DetailLoadResult?): Set<ImageRequestKey> = when (result) {
-        is DetailLoadResult.Movie -> result.detail.images.keys
+        is DetailLoadResult.Movie -> buildSet {
+            addAll(result.detail.images.keys)
+            addCastProfileKeys(result.detail.cast)
+            addCrewProfileKeys(result.detail.crew)
+        }
         is DetailLoadResult.Series -> buildSet {
             addAll(result.detail.series.images.keys)
+            addCastProfileKeys(result.detail.series.cast)
+            addCrewProfileKeys(result.detail.series.crew)
             result.detail.seasons.flatMapTo(this) { it.images.keys }
-            result.detail.episodes.flatMapTo(this) { it.images.keys }
+            result.detail.episodes.forEach { episode ->
+                addAll(episode.images.keys)
+                addCastProfileKeys(episode.guestStars)
+                addCrewProfileKeys(episode.crew)
+            }
         }
         is DetailLoadResult.Episode -> buildSet {
             addAll(result.detail.images.keys)
-            result.parentSeries?.images?.keys?.let(::addAll)
+            addCastProfileKeys(result.detail.guestStars)
+            addCrewProfileKeys(result.detail.crew)
+            result.parentSeries?.let { series ->
+                addAll(series.images.keys)
+                addCastProfileKeys(series.cast)
+                addCrewProfileKeys(series.crew)
+            }
         }
         is DetailLoadResult.Missing,
         null -> emptySet()
@@ -390,6 +459,10 @@ private fun MovieReference.toDetail(@Suppress("UNUSED_PARAMETER") libraryName: S
         fileId = file?.safeId(),
         fileName = file?.filename,
         images = details.movieImages(),
+        cast = details?.castCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
+        recommendations = details?.recommendationRefs().orEmpty(),
+        similar = details?.similarRefs().orEmpty(),
     )
 }
 
@@ -415,6 +488,10 @@ private fun SeriesReference.toDetail(): SeriesDetail {
         inProduction = details?.inProduction ?: false,
         tmdbId = tmdbId.toLong().takeIf { it > 0L },
         images = details.seriesImages(),
+        cast = details?.castCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
+        recommendations = details?.recommendationRefs().orEmpty(),
+        similar = details?.similarRefs().orEmpty(),
     )
 }
 
@@ -452,6 +529,8 @@ private fun EpisodeReference.toDetail(): EpisodeDetail {
         fileId = file?.safeId(),
         fileName = file?.filename,
         images = details.episodeImages(),
+        guestStars = details?.guestStarCredits().orEmpty(),
+        crew = details?.crewCredits().orEmpty(),
     )
 }
 
@@ -480,6 +559,123 @@ private fun EpisodeDetails?.episodeImages(): DetailImageSet = DetailImageSet(
     still = this?.primaryStillIid?.toUuidString()?.let { ImageRequestKey(it, BrowseImageCategory.Episode) },
     stillFallbackPath = this?.stillPath.cleanOrNull(),
 )
+
+private fun FlatCreditProfile?.profileImages(): DetailProfileImageSet = DetailProfileImageSet(
+    profile = this?.profileIid?.toUuidString()?.let { ImageRequestKey(it, BrowseImageCategory.Profile) },
+    profileFallbackPath = this?.profilePath.cleanOrNull(),
+)
+
+private fun FlatCastCredit.toDetailCastCredit(): DetailCastCredit {
+    val profile = profile
+    return DetailCastCredit(
+        personTmdbId = id.toPositiveLongOrNull(),
+        personId = profile?.personId?.toUuidString(),
+        creditId = creditId.cleanOrNull(),
+        castId = castId.toPositiveLongOrNull(),
+        name = name.cleanOrNull() ?: "Unknown cast member",
+        originalName = originalName.cleanOrNull(),
+        character = character.cleanOrNull(),
+        order = order.toClampedInt(),
+        gender = gender.toInt().takeIf { it > 0 },
+        knownForDepartment = knownForDepartment.cleanOrNull(),
+        profileImages = profile.profileImages(),
+    )
+}
+
+private fun FlatCrewCredit.toDetailCrewCredit(): DetailCrewCredit {
+    val profile = profile
+    return DetailCrewCredit(
+        personTmdbId = id.toPositiveLongOrNull(),
+        personId = profile?.personId?.toUuidString(),
+        creditId = creditId.cleanOrNull(),
+        name = name.cleanOrNull() ?: "Unknown crew member",
+        job = job.cleanOrNull() ?: "Crew",
+        department = department.cleanOrNull() ?: "Crew",
+        gender = gender.toInt().takeIf { it > 0 },
+        knownForDepartment = knownForDepartment.cleanOrNull(),
+        originalName = originalName.cleanOrNull(),
+        profileImages = profile.profileImages(),
+    )
+}
+
+private fun FlatRelatedMediaRef.toDetailRelatedMediaRef(): DetailRelatedMediaRef = DetailRelatedMediaRef(
+    tmdbId = tmdbId.toPositiveLongOrNull(),
+    title = title.cleanOrNull(),
+)
+
+private fun EnhancedMovieDetails.castCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until castLength) {
+        cast(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.recommendationRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until recommendationsLength) {
+        recommendations(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedMovieDetails.similarRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until similarLength) {
+        similar(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.castCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until castLength) {
+        cast(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.recommendationRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until recommendationsLength) {
+        recommendations(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EnhancedSeriesDetails.similarRefs(): List<DetailRelatedMediaRef> = buildList {
+    for (index in 0 until similarLength) {
+        similar(index)?.toDetailRelatedMediaRef()?.let(::add)
+    }
+}
+
+private fun EpisodeDetails.guestStarCredits(): List<DetailCastCredit> = buildList {
+    for (index in 0 until guestStarsLength) {
+        guestStars(index)?.toDetailCastCredit()?.let(::add)
+    }
+}
+
+private fun EpisodeDetails.crewCredits(): List<DetailCrewCredit> = buildList {
+    for (index in 0 until crewLength) {
+        crew(index)?.toDetailCrewCredit()?.let(::add)
+    }
+}
+
+private fun MutableSet<ImageRequestKey>.addCastProfileKeys(credits: Iterable<DetailCastCredit>) {
+    credits.forEach { addAll(it.profileImages.keys) }
+}
+
+private fun MutableSet<ImageRequestKey>.addCrewProfileKeys(credits: Iterable<DetailCrewCredit>) {
+    credits.forEach { addAll(it.profileImages.keys) }
+}
+
+private fun ULong.toPositiveLongOrNull(): Long? = takeIf { value ->
+    value > 0UL && value <= Long.MAX_VALUE.toULong()
+}?.toLong()
+
+private fun UInt.toClampedInt(): Int = coerceAtMost(Int.MAX_VALUE.toUInt()).toInt()
 
 private fun EnhancedMovieDetails.genreNames(): List<String> = buildList {
     for (index in 0 until genresLength) {
