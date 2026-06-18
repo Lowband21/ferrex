@@ -38,8 +38,15 @@ DEFAULT_OUTPUT_DIR = Path("target/android-visual-qa")
 DEFAULT_SETTLE_MS = 1500
 DEFAULT_WARM_SETTLE_MS = 100
 DEFAULT_LOG_LINES = 240
-DEFAULT_ACCESSIBILITY_MAX_STEPS = 6
+DEFAULT_ACCESSIBILITY_MAX_STEPS = 16
 VALIDATED_BATCHED_ACCESSIBILITY_DUMP_SDK: Mapping[str, str] = {"phone": "35", "tv": "34"}
+ACCESSIBILITY_DUMP_ATTEMPTS = 8
+ACCESSIBILITY_DUMP_RELAUNCH_ATTEMPTS = 2
+ACCESSIBILITY_DUMP_RETRY_DELAY_SECONDS = 0.75
+ACCESSIBILITY_NO_PROGRESS_STOP_STREAK = 4
+TV_ACCESSIBILITY_SETTLE_MS = 8000
+VIEWPORT_SETTLE_TIMEOUT_SECONDS = 20.0
+VIEWPORT_SETTLE_RETRY_DELAY_SECONDS = 0.25
 GATE_MODES = ("smoke", "complete")
 SCREENSHOT_MODE_FAST = "fast"
 SCREENSHOT_MODE_HELPER_COMPATIBLE = "helper-compatible"
@@ -170,9 +177,11 @@ class WmOverrideSnapshot:
     override_density: str | None
     accelerometer_rotation: str | None = None
     user_rotation: str | None = None
+    raw_user_rotation: str | None = None
+    user_rotation_mode: str | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "raw_size": self.raw_size,
             "raw_density": self.raw_density,
             "override_size": self.override_size,
@@ -180,48 +189,10 @@ class WmOverrideSnapshot:
             "accelerometer_rotation": self.accelerometer_rotation,
             "user_rotation": self.user_rotation,
         }
-
-
-@dataclass(frozen=True)
-class ViewportApplyEvidence:
-    before: WmOverrideSnapshot
-    after: WmOverrideSnapshot
-    actions: tuple[dict[str, str], ...]
-
-    @property
-    def skipped(self) -> bool:
-        return not self.actions
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "before": self.before.to_json(),
-            "after": self.after.to_json(),
-            "actions": list(self.actions),
-            "skipped": self.skipped,
-        }
-
-
-@dataclass(frozen=True)
-class CacheLookup:
-    value: dict[str, object]
-    provenance: dict[str, object]
-
-
-@dataclass(frozen=True)
-class TargetViewportPlan:
-    target: str
-    profile: ViewportProfile
-    scenarios: tuple[Scenario, ...]
-
-
-@dataclass(frozen=True)
-class TargetRunResult:
-    target: str
-    records: tuple[dict[str, object], ...]
-    viewport_events: tuple[dict[str, object], ...]
-    cache_summary: dict[str, object]
-    worker_timing: dict[str, object]
-    screenshot_method_comparison: dict[str, object] | None = None
+        if self.raw_user_rotation is not None:
+            data["raw_user_rotation"] = self.raw_user_rotation
+            data["user_rotation_mode"] = self.user_rotation_mode
+        return data
 
 
 @dataclass(frozen=True)
@@ -1433,6 +1404,25 @@ def getprop(adb: str, serial: str, name: str) -> str:
     return adb_shell(adb, serial, "getprop", name, timeout=30).stdout.strip()
 
 
+def parse_user_rotation(raw: str) -> tuple[str | None, str | None]:
+    parts = raw.split()
+    if not parts:
+        return None, None
+    mode = parts[0]
+    rotation = parts[1] if len(parts) > 1 else None
+    return mode, rotation
+
+
+def _setting_value(result: RunResult) -> str | None:
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    return value if value and value != "null" else None
+
+
+def _normalized_setting_output(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized if normalized and normalized != "null" else None
+
+
 def wm_snapshot(adb: str, serial: str) -> WmOverrideSnapshot:
     sections = adb_shell_sections(
         adb,
@@ -1447,15 +1437,21 @@ def wm_snapshot(adb: str, serial: str) -> WmOverrideSnapshot:
     )
     raw_size = sections["wm_size"]
     raw_density = sections["wm_density"]
+    raw_rotation_result = adb_shell(adb, serial, "cmd", "window", "user-rotation", check=False, timeout=30)
+    raw_user_rotation = raw_rotation_result.stdout.strip() if raw_rotation_result.returncode == 0 else None
+    user_rotation_mode, parsed_user_rotation = parse_user_rotation(raw_user_rotation or "")
     size_match = re.search(r"(?im)^\s*Override size:\s*(\d+x\d+)\s*$", raw_size)
     density_match = re.search(r"(?im)^\s*Override density:\s*(\d+)\s*$", raw_density)
+    user_rotation = _normalized_setting_output(sections["user_rotation"]) or parsed_user_rotation
     return WmOverrideSnapshot(
         raw_size=raw_size,
         raw_density=raw_density,
         override_size=size_match.group(1) if size_match else None,
         override_density=density_match.group(1) if density_match else None,
-        accelerometer_rotation=sections["accelerometer_rotation"],
-        user_rotation=sections["user_rotation"],
+        accelerometer_rotation=_normalized_setting_output(sections["accelerometer_rotation"]),
+        user_rotation=user_rotation,
+        raw_user_rotation=raw_user_rotation,
+        user_rotation_mode=user_rotation_mode,
     )
 
 
@@ -1476,9 +1472,9 @@ def wm_effective_density(snapshot: WmOverrideSnapshot) -> str | None:
 def viewport_user_rotation(profile: ViewportProfile) -> str | None:
     if profile.wm_size is None and profile.wm_density is None:
         return None
-    # Keep the emulator's natural rotation stable and let wm size/density define
-    # the logical QA viewport. Rotating the framebuffer makes some phone
-    # scenarios capture as 1200x1800 instead of the requested 1800x1200.
+    # Keep emulator framebuffer orientation stable and let wm size/density define
+    # the logical QA viewport. Auto-rotation can remap 1800x1200 foldable captures
+    # into portrait 1200x1800 frames while the activity is settling.
     return "0"
 
 
@@ -1490,12 +1486,21 @@ def set_viewport_profile(
     include_snapshot: bool = True,
 ) -> dict[str, object]:
     applied: dict[str, object] = {}
+    has_viewport_override = profile.wm_size is not None or profile.wm_density is not None
     desired_rotation = viewport_user_rotation(profile)
+    if not has_viewport_override and desired_rotation is None:
+        return applied
+    if config.target == "phone" and has_viewport_override:
+        adb_shell(adb, config.serial, "cmd", "window", "user-rotation", "lock", "0", check=False, timeout=30)
+        applied["window_user_rotation"] = "lock 0"
     if desired_rotation is not None:
         adb_shell(adb, config.serial, "settings", "put", "system", "accelerometer_rotation", "0", timeout=30)
         adb_shell(adb, config.serial, "settings", "put", "system", "user_rotation", desired_rotation, timeout=30)
         applied["accelerometer_rotation"] = "0"
         applied["user_rotation"] = desired_rotation
+    if has_viewport_override:
+        adb_shell(adb, config.serial, "wm", "size", "reset", timeout=30)
+        adb_shell(adb, config.serial, "wm", "density", "reset", timeout=30)
     if profile.wm_size is not None:
         wm_size = size_to_string(profile.wm_size)
         adb_shell(adb, config.serial, "wm", "size", wm_size, timeout=30)
@@ -1503,6 +1508,8 @@ def set_viewport_profile(
     if profile.wm_density is not None:
         adb_shell(adb, config.serial, "wm", "density", str(profile.wm_density), timeout=30)
         applied["wm_density"] = profile.wm_density
+    if config.target == "phone" and has_viewport_override:
+        adb_shell(adb, config.serial, "cmd", "window", "user-rotation", "lock", "0", check=False, timeout=30)
     if include_snapshot:
         applied["snapshot"] = wm_snapshot(adb, config.serial).to_json()
     return applied
@@ -1517,8 +1524,13 @@ def apply_viewport_profile_for_group(
 ) -> ViewportApplyEvidence:
     before = wm_snapshot(adb, config.serial)
     actions: list[dict[str, str]] = []
+    has_viewport_override = profile.wm_size is not None or profile.wm_density is not None
     try:
         desired_rotation = viewport_user_rotation(profile)
+        if config.target == "phone" and has_viewport_override:
+            if force or before.user_rotation_mode != "lock" or before.user_rotation != "0":
+                adb_shell(adb, config.serial, "cmd", "window", "user-rotation", "lock", "0", check=False, timeout=30)
+                actions.append({"kind": "window_user_rotation", "value": "lock 0"})
         if desired_rotation is not None:
             if force or before.accelerometer_rotation != "0":
                 adb_shell(adb, config.serial, "settings", "put", "system", "accelerometer_rotation", "0", timeout=30)
@@ -1536,6 +1548,8 @@ def apply_viewport_profile_for_group(
             if force or wm_effective_density(before) != desired_density:
                 adb_shell(adb, config.serial, "wm", "density", desired_density, timeout=30)
                 actions.append({"kind": "wm_density", "value": desired_density})
+        if config.target == "phone" and has_viewport_override:
+            adb_shell(adb, config.serial, "cmd", "window", "user-rotation", "lock", "0", check=False, timeout=30)
     except Exception:
         restore_viewport_profile(adb, config, before)
         raise
@@ -1548,10 +1562,6 @@ def apply_viewport_profile(adb: str, config: TargetConfig, profile: ViewportProf
 
 
 def restore_viewport_profile(adb: str, config: TargetConfig, before: WmOverrideSnapshot) -> dict[str, object]:
-    if before.accelerometer_rotation in {"0", "1"}:
-        adb_shell(adb, config.serial, "settings", "put", "system", "accelerometer_rotation", before.accelerometer_rotation, timeout=30)
-    if before.user_rotation in {"0", "1", "2", "3"}:
-        adb_shell(adb, config.serial, "settings", "put", "system", "user_rotation", before.user_rotation, timeout=30)
     if before.override_size:
         adb_shell(adb, config.serial, "wm", "size", before.override_size, timeout=30)
     else:
@@ -1560,6 +1570,33 @@ def restore_viewport_profile(adb: str, config: TargetConfig, before: WmOverrideS
         adb_shell(adb, config.serial, "wm", "density", before.override_density, timeout=30)
     else:
         adb_shell(adb, config.serial, "wm", "density", "reset", timeout=30)
+    if before.accelerometer_rotation in {"0", "1"}:
+        adb_shell(
+            adb,
+            config.serial,
+            "settings",
+            "put",
+            "system",
+            "accelerometer_rotation",
+            before.accelerometer_rotation,
+            timeout=30,
+        )
+    if before.user_rotation in {"0", "1", "2", "3"}:
+        adb_shell(adb, config.serial, "settings", "put", "system", "user_rotation", before.user_rotation, timeout=30)
+    if before.user_rotation_mode == "lock" and before.user_rotation is not None:
+        adb_shell(
+            adb,
+            config.serial,
+            "cmd",
+            "window",
+            "user-rotation",
+            "lock",
+            before.user_rotation,
+            check=False,
+            timeout=30,
+        )
+    elif before.user_rotation_mode == "free":
+        adb_shell(adb, config.serial, "cmd", "window", "user-rotation", "free", check=False, timeout=30)
     return {"restored_to": wm_snapshot(adb, config.serial).to_json()}
 
 
@@ -2389,6 +2426,67 @@ def capture_screenshot(
     return record
 
 
+def png_dimensions_from_bytes(data: bytes, context: str) -> PngDimensions:
+    header = data[:24]
+    if len(header) < 24 or not header.startswith(PNG_SIGNATURE) or header[12:16] != b"IHDR":
+        raise VisualQaError(f"{context} is not a valid PNG with IHDR header")
+    width, height = struct.unpack(">II", header[16:24])
+    return PngDimensions(width=width, height=height)
+
+
+def screencap_dimensions(adb: str, config: TargetConfig) -> PngDimensions:
+    command = [adb, "-s", config.serial, "exec-out", "screencap", "-p"]
+    completed = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        stdout = completed.stdout.decode("utf-8", errors="replace").replace("\r", "")
+        stderr = completed.stderr.decode("utf-8", errors="replace").replace("\r", "")
+        raise CommandError(command, completed.returncode, stdout, stderr)
+    return png_dimensions_from_bytes(completed.stdout, f"screencap from {config.serial}")
+
+
+def wait_for_viewport_profile(adb: str, config: TargetConfig, profile: ViewportProfile) -> dict[str, object]:
+    expected = profile.expected_size
+    deadline = time.monotonic() + VIEWPORT_SETTLE_TIMEOUT_SECONDS
+    attempts: list[dict[str, object]] = []
+    while True:
+        attempt: dict[str, object] = {"attempt": len(attempts) + 1}
+        try:
+            dimensions = screencap_dimensions(adb, config)
+            attempt["observed_dimensions"] = dimensions.to_json()
+            attempts.append(attempt)
+            if (dimensions.width, dimensions.height) == expected:
+                waited_ms = int((VIEWPORT_SETTLE_TIMEOUT_SECONDS - max(deadline - time.monotonic(), 0)) * 1000)
+                return {
+                    "profile": profile.name,
+                    "expected_dimensions": {"width": expected[0], "height": expected[1]},
+                    "waited_ms": waited_ms,
+                    "attempts": attempts,
+                }
+        except Exception as exc:  # noqa: BLE001 - retry transient screencap failures while WM settles.
+            attempt["error"] = redact_text(str(exc))
+            attempts.append(attempt)
+        if time.monotonic() >= deadline:
+            break
+        if len(attempts) % 4 == 0:
+            try:
+                set_viewport_profile(adb, config, profile)
+                attempt["reapplied_profile"] = True
+            except Exception as exc:  # noqa: BLE001 - keep waiting and report recent reapply failures.
+                attempt["reapply_error"] = redact_text(str(exc))
+        time.sleep(VIEWPORT_SETTLE_RETRY_DELAY_SECONDS)
+
+    recent_attempts = attempts[-8:]
+    raise VisualQaError(
+        f"viewport {profile.name} did not settle to {expected[0]}x{expected[1]} on {config.serial}: {recent_attempts}"
+    )
+
+
 def validate_png(path: Path, expected_size: tuple[int, int]) -> PngDimensions:
     if not path.exists():
         raise VisualQaError(f"screenshot PNG is missing: {path}")
@@ -2397,15 +2495,14 @@ def validate_png(path: Path, expected_size: tuple[int, int]) -> PngDimensions:
         raise VisualQaError(f"screenshot PNG is zero bytes: {path}")
     with path.open("rb") as handle:
         header = handle.read(24)
-    if len(header) < 24 or not header.startswith(PNG_SIGNATURE) or header[12:16] != b"IHDR":
-        raise VisualQaError(f"screenshot artifact is not a valid PNG with IHDR header: {path}")
-    width, height = struct.unpack(">II", header[16:24])
+    dimensions = png_dimensions_from_bytes(header, f"screenshot artifact {path}")
+    width, height = dimensions.width, dimensions.height
     expected_width, expected_height = expected_size
     if (width, height) != (expected_width, expected_height):
         raise VisualQaError(
             f"screenshot dimensions for {path} were {width}x{height}; expected {expected_width}x{expected_height}"
         )
-    return PngDimensions(width=width, height=height)
+    return dimensions
 
 
 def screenshot_attempt_record(
@@ -3078,6 +3175,8 @@ def capture_one(
                 with timing.step("viewport_apply"):
                     viewport_before = apply_viewport_profile(adb, config, profile)
                 record["viewport_before"] = viewport_before.to_json()
+            with timing.step("viewport_settle"):
+                record["viewport_settle"] = wait_for_viewport_profile(adb, config, profile)
             with timing.step("metadata"):
                 serial_metadata = cache.serial_metadata(adb, config)
             record["serial_metadata"] = serial_metadata.value
@@ -3098,6 +3197,8 @@ def capture_one(
                 record["dpad_key_events"] = drive_scenario(adb, config, scenario)
             with timing.step("settle"):
                 time.sleep(settle_ms / 1000.0)
+            with timing.step("viewport_capture_settle"):
+                record["viewport_capture_settle"] = wait_for_viewport_profile(adb, config, profile)
             dimensions = capture_validated_screenshot(
                 adb=adb,
                 config=config,
@@ -3198,6 +3299,8 @@ def compare_screenshot_methods(
             with timing.step("viewport_apply"):
                 viewport_before = apply_viewport_profile(adb, config, profile)
             comparison["viewport_before"] = viewport_before.to_json()
+            with timing.step("viewport_settle"):
+                comparison["viewport_settle"] = wait_for_viewport_profile(adb, config, profile)
             dimensions = capture_validated_screenshot(
                 adb=adb,
                 config=config,
@@ -3400,6 +3503,10 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
     ]
     if state_key in {"stale-offline", "recovery"}:
         for action_key, action_label in THEATER_PLATE_RECOVERY_ACTIONS:
+            if target == "phone" and action_key == "retry":
+                # Retry is already exposed as the primary action on phone Theater Plate recovery
+                # states; keep the supporting action set free of duplicate labels.
+                continue
             requirements.append(
                 AccessibilityRequirement(
                     key=f"theater-recovery-{action_key}",
@@ -3504,25 +3611,128 @@ def accessibility_remote_dump_path(attempt: int | None = None) -> str:
     return f"/sdcard/ferrex-visual-qa-accessibility-{suffix}.xml"
 
 
-def dump_accessibility_xml_safe(adb: str, config: TargetConfig, remote_path: str | None = None) -> str:
-    last_error: CommandError | None = None
-    for attempt in range(1, 4):
+def accessibility_dump_validation_error(xml_text: str, expected_text: str | None) -> str | None:
+    if "<hierarchy" not in xml_text:
+        return f"dump did not contain a UI hierarchy: {bounded_lines(redact_text(xml_text), 4)}"
+    if expected_text is not None and expected_text not in xml_text:
+        marker_match = re.search(r'Ferrex visual QA • [^"<]+', xml_text)
+        observed_marker = marker_match.group(0) if marker_match else "<missing>"
+        return f"dump did not contain expected scenario marker {expected_text!r}; observed {observed_marker!r}"
+    return None
+
+
+def should_relaunch_after_accessibility_dump_error(message: str) -> bool:
+    return any(
+        marker in message
+        for marker in (
+            "expected scenario marker",
+            "uiautomator dump exited 137",
+            "dump file missing/unreadable",
+            "accessibility dump did not stabilize",
+        )
+    )
+
+
+def dump_accessibility_xml_safe(
+    adb: str,
+    config: TargetConfig,
+    remote_path: str | None = None,
+    *,
+    expected_text: str | None = None,
+) -> str:
+    errors: list[str] = []
+    for attempt in range(1, ACCESSIBILITY_DUMP_ATTEMPTS + 1):
         attempt_remote_path = remote_path if remote_path is not None and attempt == 1 else accessibility_remote_dump_path(attempt)
+        dump_output = ""
         try:
             adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
-            adb_shell(adb, config.serial, "uiautomator", "dump", "--compressed", attempt_remote_path, timeout=90)
-            xml_text = adb_shell(adb, config.serial, "cat", attempt_remote_path, timeout=30).stdout
-            adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
-            return xml_text
+            dump = adb_shell(
+                adb,
+                config.serial,
+                "uiautomator",
+                "dump",
+                "--compressed",
+                attempt_remote_path,
+                check=False,
+                timeout=90,
+            )
+            dump_output = (dump.stdout + "\n" + dump.stderr).strip()
+            if dump.returncode != 0:
+                errors.append(
+                    f"attempt {attempt}: uiautomator dump exited {dump.returncode}: "
+                    f"{bounded_lines(redact_text(dump_output), 4)}"
+                )
+            else:
+                xml_result = adb_shell(adb, config.serial, "cat", attempt_remote_path, check=False, timeout=30)
+                xml_text = xml_result.stdout
+                if xml_result.returncode != 0:
+                    cat_output = (xml_result.stdout + "\n" + xml_result.stderr).strip()
+                    errors.append(
+                        f"attempt {attempt}: dump file missing/unreadable: "
+                        f"{bounded_lines(redact_text(cat_output or dump_output), 4)}"
+                    )
+                else:
+                    validation_error = accessibility_dump_validation_error(xml_text, expected_text)
+                    if validation_error is None:
+                        return xml_text
+                    errors.append(f"attempt {attempt}: {validation_error}")
         except CommandError as exc:
-            last_error = exc
+            errors.append(f"attempt {attempt}: {bounded_lines(redact_text(str(exc)), 4)}")
+        finally:
             adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
-            if attempt == 3:
-                raise
-            time.sleep(0.75)
-    if last_error is not None:
-        raise last_error
-    raise VisualQaError("accessibility dump failed without an error")
+        if attempt < ACCESSIBILITY_DUMP_ATTEMPTS:
+            time.sleep(ACCESSIBILITY_DUMP_RETRY_DELAY_SECONDS)
+
+    recent_errors = "\n".join(errors[-ACCESSIBILITY_DUMP_ATTEMPTS:]) or "no dump attempts completed"
+    raise VisualQaError(f"accessibility dump did not stabilize for {config.serial}:\n{recent_errors}")
+
+
+def dump_accessibility_xml_batched(adb: str, config: TargetConfig, remote_path: str) -> str:
+    script = (
+        f"remote='{remote_path}'; "
+        'uiautomator dump --compressed "$remote" >/dev/null 2>&1; '
+        "dump_status=$?; "
+        'if [ "$dump_status" -eq 0 ]; then '
+        'cat "$remote"; cat_status=$?; rm -f "$remote"; exit "$cat_status"; '
+        'else rm -f "$remote"; exit "$dump_status"; fi'
+    )
+    return adb_shell(adb, config.serial, f"sh -c {shlex.quote(script)}", timeout=120).stdout
+
+
+def dump_accessibility_xml_result(
+    adb: str,
+    config: TargetConfig,
+    strategy: AccessibilityDumpStrategy | None = None,
+    *,
+    expected_text: str | None = None,
+) -> AccessibilityXmlDump:
+    remote_path = accessibility_remote_dump_path()
+    selected = strategy or AccessibilityDumpStrategy(
+        name="safe-sequence",
+        batched=False,
+        reason="default safe sequence",
+    )
+    if selected.batched:
+        try:
+            xml_text = dump_accessibility_xml_batched(adb, config, remote_path)
+            validation_error = accessibility_dump_validation_error(xml_text, expected_text)
+            if validation_error is not None:
+                raise VisualQaError(validation_error)
+            return AccessibilityXmlDump(xml_text=xml_text, command_strategy=selected.name)
+        except Exception as exc:  # noqa: BLE001 - fall back to the long-standing safe sequence.
+            return AccessibilityXmlDump(
+                xml_text=dump_accessibility_xml_safe(adb, config, remote_path, expected_text=expected_text),
+                command_strategy="safe-sequence",
+                fallback_reason=f"{selected.name} failed; retried with safe sequence: {redact_text(str(exc))}",
+            )
+    return AccessibilityXmlDump(
+        xml_text=dump_accessibility_xml_safe(adb, config, remote_path, expected_text=expected_text),
+        command_strategy=selected.name,
+    )
+
+
+def dump_accessibility_xml(adb: str, config: TargetConfig, expected_text: str | None = None) -> str:
+    return dump_accessibility_xml_result(adb, config, expected_text=expected_text).xml_text
 
 
 def dump_accessibility_nodes(
@@ -3530,12 +3740,14 @@ def dump_accessibility_nodes(
     config: TargetConfig,
     root_tag: str | None,
     strategy: AccessibilityDumpStrategy | None = None,
+    *,
+    expected_text: str | None = None,
 ) -> tuple[AccessibilityXmlDump, list[dict[str, str]], int]:
     attempts = 5
     last_dump: AccessibilityXmlDump | None = None
     last_nodes: list[dict[str, str]] = []
     for attempt in range(1, attempts + 1):
-        dump_result = dump_accessibility_xml_result(adb, config, strategy)
+        dump_result = dump_accessibility_xml_result(adb, config, strategy, expected_text=expected_text)
         nodes = parse_accessibility_nodes(dump_result.xml_text)
         if root_tag is None or any(node_has_tag(node, root_tag) for node in nodes):
             return dump_result, nodes, attempt
@@ -3549,70 +3761,58 @@ def dump_accessibility_nodes(
     raise VisualQaError("accessibility dump did not return any XML")
 
 
-def dump_accessibility_xml_batched(adb: str, config: TargetConfig, remote_path: str) -> str:
-    script = (
-        f"remote='{remote_path}'; "
-        "uiautomator dump --compressed \"$remote\" >/dev/null 2>&1; "
-        "dump_status=$?; "
-        "if [ \"$dump_status\" -eq 0 ]; then "
-        "cat \"$remote\"; cat_status=$?; rm -f \"$remote\"; exit \"$cat_status\"; "
-        "else rm -f \"$remote\"; exit \"$dump_status\"; fi"
-    )
-    return adb_shell(adb, config.serial, f"sh -c {shlex.quote(script)}", timeout=120).stdout
-
-
-def dump_accessibility_xml_result(
-    adb: str,
-    config: TargetConfig,
-    strategy: AccessibilityDumpStrategy | None = None,
-) -> AccessibilityXmlDump:
-    remote_path = accessibility_remote_dump_path()
-    selected = strategy or AccessibilityDumpStrategy(
-        name="safe-sequence",
-        batched=False,
-        reason="default safe sequence",
-    )
-    if selected.batched:
-        try:
-            return AccessibilityXmlDump(
-                xml_text=dump_accessibility_xml_batched(adb, config, remote_path),
-                command_strategy=selected.name,
-            )
-        except Exception as exc:  # noqa: BLE001 - fall back to the long-standing safe sequence.
-            return AccessibilityXmlDump(
-                xml_text=dump_accessibility_xml_safe(adb, config, remote_path),
-                command_strategy="safe-sequence",
-                fallback_reason=f"{selected.name} failed; retried with safe sequence: {redact_text(str(exc))}",
-            )
-    return AccessibilityXmlDump(
-        xml_text=dump_accessibility_xml_safe(adb, config, remote_path),
-        command_strategy=selected.name,
-    )
-
-
-def dump_accessibility_xml(adb: str, config: TargetConfig) -> str:
-    return dump_accessibility_xml_result(adb, config).xml_text
-
-
 def drive_accessibility_reachability_step(adb: str, config: TargetConfig, profile: ViewportProfile) -> None:
     width, height = profile.expected_size
     if config.target == "tv":
-        adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_DPAD_DOWN", timeout=30)
+        for _ in range(2):
+            adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_DPAD_DOWN", timeout=30)
+            time.sleep(0.05)
         time.sleep(0.25)
         return
-    adb_shell(
-        adb,
-        config.serial,
-        "input",
-        "swipe",
-        str(width // 2),
-        str(int(height * 0.82)),
-        str(width // 2),
-        str(int(height * 0.25)),
-        "250",
-        timeout=30,
-    )
+
+    for _ in range(2):
+        adb_shell(
+            adb,
+            config.serial,
+            "input",
+            "swipe",
+            str(width // 2),
+            str(int(height * 0.88)),
+            str(width // 2),
+            str(int(height * 0.12)),
+            "350",
+            timeout=30,
+        )
+        time.sleep(0.15)
+    adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_PAGE_DOWN", check=False, timeout=30)
     time.sleep(0.25)
+
+
+def hide_soft_keyboard_if_visible(adb: str, config: TargetConfig) -> list[str]:
+    if config.target != "phone":
+        return []
+    dump = adb_shell(adb, config.serial, "dumpsys", "input_method", check=False, timeout=30)
+    if dump.returncode != 0:
+        return ["input-method-dumpsys-unavailable"]
+    if not re.search(r"(?m)\bm(?:InputShown|IsInputViewShown)=true\b|\binputShown=true\b", dump.stdout):
+        return []
+    adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_BACK", timeout=30)
+    time.sleep(0.25)
+    return ["KEYCODE_BACK"]
+
+
+def refresh_accessibility_focus(adb: str, config: TargetConfig) -> list[str]:
+    if config.target == "phone":
+        adb_shell(adb, config.serial, "input", "tap", "8", "80", timeout=30)
+        time.sleep(0.1)
+        return ["tap:8,80"]
+    if config.target != "tv":
+        return []
+    keys = ["KEYCODE_DPAD_UP", "KEYCODE_DPAD_LEFT"]
+    for key in keys:
+        adb_shell(adb, config.serial, "input", "keyevent", key, timeout=30)
+        time.sleep(0.1)
+    return keys
 
 
 def accessibility_dump_path(base_path: Path, step: int) -> Path:
@@ -3804,6 +4004,8 @@ def accessibility_one(
                 with timing.step("viewport_apply"):
                     viewport_before = apply_viewport_profile(adb, config, profile)
                 record["viewport_before"] = viewport_before.to_json()
+            with timing.step("viewport_settle"):
+                record["viewport_settle"] = wait_for_viewport_profile(adb, config, profile)
             with timing.step("metadata"):
                 serial_metadata = cache.serial_metadata(adb, config)
             record["serial_metadata"] = serial_metadata.value
@@ -3816,17 +4018,38 @@ def accessibility_one(
             add_cache_provenance(record, "package_metadata", package_metadata.provenance)
             with timing.step("force_stop"):
                 force_stop_package(adb, config)
+            with timing.step("prelaunch_settle"):
+                time.sleep(1.0 if config.target == "tv" else 0.25)
             with timing.step("launch"):
                 record["launch"] = launch_scenario(adb, config, scenario)
             with timing.step("drive"):
                 record["dpad_key_events"] = []
+            target_settle_ms = TV_ACCESSIBILITY_SETTLE_MS if config.target == "tv" else 2500
             with timing.step("settle"):
-                time.sleep(settle_ms / 1000.0)
+                time.sleep(max(settle_ms, target_settle_ms) / 1000.0)
+            try:
+                with timing.step("viewport_accessibility_settle"):
+                    record["viewport_accessibility_settle"] = wait_for_viewport_profile(adb, config, profile)
+            except VisualQaError as exc:
+                record["viewport_accessibility_initial_settle_error"] = redact_text(str(exc))
+                with timing.step("viewport_reapply"):
+                    reapply_record = {"next_attempt": 1, **set_viewport_profile(adb, config, profile)}
+                record["viewport_reapply"] = [reapply_record]
+                with timing.step("viewport_accessibility_settle"):
+                    record["viewport_accessibility_settle"] = wait_for_viewport_profile(adb, config, profile)
+            with timing.step("soft_keyboard"):
+                keyboard_events = hide_soft_keyboard_if_visible(adb, config)
+            if keyboard_events:
+                record["soft_keyboard_events"] = keyboard_events
+            with timing.step("accessibility_focus_refresh"):
+                record["dpad_key_events"] = refresh_accessibility_focus(adb, config)
+
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             nodes: list[dict[str, str]] = []
             dump_paths: list[str] = []
             dump_attempts: list[int] = []
             root_tag = scenario_root_tag(requirements)
+            expected_marker = f"Ferrex visual QA • {scenario.id}"
             steps: list[dict[str, object]] = []
             seen_node_fingerprints: set[tuple[tuple[str, str], ...]] = set()
             previous_passed_requirement_keys: set[str] = set()
@@ -3847,10 +4070,42 @@ def accessibility_one(
                 step_started = timing.now()
                 steps.append(step_record)
 
+                dump_result: AccessibilityXmlDump | None = None
+                step_nodes: list[dict[str, str]] = []
+                attempts = 0
+                dump_relaunches: list[dict[str, object]] = []
                 dump_started = timing.now()
                 with timing.step("accessibility_dump"):
-                    dump_result, step_nodes, attempts = dump_accessibility_nodes(adb, config, root_tag, dump_strategy)
+                    for relaunch_attempt in range(ACCESSIBILITY_DUMP_RELAUNCH_ATTEMPTS + 1):
+                        try:
+                            dump_result, step_nodes, attempts = dump_accessibility_nodes(
+                                adb,
+                                config,
+                                root_tag,
+                                dump_strategy,
+                                expected_text=expected_marker,
+                            )
+                            break
+                        except VisualQaError as exc:
+                            error = redact_text(str(exc))
+                            if (
+                                relaunch_attempt >= ACCESSIBILITY_DUMP_RELAUNCH_ATTEMPTS
+                                or not should_relaunch_after_accessibility_dump_error(error)
+                            ):
+                                raise
+                            relaunch_record: dict[str, object] = {
+                                "attempt": relaunch_attempt + 1,
+                                "reason": error,
+                            }
+                            force_stop_package(adb, config)
+                            time.sleep(1.0 if config.target == "tv" else 0.5)
+                            relaunch_record["launch"] = launch_scenario(adb, config, scenario)
+                            time.sleep((TV_ACCESSIBILITY_SETTLE_MS if config.target == "tv" else 2500) / 1000.0)
+                            dump_relaunches.append(relaunch_record)
+                            step_record["dump_relaunches"] = dump_relaunches
                 step_timings["dump"] = timing.elapsed_ms_since(dump_started)
+                if dump_result is None:
+                    raise VisualQaError("accessibility dump did not return a result")
                 xml_text = dump_result.xml_text
                 step_path.write_text(redact_xml_text(xml_text), encoding="utf-8")
                 dump_paths.append(str(step_path))
@@ -3913,7 +4168,7 @@ def accessibility_one(
                     if step < max_steps - 1:
                         record["early_stop_reason"] = stop_reason
                         step_record["early_stop_reason"] = stop_reason
-                elif no_progress and not exhaustive_dumps and step < max_steps - 1:
+                elif no_progress_streak >= ACCESSIBILITY_NO_PROGRESS_STOP_STREAK and not exhaustive_dumps and step < max_steps - 1:
                     stop_reason = "no_progress"
                     record["early_stop_reason"] = stop_reason
                     step_record["early_stop_reason"] = stop_reason

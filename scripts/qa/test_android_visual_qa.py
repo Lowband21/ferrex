@@ -1149,6 +1149,24 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertEqual(configs["tv"].expected_size, (1280, 720))
         self.assertEqual(configs["phone"].serial, "emulator-5554")
 
+    def test_set_viewport_profile_does_not_reset_hardware_profile(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="ABC123",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("app.apk"),
+            expected_size=(1280, 720),
+            screenshot_helper="ferrex-android-screenshot-phone",
+        )
+        profile = android_visual_qa.hardware_profile(config)
+
+        with mock.patch.object(android_visual_qa, "adb_shell") as adb_shell:
+            applied = android_visual_qa.set_viewport_profile("adb", config, profile, include_snapshot=False)
+
+        self.assertEqual(applied, {})
+        adb_shell.assert_not_called()
+
     def test_default_viewport_profiles_cover_phone_tv_and_scaled_dimensions(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
         selected = [registry.by_id["phone-home"], registry.by_id["tv-home-focus"]]
@@ -1178,9 +1196,72 @@ class AndroidVisualQaTest(unittest.TestCase):
         )
         self.assertEqual(plan["viewport_profiles"]["tv"][1]["wm_size"], "3840x2160")
 
+    def test_wait_for_viewport_profile_retries_until_screencap_dimensions_match(self) -> None:
+        observed = [
+            android_visual_qa.PngDimensions(1080, 2400),
+            android_visual_qa.PngDimensions(1800, 1200),
+        ]
+
+        def fake_screencap_dimensions(adb: str, config: object) -> android_visual_qa.PngDimensions:
+            return observed.pop(0)
+
+        with mock.patch.object(
+            android_visual_qa,
+            "screencap_dimensions",
+            side_effect=fake_screencap_dimensions,
+        ), mock.patch.object(android_visual_qa.time, "sleep") as sleep:
+            settle = android_visual_qa.wait_for_viewport_profile(
+                "adb",
+                SimpleNamespace(serial="emulator-5554"),
+                android_visual_qa.VIEWPORT_PROFILES["phone-landscape-foldable"],
+            )
+
+        self.assertEqual(settle["profile"], "phone-landscape-foldable")
+        self.assertEqual(len(settle["attempts"]), 2)
+        sleep.assert_called_once()
+
+    def test_accessibility_dump_retries_until_expected_scenario_marker_is_present(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        dump_attempts = 0
+
+        def fake_adb_shell(adb: str, serial: str, *shell_args: str, **kwargs: object) -> android_visual_qa.RunResult:
+            nonlocal dump_attempts
+            calls.append(tuple(shell_args))
+            if shell_args[:2] == ("uiautomator", "dump"):
+                dump_attempts += 1
+                return android_visual_qa.RunResult(stdout="UI hierarchy dumped", stderr="", returncode=0)
+            if shell_args[0] == "cat":
+                if dump_attempts == 1:
+                    return android_visual_qa.RunResult(stdout="", stderr="cat: missing", returncode=1)
+                return android_visual_qa.RunResult(
+                    stdout='<hierarchy><node text="Ferrex visual QA • phone-home" /></hierarchy>',
+                    stderr="",
+                    returncode=0,
+                )
+            if shell_args[0] == "rm":
+                return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+            raise AssertionError(shell_args)
+
+        with mock.patch.object(android_visual_qa, "adb_shell", side_effect=fake_adb_shell), mock.patch.object(
+            android_visual_qa.time,
+            "sleep",
+        ):
+            xml = android_visual_qa.dump_accessibility_xml(
+                "adb",
+                SimpleNamespace(serial="emulator-5554"),
+                expected_text="Ferrex visual QA • phone-home",
+            )
+
+        self.assertIn("phone-home", xml)
+        self.assertEqual(dump_attempts, 2)
+        self.assertTrue(any(call[0] == "rm" for call in calls))
+
     def test_accessibility_requirements_match_tags_labels_and_actions(self) -> None:
         scenario = android_visual_qa.Scenario("phone-theater-plate-recovery", "phone")
         requirements = android_visual_qa.accessibility_requirements_for_scenario(scenario)
+        requirement_keys = {requirement.key for requirement in requirements}
+        self.assertIn("theater-primary-action", requirement_keys)
+        self.assertNotIn("theater-recovery-retry", requirement_keys)
         xml = """
         <hierarchy>
           <node resource-id="phone.theater-plate.recovery" content-desc="Recovery root" clickable="false" focusable="false" />

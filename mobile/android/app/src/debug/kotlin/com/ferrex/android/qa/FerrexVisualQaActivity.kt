@@ -7,7 +7,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -136,32 +135,25 @@ class FerrexVisualQaActivity : ComponentActivity() {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FerrexVisualQaRoot(initialScenario: VisualQaScenario) {
-    var selectedScenario by remember { mutableStateOf(initialScenario) }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .semantics { testTagsAsResourceId = true }
             .background(MaterialTheme.colorScheme.background),
     ) {
-        ScenarioHeader(
-            scenario = selectedScenario,
-            onScenarioSelected = { selectedScenario = it },
-        )
+        ScenarioHeader(scenario = initialScenario)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
         ) {
-            FerrexVisualQaScenarioContent(selectedScenario)
+            FerrexVisualQaScenarioContent(initialScenario)
         }
     }
 }
 
 @Composable
-private fun ScenarioHeader(
-    scenario: VisualQaScenario,
-    onScenarioSelected: (VisualQaScenario) -> Unit,
-) {
+private fun ScenarioHeader(scenario: VisualQaScenario) {
     val compact = scenario.device == VisualQaDevice.Tv
     Column(
         modifier = Modifier
@@ -182,24 +174,6 @@ private fun ScenarioHeader(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                FerrexVisualQaScenarios.all.forEach { candidate ->
-                    FerrexActionButton(
-                        label = candidate.id,
-                        role = if (candidate.id == scenario.id) FerrexActionRole.Primary else FerrexActionRole.Secondary,
-                        onClick = { onScenarioSelected(candidate) },
-                    ) {
-                        Text(
-                            text = candidate.id,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -611,13 +585,15 @@ private fun TheaterPlateScenario(
                 val recoveryFirst = state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline
                 TheaterPlateStatus(target = target, state = state, density = stageDensity)
                 if (recoveryFirst) {
-                    TheaterPlateActions(target = target, state = state, tv = false, includeSupportingActions = false)
+                    TheaterPlateActions(target = target, state = state, tv = false)
                 }
                 TheaterPlateMediaCard(target = target, state = state, tv = false, densityRole = densityRole)
                 if (state == VisualQaTheaterPlateState.Search) {
                     TheaterPlateSearchField(target = target, state = state, tv = false)
                 }
-                TheaterPlateActions(target = target, state = state, tv = false, includePrimary = !recoveryFirst)
+                if (!recoveryFirst) {
+                    TheaterPlateActions(target = target, state = state, tv = false)
+                }
                 TheaterPlateRail(target = target, state = state, tv = false, densityRole = densityRole, density = stageDensity)
             }
         }
@@ -778,7 +754,13 @@ private fun TheaterPlateActions(
         if (includePrimary || state == VisualQaTheaterPlateState.PlaybackEntry) add(primary)
         if (includeSupportingActions) {
             if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
-                addAll(FerrexVisualQaFixtures.noWipeCacheRecoveryActions)
+                val recoveryActions = FerrexVisualQaFixtures.noWipeCacheRecoveryActions.filterNot { action ->
+                    // Phone Theater Plate QA already promotes retry as the primary action. Avoid a
+                    // second adjacent Retry button so the gate screenshots stay calmer without
+                    // removing the no-wipe recovery exits that distinguish this state.
+                    !tv && includePrimary && action.key == "retry"
+                }
+                addAll(recoveryActions)
             } else {
                 if (state == VisualQaTheaterPlateState.PlaybackEntry) {
                     add(
