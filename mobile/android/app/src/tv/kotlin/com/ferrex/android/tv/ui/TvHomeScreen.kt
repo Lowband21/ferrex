@@ -85,6 +85,8 @@ import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
+import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
+import com.ferrex.android.core.mediaart.MediaRailItemIdentity
 import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryFreshness
@@ -1328,8 +1330,16 @@ private fun TvPosterGrid(
     onSelect: (LibraryMediaCard) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val keys = cards.map { it.stableKey }
-    val requesters = remember(keys) { cards.associate { it.stableKey to FocusRequester() } }
+    val gridItems = remember(cards) {
+        cards.zip(
+            MediaRailIdentityResolver.assign(
+                railKey = "grid-cards",
+                stableIds = cards.map { it.stableKey },
+            ),
+        )
+    }
+    val keys = gridItems.map { it.second.renderKey }
+    val requesters = remember(keys) { keys.associateWith { FocusRequester() } }
     val restoredKey = keys.firstOrNull()?.let { fallback ->
         focusRestorer.restoreItem("grid-cards", keys, fallback)
     }
@@ -1347,17 +1357,19 @@ private fun TvPosterGrid(
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
     ) {
-        items(cards, key = { it.stableKey }) { card ->
+        items(gridItems, key = { it.second.focusKey }) { (card, identity) ->
+            val itemKey = identity.renderKey
             TvPosterCard(
                 entry = card.toPosterEntry(),
                 imageResolutions = imageResolutions,
                 imageLoader = imageLoader,
                 scope = scope,
-                focusRequester = requesters[card.stableKey],
-                onFocused = { focusRestorer.record("grid-cards", card.stableKey) },
+                focusRequester = requesters[itemKey],
+                semanticLabel = identity.semanticLabel(card.title),
+                onFocused = { focusRestorer.record("grid-cards", itemKey) },
                 onSelect = { onSelect(card) },
                 modifier = Modifier.fillMaxWidth(),
-                testTag = FerrexQaTags.Tv.poster("grid-cards", card.stableKey),
+                testTag = FerrexQaTags.Tv.poster("grid-cards", itemKey),
             )
         }
     }
@@ -1998,8 +2010,16 @@ private fun TvPosterRow(
     if (entries.isEmpty()) return
     title?.let { TvSectionHeader(it) }
     Text(supportingText, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    val keys = entries.map { it.stableKey }
-    val requesters = remember(keys) { entries.associate { it.stableKey to FocusRequester() } }
+    val railItems = remember(surfaceKey, entries) {
+        entries.zip(
+            MediaRailIdentityResolver.assign(
+                railKey = surfaceKey,
+                stableIds = entries.map { it.stableKey },
+            ),
+        ).map { (entry, identity) -> TvRailPosterItem(entry, identity) }
+    }
+    val keys = railItems.map { it.identity.renderKey }
+    val requesters = remember(keys) { keys.associateWith { FocusRequester() } }
     val restoredKey = keys.firstOrNull()?.let { fallback ->
         focusRestorer.restoreItem(surfaceKey, keys, fallback)
     }
@@ -2016,17 +2036,20 @@ private fun TvPosterRow(
             .testTag(FerrexQaTags.Tv.surface(surfaceKey))
             .focusGroup(),
     ) {
-        items(entries, key = { it.stableKey }) { entry ->
+        items(railItems, key = { it.identity.focusKey }) { railItem ->
+            val entry = railItem.entry
+            val itemKey = railItem.identity.renderKey
             TvPosterCard(
                 entry = entry,
                 imageResolutions = imageResolutions,
                 imageLoader = imageLoader,
                 scope = scope,
-                focusRequester = requesters[entry.stableKey],
-                onFocused = { focusRestorer.record(surfaceKey, entry.stableKey) },
+                focusRequester = requesters[itemKey],
+                semanticLabel = railItem.identity.semanticLabel(entry.title),
+                onFocused = { focusRestorer.record(surfaceKey, itemKey) },
                 onSelect = { onSelect(entry) },
                 modifier = Modifier.width(FerrexDesignTokens.Poster.TvWidth),
-                testTag = FerrexQaTags.Tv.poster(surfaceKey, entry.stableKey),
+                testTag = FerrexQaTags.Tv.poster(surfaceKey, itemKey),
             )
         }
     }
@@ -2039,6 +2062,7 @@ private fun TvPosterCard(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     focusRequester: FocusRequester?,
+    semanticLabel: String = entry.title,
     onFocused: () -> Unit,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2046,7 +2070,7 @@ private fun TvPosterCard(
 ) {
     TvFocusableSurface(
         onClick = onSelect,
-        semanticLabel = entry.title,
+        semanticLabel = semanticLabel,
         modifier = modifier,
         focusRequester = focusRequester,
         minHeight = FerrexDesignTokens.Poster.TvCardMinHeight,
@@ -2315,6 +2339,11 @@ private data class TvPosterEntry(
     val imageKey: ImageRequestKey?,
     val publicFallbackPath: String?,
     val route: MediaRouteArgs?,
+)
+
+private data class TvRailPosterItem(
+    val entry: TvPosterEntry,
+    val identity: MediaRailItemIdentity,
 )
 
 private data class TvButtonAction(
