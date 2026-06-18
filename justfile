@@ -156,6 +156,7 @@ alias aqv := android-visual-qa
 alias aqvs := android-visual-qa-smoke
 alias aqvc := android-visual-qa-complete
 alias aqcap := android-visual-qa-capture
+alias aqva := android-visual-qa-accessibility
 
 [no-cd]
 android-qa-doctor *args:
@@ -200,6 +201,10 @@ android-visual-qa-verify mode="smoke":
 [no-cd]
 android-visual-qa-capture target="all" scenario="all":
     ./scripts/qa/android-visual-qa.sh capture --target {{ target }} --scenario {{ scenario }}
+
+[no-cd]
+android-visual-qa-accessibility target="all" scenario="all":
+    ./scripts/qa/android-visual-qa.sh accessibility --target {{ target }} --scenario {{ scenario }}
 
 default:
     @just --list
