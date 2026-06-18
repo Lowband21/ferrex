@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -241,21 +242,26 @@ object DetailPrimitivePresenter {
                 )
             },
         )
+        val metadataBand = metadataBand(page, mode)
+        val actionShelf = actionShelf(page.stableKey, page.actions, mode)
+        val slabs = slabs(page, mode)
+        val rails = page.rails.map { rail(page.stableKey, it, mode) }
         return DetailStagePresentation(
             stableKey = page.stableKey,
             testTag = FerrexQaTags.TheaterPlate.root(mode.targetKey, page.stableKey),
-            contentDescription = buildString {
-                append(page.kind.label)
-                append(" detail for ")
-                append(page.title)
-                page.subtitle?.let { append(". ").append(it) }
-            },
+            contentDescription = stageDescription(
+                page = page,
+                heroMedia = heroMedia,
+                metadataBand = metadataBand,
+                actionShelf = actionShelf,
+                slabs = slabs,
+            ),
             density = mode.density,
             heroMedia = heroMedia,
-            metadataBand = metadataBand(page, mode),
-            actionShelf = actionShelf(page.stableKey, page.actions, mode),
-            slabs = slabs(page, mode),
-            rails = page.rails.map { rail(page.stableKey, it, mode) },
+            metadataBand = metadataBand,
+            actionShelf = actionShelf,
+            slabs = slabs,
+            rails = rails,
         )
     }
 
@@ -263,11 +269,14 @@ object DetailPrimitivePresenter {
         pageKey: String,
         actions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
-    ): DetailActionShelfPresentation = DetailActionShelfPresentation(
-        testTag = FerrexQaTags.TheaterPlate.action(mode.targetKey, pageKey, "shelf"),
-        contentDescription = "Detail actions. ${actions.size} action${if (actions.size == 1) "" else "s"} available.",
-        actions = actions.map { action(pageKey, it, mode) },
-    )
+    ): DetailActionShelfPresentation {
+        val actionPresentations = actions.map { action(pageKey, it, mode) }
+        return DetailActionShelfPresentation(
+            testTag = FerrexQaTags.TheaterPlate.action(mode.targetKey, pageKey, "shelf"),
+            contentDescription = actionShelfDescription(actionPresentations),
+            actions = actionPresentations,
+        )
+    }
 
     fun action(
         pageKey: String,
@@ -331,15 +340,25 @@ object DetailPrimitivePresenter {
         }
         return DetailMetadataBandPresentation(
             testTag = FerrexQaTags.namespaced(mode.targetKey, "detail", page.stableKey, "metadata"),
-            contentDescription = "Metadata band for ${page.title}. ${chips.size} item${if (chips.size == 1) "" else "s"}.",
+            contentDescription = metadataBandDescription(page.title, chips),
             chips = chips,
         )
     }
 
     fun slabs(page: DetailPageModel, mode: DetailSurfaceInteractionMode): List<DetailSlabPresentation> = buildList {
-        page.watchState?.let { add(watchSlab(page.stableKey, it, mode)) }
+        page.watchState?.let { watch ->
+            add(
+                watchSlab(
+                    pageKey = page.stableKey,
+                    watch = watch,
+                    recoveryActions = page.recovery.actions.takeIf { watch.needsRecoveryActions() }.orEmpty(),
+                    mode = mode,
+                ),
+            )
+        }
         page.emptyState?.let { add(emptySlab(page.stableKey, it, page.recovery.actions, mode)) }
         page.recovery.freshness?.let { add(freshnessSlab(page.stableKey, it, page.recovery.actions, mode)) }
+        addAll(imageSlabs(page, mode))
     }
 
     fun rail(pageKey: String, rail: DetailRail, mode: DetailSurfaceInteractionMode): DetailRailPresentation {
@@ -431,10 +450,7 @@ object DetailPrimitivePresenter {
             stableKey = safeMediaKey,
             role = art.role,
             testTag = FerrexQaTags.TheaterPlate.media(mode.targetKey, pageKey, safeMediaKey),
-            contentDescription = buildString {
-                append(art.label)
-                if (badges.isNotEmpty()) append(". ").append(badges.joinToString(". "))
-            },
+            contentDescription = mediaDescription(art, detailGrounding, badges),
             fallbackLabel = fallbackLabel(art),
             sizing = sizing,
             badges = badges,
@@ -447,49 +463,267 @@ object DetailPrimitivePresenter {
     private fun watchSlab(
         pageKey: String,
         watch: DetailWatchState,
+        recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
-    ): DetailSlabPresentation = DetailSlabPresentation(
-        testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "watch"),
-        title = watch.label,
-        message = watch.message,
-        tone = when (watch.state) {
-            DetailWatchStateKind.Watched -> FerrexStageSurfaceTone.Primary
-            DetailWatchStateKind.InProgress -> FerrexStageSurfaceTone.Cache
-            DetailWatchStateKind.Unavailable,
-            DetailWatchStateKind.Unknown -> FerrexStageSurfaceTone.Warning
-            DetailWatchStateKind.Unwatched -> FerrexStageSurfaceTone.Neutral
-        },
-        contentDescription = "${watch.label}. ${watch.message}",
-        actions = emptyList(),
-    )
+    ): DetailSlabPresentation {
+        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        return DetailSlabPresentation(
+            testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "watch"),
+            title = watch.label,
+            message = watch.message,
+            tone = when (watch.state) {
+                DetailWatchStateKind.Watched -> FerrexStageSurfaceTone.Primary
+                DetailWatchStateKind.InProgress -> FerrexStageSurfaceTone.Cache
+                DetailWatchStateKind.Unavailable,
+                DetailWatchStateKind.Unknown -> FerrexStageSurfaceTone.Warning
+                DetailWatchStateKind.Unwatched -> FerrexStageSurfaceTone.Neutral
+            },
+            contentDescription = slabDescription(watch.label, watch.message, actions),
+            actions = actions,
+        )
+    }
 
     private fun emptySlab(
         pageKey: String,
         empty: DetailEmptyState,
         recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
-    ): DetailSlabPresentation = DetailSlabPresentation(
-        testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "empty"),
-        title = empty.title,
-        message = empty.message,
-        tone = FerrexStageSurfaceTone.StaleOffline,
-        contentDescription = "${empty.title}. ${empty.message}",
-        actions = recoveryActions.map { action(pageKey, it, mode) },
-    )
+    ): DetailSlabPresentation {
+        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        return DetailSlabPresentation(
+            testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "empty"),
+            title = empty.title,
+            message = empty.message,
+            tone = FerrexStageSurfaceTone.StaleOffline,
+            contentDescription = slabDescription(empty.title, empty.message, actions),
+            actions = actions,
+        )
+    }
 
     private fun freshnessSlab(
         pageKey: String,
         freshness: DetailFreshnessNotice,
         recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
-    ): DetailSlabPresentation = DetailSlabPresentation(
-        testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, freshness.kind.name),
-        title = freshness.title,
-        message = freshness.message,
-        tone = freshness.kind.toStageTone(),
-        contentDescription = "${freshness.title}. ${freshness.message}",
-        actions = recoveryActions.map { action(pageKey, it, mode) },
-    )
+    ): DetailSlabPresentation {
+        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        return DetailSlabPresentation(
+            testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, freshness.kind.name),
+            title = freshness.title,
+            message = freshness.message,
+            tone = freshness.kind.toStageTone(),
+            contentDescription = slabDescription(freshness.title, freshness.message, actions),
+            actions = actions,
+        )
+    }
+
+    private fun imageSlabs(page: DetailPageModel, mode: DetailSurfaceInteractionMode): List<DetailSlabPresentation> =
+        page.imageStatusSummaries().map { summary ->
+            val actions = page.recovery.actions.map { action(page.stableKey, it, mode) }
+            DetailSlabPresentation(
+                testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", page.stableKey, "image", summary.key),
+                title = summary.title,
+                message = summary.message,
+                tone = summary.tone,
+                contentDescription = slabDescription(summary.title, summary.message, actions),
+                actions = actions,
+            )
+        }
+}
+
+private data class DetailImageStatusSummary(
+    val key: String,
+    val title: String,
+    val message: String,
+    val tone: FerrexStageSurfaceTone,
+)
+
+private fun stageDescription(
+    page: DetailPageModel,
+    heroMedia: List<DetailMediaPresentation>,
+    metadataBand: DetailMetadataBandPresentation,
+    actionShelf: DetailActionShelfPresentation,
+    slabs: List<DetailSlabPresentation>,
+): String = buildString {
+    append(page.kind.label)
+    append(" detail for ")
+    append(page.title)
+    page.subtitle?.let { append(". ").append(it) }
+    append(". Hero media: ")
+    append(heroMedia.summaryLabels { "${it.role.accessibilityLabel} ${it.stateLabel}" })
+    append(". Media objects: ")
+    append(heroMedia.summaryLabels { it.contentDescription })
+    append(". Metadata: ")
+    append(metadataBand.chips.summaryLabels { it.label })
+    append(". Actions: ")
+    append(actionShelf.actions.summaryLabels { action ->
+        if (action.enabled) {
+            "${action.label} enabled"
+        } else {
+            "${action.label} disabled: ${action.disabledReason}"
+        }
+    })
+    append(". Status slabs: ")
+    append(slabs.summaryLabels { it.title })
+}
+
+private fun actionShelfDescription(actions: List<DetailActionPresentation>): String = buildString {
+    append("Detail actions.")
+    if (actions.isEmpty()) {
+        append(" No actions.")
+    } else {
+        append(" ")
+        append(actions.size)
+        append(" action")
+        if (actions.size != 1) append("s")
+        append(": ")
+        append(actions.joinToString("; ") { action ->
+            if (action.enabled) {
+                "${action.label} enabled"
+            } else {
+                "${action.label} disabled: ${action.disabledReason}"
+            }
+        })
+        append(".")
+    }
+}
+
+private fun metadataBandDescription(title: String, chips: List<DetailMetadataChipPresentation>): String = buildString {
+    append("Metadata band for ")
+    append(title)
+    append(". ")
+    append(chips.size)
+    append(" item")
+    if (chips.size != 1) append("s")
+    if (chips.isNotEmpty()) {
+        append(": ")
+        append(chips.joinToString(", ") { it.label })
+    }
+    append(".")
+}
+
+private fun mediaDescription(
+    art: DetailPageArt,
+    grounding: MediaArtGrounding?,
+    badges: List<String>,
+): String = buildString {
+    append(art.role.accessibilityLabel)
+    append(" media object: ")
+    append(art.label)
+    append(". Image state: ")
+    append(art.imageState.accessibilityLabel)
+    grounding?.let {
+        append(". Grounding: ")
+        append(it.accessibilityLabel)
+    }
+    if (badges.isNotEmpty()) append(". ").append(badges.joinToString(". "))
+}
+
+private fun slabDescription(
+    title: String,
+    message: String,
+    actions: List<DetailActionPresentation>,
+): String = buildString {
+    append(title)
+    append(". ")
+    append(message)
+    if (actions.isNotEmpty()) {
+        append(". Recovery actions: ")
+        append(actions.joinToString(", ") { action ->
+            if (action.enabled) action.label else "${action.label} disabled: ${action.disabledReason}"
+        })
+    }
+}
+
+private fun DetailPageModel.imageStatusSummaries(): List<DetailImageStatusSummary> {
+    val media = imageStatusMedia()
+    val missing = media.filter { it.imageState is DetailImageState.NoArt }
+    val failed = media.filter { it.imageState is DetailImageState.Failed }
+    val stale = media.filter { it.imageState.staleOffline }
+    return buildList {
+        if (missing.isNotEmpty()) {
+            add(
+                DetailImageStatusSummary(
+                    key = "missing-artwork",
+                    title = "Missing artwork",
+                    message = "Missing artwork for ${missing.mediaLabels()}. Labeled placeholders stay mounted; retry cache sync or clear the selected cache to refresh image metadata.",
+                    tone = FerrexStageSurfaceTone.StaleOffline,
+                ),
+            )
+        }
+        if (failed.isNotEmpty()) {
+            val reasons = failed.mapNotNull { (it.imageState as? DetailImageState.Failed)?.reason }.distinct().summaryLabels { it }
+            add(
+                DetailImageStatusSummary(
+                    key = "failed-images",
+                    title = "Image load failed",
+                    message = "Failed image load for ${failed.mediaLabels()}. Reason: $reasons. Retry cache sync or clear the selected cache to request fresh image metadata.",
+                    tone = FerrexStageSurfaceTone.Warning,
+                ),
+            )
+        }
+        if (stale.isNotEmpty()) {
+            add(
+                DetailImageStatusSummary(
+                    key = "stale-offline-artwork",
+                    title = "Stale/offline artwork",
+                    message = "Showing stale or offline artwork for ${stale.mediaLabels()}. Details stay readable while recovery actions reconnect or refresh the cache.",
+                    tone = FerrexStageSurfaceTone.StaleOffline,
+                ),
+            )
+        }
+    }
+}
+
+private fun DetailPageModel.imageStatusMedia(): List<DetailPageArt> = buildList {
+    add(hero.background)
+    hero.foreground?.let(::add)
+}.distinctBy { art ->
+    listOf(art.label, art.requestKey?.iid, art.imageState.label).joinToString("|")
+}
+
+private fun List<DetailPageArt>.mediaLabels(): String = summaryLabels { it.label }
+
+private fun DetailWatchState.needsRecoveryActions(): Boolean = when (state) {
+    DetailWatchStateKind.Unknown,
+    DetailWatchStateKind.Unavailable -> true
+    DetailWatchStateKind.Unwatched,
+    DetailWatchStateKind.InProgress,
+    DetailWatchStateKind.Watched -> false
+}
+
+private val DetailImageState.accessibilityLabel: String get() = when (this) {
+    is DetailImageState.Ready -> if (staleOffline) "ready but stale/offline" else "ready"
+    is DetailImageState.Pending -> if (staleOffline) "pending and stale/offline" else "pending"
+    is DetailImageState.Failed -> "failed: $reason"
+    is DetailImageState.NoArt -> "missing artwork: $reason"
+}
+
+private val DetailArtRole.accessibilityLabel: String get() = when (this) {
+    DetailArtRole.Poster -> "Poster"
+    DetailArtRole.Backdrop -> "Backdrop"
+    DetailArtRole.Still -> "Still"
+    DetailArtRole.Profile -> "Profile"
+    DetailArtRole.None -> "Fallback"
+}
+
+private val MediaArtGrounding.accessibilityLabel: String get() = when (this) {
+    MediaArtGrounding.Flat -> "flat backdrop"
+    MediaArtGrounding.CardObject -> "card object"
+    MediaArtGrounding.TheaterPlateContactShadow -> "Theater Plate contact shadow"
+}
+
+private fun <T> List<T>.summaryLabels(
+    maxItems: Int = 4,
+    label: (T) -> String,
+): String {
+    if (isEmpty()) return "none"
+    val visible = take(maxItems).map(label).filter { it.isNotBlank() }
+    val remaining = size - visible.size
+    return buildString {
+        append(visible.joinToString(", "))
+        if (remaining > 0) append(", plus ").append(remaining).append(" more")
+    }
 }
 
 class DetailPrimitiveCallbacks(
@@ -609,13 +843,41 @@ fun FerrexDetailHero(
         contentDescription = "Hero detail for ${page.title}",
         testTag = FerrexQaTags.namespaced(interactionMode.targetKey, "detail", page.stableKey, "hero"),
     ) {
+        val background = page.hero.background
         val foreground = page.hero.foreground
+        val backgroundPresentation = presentation.heroMedia.first()
+        val foregroundPresentation = presentation.heroMedia.getOrNull(1) ?: backgroundPresentation
         val heroArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg)
-        if (interactionMode.prefersWideHeroLayout() && foreground != null) {
+        val showBackdropBand = interactionMode == DetailSurfaceInteractionMode.TvDpad && foreground != null
+        if (showBackdropBand) {
+            Column(verticalArrangement = heroArrangement) {
+                FerrexDetailMediaObject(
+                    art = background,
+                    presentation = backgroundPresentation,
+                    imageResolutions = imageResolutions,
+                    imageLoader = imageLoader,
+                    serverUrl = serverUrl,
+                    fallbackPolicy = fallbackPolicy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = heroArrangement, verticalAlignment = Alignment.Top) {
+                    FerrexDetailMediaObject(
+                        art = foreground,
+                        presentation = foregroundPresentation,
+                        imageResolutions = imageResolutions,
+                        imageLoader = imageLoader,
+                        serverUrl = serverUrl,
+                        fallbackPolicy = fallbackPolicy,
+                        modifier = Modifier.width(foreground.role.heroWidth(interactionMode)),
+                    )
+                    DetailHeroCopy(page = page, interactionMode = interactionMode, modifier = Modifier.weight(1f))
+                }
+            }
+        } else if (interactionMode.prefersWideHeroLayout() && foreground != null) {
             Row(horizontalArrangement = heroArrangement, verticalAlignment = Alignment.Top) {
                 FerrexDetailMediaObject(
                     art = foreground,
-                    presentation = presentation.heroMedia.first { it.role == foreground.role },
+                    presentation = foregroundPresentation,
                     imageResolutions = imageResolutions,
                     imageLoader = imageLoader,
                     serverUrl = serverUrl,
@@ -625,15 +887,17 @@ fun FerrexDetailHero(
                 DetailHeroCopy(page = page, interactionMode = interactionMode, modifier = Modifier.weight(1f))
             }
         } else {
+            val primaryArt = foreground ?: background
+            val primaryPresentation = if (foreground == null) backgroundPresentation else foregroundPresentation
             Column(verticalArrangement = heroArrangement) {
                 FerrexDetailMediaObject(
-                    art = foreground ?: page.hero.background,
-                    presentation = presentation.heroMedia.last(),
+                    art = primaryArt,
+                    presentation = primaryPresentation,
                     imageResolutions = imageResolutions,
                     imageLoader = imageLoader,
                     serverUrl = serverUrl,
                     fallbackPolicy = fallbackPolicy,
-                    modifier = Modifier.widthIn(max = (foreground ?: page.hero.background).role.heroWidth(interactionMode)),
+                    modifier = Modifier.widthIn(max = primaryArt.role.heroWidth(interactionMode)),
                 )
                 DetailHeroCopy(page = page, interactionMode = interactionMode)
             }
@@ -664,6 +928,7 @@ fun FerrexDetailMediaObject(
     Box(
         modifier = modifier
             .defaultMinSize(minHeight = presentation.sizing.minHeight)
+            .heightIn(max = presentation.sizing.maxHeight)
             .testTag(presentation.testTag)
             .semantics(mergeDescendants = true) { contentDescription = presentation.contentDescription },
     ) {

@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,7 +78,6 @@ import com.ferrex.android.tv.ui.foundation.TvFocusableStyle
 import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
 import com.ferrex.android.tv.ui.foundation.TvScaffold
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
-import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
@@ -238,19 +239,19 @@ private fun TvDetailConnectionAndNotice(
     playbackNotice: String?,
 ) {
     if (connectionStatus.visible) {
-        FerrexStatusCard(
+        TvDetailStatusSurface(
             title = connectionStatus.title,
             body = connectionStatus.message,
-            tone = FerrexStatusTone.StaleOffline,
+            tone = FerrexStageSurfaceTone.StaleOffline,
             testTag = FerrexQaTags.namespaced("tv", "theater-plate", "status", focusPageKey, "connection"),
             contentDescription = "${connectionStatus.title}. ${connectionStatus.message}",
         )
     }
     if (!connectionStatus.networkActionsEnabled && connectionStatus.networkActionMessage != null) {
-        FerrexStatusCard(
+        TvDetailStatusSurface(
             title = "Playback and watch updates paused",
             body = connectionStatus.networkActionMessage,
-            tone = FerrexStatusTone.StaleOffline,
+            tone = FerrexStageSurfaceTone.StaleOffline,
             testTag = FerrexQaTags.namespaced("tv", "theater-plate", "status", focusPageKey, "network-actions-paused"),
             contentDescription = "Playback and watch updates paused. ${connectionStatus.networkActionMessage}",
         )
@@ -268,11 +269,11 @@ private fun TvDetailConnectionAndNotice(
 
 @Composable
 private fun TvDetailLoadingState(onRetryCacheSync: () -> Unit) {
-    FerrexStatusCard(
+    TvDetailStatusSurface(
         title = "Details loading",
         body = "Library cache is resolving the selected media.",
         loading = true,
-        tone = FerrexStatusTone.Secondary,
+        tone = FerrexStageSurfaceTone.Cache,
         testTag = FerrexQaTags.namespaced("tv", "theater-plate", "status", "loading"),
         contentDescription = "Details loading. Library cache is resolving the selected media.",
     )
@@ -292,6 +293,51 @@ private fun TvDetailLoadingState(onRetryCacheSync: () -> Unit) {
         focusRestorer = null,
         autoFocus = false,
     )
+}
+
+@Composable
+private fun TvDetailStatusSurface(
+    title: String,
+    body: String,
+    tone: FerrexStageSurfaceTone,
+    testTag: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+) {
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.StatusSlab,
+        density = DetailSurfaceInteractionMode.TvDpad.density,
+        tone = tone,
+        modifier = modifier.fillMaxWidth(),
+        contentDescription = contentDescription,
+        testTag = testTag,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(FerrexDesignTokens.Space.Xl),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
+                    )
+                }
+                TheaterPlateText(
+                    text = title,
+                    role = TheaterPlateTypographyRole.StatusTitle,
+                    densityRole = TheaterPlateDensityRole.Tv1080p,
+                )
+            }
+            TheaterPlateText(
+                text = body,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+        }
+    }
 }
 
 @Composable
@@ -390,6 +436,7 @@ private fun TvDetailPageActionShelf(
                 enabled = presentation.enabled,
                 testTag = presentation.testTag,
                 contentDescription = presentation.contentDescription,
+                disabledReason = presentation.disabledReason,
                 onSelect = { onAction(action) },
             )
         },
@@ -410,9 +457,7 @@ private fun TvDetailStatusSlab(
     autoFocus: Boolean,
     onAction: (DetailPageAction) -> Unit,
 ) {
-    val recoveryPairs = sourceActions.zip(slab.actions).filterNot { (action, _) ->
-        action.kind == DetailPageActionKind.Back
-    }
+    val recoveryPairs = sourceActions.zip(slab.actions)
     val recoverySurfaceKey = TvDetailFocusPolicy.recoverySurface(slab.testTag)
     FerrexStageSurface(
         variant = FerrexStageSurfaceVariant.StatusSlab,
@@ -443,6 +488,7 @@ private fun TvDetailStatusSlab(
                             enabled = presentation.enabled,
                             testTag = presentation.testTag,
                             contentDescription = presentation.contentDescription,
+                            disabledReason = presentation.disabledReason,
                             onSelect = { onAction(action) },
                         )
                     },
@@ -668,6 +714,7 @@ private fun TvDetailActionShelf(
 ) {
     if (buttons.isEmpty()) return
     val keys = buttons.map { it.key }
+    val disabledReasons = buttons.mapNotNull { it.disabledReason }.distinct()
     val requesters = remember(keys) { keys.associateWith { FocusRequester() } }
     val enabledKeys = buttons.filter { it.enabled }.map { it.key }
     val restoredKey = enabledKeys.firstOrNull()?.let { fallback ->
@@ -678,46 +725,55 @@ private fun TvDetailActionShelf(
             runCatching { requesters[restoredKey]?.requestFocus() }
         }
     }
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag(testTag)
-            .semantics { this.contentDescription = contentDescription },
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.ControlShelf,
+        density = DetailSurfaceInteractionMode.TvDpad.density,
+        tone = if (buttons.any { it.role == DetailActionRole.Primary }) FerrexStageSurfaceTone.Primary else FerrexStageSurfaceTone.Neutral,
+        modifier = modifier.fillMaxWidth(),
+        contentDescription = contentDescription,
+        testTag = testTag,
     ) {
-        title?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusGroup(),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-            contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Xs),
-        ) {
-            items(buttons, key = { it.key }) { button ->
-                TvFocusableButton(
-                    label = button.label,
-                    onClick = button.onSelect,
-                    enabled = button.enabled,
-                    style = button.role.focusableStyle(),
-                    tone = button.role.statusTone(),
-                    focusRequester = requesters[button.key],
-                    contentDescription = button.contentDescription,
-                    testTag = button.testTag,
-                    onFocused = { focusRestorer?.record(surfaceKey, button.key) },
-                    modifier = Modifier.widthIn(
-                        min = FerrexDesignTokens.Tv.ActionMinWidth,
-                        max = FerrexDesignTokens.Tv.ActionMaxWidth,
-                    ),
-                ) {
-                    Text(button.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            title?.let {
+                TheaterPlateText(
+                    text = it,
+                    role = TheaterPlateTypographyRole.SectionTitle,
+                    densityRole = TheaterPlateDensityRole.Tv1080p,
+                )
+            }
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+                contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Xs),
+            ) {
+                items(buttons, key = { it.key }) { button ->
+                    TvFocusableButton(
+                        label = button.label,
+                        onClick = button.onSelect,
+                        enabled = button.enabled,
+                        style = button.role.focusableStyle(),
+                        tone = button.role.statusTone(),
+                        focusRequester = requesters[button.key],
+                        contentDescription = button.contentDescription,
+                        testTag = button.testTag,
+                        onFocused = { focusRestorer?.record(surfaceKey, button.key) },
+                        modifier = Modifier.widthIn(
+                            min = FerrexDesignTokens.Tv.ActionMinWidth,
+                            max = FerrexDesignTokens.Tv.ActionMaxWidth,
+                        ),
+                    ) {
+                        Text(button.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    }
                 }
+            }
+            disabledReasons.forEach { reason ->
+                TheaterPlateText(
+                    text = reason,
+                    role = TheaterPlateTypographyRole.ActionSubtitle,
+                    densityRole = TheaterPlateDensityRole.Tv1080p,
+                )
             }
         }
     }
@@ -873,5 +929,6 @@ private data class TvDetailButton(
     val enabled: Boolean,
     val testTag: String,
     val contentDescription: String,
+    val disabledReason: String? = null,
     val onSelect: () -> Unit,
 )
