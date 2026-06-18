@@ -3,6 +3,7 @@ package com.ferrex.android.ui.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,10 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
@@ -39,9 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
@@ -64,15 +59,18 @@ import com.ferrex.android.core.browse.MovieSortMode
 import com.ferrex.android.core.browse.PhoneExplicitBackAction
 import com.ferrex.android.core.browse.PhoneShellDestination
 import com.ferrex.android.core.browse.PhoneSystemBackAction
+import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
-import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
-import com.ferrex.android.core.image.TmdbImageFallbackPolicy
-import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
+import com.ferrex.android.core.mediaart.MediaArtGrounding
+import com.ferrex.android.core.mediaart.MediaArtObject
+import com.ferrex.android.core.mediaart.MediaArtRequest
+import com.ferrex.android.core.mediaart.MediaArtTargetIdentity
+import com.ferrex.android.core.mediaart.MediaRailItemIdentity
 import com.ferrex.android.core.playback.PlaybackLaunchDecision
 import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
@@ -91,7 +89,14 @@ import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.search.SearchDetailTarget
 import com.ferrex.android.core.search.SearchMediaType
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalyzer
+import com.ferrex.android.core.theaterplate.TheaterPlateColor
+import com.ferrex.android.core.theaterplate.TheaterPlateImageSource
+import com.ferrex.android.core.theaterplate.TheaterPlateImageSourceKind
+import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.watch.ContinueWatchingCard
+import com.ferrex.android.core.watch.ContinueWatchingProgressState
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.ContinueWatchingStatus
@@ -100,18 +105,30 @@ import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
-import com.ferrex.android.ui.components.FerrexAsyncImage
-import com.ferrex.android.ui.components.FerrexImageFallback
-import com.ferrex.android.ui.components.FerrexPosterCard
-import com.ferrex.android.ui.components.FerrexPosterPlaceholder
+import com.ferrex.android.ui.components.FerrexMobileMediaCard
+import com.ferrex.android.ui.components.FerrexMobileMediaGrid
+import com.ferrex.android.ui.components.FerrexMobileMediaRail
 import com.ferrex.android.ui.components.FerrexSectionTitle
 import com.ferrex.android.ui.components.FerrexStatusAction
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.MobileMediaCardLayout
+import com.ferrex.android.ui.components.MobileMediaCardState
+import com.ferrex.android.ui.components.MobileMediaWatchState
+import com.ferrex.android.ui.components.TheaterPlateDensityRole
+import com.ferrex.android.ui.components.TheaterPlateText
+import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.detail.PhoneDetailScreen
 import com.ferrex.android.ui.player.PlayerScreen
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.search.PhoneSearchPanel
+import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
+import com.ferrex.android.ui.theaterplate.FerrexStageSurface
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
+import com.ferrex.android.ui.theaterplate.TheaterPlateStage
+import com.ferrex.android.ui.theaterplate.tokens
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -511,6 +528,7 @@ fun PhoneHomeScreen(
                         state = state,
                         connectionStatus = homeConnectionUi,
                         playbackNotice = playbackNotice,
+                        freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
                         continueState = continueState,
                         imageResolutions = imageResolutions,
                         imageLoaderAvailable = imageLoader != null,
@@ -626,6 +644,7 @@ private fun HomeDestinationContent(
     state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
     playbackNotice: String?,
+    freshness: LibraryFreshness,
     continueState: ContinueWatchingState,
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
     imageLoaderAvailable: Boolean,
@@ -641,64 +660,311 @@ private fun HomeDestinationContent(
     onRetryConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    LazyColumn(
+    val analyzer = remember { TheaterPlateAnalyzer() }
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .testTag(FerrexQaTags.Phone.Home)
-            .padding(contentPadding)
-            .padding(horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal, vertical = FerrexDesignTokens.Space.ScreenPhoneVertical),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+            .padding(contentPadding),
     ) {
-        item {
-            HomeHeader(
-                state = state,
-                connectionStatus = connectionStatus,
-                playbackNotice = playbackNotice,
-            )
+        val viewport = remember(maxWidth, maxHeight) {
+            TheaterPlateViewport.fromLogicalSize(maxWidth.value, maxHeight.value)
         }
-        item {
-            ContinueWatchingSection(
-                continueState = continueState,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                onRetry = onRetryContinue,
-                onSelect = onSelectContinue,
-            )
+        val density = remember(viewport) { FerrexStageDensityFamily.forViewport(viewport) }
+        val stageContext = remember(viewport, connectionStatus.health, freshness.label) {
+            homeStageSourceContext(viewport, connectionStatus, freshness)
         }
-        if (shelves.isNotEmpty()) {
-            items(shelves, key = { it.title }) { shelf ->
-                HomeShelfSection(
-                    shelf = shelf,
-                    imageResolutions = imageResolutions,
-                    imageLoaderAvailable = imageLoaderAvailable,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                    onSelect = onSelectShelf,
-                )
+        val stageAnalysis = remember(analyzer, stageContext) { analyzer.analyzeMissingBackdrop(stageContext) }
+        val adaptation = remember(connectionStatus.health, freshness.label) {
+            if (homeStageHasStaleOrOfflineState(connectionStatus, freshness)) {
+                TheaterPlateBackdropAdaptation.StaleOffline
+            } else {
+                TheaterPlateBackdropAdaptation.MissingBackdrop
             }
+        }
+
+        TheaterPlateStage(
+            analysis = stageAnalysis,
+            adaptation = adaptation,
+            density = density,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag(FerrexQaTags.Phone.Home),
+            contentDescription = "Phone Home Theater Plate stage with generated fallback backdrop analysis and no-wipe recovery paths",
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(density.tokens().contentGap),
+            ) {
+                item {
+                    HomeHeader(
+                        state = state,
+                        connectionStatus = connectionStatus,
+                        playbackNotice = playbackNotice,
+                        density = density,
+                    )
+                }
+                item {
+                    HomeStatusBands(
+                        connectionStatus = connectionStatus,
+                        freshness = freshness,
+                        density = density,
+                        onRetryConnection = onRetryConnection,
+                    )
+                }
+                item {
+                    ContinueWatchingSection(
+                        continueState = continueState,
+                        imageResolutions = imageResolutions,
+                        imageLoaderAvailable = imageLoaderAvailable,
+                        imageLoader = imageLoader,
+                        scope = scope,
+                        density = density,
+                        onRetry = onRetryContinue,
+                        onSelect = onSelectContinue,
+                    )
+                }
+                if (shelves.isNotEmpty()) {
+                    items(shelves, key = { it.title }) { shelf ->
+                        HomeShelfSection(
+                            shelf = shelf,
+                            imageResolutions = imageResolutions,
+                            imageLoaderAvailable = imageLoaderAvailable,
+                            imageLoader = imageLoader,
+                            scope = scope,
+                            density = density,
+                            onSelect = onSelectShelf,
+                        )
+                    }
+                } else {
+                    item {
+                        HomeStageStatusBand(
+                            title = "Local shelves are waiting for cached datasets",
+                            body = "Home shelves are built only from cached complete movie batches and series bundles; no backend discovery shelves are shown here.",
+                            density = density,
+                            variant = FerrexStageSurfaceVariant.EmptyState,
+                            tone = FerrexStatusTone.StaleOffline,
+                        )
+                    }
+                }
+                item {
+                    HomeEntrySection(
+                        density = density,
+                        onOpenLibraries = onOpenLibraries,
+                        onOpenSearch = onOpenSearch,
+                    )
+                }
+                item {
+                    HomeUtilityPanel(
+                        state = state,
+                        connectionStatus = connectionStatus,
+                        freshness = freshness,
+                        density = density,
+                        onRetryConnection = onRetryConnection,
+                        onOpenAccountServer = onOpenAccountServer,
+                        onOpenDiagnostics = onOpenDiagnostics,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeStatusBands(
+    connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+    density: FerrexStageDensityFamily,
+    onRetryConnection: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
+        if (connectionStatus.visible) {
+            HomeStageStatusBand(
+                title = connectionStatus.title,
+                body = connectionStatus.message,
+                density = density,
+                tone = if (connectionStatus.retryEnabled) FerrexStatusTone.Retry else FerrexStatusTone.StaleOffline,
+                action = if (connectionStatus.retryEnabled) {
+                    HomeStageAction(
+                        label = connectionStatus.retryLabel,
+                        role = FerrexActionRole.Retry,
+                        onClick = onRetryConnection,
+                    )
+                } else {
+                    null
+                },
+            )
         } else {
-            item {
-                StateCard(
-                    title = "Local shelves are waiting for cached datasets",
-                    body = "Home shelves are built only from cached complete movie batches and series bundles; no backend discovery shelves are shown here.",
+            HomeStageStatusBand(
+                title = "Online",
+                body = "Home remains cache-aware; library and search entry points stay available even when cache refreshes later need recovery.",
+                density = density,
+                variant = FerrexStageSurfaceVariant.FactRibbon,
+                tone = FerrexStatusTone.Secondary,
+            )
+        }
+
+        val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
+        HomeStageStatusBand(
+            title = "Library cache • ${cacheStatus.title}",
+            body = cacheStatus.detail,
+            density = density,
+            variant = if (homeStageHasCacheRecoveryState(freshness)) {
+                FerrexStageSurfaceVariant.StatusSlab
+            } else {
+                FerrexStageSurfaceVariant.FactRibbon
+            },
+            tone = freshness.statusTone(),
+        )
+    }
+}
+
+private data class HomeStageAction(
+    val label: String,
+    val role: FerrexActionRole,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun HomeStageStatusBand(
+    title: String,
+    body: String,
+    density: FerrexStageDensityFamily,
+    modifier: Modifier = Modifier,
+    variant: FerrexStageSurfaceVariant = FerrexStageSurfaceVariant.StatusSlab,
+    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
+    loading: Boolean = false,
+    action: HomeStageAction? = null,
+    contentDescription: String = title,
+) {
+    val typographyDensity = density.toTheaterPlateDensityRole()
+    FerrexStageSurface(
+        variant = variant,
+        density = density,
+        tone = tone.toStageSurfaceTone(),
+        modifier = modifier.fillMaxWidth(),
+        contentDescription = contentDescription,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(FerrexDesignTokens.Space.Xxl),
+                        strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
+                    )
+                }
+                TheaterPlateText(
+                    text = title,
+                    role = TheaterPlateTypographyRole.StatusTitle,
+                    densityRole = typographyDensity,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            TheaterPlateText(
+                text = body,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = typographyDensity,
+                maxLines = TheaterPlateTypographyRole.StatusCopy.defaultMaxLinesForHome(typographyDensity),
+            )
+            action?.let {
+                FerrexActionButton(
+                    label = it.label,
+                    role = it.role,
+                    onClick = it.onClick,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        item {
-            HomeEntrySection(
-                onOpenLibraries = onOpenLibraries,
-                onOpenSearch = onOpenSearch,
+    }
+}
+
+@Composable
+private fun HomeStageSectionTitle(
+    title: String,
+    density: FerrexStageDensityFamily,
+) {
+    TheaterPlateText(
+        text = title,
+        role = TheaterPlateTypographyRole.SectionTitle,
+        densityRole = density.toTheaterPlateDensityRole(),
+        maxLines = 2,
+    )
+}
+
+@Composable
+private fun HomeStageActionSurface(
+    title: String,
+    subtitle: String,
+    density: FerrexStageDensityFamily,
+    tone: FerrexStageSurfaceTone,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val typographyDensity = density.toTheaterPlateDensityRole()
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.ControlShelf,
+        density = density,
+        tone = tone,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        contentDescription = contentDescription,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
+            TheaterPlateText(
+                text = title,
+                role = TheaterPlateTypographyRole.ActionLabel,
+                densityRole = typographyDensity,
+            )
+            TheaterPlateText(
+                text = subtitle,
+                role = TheaterPlateTypographyRole.ActionSubtitle,
+                densityRole = typographyDensity,
+                maxLines = 2,
             )
         }
-        item {
-            HomeUtilityPanel(
-                state = state,
-                connectionStatus = connectionStatus,
-                onRetryConnection = onRetryConnection,
-                onOpenAccountServer = onOpenAccountServer,
-                onOpenDiagnostics = onOpenDiagnostics,
+    }
+}
+
+@Composable
+private fun HomeStageActionButtons(
+    density: FerrexStageDensityFamily,
+    onOpenAccountServer: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    if (density == FerrexStageDensityFamily.Compact) {
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            FerrexActionButton(
+                label = "Account & Server",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenAccountServer,
+                modifier = Modifier.fillMaxWidth(),
+                contentDescription = "Account/Server entry point",
+            )
+            FerrexActionButton(
+                label = "Diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.fillMaxWidth(),
+                contentDescription = "Diagnostics entry point",
+            )
+        }
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            FerrexActionButton(
+                label = "Account & Server",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenAccountServer,
+                modifier = Modifier.weight(1f),
+                contentDescription = "Account/Server entry point",
+            )
+            FerrexActionButton(
+                label = "Diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.weight(1f),
+                contentDescription = "Diagnostics entry point",
             )
         }
     }
@@ -927,61 +1193,95 @@ private fun HomeHeader(
     state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
     playbackNotice: String?,
+    density: FerrexStageDensityFamily,
 ) {
-    Column(
-        modifier = Modifier.testTag(FerrexQaTags.Phone.HomeHeader),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    val typographyDensity = density.toTheaterPlateDensityRole()
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.ProjectionShelf,
+        density = density,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.HomeHeader),
+        contentDescription = "Phone Home header stage",
     ) {
-        Text(
-            text = FerrexShellCopy.MOBILE_TITLE,
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(text = FerrexShellCopy.MOBILE_SUBTITLE, style = MaterialTheme.typography.titleMedium)
-        Text(
-            text = "Signed in as ${state.user.displayName ?: state.user.username} • ${connectionStatus.title} • ${state.serverUrl}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(text = FerrexShellCopy.MOBILE_BODY, style = MaterialTheme.typography.bodyLarge)
-        if (state.requiresPinSetup) {
-            Text(
-                text = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server; this app will not show a fake PIN setup flow.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
+        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
+            TheaterPlateText(
+                text = "Ferrex Home",
+                role = TheaterPlateTypographyRole.HeroEyebrow,
+                densityRole = typographyDensity,
             )
-        }
-        playbackNotice?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+            TheaterPlateText(
+                text = FerrexShellCopy.MOBILE_TITLE,
+                role = TheaterPlateTypographyRole.HeroTitle,
+                densityRole = typographyDensity,
+                maxLines = 3,
             )
+            TheaterPlateText(
+                text = FerrexShellCopy.MOBILE_SUBTITLE,
+                role = TheaterPlateTypographyRole.HeroSubtitle,
+                densityRole = typographyDensity,
+                maxLines = 2,
+            )
+            TheaterPlateText(
+                text = "Signed in as ${state.user.displayName ?: state.user.username} • ${connectionStatus.title} • ${state.serverUrl}",
+                role = TheaterPlateTypographyRole.Metadata,
+                densityRole = typographyDensity,
+                maxLines = 2,
+            )
+            TheaterPlateText(
+                text = FerrexShellCopy.MOBILE_BODY,
+                role = TheaterPlateTypographyRole.HeroBody,
+                densityRole = typographyDensity,
+            )
+            if (state.requiresPinSetup) {
+                HomeStageStatusBand(
+                    title = "PIN setup required",
+                    body = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server; this app will not show a fake PIN setup flow.",
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.NoticeSlab,
+                    tone = FerrexStatusTone.Retry,
+                )
+            }
+            playbackNotice?.let {
+                HomeStageStatusBand(
+                    title = "Playback notice",
+                    body = it,
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.NoticeSlab,
+                    tone = FerrexStatusTone.Primary,
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun HomeEntrySection(
+    density: FerrexStageDensityFamily,
     onOpenLibraries: () -> Unit,
     onOpenSearch: () -> Unit,
 ) {
     Column(
         modifier = Modifier.testTag(FerrexQaTags.Phone.BrowseFind),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
     ) {
-        SectionTitle("Browse and find")
-        StateCard(
+        HomeStageSectionTitle("Browse and find", density)
+        HomeStageActionSurface(
             title = "Open Libraries",
-            body = "Full movie and series grids live on the Libraries tab with sorting, filtering, sync, and cache recovery controls.",
-            action = "Browse libraries" to onOpenLibraries,
-            actionRole = FerrexActionRole.Primary,
+            subtitle = "Full movie and series grids live on the Libraries tab with sorting, filtering, sync, and cache recovery controls.",
+            density = density,
+            tone = FerrexStageSurfaceTone.Primary,
+            contentDescription = "Open Libraries entry point",
+            onClick = onOpenLibraries,
         )
-        StateCard(
+        HomeStageActionSurface(
             title = "Search media",
-            body = "Use a dedicated search surface instead of an always-expanded Home panel.",
-            action = "Search" to onOpenSearch,
-            actionRole = FerrexActionRole.Secondary,
+            subtitle = "Use a dedicated search surface instead of an always-expanded Home panel.",
+            density = density,
+            tone = FerrexStageSurfaceTone.Neutral,
+            contentDescription = "Search media entry point",
+            onClick = onOpenSearch,
         )
     }
 }
@@ -990,42 +1290,48 @@ private fun HomeEntrySection(
 private fun HomeUtilityPanel(
     state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+    density: FerrexStageDensityFamily,
     onRetryConnection: () -> Unit,
     onOpenAccountServer: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
     Column(
         modifier = Modifier.testTag(FerrexQaTags.Phone.ServerRecovery),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
     ) {
-        SectionTitle("Server & recovery")
+        HomeStageSectionTitle("Server & recovery", density)
         if (connectionStatus.visible) {
-            ConnectionRecoveryCard(
-                connectionStatus = connectionStatus,
-                onRetryConnection = onRetryConnection,
+            HomeStageStatusBand(
+                title = connectionStatus.title,
+                body = connectionStatus.message,
+                density = density,
+                tone = if (connectionStatus.retryEnabled) FerrexStatusTone.Retry else FerrexStatusTone.StaleOffline,
+                action = if (connectionStatus.retryEnabled) {
+                    HomeStageAction(
+                        label = connectionStatus.retryLabel,
+                        role = FerrexActionRole.Retry,
+                        onClick = onRetryConnection,
+                    )
+                } else {
+                    null
+                },
             )
         } else {
-            StateCard(
+            val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
+            HomeStageStatusBand(
                 title = "Recovery exits are ready",
-                body = "${state.user.displayName ?: state.user.username} is signed in. Account keeps sign out, change server, reset connection, diagnostics, and cache repair visible without wiping app data.",
-                action = "Account & Server" to onOpenAccountServer,
-                actionRole = FerrexActionRole.Secondary,
+                body = "${state.user.displayName ?: state.user.username} is signed in. Account keeps sign out, change server, reset connection, diagnostics, and cache repair visible without wiping app data. Cache: ${cacheStatus.title}.",
+                density = density,
+                variant = FerrexStageSurfaceVariant.StatusSlab,
+                tone = freshness.statusTone(),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-            FerrexActionButton(
-                label = "Account & Server",
-                role = FerrexActionRole.Secondary,
-                onClick = onOpenAccountServer,
-                modifier = Modifier.weight(1f),
-            )
-            FerrexActionButton(
-                label = "Diagnostics",
-                role = FerrexActionRole.Secondary,
-                onClick = onOpenDiagnostics,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        HomeStageActionButtons(
+            density = density,
+            onOpenAccountServer = onOpenAccountServer,
+            onOpenDiagnostics = onOpenDiagnostics,
+        )
     }
 }
 
@@ -1118,72 +1424,101 @@ private fun ContinueWatchingSection(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
     onRetry: () -> Unit,
     onSelect: (ContinueWatchingCard) -> Unit,
 ) {
     val heroCard = continueState.cards.firstOrNull()
     val remainingCards = continueState.cards.drop(1)
-    Column(
-        modifier = Modifier.testTag(FerrexQaTags.Phone.ContinueWatching),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    val typographyDensity = density.toTheaterPlateDensityRole()
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.RailBand,
+        density = density,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.ContinueWatching),
+        contentDescription = "Continue Watching Theater Plate rail band",
     ) {
-        SectionTitle("Resume")
-        when (val status = continueState.status) {
-            ContinueWatchingStatus.Idle,
-            ContinueWatchingStatus.Loading -> StateCard(
-                title = "Loading Continue Watching",
-                body = "The /api/v1/watch/continue shelf loads independently and never blocks library browsing.",
-                loading = status == ContinueWatchingStatus.Loading,
-            )
-            ContinueWatchingStatus.Empty -> StateCard(
-                title = "Nothing in progress",
-                body = "Start playback on a movie or episode and it will appear here.",
-                action = "Retry" to onRetry,
-            )
-            is ContinueWatchingStatus.ErrorRetryable -> StateCard(
-                title = "Continue Watching unavailable",
-                body = status.message,
-                action = "Retry" to onRetry,
-            )
-            is ContinueWatchingStatus.StaleOffline -> StateCard(
-                title = "Stale/offline Continue Watching",
-                body = "Showing ${status.itemCount} previous item(s): ${status.message}",
-                tone = FerrexStatusTone.StaleOffline,
-                action = "Retry" to onRetry,
-            )
-            is ContinueWatchingStatus.Fresh -> Text(
-                text = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        heroCard?.let { card ->
-            ContinueWatchingHeroCard(
-                card = card,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                onClick = { onSelect(card) },
-            )
-        }
-        if (remainingCards.isNotEmpty()) {
-            Text("More in progress", style = MaterialTheme.typography.titleSmall)
-            val railItems = remember(remainingCards) {
-                remainingCards.zip(
-                    MediaRailIdentityResolver.assign(
-                        railKey = "continue-watching-more",
-                        stableIds = remainingCards.map { it.stableKey },
-                    ),
+        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
+            HomeStageSectionTitle("Continue Watching", density)
+            when (val status = continueState.status) {
+                ContinueWatchingStatus.Idle,
+                ContinueWatchingStatus.Loading -> HomeStageStatusBand(
+                    title = "Loading Continue Watching",
+                    body = "The /api/v1/watch/continue shelf loads independently and never blocks library browsing.",
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.StatusSlab,
+                    tone = FerrexStatusTone.Secondary,
+                    loading = status == ContinueWatchingStatus.Loading,
+                )
+                ContinueWatchingStatus.Empty -> HomeStageStatusBand(
+                    title = "Nothing in progress",
+                    body = "Start playback on a movie or episode and it will appear here.",
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.EmptyState,
+                    tone = FerrexStatusTone.Secondary,
+                    action = HomeStageAction("Retry", FerrexActionRole.Retry, onRetry),
+                )
+                is ContinueWatchingStatus.ErrorRetryable -> HomeStageStatusBand(
+                    title = "Continue Watching unavailable",
+                    body = status.message,
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.StatusSlab,
+                    tone = FerrexStatusTone.Retry,
+                    action = HomeStageAction("Retry", FerrexActionRole.Retry, onRetry),
+                )
+                is ContinueWatchingStatus.StaleOffline -> HomeStageStatusBand(
+                    title = "Stale/offline Continue Watching",
+                    body = "Showing ${status.itemCount} previous item(s): ${status.message}",
+                    density = density,
+                    variant = FerrexStageSurfaceVariant.StatusSlab,
+                    tone = FerrexStatusTone.StaleOffline,
+                    action = HomeStageAction("Retry", FerrexActionRole.Retry, onRetry),
+                )
+                is ContinueWatchingStatus.Fresh -> FerrexStageSurface(
+                    variant = FerrexStageSurfaceVariant.FactRibbon,
+                    density = density,
+                    tone = FerrexStageSurfaceTone.Cache,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentDescription = "Continue Watching freshness",
+                ) {
+                    TheaterPlateText(
+                        text = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
+                        role = TheaterPlateTypographyRole.FactValue,
+                        densityRole = typographyDensity,
+                    )
+                }
+            }
+            heroCard?.let { card ->
+                ContinueWatchingHeroCard(
+                    card = card,
+                    imageResolutions = imageResolutions,
+                    imageLoaderAvailable = imageLoaderAvailable,
+                    imageLoader = imageLoader,
+                    scope = scope,
+                    density = density,
+                    onClick = { onSelect(card) },
                 )
             }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(railItems, key = { it.second.renderKey }) { (card, identity) ->
+            if (remainingCards.isNotEmpty()) {
+                FerrexMobileMediaRail(
+                    railKey = "continue-watching-more",
+                    title = "More in progress",
+                    subtitle = "Touch a card to open the preserved Continue Watching route.",
+                    items = remainingCards,
+                    itemStableId = { it.stableKey },
+                    density = density,
+                    contentDescription = "More Continue Watching items rail",
+                ) { card, identity ->
                     ContinueWatchingCardView(
                         card = card,
                         imageResolutions = imageResolutions,
                         imageLoaderAvailable = imageLoaderAvailable,
                         imageLoader = imageLoader,
                         scope = scope,
+                        density = density,
+                        itemIdentity = identity,
                         semanticLabel = identity.semanticLabel(card.title),
                         onClick = { onSelect(card) },
                     )
@@ -1200,34 +1535,30 @@ private fun HomeShelfSection(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionTitle(shelf.title)
-        Text(shelf.subtitle, style = MaterialTheme.typography.bodyMedium)
-        Text(shelf.limitCopy, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val railItems = remember(shelf.title, shelf.items) {
-            shelf.items.zip(
-                MediaRailIdentityResolver.assign(
-                    railKey = shelf.title,
-                    stableIds = shelf.items.map { it.stableKey },
-                ),
-            )
-        }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(railItems, key = { it.second.renderKey }) { (card, identity) ->
-                MediaCardView(
-                    card = card,
-                    imageResolutions = imageResolutions,
-                    imageLoaderAvailable = imageLoaderAvailable,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                    compact = true,
-                    semanticLabel = identity.semanticLabel(card.title),
-                    onClick = { onSelect(card) },
-                )
-            }
-        }
+    FerrexMobileMediaRail(
+        railKey = shelf.title,
+        title = shelf.title,
+        subtitle = "${shelf.subtitle} ${shelf.limitCopy}",
+        items = shelf.items,
+        itemStableId = { it.stableKey },
+        density = density,
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "${shelf.title} Home shelf rail",
+    ) { card, identity ->
+        HomeMediaRailCard(
+            card = card,
+            imageResolutions = imageResolutions,
+            imageLoaderAvailable = imageLoaderAvailable,
+            imageLoader = imageLoader,
+            scope = scope,
+            density = density,
+            itemIdentity = identity,
+            semanticLabel = identity.semanticLabel(card.title),
+            onClick = { onSelect(card) },
+        )
     }
 }
 
@@ -1518,26 +1849,25 @@ private fun MediaGrid(
     scope: ServerCacheScope,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
-    LazyVerticalGrid(
+    FerrexMobileMediaGrid(
+        gridKey = "library-grid",
+        items = cards,
+        itemStableId = { it.stableKey },
         columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.PhoneGridMin),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(FerrexQaTags.Phone.LibraryGrid)
-            .heightIn(min = 220.dp, max = 680.dp),
-        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-    ) {
-        items(cards, key = { it.stableKey }) { card ->
-            MediaCardView(
-                card = card,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                compact = false,
-                onClick = { onSelect(card) },
-            )
-        }
+        modifier = Modifier.heightIn(min = 220.dp, max = 680.dp),
+        testTag = FerrexQaTags.Phone.LibraryGrid,
+        contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
+    ) { card, identity ->
+        MediaCardView(
+            card = card,
+            imageResolutions = imageResolutions,
+            imageLoaderAvailable = imageLoaderAvailable,
+            imageLoader = imageLoader,
+            scope = scope,
+            semanticLabel = identity.semanticLabel(card.title),
+            itemIdentity = identity,
+            onClick = { onSelect(card) },
+        )
     }
 }
 
@@ -1548,43 +1878,35 @@ private fun ContinueWatchingHeroCard(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
     onClick: () -> Unit,
 ) {
-    FerrexPosterCard(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = null,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                modifier = Modifier.width(132.dp),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                Text("Continue Watching", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Text(card.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(card.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(card.progressLabel, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                FerrexActionButton(
-                    label = "Open",
-                    role = FerrexActionRole.Primary,
-                    onClick = onClick,
-                )
-            }
-        }
+    val art = remember(card.imageKey, card.stableKey, card.title) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = null,
+            fallbackLabel = "No poster",
+            surfaceKey = "continue-watching-hero",
+            itemKey = card.stableKey,
+            semanticLabel = card.title,
+            grounding = MediaArtGrounding.TheaterPlateContactShadow,
+        )
     }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = "Continue Watching",
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.Hero,
+        state = continueWatchingCardState(card, actionRole = FerrexActionRole.Primary),
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "Continue Watching ${card.title}. ${card.progressLabel}. Action: Open",
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1594,29 +1916,75 @@ private fun ContinueWatchingCardView(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
+    itemIdentity: MediaRailItemIdentity,
     semanticLabel: String = card.title,
     onClick: () -> Unit,
 ) {
-    FerrexPosterCard(
-        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneWidth),
-        onClick = onClick,
-    ) {
-        Column(modifier = Modifier.padding(FerrexDesignTokens.Space.Md), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = null,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                semanticLabel = semanticLabel,
-            )
-            Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(card.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(card.progressLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        }
+    val art = remember(card.imageKey, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = null,
+            fallbackLabel = "No poster",
+            surfaceKey = "continue-watching-more",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
+        )
     }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = null,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.Rail,
+        state = continueWatchingCardState(card),
+        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneWidth),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.progressLabel}. Action: Open",
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun HomeMediaRailCard(
+    card: LibraryMediaCard,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoaderAvailable: Boolean,
+    imageLoader: coil.ImageLoader?,
+    scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
+    itemIdentity: MediaRailItemIdentity,
+    semanticLabel: String = card.title,
+    onClick: () -> Unit,
+) {
+    val art = remember(card.imageKey, card.publicFallbackPath, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = card.publicFallbackPath,
+            fallbackLabel = "No poster",
+            surfaceKey = "home-shelf",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
+        )
+    }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = card.libraryName,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.CompactRail,
+        state = libraryCardState(actionRole = FerrexActionRole.Secondary),
+        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneCompactWidth),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.libraryName}. Action: Open",
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1626,71 +1994,78 @@ private fun MediaCardView(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
-    compact: Boolean,
     semanticLabel: String = card.title,
+    itemIdentity: MediaRailItemIdentity,
     onClick: () -> Unit,
 ) {
-    FerrexPosterCard(
-        modifier = Modifier.width(if (compact) FerrexDesignTokens.Poster.PhoneCompactWidth else FerrexDesignTokens.Poster.PhoneWidth),
-        onClick = onClick,
-    ) {
-        Column(modifier = Modifier.padding(FerrexDesignTokens.Space.Sm), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = card.publicFallbackPath,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                semanticLabel = semanticLabel,
-            )
-            Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(card.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(card.libraryName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun Poster(
-    imageKey: ImageRequestKey?,
-    title: String,
-    fallbackPath: String?,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    modifier: Modifier = Modifier,
-    semanticLabel: String = title,
-) {
-    if (imageKey == null || !imageLoaderAvailable || imageLoader == null) {
-        FerrexPosterPlaceholder(
-            if (imageKey == null) "No poster" else "Images unavailable",
-            modifier = modifier.semantics(mergeDescendants = true) { contentDescription = semanticLabel },
+    val art = remember(card.imageKey, card.publicFallbackPath, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = card.publicFallbackPath,
+            fallbackLabel = "No poster",
+            surfaceKey = "library-grid",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
         )
-        return
     }
-    val resolution = imageResolutions[imageKey]
-    val fallback = if (resolution is ImageResolution.Pending || resolution is ImageResolution.Failed) {
-        PosterOnlyIidFallback.url(scope.canonicalServerUrl, imageKey)?.let { FerrexImageFallback(it, "Poster IID fallback") }
-            ?: TmdbImageFallbackPolicy.publicCdnUrl(
-                publicPath = fallbackPath,
-                category = imageKey.category,
-                productCopyAllowsPublicCdn = false,
-            )?.let { FerrexImageFallback(it, "TMDB fallback") }
-    } else {
-        null
-    }
-    FerrexAsyncImage(
-        resolution = resolution,
-        imageLoader = imageLoader,
-        contentDescription = semanticLabel,
-        modifier = modifier,
-        category = imageKey.category,
-        fallback = fallback,
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = card.libraryName,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = FerrexStageDensityFamily.Standard,
+        layout = MobileMediaCardLayout.Grid,
+        state = libraryCardState(actionRole = FerrexActionRole.Secondary),
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.libraryName}. Action: Open",
+        onClick = onClick,
     )
 }
+
+private fun continueWatchingCardState(
+    card: ContinueWatchingCard,
+    actionRole: FerrexActionRole = FerrexActionRole.Secondary,
+): MobileMediaCardState = MobileMediaCardState(
+    progressFraction = card.progressFraction,
+    progressLabel = card.progressLabel,
+    watchState = card.progressState.toMobileWatchState(),
+    actionLabel = "Open",
+    actionRole = actionRole,
+)
+
+private fun ContinueWatchingProgressState.toMobileWatchState(): MobileMediaWatchState = when (this) {
+    ContinueWatchingProgressState.Pending -> MobileMediaWatchState.Unwatched
+    ContinueWatchingProgressState.InProgress -> MobileMediaWatchState.InProgress
+    ContinueWatchingProgressState.Watched -> MobileMediaWatchState.Watched
+}
+
+private fun libraryCardState(actionRole: FerrexActionRole): MobileMediaCardState = MobileMediaCardState(
+    actionLabel = "Open",
+    actionRole = actionRole,
+)
+
+private fun mobilePosterArt(
+    imageKey: ImageRequestKey?,
+    fallbackPath: String?,
+    fallbackLabel: String,
+    surfaceKey: String,
+    itemKey: String,
+    semanticLabel: String,
+    grounding: MediaArtGrounding = MediaArtGrounding.CardObject,
+): MediaArtObject = MediaArtObject.forCategory(
+    category = imageKey?.category ?: BrowseImageCategory.Poster,
+    request = imageKey?.let { MediaArtRequest(it, fallbackPath) },
+    fallbackLabel = fallbackLabel,
+    targetIdentity = MediaArtTargetIdentity(
+        surfaceKey = surfaceKey,
+        itemKey = itemKey,
+        semanticLabel = semanticLabel,
+    ),
+    grounding = grounding,
+)
 
 @Composable
 private fun EmptyBrowseState(
@@ -1793,6 +2168,68 @@ private fun LibraryFreshness.statusTone(): FerrexStatusTone = when (this) {
     is LibraryFreshness.StaleOffline -> FerrexStatusTone.StaleOffline
     is LibraryFreshness.CorruptRebuilding -> FerrexStatusTone.Cache
     is LibraryFreshness.ErrorRetryable -> FerrexStatusTone.Error
+}
+
+private fun homeStageSourceContext(
+    viewport: TheaterPlateViewport,
+    connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+): TheaterPlateSourceContext = TheaterPlateSourceContext(
+    source = TheaterPlateImageSource.fallback(TheaterPlateImageSourceKind.GeneratedFallback),
+    viewport = viewport,
+    themeColor = homeStageSeedColor(connectionStatus, freshness),
+    defaultColor = TheaterPlateColor.DefaultStage,
+)
+
+private fun homeStageSeedColor(
+    connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+): TheaterPlateColor = when {
+    connectionStatus.health != AuthConnectionHealth.Online -> TheaterPlateColor.rgb(51, 65, 85)
+    freshness is LibraryFreshness.ErrorRetryable -> TheaterPlateColor.rgb(127, 29, 29)
+    freshness is LibraryFreshness.CorruptRebuilding -> TheaterPlateColor.rgb(49, 46, 129)
+    freshness is LibraryFreshness.StaleOffline -> TheaterPlateColor.rgb(71, 85, 105)
+    freshness is LibraryFreshness.Fresh -> TheaterPlateColor.rgb(22, 78, 99)
+    freshness is LibraryFreshness.Syncing -> TheaterPlateColor.rgb(56, 189, 248)
+    LibraryFreshness.Empty == freshness -> TheaterPlateColor.rgb(30, 41, 59)
+    else -> TheaterPlateColor.DefaultStage
+}
+
+private fun homeStageHasStaleOrOfflineState(
+    connectionStatus: AuthenticatedConnectionUi,
+    freshness: LibraryFreshness,
+): Boolean = connectionStatus.health != AuthConnectionHealth.Online || homeStageHasCacheRecoveryState(freshness)
+
+private fun homeStageHasCacheRecoveryState(freshness: LibraryFreshness): Boolean = when (freshness) {
+    LibraryFreshness.Empty,
+    LibraryFreshness.Syncing,
+    is LibraryFreshness.Fresh -> false
+    is LibraryFreshness.StaleOffline,
+    is LibraryFreshness.CorruptRebuilding,
+    is LibraryFreshness.ErrorRetryable -> true
+}
+
+private fun FerrexStageDensityFamily.toTheaterPlateDensityRole(): TheaterPlateDensityRole = when (this) {
+    FerrexStageDensityFamily.Compact -> TheaterPlateDensityRole.PhonePortrait
+    FerrexStageDensityFamily.Standard -> TheaterPlateDensityRole.PhoneLandscape
+    FerrexStageDensityFamily.TenFoot -> TheaterPlateDensityRole.Tv1080p
+}
+
+private fun FerrexStatusTone.toStageSurfaceTone(): FerrexStageSurfaceTone = when (this) {
+    FerrexStatusTone.Primary,
+    FerrexStatusTone.Retry -> FerrexStageSurfaceTone.Primary
+    FerrexStatusTone.Secondary -> FerrexStageSurfaceTone.Neutral
+    FerrexStatusTone.Cache -> FerrexStageSurfaceTone.Cache
+    FerrexStatusTone.StaleOffline -> FerrexStageSurfaceTone.StaleOffline
+    FerrexStatusTone.DestructiveReset,
+    FerrexStatusTone.Error -> FerrexStageSurfaceTone.Error
+}
+
+private fun TheaterPlateTypographyRole.defaultMaxLinesForHome(densityRole: TheaterPlateDensityRole): Int = when (this) {
+    TheaterPlateTypographyRole.StatusCopy,
+    TheaterPlateTypographyRole.RecoveryCopy -> if (densityRole == TheaterPlateDensityRole.PhonePortrait) 5 else 4
+    TheaterPlateTypographyRole.HeroTitle -> if (densityRole == TheaterPlateDensityRole.PhonePortrait) 3 else 2
+    else -> 2
 }
 
 private sealed interface MovieIndexUiState {

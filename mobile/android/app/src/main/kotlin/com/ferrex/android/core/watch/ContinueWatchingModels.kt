@@ -30,11 +30,19 @@ data class ContinueWatchingActionTarget(
     @SerialName("media_type") val mediaType: String,
 )
 
+enum class ContinueWatchingProgressState(val label: String) {
+    Pending("Pending"),
+    InProgress("In progress"),
+    Watched("Watched"),
+}
+
 data class ContinueWatchingCard(
     val stableKey: String,
     val title: String,
     val subtitle: String,
     val progressLabel: String,
+    val progressFraction: Float?,
+    val progressState: ContinueWatchingProgressState,
     val imageKey: ImageRequestKey?,
     val route: MediaRouteArgs,
 )
@@ -74,6 +82,8 @@ object ContinueWatchingMapper {
             title = item.title,
             subtitle = item.subtitle ?: actionCopy(item.actionHint, item.mediaType),
             progressLabel = progressCopy(item.position, item.duration, item.actionHint),
+            progressFraction = progressFraction(item.position, item.duration),
+            progressState = progressState(item.position, item.duration, item.actionHint),
             imageKey = imageKey,
             route = MediaRouteArgs(
                 mediaType = actionType,
@@ -96,5 +106,18 @@ object ContinueWatchingMapper {
         val percent = ((position / duration).coerceIn(0f, 1f) * 100f).toInt()
         val remaining = ((duration - position).coerceAtLeast(0f) / 60f).toInt()
         return "$percent% watched • ${remaining} min left"
+    }
+
+    private fun progressFraction(position: Float, duration: Float): Float? = if (duration > 0f) {
+        (position / duration).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+
+    private fun progressState(position: Float, duration: Float, actionHint: String): ContinueWatchingProgressState = when {
+        actionHint == "next_episode" && duration <= 0f -> ContinueWatchingProgressState.Pending
+        duration <= 0f -> ContinueWatchingProgressState.Pending
+        progressFraction(position, duration)?.let { it >= 0.95f } == true -> ContinueWatchingProgressState.Watched
+        else -> ContinueWatchingProgressState.InProgress
     }
 }
