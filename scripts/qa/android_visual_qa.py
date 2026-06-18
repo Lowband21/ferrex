@@ -1346,7 +1346,7 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
         ),
     ]
     if target == "phone" and state_key in {"stale-offline", "recovery"}:
-        for label in ("Retry", "Change server", "Reset connection", "Diagnostics / Export diagnostics"):
+        for label in ("Retry", "Change server", "Clear cache", "Reset connection", "Diagnostics / Export diagnostics"):
             requirements.append(
                 AccessibilityRequirement(
                     key=f"theater-recovery-{label.lower().replace(' ', '-')}",

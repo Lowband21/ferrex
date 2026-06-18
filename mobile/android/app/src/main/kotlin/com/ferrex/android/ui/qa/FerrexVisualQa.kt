@@ -31,6 +31,7 @@ import com.ferrex.android.core.watch.WatchSeasonStatus
 import com.ferrex.android.core.watch.WatchSeriesStatus
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.requiredTheaterPlateRecoveryActions
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 /** Stable Compose semantics tags used by visual QA, accessibility smoke tests, and manual runbooks. */
@@ -581,7 +582,7 @@ object FerrexVisualQaScenarios {
             evidencePath = "Debug Visual QA → ${device.label} Theater Plate → ${state.label}",
             fixtureSamples = listOf(state.key, state.mediaTitle, state.primaryActionLabel),
             recoveryActions = if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
-                FerrexVisualQaFixtures.noWipeRecoveryActions
+                FerrexVisualQaFixtures.noWipeCacheRecoveryActions
             } else {
                 emptyList()
             },
@@ -928,13 +929,13 @@ object FerrexVisualQaFixtures {
         SearchMediaId(SearchMediaType.Episode, "qa-episode-cache-miss"),
     )
 
-    val noWipeRecoveryActions = listOf(
-        VisualQaRecoveryActionSample("retry", "Retry", FerrexActionRole.Retry),
-        VisualQaRecoveryActionSample("sign-out", "Sign out", FerrexActionRole.Secondary),
-        VisualQaRecoveryActionSample("change-server", "Change server", FerrexActionRole.Secondary),
-        VisualQaRecoveryActionSample("reset-connection", "Reset connection", FerrexActionRole.DestructiveReset),
-        VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary),
-    )
+    val noWipeRecoveryActions = requiredTheaterPlateRecoveryActions(includeCacheClear = false).map { action ->
+        VisualQaRecoveryActionSample(action.key, action.label, action.role)
+    }
+
+    val noWipeCacheRecoveryActions = requiredTheaterPlateRecoveryActions(includeCacheClear = true).map { action ->
+        VisualQaRecoveryActionSample(action.key, action.label, action.role)
+    }
 
     fun privacyScanStrings(): List<String> = buildList {
         add(ServerLabel)
@@ -952,7 +953,7 @@ object FerrexVisualQaFixtures {
             add(card.libraryName)
             add(card.imageLabel)
         }
-        noWipeRecoveryActions.forEach { action ->
+        (noWipeRecoveryActions + noWipeCacheRecoveryActions).forEach { action ->
             add(action.key)
             add(action.label)
         }
