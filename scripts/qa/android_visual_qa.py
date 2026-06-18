@@ -20,6 +20,7 @@ import struct
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -30,11 +31,21 @@ VISUAL_QA_ACTIVITY = "com.ferrex.android.qa.FerrexVisualQaActivity"
 DEFAULT_OUTPUT_DIR = Path("target/android-visual-qa")
 DEFAULT_SETTLE_MS = 1500
 DEFAULT_LOG_LINES = 240
+ACCESSIBILITY_REACHABILITY_STEPS = 6
 GATE_MODES = ("smoke", "complete")
 SMOKE_SCENARIO_IDS = ("phone-home", "tv-home-focus")
 
 PHONE_EXPECTED_SIZE = (1080, 2400)
+PHONE_LANDSCAPE_FOLDABLE_SIZE = (1800, 1200)
 TV_EXPECTED_SIZE = (1920, 1080)
+TV_4K_SCALED_SIZE = (3840, 2160)
+
+DEFAULT_VIEWPORT_PROFILE_NAMES = (
+    "phone-portrait",
+    "phone-landscape-foldable",
+    "tv-1080p",
+    "tv-4k-scaled",
+)
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -108,6 +119,45 @@ class Scenario:
 
 
 @dataclass(frozen=True)
+class ViewportProfile:
+    name: str
+    target: str
+    expected_size: tuple[int, int]
+    wm_size: tuple[int, int] | None
+    wm_density: int | None
+    description: str
+
+    def to_json(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "name": self.name,
+            "target": self.target,
+            "expected_dimensions": {"width": self.expected_size[0], "height": self.expected_size[1]},
+            "description": self.description,
+        }
+        if self.wm_size is not None:
+            data["wm_size"] = f"{self.wm_size[0]}x{self.wm_size[1]}"
+        if self.wm_density is not None:
+            data["wm_density"] = self.wm_density
+        return data
+
+
+@dataclass(frozen=True)
+class WmOverrideSnapshot:
+    raw_size: str
+    raw_density: str
+    override_size: str | None
+    override_density: str | None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "raw_size": self.raw_size,
+            "raw_density": self.raw_density,
+            "override_size": self.override_size,
+            "override_density": self.override_density,
+        }
+
+
+@dataclass(frozen=True)
 class TargetConfig:
     target: str
     serial: str
@@ -139,11 +189,40 @@ class RunResult:
 
 
 @dataclass(frozen=True)
+class AccessibilityRequirement:
+    key: str
+    kind: str
+    tag: str | None = None
+    content_description: str | None = None
+    content_description_contains: str | None = None
+    require_content_description: bool = False
+    require_clickable: bool = False
+    require_focusable: bool = False
+
+    def to_json(self) -> dict[str, object]:
+        data: dict[str, object] = {"key": self.key, "kind": self.kind}
+        if self.tag is not None:
+            data["tag"] = self.tag
+        if self.content_description is not None:
+            data["content_description"] = self.content_description
+        if self.content_description_contains is not None:
+            data["content_description_contains"] = self.content_description_contains
+        if self.require_content_description:
+            data["require_content_description"] = True
+        if self.require_clickable:
+            data["require_clickable"] = True
+        if self.require_focusable:
+            data["require_focusable"] = True
+        return data
+
+
+@dataclass(frozen=True)
 class VerifiedCapture:
     target: str
     scenario_id: str
     screenshot_path: Path
     dimensions: PngDimensions
+    profile_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +239,90 @@ class ManifestSummary:
     @property
     def target_counts(self) -> Counter[str]:
         return Counter(capture.target for capture in self.captures)
+
+
+VIEWPORT_PROFILES: Mapping[str, ViewportProfile] = {
+    "phone-portrait": ViewportProfile(
+        name="phone-portrait",
+        target="phone",
+        expected_size=PHONE_EXPECTED_SIZE,
+        wm_size=PHONE_EXPECTED_SIZE,
+        wm_density=440,
+        description="Phone portrait evidence viewport matching the default Lowband phone emulator.",
+    ),
+    "phone-landscape-foldable": ViewportProfile(
+        name="phone-landscape-foldable",
+        target="phone",
+        expected_size=PHONE_LANDSCAPE_FOLDABLE_SIZE,
+        wm_size=PHONE_LANDSCAPE_FOLDABLE_SIZE,
+        wm_density=420,
+        description="Phone landscape/foldable-ish viewport for wide compact and two-pane visual QA.",
+    ),
+    "tv-1080p": ViewportProfile(
+        name="tv-1080p",
+        target="tv",
+        expected_size=TV_EXPECTED_SIZE,
+        wm_size=TV_EXPECTED_SIZE,
+        wm_density=320,
+        description="Android TV 1080p evidence viewport matching the default Lowband TV emulator.",
+    ),
+    "tv-4k-scaled": ViewportProfile(
+        name="tv-4k-scaled",
+        target="tv",
+        expected_size=TV_EXPECTED_SIZE,
+        wm_size=TV_4K_SCALED_SIZE,
+        wm_density=640,
+        description="Android TV 4K logical viewport scaled onto the 1080p emulator framebuffer for 10-foot Theater Plate review.",
+    ),
+}
+
+THEATER_PLATE_STATE_LABELS: Mapping[str, str] = {
+    "bright": "Bright backdrop",
+    "dark": "Dark backdrop",
+    "busy": "Busy backdrop",
+    "missing-backdrop": "Missing backdrop",
+    "long-title": "Long title",
+    "missing-artwork": "Missing artwork",
+    "stale-offline": "Stale/offline",
+    "recovery": "Recovery",
+    "search": "Search",
+    "browse": "Browse",
+    "detail": "Detail",
+    "rails": "Rails",
+    "playback-entry": "Playback entry",
+}
+
+THEATER_PLATE_PRIMARY_ACTIONS: Mapping[str, str] = {
+    "bright": "Review bright contrast",
+    "dark": "Review dark contrast",
+    "busy": "Reduce backdrop noise",
+    "missing-backdrop": "Use fallback backdrop",
+    "long-title": "Open long-title detail",
+    "missing-artwork": "Use artwork fallback",
+    "stale-offline": "Retry offline data",
+    "recovery": "Retry",
+    "search": "Search again",
+    "browse": "Browse related titles",
+    "detail": "Open detail actions",
+    "rails": "Browse rail item",
+    "playback-entry": "Resume playback",
+}
+
+LEGACY_SCENARIO_ROOT_TAGS: Mapping[str, str] = {
+    "phone-home": "phone.home",
+    "phone-search": "phone.search",
+    "phone-browse-grid": "phone.libraries.grid",
+    "phone-movie-detail": "phone.detail.movie",
+    "phone-series-detail": "phone.detail.series",
+    "phone-season-episode": "phone.detail.season-episode",
+    "phone-playback-entry": "phone.playback-entry",
+    "phone-recovery-offline-stale": "phone.recovery.offline-stale",
+    "tv-home-focus": "tv.surface.home-actions",
+    "tv-grid-focus": "tv.surface.grid-cards",
+    "tv-detail-focus": "tv.detail",
+    "tv-search-focus": "tv.search",
+    "tv-recovery-focus": "tv.surface.recovery-actions",
+}
 
 
 def utc_now() -> str:
@@ -401,12 +564,23 @@ def scenarios_for_gate_mode(registry: ScenarioRegistry, mode: str) -> list[Scena
     raise VisualQaError(f"unknown gate mode {mode!r}; expected smoke or complete")
 
 
-def capture_plan_json(mode: str | None, selected: Sequence[Scenario]) -> dict[str, object]:
+def capture_plan_json(
+    mode: str | None,
+    selected: Sequence[Scenario],
+    profiles_by_target: Mapping[str, Sequence[ViewportProfile]],
+) -> dict[str, object]:
+    capture_count = sum(len(profiles_by_target.get(scenario.target, ())) for scenario in selected)
     return {
         "mode": mode,
         "scenario_count": len(selected),
         "scenario_ids": [scenario.id for scenario in selected],
         "target_counts": dict(Counter(scenario.target for scenario in selected)),
+        "viewport_profiles": {
+            target: [profile.to_json() for profile in profiles]
+            for target, profiles in sorted(profiles_by_target.items())
+            if profiles
+        },
+        "capture_count": capture_count,
     }
 
 
@@ -438,6 +612,69 @@ def parse_expected_size(value: str) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise VisualQaError(f"invalid expected size {value!r}; dimensions must be positive")
     return (width, height)
+
+
+def size_to_string(size: tuple[int, int]) -> str:
+    return f"{size[0]}x{size[1]}"
+
+
+def expand_profile_names(raw_values: Sequence[str] | None) -> tuple[str, ...]:
+    if not raw_values:
+        return DEFAULT_VIEWPORT_PROFILE_NAMES
+    requested = [part.strip() for raw_value in raw_values for part in raw_value.split(",") if part.strip()]
+    if not requested:
+        raise VisualQaError("at least one viewport profile must be selected")
+    if "all" in requested:
+        if len(requested) > 1:
+            raise VisualQaError("viewport profile 'all' cannot be combined with explicit profiles")
+        return DEFAULT_VIEWPORT_PROFILE_NAMES
+    names: list[str] = []
+    for name in requested:
+        if name not in VIEWPORT_PROFILES:
+            available = ", ".join(["all", *VIEWPORT_PROFILES.keys()])
+            raise VisualQaError(f"unknown viewport profile {name!r}; available: {available}")
+        if name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def hardware_profile(config: TargetConfig) -> ViewportProfile:
+    return ViewportProfile(
+        name=f"hardware-{config.target}",
+        target=config.target,
+        expected_size=config.expected_size,
+        wm_size=None,
+        wm_density=None,
+        description="Explicit hardware viewport; no wm size/density override is applied.",
+    )
+
+
+def selected_viewport_profiles(
+    args: argparse.Namespace,
+    configs: Mapping[str, TargetConfig],
+    selected: Sequence[Scenario],
+) -> dict[str, tuple[ViewportProfile, ...]]:
+    selected_targets = {scenario.target for scenario in selected}
+    explicit_profiles = getattr(args, "profile", None)
+    if getattr(args, "hardware", False):
+        if explicit_profiles:
+            raise VisualQaError("--profile is not valid with --hardware; use --expected-size for explicit hardware captures")
+        return {
+            target: (hardware_profile(configs[target]),)
+            for target in sorted(selected_targets)
+        }
+
+    profile_names = expand_profile_names(explicit_profiles)
+    profiles = [VIEWPORT_PROFILES[name] for name in profile_names]
+    by_target = {
+        target: tuple(profile for profile in profiles if profile.target == target)
+        for target in sorted(selected_targets)
+    }
+    missing = sorted(target for target, target_profiles in by_target.items() if not target_profiles)
+    if missing:
+        requested = ", ".join(profile_names)
+        raise VisualQaError(f"no selected viewport profile covers target(s) {', '.join(missing)}; requested profiles: {requested}")
+    return by_target
 
 
 def target_configs(repo_root: Path, args: argparse.Namespace) -> dict[str, TargetConfig]:
@@ -512,6 +749,44 @@ def getprop(adb: str, serial: str, name: str) -> str:
     return adb_shell(adb, serial, "getprop", name, timeout=30).stdout.strip()
 
 
+def wm_snapshot(adb: str, serial: str) -> WmOverrideSnapshot:
+    raw_size = adb_shell(adb, serial, "wm", "size", timeout=30).stdout.strip()
+    raw_density = adb_shell(adb, serial, "wm", "density", timeout=30).stdout.strip()
+    size_match = re.search(r"(?im)^\s*Override size:\s*(\d+x\d+)\s*$", raw_size)
+    density_match = re.search(r"(?im)^\s*Override density:\s*(\d+)\s*$", raw_density)
+    return WmOverrideSnapshot(
+        raw_size=raw_size,
+        raw_density=raw_density,
+        override_size=size_match.group(1) if size_match else None,
+        override_density=density_match.group(1) if density_match else None,
+    )
+
+
+def apply_viewport_profile(adb: str, config: TargetConfig, profile: ViewportProfile) -> WmOverrideSnapshot:
+    before = wm_snapshot(adb, config.serial)
+    try:
+        if profile.wm_size is not None:
+            adb_shell(adb, config.serial, "wm", "size", size_to_string(profile.wm_size), timeout=30)
+        if profile.wm_density is not None:
+            adb_shell(adb, config.serial, "wm", "density", str(profile.wm_density), timeout=30)
+    except Exception:
+        restore_viewport_profile(adb, config, before)
+        raise
+    return before
+
+
+def restore_viewport_profile(adb: str, config: TargetConfig, before: WmOverrideSnapshot) -> dict[str, object]:
+    if before.override_size:
+        adb_shell(adb, config.serial, "wm", "size", before.override_size, timeout=30)
+    else:
+        adb_shell(adb, config.serial, "wm", "size", "reset", timeout=30)
+    if before.override_density:
+        adb_shell(adb, config.serial, "wm", "density", before.override_density, timeout=30)
+    else:
+        adb_shell(adb, config.serial, "wm", "density", "reset", timeout=30)
+    return {"restored_to": wm_snapshot(adb, config.serial).to_json()}
+
+
 def collect_serial_metadata(adb: str, config: TargetConfig) -> dict[str, object]:
     serial = config.serial
     props = {
@@ -572,6 +847,36 @@ def force_stop_package(adb: str, config: TargetConfig) -> None:
     adb_shell(adb, config.serial, "am", "force-stop", config.package, check=False, timeout=30)
 
 
+def focused_window_snapshot(adb: str, config: TargetConfig) -> dict[str, object]:
+    output = adb_shell(adb, config.serial, "dumpsys", "window", timeout=30).stdout
+    focus_lines = [line.strip() for line in output.splitlines() if "mCurrentFocus=" in line or "mFocusedApp=" in line]
+    return {
+        "package_foreground": any(config.package in line and VISUAL_QA_ACTIVITY in line for line in focus_lines),
+        "focus_lines": focus_lines[-4:],
+    }
+
+
+def wait_for_visual_qa_foreground(
+    adb: str,
+    config: TargetConfig,
+    scenario: Scenario,
+    timeout_seconds: float = 8.0,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot: dict[str, object] | None = None
+    while True:
+        last_snapshot = focused_window_snapshot(adb, config)
+        if last_snapshot["package_foreground"]:
+            waited_ms = int((timeout_seconds - max(deadline - time.monotonic(), 0)) * 1000)
+            return {"scenario_id": scenario.id, "waited_ms": waited_ms, **last_snapshot}
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
+    raise VisualQaError(
+        f"{config.package}/{VISUAL_QA_ACTIVITY} did not become foreground for {scenario.id}: {last_snapshot}"
+    )
+
+
 def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[str, object]:
     command = [
         adb,
@@ -591,20 +896,35 @@ def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[
         EXTRA_SCENARIO_ID,
         scenario.id,
     ]
-    result = run_command(command, timeout=60)
-    output = (result.stdout + "\n" + result.stderr).strip()
-    if re.search(r"(?im)^\s*(Error|Exception):", output):
-        raise VisualQaError(f"am start reported an error launching {scenario.id}: {redact_text(output)}")
-    return {
-        "action": ACTION_VISUAL_QA,
-        "extra_scenario_id": EXTRA_SCENARIO_ID,
-        "component": config.component,
-        "stdout": output,
-    }
+    attempts: list[dict[str, object]] = []
+    for attempt in range(1, 3):
+        result = run_command(command, timeout=60)
+        output = (result.stdout + "\n" + result.stderr).strip()
+        if re.search(r"(?im)^\s*(Error|Exception):", output):
+            raise VisualQaError(f"am start reported an error launching {scenario.id}: {redact_text(output)}")
+        attempt_record: dict[str, object] = {
+            "attempt": attempt,
+            "action": ACTION_VISUAL_QA,
+            "extra_scenario_id": EXTRA_SCENARIO_ID,
+            "component": config.component,
+            "stdout": output,
+        }
+        try:
+            attempt_record["foreground"] = wait_for_visual_qa_foreground(adb, config, scenario)
+            attempts.append(attempt_record)
+            return {**attempt_record, "attempts": attempts}
+        except VisualQaError as exc:
+            attempt_record["foreground_error"] = redact_text(str(exc))
+            attempts.append(attempt_record)
+            if attempt == 1:
+                force_stop_package(adb, config)
+                time.sleep(0.5)
+    raise VisualQaError(f"visual QA activity did not become foreground after launch attempts for {scenario.id}: {attempts}")
 
 
 def drive_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> list[str]:
-    keys = list(TV_DPAD_SEQUENCES.get(scenario.id, ()))
+    default_tv_keys: tuple[str, ...] = ("KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_RIGHT")
+    keys = list(TV_DPAD_SEQUENCES.get(scenario.id, default_tv_keys if scenario.id.startswith("tv-theater-plate-") else ()))
     for key in keys:
         adb_shell(adb, config.serial, "input", "keyevent", key, timeout=30)
         time.sleep(0.15)
@@ -741,10 +1061,13 @@ def verify_manifest(
                 f"capture record {index} did not pass: scenario={capture.get('scenario_id')!r} status={capture.get('status')!r}"
             )
         target = capture.get("target")
+        profile_name = capture.get("profile")
         scenario_id = capture.get("scenario_id")
         screenshot_raw = capture.get("screenshot_path")
         if not isinstance(target, str) or target not in {"phone", "tv"}:
             raise VisualQaError(f"capture record {index} has invalid target: {target!r}")
+        if profile_name is not None and not isinstance(profile_name, str):
+            raise VisualQaError(f"capture record {index} has invalid profile: {profile_name!r}")
         if not isinstance(scenario_id, str) or not scenario_id:
             raise VisualQaError(f"capture record {index} has invalid scenario_id: {scenario_id!r}")
         if not isinstance(screenshot_raw, str) or not screenshot_raw:
@@ -766,6 +1089,7 @@ def verify_manifest(
                 scenario_id=scenario_id,
                 screenshot_path=screenshot_path,
                 dimensions=dimensions,
+                profile_name=profile_name,
             )
         )
         seen_ids.add(scenario_id)
@@ -810,9 +1134,10 @@ def print_artifact_summary(summary: ManifestSummary) -> None:
     print(f"android-visual-qa: artifacts {summary.output_dir}", file=sys.stderr)
     print(f"android-visual-qa: manifest {summary.manifest_path}", file=sys.stderr)
     for capture in summary.captures:
+        profile = f"/{capture.profile_name}" if capture.profile_name else ""
         print(
             "android-visual-qa: "
-            f"{capture.target}/{capture.scenario_id} "
+            f"{capture.target}{profile}/{capture.scenario_id} "
             f"{capture.dimensions.width}x{capture.dimensions.height} "
             f"{capture.screenshot_path}",
             file=sys.stderr,
@@ -824,35 +1149,42 @@ def capture_one(
     adb: str,
     config: TargetConfig,
     scenario: Scenario,
+    profile: ViewportProfile,
     output_dir: Path,
     settle_ms: int,
     log_lines: int,
     prefer_nix_helper: bool,
 ) -> dict[str, object]:
     started_at = utc_now()
-    screenshot_path = output_dir / config.target / f"{scenario.id}.png"
-    failure_log_path = output_dir / "logs" / f"{config.target}-{scenario.id}-failure-logcat.txt"
+    screenshot_path = output_dir / profile.name / f"{scenario.id}.png"
+    failure_log_path = output_dir / "logs" / f"{profile.name}-{scenario.id}-failure-logcat.txt"
     record: dict[str, object] = {
         "target": config.target,
+        "profile": profile.name,
         "scenario_id": scenario.id,
         "serial": config.serial,
         "package_name": config.package,
-        "expected_dimensions": {"width": config.expected_size[0], "height": config.expected_size[1]},
+        "viewport_profile": profile.to_json(),
+        "expected_dimensions": {"width": profile.expected_size[0], "height": profile.expected_size[1]},
         "screenshot_path": str(screenshot_path),
         "started_at": started_at,
         "status": "running",
     }
+    viewport_before: WmOverrideSnapshot | None = None
 
     try:
         require_serial_present(adb, config.serial)
+        viewport_before = apply_viewport_profile(adb, config, profile)
+        record["viewport_before"] = viewport_before.to_json()
         record["serial_metadata"] = collect_serial_metadata(adb, config)
         record["package_metadata"] = collect_package_metadata(adb, config)
         force_stop_package(adb, config)
         record["launch"] = launch_scenario(adb, config, scenario)
         record["dpad_key_events"] = drive_scenario(adb, config, scenario)
         time.sleep(settle_ms / 1000.0)
-        record["screenshot_capture"] = capture_screenshot(adb, config, screenshot_path, prefer_nix_helper)
-        dimensions = validate_png(screenshot_path, config.expected_size)
+        prefer_helper_for_profile = prefer_nix_helper and profile.expected_size == config.expected_size
+        record["screenshot_capture"] = capture_screenshot(adb, config, screenshot_path, prefer_helper_for_profile)
+        dimensions = validate_png(screenshot_path, profile.expected_size)
         record["dimensions"] = dimensions.to_json()
         record["ended_at"] = utc_now()
         record["status"] = "passed"
@@ -861,7 +1193,452 @@ def capture_one(
         record["status"] = "failed"
         record["error"] = redact_text(str(exc))
         record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
+    finally:
+        if viewport_before is not None:
+            try:
+                record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
+            except Exception as exc:  # noqa: BLE001 - never leave viewport restore failures silent.
+                restore_error = redact_text(str(exc))
+                record["viewport_restore_error"] = restore_error
+                if record.get("status") == "passed":
+                    record["status"] = "failed"
+                    record["error"] = restore_error
     return record
+
+
+def theater_plate_state_key(scenario_id: str) -> str | None:
+    for prefix in ("phone-theater-plate-", "tv-theater-plate-"):
+        if scenario_id.startswith(prefix):
+            state_key = scenario_id.removeprefix(prefix)
+            return state_key if state_key in THEATER_PLATE_STATE_LABELS else None
+    return None
+
+
+def theater_plate_tag(target: str, node_kind: str, state_key: str, leaf: str | None = None) -> str:
+    parts = [target, "theater-plate"]
+    if node_kind != "root":
+        parts.append(node_kind)
+    parts.append(state_key)
+    if leaf:
+        parts.append(leaf)
+    return ".".join(parts)
+
+
+def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityRequirement]:
+    requirements: list[AccessibilityRequirement] = []
+    root_tag = LEGACY_SCENARIO_ROOT_TAGS.get(scenario.id)
+    if root_tag:
+        requirements.append(AccessibilityRequirement(key="root-tag", kind="tag", tag=root_tag))
+
+    if scenario.id == "phone-search":
+        requirements.extend(
+            [
+                AccessibilityRequirement(key="search-field", kind="tag", tag="phone.search.field"),
+                AccessibilityRequirement(key="search-actions", kind="tag", tag="phone.search.actions"),
+                AccessibilityRequirement(key="search-results", kind="tag", tag="phone.search.results"),
+            ]
+        )
+    elif scenario.id == "phone-browse-grid":
+        requirements.extend(
+            [
+                AccessibilityRequirement(key="library-grid", kind="tag", tag="phone.libraries.grid"),
+                AccessibilityRequirement(
+                    key="library-recovery-status",
+                    kind="status",
+                    tag="phone.library.recovery",
+                    require_content_description=True,
+                ),
+                AccessibilityRequirement(
+                    key="reset-connection-action",
+                    kind="action",
+                    content_description="Reset connection",
+                    require_clickable=True,
+                ),
+            ]
+        )
+    elif scenario.id == "phone-recovery-offline-stale":
+        for label in ("Retry", "Sign out", "Change server", "Reset connection", "Diagnostics / Export diagnostics"):
+            requirements.append(
+                AccessibilityRequirement(
+                    key=f"recovery-{label.lower().replace(' ', '-')}",
+                    kind="recovery-action",
+                    content_description=label,
+                    require_clickable=True,
+                )
+            )
+    elif scenario.id.startswith("tv-"):
+        surface = root_tag
+        if surface:
+            requirements.append(
+                AccessibilityRequirement(key="tv-focus-surface", kind="focus", tag=surface, require_content_description=False)
+            )
+        if scenario.id == "tv-grid-focus":
+            requirements.append(
+                AccessibilityRequirement(
+                    key="tv-media-card",
+                    kind="media",
+                    tag="tv.poster.grid-cards.movie-aurora-station",
+                    content_description_contains="Aurora Station",
+                    require_content_description=True,
+                    require_focusable=True,
+                )
+            )
+        else:
+            action_tag = {
+                "tv-home-focus": "tv.action.home-actions.search",
+                "tv-detail-focus": "tv.action.detail-actions.play",
+                "tv-search-focus": "tv.action.search-results.field",
+                "tv-recovery-focus": "tv.action.recovery-actions.retry",
+            }.get(scenario.id)
+            if action_tag:
+                requirements.append(
+                    AccessibilityRequirement(
+                        key="tv-primary-action",
+                        kind="action",
+                        tag=action_tag,
+                        require_content_description=True,
+                        require_focusable=True,
+                    )
+                )
+    return requirements
+
+
+def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str) -> list[AccessibilityRequirement]:
+    target = scenario.target
+    label = THEATER_PLATE_STATE_LABELS[state_key]
+    primary_action = THEATER_PLATE_PRIMARY_ACTIONS[state_key]
+    focus_required = target == "tv"
+    requirements = [
+        AccessibilityRequirement(
+            key="theater-root",
+            kind="tag",
+            tag=theater_plate_tag(target, "root", state_key),
+            require_content_description=True,
+        ),
+        AccessibilityRequirement(
+            key="theater-status",
+            kind="status",
+            tag=theater_plate_tag(target, "status", state_key),
+            content_description_contains=label,
+            require_content_description=True,
+        ),
+        AccessibilityRequirement(
+            key="theater-primary-action",
+            kind="action",
+            tag=theater_plate_tag(target, "action", state_key, "primary"),
+            content_description=primary_action,
+            require_clickable=target == "phone",
+            require_focusable=focus_required,
+        ),
+        AccessibilityRequirement(
+            key="theater-media-hero",
+            kind="media",
+            tag=theater_plate_tag(target, "media", state_key, "hero"),
+            content_description_contains="Theater Plate media",
+            require_content_description=True,
+            require_focusable=focus_required,
+        ),
+        AccessibilityRequirement(
+            key="theater-rail",
+            kind="media-rail",
+            tag=theater_plate_tag(target, "rail", state_key, "primary"),
+            require_content_description=True,
+        ),
+    ]
+    if target == "phone" and state_key in {"stale-offline", "recovery"}:
+        for label in ("Retry", "Change server", "Clear cache", "Reset connection", "Diagnostics / Export diagnostics"):
+            requirements.append(
+                AccessibilityRequirement(
+                    key=f"theater-recovery-{label.lower().replace(' ', '-')}",
+                    kind="recovery-action",
+                    content_description=label,
+                    require_clickable=True,
+                )
+            )
+    if state_key == "search":
+        requirements.append(
+            AccessibilityRequirement(
+                key="theater-search-field",
+                kind="action",
+                tag=theater_plate_tag(target, "search", state_key, "field"),
+                content_description="Search Theater Plate",
+                require_clickable=target == "phone",
+                require_focusable=focus_required,
+            )
+        )
+    if state_key == "playback-entry":
+        requirements.append(
+            AccessibilityRequirement(
+                key="theater-playback-entry",
+                kind="action",
+                content_description="Resume playback",
+                require_clickable=target == "phone",
+                require_focusable=focus_required,
+            )
+        )
+    return requirements
+
+
+def accessibility_requirements_for_scenario(scenario: Scenario) -> list[AccessibilityRequirement]:
+    state_key = theater_plate_state_key(scenario.id)
+    if state_key is not None:
+        return theater_plate_accessibility_requirements(scenario, state_key)
+    return legacy_accessibility_requirements(scenario)
+
+
+def dump_accessibility_xml(adb: str, config: TargetConfig) -> str:
+    remote_path = f"/sdcard/ferrex-visual-qa-accessibility-{os.getpid()}.xml"
+    try:
+        adb_shell(adb, config.serial, "uiautomator", "dump", "--compressed", remote_path, timeout=90)
+        return adb_shell(adb, config.serial, "cat", remote_path, timeout=30).stdout
+    finally:
+        adb_shell(adb, config.serial, "rm", "-f", remote_path, check=False, timeout=30)
+
+
+def drive_accessibility_reachability_step(adb: str, config: TargetConfig, profile: ViewportProfile) -> None:
+    width, height = profile.expected_size
+    if config.target == "tv":
+        for _ in range(5):
+            adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_DPAD_DOWN", timeout=30)
+            time.sleep(0.05)
+    adb_shell(
+        adb,
+        config.serial,
+        "input",
+        "swipe",
+        str(width // 2),
+        str(int(height * 0.82)),
+        str(width // 2),
+        str(int(height * 0.25)),
+        "250",
+        timeout=30,
+    )
+    time.sleep(0.25)
+
+
+def accessibility_dump_path(base_path: Path, step: int) -> Path:
+    if step == 0:
+        return base_path
+    return base_path.with_name(f"{base_path.stem}-step-{step}{base_path.suffix}")
+
+
+def parse_accessibility_nodes(xml_text: str) -> list[dict[str, str]]:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise VisualQaError(f"accessibility dump is not valid XML: {exc}") from exc
+
+    records: list[dict[str, str]] = []
+
+    def walk(element: ET.Element, ancestors: Sequence[Mapping[str, str]]) -> list[str]:
+        attrs = dict(element.attrib)
+        child_descs: list[str] = []
+        for child in element:
+            if child.tag == "node":
+                child_descs.extend(walk(child, (*ancestors, attrs)))
+        own_desc = attrs.get("content-desc", "")
+        subtree_descs = [desc for desc in (own_desc, *child_descs) if desc]
+        if element.tag == "node":
+            attrs["_subtree_content_descs"] = "\n".join(subtree_descs)
+            attrs["_ancestor_clickable"] = "true" if attrs.get("clickable") == "true" or any(
+                ancestor.get("clickable") == "true" for ancestor in ancestors
+            ) else "false"
+            attrs["_ancestor_focusable"] = "true" if attrs.get("focusable") == "true" or any(
+                ancestor.get("focusable") == "true" for ancestor in ancestors
+            ) else "false"
+            records.append(attrs)
+        return subtree_descs
+
+    for child in root:
+        if child.tag == "node":
+            walk(child, ())
+    return records
+
+
+def node_has_tag(node: Mapping[str, str], tag: str) -> bool:
+    resource_id = node.get("resource-id", "")
+    return resource_id == tag or resource_id.endswith(f":id/{tag}") or resource_id.endswith(tag)
+
+
+def node_matches_requirement(node: Mapping[str, str], requirement: AccessibilityRequirement) -> bool:
+    if requirement.tag is not None and not node_has_tag(node, requirement.tag):
+        return False
+    content_description = node.get("content-desc", "")
+    subtree_descriptions = node.get("_subtree_content_descs", content_description)
+    if requirement.content_description is not None:
+        if requirement.tag is not None:
+            if requirement.content_description not in subtree_descriptions.splitlines():
+                return False
+        elif content_description != requirement.content_description:
+            return False
+    if requirement.content_description_contains is not None:
+        searchable_description = subtree_descriptions if requirement.tag is not None else content_description
+        if requirement.content_description_contains not in searchable_description:
+            return False
+    if requirement.require_content_description and not subtree_descriptions:
+        return False
+    if requirement.require_clickable and node.get("clickable") != "true" and node.get("_ancestor_clickable") != "true":
+        return False
+    if requirement.require_focusable and node.get("focusable") != "true" and node.get("_ancestor_focusable") != "true":
+        return False
+    return True
+
+
+def verify_accessibility_requirements(
+    nodes: Sequence[Mapping[str, str]],
+    requirements: Sequence[AccessibilityRequirement],
+) -> list[dict[str, object]]:
+    checks: list[dict[str, object]] = []
+    for requirement in requirements:
+        matching = [node for node in nodes if node_matches_requirement(node, requirement)]
+        checks.append(
+            {
+                "requirement": requirement.to_json(),
+                "status": "passed" if matching else "failed",
+                "matching_nodes": len(matching),
+            }
+        )
+    return checks
+
+
+def accessibility_one(
+    *,
+    adb: str,
+    config: TargetConfig,
+    scenario: Scenario,
+    profile: ViewportProfile,
+    output_dir: Path,
+    settle_ms: int,
+    log_lines: int,
+) -> dict[str, object]:
+    started_at = utc_now()
+    dump_path = output_dir / "accessibility" / profile.name / f"{scenario.id}.xml"
+    failure_log_path = output_dir / "logs" / f"{profile.name}-{scenario.id}-accessibility-logcat.txt"
+    requirements = accessibility_requirements_for_scenario(scenario)
+    record: dict[str, object] = {
+        "target": config.target,
+        "profile": profile.name,
+        "scenario_id": scenario.id,
+        "serial": config.serial,
+        "package_name": config.package,
+        "viewport_profile": profile.to_json(),
+        "expected_dimensions": {"width": profile.expected_size[0], "height": profile.expected_size[1]},
+        "requirements": [requirement.to_json() for requirement in requirements],
+        "dump_path": str(dump_path),
+        "started_at": started_at,
+        "status": "running",
+    }
+    viewport_before: WmOverrideSnapshot | None = None
+    try:
+        if not requirements:
+            raise VisualQaError(f"no accessibility requirements registered for scenario {scenario.id}")
+        require_serial_present(adb, config.serial)
+        viewport_before = apply_viewport_profile(adb, config, profile)
+        record["viewport_before"] = viewport_before.to_json()
+        record["serial_metadata"] = collect_serial_metadata(adb, config)
+        record["package_metadata"] = collect_package_metadata(adb, config)
+        force_stop_package(adb, config)
+        record["launch"] = launch_scenario(adb, config, scenario)
+        record["dpad_key_events"] = drive_scenario(adb, config, scenario)
+        time.sleep(settle_ms / 1000.0)
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        nodes: list[dict[str, str]] = []
+        dump_paths: list[str] = []
+        for step in range(ACCESSIBILITY_REACHABILITY_STEPS):
+            xml_text = dump_accessibility_xml(adb, config)
+            step_path = accessibility_dump_path(dump_path, step)
+            step_path.write_text(redact_text(xml_text), encoding="utf-8")
+            dump_paths.append(str(step_path))
+            nodes.extend(parse_accessibility_nodes(xml_text))
+            if step < ACCESSIBILITY_REACHABILITY_STEPS - 1:
+                drive_accessibility_reachability_step(adb, config, profile)
+        record["dump_paths"] = dump_paths
+        checks = verify_accessibility_requirements(nodes, requirements)
+        failures = [check for check in checks if check["status"] != "passed"]
+        record["node_count"] = len(nodes)
+        record["checks"] = checks
+        record["ended_at"] = utc_now()
+        if failures:
+            missing = ", ".join(str(check["requirement"]["key"]) for check in failures)
+            raise VisualQaError(f"missing accessibility requirement(s): {missing}")
+        record["status"] = "passed"
+    except Exception as exc:  # noqa: BLE001 - accessibility gate must emit diagnostics.
+        record["ended_at"] = utc_now()
+        record["status"] = "failed"
+        record["error"] = redact_text(str(exc))
+        record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
+    finally:
+        if viewport_before is not None:
+            try:
+                record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
+            except Exception as exc:  # noqa: BLE001
+                restore_error = redact_text(str(exc))
+                record["viewport_restore_error"] = restore_error
+                if record.get("status") == "passed":
+                    record["status"] = "failed"
+                    record["error"] = restore_error
+    return record
+
+
+def run_accessibility(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    registry = ScenarioRegistry.load(repo_root)
+    selected = registry.select(args.target, args.scenario)
+    output_dir = resolve_output_dir(repo_root, args.output_dir)
+    configs = target_configs(repo_root, args)
+    profiles_by_target = selected_viewport_profiles(args, configs, selected)
+    adb = resolve_executable(args.adb)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "command": "android-visual-qa accessibility",
+        "argv": getattr(args, "effective_argv", sys.argv[1:]),
+        "started_at": utc_now(),
+        "output_dir": str(output_dir),
+        "hardware_confirmation": bool(args.hardware),
+        "registry": registry.to_json(),
+        "accessibility_plan": capture_plan_json(None, selected, profiles_by_target),
+        "command_versions": collect_command_versions(adb, Path(__file__).resolve()),
+        "checks": [],
+        "failures": [],
+    }
+
+    records: list[dict[str, object]] = []
+    for scenario in selected:
+        config = configs[scenario.target]
+        for profile in profiles_by_target[scenario.target]:
+            print(
+                f"android-visual-qa: accessibility {scenario.id} on {scenario.target}/{profile.name} ({config.serial})",
+                file=sys.stderr,
+            )
+            record = accessibility_one(
+                adb=adb,
+                config=config,
+                scenario=scenario,
+                profile=profile,
+                output_dir=output_dir,
+                settle_ms=args.settle_ms,
+                log_lines=args.log_lines,
+            )
+            records.append(record)
+            if record["status"] == "passed":
+                print(f"android-visual-qa: accessibility passed {profile.name}/{scenario.id}", file=sys.stderr)
+            else:
+                print(
+                    f"android-visual-qa: accessibility FAILED {profile.name}/{scenario.id}: {record['error']}",
+                    file=sys.stderr,
+                )
+
+    failures = [record for record in records if record.get("status") != "passed"]
+    manifest["checks"] = records
+    manifest["failures"] = failures
+    manifest["ended_at"] = utc_now()
+    manifest["status"] = "failed" if failures else "passed"
+    manifest_path = output_dir / "accessibility-manifest.json"
+    write_json(manifest_path, manifest)
+    print(f"android-visual-qa: accessibility manifest {manifest_path}", file=sys.stderr)
+    return 1 if failures else 0
 
 
 def run_capture_plan(
@@ -875,6 +1652,7 @@ def run_capture_plan(
     mode: str | None = None,
 ) -> int:
     configs = target_configs(repo_root, args)
+    profiles_by_target = selected_viewport_profiles(args, configs, selected)
     adb = resolve_executable(args.adb)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -886,7 +1664,7 @@ def run_capture_plan(
         "output_dir": str(output_dir),
         "hardware_confirmation": bool(args.hardware),
         "registry": registry.to_json(),
-        "capture_plan": capture_plan_json(mode, selected),
+        "capture_plan": capture_plan_json(mode, selected, profiles_by_target),
         "command_versions": collect_command_versions(adb, Path(__file__).resolve()),
         "captures": [],
         "failures": [],
@@ -895,21 +1673,26 @@ def run_capture_plan(
     captures: list[dict[str, object]] = []
     for scenario in selected:
         config = configs[scenario.target]
-        print(f"android-visual-qa: capture {scenario.id} on {scenario.target} ({config.serial})", file=sys.stderr)
-        record = capture_one(
-            adb=adb,
-            config=config,
-            scenario=scenario,
-            output_dir=output_dir,
-            settle_ms=args.settle_ms,
-            log_lines=args.log_lines,
-            prefer_nix_helper=not args.no_nix_screenshot,
-        )
-        captures.append(record)
-        if record["status"] == "passed":
-            print(f"android-visual-qa: wrote {record['screenshot_path']}", file=sys.stderr)
-        else:
-            print(f"android-visual-qa: FAILED {scenario.id}: {record['error']}", file=sys.stderr)
+        for profile in profiles_by_target[scenario.target]:
+            print(
+                f"android-visual-qa: capture {scenario.id} on {scenario.target}/{profile.name} ({config.serial})",
+                file=sys.stderr,
+            )
+            record = capture_one(
+                adb=adb,
+                config=config,
+                scenario=scenario,
+                profile=profile,
+                output_dir=output_dir,
+                settle_ms=args.settle_ms,
+                log_lines=args.log_lines,
+                prefer_nix_helper=not args.no_nix_screenshot,
+            )
+            captures.append(record)
+            if record["status"] == "passed":
+                print(f"android-visual-qa: wrote {record['screenshot_path']}", file=sys.stderr)
+            else:
+                print(f"android-visual-qa: FAILED {profile.name}/{scenario.id}: {record['error']}", file=sys.stderr)
 
     failures = [record for record in captures if record.get("status") != "passed"]
     manifest["captures"] = captures
@@ -965,6 +1748,7 @@ def run_gate(args: argparse.Namespace) -> int:
         hardware=False,
         hardware_serial=None,
         expected_size=None,
+        profile=getattr(args, "profile", None),
         effective_argv=getattr(args, "effective_argv", sys.argv[1:]),
     )
     print(f"android-visual-qa: step capture ({args.mode})", file=sys.stderr)
@@ -1053,6 +1837,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not use ferrex-android-screenshot-phone/tv helpers; always use adb -s exec-out screencap",
     )
+    gate.add_argument(
+        "--profile",
+        action="append",
+        help="Viewport profile(s) to capture: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
+    )
     gate.set_defaults(func=run_gate, hardware=False)
 
     verify = subparsers.add_parser("verify", help="Verify a captured manifest and print a concise artifact summary")
@@ -1069,6 +1858,44 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--json", action="store_true", help="Print JSON instead of tab-separated text")
     list_parser.set_defaults(func=run_list)
 
+    accessibility = subparsers.add_parser(
+        "accessibility",
+        help="Launch scenarios and verify host-side UI Automator tags, labels, actions, focus, and media semantics",
+    )
+    accessibility.add_argument("--target", choices=("phone", "mobile", "tv", "all"), required=True)
+    accessibility.add_argument(
+        "--scenario",
+        required=True,
+        help="Scenario ID from android-visual-qa list, or 'all' for the required target matrix",
+    )
+    accessibility.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help="Output directory for accessibility dumps and manifest",
+    )
+    accessibility.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
+    accessibility.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
+    accessibility.add_argument("--adb", default=os.environ.get("ADB", "adb"), help="adb executable to use")
+    accessibility.add_argument(
+        "--profile",
+        action="append",
+        help="Viewport profile(s) to check: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
+    )
+    accessibility.add_argument(
+        "--hardware",
+        action="store_true",
+        help="Use an explicitly supplied hardware serial instead of the emulator serial for the requested target",
+    )
+    accessibility.add_argument(
+        "--hardware-serial",
+        help="Hardware ADB serial; equivalent env: FERREX_ANDROID_HARDWARE_SERIAL. No default is provided.",
+    )
+    accessibility.add_argument(
+        "--expected-size",
+        help="Expected hardware dimensions only with --hardware, e.g. 1080x2400; equivalent env: FERREX_ANDROID_HARDWARE_EXPECTED_SIZE",
+    )
+    accessibility.set_defaults(func=run_accessibility, no_nix_screenshot=True)
+
     capture = subparsers.add_parser("capture", help="Launch scenarios and capture validated PNGs")
     capture.add_argument("--target", choices=("phone", "mobile", "tv", "all"), required=True)
     capture.add_argument(
@@ -1084,6 +1911,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-nix-screenshot",
         action="store_true",
         help="Do not use ferrex-android-screenshot-phone/tv helpers; always use adb -s exec-out screencap",
+    )
+    capture.add_argument(
+        "--profile",
+        action="append",
+        help="Viewport profile(s) to capture: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
     )
     capture.add_argument(
         "--hardware",

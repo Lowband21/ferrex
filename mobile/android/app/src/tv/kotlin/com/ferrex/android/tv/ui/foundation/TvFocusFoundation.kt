@@ -65,6 +65,7 @@ import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
+import com.ferrex.android.ui.theme.TvFocusTreatmentRole
 
 @Stable
 class TvFocusRestorer internal constructor(
@@ -177,13 +178,15 @@ fun TvFocusableSurface(
     tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
     minHeight: Dp = FerrexDesignTokens.Focus.TvButtonMinHeight,
+    focusTreatmentRole: TvFocusTreatmentRole = TvFocusTreatmentRole.Action,
     testTag: String? = null,
     onFocused: () -> Unit = {},
     content: @Composable RowScope.() -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val focusTreatment = FerrexDesignTokens.Focus.tvTreatment(focusTreatmentRole)
     val scale by animateFloatAsState(
-        targetValue = if (focused) FerrexDesignTokens.Focus.TvFocusedScale else FerrexDesignTokens.Focus.TvRestingScale,
+        targetValue = if (focused) focusTreatment.focusedScale else focusTreatment.restingScale,
         animationSpec = tween(FerrexDesignTokens.Motion.FocusMillis),
         label = "tvFocusableScale",
     )
@@ -223,8 +226,8 @@ fun TvFocusableSurface(
         shape = shape,
         color = colors.container,
         contentColor = colors.content,
-        border = BorderStroke(width = if (focused) FerrexDesignTokens.Focus.TvFocusedBorder else FerrexDesignTokens.Focus.TvRestingBorder, color = borderColor),
-        tonalElevation = if (focused) FerrexDesignTokens.Focus.TvFocusedElevation else FerrexDesignTokens.Space.None,
+        border = BorderStroke(width = if (focused) focusTreatment.focusedBorder else focusTreatment.restingBorder, color = borderColor),
+        tonalElevation = if (focused) focusTreatment.focusedElevation else FerrexDesignTokens.Space.None,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = FerrexDesignTokens.Space.Xxl, vertical = FerrexDesignTokens.Space.Md),
@@ -244,6 +247,7 @@ fun TvFocusableButton(
     style: TvFocusableStyle = TvFocusableStyle.Secondary,
     tone: FerrexStatusTone = style.defaultActionRole.statusTone(),
     focusRequester: FocusRequester? = null,
+    focusTreatmentRole: TvFocusTreatmentRole = TvFocusTreatmentRole.Action,
     contentDescription: String = label,
     testTag: String? = null,
     onFocused: () -> Unit = {},
@@ -259,6 +263,7 @@ fun TvFocusableButton(
         style = style,
         tone = tone,
         focusRequester = focusRequester,
+        focusTreatmentRole = focusTreatmentRole,
         testTag = testTag,
         onFocused = onFocused,
         content = content,
@@ -354,6 +359,7 @@ fun TvActionPanel(
                 enabled = action.enabled && !action.busy,
                 style = action.role.focusableStyle(),
                 tone = actionTone,
+                focusTreatmentRole = action.role.focusTreatmentRole(),
                 contentDescription = action.contentDescription,
                 onClick = action.onSelect,
                 focusRequester = requesters[action.key],
@@ -425,6 +431,16 @@ private fun TvActionRole.focusableStyle(): TvFocusableStyle = when (this) {
     TvActionRole.Cache,
     TvActionRole.Recovery,
     TvActionRole.SettingsExit -> TvFocusableStyle.Secondary
+}
+
+private fun TvActionRole.focusTreatmentRole(): TvFocusTreatmentRole = when (this) {
+    TvActionRole.Recovery -> TvFocusTreatmentRole.Recovery
+    TvActionRole.Destructive -> TvFocusTreatmentRole.Destructive
+    TvActionRole.Primary,
+    TvActionRole.Retry,
+    TvActionRole.Back,
+    TvActionRole.Cache,
+    TvActionRole.SettingsExit -> TvFocusTreatmentRole.Action
 }
 
 private fun Modifier.tvRemoteActivation(

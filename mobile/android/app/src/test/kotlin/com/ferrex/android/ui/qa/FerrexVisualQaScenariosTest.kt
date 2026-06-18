@@ -35,6 +35,34 @@ class FerrexVisualQaScenariosTest {
     }
 
     @Test
+    fun theaterPlateScenariosCoverRequiredStatesForPhoneAndTv() {
+        val theaterScenarios = FerrexVisualQaScenarios.all.filter { it.kind == VisualQaScenarioKind.TheaterPlate }
+        val expectedStates = VisualQaTheaterPlateState.entries.toSet()
+
+        assertEquals(expectedStates.size * 2, theaterScenarios.size)
+        assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Phone }.mapNotNull { it.theaterPlateState }.toSet())
+        assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Tv }.mapNotNull { it.theaterPlateState }.toSet())
+        assertEquals(
+            setOf(
+                "bright",
+                "dark",
+                "busy",
+                "missing-backdrop",
+                "long-title",
+                "missing-artwork",
+                "stale-offline",
+                "recovery",
+                "search",
+                "browse",
+                "detail",
+                "rails",
+                "playback-entry",
+            ),
+            expectedStates.map { it.key }.toSet(),
+        )
+    }
+
+    @Test
     fun scenarioIdsTagsAndFixtureSamplesAreUniqueAndStable() {
         val scenarios = FerrexVisualQaScenarios.all
 
@@ -87,6 +115,9 @@ class FerrexVisualQaScenariosTest {
         recoveryScenarios.forEach { scenario ->
             val labels = scenario.recoveryActions.map { it.label }.toSet()
             assertTrue("${scenario.id} labels $labels", labels.containsAll(requiredLabels))
+            if (scenario.kind == VisualQaScenarioKind.TheaterPlate) {
+                assertTrue("${scenario.id} cache recovery labels $labels", labels.contains("Clear cache"))
+            }
             scenario.recoveryActions.forEach { action ->
                 assertFalse("${scenario.id} ${action.key} must not require app data wipes", action.requiresDataWipe)
                 assertFalse(action.label.contains("pm clear", ignoreCase = true))

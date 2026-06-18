@@ -17,6 +17,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -58,6 +59,7 @@ fun FerrexActionRole.statusTone(): FerrexStatusTone = tone
 @Immutable
 data class FerrexStatusAction(
     val label: String,
+    val subtitle: String? = null,
     val role: FerrexActionRole = FerrexActionRole.Primary,
     val enabled: Boolean = true,
     val onClick: () -> Unit,
@@ -159,17 +161,21 @@ fun FerrexStatusCard(
                         strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
                     )
                 }
-                Text(
+                TheaterPlateText(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
+                    role = TheaterPlateTypographyRole.StatusTitle,
                     color = colors.accent,
-                    fontWeight = FontWeight.SemiBold,
                 )
             }
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = colors.content)
+            TheaterPlateText(
+                text = body,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                color = colors.content,
+            )
             action?.let {
                 FerrexActionButton(
                     label = it.label,
+                    subtitle = it.subtitle,
                     role = it.role,
                     enabled = it.enabled,
                     onClick = it.onClick,
@@ -186,10 +192,11 @@ fun FerrexActionButton(
     modifier: Modifier = Modifier,
     role: FerrexActionRole = FerrexActionRole.Primary,
     enabled: Boolean = true,
+    subtitle: String? = null,
     testTag: String? = null,
     contentDescription: String = label,
     content: @Composable RowScope.() -> Unit = {
-        Text(label, style = MaterialTheme.typography.labelLarge)
+        FerrexActionButtonLabel(label = label, subtitle = subtitle)
     },
 ) {
     val statusColors = role.statusTone().colors()
@@ -240,6 +247,32 @@ fun FerrexActionButton(
             ),
             content = content,
         )
+    }
+}
+
+@Composable
+private fun FerrexActionButtonLabel(label: String, subtitle: String?) {
+    val contentColor = LocalContentColor.current
+    if (subtitle == null) {
+        TheaterPlateText(
+            text = label,
+            role = TheaterPlateTypographyRole.ActionLabel,
+            color = contentColor,
+        )
+    } else {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            TheaterPlateText(
+                text = label,
+                role = TheaterPlateTypographyRole.ActionLabel,
+                color = contentColor,
+            )
+            TheaterPlateText(
+                text = subtitle,
+                role = TheaterPlateTypographyRole.ActionSubtitle,
+                color = contentColor.copy(alpha = 0.82f),
+                maxLines = 2,
+            )
+        }
     }
 }
 

@@ -3,8 +3,17 @@ package com.ferrex.android.ui.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.ui.components.FerrexActionRole
+import com.ferrex.android.ui.components.FerrexRecoveryActionKind
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.TheaterPlateComponentMigrationNotes
+import com.ferrex.android.ui.components.TheaterPlateDensityRole
+import com.ferrex.android.ui.components.TheaterPlateTypographyGroup
+import com.ferrex.android.ui.components.TheaterPlateTypographyRole
+import com.ferrex.android.ui.components.defaultMaxLines
+import com.ferrex.android.ui.components.requiredTheaterPlateRecoveryActions
+import com.ferrex.android.ui.components.spec
 import com.ferrex.android.ui.components.statusTone
+import com.ferrex.android.ui.components.theaterPlateDensityForViewport
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.qa.FerrexVisualQaSamples
 import kotlin.math.max
@@ -43,6 +52,117 @@ class FerrexDesignTokensTest {
         assertEquals(338.dp, FerrexDesignTokens.Poster.TvCardMinHeight)
         assertEquals(1560.dp, FerrexDesignTokens.Tv.HomeMaxWidth)
         assertEquals(1320.dp, FerrexDesignTokens.Tv.DetailMaxWidth)
+    }
+
+    @Test
+    fun theaterPlateDensityRolesCoverPhoneFoldableAndTvProfiles() {
+        assertEquals(TheaterPlateDensityRole.PhonePortrait, theaterPlateDensityForViewport(393, 852, isTv = false))
+        assertEquals(TheaterPlateDensityRole.PhoneLandscape, theaterPlateDensityForViewport(900, 540, isTv = false))
+        assertEquals(TheaterPlateDensityRole.PhoneLandscape, theaterPlateDensityForViewport(840, 1200, isTv = false))
+        assertEquals(TheaterPlateDensityRole.Tv1080p, theaterPlateDensityForViewport(1920, 1080, isTv = true))
+        assertEquals(TheaterPlateDensityRole.Tv4kScaled, theaterPlateDensityForViewport(3840, 2160, isTv = true))
+
+        val specs = TheaterPlateDensityRole.entries.associateWith { it.spec() }
+        assertEquals(TheaterPlateDensityRole.entries.toSet(), specs.keys)
+        assertTrue(specs.getValue(TheaterPlateDensityRole.PhonePortrait).minInteractiveHeight >= 48.dp)
+        assertTrue(specs.getValue(TheaterPlateDensityRole.Tv1080p).minInteractiveHeight >= FerrexDesignTokens.Focus.TvButtonMinHeight)
+        assertTrue(specs.getValue(TheaterPlateDensityRole.Tv4kScaled).contentMaxWidth > specs.getValue(TheaterPlateDensityRole.Tv1080p).contentMaxWidth)
+        assertTrue(specs.getValue(TheaterPlateDensityRole.Tv4kScaled).typeScale > specs.getValue(TheaterPlateDensityRole.PhonePortrait).typeScale)
+    }
+
+    @Test
+    fun theaterPlateTypographyRolesCoverEditorialRecoveryAndTvFocusCopy() {
+        assertEquals(17, TheaterPlateTypographyRole.entries.size)
+        assertEquals(
+            TheaterPlateTypographyGroup.entries.toSet(),
+            TheaterPlateTypographyRole.entries.map { it.group }.toSet(),
+        )
+        assertEquals(
+            setOf(
+                "hero-eyebrow",
+                "hero-title",
+                "hero-subtitle",
+                "hero-body",
+                "metadata",
+                "section-title",
+                "fact-label",
+                "fact-value",
+                "rail-title",
+                "rail-subtitle",
+                "action-label",
+                "action-subtitle",
+                "status-title",
+                "status-copy",
+                "recovery-title",
+                "recovery-copy",
+                "tv-focus-helper-label",
+            ),
+            TheaterPlateTypographyRole.entries.map { it.key }.toSet(),
+        )
+        assertTrue(TheaterPlateTypographyRole.HeroTitle.defaultMaxLines(TheaterPlateDensityRole.PhonePortrait) >= 3)
+        assertTrue(TheaterPlateTypographyRole.TvFocusHelperLabel.defaultMaxLines(TheaterPlateDensityRole.Tv1080p) >= 2)
+    }
+
+    @Test
+    fun requiredRecoveryActionsPreserveTonesAndAvoidAppDataWipes() {
+        val actions = requiredTheaterPlateRecoveryActions()
+
+        assertEquals(FerrexRecoveryActionKind.entries.map { it.key }, actions.map { it.key })
+        assertEquals(FerrexActionRole.Retry, actions.first { it.kind == FerrexRecoveryActionKind.Retry }.role)
+        assertEquals(FerrexActionRole.Cache, actions.first { it.kind == FerrexRecoveryActionKind.ClearCache }.role)
+        assertEquals(FerrexActionRole.DestructiveReset, actions.first { it.kind == FerrexRecoveryActionKind.ResetConnection }.role)
+        assertEquals(FerrexStatusTone.DestructiveReset, actions.first { it.kind == FerrexRecoveryActionKind.ResetConnection }.tone)
+        actions.forEach { action ->
+            assertFalse("${action.key} must not require app-data wipes", action.requiresAppDataWipe)
+            assertFalse(action.label.contains("wipe", ignoreCase = true))
+            assertFalse(action.label.contains("clear app data", ignoreCase = true))
+            assertTrue("${action.key} subtitle", action.subtitle.isNotBlank())
+            assertEquals(action.role.statusTone(), action.tone)
+        }
+        assertEquals(
+            listOf("retry", "sign-out", "change-server", "reset-connection", "diagnostics"),
+            requiredTheaterPlateRecoveryActions(includeCacheClear = false).map { it.key },
+        )
+    }
+
+    @Test
+    fun theaterPlateMigrationNotesPreserveRouteCallbacksForFutureStacks() {
+        val notes = TheaterPlateComponentMigrationNotes.all.associateBy { it.componentName }
+
+        assertEquals(
+            setOf("FerrexStatusCard", "FerrexActionButton", "FerrexPosterCard", "TV focus actions"),
+            notes.keys,
+        )
+        assertTrue(notes.getValue("FerrexStatusCard").preservedCallbacks.contains("FerrexStatusAction.onClick"))
+        assertTrue(notes.getValue("FerrexActionButton").preservedCallbacks.contains("onClick"))
+        assertTrue(notes.getValue("FerrexPosterCard").preservedCallbacks.contains("onClick"))
+        assertTrue(notes.getValue("TV focus actions").preservedCallbacks.contains("focus restoration key"))
+        assertTrue(notes.getValue("FerrexPosterCard").migrationNote.contains("LOW-447"))
+        assertTrue(notes.getValue("FerrexStatusCard").migrationNote.contains("LOW-448"))
+        assertTrue(notes.getValue("TV focus actions").migrationNote.contains("LOW-449"))
+        notes.values.forEach { note ->
+            assertTrue(note.foundationSeam.isNotBlank())
+            assertTrue(note.preservedCallbacks.size >= 4)
+            assertTrue(note.migrationNote.isNotBlank())
+        }
+    }
+
+    @Test
+    fun tvFocusTreatmentsKeepMediaArtGroundingDeterministic() {
+        val action = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.Action)
+        val mediaArt = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.MediaArt)
+        val recovery = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.Recovery)
+        val destructive = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.Destructive)
+        val helper = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.Helper)
+
+        assertEquals(FerrexDesignTokens.Focus.TvFocusedScale, action.focusedScale)
+        assertEquals(FerrexDesignTokens.Focus.TvFocusedBorder, action.focusedBorder)
+        assertTrue(mediaArt.focusedScale < action.focusedScale)
+        assertTrue(mediaArt.focusedBorder < action.focusedBorder)
+        assertTrue(mediaArt.mediaGroundingClearance > mediaArt.focusedBorder)
+        assertEquals(FerrexDesignTokens.Focus.TvFocusedBorder, recovery.focusedBorder)
+        assertEquals(FerrexDesignTokens.Focus.TvFocusedElevation, destructive.focusedElevation)
+        assertTrue(helper.focusedElevation < action.focusedElevation)
     }
 
     @Test
@@ -95,6 +215,7 @@ class FerrexDesignTokensTest {
     fun dynamicQaTagsAreSanitizedAndNamespaced() {
         assertEquals("tv.action.library-tabs.tab-movies", FerrexQaTags.Tv.action("library tabs", "tab:Movies"))
         assertEquals("tv.poster.continue-watching.movie-101", FerrexQaTags.Tv.poster("Continue Watching", "movie:101"))
+        assertEquals("phone.theater-plate.action.playback-entry.primary", FerrexQaTags.TheaterPlate.action("phone", "Playback Entry", "Primary"))
         assertEquals("phone.shell.nav.accountserver", FerrexQaTags.Phone.navItem("AccountServer"))
         assertEquals("status-card.stale-offline", FerrexQaTags.Shared.statusCard("Stale / Offline"))
     }

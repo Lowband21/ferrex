@@ -29,22 +29,27 @@ No generated screenshots, videos, bugreports, logcats, or local Gradle artifacts
 
 ## Host-side scenario screenshot runner
 
-After building and installing the debug APKs with `just android-qa-build` and `just android-qa-install all`, capture the deterministic debug scenario matrix from the repository root:
+After building and installing the debug APKs with `just android-qa-build` and `just android-qa-install all`, capture the deterministic debug scenario/profile matrix from the repository root:
 
 ```bash
-just android-visual-qa-capture all all
-# equivalent direct form:
-./scripts/qa/android-visual-qa.sh capture --target all --scenario all
+./scripts/qa/android-visual-qa.sh list --target all
+./scripts/qa/android-visual-qa.sh gate --mode complete --output-dir target/android-visual-qa/theater-plate
+./scripts/qa/android-visual-qa.sh accessibility --target all --scenario all --output-dir target/android-visual-qa/theater-plate-a11y
 ```
 
-The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches each scenario through `com.ferrex.android.action.VISUAL_QA` on explicit phone/TV serials, drives TV D-pad focus keys for the TV focus scenarios, and writes stable PNG paths plus `manifest.json` under `target/android-visual-qa/`:
+The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches each scenario through `com.ferrex.android.action.VISUAL_QA` on explicit phone/TV serials, applies the selected viewport profile with `wm size`/`wm density`, drives TV D-pad focus keys for the TV focus scenarios, and writes stable PNG paths plus `manifest.json` under the requested output directory:
 
-- `target/android-visual-qa/phone/<scenario-id>.png` must validate as `1080x2400`.
-- `target/android-visual-qa/tv/<scenario-id>.png` must validate as `1920x1080`.
-- `target/android-visual-qa/manifest.json` records command/tool versions, APK/package metadata, serial metadata, scenario IDs, dimensions, paths, and timestamps.
-- Failed captures include bounded redacted logcat snippets under `target/android-visual-qa/logs/`; redaction removes authorization values, bearer/basic tokens, token/ticket/password fields, URL origins, and private LAN origins.
+- `phone-portrait` validates screenshots as `1080x2400`.
+- `phone-landscape-foldable` validates screenshots as `1800x1200`.
+- `tv-1080p` validates screenshots as `1920x1080`.
+- `tv-4k-scaled` applies a `3840x2160` logical viewport/density override while validating the emulator framebuffer as `1920x1080`.
+- `<output>/<profile>/<scenario-id>.png` records the profile name, logical `wm size` override, and expected screenshot dimensions in `manifest.json` for every capture.
+- `manifest.json` records command/tool versions, APK/package metadata, serial metadata, scenario IDs, viewport profiles, dimensions, paths, and timestamps.
+- Failed captures include bounded redacted logcat snippets under `<output>/logs/`; redaction removes authorization values, bearer/basic tokens, token/ticket/password fields, URL origins, and private LAN origins.
 
-Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
+Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
+
+The accessibility subcommand writes `accessibility-manifest.json` plus UI Automator XML dumps under `<output>/accessibility/`. It fails when required recovery/action/status/focus/media nodes are missing stable tags, content descriptions, or action/focus affordances.
 
 ## Stable tag map for UI tests/manual QA
 
@@ -65,7 +70,25 @@ Key TV tags:
 - focus actions: `tv.action.<surface-key>.<action-key>`
 - poster targets: `tv.poster.<surface-key>.<stable-item-key>`
 
-TV focusable surfaces also set explicit semantic content descriptions through `TvFocusableSurface`/`TvFocusableButton`; shared phone action buttons set button content descriptions from their labels.
+Theater Plate debug tags are generated for both `phone` and `tv` targets:
+
+- root: `<target>.theater-plate.<state>`
+- status: `<target>.theater-plate.status.<state>`
+- actions: `<target>.theater-plate.action.<state>.<action-key>`
+- media: `<target>.theater-plate.media.<state>.hero`
+- rails: `<target>.theater-plate.rail.<state>.primary`
+- search field: `<target>.theater-plate.search.search.field`
+
+The required Theater Plate state IDs are `bright`, `dark`, `busy`, `missing-backdrop`, `long-title`, `missing-artwork`, `stale-offline`, `recovery`, `search`, `browse`, `detail`, `rails`, and `playback-entry`. TV focusable surfaces also set explicit semantic content descriptions through `TvFocusableSurface`/`TvFocusableButton`; shared phone action buttons set button content descriptions from their labels.
+
+## Theater Plate migration seams
+
+Route-level redesign remains out of scope for this QA lane. The source-level migration notes in `TheaterPlateComponentMigrationNotes` document the safe seams that LOW-447/LOW-448/LOW-449 should consume later:
+
+- `FerrexStatusCard` can be replaced by `FerrexStageSurface(StatusSlab)` + Theater Plate text roles while preserving `FerrexStatusAction.onClick`, loading, tags, and content descriptions.
+- `FerrexActionButton` can be restyled into Theater Plate control shelves while preserving `onClick`, enabled, subtitle, tag, and content-description callbacks for retry/reset/cache/diagnostics/playback actions.
+- `FerrexPosterCard` and rail/detail successors can migrate to projection/rail stage surfaces while preserving media-open callbacks and fallback artwork labels for LOW-447 data/rail parity.
+- TV focus actions should keep existing D-pad focus restoration keys, action callbacks, tags, and content descriptions while LOW-449 adopts the ten-foot Theater Plate surfaces.
 
 ## Manual phone runbook
 
