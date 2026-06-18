@@ -349,6 +349,18 @@ object DetailPageMapper {
             networkActionMessage = networkActionMessage,
             prefetchPolicy = prefetchPolicy,
         )
+        is DetailLoadResult.Season -> seasonPage(
+            route = result.route,
+            series = result.series,
+            season = result.season,
+            episodes = result.episodes,
+            watchState = watchState,
+            libraryFreshness = libraryFreshness,
+            imageResolutions = imageResolutions,
+            networkActionsEnabled = networkActionsEnabled,
+            networkActionMessage = networkActionMessage,
+            prefetchPolicy = prefetchPolicy,
+        )
         is DetailLoadResult.Episode -> episodePage(
             result = result,
             watchState = watchState,
@@ -389,6 +401,15 @@ object DetailPageMapper {
             stillFallbackPath = season.images.stillFallbackPath,
         )
         val hero = heroFor(pageKey, season.title, images, imageResolutions)
+        val resumeEpisode = episodes.firstOrNull { episode ->
+            val progress = watchState.mediaProgress(episode.id)
+            progress != null && !progress.isCompleted && progress.positionSeconds > 0.0 && episode.playbackTargetId != null
+        }
+        val firstPlayableEpisode = episodes.firstOrNull { it.playbackTargetId != null }
+        val resumeContract = resumeEpisode?.let { episode ->
+            DetailRouteContracts.episodeResume(episode, watchState.mediaProgress(episode.id), route)
+        }
+        val startOverContract = firstPlayableEpisode?.let { DetailRouteContracts.episodeStartOver(it, route) }
         val rails = listOf(
             episodesRail(
                 stableKey = "$pageKey:episodes",
@@ -406,6 +427,17 @@ object DetailPageMapper {
             ),
         )
         val actions = buildList {
+            addAll(
+                playbackActions(
+                    resumeContract = resumeContract,
+                    startOverContract = startOverContract,
+                    watched = seasonStatus?.isCompleted == true,
+                    playLabel = "Play season",
+                    unavailableCopy = "Playback is unavailable because this season cache does not include a playable episode file.",
+                    networkActionsEnabled = networkActionsEnabled,
+                    networkActionMessage = networkActionMessage,
+                ),
+            )
             seasonStatus?.let { status ->
                 add(
                     watchToggleAction(
@@ -566,7 +598,7 @@ object DetailPageMapper {
             },
             recovery = recoveryState(result.route, libraryFreshness),
             rails = listOf(
-                seasonsRail("series:${series.id}:seasons", detail.seasons, seriesStatus, imageResolutions),
+                seasonsRail("series:${series.id}:seasons", result.route, detail.seasons, seriesStatus, imageResolutions),
                 episodesRail(
                     stableKey = "series:${series.id}:episodes",
                     title = "Episodes",
@@ -1064,6 +1096,7 @@ object DetailPageMapper {
 
     private fun seasonsRail(
         stableKey: String,
+        route: MediaRouteArgs,
         seasons: List<SeasonDetail>,
         seriesStatus: WatchSeriesStatus?,
         imageResolutions: Map<ImageRequestKey, ImageResolution>,
@@ -1102,6 +1135,12 @@ object DetailPageMapper {
                         surfaceKey = stableKey,
                         itemKey = season.id,
                         imageResolutions = imageResolutions,
+                    ),
+                    route = MediaRouteArgs(
+                        mediaType = BrowseMediaType.Season,
+                        mediaId = season.id,
+                        libraryId = route.libraryId,
+                        sourceSurface = route.sourceSurface,
                     ),
                 )
             },

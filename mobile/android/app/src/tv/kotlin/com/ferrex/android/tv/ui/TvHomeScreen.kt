@@ -79,6 +79,7 @@ import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.detail.DetailRouteContracts
 import com.ferrex.android.core.detail.EpisodesAvailability
+import com.ferrex.android.core.detail.playbackTargetId
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
@@ -285,6 +286,7 @@ fun TvHomeScreen(
         when (val detail = detailResult) {
             is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
             is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Missing,
             null -> Unit
@@ -295,6 +297,7 @@ fun TvHomeScreen(
             when (val detail = detailResult) {
                 is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
                 is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Missing,
                 null -> Unit
@@ -343,6 +346,7 @@ fun TvHomeScreen(
                     libraryRepository?.refreshLibraries(scope, libraryId)
                 }
                 BrowseMediaType.Series,
+                BrowseMediaType.Season,
                 BrowseMediaType.Episode -> if (library != null) {
                     libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
                 } else {
@@ -359,6 +363,7 @@ fun TvHomeScreen(
             when (detail) {
                 is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
                 is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Missing,
                 null -> Unit
@@ -378,6 +383,7 @@ fun TvHomeScreen(
         when (detail) {
             is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
             is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Missing,
             null -> Unit
@@ -1713,6 +1719,18 @@ private fun TvMediaDetailScreen(
                 onMarkSeriesWatched = onMarkSeriesWatched,
                 onPlaybackContract = onPlaybackContract,
             )
+            is DetailLoadResult.Season -> TvSeasonDetail(
+                result = result,
+                watchState = watchState,
+                imageResolutions = imageResolutions,
+                imageLoader = imageLoader,
+                scope = scope,
+                networkActionsEnabled = connectionStatus.networkActionsEnabled,
+                networkActionMessage = connectionStatus.networkActionMessage,
+                onRetryWatch = onRetryWatch,
+                onMarkSeriesWatched = onMarkSeriesWatched,
+                onPlaybackContract = onPlaybackContract,
+            )
             is DetailLoadResult.Episode -> TvEpisodeDetail(
                 result = result,
                 watchState = watchState,
@@ -1860,6 +1878,77 @@ private fun TvSeriesDetail(
         }
         if (detail.episodes.size > 12) {
             Text("Showing 12 of ${detail.episodes.size} episode labels on TV detail; playback actions remain available above.", style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun TvSeasonDetail(
+    result: DetailLoadResult.Season,
+    watchState: WatchRepositoryState,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoader: ImageLoader?,
+    scope: ServerCacheScope,
+    networkActionsEnabled: Boolean,
+    networkActionMessage: String?,
+    onRetryWatch: () -> Unit,
+    onMarkSeriesWatched: (Long, Boolean) -> Unit,
+    onPlaybackContract: (PlaybackRouteContract) -> Unit,
+) {
+    val season = result.season
+    val series = result.series
+    val seriesStatus = watchState.seriesStatus(series?.tmdbId)
+    val seasonStatus = seriesStatus?.seasons?.get(season.seasonNumber)
+    val firstPlayableEpisode = result.episodes.firstOrNull { it.playbackTargetId != null }
+    TvDetailArtwork(season.images.poster ?: series?.images?.poster ?: series?.images?.backdrop, season.title, imageResolutions, imageLoader, scope)
+    TvDetailTitle(
+        title = season.title,
+        subtitle = listOfNotNull(series?.title, season.episodeCount?.let { "$it episode(s)" }, season.airDate?.take(4)).joinToString(" • "),
+        body = season.overview,
+    )
+    TvStateCopy(
+        title = "Season watch state",
+        body = seasonStatus?.let { "${it.watched} of ${it.total} watched; ${it.inProgress} in progress." }
+            ?: (watchState.lastError ?: "Retry to load series watch state for this season."),
+    )
+    TvNetworkActionStatus(networkActionsEnabled, networkActionMessage)
+    TvActionPanel(
+        title = "Playback and watch actions",
+        actions = buildList {
+            result.episodes.firstNotNullOfOrNull { episode ->
+                DetailRouteContracts.episodeResume(episode, watchState.mediaProgress(episode.id), result.route)
+            }?.let { contract ->
+                add(TvActionPanelAction("resume-season", "Resume season", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
+            }
+            firstPlayableEpisode?.let { episode ->
+                DetailRouteContracts.episodeStartOver(episode, result.route)?.let { contract ->
+                    add(TvActionPanelAction("play-season", "Play season", TvActionRole.Primary, enabled = networkActionsEnabled, onSelect = { onPlaybackContract(contract) }))
+                }
+            }
+            add(TvActionPanelAction("retry-watch", "Retry watch state", TvActionRole.Retry, enabled = networkActionsEnabled, onSelect = onRetryWatch))
+            series?.tmdbId?.let { tmdbId ->
+                add(
+                    TvActionPanelAction(
+                        key = "toggle-season-watched",
+                        label = if (seasonStatus?.isCompleted == true) "Mark series unwatched" else "Mark series watched",
+                        role = TvActionRole.Cache,
+                        enabled = seriesStatus?.pendingMutation != true && networkActionsEnabled,
+                        onSelect = { onMarkSeriesWatched(tmdbId, seasonStatus?.isCompleted != true) },
+                    ),
+                )
+            }
+        },
+        autoFocus = false,
+    )
+    if (result.episodes.isNotEmpty()) {
+        Text("Episodes", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+        result.episodes.take(12).forEach { episode ->
+            Text(
+                text = "S${episode.seasonNumber} E${episode.episodeNumber}: ${episode.title}",
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

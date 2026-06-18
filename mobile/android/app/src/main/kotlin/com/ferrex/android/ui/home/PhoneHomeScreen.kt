@@ -253,6 +253,7 @@ fun PhoneHomeScreen(
         when (val detail = detailResult) {
             is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
             is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Missing,
             null -> Unit
@@ -263,6 +264,7 @@ fun PhoneHomeScreen(
             when (val detail = detailResult) {
                 is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
                 is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Missing,
                 null -> Unit
@@ -300,6 +302,7 @@ fun PhoneHomeScreen(
                     libraryRepository?.refreshLibraries(scope, libraryId)
                 }
                 com.ferrex.android.core.browse.BrowseMediaType.Series,
+                com.ferrex.android.core.browse.BrowseMediaType.Season,
                 com.ferrex.android.core.browse.BrowseMediaType.Episode -> if (library != null) {
                     libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
                 } else {
@@ -316,6 +319,7 @@ fun PhoneHomeScreen(
             when (detail) {
                 is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+                is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
                 is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
                 is DetailLoadResult.Missing,
                 null -> Unit
@@ -335,6 +339,7 @@ fun PhoneHomeScreen(
         when (detail) {
             is DetailLoadResult.Movie -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Series -> detail.detail.series.tmdbId?.let { watchRepository?.refreshSeries(it) }
+            is DetailLoadResult.Season -> detail.series?.tmdbId?.let { watchRepository?.refreshSeries(it) }
             is DetailLoadResult.Episode -> watchRepository?.refreshMediaProgress(detail.detail.id)
             is DetailLoadResult.Missing,
             null -> Unit
@@ -490,6 +495,8 @@ fun PhoneHomeScreen(
                 onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
                 onPlaybackContract = { launchPlayback(it) },
                 onOpenDiagnostics = onOpenDiagnostics,
+                libraryFreshness = repositoryState?.freshness,
+                onOpenDetail = { selectedDetailRoute = it },
             )
         } else {
             AuthenticatedPhoneShell(

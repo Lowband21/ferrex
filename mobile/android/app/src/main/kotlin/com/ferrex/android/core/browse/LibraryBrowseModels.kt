@@ -15,6 +15,7 @@ import com.ferrex.android.core.library.toUuidString
 enum class BrowseMediaType(val routeValue: String, val displayName: String) {
     Movie("movie", "Movie"),
     Series("series", "Series"),
+    Season("season", "Season"),
     Episode("episode", "Episode"),
     Unknown("unknown", "Media"),
     ;
@@ -23,6 +24,7 @@ enum class BrowseMediaType(val routeValue: String, val displayName: String) {
         fun fromApi(value: String?): BrowseMediaType = when (value?.trim()?.lowercase()) {
             "movie" -> Movie
             "series" -> Series
+            "season" -> Season
             "episode" -> Episode
             else -> Unknown
         }
