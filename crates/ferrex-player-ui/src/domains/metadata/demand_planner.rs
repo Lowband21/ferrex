@@ -5,7 +5,7 @@
 //! image service with appropriate priorities.
 
 use ferrex_core::player_prelude::{
-    EpisodeSize, ImageRequest, ImageSize, PosterSize, Priority,
+    EpisodeSize, ImageRequest, ImageSize, PosterSize, Priority, ProfileSize,
 };
 use uuid::Uuid;
 
@@ -39,6 +39,7 @@ impl DemandContext {
 pub enum DemandRequestKind {
     Poster { size: PosterSize },
     EpisodeStill { size: EpisodeSize },
+    Profile { size: ProfileSize },
 }
 
 /// Snapshot of current demand produced by UI layer.
@@ -268,6 +269,9 @@ fn resolve_image_request(
             DemandRequestKind::EpisodeStill { size } => {
                 ImageRequest::new(id, ImageSize::Thumbnail(*size))
             }
+            DemandRequestKind::Profile { size } => {
+                ImageRequest::new(id, ImageSize::Profile(*size))
+            }
         };
     }
 
@@ -316,6 +320,32 @@ mod tests {
     }
 
     #[test]
+    fn context_override_supports_poster_sizes() {
+        let poster_id = uuid(41);
+        let mut context = DemandContext::default();
+        context.override_request(
+            poster_id,
+            DemandRequestKind::Poster {
+                size: PosterSize::W342,
+            },
+        );
+
+        let desired = build_desired_set(
+            vec![poster_id],
+            Vec::<Uuid>::new(),
+            Vec::<Uuid>::new(),
+            PosterSize::W185,
+            Some(&context),
+        );
+
+        assert_eq!(desired.len(), 1);
+        let request = &desired[0].0;
+        assert_eq!(request.iid, poster_id);
+        assert_eq!(request.size, ImageSize::Poster(PosterSize::W342));
+        assert_eq!(desired[0].1, Priority::Visible);
+    }
+
+    #[test]
     fn context_override_supports_episode_stills() {
         let episode_id = uuid(42);
         let mut context = DemandContext::default();
@@ -339,6 +369,32 @@ mod tests {
         assert_eq!(request.iid, episode_id);
         assert!(matches!(request.size, ImageSize::Thumbnail(_)));
         assert_eq!(desired[0].1, Priority::Preload);
+    }
+
+    #[test]
+    fn context_override_supports_profile_images() {
+        let profile_id = uuid(43);
+        let mut context = DemandContext::default();
+        context.override_request(
+            profile_id,
+            DemandRequestKind::Profile {
+                size: ProfileSize::W185,
+            },
+        );
+
+        let desired = build_desired_set(
+            Vec::<Uuid>::new(),
+            Vec::<Uuid>::new(),
+            vec![profile_id],
+            PosterSize::W185,
+            Some(&context),
+        );
+
+        assert_eq!(desired.len(), 1);
+        let request = &desired[0].0;
+        assert_eq!(request.iid, profile_id);
+        assert_eq!(request.size, ImageSize::Profile(ProfileSize::W185));
+        assert_eq!(desired[0].1, Priority::Background);
     }
 
     #[test]

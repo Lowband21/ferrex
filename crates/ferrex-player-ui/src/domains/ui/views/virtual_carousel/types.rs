@@ -3,6 +3,15 @@
 use crate::domains::ui::views::grid::types::CardSize;
 use uuid::Uuid;
 
+/// Media owner namespace for detail rail carousel identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailCarouselOwnerKind {
+    Movie,
+    Series,
+    Season,
+    Episode,
+}
+
 /// Unique key for identifying carousels throughout the app.
 /// Using a strongly-typed key avoids brittle string matching and enables
 /// scoped state per carousel instance.
@@ -15,7 +24,31 @@ pub enum CarouselKey {
     LibraryMovies(Uuid),  // library_id
     LibrarySeries(Uuid),  // library_id
     AuthUsers,
+    DetailCast {
+        owner_kind: DetailCarouselOwnerKind,
+        owner_id: Uuid,
+    },
+    DetailSeriesEpisodes(Uuid),  // series_id
+    DetailEpisodeSiblings(Uuid), // season_id
+    DetailRelated {
+        owner_kind: DetailCarouselOwnerKind,
+        owner_id: Uuid,
+    },
     Custom(&'static str),
+}
+
+impl CarouselKey {
+    pub fn is_detail_rail(&self) -> bool {
+        matches!(
+            self,
+            Self::ShowSeasons(_)
+                | Self::SeasonEpisodes(_)
+                | Self::DetailCast { .. }
+                | Self::DetailSeriesEpisodes(_)
+                | Self::DetailEpisodeSiblings(_)
+                | Self::DetailRelated { .. }
+        )
+    }
 }
 
 /// Carousel paging and boundary behavior.
@@ -25,6 +58,15 @@ pub enum WrapMode {
     Finite,
     /// Infinite wrap-around carousel. Indexing wraps with modulo arithmetic.
     Infinite,
+}
+
+/// Overscan behavior for a carousel instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverscanPolicy {
+    /// Keep the configured before/after item counts fixed.
+    Fixed,
+    /// Derive detail-rail overscan from the current viewport page size.
+    DetailRailAdaptive,
 }
 
 /// Static configuration for a carousel instance. These can be derived from
@@ -45,6 +87,8 @@ pub struct CarouselConfig {
     /// Whether to include horizontal animation padding (e.g., for flip animations)
     /// when deriving width from `card_size`.
     pub include_animation_padding: bool,
+    /// Policy used when recomputing overscan after viewport or metric changes.
+    pub overscan_policy: OverscanPolicy,
 }
 
 impl CarouselConfig {
@@ -59,6 +103,7 @@ impl CarouselConfig {
             wrap_mode: WrapMode::Finite,
             card_size: Some(CardSize::Medium),
             include_animation_padding: true,
+            overscan_policy: OverscanPolicy::Fixed,
         }
     }
 
@@ -73,6 +118,7 @@ impl CarouselConfig {
             wrap_mode: WrapMode::Finite,
             card_size: Some(CardSize::Wide),
             include_animation_padding: true,
+            overscan_policy: OverscanPolicy::Fixed,
         }
     }
 
@@ -87,6 +133,38 @@ impl CarouselConfig {
             wrap_mode: WrapMode::Finite,
             card_size: Some(CardSize::Small),
             include_animation_padding: true,
+            overscan_policy: OverscanPolicy::Fixed,
+        }
+    }
+
+    /// Detail rail configuration using caller-supplied, layout-solved metrics.
+    ///
+    /// Unlike card-size presets, these dimensions are already resolved by the
+    /// detail layout solver for the current scale and viewport.
+    pub const fn detail_rail(item_width: f32, item_spacing: f32) -> Self {
+        Self {
+            item_width,
+            item_spacing,
+            overscan_items_before: 1,
+            overscan_items_after: 2,
+            wrap_mode: WrapMode::Finite,
+            card_size: None,
+            include_animation_padding: false,
+            overscan_policy: OverscanPolicy::DetailRailAdaptive,
+        }
+    }
+
+    pub fn effective_item_width(self, scale: f32) -> f32 {
+        if let Some(card_size) = self.card_size {
+            let (w, _h) = card_size.scaled_dimensions(scale);
+            if self.include_animation_padding {
+                let pad = crate::infra::constants::animation::calculate_horizontal_padding(w);
+                w + 2.0 * pad
+            } else {
+                w
+            }
+        } else {
+            self.item_width
         }
     }
 }

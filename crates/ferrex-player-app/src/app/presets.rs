@@ -19,7 +19,9 @@ use crate::{
             tabs::{TabId, TabState},
             types::ViewState,
             update_handlers::{
-                handle_view_movie_details, recompute_and_init_curated_carousels,
+                handle_view_episode, handle_view_movie_details,
+                handle_view_season, handle_view_series,
+                recompute_and_init_curated_carousels,
             },
             views::{
                 tenfoot::{
@@ -581,10 +583,7 @@ fn desktop_series_detail_state(config: &AppConfig) -> State {
     let mut state = authenticated_base_state(config, false);
     seed_library_state(&mut state);
 
-    state.domains.ui.state.view = ViewState::SeriesDetail {
-        series_id: seed_series_id(0),
-        backdrop_handle: None,
-    };
+    let _ = handle_view_series(&mut state, seed_series_id(0));
     state.loading = false;
     state
 }
@@ -593,11 +592,8 @@ fn desktop_season_detail_state(config: &AppConfig) -> State {
     let mut state = authenticated_base_state(config, false);
     seed_library_state(&mut state);
 
-    state.domains.ui.state.view = ViewState::SeasonDetail {
-        series_id: seed_series_id(0),
-        season_id: seed_season_id(0),
-        backdrop_handle: None,
-    };
+    let _ =
+        handle_view_season(&mut state, seed_series_id(0), seed_season_id(0));
     state.loading = false;
     state
 }
@@ -612,10 +608,7 @@ fn desktop_episode_detail_state(config: &AppConfig) -> State {
     let mut state = authenticated_base_state(config, false);
     seed_library_state(&mut state);
 
-    state.domains.ui.state.view = ViewState::EpisodeDetail {
-        episode_id: seed_episode_id(0),
-        backdrop_handle: None,
-    };
+    let _ = handle_view_episode(&mut state, seed_episode_id(0));
     state.loading = false;
     state
 }
@@ -643,7 +636,7 @@ fn desktop_season_detail_scrolled_state(config: &AppConfig) -> State {
 
 fn desktop_episode_detail_scrolled_state(config: &AppConfig) -> State {
     let mut state = desktop_episode_detail_state(config);
-    configure_detail_typography_scrolled_state(&mut state, false);
+    configure_detail_typography_scrolled_state(&mut state, true);
     state
 }
 
@@ -652,11 +645,7 @@ fn tenfoot_season_detail_scrolled_state(config: &AppConfig) -> State {
     seed_library_state(&mut state);
 
     let season_id = seed_season_id(0);
-    state.domains.ui.state.view = ViewState::SeasonDetail {
-        series_id: seed_series_id(0),
-        season_id,
-        backdrop_handle: None,
-    };
+    let _ = handle_view_season(&mut state, seed_series_id(0), season_id);
     state.domains.ui.state.tenfoot_detail.focus_id =
         Some(TenFootDetailFocusId::PanelItem {
             panel: TenFootDetailPanelId::SeasonEpisodes(season_id),
@@ -724,6 +713,11 @@ fn ensure_detail_relationship_carousels(state: &mut State) {
                     .unwrap_or(0);
                 vec![(CarouselKey::SeasonEpisodes(season_id.to_uuid()), total)]
             }
+            ViewState::EpisodeDetail { episode_id, .. } => {
+                episode_sibling_carousel_key_and_count(state, episode_id)
+                    .into_iter()
+                    .collect()
+            }
             _ => Vec::new(),
         };
 
@@ -748,8 +742,41 @@ fn detail_relationship_carousel_keys(state: &State) -> Vec<CarouselKey> {
         ViewState::SeasonDetail { season_id, .. } => {
             vec![CarouselKey::SeasonEpisodes(season_id.to_uuid())]
         }
+        ViewState::EpisodeDetail { episode_id, .. } => {
+            episode_sibling_carousel_key_and_count(state, episode_id)
+                .map(|(key, _)| vec![key])
+                .unwrap_or_default()
+        }
         _ => Vec::new(),
     }
+}
+
+fn episode_sibling_carousel_key_and_count(
+    state: &State,
+    episode_id: &EpisodeID,
+) -> Option<(CarouselKey, usize)> {
+    let Media::Episode(episode) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get(&MediaID::Episode(*episode_id))
+        .ok()?
+    else {
+        return None;
+    };
+    let total = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&episode.season_id)
+        .map(|episodes| episodes.len())
+        .unwrap_or(0);
+    Some((
+        CarouselKey::DetailEpisodeSiblings(episode.season_id.to_uuid()),
+        total,
+    ))
 }
 
 fn detail_scroll_restore_task(state: &State) -> Task<DomainMessage> {
@@ -2870,6 +2897,25 @@ mod tests {
                 .len(),
             1
         );
+        assert!(
+            series_state
+                .domains
+                .ui
+                .state
+                .series_yoke_cache
+                .peek(&seed_series_id(0).to_uuid())
+                .is_some()
+        );
+        assert!(
+            series_state
+                .domains
+                .ui
+                .state
+                .carousel_registry
+                .get(&CarouselKey::ShowSeasons(seed_series_id(0).to_uuid()))
+                .is_some(),
+            "series detail preset should register its season rail for initial demand"
+        );
 
         assert!(matches!(
             season_state.domains.ui.state.view,
@@ -2887,6 +2933,25 @@ mod tests {
                 .len(),
             8
         );
+        assert!(
+            season_state
+                .domains
+                .ui
+                .state
+                .season_yoke_cache
+                .peek(&seed_season_id(0).to_uuid())
+                .is_some()
+        );
+        assert!(
+            season_state
+                .domains
+                .ui
+                .state
+                .carousel_registry
+                .get(&CarouselKey::SeasonEpisodes(seed_season_id(0).to_uuid()))
+                .is_some(),
+            "season detail preset should register its episode rail for initial demand"
+        );
 
         assert!(matches!(
             episode_state.domains.ui.state.view,
@@ -2900,6 +2965,27 @@ mod tests {
                 .repo_accessor
                 .get(&MediaID::Episode(seed_episode_id(0)))
                 .is_ok()
+        );
+        assert!(
+            episode_state
+                .domains
+                .ui
+                .state
+                .episode_yoke_cache
+                .peek(&seed_episode_id(0).to_uuid())
+                .is_some()
+        );
+        assert!(
+            episode_state
+                .domains
+                .ui
+                .state
+                .carousel_registry
+                .get(&CarouselKey::DetailEpisodeSiblings(
+                    seed_season_id(0).to_uuid()
+                ))
+                .is_some(),
+            "episode detail preset should register its sibling rail for initial demand"
         );
     }
 
@@ -2937,6 +3023,23 @@ mod tests {
             season_carousel.scroll_x > 0.0,
             "season scrolled preset should restore a horizontal episode rail offset"
         );
+
+        let sibling_key =
+            CarouselKey::DetailEpisodeSiblings(seed_season_id(0).to_uuid());
+        let sibling_carousel = episode
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .get(&sibling_key)
+            .expect(
+                "episode scrolled preset should seed sibling rail carousel",
+            );
+        assert!(
+            sibling_carousel.scroll_x > 0.0,
+            "episode scrolled preset should restore a horizontal sibling rail offset"
+        );
+
         assert!(tenfoot.interface_mode.is_tenfoot());
         assert!(tenfoot.domains.ui.state.tenfoot_detail.scroll_y > 0.0);
     }

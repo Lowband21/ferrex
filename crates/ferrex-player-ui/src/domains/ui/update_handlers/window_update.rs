@@ -2,11 +2,29 @@ use iced::{Size, Task};
 
 use crate::domains::metadata::demand_planner::DemandSnapshot;
 use crate::domains::ui::shell_ui::Scope;
-use crate::domains::ui::views::virtual_carousel::{
-    planner, types::CarouselKey,
-};
+use crate::domains::ui::views::detail::solve_detail_layout_from_runtime;
 use crate::{domains::ui::messages::UiMessage, state::State};
-use ferrex_model::SeasonID;
+
+fn detail_rail_viewport_width(state: &State, fallback: f32) -> f32 {
+    let plan = solve_detail_layout_from_runtime(
+        state.window_size.width,
+        state.window_size.height,
+        state.domains.ui.state.view.header_height().unwrap_or(0.0),
+        state.interface_mode,
+        &state.domains.ui.state.size_provider,
+        &state.domains.ui.state.scaled_layout,
+    );
+    let stage_width = plan
+        .foreground_stage(0.0)
+        .stage
+        .stage_width
+        .min(plan.viewport_width);
+    if stage_width > 0.0 {
+        stage_width.max(1.0)
+    } else {
+        fallback.max(1.0)
+    }
+}
 
 #[cfg_attr(
     any(
@@ -120,13 +138,20 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
         handle.send(snapshot);
     }
 
-    // Update virtual carousels with new width (trial support)
-    // Recompute items/page and max scroll for all registered carousels.
+    // Update virtual carousels with new width. Detail rails use the solved
+    // foreground-stage width until Iced reports the exact scroll viewport.
+    let carousel_keys = state.domains.ui.state.carousel_registry.keys();
+    let detail_width = detail_rail_viewport_width(state, size.width.max(1.0));
     {
         let reg = &mut state.domains.ui.state.carousel_registry;
-        for key in reg.keys() {
-            if let Some(vc) = reg.get_mut(&key) {
-                vc.update_dimensions(size.width.max(1.0));
+        for key in &carousel_keys {
+            let viewport_width = if key.is_detail_rail() {
+                detail_width
+            } else {
+                size.width.max(1.0)
+            };
+            if let Some(vc) = reg.get_mut(key) {
+                vc.update_dimensions(viewport_width);
             }
         }
     }
@@ -143,92 +168,12 @@ pub fn handle_window_resized(state: &mut State, size: Size) -> Task<UiMessage> {
         super::home_tab::emit_initial_all_tab_snapshots_combined(state);
     }
 
-    // Detail views: re-emit for the active carousel key
-    match state.domains.ui.state.view.clone() {
-        crate::domains::ui::types::ViewState::SeriesDetail {
-            series_id,
-            ..
-        } => {
-            let key = CarouselKey::ShowSeasons(series_id.to_uuid());
-            if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
-                && let Ok(seasons) = state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_series_seasons(&series_id)
-            {
-                let poster_size =
-                    state.domains.settings.display.library_poster_quality;
-                let total = seasons.len();
-                let snap = planner::snapshot_for_visible(
-                    vc,
-                    total,
-                    |i| {
-                        seasons
-                            .get(i)
-                            .and_then(|s| s.details.primary_poster_iid)
-                    },
-                    poster_size,
-                    None,
-                    &state.runtime_config,
-                );
-                if let Some(handle) =
-                    state.domains.metadata.state.planner_handle.as_ref()
-                {
-                    handle.send(snap);
-                }
-            }
+    for key in carousel_keys {
+        if key.is_detail_rail() {
+            super::virtual_carousel_updates::maybe_send_snapshot_for_key(
+                state, &key, true,
+            );
         }
-        crate::domains::ui::types::ViewState::SeasonDetail {
-            season_id,
-            ..
-        } => {
-            let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
-            if let Some(vc) = state.domains.ui.state.carousel_registry.get(&key)
-            {
-                let poster_size =
-                    state.domains.settings.display.library_poster_quality;
-                let episodes = state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_season_episodes(&SeasonID(season_id.to_uuid()))
-                    .unwrap_or_else(|_| Vec::new());
-                let total = episodes.len();
-                let (vis, mut pre, mut back) = planner::collect_ranges_ids(
-                    vc,
-                    total,
-                    |i| {
-                        episodes
-                            .get(i)
-                            .and_then(|e| e.details.primary_still_iid)
-                    },
-                    &state.runtime_config,
-                );
-                pre.retain(|id| !vis.contains(id));
-                back.retain(|id| !vis.contains(id) && !pre.contains(id));
-                let mut all = vis.clone();
-                all.extend(pre.iter().copied());
-                all.extend(back.iter().copied());
-                let ctx = planner::build_episode_still_context(&all);
-                let snap = DemandSnapshot {
-                    visible_ids: vis,
-                    prefetch_ids: pre,
-                    background_ids: back,
-                    timestamp: std::time::Instant::now(),
-                    context: Some(ctx),
-                    poster_size,
-                };
-                if let Some(handle) =
-                    state.domains.metadata.state.planner_handle.as_ref()
-                {
-                    handle.send(snap);
-                }
-            }
-        }
-        _ => {}
     }
 
     Task::none()

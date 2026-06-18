@@ -4,20 +4,22 @@ use crate::{
         messages::UiMessage,
         theme,
         views::virtual_carousel::{
-            CarouselKey, VirtualCarouselMessage, VirtualCarouselState,
+            CarouselKey, CarouselRegistry, VirtualCarouselMessage,
+            VirtualCarouselState,
         },
-        widgets::image_for::image_for,
+        widgets::image_for::{ImageFor, image_for},
     },
     infra::design_tokens::SizeProvider,
 };
 
 use super::{
     DetailAction, DetailActionRole, DetailArtAspect, DetailArtLayout,
-    DetailArtwork, DetailBackdropControl, DetailCastMember, DetailCastSection,
-    DetailColorIntent, DetailComposition, DetailEmptyState, DetailFact,
-    DetailFactLayoutMode, DetailFactPanel, DetailLayoutPlan,
+    DetailArtwork, DetailBackdropControl, DetailCastSection, DetailColorIntent,
+    DetailComposition, DetailEmptyState, DetailFact, DetailFactLayoutMode,
+    DetailFactPanel, DetailLayoutPlan, DetailMediaRail, DetailMediaRailItem,
     DetailMetadataPill, DetailNotice, DetailOverviewSection, DetailPageModel,
-    DetailRailItem, DetailRelationshipRail, DetailSection,
+    DetailRailCardVariant, DetailRailKind, DetailRailMetrics,
+    DetailRailScrollbarPolicy, DetailRelationshipRail, DetailSection,
     DetailSurfaceIntensityTokens, DetailTechnicalItem, DetailTechnicalSection,
     DetailTextAlignment, DetailTextOverflow, DetailTextRole, DetailTextStyle,
     DetailTone,
@@ -28,12 +30,13 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Theme,
     Vector, alignment,
     widget::{
-        Column, Row, Space, button, column, container, mouse_area, row,
+        Column, Row, Space, Stack, button, column, container, mouse_area, row,
         scrollable, text, text::Wrapping,
     },
 };
 use iced_aw::menu::{Item, Menu, MenuBar};
 use lucide_icons::Icon;
+use std::ops::Range;
 
 /// Semantic foreground surface families for Theater Plate detail stages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,6 +75,32 @@ pub struct DetailRegisteredRailAdapter<'a> {
     pub carousel_state: &'a VirtualCarouselState,
 }
 
+pub fn registered_detail_rail_adapters<'a>(
+    sections: &'a [DetailSection],
+    registry: &'a CarouselRegistry,
+) -> Vec<DetailRegisteredRailAdapter<'a>> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            DetailSection::Cast(section) => {
+                let key = section.carousel_key.as_ref()?;
+                Some(DetailRegisteredRailAdapter {
+                    key,
+                    carousel_state: registry.get(key)?,
+                })
+            }
+            DetailSection::RelationshipRail(rail) => {
+                let key = rail.carousel_key.as_ref()?;
+                Some(DetailRegisteredRailAdapter {
+                    key,
+                    carousel_state: registry.get(key)?,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DetailActionSurfaceMode {
     Pressable,
@@ -84,6 +113,17 @@ pub struct DetailStageSectionRenderState {
     pub surface: DetailForegroundSurface,
     pub empty: bool,
     pub full_width: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DetailArtworkRenderOptions<'a> {
+    item_identity: Option<&'a str>,
+    carousel_key: Option<&'a CarouselKey>,
+    request_size: Option<ImageSize>,
+    skip_request: bool,
+    shader_title: Option<&'a str>,
+    shader_meta: Option<&'a str>,
+    shader_text_zone_height: Option<f32>,
 }
 
 pub fn detail_action_surface_mode(
@@ -649,7 +689,22 @@ fn view_stage_section_with_height(
             sizes,
             matched_panel_height,
         ),
-        DetailSection::Cast(section) => view_cast_band(section, plan, sizes),
+        DetailSection::Cast(section) => {
+            if let Some(key) = section.carousel_key.as_ref()
+                && let Some(adapter) =
+                    registered_rails.iter().find(|adapter| adapter.key == key)
+            {
+                return view_registered_cast_band(
+                    section,
+                    key.clone(),
+                    adapter.carousel_state,
+                    plan,
+                    sizes,
+                );
+            }
+
+            view_cast_band(section, plan, sizes)
+        }
         DetailSection::Technical(section) => {
             view_technical_ribbon(section, plan, sizes)
         }
@@ -774,33 +829,34 @@ pub fn view_cast_band(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if section.members.is_empty() {
-        return view_empty_stage_message(
-            &section.title,
-            section
-                .empty_message
-                .as_deref()
-                .unwrap_or("No cast information is available."),
-            Some(Icon::Users),
-            plan,
-            sizes,
-        );
+    let rail = section.to_media_rail();
+    view_media_rail_deck(&rail, plan, sizes)
+}
+
+pub fn view_registered_cast_band(
+    section: &DetailCastSection,
+    key: CarouselKey,
+    carousel_state: &VirtualCarouselState,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let rail = section.to_media_rail();
+    if rail.is_empty() {
+        return view_media_rail_deck(&rail, plan, sizes);
     }
 
-    let mut row = Row::new().spacing(plan.rail.gap).align_y(Alignment::Start);
-    for member in &section.members {
-        row = row.push(view_cast_member(member, plan, sizes));
-    }
-
-    let image_width = (cast_card_width(plan) * 0.72).clamp(72.0, 180.0);
-    let cast_card_height = image_width * 1.5
-        + sizes.font.small
-        + sizes.font.micro
-        + sizes.spacing.xl;
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let row = registered_media_rail_row(&rail, carousel_state, plan, sizes);
     view_stage_surface_shell(
-        &section.title,
-        horizontal_scroller(row, cast_card_height),
-        DetailForegroundSurface::CastBand,
+        &rail.title,
+        registered_horizontal_scroller(
+            row,
+            metrics.scroll_height,
+            key,
+            carousel_state,
+            metrics,
+        ),
+        media_rail_surface(&rail),
         DetailTone::Neutral,
         plan,
         sizes,
@@ -848,32 +904,8 @@ pub fn view_relationship_rail_deck(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if section.items.is_empty() {
-        return view_empty_stage_message(
-            &section.title,
-            section
-                .empty_message
-                .as_deref()
-                .unwrap_or("No related titles are available."),
-            Some(Icon::Layers),
-            plan,
-            sizes,
-        );
-    }
-
-    let mut row = Row::new().spacing(plan.rail.gap);
-    for item in &section.items {
-        row = row.push(view_rail_item(item, plan, sizes, Priority::Preload));
-    }
-
-    view_stage_surface_shell(
-        &section.title,
-        horizontal_scroller(row, rail_scroll_height(section, plan, sizes)),
-        DetailForegroundSurface::RailBand,
-        DetailTone::Neutral,
-        plan,
-        sizes,
-    )
+    let rail = section.to_media_rail();
+    view_media_rail_deck(&rail, plan, sizes)
 }
 
 pub fn view_registered_relationship_rail_deck(
@@ -883,25 +915,98 @@ pub fn view_registered_relationship_rail_deck(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if section.items.is_empty() {
-        return view_relationship_rail_deck(section, plan, sizes);
+    let rail = section.to_media_rail();
+    if rail.is_empty() {
+        return view_media_rail_deck(&rail, plan, sizes);
     }
 
-    let row =
-        registered_relationship_rail_row(section, carousel_state, plan, sizes);
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let row = registered_media_rail_row(&rail, carousel_state, plan, sizes);
     view_stage_surface_shell(
-        &section.title,
+        &rail.title,
         registered_horizontal_scroller(
             row,
-            rail_scroll_height(section, plan, sizes),
+            metrics.scroll_height,
             key,
             carousel_state,
+            metrics,
         ),
-        DetailForegroundSurface::RailBand,
+        media_rail_surface(&rail),
         DetailTone::Neutral,
         plan,
         sizes,
     )
+}
+
+fn view_media_rail_deck(
+    rail: &DetailMediaRail,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    if rail.is_empty() {
+        return view_empty_stage_message(
+            &rail.title,
+            rail.empty_message
+                .as_deref()
+                .unwrap_or_else(|| media_rail_default_empty_message(rail.kind)),
+            Some(media_rail_empty_icon(rail.kind)),
+            plan,
+            sizes,
+        );
+    }
+
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let mut row = Row::new().spacing(metrics.gap).align_y(Alignment::Start);
+    for item in &rail.items {
+        row = row.push(view_media_rail_item(
+            rail,
+            item,
+            plan,
+            sizes,
+            Priority::Preload,
+        ));
+    }
+
+    view_stage_surface_shell(
+        &rail.title,
+        media_rail_horizontal_scroller(row, metrics.scroll_height, metrics),
+        media_rail_surface(rail),
+        DetailTone::Neutral,
+        plan,
+        sizes,
+    )
+}
+
+fn media_rail_surface(rail: &DetailMediaRail) -> DetailForegroundSurface {
+    match rail.kind {
+        DetailRailKind::Cast => DetailForegroundSurface::CastBand,
+        DetailRailKind::Seasons
+        | DetailRailKind::Episodes
+        | DetailRailKind::EpisodeSiblings
+        | DetailRailKind::Related => DetailForegroundSurface::RailBand,
+    }
+}
+
+fn media_rail_empty_icon(kind: DetailRailKind) -> Icon {
+    match kind {
+        DetailRailKind::Cast => Icon::Users,
+        DetailRailKind::Seasons => Icon::Tv,
+        DetailRailKind::Episodes | DetailRailKind::EpisodeSiblings => {
+            Icon::Clapperboard
+        }
+        DetailRailKind::Related => Icon::Layers,
+    }
+}
+
+fn media_rail_default_empty_message(kind: DetailRailKind) -> &'static str {
+    match kind {
+        DetailRailKind::Cast => "No cast information is available.",
+        DetailRailKind::Seasons => "No seasons are available.",
+        DetailRailKind::Episodes | DetailRailKind::EpisodeSiblings => {
+            "No episodes are available."
+        }
+        DetailRailKind::Related => "No related titles are available.",
+    }
 }
 
 pub fn view_notice_slab(
@@ -1276,6 +1381,7 @@ pub fn view_hero_art(
         Priority::Visible,
         Length::Fixed(plan.hero_art.width),
         Length::Fixed(plan.hero_art.height),
+        DetailArtworkRenderOptions::default(),
     )
 }
 
@@ -1735,41 +1841,8 @@ pub fn view_cast_section(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if section.members.is_empty() {
-        return view_panel_compat(
-            &section.title,
-            {
-                let caption_style = plan.typography.caption;
-                text(section.empty_message.clone().unwrap_or_else(|| {
-                    "No cast information is available.".to_string()
-                }))
-                .size(caption_style.size)
-                .line_height(caption_style.line_height)
-                .color(detail_text_color(caption_style.color_intent))
-                .into()
-            },
-            plan,
-            sizes,
-        );
-    }
-
-    let mut row = Row::new().spacing(plan.rail.gap).align_y(Alignment::Start);
-    for member in &section.members {
-        row = row.push(view_cast_member(member, plan, sizes));
-    }
-
-    let image_width = (cast_card_width(plan) * 0.72).clamp(72.0, 180.0);
-    let cast_card_height = image_width * 1.5
-        + text_budget_height(plan.typography.cast_name)
-        + text_budget_height(plan.typography.cast_role)
-        + sizes.spacing.xl;
-
-    view_panel_compat(
-        &section.title,
-        horizontal_scroller(row, cast_card_height),
-        plan,
-        sizes,
-    )
+    let rail = section.to_media_rail();
+    view_media_rail_panel(&rail, plan, sizes)
 }
 
 pub fn view_technical_section(
@@ -1816,13 +1889,51 @@ pub fn view_relationship_rail(
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Element<'static, UiMessage> {
-    if section.items.is_empty() {
+    let rail = section.to_media_rail();
+    view_media_rail_panel(&rail, plan, sizes)
+}
+
+pub fn view_registered_relationship_rail(
+    section: &DetailRelationshipRail,
+    key: CarouselKey,
+    carousel_state: &VirtualCarouselState,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    let rail = section.to_media_rail();
+    if rail.is_empty() {
+        return view_media_rail_panel(&rail, plan, sizes);
+    }
+
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let row = registered_media_rail_row(&rail, carousel_state, plan, sizes);
+
+    view_panel_compat(
+        &rail.title,
+        registered_horizontal_scroller(
+            row,
+            metrics.scroll_height,
+            key,
+            carousel_state,
+            metrics,
+        ),
+        plan,
+        sizes,
+    )
+}
+
+fn view_media_rail_panel(
+    rail: &DetailMediaRail,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+) -> Element<'static, UiMessage> {
+    if rail.is_empty() {
         return view_panel_compat(
-            &section.title,
+            &rail.title,
             {
                 let caption_style = plan.typography.caption;
-                text(section.empty_message.clone().unwrap_or_else(|| {
-                    "No related titles are available.".to_string()
+                text(rail.empty_message.clone().unwrap_or_else(|| {
+                    media_rail_default_empty_message(rail.kind).to_string()
                 }))
                 .size(caption_style.size)
                 .line_height(caption_style.line_height)
@@ -1834,41 +1945,21 @@ pub fn view_relationship_rail(
         );
     }
 
-    let mut row = Row::new().spacing(plan.rail.gap);
-    for item in &section.items {
-        row = row.push(view_rail_item(item, plan, sizes, Priority::Preload));
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let mut row = Row::new().spacing(metrics.gap).align_y(Alignment::Start);
+    for item in &rail.items {
+        row = row.push(view_media_rail_item(
+            rail,
+            item,
+            plan,
+            sizes,
+            Priority::Preload,
+        ));
     }
 
     view_panel_compat(
-        &section.title,
-        horizontal_scroller(row, rail_scroll_height(section, plan, sizes)),
-        plan,
-        sizes,
-    )
-}
-
-pub fn view_registered_relationship_rail(
-    section: &DetailRelationshipRail,
-    key: CarouselKey,
-    carousel_state: &VirtualCarouselState,
-    plan: &DetailLayoutPlan,
-    sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    if section.items.is_empty() {
-        return view_relationship_rail(section, plan, sizes);
-    }
-
-    let row =
-        registered_relationship_rail_row(section, carousel_state, plan, sizes);
-
-    view_panel_compat(
-        &section.title,
-        registered_horizontal_scroller(
-            row,
-            rail_scroll_height(section, plan, sizes),
-            key,
-            carousel_state,
-        ),
+        &rail.title,
+        media_rail_horizontal_scroller(row, metrics.scroll_height, metrics),
         plan,
         sizes,
     )
@@ -2350,83 +2441,6 @@ fn view_fact(
     }
 }
 
-fn cast_card_width(plan: &DetailLayoutPlan) -> f32 {
-    match plan.composition {
-        DetailComposition::CompactPortrait => (plan.content_width * 0.46)
-            .min(plan.rail.card_width)
-            .max(112.0),
-        DetailComposition::CompactLandscape => plan.rail.card_width.max(140.0),
-        DetailComposition::BalancedDesktop => plan.rail.card_width.max(170.0),
-        DetailComposition::CinematicWide => plan.rail.card_width.max(200.0),
-        DetailComposition::TenFoot => plan.rail.card_width.max(220.0),
-    }
-}
-
-fn view_cast_profile_image(
-    artwork: &DetailArtwork,
-    width: f32,
-    height: f32,
-    sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    view_artwork(
-        artwork,
-        DetailArtLayout {
-            width,
-            height,
-            corner_radius: sizes.scale(3.0),
-            aspect: DetailArtAspect::Poster,
-        },
-        Priority::Preload,
-        Length::Fixed(width),
-        Length::Fixed(height),
-    )
-}
-
-fn view_cast_member(
-    member: &DetailCastMember,
-    plan: &DetailLayoutPlan,
-    sizes: &SizeProvider,
-) -> Element<'static, UiMessage> {
-    let card_width = cast_card_width(plan);
-    let image_width = (card_width * 0.72).clamp(72.0, 180.0);
-    let image_height = image_width * 1.5;
-    let image = view_cast_profile_image(
-        &member.artwork,
-        image_width,
-        image_height,
-        sizes,
-    );
-
-    let mut content = Column::new()
-        .spacing(sizes.spacing.xs)
-        .align_x(Alignment::Center)
-        .width(Length::Fixed(card_width))
-        .push(image)
-        .push({
-            let style = plan.typography.cast_name;
-            styled_text(
-                member.name.clone(),
-                style,
-                detail_text_color(style.color_intent),
-                Length::Fill,
-                true,
-            )
-        });
-
-    if let Some(role) = &member.role {
-        let style = plan.typography.cast_role;
-        content = content.push(styled_text(
-            role.clone(),
-            style,
-            detail_text_color(style.color_intent),
-            Length::Fill,
-            true,
-        ));
-    }
-
-    content.into()
-}
-
 fn view_technical_item(
     item: &DetailTechnicalItem,
     sizes: &SizeProvider,
@@ -2455,92 +2469,156 @@ fn view_technical_item(
         .into()
 }
 
-fn rail_scroll_height(
-    section: &DetailRelationshipRail,
-    plan: &DetailLayoutPlan,
-    sizes: &SizeProvider,
-) -> f32 {
-    let max_image_height = section
-        .items
-        .iter()
-        .map(|item| rail_art_layout(&item.artwork, plan, sizes).height)
-        .fold(plan.rail.card_height, f32::max);
-
-    max_image_height
-        + text_budget_height(plan.typography.rail_title)
-        + text_budget_height(plan.typography.rail_subtitle)
-        + sizes.spacing.xl
+fn rail_item_uses_shader_text(
+    _variant: DetailRailCardVariant,
+    artwork: &DetailArtwork,
+) -> bool {
+    !matches!(artwork, DetailArtwork::None { .. })
 }
 
 fn rail_art_layout(
-    artwork: &DetailArtwork,
-    plan: &DetailLayoutPlan,
+    variant: DetailRailCardVariant,
+    metrics: DetailRailMetrics,
     sizes: &SizeProvider,
 ) -> DetailArtLayout {
-    let (height, aspect) = match artwork {
-        DetailArtwork::Poster { .. } | DetailArtwork::Profile { .. } => (
-            plan.rail.card_width / (2.0 / 3.0),
-            super::DetailArtAspect::Poster,
-        ),
-        DetailArtwork::Still { .. } | DetailArtwork::None { .. } => (
-            plan.rail.card_width * 9.0 / 16.0,
-            super::DetailArtAspect::Still,
-        ),
+    let aspect = match variant {
+        DetailRailCardVariant::StillWide => DetailArtAspect::Still,
+        DetailRailCardVariant::Profile | DetailRailCardVariant::Poster => {
+            DetailArtAspect::Poster
+        }
+    };
+    let corner_radius = match variant {
+        DetailRailCardVariant::Profile => sizes.scale(3.0),
+        DetailRailCardVariant::Poster | DetailRailCardVariant::StillWide => {
+            sizes.scale(10.0)
+        }
     };
 
     DetailArtLayout {
-        width: plan.rail.card_width,
-        height,
-        corner_radius: sizes.scale(10.0),
+        width: metrics.art_width,
+        height: metrics.art_height,
+        corner_radius,
         aspect,
     }
 }
 
-fn view_rail_item(
-    item: &DetailRailItem,
+fn media_rail_item_meta(item: &DetailMediaRailItem) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(meta) = item
+        .meta
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        parts.push(meta.to_string());
+    }
+    if let Some(badge) = item
+        .badge
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        parts.push(badge.to_string());
+    }
+    if let Some(progress) = item.progress {
+        let pct = (progress.clamp(0.0, 1.0) * 100.0).round() as u32;
+        parts.push(format!("{pct}% watched"));
+    }
+
+    (!parts.is_empty()).then(|| parts.join(" • "))
+}
+
+pub fn view_detail_media_rail_card(
+    rail: &DetailMediaRail,
+    item: &DetailMediaRailItem,
+    metrics: DetailRailMetrics,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
     priority: Priority,
 ) -> Element<'static, UiMessage> {
-    let image_layout = rail_art_layout(&item.artwork, plan, sizes);
+    let image_layout = rail_art_layout(rail.card_variant, metrics, sizes);
+    let uses_shader_text =
+        rail_item_uses_shader_text(rail.card_variant, &item.artwork);
+    let item_identity = format!("{}:{}", rail.stable_key, item.stable_id);
+    let image_request_size = item.request_size();
+    let meta = media_rail_item_meta(item);
     let image = view_artwork(
         &item.artwork,
         image_layout,
         priority,
         Length::Fixed(image_layout.width),
         Length::Fixed(image_layout.height),
+        DetailArtworkRenderOptions {
+            item_identity: uses_shader_text.then_some(item_identity.as_str()),
+            carousel_key: rail.carousel_key.as_ref(),
+            request_size: image_request_size,
+            skip_request: image_request_size.is_none(),
+            shader_title: uses_shader_text.then_some(item.title.as_str()),
+            shader_meta: uses_shader_text.then_some(meta.as_deref()).flatten(),
+            shader_text_zone_height: uses_shader_text
+                .then_some(metrics.text_zone_height),
+        },
     );
 
     let title_style = plan.typography.rail_title;
     let subtitle_style = plan.typography.rail_subtitle;
-    let content = Column::new()
-        .spacing(sizes.spacing.xs)
-        .width(Length::Fixed(plan.rail.card_width))
-        .push(image)
-        .push(styled_text(
-            item.title.clone(),
-            title_style,
-            detail_text_color(title_style.color_intent),
-            Length::Fill,
-            true,
-        ))
-        .push(styled_text(
-            item.subtitle.clone().unwrap_or_default(),
-            subtitle_style,
-            detail_text_color(subtitle_style.color_intent),
-            Length::Fill,
-            true,
-        ));
+    let mut content = Column::new()
+        .spacing(if uses_shader_text {
+            0.0
+        } else {
+            sizes.spacing.xs
+        })
+        .width(Length::Fixed(metrics.card_width))
+        .height(Length::Fixed(metrics.card_height))
+        .push(image);
 
-    if let Some(message) = &item.on_press {
-        button(content)
-            .padding(0)
-            .style(detail_rail_card_button_style())
-            .on_press(message.clone())
-            .into()
-    } else {
-        container(content).into()
+    if matches!(rail.card_variant, DetailRailCardVariant::Profile) {
+        content = content.align_x(Alignment::Center);
     }
+
+    if !uses_shader_text {
+        content = content
+            .push(styled_text(
+                item.title.clone(),
+                title_style,
+                detail_text_color(title_style.color_intent),
+                Length::Fill,
+                true,
+            ))
+            .push(styled_text(
+                meta.unwrap_or_default(),
+                subtitle_style,
+                detail_text_color(subtitle_style.color_intent),
+                Length::Fill,
+                true,
+            ));
+    }
+
+    content.into()
+}
+
+fn view_media_rail_item(
+    rail: &DetailMediaRail,
+    item: &DetailMediaRailItem,
+    plan: &DetailLayoutPlan,
+    sizes: &SizeProvider,
+    priority: Priority,
+) -> Element<'static, UiMessage> {
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let content =
+        view_detail_media_rail_card(rail, item, metrics, plan, sizes, priority);
+
+    if rail.activation_policy.allows_item_activation() {
+        if let Some(message) = &item.on_press {
+            return button(content)
+                .padding(0)
+                .style(detail_rail_card_button_style())
+                .on_press(message.clone())
+                .into();
+        }
+    }
+
+    container(content).into()
 }
 
 fn view_notice(
@@ -2618,12 +2696,35 @@ fn view_panel_compat_with_height(
         .into()
 }
 
+fn apply_artwork_render_options(
+    mut image: ImageFor,
+    options: DetailArtworkRenderOptions<'_>,
+) -> ImageFor {
+    if let Some(identity) = options.item_identity {
+        image = image.item_identity(identity);
+    }
+    if let Some(key) = options.carousel_key {
+        image = image.carousel_key(key.clone());
+    }
+    if let Some(height) = options.shader_text_zone_height {
+        image = image.shader_text_zone_height(height);
+    }
+    if let Some(title) = options.shader_title {
+        image = image.title(title);
+    }
+    if let Some(meta) = options.shader_meta {
+        image = image.meta(meta);
+    }
+    image
+}
+
 fn view_artwork(
     artwork: &DetailArtwork,
     layout: DetailArtLayout,
     priority: Priority,
     width: Length,
     height: Length,
+    options: DetailArtworkRenderOptions<'_>,
 ) -> Element<'static, UiMessage> {
     match artwork {
         DetailArtwork::Poster {
@@ -2637,10 +2738,11 @@ fn view_artwork(
             rotation_y,
             ..
         } => {
+            let request_size = options.request_size.unwrap_or(*request_size);
             let mut image = image_for(*media_uuid)
                 .iid(*image_id)
-                .skip_request(image_id.is_none())
-                .request_size(*request_size)
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
                 .display_size(layout.width, layout.height)
                 .radius(layout.corner_radius)
                 .priority(priority)
@@ -2662,38 +2764,46 @@ fn view_artwork(
                 image = image.rotation_y(*rotation_y);
             }
 
-            image.into()
+            apply_artwork_render_options(image, options).into()
         }
         DetailArtwork::Still {
             media_uuid,
             image_id,
             ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::thumbnail())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(Icon::Clapperboard)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let request_size =
+                options.request_size.unwrap_or_else(ImageSize::thumbnail);
+            let image = image_for(*media_uuid)
+                .iid(*image_id)
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
+                .display_size(layout.width, layout.height)
+                .radius(layout.corner_radius)
+                .priority(priority)
+                .placeholder(Icon::Clapperboard)
+                .tight_bounds()
+                .no_animation();
+            apply_artwork_render_options(image, options).into()
+        }
         DetailArtwork::Profile {
             media_uuid,
             image_id,
             ..
-        } => image_for(*media_uuid)
-            .iid(*image_id)
-            .skip_request(image_id.is_none())
-            .request_size(ImageSize::profile())
-            .display_size(layout.width, layout.height)
-            .radius(layout.corner_radius)
-            .priority(priority)
-            .placeholder(Icon::User)
-            .tight_bounds()
-            .no_animation()
-            .into(),
+        } => {
+            let request_size =
+                options.request_size.unwrap_or_else(ImageSize::profile);
+            let image = image_for(*media_uuid)
+                .iid(*image_id)
+                .skip_request(image_id.is_none() || options.skip_request)
+                .request_size(request_size)
+                .display_size(layout.width, layout.height)
+                .radius(layout.corner_radius)
+                .priority(priority)
+                .placeholder(Icon::User)
+                .tight_bounds()
+                .no_animation();
+            apply_artwork_render_options(image, options).into()
+        }
         DetailArtwork::None { label } => container(
             text(label.clone())
                 .size(14)
@@ -2708,67 +2818,110 @@ fn view_artwork(
     }
 }
 
-fn registered_relationship_rail_row(
-    section: &DetailRelationshipRail,
+#[derive(Debug, Clone, PartialEq)]
+struct RegisteredRailWindow {
+    visible_range: Range<usize>,
+    leading_spacer: f32,
+    trailing_spacer: f32,
+    item_width: f32,
+    item_spacing: f32,
+}
+
+fn registered_rail_window(
+    item_count: usize,
+    carousel_state: &VirtualCarouselState,
+    metrics: DetailRailMetrics,
+) -> RegisteredRailWindow {
+    let item_width = metrics.card_width.max(1.0);
+    let item_spacing = metrics.gap.max(0.0);
+    let stride = (item_width + item_spacing).max(1.0);
+    let fallback_overscan = carousel_state.overscan_after.max(metrics.overscan);
+    let fallback_end = item_count.min(
+        carousel_state
+            .items_per_page
+            .saturating_add(fallback_overscan)
+            .max(1),
+    );
+    let visible_range =
+        if carousel_state.visible_range.is_empty() && item_count > 0 {
+            0..fallback_end
+        } else {
+            carousel_state.visible_range.start.min(item_count)
+                ..carousel_state.visible_range.end.min(item_count)
+        };
+    let leading_spacer = visible_range.start as f32 * stride;
+    let trailing_spacer = if visible_range.end < item_count {
+        (item_count - visible_range.end) as f32 * stride
+    } else {
+        0.0
+    };
+
+    RegisteredRailWindow {
+        visible_range,
+        leading_spacer,
+        trailing_spacer,
+        item_width,
+        item_spacing,
+    }
+}
+
+fn registered_media_rail_row(
+    rail: &DetailMediaRail,
     carousel_state: &VirtualCarouselState,
     plan: &DetailLayoutPlan,
     sizes: &SizeProvider,
 ) -> Row<'static, UiMessage> {
-    let item_width = carousel_state.item_width.max(plan.rail.card_width);
-    let stride = (item_width + carousel_state.item_spacing).max(1.0);
-    let fallback_end = section.items.len().min(
-        carousel_state
-            .items_per_page
-            .saturating_add(carousel_state.overscan_after)
-            .max(1),
-    );
-    let visible_range = if carousel_state.visible_range.is_empty()
-        && !section.items.is_empty()
-    {
-        0..fallback_end
-    } else {
-        carousel_state.visible_range.clone()
-    };
+    let metrics = plan.rail.metrics_for(rail.card_variant);
+    let window =
+        registered_rail_window(rail.items.len(), carousel_state, metrics);
 
     let mut item_row = Row::new().spacing(0);
 
-    if visible_range.start > 0 {
-        item_row = item_row.push(
-            Space::new()
-                .width(Length::Fixed(visible_range.start as f32 * stride)),
-        );
+    if window.leading_spacer > 0.0 {
+        item_row = item_row
+            .push(Space::new().width(Length::Fixed(window.leading_spacer)));
     }
 
     let mut first_item = true;
-    for idx in visible_range.clone() {
-        if idx < section.items.len() {
-            if !first_item {
-                item_row = item_row.push(
-                    Space::new()
-                        .width(Length::Fixed(carousel_state.item_spacing)),
-                );
-            }
-            item_row = item_row.push(
-                container(view_rail_item(
-                    &section.items[idx],
-                    plan,
-                    sizes,
-                    Priority::Visible,
-                ))
-                .width(Length::Fixed(item_width))
-                .align_x(iced::alignment::Horizontal::Center),
-            );
-            first_item = false;
+    for idx in window.visible_range.clone() {
+        if !first_item {
+            item_row = item_row
+                .push(Space::new().width(Length::Fixed(window.item_spacing)));
         }
+        item_row = item_row.push(
+            container(view_media_rail_item(
+                rail,
+                &rail.items[idx],
+                plan,
+                sizes,
+                Priority::Visible,
+            ))
+            .width(Length::Fixed(window.item_width))
+            .align_x(iced::alignment::Horizontal::Center),
+        );
+        first_item = false;
     }
 
-    if visible_range.end < section.items.len() {
-        let remaining = section.items.len() - visible_range.end;
+    if window.trailing_spacer > 0.0 {
         item_row = item_row
-            .push(Space::new().width(Length::Fixed(remaining as f32 * stride)));
+            .push(Space::new().width(Length::Fixed(window.trailing_spacer)));
     }
 
     item_row
+}
+
+fn detail_rail_scrollbar(metrics: DetailRailMetrics) -> scrollable::Scrollbar {
+    match metrics.scrollbar_policy {
+        DetailRailScrollbarPolicy::Hidden => scrollable::Scrollbar::hidden(),
+        DetailRailScrollbarPolicy::Overlay => {
+            scrollable::Scrollbar::default().scroller_width(4).margin(2)
+        }
+        DetailRailScrollbarPolicy::Always => scrollable::Scrollbar::default()
+            .width(8)
+            .scroller_width(4)
+            .margin(2)
+            .spacing(2),
+    }
 }
 
 fn registered_horizontal_scroller(
@@ -2776,6 +2929,7 @@ fn registered_horizontal_scroller(
     height: f32,
     key: CarouselKey,
     carousel_state: &VirtualCarouselState,
+    metrics: DetailRailMetrics,
 ) -> Element<'static, UiMessage> {
     let key_for_scroll = key.clone();
     let key_for_enter = key.clone();
@@ -2783,9 +2937,9 @@ fn registered_horizontal_scroller(
 
     let scroll = scrollable(row)
         .id(carousel_state.scrollable_id.clone())
-        .direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::default().scroller_width(4).margin(2),
-        ))
+        .direction(scrollable::Direction::Horizontal(detail_rail_scrollbar(
+            metrics,
+        )))
         .on_scroll(move |viewport| {
             UiMessage::VirtualCarousel(VirtualCarouselMessage::ViewportChanged(
                 key_for_scroll.clone(),
@@ -2794,10 +2948,12 @@ fn registered_horizontal_scroller(
         })
         .width(Length::Fill)
         .height(Length::Fixed(height));
-    let scroll = container(scroll)
+    let scroll: Element<'static, UiMessage> = container(scroll)
         .width(Length::Fill)
         .height(Length::Fixed(height))
-        .clip(true);
+        .clip(true)
+        .into();
+    let scroll = detail_rail_scroller_with_edge_fades(scroll, height, metrics);
 
     mouse_area(scroll)
         .on_enter(UiMessage::VirtualCarousel(
@@ -2807,6 +2963,99 @@ fn registered_horizontal_scroller(
             key_for_exit,
         )))
         .into()
+}
+
+fn media_rail_horizontal_scroller(
+    row: Row<'static, UiMessage>,
+    height: f32,
+    metrics: DetailRailMetrics,
+) -> Element<'static, UiMessage> {
+    let scroll = scrollable(row)
+        .direction(scrollable::Direction::Horizontal(detail_rail_scrollbar(
+            metrics,
+        )))
+        .width(Length::Fill)
+        .height(Length::Fixed(height));
+
+    let scroll: Element<'static, UiMessage> = container(scroll)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .clip(true)
+        .into();
+
+    detail_rail_scroller_with_edge_fades(scroll, height, metrics)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RailEdgeFadeSide {
+    Left,
+    Right,
+}
+
+fn detail_rail_scroller_with_edge_fades(
+    scroll: Element<'static, UiMessage>,
+    height: f32,
+    metrics: DetailRailMetrics,
+) -> Element<'static, UiMessage> {
+    let fade_width = metrics
+        .edge_fade_width
+        .min(metrics.card_width * 0.5)
+        .max(0.0);
+    if fade_width <= 0.0 {
+        return scroll;
+    }
+
+    let fades = row![
+        rail_edge_fade(RailEdgeFadeSide::Left, fade_width, height),
+        Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(height)),
+        rail_edge_fade(RailEdgeFadeSide::Right, fade_width, height),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fixed(height));
+
+    Stack::new()
+        .push(scroll)
+        .push(fades)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .into()
+}
+
+fn rail_edge_fade(
+    side: RailEdgeFadeSide,
+    width: f32,
+    height: f32,
+) -> Element<'static, UiMessage> {
+    container(Space::new())
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .style(rail_edge_fade_style(side))
+        .into()
+}
+
+fn rail_edge_fade_style(
+    side: RailEdgeFadeSide,
+) -> impl Fn(&Theme) -> container::Style + Clone {
+    move |_| {
+        let solid = Color::from_rgba(0.010, 0.010, 0.018, 0.34);
+        let transparent = Color::from_rgba(0.010, 0.010, 0.018, 0.0);
+        let angle = match side {
+            RailEdgeFadeSide::Left => 0.0,
+            RailEdgeFadeSide::Right => std::f32::consts::PI,
+        };
+
+        container::Style {
+            background: Some(Background::Gradient(
+                iced::gradient::Linear::new(iced::Radians(angle))
+                    .add_stop(0.0, solid)
+                    .add_stop(1.0, transparent)
+                    .into(),
+            )),
+            ..Default::default()
+        }
+    }
 }
 
 fn horizontal_scroller(
@@ -3147,12 +3396,16 @@ fn detail_action_button_style(
 mod tests {
     use super::*;
     use crate::{
-        domains::ui::views::detail::{
-            DetailActionMenuItem, DetailInterfaceMode, DetailLayoutInput,
-            solve_detail_layout,
+        domains::ui::views::{
+            detail::{
+                DetailActionMenuItem, DetailCastMember, DetailInterfaceMode,
+                DetailLayoutInput, DetailRailActivationPolicy, DetailRailItem,
+                solve_detail_layout,
+            },
+            virtual_carousel::CarouselConfig,
         },
         infra::{
-            constants::layout::{calculations::ScaledLayout, grid},
+            constants::layout::{calculations::ScaledLayout, grid, poster},
             design_tokens::{ScalingContext, SizeProvider},
         },
     };
@@ -3174,9 +3427,30 @@ mod tests {
         ))
     }
 
+    fn test_rail_metrics() -> DetailRailMetrics {
+        DetailRailMetrics {
+            variant: DetailRailCardVariant::StillWide,
+            art_width: 140.0,
+            art_height: 78.0,
+            card_width: 140.0,
+            card_height: 120.0,
+            stride: 152.0,
+            gap: 12.0,
+            text_zone_height: 42.0,
+            scroll_height: 128.0,
+            edge_fade_width: 24.0,
+            scrollbar_policy: DetailRailScrollbarPolicy::Overlay,
+            overscan: 2,
+            visible_rows: 1,
+        }
+    }
+
     fn rail_section(count: usize) -> DetailSection {
         DetailSection::RelationshipRail(DetailRelationshipRail {
             id: "rail".to_string(),
+            kind: DetailRailKind::Related,
+            card_variant: DetailRailCardVariant::StillWide,
+            activation_policy: DetailRailActivationPolicy::ActivateItem,
             carousel_key: None,
             title: "Related".to_string(),
             empty_message: Some("No related titles".to_string()),
@@ -3192,6 +3466,43 @@ mod tests {
                 })
                 .collect(),
         })
+    }
+
+    #[test]
+    fn registered_rail_window_uses_detail_metrics_for_spacers() {
+        let metrics = test_rail_metrics();
+        let mut carousel_state = VirtualCarouselState::new_unscaled(
+            12,
+            456.0,
+            CarouselConfig::detail_rail(metrics.card_width, metrics.gap),
+        );
+
+        carousel_state.set_scroll_x(metrics.stride * 2.0);
+        let window = registered_rail_window(12, &carousel_state, metrics);
+
+        assert_eq!(window.visible_range, 1..8);
+        assert_eq!(window.item_width, metrics.card_width);
+        assert_eq!(window.item_spacing, metrics.gap);
+        assert_eq!(window.leading_spacer, metrics.stride);
+        assert_eq!(window.trailing_spacer, 4.0 * metrics.stride);
+    }
+
+    #[test]
+    fn registered_rail_window_right_aligned_end_has_no_trailing_spacer() {
+        let metrics = test_rail_metrics();
+        let mut carousel_state = VirtualCarouselState::new_unscaled(
+            8,
+            456.0,
+            CarouselConfig::detail_rail(metrics.card_width, metrics.gap),
+        );
+        carousel_state
+            .set_index_position(carousel_state.max_start_index() as f32);
+
+        let window = registered_rail_window(8, &carousel_state, metrics);
+
+        assert_eq!(carousel_state.scroll_x, carousel_state.max_scroll);
+        assert_eq!(window.visible_range.end, 8);
+        assert_eq!(window.trailing_spacer, 0.0);
     }
 
     #[test]
@@ -3327,7 +3638,9 @@ mod tests {
         });
         let cast = DetailSection::Cast(DetailCastSection {
             title: "Cast".to_string(),
+            carousel_key: None,
             members: vec![DetailCastMember {
+                id: "performer".to_string(),
                 name: "Performer".to_string(),
                 role: Some("Lead".to_string()),
                 artwork: DetailArtwork::None {
@@ -3390,6 +3703,57 @@ mod tests {
             DetailForegroundSurface::EmptyState
         );
         assert!(detail_stage_section_render_state(&rail_section(1)).full_width);
+    }
+
+    #[test]
+    fn rail_shader_media_cards_reserve_bounded_text_zone() {
+        let plan = layout_plan();
+        let sizes = SizeProvider::new(ScalingContext::default());
+        let still = DetailArtwork::still(
+            uuid::Uuid::from_u128(1),
+            Some(uuid::Uuid::from_u128(2)),
+            "Episode still",
+        );
+        let profile = DetailArtwork::Profile {
+            media_uuid: uuid::Uuid::from_u128(3),
+            image_id: Some(uuid::Uuid::from_u128(4)),
+            alt: "Cast profile".to_string(),
+        };
+
+        let still_metrics =
+            plan.rail.metrics_for(DetailRailCardVariant::StillWide);
+        let still_layout = rail_art_layout(
+            DetailRailCardVariant::StillWide,
+            still_metrics,
+            &sizes,
+        );
+        let still_aspect = still_layout.width / still_layout.height;
+        assert!((still_aspect - 16.0 / 9.0).abs() < 0.001);
+        assert_eq!(still_layout.aspect, DetailArtAspect::Still);
+        assert!(rail_item_uses_shader_text(
+            DetailRailCardVariant::StillWide,
+            &still
+        ));
+        assert!(
+            still_metrics.text_zone_height
+                >= sizes.scale(poster::SHADER_TEXT_ZONE_HEIGHT)
+        );
+
+        let profile_metrics =
+            plan.rail.metrics_for(DetailRailCardVariant::Profile);
+        let profile_layout = rail_art_layout(
+            DetailRailCardVariant::Profile,
+            profile_metrics,
+            &sizes,
+        );
+        let profile_aspect = profile_layout.width / profile_layout.height;
+        assert!((profile_aspect - 2.0 / 3.0).abs() < 0.001);
+        assert_eq!(profile_layout.aspect, DetailArtAspect::Poster);
+        assert!(rail_item_uses_shader_text(
+            DetailRailCardVariant::Profile,
+            &profile
+        ));
+        assert!(profile_metrics.text_zone_height > 0.0);
     }
 
     #[test]

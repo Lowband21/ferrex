@@ -5,13 +5,16 @@ use uuid::Uuid;
 /// Uniquely identifies a poster widget instance in the UI.
 /// A single media item can have multiple PosterInstanceKeys when displayed
 /// in multiple carousels simultaneously (e.g., same movie in "Continue Watching"
-/// and "Recently Added").
+/// and "Recently Added") or repeated within the same rail.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PosterInstanceKey {
     /// The underlying media UUID (for operations like Play, Details)
     pub media_id: Uuid,
     /// Which carousel this instance belongs to (None for non-carousel contexts)
     pub carousel_key: Option<CarouselKey>,
+    /// Optional caller-provided item identity for duplicate media/image entries
+    /// inside one rail or non-carousel surface.
+    pub item_identity: Option<String>,
 }
 
 impl PosterInstanceKey {
@@ -19,7 +22,14 @@ impl PosterInstanceKey {
         Self {
             media_id,
             carousel_key,
+            item_identity: None,
         }
+    }
+
+    /// Attach caller-scoped item identity without changing the media target.
+    pub fn with_item_identity(mut self, item_identity: Option<String>) -> Self {
+        self.item_identity = item_identity;
+        self
     }
 
     /// Create a key for a poster not in a carousel (detail pages, grids, etc.)
@@ -27,6 +37,7 @@ impl PosterInstanceKey {
         Self {
             media_id,
             carousel_key: None,
+            item_identity: None,
         }
     }
 }

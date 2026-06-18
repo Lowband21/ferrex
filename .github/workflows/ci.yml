@@ -98,6 +98,10 @@ jobs:
           restore-keys: |
             cargo-${{ matrix.os }}-${{ matrix.target }}-
 
+      - name: Refresh cached FFmpeg linkage metadata (macOS)
+        if: runner.os == 'macOS'
+        run: cargo clean -p ffmpeg-sys-next
+
       - if: runner.os != 'Windows'
         run: cargo fmt --all --check
       - if: runner.os != 'Windows'

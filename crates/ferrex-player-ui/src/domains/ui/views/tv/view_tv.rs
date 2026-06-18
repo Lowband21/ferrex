@@ -10,16 +10,17 @@ use crate::{
             views::{
                 detail::{
                     DetailAction, DetailArtAspect, DetailArtwork,
-                    DetailBackdropControl, DetailContentKind,
+                    DetailBackdropControl, DetailContentKind, DetailEmptyState,
                     DetailLayoutInput, DetailMetadataImportance,
                     DetailMetadataPill, DetailNotice, DetailOverviewSection,
-                    DetailPageModel, DetailRailItem,
-                    DetailRegisteredRailAdapter, DetailRelationshipRail,
-                    DetailSection, DetailTone, prioritize_metadata_items,
+                    DetailPageModel, DetailRailActivationPolicy,
+                    DetailRailCardVariant, DetailRailItem, DetailRailKind,
+                    DetailRelationshipRail, DetailSection, DetailTone,
+                    prioritize_metadata_items, registered_detail_rail_adapters,
                     solve_detail_layout,
                     view_detail_stage_with_registered_rails,
                 },
-                virtual_carousel::{CarouselRegistry, types::CarouselKey},
+                virtual_carousel::types::CarouselKey,
             },
         },
     },
@@ -481,6 +482,44 @@ pub fn view_episode_detail(
         ));
     }
 
+    let season_id = SeasonID(episode.season_id.0);
+    match state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+    {
+        Ok(episodes) if episodes.is_empty() => {
+            model.sections.push(episode_siblings_empty_state(season_id));
+        }
+        Ok(episodes) => {
+            model.sections.push(DetailSection::RelationshipRail(
+                episode_siblings_relationship_rail(
+                    season_id,
+                    *episode_id,
+                    &episodes,
+                ),
+            ));
+        }
+        Err(error) => {
+            log::warn!(
+                "[TV] Failed to fetch sibling episodes for episode {} in season {}: {:?}",
+                episode_uuid,
+                season_id,
+                error
+            );
+            model.sections.push(warning_notice(
+                "Sibling episodes unavailable",
+                format!(
+                    "Local episode rows for season {} could not be read ({error:?}). Use Back or Home, then retry after the repository recovers.",
+                    season_id.to_uuid()
+                ),
+            ));
+            ensure_recovery_actions(&mut model.actions);
+        }
+    }
+
     view_adaptive_tv_detail(model, state)
 }
 
@@ -495,7 +534,7 @@ fn view_adaptive_tv_detail(
 
     let sizes = &state.domains.ui.state.size_provider;
     let plan = detail_layout_for_model(&model, state);
-    let registered_rails = registered_tv_rail_adapters(
+    let registered_rails = registered_detail_rail_adapters(
         &model.sections,
         &state.domains.ui.state.carousel_registry,
     );
@@ -506,25 +545,6 @@ fn view_adaptive_tv_detail(
         sizes,
         &registered_rails,
     )
-}
-
-fn registered_tv_rail_adapters<'a>(
-    sections: &'a [DetailSection],
-    registry: &'a CarouselRegistry,
-) -> Vec<DetailRegisteredRailAdapter<'a>> {
-    sections
-        .iter()
-        .filter_map(|section| match section {
-            DetailSection::RelationshipRail(rail) => {
-                let key = rail.carousel_key.as_ref()?;
-                Some(DetailRegisteredRailAdapter {
-                    key,
-                    carousel_state: registry.get(key)?,
-                })
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 fn detail_layout_for_model(
@@ -577,6 +597,9 @@ fn seasons_relationship_rail(
     let key = CarouselKey::ShowSeasons(series_id.to_uuid());
     DetailRelationshipRail {
         id: carousel_key_id(&key),
+        kind: DetailRailKind::Seasons,
+        card_variant: DetailRailCardVariant::Poster,
+        activation_policy: DetailRailActivationPolicy::Navigate,
         carousel_key: Some(key),
         title: "Seasons".to_string(),
         empty_message: Some(format!(
@@ -617,6 +640,9 @@ fn episodes_relationship_rail(
     let key = CarouselKey::SeasonEpisodes(season_id.to_uuid());
     DetailRelationshipRail {
         id: carousel_key_id(&key),
+        kind: DetailRailKind::Episodes,
+        card_variant: DetailRailCardVariant::StillWide,
+        activation_policy: DetailRailActivationPolicy::Play,
         carousel_key: Some(key),
         title: "Episodes".to_string(),
         empty_message: Some(format!(
@@ -649,6 +675,80 @@ fn episodes_relationship_rail(
             })
             .collect(),
     }
+}
+
+fn episode_siblings_relationship_rail(
+    season_id: SeasonID,
+    current_episode_id: EpisodeID,
+    episodes: &[EpisodeReference],
+) -> DetailRelationshipRail {
+    let key = CarouselKey::DetailEpisodeSiblings(season_id.to_uuid());
+    DetailRelationshipRail {
+        id: carousel_key_id(&key),
+        kind: DetailRailKind::EpisodeSiblings,
+        card_variant: DetailRailCardVariant::StillWide,
+        activation_policy: DetailRailActivationPolicy::Navigate,
+        carousel_key: Some(key),
+        title: "This Season".to_string(),
+        empty_message: Some(format!(
+            "No local sibling episode rows were found for season {}.",
+            season_id.to_uuid()
+        )),
+        items: episodes
+            .iter()
+            .map(|episode| {
+                let title = episode_sibling_title(episode);
+                DetailRailItem {
+                    id: episode.id.to_uuid().to_string(),
+                    title: title.clone(),
+                    subtitle: Some(episode_sibling_subtitle(
+                        episode,
+                        current_episode_id,
+                    )),
+                    artwork: DetailArtwork::still(
+                        episode.id.to_uuid(),
+                        episode.details.primary_still_iid,
+                        format!("{title} still"),
+                    ),
+                    on_press: (episode.id != current_episode_id).then(|| {
+                        UiShellMessage::ViewEpisode(episode.id).into()
+                    }),
+                }
+            })
+            .collect(),
+    }
+}
+
+fn episode_siblings_empty_state(season_id: SeasonID) -> DetailSection {
+    DetailSection::Empty(DetailEmptyState {
+        title: "No sibling episodes".to_string(),
+        message: format!(
+            "No local episode rows were found for season {}. This episode can still be played directly.",
+            season_id.to_uuid()
+        ),
+        icon: None,
+    })
+}
+
+fn episode_sibling_title(episode: &EpisodeReference) -> String {
+    if episode.details.name.trim().is_empty() {
+        format!("Episode {}", episode.episode_number.value())
+    } else {
+        episode.details.name.clone()
+    }
+}
+
+fn episode_sibling_subtitle(
+    episode: &EpisodeReference,
+    current_episode_id: EpisodeID,
+) -> String {
+    let mut parts = vec![episode_code(episode)];
+    if episode.id == current_episode_id {
+        parts.push("Current".to_string());
+    } else if let Some(runtime) = episode.details.runtime {
+        parts.push(format!("{runtime} min"));
+    }
+    parts.join(" • ")
 }
 
 fn series_actions(
@@ -841,7 +941,9 @@ fn backdrop_control_label(state: &State) -> String {
 mod tests {
     use super::*;
 
-    use crate::domains::ui::views::virtual_carousel::CarouselConfig;
+    use crate::domains::ui::views::virtual_carousel::{
+        CarouselConfig, CarouselRegistry,
+    };
 
     #[test]
     fn season_title_names_specials_without_numeric_prefix() {
@@ -861,8 +963,11 @@ mod tests {
         let series_id = SeriesID(Uuid::nil());
         let season_id = SeasonID(Uuid::nil());
 
+        let episode_id = EpisodeID(Uuid::nil());
         let seasons = seasons_relationship_rail(series_id, &[]);
         let episodes = episodes_relationship_rail(season_id, &[]);
+        let siblings =
+            episode_siblings_relationship_rail(season_id, episode_id, &[]);
 
         assert_eq!(
             seasons.carousel_key,
@@ -872,8 +977,13 @@ mod tests {
             episodes.carousel_key,
             Some(CarouselKey::SeasonEpisodes(season_id.to_uuid()))
         );
+        assert_eq!(
+            siblings.carousel_key,
+            Some(CarouselKey::DetailEpisodeSiblings(season_id.to_uuid()))
+        );
         assert!(seasons.id.starts_with("ShowSeasons"));
         assert!(episodes.id.starts_with("SeasonEpisodes"));
+        assert!(siblings.id.starts_with("DetailEpisodeSiblings"));
     }
 
     #[test]
@@ -888,6 +998,9 @@ mod tests {
             )),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "registered-seasons".to_string(),
+                kind: DetailRailKind::Seasons,
+                card_variant: DetailRailCardVariant::Poster,
+                activation_policy: DetailRailActivationPolicy::Navigate,
                 carousel_key: Some(registered_key.clone()),
                 title: "Seasons".to_string(),
                 items: Vec::new(),
@@ -895,6 +1008,9 @@ mod tests {
             }),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "missing-episodes".to_string(),
+                kind: DetailRailKind::Episodes,
+                card_variant: DetailRailCardVariant::StillWide,
+                activation_policy: DetailRailActivationPolicy::Play,
                 carousel_key: Some(missing_key),
                 title: "Episodes".to_string(),
                 items: Vec::new(),
@@ -902,6 +1018,9 @@ mod tests {
             }),
             DetailSection::RelationshipRail(DetailRelationshipRail {
                 id: "anonymous".to_string(),
+                kind: DetailRailKind::Related,
+                card_variant: DetailRailCardVariant::StillWide,
+                activation_policy: DetailRailActivationPolicy::ActivateItem,
                 carousel_key: None,
                 title: "Related".to_string(),
                 items: Vec::new(),
@@ -917,7 +1036,7 @@ mod tests {
             1.0,
         );
 
-        let adapters = registered_tv_rail_adapters(&sections, &registry);
+        let adapters = registered_detail_rail_adapters(&sections, &registry);
 
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].key, &registered_key);

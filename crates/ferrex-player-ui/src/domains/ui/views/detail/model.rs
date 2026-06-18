@@ -457,6 +457,158 @@ impl DetailSection {
     }
 }
 
+/// Semantic family for a detail media rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailRailKind {
+    Cast,
+    Seasons,
+    Episodes,
+    EpisodeSiblings,
+    Related,
+}
+
+/// Renderer-facing card shape used by the variant-aware rail metrics solver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailRailCardVariant {
+    Profile,
+    Poster,
+    StillWide,
+}
+
+/// Cache/fetch image family requested by a detail rail item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailRailImageRequestKind {
+    Poster,
+    Still,
+    Profile,
+    None,
+}
+
+impl DetailRailImageRequestKind {
+    pub fn from_artwork(artwork: &DetailArtwork) -> Self {
+        match artwork {
+            DetailArtwork::Poster { .. } => Self::Poster,
+            DetailArtwork::Still { .. } => Self::Still,
+            DetailArtwork::Profile { .. } => Self::Profile,
+            DetailArtwork::None { .. } => Self::None,
+        }
+    }
+
+    /// Resolve the cache/fetch size represented by this rail image kind.
+    pub fn request_size(
+        self,
+        poster_request_size: ImageSize,
+    ) -> Option<ImageSize> {
+        match self {
+            Self::Poster => Some(poster_request_size),
+            Self::Still => Some(ImageSize::thumbnail()),
+            Self::Profile => Some(ImageSize::profile()),
+            Self::None => None,
+        }
+    }
+}
+
+/// Rail-level activation semantics for remote and pointer surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailRailActivationPolicy {
+    Disabled,
+    ActivateItem,
+    Navigate,
+    Play,
+}
+
+impl DetailRailActivationPolicy {
+    pub fn allows_item_activation(self) -> bool {
+        !matches!(self, Self::Disabled)
+    }
+}
+
+/// Repository-free, normalized detail media rail.
+#[derive(Debug, Clone)]
+pub struct DetailMediaRail {
+    pub stable_key: String,
+    pub kind: DetailRailKind,
+    pub card_variant: DetailRailCardVariant,
+    pub carousel_key: Option<CarouselKey>,
+    pub title: String,
+    pub items: Vec<DetailMediaRailItem>,
+    pub empty_message: Option<String>,
+    pub activation_policy: DetailRailActivationPolicy,
+}
+
+impl DetailMediaRail {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+/// Repository-free detail rail item with stable identity and display metadata.
+#[derive(Debug, Clone)]
+pub struct DetailMediaRailItem {
+    pub stable_id: String,
+    pub image_request_kind: DetailRailImageRequestKind,
+    pub title: String,
+    pub meta: Option<String>,
+    pub badge: Option<String>,
+    pub progress: Option<f32>,
+    pub artwork: DetailArtwork,
+    pub on_press: Option<UiMessage>,
+}
+
+impl DetailMediaRailItem {
+    pub fn new(
+        stable_id: impl Into<String>,
+        title: impl Into<String>,
+        artwork: DetailArtwork,
+    ) -> Self {
+        let image_request_kind =
+            DetailRailImageRequestKind::from_artwork(&artwork);
+        Self {
+            stable_id: stable_id.into(),
+            image_request_kind,
+            title: title.into(),
+            meta: None,
+            badge: None,
+            progress: None,
+            artwork,
+            on_press: None,
+        }
+    }
+
+    pub fn with_meta(mut self, meta: impl Into<String>) -> Self {
+        let meta = meta.into();
+        self.meta = (!meta.trim().is_empty()).then_some(meta);
+        self
+    }
+
+    pub fn with_badge(mut self, badge: impl Into<String>) -> Self {
+        let badge = badge.into();
+        self.badge = (!badge.trim().is_empty()).then_some(badge);
+        self
+    }
+
+    pub fn with_progress(mut self, progress: f32) -> Self {
+        self.progress = Some(progress.clamp(0.0, 1.0));
+        self
+    }
+
+    pub fn with_activation(mut self, on_press: UiMessage) -> Self {
+        self.on_press = Some(on_press);
+        self
+    }
+
+    /// Cache/fetch size requested by this rail item's typed image metadata.
+    pub fn request_size(&self) -> Option<ImageSize> {
+        let poster_request_size = match &self.artwork {
+            DetailArtwork::Poster { request_size, .. } => *request_size,
+            DetailArtwork::Still { .. }
+            | DetailArtwork::Profile { .. }
+            | DetailArtwork::None { .. } => ImageSize::poster(),
+        };
+        self.image_request_kind.request_size(poster_request_size)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DetailOverviewSection {
     pub title: String,
@@ -498,15 +650,50 @@ impl DetailFact {
 #[derive(Debug, Clone)]
 pub struct DetailCastSection {
     pub title: String,
+    pub carousel_key: Option<CarouselKey>,
     pub members: Vec<DetailCastMember>,
     pub empty_message: Option<String>,
 }
 
+impl DetailCastSection {
+    pub fn to_media_rail(&self) -> DetailMediaRail {
+        DetailMediaRail {
+            stable_key: "cast".to_string(),
+            kind: DetailRailKind::Cast,
+            card_variant: DetailRailCardVariant::Profile,
+            carousel_key: self.carousel_key.clone(),
+            title: self.title.clone(),
+            items: self
+                .members
+                .iter()
+                .map(DetailCastMember::to_media_rail_item)
+                .collect(),
+            empty_message: self.empty_message.clone(),
+            activation_policy: DetailRailActivationPolicy::Disabled,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DetailCastMember {
+    pub id: String,
     pub name: String,
     pub role: Option<String>,
     pub artwork: DetailArtwork,
+}
+
+impl DetailCastMember {
+    pub fn to_media_rail_item(&self) -> DetailMediaRailItem {
+        let mut item = DetailMediaRailItem::new(
+            self.id.clone(),
+            self.name.clone(),
+            self.artwork.clone(),
+        );
+        if let Some(role) = &self.role {
+            item = item.with_meta(role.clone());
+        }
+        item
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -527,10 +714,32 @@ pub struct DetailTechnicalItem {
 #[derive(Debug, Clone)]
 pub struct DetailRelationshipRail {
     pub id: String,
+    pub kind: DetailRailKind,
+    pub card_variant: DetailRailCardVariant,
+    pub activation_policy: DetailRailActivationPolicy,
     pub carousel_key: Option<CarouselKey>,
     pub title: String,
     pub items: Vec<DetailRailItem>,
     pub empty_message: Option<String>,
+}
+
+impl DetailRelationshipRail {
+    pub fn to_media_rail(&self) -> DetailMediaRail {
+        DetailMediaRail {
+            stable_key: self.id.clone(),
+            kind: self.kind,
+            card_variant: self.card_variant,
+            carousel_key: self.carousel_key.clone(),
+            title: self.title.clone(),
+            items: self
+                .items
+                .iter()
+                .map(DetailRailItem::to_media_rail_item)
+                .collect(),
+            empty_message: self.empty_message.clone(),
+            activation_policy: self.activation_policy,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -540,6 +749,23 @@ pub struct DetailRailItem {
     pub subtitle: Option<String>,
     pub artwork: DetailArtwork,
     pub on_press: Option<UiMessage>,
+}
+
+impl DetailRailItem {
+    pub fn to_media_rail_item(&self) -> DetailMediaRailItem {
+        let mut item = DetailMediaRailItem::new(
+            self.id.clone(),
+            self.title.clone(),
+            self.artwork.clone(),
+        );
+        if let Some(subtitle) = &self.subtitle {
+            item = item.with_meta(subtitle.clone());
+        }
+        if let Some(on_press) = &self.on_press {
+            item = item.with_activation(on_press.clone());
+        }
+        item
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -658,5 +884,77 @@ mod tests {
         assert_eq!(metadata[1].label, "Watched");
         assert_eq!(metadata[2].label, "PG-13");
         assert_eq!(metadata[3].label, "★ 8.4");
+    }
+
+    #[test]
+    fn cast_section_adapts_to_unified_profile_media_rail() {
+        let section = DetailCastSection {
+            title: "Cast".to_string(),
+            carousel_key: None,
+            empty_message: Some("No cast".to_string()),
+            members: vec![DetailCastMember {
+                id: "person-42".to_string(),
+                name: "Ada".to_string(),
+                role: Some("Captain".to_string()),
+                artwork: DetailArtwork::Profile {
+                    media_uuid: uuid(42),
+                    image_id: Some(uuid(43)),
+                    alt: "Ada profile".to_string(),
+                },
+            }],
+        };
+
+        let rail = section.to_media_rail();
+
+        assert_eq!(rail.stable_key, "cast");
+        assert_eq!(rail.kind, DetailRailKind::Cast);
+        assert_eq!(rail.card_variant, DetailRailCardVariant::Profile);
+        assert_eq!(
+            rail.activation_policy,
+            DetailRailActivationPolicy::Disabled
+        );
+        assert_eq!(rail.empty_message.as_deref(), Some("No cast"));
+        assert_eq!(rail.items[0].stable_id, "person-42");
+        assert_eq!(rail.items[0].meta.as_deref(), Some("Captain"));
+        assert_eq!(
+            rail.items[0].image_request_kind,
+            DetailRailImageRequestKind::Profile
+        );
+    }
+
+    #[test]
+    fn relationship_rail_adapts_to_unified_media_rail_identity_and_policy() {
+        let rail = DetailRelationshipRail {
+            id: "SeasonEpisodes:season-1".to_string(),
+            kind: DetailRailKind::Episodes,
+            card_variant: DetailRailCardVariant::StillWide,
+            activation_policy: DetailRailActivationPolicy::Play,
+            carousel_key: None,
+            title: "Episodes".to_string(),
+            empty_message: None,
+            items: vec![DetailRailItem {
+                id: "episode-1".to_string(),
+                title: "S01E01".to_string(),
+                subtitle: Some("Pilot".to_string()),
+                artwork: DetailArtwork::still(
+                    uuid(1),
+                    Some(uuid(2)),
+                    "Pilot still",
+                ),
+                on_press: None,
+            }],
+        }
+        .to_media_rail();
+
+        assert_eq!(rail.stable_key, "SeasonEpisodes:season-1");
+        assert_eq!(rail.kind, DetailRailKind::Episodes);
+        assert_eq!(rail.card_variant, DetailRailCardVariant::StillWide);
+        assert!(rail.activation_policy.allows_item_activation());
+        assert_eq!(rail.items[0].stable_id, "episode-1");
+        assert_eq!(rail.items[0].meta.as_deref(), Some("Pilot"));
+        assert_eq!(
+            rail.items[0].image_request_kind,
+            DetailRailImageRequestKind::Still
+        );
     }
 }

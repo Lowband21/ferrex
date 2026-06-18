@@ -8,9 +8,14 @@ use crate::{
             shell_ui::Scope,
             tabs::{TabId, TabState},
             utils::bump_keep_alive,
-            views::virtual_carousel::{
-                messages::VirtualCarouselMessage as VCM, planner,
-                registry::MotionState, types::CarouselKey,
+            views::{
+                detail::DetailRailImageRequestKind,
+                virtual_carousel::{
+                    messages::VirtualCarouselMessage as VCM,
+                    planner,
+                    registry::MotionState,
+                    types::{CarouselKey, DetailCarouselOwnerKind},
+                },
             },
         },
     },
@@ -26,13 +31,17 @@ use crate::{
 use crate::infra::profiling_scopes;
 use std::time::Instant;
 
-use ferrex_core::{player_prelude::LibraryId, types::ids::SeriesID};
+use ferrex_core::{
+    player_prelude::{EpisodeSize, LibraryId, ProfileSize},
+    types::ids::SeriesID,
+};
 
 use ferrex_model::SeasonID;
 use iced::{
     Task,
     widget::{operation::scroll_to, scrollable::AbsoluteOffset},
 };
+use rkyv::option::ArchivedOption;
 use std::time::Duration;
 
 /// Handle virtual carousel messages
@@ -165,107 +174,64 @@ pub fn handle_virtual_carousel_message(
 
             match key {
                 CarouselKey::ShowSeasons(series_uuid) => {
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
+                    let series_id = SeriesID::from(series_uuid);
+                    if let Ok(seasons) = state
+                        .domains
+                        .ui
+                        .state
+                        .repo_accessor
+                        .get_series_seasons(&series_id)
                     {
-                        let series_id = SeriesID::from(series_uuid);
-                        if let Ok(seasons) = state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_series_seasons(&series_id)
-                        {
-                            let total = seasons.len();
-                            if let Some(vc) = state
-                                .domains
-                                .ui
-                                .state
-                                .carousel_registry
-                                .get(&key)
-                            {
-                                #[cfg(any(
-                                    feature = "profile-with-puffin",
-                                    feature = "profile-with-tracy",
-                                    feature = "profile-with-tracing",
-                                ))]
-                                profiling::scope!(
-                                    profiling_scopes::scopes::CAROUSEL_SNAPSHOT
-                                );
-                                let snap = planner::snapshot_for_visible(
-                                    vc,
-                                    total,
-                                    |i| {
-                                        seasons.get(i).and_then(|s| {
-                                            s.details.primary_poster_iid
-                                        })
-                                    },
-                                    state
-                                        .domains
-                                        .settings
-                                        .display
-                                        .library_poster_quality,
-                                    None,
-                                    &state.runtime_config,
-                                );
-                                handle.send(snap);
-                            }
-                        }
+                        emit_snapshot_from_slots(
+                            state,
+                            &key,
+                            &seasons
+                                .iter()
+                                .map(|season| season.details.primary_poster_iid)
+                                .collect::<Vec<_>>(),
+                            DetailRailImageRequestKind::Poster,
+                        );
                     }
                 }
                 CarouselKey::SeasonEpisodes(season_uuid) => {
-                    if let Some(handle) =
-                        state.domains.metadata.state.planner_handle.as_ref()
-                    {
-                        let season_id = SeasonID(season_uuid);
-                        let episodes = state
-                            .domains
-                            .ui
-                            .state
-                            .repo_accessor
-                            .get_season_episodes(&season_id)
-                            .unwrap_or_else(|_| Vec::new());
-                        let total = episodes.len();
-                        if let Some(vc) =
-                            state.domains.ui.state.carousel_registry.get(&key)
-                        {
-                            let (vis, mut pre, mut back) =
-                                planner::collect_ranges_ids(
-                                    vc,
-                                    total,
-                                    |i| {
-                                        episodes.get(i).and_then(|e| {
-                                            e.details.primary_still_iid
-                                        })
-                                    },
-                                    &state.runtime_config,
-                                );
-                            // Build context for all ids
-                            // Combine and deduplicate
-                            pre.retain(|id| !vis.contains(id));
-                            back.retain(|id| {
-                                !vis.contains(id) && !pre.contains(id)
-                            });
-                            let mut all = vis.clone();
-                            all.extend(pre.iter().copied());
-                            all.extend(back.iter().copied());
-                            let ctx =
-                                planner::build_episode_still_context(&all);
-                            let snap = DemandSnapshot {
-                                visible_ids: vis,
-                                prefetch_ids: pre,
-                                background_ids: back,
-                                timestamp: Instant::now(),
-                                context: Some(ctx),
-                                poster_size: state
-                                    .domains
-                                    .settings
-                                    .display
-                                    .library_poster_quality,
-                            };
-                            handle.send(snap);
-                        }
-                    }
+                    let slots = season_episode_still_slots(state, season_uuid);
+                    emit_snapshot_from_slots(
+                        state,
+                        &key,
+                        &slots,
+                        DetailRailImageRequestKind::Still,
+                    );
+                }
+                CarouselKey::DetailCast {
+                    owner_kind,
+                    owner_id,
+                } => {
+                    let slots =
+                        detail_cast_profile_slots(state, owner_kind, owner_id);
+                    emit_snapshot_from_slots(
+                        state,
+                        &key,
+                        &slots,
+                        DetailRailImageRequestKind::Profile,
+                    );
+                }
+                CarouselKey::DetailSeriesEpisodes(series_uuid) => {
+                    let slots = series_episode_still_slots(state, series_uuid);
+                    emit_snapshot_from_slots(
+                        state,
+                        &key,
+                        &slots,
+                        DetailRailImageRequestKind::Still,
+                    );
+                }
+                CarouselKey::DetailEpisodeSiblings(season_uuid) => {
+                    let slots = season_episode_still_slots(state, season_uuid);
+                    emit_snapshot_from_slots(
+                        state,
+                        &key,
+                        &slots,
+                        DetailRailImageRequestKind::Still,
+                    );
                 }
                 CarouselKey::LibraryMovies(lib_uuid) => {
                     if let Some(handle) =
@@ -542,6 +508,10 @@ pub fn handle_virtual_carousel_message(
         VCM::NextItem(key) => start_snap_to_step(state, key, true),
         VCM::PrevItem(key) => start_snap_to_step(state, key, false),
         VCM::FocusKey(key) => {
+            if !carousel_key_is_registered_and_relevant(state, &key) {
+                return Task::none();
+            }
+
             // Only allow hover to change focus if there has been recent mouse movement
             let now = Instant::now();
             let mut allow =
@@ -926,6 +896,284 @@ fn ensure_scroller_for_key<'a>(
         .ensure_scroller_with_config(key, cfg)
 }
 
+fn detail_rail_demand_image_kind(
+    state: &State,
+    request_kind: DetailRailImageRequestKind,
+) -> Option<planner::CarouselDemandImageKind> {
+    match request_kind {
+        DetailRailImageRequestKind::Poster => {
+            Some(planner::CarouselDemandImageKind::Poster {
+                size: state.domains.settings.display.detail_poster_quality,
+            })
+        }
+        DetailRailImageRequestKind::Still => {
+            Some(planner::CarouselDemandImageKind::EpisodeStill {
+                size: EpisodeSize::W512,
+            })
+        }
+        DetailRailImageRequestKind::Profile => {
+            Some(planner::CarouselDemandImageKind::Profile {
+                size: ProfileSize::W185,
+            })
+        }
+        DetailRailImageRequestKind::None => None,
+    }
+}
+
+fn emit_snapshot_from_slots(
+    state: &State,
+    key: &CarouselKey,
+    image_slots: &[Option<uuid::Uuid>],
+    request_kind: DetailRailImageRequestKind,
+) {
+    let Some(image_kind) = detail_rail_demand_image_kind(state, request_kind)
+    else {
+        return;
+    };
+
+    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref()
+        && let Some(vc) = state.domains.ui.state.carousel_registry.get(key)
+    {
+        let snap = planner::snapshot_for_visible_with_image_kind(
+            vc,
+            image_slots.len(),
+            |i| image_slots.get(i).copied().flatten(),
+            image_kind,
+            state.domains.settings.display.detail_poster_quality,
+            &state.runtime_config,
+        );
+        handle.send(snap);
+    }
+}
+
+fn detail_cast_profile_slots(
+    state: &State,
+    owner_kind: DetailCarouselOwnerKind,
+    owner_id: uuid::Uuid,
+) -> Vec<Option<uuid::Uuid>> {
+    match owner_kind {
+        DetailCarouselOwnerKind::Movie => state
+            .domains
+            .ui
+            .state
+            .movie_yoke_cache
+            .peek(&owner_id)
+            .map(|yoke| {
+                let movie = *yoke.get();
+                movie
+                    .details
+                    .cast
+                    .iter()
+                    .filter(|actor| {
+                        matches!(&actor.image_id, ArchivedOption::Some(_))
+                    })
+                    .map(|actor| match &actor.image_id {
+                        ArchivedOption::Some(iid) => Some(*iid),
+                        ArchivedOption::None => None,
+                    })
+                    .chain(
+                        movie
+                            .details
+                            .cast
+                            .iter()
+                            .filter(|actor| {
+                                matches!(&actor.image_id, ArchivedOption::None)
+                            })
+                            .map(|_| None),
+                    )
+                    .collect()
+            })
+            .unwrap_or_default(),
+        DetailCarouselOwnerKind::Series => state
+            .domains
+            .ui
+            .state
+            .series_yoke_cache
+            .peek_ref(&owner_id)
+            .map(|yoke| {
+                let series = *yoke.get();
+                series
+                    .details
+                    .cast
+                    .iter()
+                    .filter(|actor| {
+                        matches!(&actor.image_id, ArchivedOption::Some(_))
+                    })
+                    .map(|actor| match &actor.image_id {
+                        ArchivedOption::Some(iid) => Some(*iid),
+                        ArchivedOption::None => None,
+                    })
+                    .chain(
+                        series
+                            .details
+                            .cast
+                            .iter()
+                            .filter(|actor| {
+                                matches!(&actor.image_id, ArchivedOption::None)
+                            })
+                            .map(|_| None),
+                    )
+                    .collect()
+            })
+            .unwrap_or_default(),
+        DetailCarouselOwnerKind::Season | DetailCarouselOwnerKind::Episode => {
+            Vec::new()
+        }
+    }
+}
+
+fn series_episode_still_slots(
+    state: &State,
+    series_uuid: uuid::Uuid,
+) -> Vec<Option<uuid::Uuid>> {
+    let series_id = SeriesID::from(series_uuid);
+    let Ok(seasons) = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_series_seasons(&series_id)
+    else {
+        return Vec::new();
+    };
+
+    let mut slots = Vec::new();
+    for season in seasons {
+        if let Ok(episodes) = state
+            .domains
+            .ui
+            .state
+            .repo_accessor
+            .get_season_episodes(&season.id)
+        {
+            slots.extend(
+                episodes
+                    .iter()
+                    .map(|episode| episode.details.primary_still_iid),
+            );
+        }
+    }
+    slots
+}
+
+fn season_episode_still_slots(
+    state: &State,
+    season_uuid: uuid::Uuid,
+) -> Vec<Option<uuid::Uuid>> {
+    let season_id = SeasonID(season_uuid);
+    state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_season_episodes(&season_id)
+        .unwrap_or_default()
+        .iter()
+        .map(|episode| episode.details.primary_still_iid)
+        .collect()
+}
+
+fn current_episode_season_uuid(
+    state: &State,
+    episode_id: ferrex_core::player_prelude::EpisodeID,
+) -> Option<uuid::Uuid> {
+    state
+        .domains
+        .ui
+        .state
+        .episode_yoke_cache
+        .peek_ref(&episode_id.to_uuid())
+        .map(|episode| episode.get().season_id.to_uuid())
+}
+
+fn carousel_key_matches_current_view(state: &State, key: &CarouselKey) -> bool {
+    use crate::domains::ui::types::ViewState;
+
+    match state.domains.ui.state.view.clone() {
+        ViewState::Library => !key.is_detail_rail(),
+        ViewState::MovieDetail { movie_id, .. } => matches!(
+            key,
+            CarouselKey::DetailCast {
+                owner_kind: DetailCarouselOwnerKind::Movie,
+                owner_id,
+            } | CarouselKey::DetailRelated {
+                owner_kind: DetailCarouselOwnerKind::Movie,
+                owner_id,
+            } if *owner_id == movie_id.to_uuid()
+        ),
+        ViewState::SeriesDetail { series_id, .. } => {
+            matches!(
+                key,
+                CarouselKey::ShowSeasons(id)
+                    | CarouselKey::DetailSeriesEpisodes(id) if *id == series_id.to_uuid()
+            ) || matches!(
+                key,
+                CarouselKey::DetailCast {
+                    owner_kind: DetailCarouselOwnerKind::Series,
+                    owner_id,
+                } | CarouselKey::DetailRelated {
+                    owner_kind: DetailCarouselOwnerKind::Series,
+                    owner_id,
+                } if *owner_id == series_id.to_uuid()
+            )
+        }
+        ViewState::SeasonDetail { season_id, .. } => {
+            matches!(
+                key,
+                CarouselKey::SeasonEpisodes(id)
+                    | CarouselKey::DetailEpisodeSiblings(id) if *id == season_id.to_uuid()
+            ) || matches!(
+                key,
+                CarouselKey::DetailRelated {
+                    owner_kind: DetailCarouselOwnerKind::Season,
+                    owner_id,
+                } if *owner_id == season_id.to_uuid()
+            )
+        }
+        ViewState::EpisodeDetail { episode_id, .. } => match key {
+            CarouselKey::DetailEpisodeSiblings(season_id) => {
+                current_episode_season_uuid(state, episode_id)
+                    .is_some_and(|current_season| *season_id == current_season)
+            }
+            CarouselKey::DetailRelated {
+                owner_kind: DetailCarouselOwnerKind::Episode,
+                owner_id,
+            } => *owner_id == episode_id.to_uuid(),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn carousel_key_is_registered_and_relevant(
+    state: &State,
+    key: &CarouselKey,
+) -> bool {
+    state.domains.ui.state.carousel_registry.get(key).is_some()
+        && carousel_key_matches_current_view(state, key)
+}
+
+fn first_registered_relevant_key(state: &State) -> Option<CarouselKey> {
+    state
+        .domains
+        .ui
+        .state
+        .carousel_registry
+        .keys()
+        .into_iter()
+        .find(|key| carousel_key_matches_current_view(state, key))
+}
+
+fn preferred_registered_key<const N: usize>(
+    state: &State,
+    candidates: [CarouselKey; N],
+) -> Option<CarouselKey> {
+    candidates
+        .into_iter()
+        .find(|key| carousel_key_is_registered_and_relevant(state, key))
+        .or_else(|| first_registered_relevant_key(state))
+}
+
 fn active_carousel_key(state: &State) -> Option<CarouselKey> {
     // Priority 1: Prefer hover if last source was mouse, or there was recent mouse movement
     let now = Instant::now();
@@ -934,6 +1182,7 @@ fn active_carousel_key(state: &State) -> Option<CarouselKey> {
         virtual_carousel::focus::HOVER_SWITCH_WINDOW_MS,
     ) && let Some(hovered_key) =
         &state.domains.ui.state.carousel_focus.hovered_key
+        && carousel_key_is_registered_and_relevant(state, hovered_key)
     {
         return Some(hovered_key.clone());
     }
@@ -942,20 +1191,63 @@ fn active_carousel_key(state: &State) -> Option<CarouselKey> {
     // This is set by Up/Down arrow keys in All view, or as a side effect of chevron navigation
     if let Some(keyboard_key) =
         &state.domains.ui.state.carousel_focus.keyboard_active_key
+        && carousel_key_is_registered_and_relevant(state, keyboard_key)
     {
         return Some(keyboard_key.clone());
     }
 
-    // Priority 3: Fall back to view-specific defaults
+    // Priority 3: Fall back to registered rails for the current detail view.
     match state.domains.ui.state.view.clone() {
+        crate::domains::ui::types::ViewState::MovieDetail {
+            movie_id, ..
+        } => preferred_registered_key(
+            state,
+            [
+                CarouselKey::DetailCast {
+                    owner_kind: DetailCarouselOwnerKind::Movie,
+                    owner_id: movie_id.to_uuid(),
+                },
+                CarouselKey::DetailRelated {
+                    owner_kind: DetailCarouselOwnerKind::Movie,
+                    owner_id: movie_id.to_uuid(),
+                },
+            ],
+        ),
         crate::domains::ui::types::ViewState::SeriesDetail {
             series_id,
             ..
-        } => Some(CarouselKey::ShowSeasons(series_id.to_uuid())),
+        } => preferred_registered_key(
+            state,
+            [
+                CarouselKey::ShowSeasons(series_id.to_uuid()),
+                CarouselKey::DetailCast {
+                    owner_kind: DetailCarouselOwnerKind::Series,
+                    owner_id: series_id.to_uuid(),
+                },
+                CarouselKey::DetailSeriesEpisodes(series_id.to_uuid()),
+                CarouselKey::DetailRelated {
+                    owner_kind: DetailCarouselOwnerKind::Series,
+                    owner_id: series_id.to_uuid(),
+                },
+            ],
+        ),
         crate::domains::ui::types::ViewState::SeasonDetail {
             season_id,
             ..
-        } => Some(CarouselKey::SeasonEpisodes(season_id.to_uuid())),
+        } => preferred_registered_key(
+            state,
+            [
+                CarouselKey::SeasonEpisodes(season_id.to_uuid()),
+                CarouselKey::DetailEpisodeSiblings(season_id.to_uuid()),
+                CarouselKey::DetailRelated {
+                    owner_kind: DetailCarouselOwnerKind::Season,
+                    owner_id: season_id.to_uuid(),
+                },
+            ],
+        ),
+        crate::domains::ui::types::ViewState::EpisodeDetail { .. } => {
+            first_registered_relevant_key(state)
+        }
         crate::domains::ui::types::ViewState::Library
             if matches!(state.domains.ui.state.scope, Scope::Home) =>
         {
@@ -1327,176 +1619,168 @@ fn handle_release_snap_align(
     Task::none()
 }
 
-fn maybe_send_snapshot_for_key(
+pub(super) fn maybe_send_snapshot_for_key(
     state: &mut State,
     key: &CarouselKey,
     force: bool,
 ) {
-    if let Some(handle) = state.domains.metadata.state.planner_handle.as_ref() {
-        let emit = if force {
-            true
-        } else {
-            state
+    if state.domains.metadata.state.planner_handle.is_none() {
+        return;
+    }
+
+    let emit = if force {
+        true
+    } else {
+        state
+            .domains
+            .ui
+            .state
+            .carousel_registry
+            .should_emit_snapshot(
+                key,
+                Duration::from_millis(snap::SNAPSHOT_DEBOUNCE_MS),
+            )
+    };
+    if !emit {
+        return;
+    }
+
+    match key {
+        CarouselKey::ShowSeasons(series_uuid) => {
+            let series_id = SeriesID::from(*series_uuid);
+            if let Ok(seasons) = state
                 .domains
                 .ui
                 .state
-                .carousel_registry
-                .should_emit_snapshot(
+                .repo_accessor
+                .get_series_seasons(&series_id)
+            {
+                let slots = seasons
+                    .iter()
+                    .map(|season| season.details.primary_poster_iid)
+                    .collect::<Vec<_>>();
+                emit_snapshot_from_slots(
+                    state,
                     key,
-                    Duration::from_millis(snap::SNAPSHOT_DEBOUNCE_MS),
-                )
-        };
-        if !emit {
-            return;
+                    &slots,
+                    DetailRailImageRequestKind::Poster,
+                );
+            }
         }
-
-        match key {
-            CarouselKey::ShowSeasons(series_uuid) => {
-                let series_id = SeriesID::from(*series_uuid);
-                if let Ok(seasons) = state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_series_seasons(&series_id)
-                    && let Some(vc) =
-                        state.domains.ui.state.carousel_registry.get(key)
-                {
-                    let total = seasons.len();
-                    let snap = planner::snapshot_for_visible(
-                        vc,
-                        total,
-                        |i| {
-                            seasons
-                                .get(i)
-                                .and_then(|s| s.details.primary_poster_iid)
-                        },
-                        state.domains.settings.display.library_poster_quality,
-                        None,
-                        &state.runtime_config,
-                    );
-                    handle.send(snap);
-                }
-            }
-            CarouselKey::LibraryMovies(lib_uuid) => {
-                if let Some(vc) =
-                    state.domains.ui.state.carousel_registry.get(key)
-                    && let Some(tab) = state
-                        .tab_manager
-                        .get_tab(TabId::Library(LibraryId(*lib_uuid)))
-                    && let TabState::Library(lib_state) = tab
-                {
-                    let ids = &lib_state.cached_index_ids;
-                    let total = ids.len();
-                    #[cfg(any(
-                        feature = "profile-with-puffin",
-                        feature = "profile-with-tracy",
-                        feature = "profile-with-tracing",
-                    ))]
-                    profiling::scope!(
-                        profiling_scopes::scopes::CAROUSEL_SNAPSHOT
-                    );
-                    let snap = planner::snapshot_for_visible(
-                        vc,
-                        total,
-                        |i| {
-                            ids.get(i).copied().and_then(|id| {
-                                crate::domains::ui::utils::primary_poster_iid_for_library_media(
-                                    state,
-                                    crate::infra::api_types::LibraryType::Movies,
-                                    id,
-                                )
-                            })
-                        },
-                        state.domains.settings.display.library_poster_quality,
-                        None,
-                        &state.runtime_config,
-                    );
-                    handle.send(snap);
-                }
-            }
-            CarouselKey::LibrarySeries(lib_uuid) => {
-                if let Some(vc) =
-                    state.domains.ui.state.carousel_registry.get(key)
-                    && let Some(tab) = state
-                        .tab_manager
-                        .get_tab(TabId::Library(LibraryId(*lib_uuid)))
-                    && let TabState::Library(lib_state) = tab
-                {
-                    let ids = &lib_state.cached_index_ids;
-                    let total = ids.len();
-                    #[cfg(any(
-                        feature = "profile-with-puffin",
-                        feature = "profile-with-tracy",
-                        feature = "profile-with-tracing",
-                    ))]
-                    profiling::scope!(
-                        profiling_scopes::scopes::CAROUSEL_SNAPSHOT
-                    );
-                    let snap = planner::snapshot_for_visible(
-                        vc,
-                        total,
-                        |i| {
-                            ids.get(i).copied().and_then(|id| {
-                                crate::domains::ui::utils::primary_poster_iid_for_library_media(
-                                    state,
-                                    crate::infra::api_types::LibraryType::Series,
-                                    id,
-                                )
-                            })
-                        },
-                        state.domains.settings.display.library_poster_quality,
-                        None,
-                        &state.runtime_config,
-                    );
-                    handle.send(snap);
-                }
-            }
-            CarouselKey::SeasonEpisodes(season_uuid) => {
-                let season_id = SeasonID(*season_uuid);
-                let episodes = state
-                    .domains
-                    .ui
-                    .state
-                    .repo_accessor
-                    .get_season_episodes(&season_id)
-                    .unwrap_or_else(|_| Vec::new());
-                if let Some(vc) =
-                    state.domains.ui.state.carousel_registry.get(key)
-                {
-                    let total = episodes.len();
-                    let (vis, mut pre, mut back) = planner::collect_ranges_ids(
-                        vc,
-                        total,
-                        |i| {
-                            episodes
-                                .get(i)
-                                .and_then(|e| e.details.primary_still_iid)
-                        },
-                        &state.runtime_config,
-                    );
-                    pre.retain(|id| !vis.contains(id));
-                    back.retain(|id| !vis.contains(id) && !pre.contains(id));
-                    let mut all = vis.clone();
-                    all.extend(pre.iter().copied());
-                    all.extend(back.iter().copied());
-                    let ctx = planner::build_episode_still_context(&all);
-                    let snap = DemandSnapshot {
-                        visible_ids: vis,
-                        prefetch_ids: pre,
-                        background_ids: back,
-                        timestamp: std::time::Instant::now(),
-                        context: Some(ctx),
-                        poster_size: state
-                            .domains
-                            .settings
-                            .display
-                            .library_poster_quality,
-                    };
-                    handle.send(snap);
-                }
-            }
-            _ => {}
+        CarouselKey::SeasonEpisodes(season_uuid) => {
+            let slots = season_episode_still_slots(state, *season_uuid);
+            emit_snapshot_from_slots(
+                state,
+                key,
+                &slots,
+                DetailRailImageRequestKind::Still,
+            );
         }
+        CarouselKey::DetailCast {
+            owner_kind,
+            owner_id,
+        } => {
+            let slots =
+                detail_cast_profile_slots(state, *owner_kind, *owner_id);
+            emit_snapshot_from_slots(
+                state,
+                key,
+                &slots,
+                DetailRailImageRequestKind::Profile,
+            );
+        }
+        CarouselKey::DetailSeriesEpisodes(series_uuid) => {
+            let slots = series_episode_still_slots(state, *series_uuid);
+            emit_snapshot_from_slots(
+                state,
+                key,
+                &slots,
+                DetailRailImageRequestKind::Still,
+            );
+        }
+        CarouselKey::DetailEpisodeSiblings(season_uuid) => {
+            let slots = season_episode_still_slots(state, *season_uuid);
+            emit_snapshot_from_slots(
+                state,
+                key,
+                &slots,
+                DetailRailImageRequestKind::Still,
+            );
+        }
+        CarouselKey::LibraryMovies(lib_uuid) => {
+            if let Some(handle) =
+                state.domains.metadata.state.planner_handle.as_ref()
+                && let Some(vc) =
+                    state.domains.ui.state.carousel_registry.get(key)
+                && let Some(tab) = state
+                    .tab_manager
+                    .get_tab(TabId::Library(LibraryId(*lib_uuid)))
+                && let TabState::Library(lib_state) = tab
+            {
+                let ids = &lib_state.cached_index_ids;
+                let total = ids.len();
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing",
+                ))]
+                profiling::scope!(profiling_scopes::scopes::CAROUSEL_SNAPSHOT);
+                let snap = planner::snapshot_for_visible(
+                    vc,
+                    total,
+                    |i| {
+                        ids.get(i).copied().and_then(|id| {
+                            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                state,
+                                crate::infra::api_types::LibraryType::Movies,
+                                id,
+                            )
+                        })
+                    },
+                    state.domains.settings.display.library_poster_quality,
+                    None,
+                    &state.runtime_config,
+                );
+                handle.send(snap);
+            }
+        }
+        CarouselKey::LibrarySeries(lib_uuid) => {
+            if let Some(handle) =
+                state.domains.metadata.state.planner_handle.as_ref()
+                && let Some(vc) =
+                    state.domains.ui.state.carousel_registry.get(key)
+                && let Some(tab) = state
+                    .tab_manager
+                    .get_tab(TabId::Library(LibraryId(*lib_uuid)))
+                && let TabState::Library(lib_state) = tab
+            {
+                let ids = &lib_state.cached_index_ids;
+                let total = ids.len();
+                #[cfg(any(
+                    feature = "profile-with-puffin",
+                    feature = "profile-with-tracy",
+                    feature = "profile-with-tracing",
+                ))]
+                profiling::scope!(profiling_scopes::scopes::CAROUSEL_SNAPSHOT);
+                let snap = planner::snapshot_for_visible(
+                    vc,
+                    total,
+                    |i| {
+                        ids.get(i).copied().and_then(|id| {
+                            crate::domains::ui::utils::primary_poster_iid_for_library_media(
+                                state,
+                                crate::infra::api_types::LibraryType::Series,
+                                id,
+                            )
+                        })
+                    },
+                    state.domains.settings.display.library_poster_quality,
+                    None,
+                    &state.runtime_config,
+                );
+                handle.send(snap);
+            }
+        }
+        _ => {}
     }
 }
