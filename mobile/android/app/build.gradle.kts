@@ -12,6 +12,7 @@ fun localOrEnv(key: String): String? =
 android {
     namespace = "com.ferrex.android"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.ferrex.android"

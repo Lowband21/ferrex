@@ -146,6 +146,36 @@ alias rpr := run-player-release
 alias rs := run-server
 alias rsr := run-server-release
 alias gs := gstat
+alias aqd := android-qa-doctor
+alias aqb := android-qa-build
+alias aqs := android-qa-start
+alias aqi := android-qa-install
+alias aql := android-qa-launch
+alias aqc := android-qa-check
+
+[no-cd]
+android-qa-doctor *args:
+    ./scripts/qa/android-emulator-qa.sh doctor {{ args }}
+
+[no-cd]
+android-qa-build:
+    ./scripts/qa/android-emulator-qa.sh build
+
+[no-cd]
+android-qa-start:
+    ./scripts/qa/android-emulator-qa.sh start
+
+[no-cd]
+android-qa-install target="all":
+    ./scripts/qa/android-emulator-qa.sh install {{ target }}
+
+[no-cd]
+android-qa-launch target="all":
+    ./scripts/qa/android-emulator-qa.sh launch {{ target }}
+
+[no-cd]
+android-qa-check target="all":
+    ./scripts/qa/android-emulator-qa.sh check {{ target }}
 
 default:
     @just --list
