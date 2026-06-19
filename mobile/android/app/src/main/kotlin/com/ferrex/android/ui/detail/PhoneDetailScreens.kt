@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +15,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
+import coil.compose.AsyncImage
 import com.ferrex.android.core.auth.AuthenticatedConnectionUi
 import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.detail.DetailPageAction
@@ -31,7 +36,12 @@ import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.mediaart.MediaArtFallbackPolicy
+import com.ferrex.android.core.mediaart.MediaArtVisualState
+import com.ferrex.android.core.mediaart.runtimeFallback
 import com.ferrex.android.core.playback.PlaybackRouteContract
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalyzer
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
@@ -41,6 +51,7 @@ import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.TheaterPlateStage
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 @Composable
@@ -93,6 +104,7 @@ fun PhoneDetailScreen(
     }
     val effectiveImageLoader = imageLoader.takeIf { imageLoaderAvailable }
     val episodeUnavailable = detailResult.episodeUnavailableNotice()
+    val stageAnalyzer = remember { TheaterPlateAnalyzer() }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -105,6 +117,19 @@ fun PhoneDetailScreen(
                 } else {
                     DetailSurfaceInteractionMode.PhoneTouch
                 }
+            }
+            val viewport = remember(maxWidth, maxHeight) {
+                TheaterPlateViewport.fromLogicalSize(maxWidth.value, maxHeight.value)
+            }
+            val stagePresentation = remember(page, imageResolutions, viewport) {
+                DetailTheaterPlateStagePresenter.stage(
+                    page = page,
+                    imageResolutions = imageResolutions,
+                    viewport = viewport,
+                )
+            }
+            val stageAnalysis = remember(stageAnalyzer, stagePresentation.context) {
+                stageAnalyzer.analyzeMissingBackdrop(stagePresentation.context).copy(context = stagePresentation.context)
             }
             val callbacks = DetailPrimitiveCallbacks(
                 onAction = { action ->
@@ -135,28 +160,82 @@ fun PhoneDetailScreen(
                 },
             )
 
-            FerrexDetailStage(
-                page = page,
-                imageResolutions = imageResolutions,
-                imageLoader = effectiveImageLoader,
-                serverUrl = scope.canonicalServerUrl,
-                interactionMode = interactionMode,
-                callbacks = callbacks,
-                header = {
-                    PhoneDetailChrome(
-                        preparedPlaybackContract = preparedPlaybackContract,
-                        connectionStatus = connectionStatus,
-                        actionNotice = actionNotice,
-                        episodeUnavailable = episodeUnavailable,
-                        interactionMode = interactionMode,
-                        onBack = onBack,
-                        onRetryConnection = onRetryConnection,
-                        onRetryEpisodes = onRetryEpisodes,
-                    )
+            TheaterPlateStage(
+                analysis = stageAnalysis,
+                adaptation = stagePresentation.adaptation,
+                density = interactionMode.density,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag(page.phoneDetailRootTag()),
+                contentDescription = stagePresentation.contentDescription,
+                backdrop = effectiveImageLoader?.let { loader ->
+                    {
+                        PhoneDetailStageBackdrop(
+                            stage = stagePresentation,
+                            imageResolutions = imageResolutions,
+                            imageLoader = loader,
+                            serverUrl = scope.canonicalServerUrl,
+                        )
+                    }
                 },
-            )
+            ) {
+                FerrexDetailStage(
+                    page = page,
+                    imageResolutions = imageResolutions,
+                    imageLoader = effectiveImageLoader,
+                    serverUrl = scope.canonicalServerUrl,
+                    interactionMode = interactionMode,
+                    callbacks = callbacks,
+                    contentPadding = PaddingValues(0.dp),
+                    containerColor = Color.Transparent,
+                    header = {
+                        PhoneDetailChrome(
+                            preparedPlaybackContract = preparedPlaybackContract,
+                            connectionStatus = connectionStatus,
+                            actionNotice = actionNotice,
+                            episodeUnavailable = episodeUnavailable,
+                            interactionMode = interactionMode,
+                            onBack = onBack,
+                            onRetryConnection = onRetryConnection,
+                            onRetryEpisodes = onRetryEpisodes,
+                        )
+                    },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun PhoneDetailStageBackdrop(
+    stage: DetailTheaterPlateStagePresentation,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoader: ImageLoader,
+    serverUrl: String,
+) {
+    val sourceArt = stage.sourceArt ?: return
+    val mediaArt = sourceArt.mediaArt ?: return
+    val visualState = MediaArtVisualState.from(
+        art = mediaArt,
+        resolution = sourceArt.requestKey?.let(imageResolutions::get),
+        fallback = mediaArt.runtimeFallback(serverUrl, MediaArtFallbackPolicy()),
+    )
+    val loaded = visualState as? MediaArtVisualState.Loaded ?: return
+    AsyncImage(
+        model = loaded.url,
+        imageLoader = imageLoader,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+private fun DetailPageModel.phoneDetailRootTag(): String = when (kind) {
+    DetailPageKind.Movie -> FerrexQaTags.Phone.MovieDetail
+    DetailPageKind.Series -> FerrexQaTags.Phone.SeriesDetail
+    DetailPageKind.Season,
+    DetailPageKind.Episode -> FerrexQaTags.Phone.SeasonEpisode
+    DetailPageKind.MissingDetail -> FerrexQaTags.namespaced("phone", "detail", "missing")
 }
 
 @Composable

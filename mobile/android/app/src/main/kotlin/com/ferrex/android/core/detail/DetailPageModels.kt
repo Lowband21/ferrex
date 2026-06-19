@@ -636,15 +636,13 @@ object DetailPageMapper {
         val episodeStatus = seriesStatus?.episodeStatus(episode.seasonNumber, episode.episodeNumber)
         val resumeContract = DetailRouteContracts.episodeResume(episode, progress, result.route)
         val startOverContract = DetailRouteContracts.episodeStartOver(episode, result.route)
-        val heroImages = DetailImageSet(
-            poster = result.parentSeries?.images?.poster,
-            backdrop = result.parentSeries?.images?.backdrop,
-            still = episode.images.still ?: result.parentSeries?.images?.still,
-            posterFallbackPath = result.parentSeries?.images?.posterFallbackPath,
-            backdropFallbackPath = result.parentSeries?.images?.backdropFallbackPath,
-            stillFallbackPath = episode.images.stillFallbackPath ?: result.parentSeries?.images?.stillFallbackPath,
+        val hero = episodeHeroFor(
+            pageKey = "episode:${episode.id}",
+            title = episode.title,
+            parentSeries = result.parentSeries,
+            episodeImages = episode.images,
+            imageResolutions = imageResolutions,
         )
-        val hero = heroFor("episode:${episode.id}", episode.title, heroImages, imageResolutions)
         return page(
             stableKey = "episode:${episode.id}",
             kind = DetailPageKind.Episode,
@@ -1019,6 +1017,46 @@ object DetailPageMapper {
                 label = "$title poster",
                 surfaceKey = pageKey,
                 itemKey = "poster",
+                imageResolutions = imageResolutions,
+                grounding = MediaArtGrounding.TheaterPlateContactShadow,
+            )
+        }
+        return DetailHero(background = background, foreground = foreground)
+    }
+
+    private fun episodeHeroFor(
+        pageKey: String,
+        title: String,
+        parentSeries: SeriesDetail?,
+        episodeImages: DetailImageSet,
+        imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    ): DetailHero {
+        val backgroundKey = parentSeries?.images?.backdrop
+        val background = if (backgroundKey != null) {
+            artFor(
+                key = backgroundKey,
+                fallbackPath = parentSeries?.images?.backdropFallbackPath,
+                label = "${parentSeries?.title ?: title} backdrop",
+                surfaceKey = pageKey,
+                itemKey = "hero",
+                imageResolutions = imageResolutions,
+                grounding = MediaArtGrounding.Flat,
+            )
+        } else {
+            noArt(
+                label = "$title backdrop",
+                reason = "Episode backdrop is unavailable; Theater Plate uses a generated fallback while the episode still remains foreground.",
+            )
+        }
+        val foregroundKey = episodeImages.still ?: parentSeries?.images?.poster
+        val foreground = foregroundKey?.let { key ->
+            val stillForeground = key == episodeImages.still
+            artFor(
+                key = key,
+                fallbackPath = if (stillForeground) episodeImages.stillFallbackPath else parentSeries?.images?.posterFallbackPath,
+                label = if (stillForeground) "$title still" else "${parentSeries?.title ?: title} poster",
+                surfaceKey = pageKey,
+                itemKey = if (stillForeground) "still" else "poster",
                 imageResolutions = imageResolutions,
                 grounding = MediaArtGrounding.TheaterPlateContactShadow,
             )

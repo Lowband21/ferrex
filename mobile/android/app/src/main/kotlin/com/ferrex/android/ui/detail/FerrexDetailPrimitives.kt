@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -72,6 +73,13 @@ import com.ferrex.android.core.mediaart.MediaArtFitPolicy
 import com.ferrex.android.core.mediaart.MediaArtGrounding
 import com.ferrex.android.core.mediaart.runtimeFallback
 import com.ferrex.android.core.playback.PlaybackRouteContract
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalysis
+import com.ferrex.android.core.theaterplate.TheaterPlateAnalyzer
+import com.ferrex.android.core.theaterplate.TheaterPlateColor
+import com.ferrex.android.core.theaterplate.TheaterPlateImageSource
+import com.ferrex.android.core.theaterplate.TheaterPlateImageSourceKind
+import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexMediaArt
@@ -82,6 +90,7 @@ import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
 import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlin.math.roundToInt
 
@@ -222,6 +231,93 @@ data class DetailStagePresentation(
     val slabs: List<DetailSlabPresentation>,
     val rails: List<DetailRailPresentation>,
 )
+
+@Immutable
+data class DetailTheaterPlateStagePresentation(
+    val stableKey: String,
+    val contentDescription: String,
+    val context: TheaterPlateSourceContext,
+    val adaptation: TheaterPlateBackdropAdaptation,
+    val sourceArt: DetailPageArt?,
+)
+
+/** Presentation seam for the route-level Theater Plate background used by phone detail. */
+object DetailTheaterPlateStagePresenter {
+    fun stage(
+        page: DetailPageModel,
+        imageResolutions: Map<ImageRequestKey, ImageResolution>,
+        viewport: TheaterPlateViewport,
+    ): DetailTheaterPlateStagePresentation {
+        val sourceArt = stageSourceArt(page)
+        val sourceKey = sourceArt?.requestKey
+        val resolution = sourceKey?.let(imageResolutions::get)
+        val context = TheaterPlateSourceContext(
+            source = if (sourceKey != null) {
+                TheaterPlateImageSource.backdrop(
+                    request = sourceKey,
+                    token = resolution.stageToken(sourceKey),
+                )
+            } else {
+                TheaterPlateImageSource.fallback(TheaterPlateImageSourceKind.GeneratedFallback)
+            },
+            viewport = viewport,
+            defaultColor = page.kind.detailStageDefaultColor(),
+        )
+        return DetailTheaterPlateStagePresentation(
+            stableKey = page.stableKey,
+            contentDescription = buildString {
+                append(page.kind.label)
+                append(" detail Theater Plate stage for ")
+                append(page.title)
+                sourceArt?.label?.let { append(". Stage source: ").append(it) }
+            },
+            context = context,
+            adaptation = sourceArt.stageAdaptation(resolution),
+            sourceArt = sourceArt,
+        )
+    }
+
+    fun analysis(
+        page: DetailPageModel,
+        imageResolutions: Map<ImageRequestKey, ImageResolution>,
+        viewport: TheaterPlateViewport,
+        analyzer: TheaterPlateAnalyzer = TheaterPlateAnalyzer(),
+    ): TheaterPlateAnalysis {
+        val context = stage(page, imageResolutions, viewport).context
+        return analyzer.analyzeMissingBackdrop(context).copy(context = context)
+    }
+
+    private fun stageSourceArt(page: DetailPageModel): DetailPageArt? = listOfNotNull(
+        page.hero.background.takeIf { it.role == DetailArtRole.Backdrop && it.requestKey != null },
+        page.hero.background.takeIf { it.role == DetailArtRole.Still && it.requestKey != null },
+    ).firstOrNull()
+
+    private fun ImageResolution?.stageToken(sourceKey: ImageRequestKey): String = when (this) {
+        is ImageResolution.Ready -> token
+        else -> sourceKey.cacheKey
+    }
+
+    private fun DetailPageArt?.stageAdaptation(resolution: ImageResolution?): TheaterPlateBackdropAdaptation {
+        if (this == null || imageState is DetailImageState.NoArt || resolution is ImageResolution.Placeholder) {
+            return TheaterPlateBackdropAdaptation.MissingBackdrop
+        }
+        if (imageState.staleOffline || resolution?.stale == true) {
+            return TheaterPlateBackdropAdaptation.StaleOffline
+        }
+        return when (resolution) {
+            is ImageResolution.Failed,
+            is ImageResolution.Pending -> TheaterPlateBackdropAdaptation.LowQuality
+            is ImageResolution.Ready -> TheaterPlateBackdropAdaptation.Ready
+            is ImageResolution.Placeholder -> TheaterPlateBackdropAdaptation.MissingBackdrop
+            null -> when (imageState) {
+                is DetailImageState.Ready -> TheaterPlateBackdropAdaptation.Ready
+                is DetailImageState.Pending,
+                is DetailImageState.Failed -> TheaterPlateBackdropAdaptation.LowQuality
+                is DetailImageState.NoArt -> TheaterPlateBackdropAdaptation.MissingBackdrop
+            }
+        }
+    }
+}
 
 /** Presentation seam used by unit tests and by the Compose primitives below. */
 object DetailPrimitivePresenter {
@@ -762,28 +858,19 @@ fun FerrexDetailStage(
     interactionMode: DetailSurfaceInteractionMode = DetailSurfaceInteractionMode.PhoneTouch,
     callbacks: DetailPrimitiveCallbacks = DetailPrimitiveCallbacks(),
     fallbackPolicy: MediaArtFallbackPolicy = MediaArtFallbackPolicy(),
+    contentPadding: PaddingValues = detailStageContentPadding(interactionMode),
+    containerColor: Color = FerrexDesignTokens.Palette.SlateCanvas,
     header: (@Composable () -> Unit)? = null,
 ) {
     val presentation = remember(page, interactionMode) { DetailPrimitivePresenter.stage(page, interactionMode) }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(FerrexDesignTokens.Palette.SlateCanvas)
+            .background(containerColor)
             .testTag(presentation.testTag)
             .semantics { contentDescription = presentation.contentDescription },
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
-        contentPadding = PaddingValues(
-            horizontal = when (interactionMode) {
-                DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvHorizontal
-                DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 32.dp
-                DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneHorizontal
-            },
-            vertical = when (interactionMode) {
-                DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvVertical
-                DetailSurfaceInteractionMode.PhoneLandscapeTouch -> FerrexDesignTokens.Space.Xxl
-                DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneVertical
-            },
-        ),
+        contentPadding = contentPadding,
     ) {
         if (header != null) {
             item(key = "detail-header") {
@@ -1409,6 +1496,27 @@ private fun DetailActionRole.toSharedRole(): FerrexActionRole = when (this) {
     DetailActionRole.DestructiveReset -> FerrexActionRole.DestructiveReset
     DetailActionRole.Diagnostics -> FerrexActionRole.Secondary
     DetailActionRole.Back -> FerrexActionRole.Secondary
+}
+
+private fun detailStageContentPadding(interactionMode: DetailSurfaceInteractionMode): PaddingValues = PaddingValues(
+    horizontal = when (interactionMode) {
+        DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvHorizontal
+        DetailSurfaceInteractionMode.PhoneLandscapeTouch -> 32.dp
+        DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneHorizontal
+    },
+    vertical = when (interactionMode) {
+        DetailSurfaceInteractionMode.TvDpad -> FerrexDesignTokens.Space.ScreenTvVertical
+        DetailSurfaceInteractionMode.PhoneLandscapeTouch -> FerrexDesignTokens.Space.Xxl
+        DetailSurfaceInteractionMode.PhoneTouch -> FerrexDesignTokens.Space.ScreenPhoneVertical
+    },
+)
+
+private fun DetailPageKind.detailStageDefaultColor(): TheaterPlateColor = when (this) {
+    DetailPageKind.Movie -> TheaterPlateColor.rgb(15, 23, 42)
+    DetailPageKind.Series -> TheaterPlateColor.rgb(23, 37, 84)
+    DetailPageKind.Season -> TheaterPlateColor.rgb(30, 27, 75)
+    DetailPageKind.Episode -> TheaterPlateColor.rgb(22, 78, 99)
+    DetailPageKind.MissingDetail -> TheaterPlateColor.rgb(31, 41, 55)
 }
 
 private val DetailPageKind.label: String get() = when (this) {

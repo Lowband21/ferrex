@@ -347,6 +347,9 @@ class DetailPageModelsTest {
             ),
         )
 
+        assertEquals(DetailArtRole.Backdrop, page.hero.background.role)
+        assertEquals(DetailArtRole.Still, page.hero.foreground?.role)
+        assertEquals(key("still-2", BrowseImageCategory.Episode), page.hero.foreground?.requestKey)
         assertEquals(DetailRailState.Available, page.rail(DetailRailKind.SiblingEpisodes)?.state)
         assertEquals(2, page.rail(DetailRailKind.SiblingEpisodes)?.items?.size)
         assertEquals(DetailRailState.Available, page.rail(DetailRailKind.Cast)?.state)
