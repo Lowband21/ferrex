@@ -37,8 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -72,6 +70,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -126,10 +125,10 @@ import com.ferrex.android.core.playback.TvTrackPickerKind
 import com.ferrex.android.core.playback.toPlaybackTrackGroupSnapshots
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
-import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
 import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
@@ -158,6 +157,154 @@ private enum class AspectRatioMode(
 enum class PlayerChrome {
     Phone,
     Tv,
+}
+
+internal enum class PhonePlaybackPanelTreatment {
+    InlineFlat,
+}
+
+internal data class PhonePlaybackRecoveryActionPresentation(
+    val key: String,
+    val label: String,
+    val role: FerrexActionRole,
+    val contentDescription: String,
+)
+
+internal data class PhonePlaybackRecoveryPresentation(
+    val title: String,
+    val supportingText: String,
+    val tone: FerrexStatusTone,
+    val actions: List<PhonePlaybackRecoveryActionPresentation>,
+    val treatment: PhonePlaybackPanelTreatment = PhonePlaybackPanelTreatment.InlineFlat,
+) {
+    val testTag: String = FerrexQaTags.namespaced("phone", "player", "recovery", title)
+    val contentDescription: String = buildString {
+        append(title)
+        append(". ")
+        append(supportingText)
+        if (actions.isNotEmpty()) {
+            append(". Recovery actions: ")
+            append(actions.joinToString(", ") { it.label })
+        }
+    }
+}
+
+internal object PhonePlaybackRecoveryPresenter {
+    const val RetryKey = "retry"
+    const val BackKey = "back"
+    const val ChangeServerKey = "change-server"
+    const val SignOutKey = "sign-out"
+    const val DiagnosticsKey = "diagnostics"
+
+    fun loading(message: String, diagnosticsAvailable: Boolean): PhonePlaybackRecoveryPresentation = PhonePlaybackRecoveryPresentation(
+        title = "Preparing playback",
+        supportingText = message,
+        tone = FerrexStatusTone.Secondary,
+        actions = listOfNotNull(
+            action(
+                key = BackKey,
+                label = "Back to details",
+                role = FerrexActionRole.Secondary,
+                contentDescription = "Back to details while playback is loading",
+            ),
+            action(
+                key = ChangeServerKey,
+                label = "Change server",
+                role = FerrexActionRole.Secondary,
+                contentDescription = "Change Ferrex server while playback is loading",
+            ),
+            action(
+                key = SignOutKey,
+                label = "Sign out",
+                role = FerrexActionRole.Secondary,
+                contentDescription = "Sign out while playback is loading",
+            ),
+            action(
+                key = DiagnosticsKey,
+                label = "Diagnostics / Export diagnostics",
+                role = FerrexActionRole.Secondary,
+                contentDescription = "Open diagnostics while playback is loading",
+            ).takeIf { diagnosticsAvailable },
+        ),
+    )
+
+    fun error(
+        failure: PlaybackFailure,
+        actions: PlaybackRecoveryActions,
+        diagnosticsAvailable: Boolean,
+    ): PhonePlaybackRecoveryPresentation = PhonePlaybackRecoveryPresentation(
+        title = failure.tvPanelTitle(),
+        supportingText = buildString {
+            append(failure.message)
+            failure.httpStatusCode?.let { append("\nHTTP $it") }
+            if (failure.isAuthFailure) {
+                append("\nChange server and Sign out remain available if session recovery cannot refresh credentials.")
+            }
+        },
+        tone = FerrexStatusTone.Error,
+        actions = buildList {
+            if (actions.retry) {
+                add(
+                    action(
+                        key = RetryKey,
+                        label = "Retry playback",
+                        role = FerrexActionRole.Retry,
+                        contentDescription = "Retry playback after ${failure.kind}",
+                    ),
+                )
+            }
+            add(
+                action(
+                    key = BackKey,
+                    label = "Back to details",
+                    role = FerrexActionRole.Secondary,
+                    contentDescription = "Back to details after playback failed",
+                ),
+            )
+            if (actions.changeServer) {
+                add(
+                    action(
+                        key = ChangeServerKey,
+                        label = "Change server",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Change Ferrex server after playback failed",
+                    ),
+                )
+            }
+            if (actions.signOut) {
+                add(
+                    action(
+                        key = SignOutKey,
+                        label = "Sign out",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Sign out after playback failed",
+                    ),
+                )
+            }
+            if (actions.diagnostics && diagnosticsAvailable) {
+                add(
+                    action(
+                        key = DiagnosticsKey,
+                        label = "Diagnostics / Export diagnostics",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Open diagnostics after playback failed",
+                    ),
+                )
+            }
+        },
+    )
+
+    private fun action(
+        key: String,
+        label: String,
+        role: FerrexActionRole,
+        contentDescription: String,
+    ): PhonePlaybackRecoveryActionPresentation = PhonePlaybackRecoveryActionPresentation(
+        key = key,
+        label = label,
+        role = role,
+        contentDescription = contentDescription,
+    )
 }
 
 @Composable
@@ -391,60 +538,21 @@ private fun PlaybackLoading(
         return
     }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(32.dp),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
-        ) {
-            CircularProgressIndicator()
-            Text(
-                text = "Preparing playback",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-            )
-            FerrexActionButton(
-                label = "Back to details",
-                role = FerrexActionRole.Secondary,
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                FerrexActionButton(
-                    label = "Change server",
-                    role = FerrexActionRole.Secondary,
-                    onClick = onChangeServer,
-                    modifier = Modifier.weight(1f),
-                )
-                FerrexActionButton(
-                    label = "Sign out",
-                    role = FerrexActionRole.Secondary,
-                    onClick = onSignOut,
-                    modifier = Modifier.weight(1f),
-                )
+    PhonePlaybackRecoveryContent(
+        presentation = PhonePlaybackRecoveryPresenter.loading(
+            message = message,
+            diagnosticsAvailable = onOpenDiagnostics != null,
+        ),
+        leading = { CircularProgressIndicator() },
+        onAction = { key ->
+            when (key) {
+                PhonePlaybackRecoveryPresenter.BackKey -> onBack()
+                PhonePlaybackRecoveryPresenter.ChangeServerKey -> onChangeServer()
+                PhonePlaybackRecoveryPresenter.SignOutKey -> onSignOut()
+                PhonePlaybackRecoveryPresenter.DiagnosticsKey -> onOpenDiagnostics?.invoke()
             }
-            onOpenDiagnostics?.let {
-                FerrexActionButton(
-                    label = "Diagnostics / Export diagnostics",
-                    role = FerrexActionRole.Secondary,
-                    onClick = it,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -527,73 +635,62 @@ private fun PlaybackErrorPanel(
         return
     }
 
-    Card(
+    PhonePlaybackRecoveryContent(
+        presentation = PhonePlaybackRecoveryPresenter.error(
+            failure = failure,
+            actions = actions,
+            diagnosticsAvailable = onOpenDiagnostics != null,
+        ),
+        onAction = { key ->
+            when (key) {
+                PhonePlaybackRecoveryPresenter.RetryKey -> onRetry()
+                PhonePlaybackRecoveryPresenter.BackKey -> onBack()
+                PhonePlaybackRecoveryPresenter.ChangeServerKey -> onChangeServer()
+                PhonePlaybackRecoveryPresenter.SignOutKey -> onSignOut()
+                PhonePlaybackRecoveryPresenter.DiagnosticsKey -> onOpenDiagnostics?.invoke()
+            }
+        },
+    )
+}
+
+@Composable
+private fun PhonePlaybackRecoveryContent(
+    presentation: PhonePlaybackRecoveryPresentation,
+    onAction: (String) -> Unit,
+    leading: (@Composable () -> Unit)? = null,
+) {
+    val colors = presentation.tone.colors()
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(32.dp),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            .padding(32.dp)
+            .testTag(presentation.testTag)
+            .semantics(mergeDescendants = true) { contentDescription = presentation.contentDescription },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
     ) {
-        Column(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxl),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            FerrexStatusCard(
-                title = failure.tvPanelTitle(),
-                body = buildString {
-                    append(failure.message)
-                    failure.httpStatusCode?.let { append("\nHTTP $it") }
-                    if (failure.isAuthFailure) {
-                        append("\nChange server and Sign out remain available if session recovery cannot refresh credentials.")
-                    }
-                },
-                tone = FerrexStatusTone.Error,
-            )
-            if (actions.retry) {
-                FerrexActionButton(
-                    label = "Retry playback",
-                    role = FerrexActionRole.Retry,
-                    onClick = onRetry,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+        leading?.invoke()
+        Text(
+            text = presentation.title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = colors.accent,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = presentation.supportingText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = colors.content,
+            textAlign = TextAlign.Center,
+        )
+        presentation.actions.forEach { action ->
             FerrexActionButton(
-                label = "Back to details",
-                role = FerrexActionRole.Secondary,
-                onClick = onBack,
+                label = action.label,
+                role = action.role,
+                onClick = { onAction(action.key) },
+                contentDescription = action.contentDescription,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (actions.changeServer || actions.signOut) {
-                Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                    if (actions.changeServer) {
-                        FerrexActionButton(
-                            label = "Change server",
-                            role = FerrexActionRole.Secondary,
-                            onClick = onChangeServer,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (actions.signOut) {
-                        FerrexActionButton(
-                            label = "Sign out",
-                            role = FerrexActionRole.Secondary,
-                            onClick = onSignOut,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-            if (actions.diagnostics) {
-                onOpenDiagnostics?.let {
-                    FerrexActionButton(
-                        label = "Diagnostics / Export diagnostics",
-                        role = FerrexActionRole.Secondary,
-                        onClick = it,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
         }
     }
 }

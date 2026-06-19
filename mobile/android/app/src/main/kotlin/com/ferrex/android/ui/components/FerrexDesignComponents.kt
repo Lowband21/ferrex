@@ -25,6 +25,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -139,7 +140,7 @@ fun FerrexStatusCard(
             .fillMaxWidth()
             .withFerrexTestTag(testTag)
             .withFerrexContentDescription(contentDescription),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
+        shape = RectangleShape,
         color = colors.container,
         contentColor = colors.content,
         tonalElevation = FerrexDesignTokens.Space.None,

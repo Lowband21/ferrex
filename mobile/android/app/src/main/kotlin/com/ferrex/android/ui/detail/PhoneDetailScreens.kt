@@ -1,19 +1,14 @@
 package com.ferrex.android.ui.detail
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -50,6 +45,7 @@ import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTreatment
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theaterplate.TheaterPlateStage
 import com.ferrex.android.ui.theme.FerrexDesignTokens
@@ -195,7 +191,6 @@ fun PhoneDetailScreen(
                             actionNotice = actionNotice,
                             episodeUnavailable = episodeUnavailable,
                             interactionMode = interactionMode,
-                            onBack = onBack,
                             onRetryConnection = onRetryConnection,
                             onRetryEpisodes = onRetryEpisodes,
                         )
@@ -245,34 +240,10 @@ private fun PhoneDetailChrome(
     actionNotice: String?,
     episodeUnavailable: EpisodeUnavailableNotice?,
     interactionMode: DetailSurfaceInteractionMode,
-    onBack: () -> Unit,
     onRetryConnection: () -> Unit,
     onRetryEpisodes: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = interactionMode.density,
-            tone = FerrexStageSurfaceTone.Primary,
-            modifier = Modifier.fillMaxWidth(),
-            contentDescription = "Phone detail navigation actions",
-            testTag = FerrexQaTags.namespaced("phone", "detail", "chrome"),
-        ) {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FerrexActionButton(
-                    label = "Back",
-                    role = FerrexActionRole.Secondary,
-                    onClick = onBack,
-                    modifier = Modifier.widthIn(min = interactionMode.actionMinWidth),
-                    testTag = FerrexQaTags.namespaced("phone", "detail", "action", "back"),
-                    contentDescription = "Back to the previous phone screen",
-                )
-            }
-        }
         if (connectionStatus.visible) {
             PhoneDetailNotice(
                 title = connectionStatus.title,
@@ -336,6 +307,7 @@ private fun PhoneDetailNotice(
         modifier = Modifier.fillMaxWidth(),
         contentDescription = "$title. $body",
         testTag = FerrexQaTags.namespaced("phone", "detail", "notice", tagKey),
+        treatment = FerrexStageSurfaceTreatment.DividerOnly,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
             TheaterPlateText(

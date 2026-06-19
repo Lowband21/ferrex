@@ -40,8 +40,17 @@ import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
+
+internal object PhoneRecoveryPresentation {
+    val VisibleBackActionLabel: String? = null
+
+    fun statusTag(key: String): String = FerrexQaTags.namespaced("phone", "recovery", "status", key)
+
+    fun statusDescription(title: String, body: String): String = "$title. $body"
+}
 
 @Composable
 fun PhoneLoadingScreen() {
@@ -144,6 +153,8 @@ fun PhoneServerConnectScreen(
                 title = "Connection status",
                 body = it,
                 tone = FerrexStatusTone.Primary,
+                testTag = PhoneRecoveryPresentation.statusTag("connection"),
+                contentDescription = PhoneRecoveryPresentation.statusDescription("Connection status", it),
             )
         }
     }
@@ -252,6 +263,8 @@ fun PhoneLoginScreen(
                 title = "Sign-in status",
                 body = it,
                 tone = if (isFatal) FerrexStatusTone.Error else FerrexStatusTone.Secondary,
+                testTag = PhoneRecoveryPresentation.statusTag("sign-in"),
+                contentDescription = PhoneRecoveryPresentation.statusDescription("Sign-in status", it),
             )
         }
     }

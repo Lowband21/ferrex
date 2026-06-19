@@ -89,6 +89,7 @@ import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
 import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTreatment
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
 import com.ferrex.android.ui.theme.FerrexDesignTokens
@@ -368,7 +369,7 @@ object DetailPrimitivePresenter {
         actions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
     ): DetailActionShelfPresentation {
-        val actionPresentations = actions.map { action(pageKey, it, mode) }
+        val actionPresentations = actions.visibleForDetailMode(mode).map { action(pageKey, it, mode) }
         return DetailActionShelfPresentation(
             testTag = FerrexQaTags.TheaterPlate.action(mode.targetKey, pageKey, "shelf"),
             contentDescription = actionShelfDescription(actionPresentations),
@@ -582,7 +583,7 @@ object DetailPrimitivePresenter {
         recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
     ): DetailSlabPresentation {
-        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        val actions = recoveryActions.visibleForDetailMode(mode).map { action(pageKey, it, mode) }
         return DetailSlabPresentation(
             testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "watch"),
             title = watch.label,
@@ -605,7 +606,7 @@ object DetailPrimitivePresenter {
         recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
     ): DetailSlabPresentation {
-        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        val actions = recoveryActions.visibleForDetailMode(mode).map { action(pageKey, it, mode) }
         return DetailSlabPresentation(
             testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, "empty"),
             title = empty.title,
@@ -622,7 +623,7 @@ object DetailPrimitivePresenter {
         recoveryActions: List<DetailPageAction>,
         mode: DetailSurfaceInteractionMode,
     ): DetailSlabPresentation {
-        val actions = recoveryActions.map { action(pageKey, it, mode) }
+        val actions = recoveryActions.visibleForDetailMode(mode).map { action(pageKey, it, mode) }
         return DetailSlabPresentation(
             testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", pageKey, freshness.kind.name),
             title = freshness.title,
@@ -635,7 +636,7 @@ object DetailPrimitivePresenter {
 
     private fun imageSlabs(page: DetailPageModel, mode: DetailSurfaceInteractionMode): List<DetailSlabPresentation> =
         page.imageStatusSummaries().map { summary ->
-            val actions = page.recovery.actions.map { action(page.stableKey, it, mode) }
+            val actions = page.recovery.actions.visibleForDetailMode(mode).map { action(page.stableKey, it, mode) }
             DetailSlabPresentation(
                 testTag = FerrexQaTags.namespaced(mode.targetKey, "theater-plate", "status", page.stableKey, "image", summary.key),
                 title = summary.title,
@@ -848,6 +849,16 @@ class DetailPrimitiveCallbacks(
     val onRailItemActivated: (DetailRail, DetailRailItem) -> Unit = { _, _ -> },
 )
 
+private fun DetailSurfaceInteractionMode.usesSystemBackForPhoneDetail(): Boolean = this == DetailSurfaceInteractionMode.PhoneTouch ||
+    this == DetailSurfaceInteractionMode.PhoneLandscapeTouch
+
+private fun List<DetailPageAction>.visibleForDetailMode(mode: DetailSurfaceInteractionMode): List<DetailPageAction> =
+    if (mode.usesSystemBackForPhoneDetail()) {
+        filterNot { it.kind == DetailPageActionKind.Back }
+    } else {
+        this
+    }
+
 @Composable
 fun FerrexDetailStage(
     page: DetailPageModel,
@@ -863,6 +874,8 @@ fun FerrexDetailStage(
     header: (@Composable () -> Unit)? = null,
 ) {
     val presentation = remember(page, interactionMode) { DetailPrimitivePresenter.stage(page, interactionMode) }
+    val visiblePageActions = remember(page.actions, interactionMode) { page.actions.visibleForDetailMode(interactionMode) }
+    val visibleRecoveryActions = remember(page.recovery.actions, interactionMode) { page.recovery.actions.visibleForDetailMode(interactionMode) }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -896,10 +909,10 @@ fun FerrexDetailStage(
                 )
             }
         }
-        if (page.actions.isNotEmpty()) {
+        if (visiblePageActions.isNotEmpty()) {
             item(key = "actions") {
                 FerrexDetailActionShelf(
-                    actions = page.actions,
+                    actions = visiblePageActions,
                     presentation = presentation.actionShelf,
                     interactionMode = interactionMode,
                     callbacks = callbacks,
@@ -907,7 +920,7 @@ fun FerrexDetailStage(
             }
         }
         items(presentation.slabs, key = { it.testTag }) { slab ->
-            val actions = if (slab.actions.isEmpty()) emptyList() else page.recovery.actions
+            val actions = if (slab.actions.isEmpty()) emptyList() else visibleRecoveryActions
             FerrexDetailStatusSlab(
                 slab = slab,
                 sourceActions = actions,
@@ -1156,6 +1169,11 @@ fun FerrexDetailStatusSlab(
         modifier = modifier.fillMaxWidth(),
         contentDescription = slab.contentDescription,
         testTag = slab.testTag,
+        treatment = if (interactionMode.usesSystemBackForPhoneDetail()) {
+            FerrexStageSurfaceTreatment.DividerOnly
+        } else {
+            FerrexStageSurfaceTreatment.StatusBand
+        },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
             TheaterPlateText(
