@@ -41,8 +41,10 @@ import com.ferrex.android.core.auth.AuthConnectionHealth
 import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
 import com.ferrex.android.core.auth.AuthenticatedConnectionUi
 import com.ferrex.android.core.auth.ConnectionRecoveryRefreshGate
+import com.ferrex.android.core.auth.NoWipeRecoveryActionKind
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.auth.connectionRecoveryUi
+import com.ferrex.android.core.auth.noWipeRecoveryActions
 import com.ferrex.android.core.browse.AuthenticatedHomeBackPolicy
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
@@ -1456,6 +1458,12 @@ private fun AccountSummaryCard(
     onResetConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
+    val recoveryActions = noWipeRecoveryActions(includeCacheClear = false).associateBy { it.kind }
+    val retryAction = recoveryActions.getValue(NoWipeRecoveryActionKind.Retry)
+    val signOutAction = recoveryActions.getValue(NoWipeRecoveryActionKind.SignOut)
+    val changeServerAction = recoveryActions.getValue(NoWipeRecoveryActionKind.ChangeServer)
+    val resetConnectionAction = recoveryActions.getValue(NoWipeRecoveryActionKind.ResetConnection)
+    val diagnosticsAction = recoveryActions.getValue(NoWipeRecoveryActionKind.Diagnostics)
     Column(
         modifier = Modifier.testTag(FerrexQaTags.Phone.AccountSummary),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
@@ -1468,6 +1476,7 @@ private fun AccountSummaryCard(
         if (connectionStatus.visible) {
             FerrexActionButton(
                 label = connectionStatus.retryLabel,
+                subtitle = retryAction.subtitle,
                 role = FerrexActionRole.Retry,
                 enabled = connectionStatus.retryEnabled,
                 onClick = onRetryConnection,
@@ -1476,26 +1485,30 @@ private fun AccountSummaryCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
             FerrexActionButton(
-                label = "Change server",
+                label = changeServerAction.label,
+                subtitle = changeServerAction.subtitle,
                 role = FerrexActionRole.Secondary,
                 onClick = onChangeServer,
                 modifier = Modifier.weight(1f),
             )
             FerrexActionButton(
-                label = "Sign out",
+                label = signOutAction.label,
+                subtitle = signOutAction.subtitle,
                 role = FerrexActionRole.Secondary,
                 onClick = onSignOut,
                 modifier = Modifier.weight(1f),
             )
         }
         FerrexActionButton(
-            label = "Reset connection",
+            label = resetConnectionAction.label,
+            subtitle = resetConnectionAction.subtitle,
             role = FerrexActionRole.DestructiveReset,
             onClick = onResetConnection,
             modifier = Modifier.fillMaxWidth(),
         )
         FerrexActionButton(
-            label = "Diagnostics / Export diagnostics",
+            label = diagnosticsAction.label,
+            subtitle = diagnosticsAction.subtitle,
             role = FerrexActionRole.Secondary,
             onClick = onOpenDiagnostics,
             modifier = Modifier.fillMaxWidth(),

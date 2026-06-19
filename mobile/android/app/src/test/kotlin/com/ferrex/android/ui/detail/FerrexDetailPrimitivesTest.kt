@@ -24,6 +24,8 @@ import com.ferrex.android.core.detail.DetailRailKind
 import com.ferrex.android.core.detail.DetailRailState
 import com.ferrex.android.core.detail.DetailRecoveryState
 import com.ferrex.android.core.detail.DetailTone
+import com.ferrex.android.core.detail.DetailWatchState
+import com.ferrex.android.core.detail.DetailWatchStateKind
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.mediaart.MediaArtFitPolicy
@@ -328,7 +330,7 @@ class FerrexDetailPrimitivesTest {
         ),
         metadata = listOf(DetailMetadataItem("PG-13", tone = DetailTone.Neutral)),
         facts = listOf(DetailFactItem("Runtime", "95 min", tone = DetailTone.Accent)),
-        watchState = null,
+        watchState = watchState,
         actions = actions,
         recovery = recovery,
         rails = rails,
@@ -415,7 +417,6 @@ class FerrexDetailPrimitivesTest {
         mediaArt = null,
         imageState = DetailImageState.NoArt(label = "missing", reason = reason),
     )
-
     private fun playbackContract(id: String): PlaybackRouteContract = PlaybackRouteContract(
         targetMediaId = "file-$id",
         logicalMediaId = id,

@@ -58,6 +58,20 @@ class TheaterPlateStagePrimitivesTest {
     }
 
     @Test
+    fun phoneSurfaceTokensCalmNestedContainers() {
+        val phoneStatus = FerrexStageSurfaceVariant.StatusSlab.tokenSpec(FerrexStageDensityFamily.Standard)
+        val phoneRail = FerrexStageSurfaceVariant.RailBand.tokenSpec(FerrexStageDensityFamily.Standard)
+        val phoneControl = FerrexStageSurfaceVariant.ControlShelf.tokenSpec(FerrexStageDensityFamily.Standard)
+        val tvStatus = FerrexStageSurfaceVariant.StatusSlab.tokenSpec(FerrexStageDensityFamily.TenFoot)
+
+        assertTrue("phone status container stays quiet", phoneStatus.containerAlpha < 0.30f)
+        assertTrue("phone status border stays quiet", phoneStatus.borderAlpha < 0.25f)
+        assertTrue("passive rails should be quieter than controls", phoneRail.containerAlpha < phoneControl.containerAlpha)
+        assertTrue("passive rail outlines should be quieter than controls", phoneRail.borderAlpha < phoneControl.borderAlpha)
+        assertTrue("TV focus surfaces keep stronger outlines", tvStatus.borderAlpha > phoneStatus.borderAlpha)
+    }
+
+    @Test
     fun gradeControlsMapToFiniteStageVisuals() {
         TheaterPlateGradeClass.entries.forEach { gradeClass ->
             val controls = controlsFor(gradeClass)
