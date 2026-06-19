@@ -117,12 +117,25 @@ pub trait FolderScanActor: Send + Sync {
 pub struct ScannerFileFilterPolicy {
     media_extensions: BTreeSet<String>,
     ignored_extensions: BTreeSet<String>,
+    ignored_path_patterns: Vec<String>,
 }
 
 impl ScannerFileFilterPolicy {
     pub fn new(
         media_extensions: impl IntoIterator<Item = String>,
         ignored_extensions: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self::new_with_ignored_path_patterns(
+            media_extensions,
+            ignored_extensions,
+            Vec::<String>::new(),
+        )
+    }
+
+    pub fn new_with_ignored_path_patterns(
+        media_extensions: impl IntoIterator<Item = String>,
+        ignored_extensions: impl IntoIterator<Item = String>,
+        ignored_path_patterns: impl IntoIterator<Item = String>,
     ) -> Self {
         let media_extensions = media_extensions
             .into_iter()
@@ -132,10 +145,16 @@ impl ScannerFileFilterPolicy {
             .into_iter()
             .filter_map(|ext| normalize_extension(&ext))
             .collect();
+        let ignored_path_patterns = ignored_path_patterns
+            .into_iter()
+            .map(|pattern| pattern.trim().replace('\\', "/"))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
 
         Self {
             media_extensions,
             ignored_extensions,
+            ignored_path_patterns,
         }
     }
 
@@ -145,6 +164,10 @@ impl ScannerFileFilterPolicy {
 
     pub fn ignored_extensions(&self) -> impl Iterator<Item = &str> {
         self.ignored_extensions.iter().map(String::as_str)
+    }
+
+    pub fn ignored_path_patterns(&self) -> impl Iterator<Item = &str> {
+        self.ignored_path_patterns.iter().map(String::as_str)
     }
 
     pub fn is_supported_media_ext(&self, ext: &str) -> bool {
@@ -160,6 +183,13 @@ impl ScannerFileFilterPolicy {
             .and_then(|e| e.to_str())
             .map(|ext| self.is_supported_media_ext(ext))
             .unwrap_or(false)
+    }
+
+    pub fn is_ignored_path(&self, path: &Path) -> bool {
+        let value = path.to_string_lossy().replace('\\', "/");
+        self.ignored_path_patterns
+            .iter()
+            .any(|pattern| path_pattern_matches(pattern, &value))
     }
 }
 
@@ -179,6 +209,57 @@ fn normalize_extension(ext: &str) -> Option<String> {
         && !normalized.contains('\\')
         && !normalized.contains('*'))
     .then_some(normalized)
+}
+
+fn path_pattern_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.trim().replace('\\', "/");
+    if pattern.is_empty() {
+        return false;
+    }
+
+    if pattern.contains('*') || pattern.contains('?') {
+        return wildcard_match(pattern.as_bytes(), value.as_bytes());
+    }
+
+    value == pattern
+        || value
+            .strip_prefix('/')
+            .is_some_and(|trimmed| trimmed == pattern)
+        || value
+            .split('/')
+            .any(|component| component.eq_ignore_ascii_case(&pattern))
+}
+
+fn wildcard_match(pattern: &[u8], value: &[u8]) -> bool {
+    let (mut pattern_idx, mut value_idx) = (0usize, 0usize);
+    let mut star_idx: Option<usize> = None;
+    let mut star_value_idx = 0usize;
+
+    while value_idx < value.len() {
+        if pattern_idx < pattern.len()
+            && (pattern[pattern_idx] == b'?'
+                || pattern[pattern_idx].eq_ignore_ascii_case(&value[value_idx]))
+        {
+            pattern_idx += 1;
+            value_idx += 1;
+        } else if pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
+            star_idx = Some(pattern_idx);
+            pattern_idx += 1;
+            star_value_idx = value_idx;
+        } else if let Some(star) = star_idx {
+            pattern_idx = star + 1;
+            star_value_idx += 1;
+            value_idx = star_value_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
+        pattern_idx += 1;
+    }
+
+    pattern_idx == pattern.len()
 }
 
 /// Folder scan actor that performs filesystem operations for one folder per job.
@@ -329,6 +410,15 @@ impl FolderScanActor for DefaultFolderScanActor {
 
         for entry in &entries {
             let entry_path = folder_path.join(&entry.name);
+            if self.filters.is_ignored_path(&entry_path) {
+                tracing::debug!(
+                    target: "scan::jobs",
+                    path = %entry_path.display(),
+                    "ignoring scanner-filtered path"
+                );
+                continue;
+            }
+
             if entry.is_dir {
                 // Skip hidden/system directories up front
                 if entry.name.starts_with('.') {
@@ -642,6 +732,25 @@ mod tests {
         assert!(filters.is_media_file_path(Path::new("movie.MP4")));
         assert!(!filters.is_media_file_path(Path::new("movie.avi")));
         assert!(!filters.is_media_file_path(Path::new("partial.tmp")));
+    }
+
+    #[test]
+    fn filter_policy_matches_ignored_path_patterns() {
+        let filters = ScannerFileFilterPolicy::new_with_ignored_path_patterns(
+            vec!["mkv".to_string()],
+            Vec::<String>::new(),
+            vec!["**/.staging/**".to_string(), "transcoding".to_string()],
+        );
+
+        assert!(
+            filters.is_ignored_path(Path::new(
+                "/media/Incoming/.staging/Movie.mkv"
+            ))
+        );
+        assert!(filters.is_ignored_path(Path::new(
+            "/media/Incoming/transcoding/Movie.mkv"
+        )));
+        assert!(!filters.is_ignored_path(Path::new("/media/Movies/Movie.mkv")));
     }
 
     #[tokio::test]

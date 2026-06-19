@@ -21,6 +21,10 @@ pub struct ScanMetrics {
 }
 
 /// Minimal, feature-agnostic view of orchestrator configuration for admin surfaces.
+///
+/// Scanner layout diagnostics use the stable reason codes documented by
+/// `domain::scan::manifest::ManifestDiagnosticReason`; clients should treat
+/// these codes as API-facing strings even when future persistence changes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanConfig {
     pub orchestrator: OrchestratorConfigView,
@@ -42,8 +46,13 @@ pub struct IncrementalScanPolicyView {
     pub maintenance_tick_interval_ms: u64,
     pub maintenance_max_jobs_per_library: usize,
     pub maintenance_max_root_entries_per_library: usize,
+    /// Extensions that the scanner layout contract treats as video candidates.
     pub media_extensions: Vec<String>,
+    /// Extensions filtered before media classification, reported with the
+    /// `scanner.layout.ignored_extension` diagnostic code when surfaced.
     pub ignored_extensions: Vec<String>,
+    /// Shell-style path patterns filtered before layout classification, reported
+    /// with the `scanner.layout.ignored_path_pattern` diagnostic code when surfaced.
     pub ignored_path_patterns: Vec<String>,
 }
 

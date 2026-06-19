@@ -40,6 +40,7 @@
 //! - `poll_interval_ms`: fallback cadence for polling watchers.
 //! - `overflow_batch_capacity`: size of the channel; hitting this triggers an overflow event.
 //! - `ignored_extensions`: optional allow/deny list to filter noise (images, subtitles, temp files).
+//! - `ignored_path_patterns`: shell-style path filters applied before layout classification.
 //! - `maintenance_tick_interval_ms`: how often to examine partitions for sweep scheduling.
 //!
 //! ---

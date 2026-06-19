@@ -484,9 +484,10 @@ async fn wire_app_resources(
             tmdb_provider.clone(),
             image_service.clone(),
             unit_of_work.clone(),
-            ferrex_core::domain::scan::actors::folder::ScannerFileFilterPolicy::new(
+            ferrex_core::domain::scan::actors::folder::ScannerFileFilterPolicy::new_with_ignored_path_patterns(
                 config.scanner.video_extensions.clone(),
                 config.scanner.ignored_extensions.clone(),
+                config.scanner.ignored_path_patterns.clone(),
             ),
         )
         .await?,

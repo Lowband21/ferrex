@@ -583,6 +583,9 @@ where
             let filtered: Vec<FileSystemEvent> = changes
                 .into_iter()
                 .filter(|ev| {
+                    if self.file_filters.is_ignored_path(&ev.path) {
+                        return false;
+                    }
                     if ev.path.is_dir() {
                         return true;
                     }
