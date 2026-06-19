@@ -16,7 +16,7 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         return Subscription::none();
     }
 
-    let mut scan_ids: HashSet<_> = state
+    let scan_ids: HashSet<_> = state
         .domains
         .library
         .state
@@ -24,8 +24,6 @@ pub fn subscription(state: &State) -> Subscription<DomainMessage> {
         .keys()
         .copied()
         .collect();
-    scan_ids
-        .extend(state.domains.library.state.latest_progress.keys().copied());
 
     let plans = stream_plan(LibrarySubscriptionInputs {
         load_state: state.domains.library.state.load_state.clone(),

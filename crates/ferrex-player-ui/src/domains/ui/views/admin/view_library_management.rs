@@ -9,12 +9,11 @@ use crate::{
             views::admin::view_library_form,
         },
     },
-    infra::repository::accessor::{Accessor, ReadOnly},
     infra::theme::accent,
     state::State,
 };
 use ferrex_core::player_prelude::{
-    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus,
+    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus, ScanRunMode,
     ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
@@ -129,11 +128,7 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
                     .expect("Failed to lock repository")
                     .iter()
                     .map(|library_id| {
-                        create_library_card(
-                            state.domains.ui.state.repo_accessor.clone(),
-                            library_id,
-                            &permissions,
-                        )
+                        create_library_card(state, library_id, &permissions)
                     })
                     .collect::<Vec<_>>(),
             )
@@ -150,12 +145,17 @@ pub fn view_library_management(state: &State) -> Element<'_, UiMessage> {
 }
 
 fn create_library_card<'a>(
-    repo_accessor: Accessor<ReadOnly>,
+    state: &'a State,
     library_id: &Uuid,
     permissions: &permissions::PermissionChecker,
 ) -> Element<'a, UiMessage> {
-    let library_opt =
-        repo_accessor.get_archived_library_yoke(library_id).unwrap(); // This should be safe but I should handle it anyway
+    let library_opt = state
+        .domains
+        .ui
+        .state
+        .repo_accessor
+        .get_archived_library_yoke(library_id)
+        .unwrap(); // This should be safe but I should handle it anyway
 
     if let Some(library_yoke) = library_opt {
         let library = *library_yoke.get();
@@ -175,16 +175,44 @@ fn create_library_card<'a>(
 
         // Scan button (only if user has scan permission)
         if permissions.can_scan_libraries() && library.enabled {
-            action_buttons = action_buttons.push(
-                button("Scan")
-                    .on_press(
-                        SettingsUiMessage::ScanLibrary(LibraryId(
-                            library.id.as_uuid(),
-                        ))
-                        .into(),
-                    )
-                    .style(theme::Button::Secondary.style()),
-            );
+            let domain_library_id = LibraryId(library.id.as_uuid());
+            let active_manual_scan =
+                state.domains.library.state.active_scan_by_library_mode(
+                    domain_library_id,
+                    ScanRunMode::Manual,
+                );
+            let scan_start_pending = state
+                .domains
+                .library
+                .state
+                .is_scan_start_pending(domain_library_id, ScanRunMode::Manual);
+            let scan_button_label = if scan_start_pending {
+                "Starting…"
+            } else if let Some(scan) = active_manual_scan {
+                match &scan.status {
+                    ScanLifecycleStatus::Pending => "Scan pending",
+                    ScanLifecycleStatus::Running => "Scanning…",
+                    ScanLifecycleStatus::Paused => "Scan paused",
+                    ScanLifecycleStatus::Completed
+                    | ScanLifecycleStatus::Failed
+                    | ScanLifecycleStatus::Canceled => "Scan",
+                }
+            } else {
+                "Scan"
+            };
+
+            let scan_button = button(scan_button_label)
+                .style(theme::Button::Secondary.style());
+            let scan_button = if active_manual_scan.is_some()
+                || scan_start_pending
+            {
+                scan_button
+            } else {
+                scan_button.on_press(
+                    SettingsUiMessage::ScanLibrary(domain_library_id).into(),
+                )
+            };
+            action_buttons = action_buttons.push(scan_button);
             // Reset: delete and recreate library with start_scan=true
             action_buttons = action_buttons.push(
                 button("Reset Library")

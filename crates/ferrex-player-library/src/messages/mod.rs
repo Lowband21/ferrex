@@ -6,8 +6,9 @@ use crate::media_root_browser;
 use crate::types::LibrariesBootstrapPayload;
 use ferrex_core::player_prelude::Library as CoreLibrary;
 use ferrex_core::player_prelude::{
-    LibraryId, LibraryMediaResponse, MediaFile, MovieBatchId, ScanConfig,
-    ScanMetrics, ScanProgressEvent, ScanSnapshotDto, SeriesID,
+    LibraryId, LibraryMediaResponse, MediaFile, MovieBatchId,
+    ScanCommandAcceptedResponse, ScanConfig, ScanMetrics, ScanProgressEvent,
+    ScanSnapshotDto, SeriesID,
 };
 use ferrex_player_api::api_types::{Library as ApiLibrary, Media, MediaID};
 use uuid::Uuid;
@@ -51,8 +52,7 @@ pub enum LibraryMessage {
     // Scanning
     ScanStarted {
         library_id: LibraryId,
-        scan_id: Uuid,
-        correlation_id: Uuid,
+        response: ScanCommandAcceptedResponse,
     },
     ScanProgressFrame(ScanProgressEvent),
     FetchActiveScans,
@@ -345,12 +345,14 @@ impl std::fmt::Debug for LibraryMessage {
             Self::ScanLibrary(_) => write!(f, "Library::ScanLibrary"),
             Self::ScanStarted {
                 library_id,
-                scan_id,
-                correlation_id,
+                response,
             } => write!(
                 f,
-                "Library::ScanStarted(library={}, scan={}, correlation={})",
-                library_id, scan_id, correlation_id
+                "Library::ScanStarted(library={}, scan={}, correlation={}, disposition={:?})",
+                library_id,
+                response.scan_id,
+                response.correlation_id,
+                response.disposition
             ),
             Self::ScanProgressFrame(frame) => write!(
                 f,

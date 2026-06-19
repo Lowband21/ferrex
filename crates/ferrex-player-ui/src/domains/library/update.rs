@@ -30,9 +30,7 @@ use std::{
     sync::Arc,
 };
 
-use ferrex_core::player_prelude::{
-    Library, LibraryId, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
-};
+use ferrex_core::player_prelude::{Library, LibraryId};
 #[cfg(feature = "demo")]
 use ferrex_model::library::LibraryType;
 use ferrex_player_api::services::api::ApiService;
@@ -638,37 +636,23 @@ pub fn update_library(
         // Already handled above
         LibraryMessage::ScanStarted {
             library_id,
-            scan_id,
-            correlation_id,
+            response,
         } => {
             log::info!(
-                "Scan started: library={}, scan={}, correlation={}",
+                "Scan start accepted: library={}, scan={}, correlation={}, mode={}, status={}, disposition={:?}",
                 library_id,
-                scan_id,
-                correlation_id
+                response.scan_id,
+                response.correlation_id,
+                response.mode.as_str(),
+                response.status.as_str(),
+                response.disposition
             );
 
-            state.domains.library.state.active_scans.insert(
-                scan_id,
-                ScanSnapshotDto {
-                    scan_id,
-                    library_id,
-                    status: ScanLifecycleStatus::Running,
-                    mode: ScanRunMode::Manual,
-                    completed_items: 0,
-                    total_items: 0,
-                    retrying_items: 0,
-                    dead_lettered_items: 0,
-                    correlation_id,
-                    idempotency_key: String::new(),
-                    run_key: ScanRunMode::Manual.run_key(library_id),
-                    disposition: None,
-                    current_path: None,
-                    started_at: chrono::Utc::now(),
-                    terminal_at: None,
-                    sequence: 0,
-                },
-            );
+            state
+                .domains
+                .library
+                .state
+                .apply_scan_start_response(library_id, &response);
 
             let task =
                 super::update_handlers::scan_updates::handle_fetch_active_scans(
@@ -695,35 +679,28 @@ pub fn update_library(
         LibraryMessage::ScanProgressFrame(frame) => {
             let status = frame.status.clone();
             super::update_handlers::scan_updates::apply_scan_progress_frame(
-                state,
-                frame.clone(),
+                state, frame,
             );
 
             match status.as_str() {
                 "completed" => {
-                    super::update_handlers::scan_updates::remove_scan(
-                        state,
-                        frame.scan_id,
-                    );
                     let refresh_task =
                         super::update_handlers::refresh_library::handle_refresh_library(state);
                     DomainUpdateResult::task(
                         refresh_task.map(DomainMessage::Library),
                     )
                 }
-                "failed" | "canceled" => {
-                    super::update_handlers::scan_updates::remove_scan(
-                        state,
-                        frame.scan_id,
-                    );
-                    DomainUpdateResult::task(Task::none())
-                }
+                "failed" | "canceled" => DomainUpdateResult::task(Task::none()),
                 _ => DomainUpdateResult::task(Task::none()),
             }
         }
 
         LibraryMessage::ScanCommandFailed { library_id, error } => {
             if let Some(id) = library_id {
+                state.domains.library.state.finish_scan_start(
+                    id,
+                    ferrex_core::player_prelude::ScanRunMode::Manual,
+                );
                 log::error!("Scan command failed for {}: {}", id, error);
             } else {
                 log::error!("Scan command failed: {}", error);
