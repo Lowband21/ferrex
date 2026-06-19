@@ -139,6 +139,24 @@ pub trait JobEventPublisher: Send + Sync {
     async fn publish(&self, event: JobEvent) -> Result<()>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanSeedMode {
+    Bulk,
+    Maintenance,
+    Resume,
+}
+
+/// Summary emitted after a library actor finishes seeding scan work.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScanSeedSummary {
+    pub library_id: LibraryId,
+    pub correlation_id: Option<Uuid>,
+    pub mode: ScanSeedMode,
+    pub queued_folders: usize,
+    pub completed_at: DateTime<Utc>,
+}
+
 // Domain-level events linking the scan/analyze/index provider.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ScanEvent {
@@ -149,6 +167,7 @@ pub enum ScanEvent {
     },
     MediaFileDiscovered(Box<MediaFileDiscovered>),
     FolderScanCompleted(FolderScanSummary),
+    SeedCompleted(ScanSeedSummary),
     // Pipeline progression events
     MediaAnalyzed(Box<MediaAnalyzed>),
     MediaReadyForIndex(Box<MediaReadyForIndex>),

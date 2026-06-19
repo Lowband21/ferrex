@@ -15,7 +15,9 @@ use crate::domain::scan::orchestration::context::{
 use crate::error::{MediaError, Result};
 use ferrex_model::{MediaID, VideoMediaType};
 
-use super::messages::{FolderScanSummary, MediaFileDiscovered};
+use super::messages::{
+    FolderScanOutcome, FolderScanSummary, MediaFileDiscovered,
+};
 use crate::domain::scan::orchestration::job::{
     FolderScanJob, MediaFingerprint,
 };
@@ -42,6 +44,9 @@ pub struct FolderListingPlan {
     pub media_files: Vec<PathBuf>,
     pub ancillary_files: Vec<PathBuf>,
     pub generated_listing_hash: String,
+    /// Number of raw directory entries observed before scan-context filtering.
+    #[serde(default)]
+    pub total_entries: usize,
     /// True when the requested folder no longer exists or is no longer a directory.
     /// Missing folders reconcile as recursive tombstones instead of dead-lettering.
     #[serde(default)]
@@ -287,6 +292,7 @@ impl FolderScanActor for DefaultFolderScanActor {
                     media_files: Vec::new(),
                     ancillary_files: Vec::new(),
                     generated_listing_hash: compute_listing_hash(&[]),
+                    total_entries: 0,
                     folder_missing: true,
                 });
             }
@@ -302,6 +308,7 @@ impl FolderScanActor for DefaultFolderScanActor {
                     media_files: Vec::new(),
                     ancillary_files: Vec::new(),
                     generated_listing_hash: compute_listing_hash(&[]),
+                    total_entries: 0,
                     folder_missing: true,
                 });
             }
@@ -384,6 +391,7 @@ impl FolderScanActor for DefaultFolderScanActor {
             media_files,
             ancillary_files,
             generated_listing_hash,
+            total_entries: entries.len(),
             folder_missing: false,
         })
     }
@@ -577,11 +585,22 @@ impl FolderScanActor for DefaultFolderScanActor {
         discovered: &[MediaFileDiscovered],
         children: &[FolderScanContext],
     ) -> Result<FolderScanSummary> {
+        let outcome = if plan.folder_missing {
+            FolderScanOutcome::Missing
+        } else if !discovered.is_empty() || !children.is_empty() {
+            FolderScanOutcome::Changed
+        } else if plan.total_entries == 0 {
+            FolderScanOutcome::Empty
+        } else {
+            FolderScanOutcome::Unsupported
+        };
+
         Ok(FolderScanSummary {
             context: context.clone(),
             discovered_files: discovered.len(),
             enqueued_subfolders: children.len(),
             listing_hash: plan.generated_listing_hash.clone(),
+            outcome,
             completed_at: Utc::now(),
         })
     }

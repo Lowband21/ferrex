@@ -8,13 +8,14 @@ use ferrex_core::{
     application::unit_of_work::AppUnitOfWork,
     domain::scan::{
         actors::{
-            FileSystemEvent, FileSystemEventKind, LibraryRootsId,
+            FileSystemEvent, FileSystemEventKind, FolderScanOutcome,
+            LibraryRootsId,
             index::{IndexingChange, IndexingOutcome},
         },
         orchestration::{
             JobEvent, LibraryActorCommand, LibraryScanRun,
             LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
-            events::{JobEventPayload, ScanEvent},
+            events::{JobEventPayload, ScanEvent, ScanSeedSummary},
             job::{JobId, JobKind},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
         },
@@ -730,8 +731,9 @@ struct ScanRunState {
     quiescence_started_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
     item_states: HashMap<String, ScanItemState>,
-    // Count of successful indexed media per folder path
-    index_successes_by_folder: HashMap<String, u32>,
+    folder_outcomes_by_path: HashMap<String, FolderScanOutcome>,
+    historical_cursor_count: u64,
+    seed_completed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -803,6 +805,8 @@ enum ScanItemStatus {
     InProgress,
     Retrying,
     Completed,
+    KnownUnchanged,
+    Skipped,
     DeadLettered,
 }
 
@@ -812,7 +816,17 @@ impl ScanItemStatus {
     }
 
     fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::DeadLettered)
+        matches!(
+            self,
+            Self::Completed
+                | Self::KnownUnchanged
+                | Self::Skipped
+                | Self::DeadLettered
+        )
+    }
+
+    fn counts_as_completed(self) -> bool {
+        matches!(self, Self::Completed | Self::KnownUnchanged | Self::Skipped)
     }
 }
 
@@ -869,7 +883,9 @@ impl ScanRun {
                 quiescence_started_at: None,
                 last_error: durable.last_error,
                 item_states: HashMap::new(),
-                index_successes_by_folder: HashMap::new(),
+                folder_outcomes_by_path: HashMap::new(),
+                historical_cursor_count: 0,
+                seed_completed: false,
             }),
             tx,
             inner: Arc::downgrade(&inner),
@@ -1064,13 +1080,6 @@ impl ScanRun {
                 cur = dir.parent();
             }
         }
-
-        // Credit the chosen entity root folder
-        let entry = state
-            .index_successes_by_folder
-            .entry(chosen.clone())
-            .or_insert(0);
-        *entry = entry.saturating_add(1);
 
         // Treat this as activity so quiescence waits for indexing to settle
         state.current_path = Some(chosen.clone());
@@ -1283,6 +1292,73 @@ impl ScanRun {
         self.emit_frames(frames).await;
     }
 
+    async fn record_folder_summary(
+        &self,
+        summary: &ferrex_core::domain::scan::FolderScanSummary,
+    ) {
+        let event_time = Utc::now();
+        let path = summary.context.folder_path_norm().to_string();
+        let frames = {
+            let mut state = self.state.lock().await;
+            if state.is_terminal() {
+                Vec::new()
+            } else {
+                let mut frames = Vec::new();
+                let changed = state.remember_folder_outcome(
+                    &path,
+                    summary.outcome,
+                    event_time,
+                );
+                if changed {
+                    state.current_path = Some(path.clone());
+                    state.path_key = SubjectKey::path(path).ok();
+                    state.last_activity_at = Some(event_time);
+                    frames.push(QueuedFrame {
+                        event: ScanEventKind::Progress,
+                        payload: state.build_payload(),
+                    });
+
+                    if state.can_enter_quiescing()
+                        && let Some(frame) = state.handle_state_event(
+                            ScanStateEvent::AllItemsProcessed,
+                            event_time,
+                        )
+                    {
+                        frames.push(frame);
+                    }
+                }
+                frames
+            }
+        };
+
+        self.emit_frames(frames).await;
+    }
+
+    async fn record_seed_completed(&self, summary: &ScanSeedSummary) -> bool {
+        let frame = {
+            let mut state = self.state.lock().await;
+            if state.is_terminal() {
+                None
+            } else {
+                state.mark_seed_completed(
+                    summary.queued_folders,
+                    summary.completed_at,
+                )
+            }
+        };
+
+        if let Some(frame) = frame {
+            let event = frame.event.clone();
+            self.emit_frame(frame.event, frame.payload).await;
+            if matches!(event, ScanEventKind::Completed) {
+                self.finalize_history(ScanLifecycleStatus::Completed).await;
+                return true;
+            }
+        }
+
+        false
+    }
+
     async fn record_folder_completed(
         &self,
         idempotency_key: &str,
@@ -1306,10 +1382,17 @@ impl ScanRun {
                     "record_folder_completed"
                 );
                 let mut frames = Vec::new();
+                let target_status = path
+                    .as_ref()
+                    .and_then(subject_key_path)
+                    .and_then(|path| state.folder_outcomes_by_path.get(path))
+                    .copied()
+                    .map(ScanRunState::status_for_folder_outcome)
+                    .unwrap_or(ScanItemStatus::Completed);
                 let changed = state.update_item_status(
                     idempotency_key,
                     Some(job_id),
-                    ScanItemStatus::Completed,
+                    target_status,
                     event_time,
                     path.clone(),
                     None,
@@ -1547,11 +1630,15 @@ impl ScanRun {
     ) -> bool {
         let (maybe_frame, finalize_status) = {
             let mut state = self.state.lock().await;
-            if state.is_terminal() || state.total_items == 0 {
+            if state.is_terminal() {
                 (None, None)
             } else {
                 let now = Utc::now();
                 let mut frame: Option<QueuedFrame> = None;
+
+                if state.total_items == 0 && state.seed_completed {
+                    frame = state.transition(ScanPhase::Completed, now);
+                }
 
                 if matches!(
                     state.phase,
@@ -1567,46 +1654,24 @@ impl ScanRun {
                 if frame.is_none()
                     && matches!(state.phase, ScanPhase::Quiescing)
                 {
-                    let quiesced = state
-                        .quiescence_started_at
-                        .map(|ts| now - ts >= completion_quiescence)
-                        .unwrap_or(false);
+                    if state.reset_quiescence_after_activity(now) {
+                        tracing::debug!(
+                            target: "scan::state",
+                            scan = %state.scan_id,
+                            library = %state.library_id,
+                            "reset scan quiescence after run-visible activity"
+                        );
+                    } else {
+                        let quiesced = state
+                            .quiescence_started_at
+                            .map(|ts| now - ts >= completion_quiescence)
+                            .unwrap_or(false);
 
-                    if quiesced && state.can_enter_quiescing() {
-                        // Only complete if no new activity has occurred since quiescing began.
-                        let no_new_activity = match (
-                            state.quiescence_started_at,
-                            state.last_activity_at,
-                        ) {
-                            (Some(qts), Some(last)) => last <= qts,
-                            (Some(_), None) => true,
-                            _ => true,
-                        };
-
-                        if no_new_activity {
-                            // Final pass: demote unmatched root items before completing.
-                            let demoted = state
-                                .demote_completed_without_index_matches(now);
-                            if demoted > 0 {
-                                // Emit updated progress and extend quiescence window
-                                let progress = state.build_payload();
-                                frame = Some(QueuedFrame {
-                                    event: ScanEventKind::Progress,
-                                    payload: progress,
-                                });
-                                tracing::info!(
-                                    target: "scan::summary",
-                                    scan = %state.scan_id,
-                                    library = %state.library_id,
-                                    demoted,
-                                    "demoted unmatched root folders prior to completion"
-                                );
-                            } else {
-                                frame = state.handle_state_event(
-                                    ScanStateEvent::QuiescenceComplete,
-                                    now,
-                                );
-                            }
+                        if quiesced && state.can_enter_quiescing() {
+                            frame = state.handle_state_event(
+                                ScanStateEvent::QuiescenceComplete,
+                                now,
+                            );
                         }
                     }
                 }
@@ -1716,7 +1781,7 @@ impl ScanRun {
             .unwrap_or_else(|| Duration::from_secs(0))
             >= guard.min_interval;
 
-        let (root_completed, root_total) = {
+        let (root_completed, root_total, historical_cursor_count) = {
             let state = self.state.lock().await;
             // Build set of scanned paths
             let mut scanned_paths: HashSet<String> = HashSet::new();
@@ -1748,12 +1813,12 @@ impl ScanRun {
                     && is_root(path)
                 {
                     roots_total += 1;
-                    if matches!(item.status, ScanItemStatus::Completed) {
+                    if item.status.counts_as_completed() {
                         roots_completed += 1;
                     }
                 }
             }
-            (roots_completed, roots_total)
+            (roots_completed, roots_total, state.historical_cursor_count)
         };
 
         if force
@@ -1773,6 +1838,7 @@ impl ScanRun {
                 pct = pct,
                 root_completed = root_completed,
                 root_total = root_total,
+                historical_cursors = historical_cursor_count,
                 path = ?payload.current_path,
                 "scan progress"
             );
@@ -1984,40 +2050,9 @@ impl ScanRunState {
     }
 
     fn rehydrate_from_cursors(&mut self, cursors: &[ScanCursor]) {
-        let mut latest = self.last_activity_at;
-
-        for cursor in cursors {
-            let idempotency_key =
-                format!("scan:{}:{}", self.library_id, cursor.folder_path_norm);
-            if self.item_states.contains_key(&idempotency_key) {
-                continue;
-            }
-
-            self.total_items = self.total_items.saturating_add(1);
-            self.completed_items = self.completed_items.saturating_add(1);
-
-            let last_activity = cursor.last_scan_at;
-            latest = Some(match latest {
-                Some(existing) => existing.max(last_activity),
-                None => last_activity,
-            });
-
-            self.item_states.insert(
-                idempotency_key,
-                ScanItemState {
-                    status: ScanItemStatus::Completed,
-                    last_activity,
-                    path_key: SubjectKey::path(cursor.folder_path_norm.clone())
-                        .ok(),
-                    last_error: None,
-                    last_job_id: None,
-                },
-            );
-        }
-
-        if let Some(activity) = latest {
-            self.last_activity_at = Some(activity);
-        }
+        self.historical_cursor_count = self
+            .historical_cursor_count
+            .saturating_add(cursors.len() as u64);
     }
 
     fn handle_state_event(
@@ -2094,9 +2129,19 @@ impl ScanRunState {
                 ) && self.can_enter_quiescing()
             }
             ScanPhase::Completed => {
-                matches!(self.phase, ScanPhase::Quiescing)
-                    && self.completed_items + self.dead_lettered_items
-                        == self.total_items
+                let all_items_terminal =
+                    matches!(self.phase, ScanPhase::Quiescing)
+                        && self.completed_items + self.dead_lettered_items
+                            == self.total_items;
+                let no_work_seed_completed = self.seed_completed
+                    && self.total_items == 0
+                    && matches!(
+                        self.phase,
+                        ScanPhase::Initializing
+                            | ScanPhase::Discovering
+                            | ScanPhase::Processing
+                    );
+                all_items_terminal || no_work_seed_completed
             }
             ScanPhase::Failed | ScanPhase::Canceled => {
                 !self.phase.is_terminal()
@@ -2164,97 +2209,90 @@ impl ScanRunState {
         }
     }
 
-    fn demote_completed_without_index_matches(
+    fn mark_seed_completed(
         &mut self,
+        queued_folders: usize,
+        completed_at: DateTime<Utc>,
+    ) -> Option<QueuedFrame> {
+        self.seed_completed = true;
+        if queued_folders == 0 && self.total_items == 0 {
+            self.last_activity_at = Some(completed_at);
+            self.transition(ScanPhase::Completed, completed_at)
+        } else {
+            None
+        }
+    }
+
+    fn status_for_folder_outcome(outcome: FolderScanOutcome) -> ScanItemStatus {
+        match outcome {
+            FolderScanOutcome::Changed => ScanItemStatus::Completed,
+            FolderScanOutcome::UnchangedCursor => {
+                ScanItemStatus::KnownUnchanged
+            }
+            FolderScanOutcome::Missing
+            | FolderScanOutcome::Empty
+            | FolderScanOutcome::Unsupported => ScanItemStatus::Skipped,
+        }
+    }
+
+    fn remember_folder_outcome(
+        &mut self,
+        path: &str,
+        outcome: FolderScanOutcome,
         now: DateTime<Utc>,
-    ) -> usize {
-        let mut to_demote: Vec<(String, Option<String>)> = Vec::new();
+    ) -> bool {
+        self.folder_outcomes_by_path
+            .insert(path.to_string(), outcome);
 
-        // Build a set of all tracked folder paths to detect root-level items
-        let mut scanned_paths: HashSet<String> = HashSet::new();
-        for item in self.item_states.values() {
-            if let Some(p) = &item.path_key
-                && let Some(path) = subject_key_path(p)
-            {
-                scanned_paths.insert(path.to_string());
-            }
+        let target_status = Self::status_for_folder_outcome(outcome);
+        if target_status == ScanItemStatus::Completed {
+            return false;
         }
 
-        // Helper to check whether a scanned path has any scanned ancestor
-        let is_root_item = |path: &str| -> bool {
-            let mut cur = std::path::Path::new(path).parent();
-            while let Some(dir) = cur {
-                if let Some(dir_str) = dir.to_str()
-                    && scanned_paths.contains(dir_str)
-                {
-                    return false;
-                }
-                cur = dir.parent();
-            }
-            true
-        };
+        let matching_items: Vec<String> = self
+            .item_states
+            .iter()
+            .filter_map(|(idempotency, item)| {
+                let item_path =
+                    item.path_key.as_ref().and_then(subject_key_path)?;
+                (item_path == path
+                    && matches!(
+                        item.status,
+                        ScanItemStatus::Completed
+                            | ScanItemStatus::KnownUnchanged
+                            | ScanItemStatus::Skipped
+                    ))
+                .then(|| idempotency.clone())
+            })
+            .collect();
 
-        for (idempotency, item) in self.item_states.iter() {
-            if !matches!(item.status, ScanItemStatus::Completed) {
-                continue;
-            }
-            let Some(path) = item.path_key.as_ref() else {
-                continue;
-            };
-            let Some(path) = subject_key_path(path) else {
-                continue;
-            };
-            // Only demote root-level scanned folders based on matching status
-            if !is_root_item(path) {
-                continue;
-            }
-            let success_count = self
-                .index_successes_by_folder
-                .get(path)
-                .cloned()
-                .unwrap_or(0);
-            if success_count == 0 {
-                to_demote.push((idempotency.clone(), Some(path.to_string())));
-            }
-        }
-
-        let mut changed = 0usize;
-        let mut last_path: Option<String> = None;
-        for (idempotency, path) in to_demote {
-            let path_key =
-                path.clone().and_then(|path| SubjectKey::path(path).ok());
-            let updated = self.update_item_status(
+        let mut changed = false;
+        for idempotency in matching_items {
+            changed |= self.update_item_status(
                 &idempotency,
                 None,
-                ScanItemStatus::DeadLettered,
+                target_status,
                 now,
-                path_key,
-                Some("no_root_match".to_string()),
+                SubjectKey::path(path.to_string()).ok(),
+                None,
             );
-            if updated {
-                tracing::info!(
-                    target: "scan::state",
-                    scan = %self.scan_id,
-                    library = %self.library_id,
-                    idempotency = %idempotency,
-                    path = ?path,
-                    "demoted folder completion due to zero indexed media"
-                );
-                changed += 1;
-                if let Some(p) = path {
-                    last_path = Some(p);
-                }
-            }
         }
-
-        if changed > 0 {
-            self.current_path = last_path.clone();
-            self.path_key =
-                last_path.and_then(|path| SubjectKey::path(path).ok());
-            self.last_activity_at = Some(now);
-        }
-
         changed
+    }
+
+    fn reset_quiescence_after_activity(&mut self, now: DateTime<Utc>) -> bool {
+        let (Some(started_at), Some(last_activity_at)) =
+            (self.quiescence_started_at, self.last_activity_at)
+        else {
+            return false;
+        };
+
+        if last_activity_at > started_at {
+            self.quiescence_started_at = Some(now);
+            true
+        } else {
+            false
+        }
     }
 
     fn build_payload(&mut self) -> ScanProgressEvent {
@@ -2329,13 +2367,16 @@ impl ScanRunState {
         match self.item_states.entry(idempotency_key.to_string()) {
             Entry::Vacant(slot) => {
                 self.total_items += 1;
-                match status {
-                    ScanItemStatus::Completed => self.completed_items += 1,
-                    ScanItemStatus::DeadLettered => {
-                        self.dead_lettered_items += 1
+                if status.counts_as_completed() {
+                    self.completed_items += 1;
+                } else {
+                    match status {
+                        ScanItemStatus::DeadLettered => {
+                            self.dead_lettered_items += 1
+                        }
+                        ScanItemStatus::Retrying => self.retrying_items += 1,
+                        _ => {}
                     }
-                    ScanItemStatus::Retrying => self.retrying_items += 1,
-                    _ => {}
                 }
                 slot.insert(ScanItemState {
                     status,
@@ -2374,6 +2415,11 @@ impl ScanRunState {
                     }
                     return false;
                 }
+                if matches!(old_status, ScanItemStatus::DeadLettered)
+                    && !matches!(status, ScanItemStatus::DeadLettered)
+                {
+                    return false;
+                }
                 if old_status == status {
                     item.last_activity = event_time;
                     if let Some(path) = path_key {
@@ -2381,10 +2427,9 @@ impl ScanRunState {
                     }
                     if let Some(err) = error {
                         item.last_error = Some(err);
-                    } else if matches!(
-                        status,
-                        ScanItemStatus::Completed | ScanItemStatus::InProgress
-                    ) {
+                    } else if status.counts_as_completed()
+                        || matches!(status, ScanItemStatus::InProgress)
+                    {
                         item.last_error = None;
                     }
                     if let Some(job) = job_id {
@@ -2393,29 +2438,33 @@ impl ScanRunState {
                     return false;
                 }
 
-                match old_status {
-                    ScanItemStatus::Completed => {
-                        self.completed_items =
-                            self.completed_items.saturating_sub(1);
+                if old_status.counts_as_completed() {
+                    self.completed_items =
+                        self.completed_items.saturating_sub(1);
+                } else {
+                    match old_status {
+                        ScanItemStatus::DeadLettered => {
+                            self.dead_lettered_items =
+                                self.dead_lettered_items.saturating_sub(1);
+                        }
+                        ScanItemStatus::Retrying => {
+                            self.retrying_items =
+                                self.retrying_items.saturating_sub(1);
+                        }
+                        _ => {}
                     }
-                    ScanItemStatus::DeadLettered => {
-                        self.dead_lettered_items =
-                            self.dead_lettered_items.saturating_sub(1);
-                    }
-                    ScanItemStatus::Retrying => {
-                        self.retrying_items =
-                            self.retrying_items.saturating_sub(1);
-                    }
-                    _ => {}
                 }
 
-                match status {
-                    ScanItemStatus::Completed => self.completed_items += 1,
-                    ScanItemStatus::DeadLettered => {
-                        self.dead_lettered_items += 1
+                if status.counts_as_completed() {
+                    self.completed_items += 1;
+                } else {
+                    match status {
+                        ScanItemStatus::DeadLettered => {
+                            self.dead_lettered_items += 1
+                        }
+                        ScanItemStatus::Retrying => self.retrying_items += 1,
+                        _ => {}
                     }
-                    ScanItemStatus::Retrying => self.retrying_items += 1,
-                    _ => {}
                 }
 
                 item.status = status;
@@ -2426,11 +2475,9 @@ impl ScanRunState {
                 match error {
                     Some(err) => item.last_error = Some(err),
                     None => {
-                        if matches!(
-                            status,
-                            ScanItemStatus::Completed
-                                | ScanItemStatus::InProgress
-                        ) {
+                        if status.counts_as_completed()
+                            || matches!(status, ScanItemStatus::InProgress)
+                        {
                             item.last_error = None;
                         }
                     }
@@ -2473,6 +2520,218 @@ impl ScanRunState {
             }
         }
         saw_active
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_core::domain::scan::orchestration::scan_cursor::ScanCursorId;
+    use std::{collections::HashMap, path::PathBuf};
+
+    fn test_state() -> ScanRunState {
+        let scan_id = Uuid::now_v7();
+        let library_id = LibraryId::new();
+        ScanRunState {
+            scan_id,
+            library_id,
+            phase: ScanPhase::Initializing,
+            status: ScanLifecycleStatus::Pending,
+            completed_items: 0,
+            total_items: 0,
+            dead_lettered_items: 0,
+            retrying_items: 0,
+            current_path: None,
+            path_key: None,
+            correlation_id: scan_id,
+            idempotency_prefix: format!("scan:{}:", scan_id),
+            event_sequence: 0,
+            last_idempotency_key: String::new(),
+            started_at: Utc::now(),
+            terminal_at: None,
+            last_activity_at: None,
+            quiescence_started_at: None,
+            last_error: None,
+            item_states: HashMap::new(),
+            folder_outcomes_by_path: HashMap::new(),
+            historical_cursor_count: 0,
+            seed_completed: false,
+        }
+    }
+
+    #[test]
+    fn persisted_cursors_are_informational_only() {
+        let mut state = test_state();
+        let folder = PathBuf::from("/library/Movie");
+        let cursor = ScanCursor {
+            id: ScanCursorId::new(state.library_id, &vec![folder.clone()]),
+            folder_path_norm: folder.to_string_lossy().to_string(),
+            listing_hash: "stable".into(),
+            entry_count: 1,
+            last_scan_at: Utc::now(),
+            last_modified_at: None,
+            device_id: None,
+        };
+
+        state.rehydrate_from_cursors(&[cursor]);
+
+        assert_eq!(state.historical_cursor_count, 1);
+        assert_eq!(state.total_items, 0);
+        assert_eq!(state.completed_items, 0);
+        assert!(state.item_states.is_empty());
+    }
+
+    #[test]
+    fn folder_outcomes_preserve_known_and_skipped_states() {
+        let mut state = test_state();
+        let now = Utc::now();
+        let unchanged_path = "/library/Stable Movie";
+        let unsupported_path = "/library/Extras Only";
+
+        state.update_item_status(
+            "unchanged-job",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now,
+            SubjectKey::path(unchanged_path.to_string()).ok(),
+            None,
+        );
+        state.remember_folder_outcome(
+            unchanged_path,
+            FolderScanOutcome::UnchangedCursor,
+            now,
+        );
+        assert!(matches!(
+            state.item_states["unchanged-job"].status,
+            ScanItemStatus::InProgress
+        ));
+
+        let unchanged_status = state
+            .folder_outcomes_by_path
+            .get(unchanged_path)
+            .copied()
+            .map(ScanRunState::status_for_folder_outcome)
+            .unwrap();
+        state.update_item_status(
+            "unchanged-job",
+            Some(JobId::new()),
+            unchanged_status,
+            now,
+            SubjectKey::path(unchanged_path.to_string()).ok(),
+            None,
+        );
+        assert!(matches!(
+            state.item_states["unchanged-job"].status,
+            ScanItemStatus::KnownUnchanged
+        ));
+
+        state.update_item_status(
+            "unsupported-job",
+            Some(JobId::new()),
+            ScanRunState::status_for_folder_outcome(
+                FolderScanOutcome::Unsupported,
+            ),
+            now,
+            SubjectKey::path(unsupported_path.to_string()).ok(),
+            None,
+        );
+        assert!(matches!(
+            state.item_states["unsupported-job"].status,
+            ScanItemStatus::Skipped
+        ));
+        assert_eq!(state.total_items, 2);
+        assert_eq!(state.completed_items, 2);
+        assert_eq!(state.dead_lettered_items, 0);
+    }
+
+    #[test]
+    fn no_work_seed_completes_without_items_once() {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.handle_state_event(ScanStateEvent::RunStarted, now);
+
+        let frame = state
+            .mark_seed_completed(0, now + ChronoDuration::milliseconds(1))
+            .expect("seed completion should emit terminal frame");
+        assert!(matches!(frame.event, ScanEventKind::Completed));
+        assert_eq!(state.status, ScanLifecycleStatus::Completed);
+        assert_eq!(state.total_items, 0);
+        assert_eq!(state.completed_items, 0);
+
+        let duplicate =
+            state.mark_seed_completed(0, now + ChronoDuration::milliseconds(2));
+        assert!(duplicate.is_none());
+    }
+
+    #[test]
+    fn retryable_failures_do_not_quiesce_but_non_retryable_failures_do() {
+        let now = Utc::now();
+        let mut retrying = test_state();
+        retrying.update_item_status(
+            "retrying-job",
+            Some(JobId::new()),
+            ScanItemStatus::Retrying,
+            now,
+            SubjectKey::path("/library/retry".to_string()).ok(),
+            Some("transient".into()),
+        );
+        assert_eq!(retrying.retrying_items, 1);
+        assert!(!retrying.can_enter_quiescing());
+
+        let mut dead = test_state();
+        dead.update_item_status(
+            "dead-job",
+            Some(JobId::new()),
+            ScanItemStatus::DeadLettered,
+            now,
+            SubjectKey::path("/library/dead".to_string()).ok(),
+            Some("permanent".into()),
+        );
+        assert_eq!(dead.dead_lettered_items, 1);
+        assert!(dead.can_enter_quiescing());
+    }
+
+    #[test]
+    fn quiescence_resets_after_reconciliation_activity() {
+        let mut state = test_state();
+        let started = Utc::now();
+        let activity = started + ChronoDuration::milliseconds(5);
+        let reset_at = activity + ChronoDuration::milliseconds(5);
+        state.phase = ScanPhase::Quiescing;
+        state.status = ScanLifecycleStatus::Running;
+        state.total_items = 1;
+        state.completed_items = 1;
+        state.quiescence_started_at = Some(started);
+        state.last_activity_at = Some(activity);
+
+        assert!(state.reset_quiescence_after_activity(reset_at));
+        assert_eq!(state.quiescence_started_at, Some(reset_at));
+        assert!(!state.reset_quiescence_after_activity(
+            reset_at + ChronoDuration::milliseconds(1)
+        ));
+    }
+
+    #[test]
+    fn terminal_completion_transition_emits_once() {
+        let mut state = test_state();
+        let now = Utc::now();
+        state.phase = ScanPhase::Quiescing;
+        state.status = ScanLifecycleStatus::Running;
+        state.total_items = 1;
+        state.completed_items = 1;
+
+        let first =
+            state.handle_state_event(ScanStateEvent::QuiescenceComplete, now);
+        assert!(matches!(
+            first.map(|frame| frame.event),
+            Some(ScanEventKind::Completed)
+        ));
+
+        let second = state.handle_state_event(
+            ScanStateEvent::QuiescenceComplete,
+            now + ChronoDuration::milliseconds(1),
+        );
+        assert!(second.is_none());
     }
 }
 
@@ -2804,6 +3063,35 @@ impl ScanRunAggregatorInner {
             }
             ScanEvent::FolderScanCompleted(summary) => {
                 self.observe_series_bundle_folder_completed(&summary).await;
+
+                let runs: Vec<Arc<ScanRun>> = {
+                    let guard = self.runs.read().await;
+                    guard
+                        .values()
+                        .filter(|run| {
+                            run.library_id() == summary.context.library_id()
+                        })
+                        .cloned()
+                        .collect()
+                };
+
+                for run in runs {
+                    run.record_folder_summary(&summary).await;
+                }
+            }
+            ScanEvent::SeedCompleted(summary) => {
+                if let Some(correlation_id) = summary.correlation_id {
+                    let run = {
+                        let guard = self.runs.read().await;
+                        guard.get(&correlation_id).cloned()
+                    };
+
+                    if let Some(run) = run
+                        && run.record_seed_completed(&summary).await
+                    {
+                        self.on_run_completed(run).await;
+                    }
+                }
             }
             ScanEvent::Indexed(outcome) => {
                 let outcome = *outcome;

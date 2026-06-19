@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, RwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::scan::actors::LibraryActor;
-use crate::domain::scan::actors::LibraryActorCommand;
+use crate::domain::scan::actors::{LibraryActorCommand, StartMode};
 use crate::domain::scan::orchestration::runtime::JobEventStream;
 use crate::domain::scan::orchestration::{
     budget::{WorkloadBudget, WorkloadType},
@@ -17,7 +17,8 @@ use crate::domain::scan::orchestration::{
     correlation::CorrelationCache,
     dispatcher::{DispatchStatus, JobDispatcher},
     events::{
-        JobEvent, JobEventPayload, ScanEvent, ScanEventBus, stable_path_key,
+        JobEvent, JobEventPayload, ScanEvent, ScanEventBus, ScanSeedMode,
+        ScanSeedSummary, stable_path_key,
     },
     job::{
         DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload,
@@ -426,6 +427,13 @@ where
                                 }
                             }
 
+                            let queued_folders = batch
+                                .iter()
+                                .filter(|(payload, _)| {
+                                    matches!(payload, JobPayload::FolderScan(_))
+                                })
+                                .count();
+
                             if !batch.is_empty() {
                                 // Preserve correlation_ids for event publication.
                                 let payloads: Vec<JobPayload> = batch
@@ -505,6 +513,35 @@ where
                                     if let Err(err) = e.publish(event).await {
                                         tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish enqueue event");
                                     }
+                                }
+                            }
+
+                            if let LibraryActorCommand::Start {
+                                mode,
+                                correlation_id,
+                            } = &command
+                            {
+                                let mode = match mode {
+                                    StartMode::Bulk => ScanSeedMode::Bulk,
+                                    StartMode::Maintenance => {
+                                        ScanSeedMode::Maintenance
+                                    }
+                                    StartMode::Resume => ScanSeedMode::Resume,
+                                };
+                                let summary = ScanSeedSummary {
+                                    library_id,
+                                    correlation_id: *correlation_id,
+                                    mode,
+                                    queued_folders,
+                                    completed_at: chrono::Utc::now(),
+                                };
+                                if let Err(err) = e
+                                    .publish_scan_event(ScanEvent::SeedCompleted(
+                                        summary,
+                                    ))
+                                    .await
+                                {
+                                    tracing::warn!(target: "scan::mailbox", error = %err, "failed to publish scan seed completion");
                                 }
                             }
 

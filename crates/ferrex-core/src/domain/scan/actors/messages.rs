@@ -114,6 +114,34 @@ pub struct NoopActorObserver;
 
 impl ActorObserver for NoopActorObserver {}
 
+/// Terminal outcome for a folder scan unit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderScanOutcome {
+    /// The folder listing changed and produced downstream discovery or reconciliation work.
+    Changed,
+    /// The persisted cursor matched the current listing hash, so scanning was short-circuited.
+    UnchangedCursor,
+    /// The folder no longer exists, or is no longer a directory, and was reconciled as tombstoned.
+    Missing,
+    /// The folder was readable but contained no entries.
+    Empty,
+    /// The folder contained entries, but none were supported scan units for its context.
+    Unsupported,
+}
+
+impl FolderScanOutcome {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Changed => "changed",
+            Self::UnchangedCursor => "unchanged_cursor",
+            Self::Missing => "missing",
+            Self::Empty => "empty",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
 /// Outcome summary produced by `FolderScanActor` for diagnostics.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FolderScanSummary {
@@ -121,6 +149,7 @@ pub struct FolderScanSummary {
     pub discovered_files: usize,
     pub enqueued_subfolders: usize,
     pub listing_hash: String,
+    pub outcome: FolderScanOutcome,
     pub completed_at: DateTime<Utc>,
 }
 
