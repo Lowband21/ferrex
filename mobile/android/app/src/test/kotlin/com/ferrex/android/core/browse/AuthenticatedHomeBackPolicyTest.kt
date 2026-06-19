@@ -51,7 +51,15 @@ class AuthenticatedHomeBackPolicyTest {
     }
 
     @Test
-    fun explicitBackOnlyClosesPlaybackOrDetailLayers() {
+    fun explicitBackOnlyClosesDiagnosticsPlaybackOrDetailLayers() {
+        assertEquals(
+            PhoneExplicitBackAction.CloseDiagnostics,
+            AuthenticatedHomeBackPolicy.phoneExplicitBackAction(
+                hasActivePlayback = true,
+                hasSelectedDetail = true,
+                diagnosticsOpen = true,
+            ),
+        )
         assertEquals(
             PhoneExplicitBackAction.ClosePlayback,
             AuthenticatedHomeBackPolicy.phoneExplicitBackAction(hasActivePlayback = true, hasSelectedDetail = true),
@@ -67,9 +75,40 @@ class AuthenticatedHomeBackPolicyTest {
     }
 
     @Test
+    fun diagnosticsSystemBackClosesDiagnosticsBeforeAuthenticatedLayers() {
+        assertEquals(
+            PhoneSystemBackAction.CloseDiagnostics,
+            AuthenticatedHomeBackPolicy.phoneSystemBackAction(
+                hasActivePlayback = true,
+                hasSelectedDetail = true,
+                currentDestination = PhoneShellDestination.Search,
+                diagnosticsOpen = true,
+            ),
+        )
+    }
+
+    @Test
+    fun recoverySurfacesDoNotTrapSystemBackOrHideNoWipeRecoveryActions() {
+        assertEquals(
+            PhoneSystemBackAction.ExitApp,
+            AuthenticatedHomeBackPolicy.phoneSystemBackAction(
+                hasActivePlayback = false,
+                hasSelectedDetail = false,
+                recoverySurfaceActive = true,
+            ),
+        )
+
+        val documentation = AuthenticatedHomeBackPolicy.PHONE_BACK_BEHAVIOR_DOCUMENTATION
+        listOf("retry", "sign out", "change server", "reset connection", "diagnostics", "cache recovery").forEach { action ->
+            assertTrue(documentation.contains(action, ignoreCase = true))
+        }
+        assertTrue(documentation.contains("without Android app-data wipes"))
+    }
+
+    @Test
     fun phoneBackDocumentationNamesEveryAuthenticatedSurface() {
         val documentation = AuthenticatedHomeBackPolicy.PHONE_BACK_BEHAVIOR_DOCUMENTATION
-        listOf("Home", "Libraries", "Search", "Account/Server", "Detail", "Playback").forEach { surface ->
+        listOf("Home", "Libraries", "Search", "Account/Server", "Detail", "Playback", "Diagnostics", "Recovery").forEach { surface ->
             assertTrue(documentation.contains(surface))
         }
     }

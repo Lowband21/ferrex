@@ -24,16 +24,18 @@ import com.ferrex.android.core.detail.DetailRailKind
 import com.ferrex.android.core.detail.DetailRailState
 import com.ferrex.android.core.detail.DetailRecoveryState
 import com.ferrex.android.core.detail.DetailTone
-import com.ferrex.android.core.detail.DetailWatchState
-import com.ferrex.android.core.detail.DetailWatchStateKind
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
+import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.mediaart.MediaArtFitPolicy
 import com.ferrex.android.core.mediaart.MediaArtGrounding
 import com.ferrex.android.core.mediaart.MediaArtObject
 import com.ferrex.android.core.mediaart.MediaArtRequest
 import com.ferrex.android.core.mediaart.MediaArtTargetIdentity
 import com.ferrex.android.core.playback.PlaybackRouteContract
+import com.ferrex.android.core.theaterplate.TheaterPlateImageSourceKind
+import com.ferrex.android.core.theaterplate.TheaterPlateViewport
+import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -64,6 +66,123 @@ class FerrexDetailPrimitivesTest {
         assertTrue(tv.heroMedia.first().sizing.width > phone.heroMedia.first().sizing.width)
         assertEquals("Tap to play", phone.rails.single().items.single().activationLabel)
         assertEquals("Press Select to play", tv.rails.single().items.single().activationLabel)
+    }
+
+    @Test
+    fun routeStagePresenterUsesHeroBackdropTokensAndAdaptationLabels() {
+        val page = page()
+        val backdropKey = page.hero.background.requestKey!!
+        val viewport = TheaterPlateViewport.of(390, 844)
+
+        val ready = DetailTheaterPlateStagePresenter.stage(
+            page = page,
+            imageResolutions = mapOf(
+                backdropKey to ImageResolution.Ready(
+                    key = backdropKey,
+                    url = "https://ferrex/images/blob/backdrop-token",
+                    token = "backdrop-token",
+                ),
+            ),
+            viewport = viewport,
+        )
+        val stale = DetailTheaterPlateStagePresenter.stage(
+            page = page,
+            imageResolutions = mapOf(
+                backdropKey to ImageResolution.Ready(
+                    key = backdropKey,
+                    url = "https://ferrex/images/blob/stale-token",
+                    token = "stale-token",
+                    stale = true,
+                ),
+            ),
+            viewport = viewport,
+        )
+        val lowQuality = DetailTheaterPlateStagePresenter.stage(
+            page = page,
+            imageResolutions = mapOf(
+                backdropKey to ImageResolution.Failed(
+                    key = backdropKey,
+                    reason = "manifest failed",
+                    retryable = true,
+                ),
+            ),
+            viewport = viewport,
+        )
+        val posterOnly = DetailTheaterPlateStagePresenter.stage(
+            page = page.copy(
+                hero = DetailHero(
+                    background = art(
+                        role = DetailArtRole.Poster,
+                        category = BrowseImageCategory.Poster,
+                        label = "Poster-only movie poster",
+                        state = DetailImageState.Ready("ready", staleOffline = false),
+                        grounding = MediaArtGrounding.TheaterPlateContactShadow,
+                    ),
+                    foreground = null,
+                ),
+            ),
+            imageResolutions = emptyMap(),
+            viewport = viewport,
+        )
+
+        assertEquals(TheaterPlateImageSourceKind.Backdrop, ready.context.source.kind)
+        assertEquals(backdropKey, ready.context.source.request)
+        assertEquals("backdrop-token", ready.context.source.token)
+        assertEquals(viewport, ready.context.viewport)
+        val analysis = DetailTheaterPlateStagePresenter.analysis(
+            page = page,
+            imageResolutions = mapOf(
+                backdropKey to ImageResolution.Ready(
+                    key = backdropKey,
+                    url = "https://ferrex/images/blob/backdrop-token",
+                    token = "backdrop-token",
+                ),
+            ),
+            viewport = viewport,
+        )
+
+        assertEquals(TheaterPlateBackdropAdaptation.Ready, ready.adaptation)
+        assertEquals(backdropKey, analysis.context.source.request)
+        assertTrue(ready.contentDescription.contains("Cache Movie"))
+        assertEquals(TheaterPlateBackdropAdaptation.StaleOffline, stale.adaptation)
+        assertEquals(TheaterPlateBackdropAdaptation.LowQuality, lowQuality.adaptation)
+        assertEquals(TheaterPlateImageSourceKind.GeneratedFallback, posterOnly.context.source.kind)
+        assertEquals(TheaterPlateBackdropAdaptation.MissingBackdrop, posterOnly.adaptation)
+    }
+
+    @Test
+    fun routeStagePresenterUsesGeneratedFallbackForEpisodeStillWhenBackdropMissing() {
+        val episodeStill = art(
+            role = DetailArtRole.Still,
+            category = BrowseImageCategory.Episode,
+            label = "Episode 2 still",
+            state = DetailImageState.Ready("ready", staleOffline = false),
+            grounding = MediaArtGrounding.TheaterPlateContactShadow,
+        )
+        val page = page().copy(
+            stableKey = "episode:2",
+            kind = DetailPageKind.Episode,
+            title = "Episode 2",
+            hero = DetailHero(
+                background = noArt(
+                    label = "Episode 2 backdrop",
+                    reason = "Episode backdrop is unavailable.",
+                ),
+                foreground = episodeStill,
+            ),
+        )
+
+        val stage = DetailTheaterPlateStagePresenter.stage(
+            page = page,
+            imageResolutions = emptyMap(),
+            viewport = TheaterPlateViewport.of(390, 844),
+        )
+
+        assertEquals(TheaterPlateImageSourceKind.GeneratedFallback, stage.context.source.kind)
+        assertEquals(null, stage.context.source.request)
+        assertEquals(TheaterPlateBackdropAdaptation.MissingBackdrop, stage.adaptation)
+        assertEquals(null, stage.sourceArt)
+        assertFalse(stage.contentDescription.contains("Stage source: Episode 2 still"))
     }
 
     @Test
@@ -173,6 +292,39 @@ class FerrexDetailPrimitivesTest {
         assertTrue(shelf.actions[0].contentDescription.contains("Disabled: Reconnect before playback."))
         assertTrue(shelf.actions[0].testTag.contains("resume"))
         assertTrue(shelf.actions[1].contentDescription.contains("Destructive reset action"))
+    }
+
+    @Test
+    fun watchFailureStatusAndRetryDoNotHidePlaybackActions() {
+        val page = page(
+            watchState = DetailWatchState(
+                scopeKey = "movie:1",
+                label = "Movie watch state",
+                state = DetailWatchStateKind.Unknown,
+                progress = 0f,
+                pendingMutation = false,
+                message = "Watch state refresh failed: offline. Retry watch state keeps playback actions visible.",
+            ),
+            actions = listOf(
+                DetailPageAction(
+                    kind = DetailPageActionKind.Play,
+                    label = "Play",
+                    role = DetailActionRole.Primary,
+                    playbackContract = playbackContract("movie"),
+                ),
+                DetailPageAction(
+                    kind = DetailPageActionKind.RetryWatch,
+                    label = "Retry watch state",
+                    role = DetailActionRole.Retry,
+                ),
+            ),
+        )
+
+        val presentation = DetailPrimitivePresenter.stage(page, DetailSurfaceInteractionMode.PhoneTouch)
+
+        assertTrue(presentation.slabs.single { it.title == "Movie watch state" }.message.contains("offline"))
+        assertTrue(presentation.actionShelf.actions.any { it.label == "Play" })
+        assertTrue(presentation.actionShelf.actions.any { it.label == "Retry watch state" })
     }
 
     @Test
@@ -297,7 +449,7 @@ class FerrexDetailPrimitivesTest {
         ),
         metadata = listOf(DetailMetadataItem("PG-13", tone = DetailTone.Neutral)),
         facts = listOf(DetailFactItem("Runtime", "95 min", tone = DetailTone.Accent)),
-        watchState = watchState,
+        watchState = null,
         actions = actions,
         recovery = recovery,
         rails = rails,
@@ -376,6 +528,13 @@ class FerrexDetailPrimitivesTest {
         DetailPageAction(DetailPageActionKind.ChangeServer, "Change server", DetailActionRole.Secondary),
         DetailPageAction(DetailPageActionKind.ResetConnection, "Reset connection", DetailActionRole.DestructiveReset),
         DetailPageAction(DetailPageActionKind.Diagnostics, "Diagnostics / Export diagnostics", DetailActionRole.Diagnostics),
+    )
+
+    private fun noArt(label: String, reason: String): DetailPageArt = DetailPageArt(
+        role = DetailArtRole.None,
+        label = label,
+        mediaArt = null,
+        imageState = DetailImageState.NoArt(label = "missing", reason = reason),
     )
 
     private fun playbackContract(id: String): PlaybackRouteContract = PlaybackRouteContract(

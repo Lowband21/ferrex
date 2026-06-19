@@ -61,6 +61,30 @@ class ConnectionRecoveryModelsTest {
         assertTrue(gate.consumeOnlineRecoveryRefresh(AuthConnectionHealth.Online))
     }
 
+    @Test
+    fun noWipeRecoveryActionsCoverAuthAndCacheRecoveryWithoutOsAppDataClear() {
+        val actions = noWipeRecoveryActions(includeCacheClear = true)
+
+        assertEquals(
+            listOf(
+                NoWipeRecoveryActionKind.Retry,
+                NoWipeRecoveryActionKind.SignOut,
+                NoWipeRecoveryActionKind.ChangeServer,
+                NoWipeRecoveryActionKind.ResetConnection,
+                NoWipeRecoveryActionKind.Diagnostics,
+                NoWipeRecoveryActionKind.ClearCache,
+            ),
+            actions.map { it.kind },
+        )
+        actions.forEach { action ->
+            assertFalse("${action.key} must not clear OS app data", action.requiresOsAppDataClear)
+            assertFalse(action.label.contains("wipe", ignoreCase = true))
+            assertFalse(action.subtitle.contains("wipe", ignoreCase = true))
+            assertTrue(action.subtitle.contains("Ferrex", ignoreCase = true) || action.kind == NoWipeRecoveryActionKind.Diagnostics)
+        }
+        assertFalse(noWipeRecoveryActions(includeCacheClear = false).any { it.kind == NoWipeRecoveryActionKind.ClearCache })
+    }
+
     private fun authenticated(
         health: AuthConnectionHealth,
         reason: RecoverableFailureReason? = null,

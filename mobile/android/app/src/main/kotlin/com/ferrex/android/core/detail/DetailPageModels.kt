@@ -463,7 +463,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = seasonMetadata(season, seasonStatus),
             facts = seasonFacts(season),
-            watchState = seasonWatchState(season, seasonStatus),
+            watchState = seasonWatchState(season, seasonStatus, series?.tmdbId, watchState.lastError),
             actions = actions,
             recovery = recoveryState(route, libraryFreshness),
             rails = rails,
@@ -500,7 +500,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = movieMetadata(movie, progress),
             facts = movieFacts(movie),
-            watchState = mediaWatchState(movie.id, "Movie watch state", progress),
+            watchState = mediaWatchState(movie.id, "Movie watch state", progress, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -561,7 +561,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = seriesMetadata(series, seriesStatus),
             facts = seriesFacts(series),
-            watchState = seriesWatchState(series, seriesStatus),
+            watchState = seriesWatchState(series, seriesStatus, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -656,7 +656,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = episodeMetadata(episode, progress, episodeStatus),
             facts = episodeFacts(episode),
-            watchState = episodeWatchState(episode, progress, episodeStatus),
+            watchState = episodeWatchState(episode, progress, episodeStatus, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -1516,6 +1516,7 @@ object DetailPageMapper {
         scopeKey: String,
         label: String,
         progress: WatchMediaProgress?,
+        lastError: String? = null,
     ): DetailWatchState = when {
         progress == null -> DetailWatchState(
             scopeKey = scopeKey,
@@ -1523,7 +1524,10 @@ object DetailPageMapper {
             state = DetailWatchStateKind.Unknown,
             progress = 0f,
             pendingMutation = false,
-            message = "Watch state has not loaded yet. Retry watch state keeps this detail recoverable.",
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Watch state has not loaded yet. Retry watch state keeps this detail recoverable.",
+            ),
         )
         progress.isCompleted -> DetailWatchState(
             scopeKey = scopeKey,
@@ -1551,7 +1555,11 @@ object DetailPageMapper {
         )
     }
 
-    private fun seriesWatchState(series: SeriesDetail, status: WatchSeriesStatus?): DetailWatchState = when {
+    private fun seriesWatchState(
+        series: SeriesDetail,
+        status: WatchSeriesStatus?,
+        lastError: String? = null,
+    ): DetailWatchState = when {
         series.tmdbId == null -> DetailWatchState(
             scopeKey = series.id,
             label = "Series watch state",
@@ -1566,7 +1574,10 @@ object DetailPageMapper {
             state = DetailWatchStateKind.Unknown,
             progress = 0f,
             pendingMutation = false,
-            message = "Retry to load series watch state and next episode.",
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Retry to load series watch state and next episode.",
+            ),
         )
         status.isCompleted -> DetailWatchState(
             scopeKey = series.tmdbId.toString(),
@@ -1594,27 +1605,45 @@ object DetailPageMapper {
         )
     }
 
-    private fun seasonWatchState(season: SeasonDetail, status: WatchSeasonStatus?): DetailWatchState? = status?.let {
-        DetailWatchState(
+    private fun seasonWatchState(
+        season: SeasonDetail,
+        status: WatchSeasonStatus?,
+        tmdbSeriesId: Long?,
+        lastError: String? = null,
+    ): DetailWatchState? = when {
+        status != null -> DetailWatchState(
             scopeKey = "season:${season.id}",
             label = "Season watch state",
             state = when {
-                it.isCompleted -> DetailWatchStateKind.Watched
-                it.watched > 0 || it.inProgress > 0 -> DetailWatchStateKind.InProgress
+                status.isCompleted -> DetailWatchStateKind.Watched
+                status.watched > 0 || status.inProgress > 0 -> DetailWatchStateKind.InProgress
                 else -> DetailWatchStateKind.Unwatched
             },
-            progress = if (it.total > 0) (it.watched.toFloat() / it.total.toFloat()).coerceIn(0f, 1f) else 0f,
+            progress = if (status.total > 0) (status.watched.toFloat() / status.total.toFloat()).coerceIn(0f, 1f) else 0f,
             pendingMutation = false,
-            message = "${it.watched} of ${it.total} watched; ${it.inProgress} in progress.",
+            message = "${status.watched} of ${status.total} watched; ${status.inProgress} in progress.",
         )
+        tmdbSeriesId != null || !lastError.isNullOrBlank() -> DetailWatchState(
+            scopeKey = "season:${season.id}",
+            label = "Season watch state",
+            state = DetailWatchStateKind.Unknown,
+            progress = 0f,
+            pendingMutation = false,
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Retry to load season watch state.",
+            ),
+        )
+        else -> null
     }
 
     private fun episodeWatchState(
         episode: EpisodeDetail,
         progress: WatchMediaProgress?,
         status: WatchEpisodeStatus?,
+        lastError: String? = null,
     ): DetailWatchState {
-        val mediaState = mediaWatchState(episode.id, "Episode watch state", progress)
+        val mediaState = mediaWatchState(episode.id, "Episode watch state", progress, lastError)
         if (progress != null || status == null) return mediaState
         return DetailWatchState(
             scopeKey = episode.id,
@@ -1633,6 +1662,11 @@ object DetailPageMapper {
             },
         )
     }
+
+    private fun watchRefreshMessage(lastError: String?, fallback: String): String = lastError
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "Watch state refresh failed: $it. Retry watch state keeps playback actions visible." }
+        ?: fallback
 
     private fun mediaWatchMetadata(progress: WatchMediaProgress): DetailMetadataItem = when {
         progress.isCompleted -> DetailMetadataItem("Watched", DetailTone.Success, DetailMetadataKind.WatchState)

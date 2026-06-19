@@ -420,6 +420,7 @@ fun PhoneHomeScreen(
 
     fun handleExplicitBack() {
         when (AuthenticatedHomeBackPolicy.phoneExplicitBackAction(activePlaybackContract != null, selectedDetailRoute != null)) {
+            PhoneExplicitBackAction.CloseDiagnostics -> Unit
             PhoneExplicitBackAction.ClosePlayback -> activePlaybackContract = null
             PhoneExplicitBackAction.CloseDetail -> selectedDetailRoute = null
             PhoneExplicitBackAction.StayOnSurface -> Unit
@@ -433,6 +434,7 @@ fun PhoneHomeScreen(
     )
     BackHandler(enabled = phoneBackAction != PhoneSystemBackAction.ExitApp) {
         when (phoneBackAction) {
+            PhoneSystemBackAction.CloseDiagnostics -> Unit
             PhoneSystemBackAction.ClosePlayback -> activePlaybackContract = null
             PhoneSystemBackAction.CloseDetail -> selectedDetailRoute = null
             PhoneSystemBackAction.ReturnHome -> selectedDestination = PhoneShellDestination.Home
