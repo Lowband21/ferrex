@@ -57,6 +57,8 @@ internal object PhoneDiagnosticsPresentation {
 
     fun statusTag(key: String): String = FerrexQaTags.namespaced("phone", "diagnostics", "status", key)
 
+    fun actionTag(key: String): String = FerrexQaTags.namespaced("phone", "diagnostics", "action", key)
+
     fun statusDescription(title: String, body: String): String = "$title. $body"
 
     fun actionLabels(exportRunning: Boolean, clearRunning: Boolean): List<String> = listOf(
@@ -244,14 +246,20 @@ private fun DiagnosticsActions(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Button(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PhoneDiagnosticsPresentation.actionTag("export"))
+                .semantics { contentDescription = labels[0] },
             enabled = !exportRunning && !clearRunning,
             onClick = onExport,
         ) {
             Text(labels[0])
         }
         OutlinedButton(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PhoneDiagnosticsPresentation.actionTag("clear"))
+                .semantics { contentDescription = labels[1] },
             enabled = !exportRunning && !clearRunning,
             onClick = onClear,
         ) {

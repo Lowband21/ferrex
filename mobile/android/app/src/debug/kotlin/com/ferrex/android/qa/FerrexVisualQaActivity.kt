@@ -96,6 +96,7 @@ import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.detail.PhoneDetailScreen
+import com.ferrex.android.ui.diagnostics.PhoneDiagnosticsScreen
 import com.ferrex.android.ui.home.PhoneHomeScreen
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.qa.FerrexVisualQaFixtures
@@ -229,6 +230,10 @@ private fun FerrexVisualQaScenarioContent(scenario: VisualQaScenario) {
                 onOpenDiagnostics = {},
             )
         }
+        VisualQaScenarioKind.PhoneDiagnostics -> PhoneDiagnosticsScreen(
+            diagnostics = null,
+            onBack = {},
+        )
         VisualQaScenarioKind.TvHomeFocus -> TvFocusScenario(
             scenario = scenario,
             title = "TV home actions",
@@ -274,6 +279,18 @@ private fun FerrexVisualQaScenarioContent(scenario: VisualQaScenario) {
             surfaceKey = "recovery-actions",
             actions = FerrexVisualQaFixtures.noWipeRecoveryActions,
             statusTone = FerrexStatusTone.StaleOffline,
+        )
+        VisualQaScenarioKind.TvDiagnosticsFocus -> TvFocusScenario(
+            scenario = scenario,
+            title = "TV diagnostics actions",
+            body = "Export and clear diagnostics/logs stay flat, focused, and safe; Back remains the only navigation exit.",
+            surfaceKey = "diagnostics-actions",
+            actions = listOf(
+                VisualQaRecoveryActionSample("export", "Export / Share diagnostics", FerrexActionRole.Primary),
+                VisualQaRecoveryActionSample("clear", "Clear diagnostics/logs", FerrexActionRole.DestructiveReset),
+                VisualQaRecoveryActionSample("back", "Back", FerrexActionRole.Secondary),
+            ),
+            statusTone = FerrexStatusTone.Cache,
         )
         VisualQaScenarioKind.TheaterPlate -> TheaterPlateScenario(
             scenario = scenario,

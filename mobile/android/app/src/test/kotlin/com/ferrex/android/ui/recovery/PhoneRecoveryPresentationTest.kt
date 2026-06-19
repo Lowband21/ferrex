@@ -10,6 +10,8 @@ class PhoneRecoveryPresentationTest {
     @Test
     fun diagnosticsActionsStayFlatWithoutVisibleBackButton() {
         assertNull(PhoneDiagnosticsPresentation.VisibleBackActionLabel)
+        assertEquals("phone.diagnostics.action.export", PhoneDiagnosticsPresentation.actionTag("export"))
+        assertEquals("phone.diagnostics.action.clear", PhoneDiagnosticsPresentation.actionTag("clear"))
         assertEquals(
             listOf("Export / Share diagnostics", "Clear diagnostics/logs"),
             PhoneDiagnosticsPresentation.actionLabels(exportRunning = false, clearRunning = false),
