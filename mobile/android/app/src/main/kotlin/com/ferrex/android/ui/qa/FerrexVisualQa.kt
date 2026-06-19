@@ -20,8 +20,8 @@ import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.search.SearchMediaId
-import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.core.search.SearchMediaType
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.core.watch.WatchEpisodeKey
 import com.ferrex.android.core.watch.WatchEpisodeState
 import com.ferrex.android.core.watch.WatchEpisodeStatus
@@ -466,7 +466,7 @@ object FerrexVisualQaScenarios {
             device = VisualQaDevice.Phone,
             kind = VisualQaScenarioKind.PhoneBrowseGrid,
             title = "Phone Theater Plate browse/grid",
-            description = "Phone library browse sample with one compact control row and a dense grid owning the vertical scroll; recovery moves to status/More affordances.",
+            description = "Phone library browse sample with compact horizontally scrolling control and recovery/status rows plus a 12-card dense grid owning the vertical scroll; recovery stays in status/More affordances instead of a full-width card list.",
             testTag = FerrexQaTags.Phone.LibraryGrid,
             evidencePath = "Debug Visual QA → Phone Theater Plate browse/grid",
             fixtureSamples = FerrexVisualQaFixtures.browseCards.map { it.stableKey },
@@ -537,14 +537,16 @@ object FerrexVisualQaScenarios {
             device = VisualQaDevice.Tv,
             kind = VisualQaScenarioKind.TvGridFocus,
             title = "TV compact library grid focus",
-            description = "TV full-library grid sample with compact top controls, dense poster cards, modal sort/filter and status/recovery panels.",
+            description = "TV full-library grid sample with compact top controls, a 12-card dense poster grid, modal sort/filter controls, and status/recovery panels instead of permanent huge-card rows.",
             testTag = FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_TOP_CONTROLS),
             evidencePath = "Debug Visual QA → TV compact library grid",
             fixtureSamples = listOf(
                 FerrexQaTags.Tv.action(TvGridFocusPolicy.SURFACE_TOP_CONTROLS, "media-type"),
                 FerrexQaTags.Tv.action(TvGridFocusPolicy.SURFACE_TOP_CONTROLS, "sort-filter"),
+                FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS),
                 FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_MOVIE_CONTROLS_PANEL),
                 FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_STATUS_PANEL),
+                "dense-grid:${FerrexVisualQaFixtures.browseCards.size}-cards",
                 FerrexVisualQaFixtures.browseCards.first().testTag,
             ),
         ),
@@ -910,33 +912,132 @@ object FerrexVisualQaFixtures {
     )
 
     val browseCards = listOf(
-        VisualQaMediaCardSample(
+        browseCard(
             stableKey = "movie:$MovieLibraryId:$MovieId",
             title = movieDetail.title,
             subtitle = "Movie • 2026 • 118 min",
             libraryName = "QA Movies",
             route = movieRoute,
             imageLabel = "Poster placeholder",
-            testTag = FerrexQaTags.Tv.poster("grid-cards", "movie-aurora-station"),
+            posterKey = "movie-aurora-station",
         ),
-        VisualQaMediaCardSample(
+        browseCard(
             stableKey = "series:$SeriesLibraryId:$SeriesId",
             title = seriesDetail.title,
             subtitle = "Series • 1 season • 2 episodes",
             libraryName = "QA Series",
             route = seriesRoute,
             imageLabel = "Series placeholder",
-            testTag = FerrexQaTags.Tv.poster("grid-cards", "series-cloudline-archives"),
+            posterKey = "series-cloudline-archives",
         ),
-        VisualQaMediaCardSample(
+        browseCard(
             stableKey = "episode:$SeriesLibraryId:$EpisodeOneId",
             title = episodeOne.title,
             subtitle = "S1 E1 • resume available",
             libraryName = "QA Series",
             route = episodeRoute,
             imageLabel = "Episode placeholder",
-            testTag = FerrexQaTags.Tv.poster("grid-cards", "episode-signals-static"),
+            posterKey = "episode-signals-static",
         ),
+        browseCard(
+            stableKey = "movie:$MovieLibraryId:qa-movie-cobalt-orbit",
+            title = "Cobalt Orbit",
+            subtitle = "Movie • 2024 • 96 min",
+            libraryName = "QA Movies",
+            route = movieRoute,
+            imageLabel = "Blue orbit poster",
+            posterKey = "movie-cobalt-orbit",
+        ),
+        browseCard(
+            stableKey = "movie:$MovieLibraryId:qa-movie-velvet-comet",
+            title = "Velvet Comet",
+            subtitle = "Movie • 2023 • 104 min",
+            libraryName = "QA Movies",
+            route = movieRoute,
+            imageLabel = "Comet poster",
+            posterKey = "movie-velvet-comet",
+        ),
+        browseCard(
+            stableKey = "movie:$MovieLibraryId:qa-movie-harbor-nine",
+            title = "Harbor Nine",
+            subtitle = "Movie • 2022 • 111 min",
+            libraryName = "QA Movies",
+            route = movieRoute,
+            imageLabel = "Harbor poster",
+            posterKey = "movie-harbor-nine",
+        ),
+        browseCard(
+            stableKey = "movie:$MovieLibraryId:qa-movie-night-relay",
+            title = "Night Relay",
+            subtitle = "Movie • 2021 • 89 min",
+            libraryName = "QA Movies",
+            route = movieRoute,
+            imageLabel = "Relay poster",
+            posterKey = "movie-night-relay",
+        ),
+        browseCard(
+            stableKey = "series:$SeriesLibraryId:qa-series-glass-garden",
+            title = "Glass Garden",
+            subtitle = "Series • 2 seasons • 14 episodes",
+            libraryName = "QA Series",
+            route = seriesRoute,
+            imageLabel = "Garden poster",
+            posterKey = "series-glass-garden",
+        ),
+        browseCard(
+            stableKey = "series:$SeriesLibraryId:qa-series-signal-cove",
+            title = "Signal Cove",
+            subtitle = "Series • 1 season • 8 episodes",
+            libraryName = "QA Series",
+            route = seriesRoute,
+            imageLabel = "Cove poster",
+            posterKey = "series-signal-cove",
+        ),
+        browseCard(
+            stableKey = "episode:$SeriesLibraryId:qa-episode-second-pass",
+            title = "Second Pass",
+            subtitle = "S1 E2 • unwatched",
+            libraryName = "QA Series",
+            route = episodeRoute,
+            imageLabel = "Episode card",
+            posterKey = "episode-second-pass",
+        ),
+        browseCard(
+            stableKey = "episode:$SeriesLibraryId:qa-episode-cache-light",
+            title = "Cache Light",
+            subtitle = "S1 E3 • cached offline",
+            libraryName = "QA Series",
+            route = episodeRoute,
+            imageLabel = "Cache poster",
+            posterKey = "episode-cache-light",
+        ),
+        browseCard(
+            stableKey = "episode:$SeriesLibraryId:qa-episode-safe-return",
+            title = "Safe Return",
+            subtitle = "S1 E4 • recovery ready",
+            libraryName = "QA Series",
+            route = episodeRoute,
+            imageLabel = "Return poster",
+            posterKey = "episode-safe-return",
+        ),
+    )
+
+    private fun browseCard(
+        stableKey: String,
+        title: String,
+        subtitle: String,
+        libraryName: String,
+        route: MediaRouteArgs,
+        imageLabel: String,
+        posterKey: String,
+    ): VisualQaMediaCardSample = VisualQaMediaCardSample(
+        stableKey = stableKey,
+        title = title,
+        subtitle = subtitle,
+        libraryName = libraryName,
+        route = route,
+        imageLabel = imageLabel,
+        testTag = FerrexQaTags.Tv.poster(TvGridFocusPolicy.SURFACE_CARDS, posterKey),
     )
 
     val searchIds = listOf(

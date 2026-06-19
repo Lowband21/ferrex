@@ -8,14 +8,15 @@ Run from the repository root unless noted.
 
 ```bash
 cd mobile/android
-ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:testMobileDebugUnitTest :app:testTvDebugUnitTest --tests 'com.ferrex.android.ui.theme.FerrexDesignTokensTest' --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
+ANDROID_HOME=/home/lowband/Android/Sdk ANDROID_SDK_ROOT=/home/lowband/Android/Sdk ./gradlew :app:testMobileDebugUnitTest :app:testTvDebugUnitTest --tests 'com.ferrex.android.ui.theme.FerrexDesignTokensTest' --tests 'com.ferrex.android.ui.qa.FerrexVisualQaScenariosTest' --no-daemon --stacktrace -Pandroid.aapt2FromMavenOverride=/home/lowband/Android/Sdk/build-tools/35.0.0/aapt2
 ```
 
 Expected result: `BUILD SUCCESSFUL`. The focused test verifies:
 
 - tokenized text/action/status contrast pairs meet WCAG AA normal-text contrast (`4.5:1`) after alpha containers are composited over the dark Ferrex panel background;
 - every `FerrexActionRole` maps to the expected `FerrexStatusTone`;
-- deterministic visual-QA samples expose unique stable tags, descriptions, and manual evidence paths;
+- deterministic visual-QA samples expose unique stable tags, descriptions, manual evidence paths, and synthetic media fixtures;
+- phone and TV library-grid scenarios explicitly document compact controls plus dense grids, with enough synthetic poster cards to catch regressions back to vertical huge-card lists;
 - dynamic phone/TV tag builders sanitize spaces, punctuation, and mixed case into predictable namespaces.
 
 Full Android CI-compatible gate after source changes:
@@ -81,15 +82,18 @@ Key phone tags:
 
 - `phone.shell`, `phone.shell.nav`, `phone.shell.nav.<destination>`
 - `phone.home`, `phone.home.header`, `phone.home.continue-watching`, `phone.home.browse-find`, `phone.home.server-recovery`
-- `phone.libraries`, `phone.libraries.tabs`, `phone.libraries.chooser`, `phone.libraries.grid`, `phone.library.recovery`
+- `phone.libraries`, `phone.libraries.tabs`, `phone.libraries.chooser`, `phone.libraries.controls`, `phone.libraries.index-status`, `phone.libraries.grid`, `phone.library.recovery`
 - `phone.search`, `phone.search.panel`, `phone.search.field`, `phone.search.actions`, `phone.search.results`
 - `phone.account-server`, `phone.account-server.summary`
 
 Key TV tags:
 
 - top-level: `tv.home`, `tv.search`, `tv.search.field`, `tv.search.results`, `tv.detail`
-- focus surfaces: `tv.surface.<surface-key>`
-- focus actions: `tv.action.<surface-key>.<action-key>`
+- compact full-grid controls: `tv.surface.grid-top-controls`, `tv.action.grid-top-controls.media-type`, `tv.action.grid-top-controls.library`, `tv.action.grid-top-controls.sort-filter`, `tv.action.grid-top-controls.status-more`
+- dense full-grid posters: `tv.surface.grid-cards`, `tv.poster.grid-cards.<stable-item-key>`
+- modal grid panels: `tv.surface.grid-movie-controls-panel`, `tv.surface.grid-status-panel`, plus `tv.action.<panel>.<action-key>` for sort/filter/retry/cache/diagnostics exits
+- generic focus surfaces: `tv.surface.<surface-key>`
+- generic focus actions: `tv.action.<surface-key>.<action-key>`
 - poster targets: `tv.poster.<surface-key>.<stable-item-key>`
 
 Theater Plate debug tags are generated for both `phone` and `tv` targets:
@@ -103,6 +107,15 @@ Theater Plate debug tags are generated for both `phone` and `tv` targets:
 - search field: `<target>.theater-plate.search.search.field`
 
 The required Theater Plate state IDs are `bright`, `dark`, `busy`, `missing-backdrop`, `long-title`, `missing-artwork`, `stale-offline`, `recovery`, `search`, `browse`, `detail`, `rails`, and `playback-entry`. TV focusable surfaces also set explicit semantic content descriptions through `TvFocusableSurface`/`TvFocusableButton`; shared phone action buttons set button content descriptions from their labels.
+
+## Library-grid density contract
+
+The phone and TV library-grid debug scenarios are the visual canaries for the compact-control rewrite:
+
+- `phone-browse-grid` renders compact horizontally scrolling control/status shelves for media type, library, sort/filter, status, More/Recovery, retry, reset, and diagnostics above a `FerrexMobileMediaGrid` dense poster grid. The grid owns vertical scroll below the controls; do not restore first-page caps or full-width card lists.
+- `tv-grid-focus` renders compact D-pad top controls (`grid-top-controls`), a dense synthetic 12-card poster grid (`grid-cards`), and modal sort/filter plus status/recovery panels. The cards use dense grid token spacing/copy and stable `tv.poster.grid-cards.*` tags; TV home rails keep their larger 10-foot rail dimensions and must not inherit the dense full-grid treatment.
+- Recovery controls remain explicit, tagged, and no-wipe: Retry selected/all, Clear selected/all cache, Change server, Reset connection, and Diagnostics / Export diagnostics stay reachable from the status/More panel.
+- Screenshots, UI Automator dumps, logcat snippets, and videos for these scenarios must follow the redaction rules below before attachment.
 
 ## Theater Plate migration seams
 
@@ -139,7 +152,7 @@ Phone paths to capture/verify:
 | Path | Expected visual/accessibility evidence |
 | --- | --- |
 | Home | Header, Continue Watching, Browse and find, and Server & recovery sections are visible; primary cyan and secondary violet copy remain legible on slate surfaces. |
-| Libraries | Compact top controls expose Movie/Series, library chooser, movie sort/filter, status, and More/Recovery dialogs; one dense grid owns the scroll below the controls without hidden first-page caps. |
+| Libraries | Compact top controls expose Movie/Series, library chooser, movie sort/filter, status, More/Recovery, retry/reset, and diagnostics; one dense grid owns the scroll below the controls without hidden first-page caps or full-width huge-card lists. |
 | Search | Query field, Retry/Clear actions, result rows, stale/cache-miss/error cards, and diagnostics action remain visible and tagged. |
 | Account & Server | Retry, Change server, Sign out, Reset connection, Diagnostics, and cache recovery exits remain visible; reset/change paths do not require OS app-data wipe. |
 | Detail/Player if available | Playback/watch actions and error recovery copy preserve token contrast and expose labeled actions. |
@@ -171,7 +184,7 @@ TV paths to capture/verify:
 | --- | --- |
 | Home actions | Focus ring/scale is visible on Search, Settings & Diagnostics, and Retry when present; semantic labels match button copy. |
 | Continue Watching / shelves | Poster cards expose `tv.poster.<surface>.<item>` tags, content descriptions from media titles, and visible focus border/scale. |
-| Library tabs/chooser/actions | Tabs, library chips, Browse all, Retry selected library, and recovery controls expose `tv.action.<surface>.<key>` tags and restore focus. |
+| Library grid controls/posters | `grid-top-controls` exposes compact Back, Media, Library, Sort/filter, and Status/More actions; `grid-cards` shows dense poster cards tagged as `tv.poster.grid-cards.<item>` rather than vertical huge-card rows; modal sort/filter and status/recovery panels restore focus and keep no-wipe exits reachable. |
 | Search | Search field is focusable, Back/Retry/Clear are tagged, result rows expose `Open <title>` descriptions, and cache-miss recovery actions remain reachable. |
 | Detail | Back starts as a safe focus target; playback/watch actions and missing-detail recovery actions are tagged and have visible focus. |
 | Recovery/errors | Retry, clear cache, Change server, Reset connection, Sign out, and Diagnostics actions stay reachable without OS app-data wipe. |

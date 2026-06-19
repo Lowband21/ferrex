@@ -1,5 +1,6 @@
 package com.ferrex.android.ui.qa
 
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -87,6 +88,32 @@ class FerrexVisualQaScenariosTest {
         assertTrue(home.description.contains("recovery"))
         assertTrue(home.fixtureSamples.contains("phone-portrait"))
         assertTrue(home.fixtureSamples.contains("phone-landscape-foldable"))
+    }
+
+    @Test
+    fun libraryGridScenariosDocumentCompactControlsAndDensePosterContracts() {
+        val phoneGrid = FerrexVisualQaScenarios.find(FerrexQaScenarioIds.PhoneBrowseGrid)!!
+        val tvGrid = FerrexVisualQaScenarios.find(FerrexQaScenarioIds.TvGridFocus)!!
+        val browseCards = FerrexVisualQaFixtures.browseCards
+
+        assertTrue(phoneGrid.description.contains("compact", ignoreCase = true))
+        assertTrue(phoneGrid.description.contains("dense grid", ignoreCase = true))
+        assertTrue(phoneGrid.description.contains("instead of a full-width card list", ignoreCase = true))
+        assertEquals(browseCards.map { it.stableKey }, phoneGrid.fixtureSamples)
+
+        assertTrue(tvGrid.description.contains("compact top controls", ignoreCase = true))
+        assertTrue(tvGrid.description.contains("dense poster grid", ignoreCase = true))
+        assertTrue(tvGrid.description.contains("instead of permanent huge-card rows", ignoreCase = true))
+        assertEquals(12, browseCards.size)
+        assertEquals(browseCards.size, browseCards.map { it.stableKey }.distinct().size)
+        assertEquals(browseCards.size, browseCards.map { it.testTag }.distinct().size)
+        assertTrue(tvGrid.fixtureSamples.contains(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)))
+        assertTrue(tvGrid.fixtureSamples.contains(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_MOVIE_CONTROLS_PANEL)))
+        assertTrue(tvGrid.fixtureSamples.contains(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_STATUS_PANEL)))
+        assertTrue(tvGrid.fixtureSamples.contains("dense-grid:${browseCards.size}-cards"))
+        browseCards.forEach { card ->
+            assertTrue(card.testTag.startsWith("tv.poster.${TvGridFocusPolicy.SURFACE_CARDS}."))
+        }
     }
 
     @Test
