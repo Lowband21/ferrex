@@ -15,6 +15,73 @@ macro_rules! wrap_task {
     };
 }
 
+fn focus_area_for_current_auth_flow(state: &State) -> Option<FocusArea> {
+    use crate::domains::auth::types::{
+        AuthenticationFlow, CredentialType, SetupStep,
+    };
+
+    match &state.domains.auth.state.auth_flow {
+        AuthenticationFlow::PreAuthLogin { .. } => {
+            Some(FocusArea::AuthPreAuthLogin)
+        }
+        AuthenticationFlow::EnteringCredentials {
+            input_type: CredentialType::Password,
+            ..
+        } => Some(FocusArea::AuthPasswordEntry),
+        AuthenticationFlow::EnteringCredentials {
+            input_type: CredentialType::Pin { .. },
+            ..
+        } => Some(FocusArea::AuthPinEntry),
+        AuthenticationFlow::SettingUpPin { .. } => {
+            Some(FocusArea::AuthPinSetup)
+        }
+        AuthenticationFlow::FirstRunSetup {
+            current_step: SetupStep::Account,
+            ..
+        } => Some(FocusArea::AuthFirstRunSetup),
+        AuthenticationFlow::FirstRunSetup {
+            current_step: SetupStep::Pin,
+            ..
+        } => Some(FocusArea::AuthFirstRunPinSetup),
+        _ => None,
+    }
+}
+
+fn focus_task_for_current_auth_flow(state: &State) -> Task<DomainMessage> {
+    match focus_area_for_current_auth_flow(state) {
+        Some(area) => {
+            Task::done(DomainMessage::Focus(FocusMessage::Activate(area)))
+        }
+        None => Task::done(DomainMessage::Focus(FocusMessage::Clear)),
+    }
+}
+
+fn auth_task_with_current_focus(
+    task: Task<auth::AuthMessage>,
+    state: &State,
+) -> DomainUpdateResult {
+    DomainUpdateResult::task(Task::batch(vec![
+        task.map(DomainMessage::Auth),
+        focus_task_for_current_auth_flow(state),
+    ]))
+}
+
+fn auth_result_focus_task(state: &State) -> Task<DomainMessage> {
+    use crate::domains::auth::types::AuthenticationFlow;
+
+    match &state.domains.auth.state.auth_flow {
+        AuthenticationFlow::SettingUpPin { .. } => {
+            Task::done(DomainMessage::Focus(FocusMessage::Activate(
+                FocusArea::AuthPinSetup,
+            )))
+        }
+        AuthenticationFlow::Authenticated { .. } => {
+            Task::done(DomainMessage::Focus(FocusMessage::Clear))
+        }
+        _ => Task::none(),
+    }
+}
+
 #[cfg_attr(
     any(
         feature = "profile-with-puffin",
@@ -42,23 +109,8 @@ pub fn update_auth(
         }
 
         auth::AuthMessage::SetupStatusChecked(status) => {
-            let needs_setup = status.needs_setup;
-            let setup_task = handle_setup_status_checked(state, status)
-                .map(DomainMessage::Auth);
-
-            // Rationale: Activate focus for the appropriate auth form based on setup status.
-            // When not first-run, we show the pre-auth login and should enable Tab traversal.
-            let focus_task = if needs_setup {
-                Task::done(DomainMessage::Focus(FocusMessage::Activate(
-                    FocusArea::AuthFirstRunSetup,
-                )))
-            } else {
-                Task::done(DomainMessage::Focus(FocusMessage::Activate(
-                    FocusArea::AuthPreAuthLogin,
-                )))
-            };
-
-            DomainUpdateResult::task(Task::batch(vec![setup_task, focus_task]))
+            let setup_task = handle_setup_status_checked(state, status);
+            auth_task_with_current_focus(setup_task, state)
         }
 
         auth::AuthMessage::AutoLoginCheckComplete => {
@@ -147,23 +199,8 @@ pub fn update_auth(
 
         // Device auth flow
         auth::AuthMessage::DeviceStatusChecked(user, result) => {
-            let device_task = handle_device_status_checked(state, user, result)
-                .map(DomainMessage::Auth);
-
-            let focus_task = match &state.domains.auth.state.auth_flow {
-                crate::domains::auth::types::AuthenticationFlow::EnteringCredentials {
-                    input_type: crate::domains::auth::types::CredentialType::Password,
-                    ..
-                } => Task::done(DomainMessage::Focus(FocusMessage::Activate(
-                    FocusArea::AuthPasswordEntry,
-                ))),
-                crate::domains::auth::types::AuthenticationFlow::EnteringCredentials { .. } => {
-                    Task::done(DomainMessage::Focus(FocusMessage::Clear))
-                }
-                _ => Task::none(),
-            };
-
-            DomainUpdateResult::task(Task::batch(vec![device_task, focus_task]))
+            let device_task = handle_device_status_checked(state, user, result);
+            auth_task_with_current_focus(device_task, state)
         }
 
         auth::AuthMessage::UpdateCredential(input) => {
@@ -187,11 +224,16 @@ pub fn update_auth(
         }
 
         auth::AuthMessage::AuthResult(result) => {
-            wrap_task!(handle_auth_flow_auth_result(state, result))
+            let task = handle_auth_flow_auth_result(state, result);
+            DomainUpdateResult::task(Task::batch(vec![
+                task.map(DomainMessage::Auth),
+                auth_result_focus_task(state),
+            ]))
         }
 
         auth::AuthMessage::UsePasswordLogin => {
-            wrap_task!(handle_auth_flow_use_password_login(state))
+            let task = handle_auth_flow_use_password_login(state);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::ResetLocalAuthState => {
@@ -199,11 +241,13 @@ pub fn update_auth(
         }
 
         auth::AuthMessage::LocalAuthStateReset(result) => {
-            wrap_task!(handle_local_auth_state_reset(state, result))
+            let task = handle_local_auth_state_reset(state, result);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::SetupPin => {
-            wrap_task!(handle_auth_flow_setup_pin(state))
+            let task = handle_auth_flow_setup_pin(state);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::UpdatePin(pin) => {
@@ -226,9 +270,15 @@ pub fn update_auth(
             wrap_task!(handle_auth_flow_pin_set(state, result))
         }
 
-        auth::AuthMessage::Retry => wrap_task!(handle_auth_flow_retry(state)),
+        auth::AuthMessage::Retry => {
+            let task = handle_auth_flow_retry(state);
+            auth_task_with_current_focus(task, state)
+        }
 
-        auth::AuthMessage::Back => wrap_task!(handle_auth_flow_back(state)),
+        auth::AuthMessage::Back => {
+            let task = handle_auth_flow_back(state);
+            auth_task_with_current_focus(task, state)
+        }
 
         // Admin PIN unlock management
         auth::AuthMessage::EnableAdminPinUnlock => {
@@ -299,15 +349,18 @@ pub fn update_auth(
 
         // Setup wizard navigation
         auth::AuthMessage::SetupNextStep => {
-            wrap_task!(handle_setup_next_step(state))
+            let task = handle_setup_next_step(state);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::SetupPreviousStep => {
-            wrap_task!(handle_setup_previous_step(state))
+            let task = handle_setup_previous_step(state);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::SkipPinSetup => {
-            wrap_task!(handle_skip_pin_setup(state))
+            let task = handle_skip_pin_setup(state);
+            auth_task_with_current_focus(task, state)
         }
 
         auth::AuthMessage::SetupAnimationTick(delta) => {

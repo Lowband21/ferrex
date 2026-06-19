@@ -18,9 +18,7 @@ use crate::domains::ui::views::auth::login_card;
 use ferrex_core::player_prelude::User;
 use iced::{
     Alignment, Element, Length, Theme,
-    widget::{
-        Space, button, checkbox, column, container, row, text, text_input,
-    },
+    widget::{Space, checkbox, column, container, text, text_input},
 };
 
 /// Shows the credential entry screen (password or PIN)
@@ -171,11 +169,23 @@ pub fn view_credential_entry<'a>(
                     .spacing(8),
             );
         }
-        CredentialType::Pin { max_length, .. } => {
+        CredentialType::Pin { .. } => {
             content = content.push(
-                container(pin_input(input.as_str(), *max_length))
+                text_input("PIN", input.as_str())
+                    .on_input(|s| {
+                        DomainMessage::Auth(
+                            auth::AuthMessage::UpdateCredential(s),
+                        )
+                    })
+                    .on_submit(DomainMessage::Auth(
+                        auth::AuthMessage::SubmitCredential,
+                    ))
+                    .secure(true)
+                    .id(ids::auth_pin_entry())
+                    .padding(12)
+                    .size(16)
                     .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center),
+                    .style(theme::TextInput::style()),
             );
         }
     }
@@ -373,179 +383,4 @@ pub fn view_pre_auth_login<'a>(
     );
 
     auth_container(card).into()
-}
-
-/// Creates a PIN input display
-fn pin_input<'a>(value: &str, max_length: usize) -> Element<'a, DomainMessage> {
-    let digits: Vec<Element<'a, DomainMessage>> = (0..max_length)
-        .map(|i| {
-            let digit = value.chars().nth(i);
-            let display = if digit.is_some() { "●" } else { "○" };
-
-            container(
-                text(display)
-                    .size(32)
-                    .align_x(iced::alignment::Horizontal::Center),
-            )
-            .width(Length::Fixed(60.0))
-            .height(Length::Fixed(60.0))
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center)
-            .style(move |theme: &Theme| {
-                let palette = theme.extended_palette();
-                container::Style {
-                    background: if digit.is_some() {
-                        Some(palette.primary.weak.color.into())
-                    } else {
-                        None
-                    },
-                    border: iced::Border {
-                        color: if digit.is_some() {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.strong.color
-                        },
-                        width: 2.0,
-                        radius: 8.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
-        })
-        .collect();
-
-    column![
-        row(digits).spacing(12).align_y(Alignment::Center),
-        Space::new().height(Length::Fixed(20.0)),
-        // Numeric keypad
-        numeric_keypad(value, max_length)
-    ]
-    .align_x(Alignment::Center)
-    .into()
-}
-
-/// Creates a numeric keypad for PIN entry
-fn numeric_keypad<'a>(
-    current_value: &str,
-    max_length: usize,
-) -> Element<'a, DomainMessage> {
-    let button_size = 60.0;
-
-    let create_digit_button = |digit: char| {
-        button(
-            text(digit)
-                .size(24)
-                .align_x(iced::alignment::Horizontal::Center),
-        )
-        .on_press_maybe(if current_value.len() < max_length {
-            Some(DomainMessage::Auth(auth::AuthMessage::UpdateCredential(
-                format!("{}{}", current_value, digit),
-            )))
-        } else {
-            None
-        })
-        .width(Length::Fixed(button_size))
-        .height(Length::Fixed(button_size))
-        .style(|theme: &Theme, status| {
-            let palette = theme.extended_palette();
-            match status {
-                button::Status::Active => button::Style {
-                    background: Some(palette.background.weak.color.into()),
-                    text_color: palette.background.base.text,
-                    border: iced::Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                button::Status::Hovered => button::Style {
-                    background: Some(palette.primary.weak.color.into()),
-                    text_color: palette.background.base.text,
-                    border: iced::Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                button::Status::Pressed => button::Style {
-                    background: Some(palette.primary.base.color.into()),
-                    text_color: palette.primary.base.text,
-                    border: iced::Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                button::Status::Disabled => button::Style {
-                    background: Some(palette.background.weak.color.into()),
-                    text_color: palette.background.strong.text,
-                    border: iced::Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            }
-        })
-    };
-
-    let backspace_button = button(
-        text("⌫")
-            .size(24)
-            .align_x(iced::alignment::Horizontal::Center),
-    )
-    .on_press_maybe(if !current_value.is_empty() {
-        let mut new_value = current_value.to_string();
-        new_value.pop();
-        Some(DomainMessage::Auth(auth::AuthMessage::UpdateCredential(
-            new_value,
-        )))
-    } else {
-        None
-    })
-    .width(Length::Fixed(button_size))
-    .height(Length::Fixed(button_size))
-    .style(|theme: &Theme, _| {
-        let palette = theme.extended_palette();
-        button::Style {
-            background: Some(palette.background.weak.color.into()),
-            text_color: palette.background.base.text,
-            border: iced::Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    });
-
-    column![
-        row![
-            create_digit_button('1'),
-            create_digit_button('2'),
-            create_digit_button('3'),
-        ]
-        .spacing(8),
-        row![
-            create_digit_button('4'),
-            create_digit_button('5'),
-            create_digit_button('6'),
-        ]
-        .spacing(8),
-        row![
-            create_digit_button('7'),
-            create_digit_button('8'),
-            create_digit_button('9'),
-        ]
-        .spacing(8),
-        row![
-            Space::new().width(Length::Fixed(button_size)),
-            create_digit_button('0'),
-            backspace_button,
-        ]
-        .spacing(8),
-    ]
-    .spacing(8)
-    .align_x(Alignment::Center)
-    .into()
 }

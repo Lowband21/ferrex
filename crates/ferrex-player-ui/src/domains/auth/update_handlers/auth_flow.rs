@@ -1301,7 +1301,7 @@ pub fn handle_auth_flow_update_confirm_pin(
     Task::none()
 }
 
-/// Select which PIN setup field receives keypad input.
+/// Select which PIN setup field receives typed input.
 pub fn handle_auth_flow_select_pin_entry_target(
     state: &mut State,
     target: PinEntryTarget,
