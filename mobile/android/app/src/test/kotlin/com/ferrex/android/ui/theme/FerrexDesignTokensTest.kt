@@ -69,18 +69,30 @@ class FerrexDesignTokensTest {
         assertFalse(MobileMediaCardLayout.DenseGrid.showsActionBadge)
         assertTrue(phoneSpec.minInteractiveSize >= 48.dp)
 
-        val tvGridWidthWithDenseControlRail = (
-            1920f -
-                FerrexDesignTokens.Space.ScreenTvHorizontal.value * 2f -
-                FerrexDesignTokens.DenseLibraryGrid.tvControlRailWidth.value -
-                FerrexDesignTokens.DenseLibraryGrid.tvControlRailGap.value
+        val tvGridWidthBelowCompactControls = (1920f - FerrexDesignTokens.Space.ScreenTvHorizontal.value * 2f).dp
+        val tvGridHeightBelowCompactControls = (
+            1080f -
+                FerrexDesignTokens.Tv.FullScreenVerticalPadding.value * 2f -
+                FerrexDesignTokens.Focus.TvButtonMinHeight.value -
+                FerrexDesignTokens.Space.Lg.value
             ).dp
-        val tvRouteHeight = (1080f - FerrexDesignTokens.Tv.FullScreenVerticalPadding.value * 2f).dp
         val tvSpec = FerrexDesignTokens.DenseLibraryGrid.tv
+        val legacyTvGridSpec = DenseLibraryGridSpec(
+            minCellWidth = FerrexDesignTokens.Poster.TvGridMin,
+            horizontalSpacing = FerrexDesignTokens.Space.Xl,
+            verticalSpacing = FerrexDesignTokens.Space.Xl,
+            contentPaddingHorizontal = FerrexDesignTokens.Space.None,
+            contentPaddingVertical = FerrexDesignTokens.Space.Sm,
+            cardMinHeight = FerrexDesignTokens.Poster.TvCardMinHeight,
+            minInteractiveSize = FerrexDesignTokens.Focus.TvButtonMinHeight,
+        )
+        val denseVisiblePosters = tvSpec.columnsFor(tvGridWidthBelowCompactControls) * tvSpec.visibleRowsFor(tvGridHeightBelowCompactControls)
+        val legacyVisiblePosters = legacyTvGridSpec.columnsFor(tvGridWidthBelowCompactControls) * legacyTvGridSpec.visibleRowsFor(tvGridHeightBelowCompactControls)
 
-        assertTrue(tvSpec.columnsFor(tvGridWidthWithDenseControlRail) >= 10)
-        assertTrue(tvSpec.visibleRowsFor(tvRouteHeight) >= 2)
-        assertTrue(tvSpec.heightForRows(2) <= tvRouteHeight)
+        assertTrue(tvSpec.minCellWidth < FerrexDesignTokens.Poster.TvGridMin)
+        assertTrue(tvSpec.cardMinHeight < FerrexDesignTokens.Poster.TvCardMinHeight)
+        assertTrue(tvSpec.columnsFor(tvGridWidthBelowCompactControls) >= 13)
+        assertTrue(denseVisiblePosters >= legacyVisiblePosters * 2)
         assertTrue(tvSpec.minInteractiveSize >= FerrexDesignTokens.Focus.TvButtonMinHeight)
         assertTrue(FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.MediaArt).focusedBorder >= 2.dp)
     }

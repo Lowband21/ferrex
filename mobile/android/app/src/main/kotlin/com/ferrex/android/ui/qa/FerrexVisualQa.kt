@@ -20,6 +20,7 @@ import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.search.SearchMediaId
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.core.search.SearchMediaType
 import com.ferrex.android.core.watch.WatchEpisodeKey
 import com.ferrex.android.core.watch.WatchEpisodeState
@@ -535,11 +536,17 @@ object FerrexVisualQaScenarios {
             id = FerrexQaScenarioIds.TvGridFocus,
             device = VisualQaDevice.Tv,
             kind = VisualQaScenarioKind.TvGridFocus,
-            title = "TV grid focus",
-            description = "TV poster grid focus sample for browse rows and poster-card selection.",
-            testTag = FerrexQaTags.Tv.surface("grid-cards"),
-            evidencePath = "Debug Visual QA → TV grid focus",
-            fixtureSamples = FerrexVisualQaFixtures.browseCards.map { it.testTag },
+            title = "TV compact library grid focus",
+            description = "TV full-library grid sample with compact top controls, dense poster cards, modal sort/filter and status/recovery panels.",
+            testTag = FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_TOP_CONTROLS),
+            evidencePath = "Debug Visual QA → TV compact library grid",
+            fixtureSamples = listOf(
+                FerrexQaTags.Tv.action(TvGridFocusPolicy.SURFACE_TOP_CONTROLS, "media-type"),
+                FerrexQaTags.Tv.action(TvGridFocusPolicy.SURFACE_TOP_CONTROLS, "sort-filter"),
+                FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_MOVIE_CONTROLS_PANEL),
+                FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_STATUS_PANEL),
+                FerrexVisualQaFixtures.browseCards.first().testTag,
+            ),
         ),
         scenario(
             id = FerrexQaScenarioIds.TvDetailFocus,

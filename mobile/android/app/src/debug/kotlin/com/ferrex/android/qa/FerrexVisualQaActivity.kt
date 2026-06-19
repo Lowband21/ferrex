@@ -77,6 +77,7 @@ import com.ferrex.android.core.theaterplate.TheaterPlateLocalLuma
 import com.ferrex.android.core.theaterplate.TheaterPlatePalette
 import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
 import com.ferrex.android.core.theaterplate.TheaterPlateViewport
+import com.ferrex.android.core.tvfocus.TvGridFocusPolicy
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexPosterCard
@@ -1061,26 +1062,72 @@ private fun TvGridFocusScenario(scenario: VisualQaScenario) {
     QaScrollableScenario(scenario = scenario, tv = true) {
         ScenarioTitle(scenario, centered = true)
         FerrexStatusCard(
-            title = "TV poster grid",
-            body = "Each poster card is focusable, has a deterministic tag, and carries synthetic media metadata only.",
+            title = "TV compact library grid",
+            body = "Compact top controls open modal panels while dense poster cards fill the remaining browse surface.",
             tone = FerrexStatusTone.Cache,
         )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag(FerrexQaTags.Tv.surface("grid-cards")),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+                .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_TOP_CONTROLS)),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
         ) {
-            FerrexVisualQaFixtures.browseCards.forEach { card ->
-                QaTvPosterCard(card)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+            ) {
+                listOf(
+                    VisualQaRecoveryActionSample("back", "Back", FerrexActionRole.Secondary),
+                    VisualQaRecoveryActionSample("media-type", "Media: Movies", FerrexActionRole.Primary),
+                    VisualQaRecoveryActionSample("library", "Library: QA Movies", FerrexActionRole.Primary),
+                    VisualQaRecoveryActionSample("sort-filter", "Sort/filter", FerrexActionRole.Cache),
+                    VisualQaRecoveryActionSample("status-more", "Status / More", FerrexActionRole.Cache),
+                ).forEach { action ->
+                    QaTvFocusableAction(
+                        surfaceKey = TvGridFocusPolicy.SURFACE_TOP_CONTROLS,
+                        action = action,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = FerrexDesignTokens.Focus.TvButtonMinHeight),
+                    )
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        ) {
+            FerrexVisualQaFixtures.browseCards.chunked(3).forEach { rowCards ->
+                Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
+                    rowCards.forEach { card ->
+                        QaTvPosterCard(card, modifier = Modifier.width(164.dp))
+                    }
+                }
             }
         }
         QaTvActionPanel(
-            surfaceKey = "library-actions",
+            surfaceKey = TvGridFocusPolicy.SURFACE_MOVIE_CONTROLS_PANEL,
             actions = listOf(
-                VisualQaRecoveryActionSample("browse-all", "Browse all", FerrexActionRole.Primary),
-                VisualQaRecoveryActionSample("retry-library", "Retry selected library", FerrexActionRole.Retry),
-                VisualQaRecoveryActionSample("clear-cache", "Clear selected cache", FerrexActionRole.Cache),
+                VisualQaRecoveryActionSample("sort-titleasc", "Sort: Title A-Z", FerrexActionRole.Primary),
+                VisualQaRecoveryActionSample("sort-releasedatedesc", "Sort: Release date", FerrexActionRole.Cache),
+                VisualQaRecoveryActionSample("filter-all", "Filter: All movies", FerrexActionRole.Primary),
+                VisualQaRecoveryActionSample("filter-highrated", "Filter: Rating 7+", FerrexActionRole.Cache),
+                VisualQaRecoveryActionSample("close", "Close panel", FerrexActionRole.Secondary),
+            ),
+        )
+        QaTvActionPanel(
+            surfaceKey = TvGridFocusPolicy.SURFACE_STATUS_PANEL,
+            actions = listOf(
+                VisualQaRecoveryActionSample("sync-selected", "Retry selected library", FerrexActionRole.Retry),
+                VisualQaRecoveryActionSample("retry-all", "Retry all libraries", FerrexActionRole.Retry),
+                VisualQaRecoveryActionSample("clear-selected-cache", "Clear selected cache", FerrexActionRole.Cache),
+                VisualQaRecoveryActionSample("clear-all-cache", "Clear all cache", FerrexActionRole.DestructiveReset),
+                VisualQaRecoveryActionSample("change-server", "Change server", FerrexActionRole.Secondary),
+                VisualQaRecoveryActionSample("reset-connection", "Reset connection", FerrexActionRole.DestructiveReset),
+                VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary),
+                VisualQaRecoveryActionSample("close", "Close panel", FerrexActionRole.Secondary),
             ),
         )
     }
@@ -1110,16 +1157,17 @@ private fun QaTvFocusableAction(
     action: VisualQaRecoveryActionSample,
     testTag: String = FerrexQaTags.Tv.action(surfaceKey, action.key),
     contentDescription: String = action.label,
+    modifier: Modifier = Modifier
+        .widthIn(max = FerrexDesignTokens.Tv.ActionPanelMaxWidth)
+        .fillMaxWidth()
+        .heightIn(min = FerrexDesignTokens.Focus.TvButtonMinHeight),
 ) {
     var focused by remember { mutableStateOf(false) }
     val tone = action.role.statusTone()
     val colors = tone.colors()
     val enabled = action.enabled
     Surface(
-        modifier = Modifier
-            .widthIn(max = FerrexDesignTokens.Tv.ActionPanelMaxWidth)
-            .fillMaxWidth()
-            .heightIn(min = FerrexDesignTokens.Focus.TvButtonMinHeight)
+        modifier = modifier
             .testTag(testTag)
             .clickable(enabled = enabled, role = Role.Button, onClick = {})
             .onFocusChanged { focused = it.isFocused }
@@ -1160,11 +1208,13 @@ private fun QaTvFocusableAction(
 }
 
 @Composable
-private fun QaTvPosterCard(card: VisualQaMediaCardSample) {
+private fun QaTvPosterCard(
+    card: VisualQaMediaCardSample,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+) {
     var focused by remember { mutableStateOf(false) }
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .testTag(card.testTag)
             .clickable(onClick = {})
             .onFocusChanged { focused = it.isFocused }
@@ -1182,17 +1232,14 @@ private fun QaTvPosterCard(card: VisualQaMediaCardSample) {
             color = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
         ),
     ) {
-        Row(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.padding(FerrexDesignTokens.Space.Sm),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
         ) {
-            FerrexPosterPlaceholder(label = card.imageLabel, modifier = Modifier.width(132.dp))
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                Text(text = card.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = card.subtitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(text = card.libraryName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
+            FerrexPosterPlaceholder(label = card.imageLabel)
+            Text(text = card.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = card.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(text = card.libraryName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
         }
     }
 }

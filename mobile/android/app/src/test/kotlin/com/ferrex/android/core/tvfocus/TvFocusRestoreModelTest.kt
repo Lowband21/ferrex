@@ -97,9 +97,11 @@ class TvFocusRestoreModelTest {
     }
 
     @Test
-    fun tvGridFocusMovesFromDisappearingCardsToEmptyRecovery() {
-        val state = TvFocusRestoreState()
+    fun tvGridFocusMovesBetweenDenseCardsAndEmptyRecovery() {
+        val cardState = TvFocusRestoreState()
             .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_CARDS, "movie:library:item"))
+        val emptyState = TvFocusRestoreState()
+            .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS, "retry-all"))
 
         assertEquals(
             TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
@@ -107,11 +109,40 @@ class TvFocusRestoreModelTest {
         )
         assertEquals(
             TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
-            TvGridFocusPolicy.preferredSurface(state.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = false),
+            TvGridFocusPolicy.preferredSurface(cardState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = false),
         )
         assertEquals(
             TvGridFocusPolicy.SURFACE_CARDS,
-            TvGridFocusPolicy.preferredSurface(state.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+            TvGridFocusPolicy.preferredSurface(cardState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+        )
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_CARDS,
+            TvGridFocusPolicy.preferredSurface(emptyState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+        )
+    }
+
+    @Test
+    fun tvGridFocusRestoresTopControlsAroundControlPanels() {
+        val panelState = TvFocusRestoreState()
+            .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_STATUS_PANEL, "diagnostics"))
+        val legacyRailState = TvFocusRestoreState()
+            .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_MOVIE_FILTER, "filter-All"))
+
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_STATUS_PANEL,
+            TvGridFocusPolicy.preferredSurface(
+                lastTarget = panelState.lastTarget(TvGridFocusPolicy.SCREEN_GRID),
+                hasCards = true,
+                openPanelSurface = TvGridFocusPolicy.SURFACE_STATUS_PANEL,
+            ),
+        )
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_TOP_CONTROLS,
+            TvGridFocusPolicy.preferredSurface(panelState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+        )
+        assertEquals(
+            TvGridFocusPolicy.SURFACE_TOP_CONTROLS,
+            TvGridFocusPolicy.preferredSurface(legacyRailState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
         )
     }
 
