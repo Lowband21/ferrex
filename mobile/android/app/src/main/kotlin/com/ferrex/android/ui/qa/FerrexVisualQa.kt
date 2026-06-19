@@ -465,7 +465,7 @@ object FerrexVisualQaScenarios {
             device = VisualQaDevice.Phone,
             kind = VisualQaScenarioKind.PhoneBrowseGrid,
             title = "Phone Theater Plate browse/grid",
-            description = "Phone Theater Plate library browse sample with staged tabs, movie/series grids, stale-cache, and retry affordances visible.",
+            description = "Phone library browse sample with one compact control row and a dense grid owning the vertical scroll; recovery moves to status/More affordances.",
             testTag = FerrexQaTags.Phone.LibraryGrid,
             evidencePath = "Debug Visual QA → Phone Theater Plate browse/grid",
             fixtureSamples = FerrexVisualQaFixtures.browseCards.map { it.stableKey },

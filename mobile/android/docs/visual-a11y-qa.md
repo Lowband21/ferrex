@@ -139,7 +139,7 @@ Phone paths to capture/verify:
 | Path | Expected visual/accessibility evidence |
 | --- | --- |
 | Home | Header, Continue Watching, Browse and find, and Server & recovery sections are visible; primary cyan and secondary violet copy remain legible on slate surfaces. |
-| Libraries | Movie/Series tabs, library chooser, full grid, status copy, and library recovery actions are reachable without hidden first-page caps. |
+| Libraries | Compact top controls expose Movie/Series, library chooser, movie sort/filter, status, and More/Recovery dialogs; one dense grid owns the scroll below the controls without hidden first-page caps. |
 | Search | Query field, Retry/Clear actions, result rows, stale/cache-miss/error cards, and diagnostics action remain visible and tagged. |
 | Account & Server | Retry, Change server, Sign out, Reset connection, Diagnostics, and cache recovery exits remain visible; reset/change paths do not require OS app-data wipe. |
 | Detail/Player if available | Playback/watch actions and error recovery copy preserve token contrast and expose labeled actions. |
