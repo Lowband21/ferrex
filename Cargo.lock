@@ -1298,7 +1298,7 @@ checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -3008,7 +3008,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
+ "windows-link 0.1.3",
  "windows-result 0.4.1",
 ]
 
@@ -3095,7 +3095,7 @@ dependencies = [
 [[package]]
 name = "gio-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#050bc0a3b1c869cf112cca0ffb882448428b64b3"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -3124,7 +3124,7 @@ checksum = "151665d9be52f9bb40fc7966565d39666f2d1e69233571b71b87791c7e0528b3"
 [[package]]
 name = "glib"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#050bc0a3b1c869cf112cca0ffb882448428b64b3"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
 dependencies = [
  "bitflags 2.11.0",
  "futures-channel",
@@ -3144,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "glib-macros"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#050bc0a3b1c869cf112cca0ffb882448428b64b3"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3155,7 +3155,7 @@ dependencies = [
 [[package]]
 name = "glib-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#050bc0a3b1c869cf112cca0ffb882448428b64b3"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
 dependencies = [
  "libc",
  "system-deps",
@@ -3191,7 +3191,7 @@ dependencies = [
 [[package]]
 name = "gobject-sys"
 version = "0.23.0-alpha"
-source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#050bc0a3b1c869cf112cca0ffb882448428b64b3"
+source = "git+https://github.com/gtk-rs/gtk-rs-core?branch=main#c5f1c6e5185e8f1a0dc3e7d999ea786fabdea674"
 dependencies = [
  "glib-sys",
  "libc",
@@ -3252,7 +3252,7 @@ dependencies = [
 [[package]]
 name = "gstreamer"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "cfg-if",
  "futures-channel",
@@ -3276,7 +3276,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-app"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -3290,7 +3290,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-app-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "glib-sys",
  "gstreamer-base-sys",
@@ -3302,7 +3302,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-base"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "atomic_refcell",
  "cfg-if",
@@ -3315,7 +3315,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-base-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -3327,7 +3327,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "cfg-if",
  "glib-sys",
@@ -3339,7 +3339,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-video"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "cfg-if",
  "futures-channel",
@@ -3354,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "gstreamer-video-sys"
 version = "0.26.0-alpha"
-source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#63f2c72905a77fc57bf0fae809a97eb45abcfb2f"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs.git?branch=main#7922e962b267bdb645443615a5ae84239c71f19c"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -7613,7 +7613,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "subwave_appsink"
 version = "0.1.0"
-source = "git+https://github.com/Lowband21/subwave.git?branch=feat%2Fsubs#62b162e340c8e766301ea1a577697b2e145ebf55"
+source = "git+https://github.com/Lowband21/subwave.git?branch=main#4de8fd485a8077d17fd0f25e7b426988ac0da116"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
@@ -7627,7 +7627,7 @@ dependencies = [
 [[package]]
 name = "subwave_core"
 version = "0.1.0"
-source = "git+https://github.com/Lowband21/subwave.git?branch=feat%2Fsubs#62b162e340c8e766301ea1a577697b2e145ebf55"
+source = "git+https://github.com/Lowband21/subwave.git?branch=main#4de8fd485a8077d17fd0f25e7b426988ac0da116"
 dependencies = [
  "gstreamer",
  "thiserror 2.0.18",
@@ -7637,7 +7637,7 @@ dependencies = [
 [[package]]
 name = "subwave_unified"
 version = "0.1.0"
-source = "git+https://github.com/Lowband21/subwave.git?branch=feat%2Fsubs#62b162e340c8e766301ea1a577697b2e145ebf55"
+source = "git+https://github.com/Lowband21/subwave.git?branch=main#4de8fd485a8077d17fd0f25e7b426988ac0da116"
 dependencies = [
  "gstreamer",
  "iced",
@@ -7652,7 +7652,7 @@ dependencies = [
 [[package]]
 name = "subwave_wayland"
 version = "0.1.0"
-source = "git+https://github.com/Lowband21/subwave.git?branch=feat%2Fsubs#62b162e340c8e766301ea1a577697b2e145ebf55"
+source = "git+https://github.com/Lowband21/subwave.git?branch=main#4de8fd485a8077d17fd0f25e7b426988ac0da116"
 dependencies = [
  "ab_glyph",
  "gstreamer",
@@ -7666,6 +7666,7 @@ dependencies = [
  "log",
  "once_cell",
  "parking_lot",
+ "quick-xml",
  "raw-window-handle",
  "rustc-hash 2.1.2",
  "subwave_core",
@@ -7805,7 +7806,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -9074,7 +9075,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

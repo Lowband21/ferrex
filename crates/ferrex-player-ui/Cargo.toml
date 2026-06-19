@@ -88,8 +88,8 @@ lucide-icons = { git = "https://github.com/Lowband21/lucide-icons-iced-0.14.git"
 # subwave_unified = { git = "https://github.com/Lowband21/subwave.git" }
 # subwave_core = { git = "https://github.com/Lowband21/subwave.git" }
 
-subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
-subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "feat/subs" }
+subwave_unified = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
+subwave_core = { git = "https://github.com/Lowband21/subwave.git", branch = "main" }
 
 # Async runtime
 tokio.workspace = true
