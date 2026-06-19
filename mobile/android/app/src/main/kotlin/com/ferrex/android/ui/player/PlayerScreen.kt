@@ -205,6 +205,7 @@ fun PlayerScreen(
                 onBack = onBack,
                 onChangeServer = onChangeServer,
                 onSignOut = onSignOut,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
             is PlaybackPlayerState.Loading -> PlaybackLoading(
                 message = if (state.retryAttempt > 0) {
@@ -216,6 +217,7 @@ fun PlayerScreen(
                 onBack = onBack,
                 onChangeServer = onChangeServer,
                 onSignOut = onSignOut,
+                onOpenDiagnostics = onOpenDiagnostics,
             )
             is PlaybackPlayerState.Ready -> PlayerContent(
                 streamUrl = state.prepared.streamUrl,
@@ -237,7 +239,7 @@ fun PlayerScreen(
             )
             is PlaybackPlayerState.SessionInvalidated -> PlaybackErrorPanel(
                 failure = state.failure.copy(message = "Playback authorization could not be recovered. Sign in again to continue."),
-                actions = PlaybackRecoveryActions(retry = false, changeServer = true, signOut = true),
+                actions = PlaybackRecoveryActions.sessionInvalidated(),
                 chrome = chrome,
                 onRetry = controller::retry,
                 onBack = onBack,
@@ -256,21 +258,53 @@ private fun PlaybackLoading(
     onBack: () -> Unit,
     onChangeServer: () -> Unit,
     onSignOut: () -> Unit,
+    onOpenDiagnostics: (() -> Unit)?,
 ) {
     if (chrome == PlayerChrome.Tv) {
         TvPlaybackActionPanel(
             title = "Preparing playback",
             supportingText = message,
             tone = FerrexStatusTone.Secondary,
-            actions = listOf(
-                TvPlaybackPanelAction(
-                    key = "back",
-                    label = "Back to details",
-                    role = FerrexActionRole.Secondary,
-                    contentDescription = "Back to details while playback is loading",
-                    onSelect = onBack,
-                ),
-            ),
+            actions = buildList {
+                add(
+                    TvPlaybackPanelAction(
+                        key = "back",
+                        label = "Back to details",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Back to details while playback is loading",
+                        onSelect = onBack,
+                    ),
+                )
+                add(
+                    TvPlaybackPanelAction(
+                        key = "change-server",
+                        label = "Change server",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Change Ferrex server while playback is loading",
+                        onSelect = onChangeServer,
+                    ),
+                )
+                add(
+                    TvPlaybackPanelAction(
+                        key = "sign-out",
+                        label = "Sign out",
+                        role = FerrexActionRole.Secondary,
+                        contentDescription = "Sign out while playback is loading",
+                        onSelect = onSignOut,
+                    ),
+                )
+                onOpenDiagnostics?.let {
+                    add(
+                        TvPlaybackPanelAction(
+                            key = "diagnostics",
+                            label = "Diagnostics / Export diagnostics",
+                            role = FerrexActionRole.Cache,
+                            contentDescription = "Open diagnostics while playback is loading",
+                            onSelect = it,
+                        ),
+                    )
+                }
+            },
             leading = {
                 CircularProgressIndicator(
                     color = MaterialTheme.colorScheme.primary,
@@ -323,6 +357,14 @@ private fun PlaybackLoading(
                     role = FerrexActionRole.Secondary,
                     onClick = onSignOut,
                     modifier = Modifier.weight(1f),
+                )
+            }
+            onOpenDiagnostics?.let {
+                FerrexActionButton(
+                    label = "Diagnostics / Export diagnostics",
+                    role = FerrexActionRole.Secondary,
+                    onClick = it,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -391,16 +433,18 @@ private fun PlaybackErrorPanel(
                         ),
                     )
                 }
-                onOpenDiagnostics?.let {
-                    add(
-                        TvPlaybackPanelAction(
-                            key = "diagnostics",
-                            label = "Diagnostics / Export diagnostics",
-                            role = FerrexActionRole.Cache,
-                            contentDescription = "Open diagnostics after playback failed",
-                            onSelect = it,
-                        ),
-                    )
+                if (actions.diagnostics) {
+                    onOpenDiagnostics?.let {
+                        add(
+                            TvPlaybackPanelAction(
+                                key = "diagnostics",
+                                label = "Diagnostics / Export diagnostics",
+                                role = FerrexActionRole.Cache,
+                                contentDescription = "Open diagnostics after playback failed",
+                                onSelect = it,
+                            ),
+                        )
+                    }
                 }
             },
         )
@@ -464,13 +508,15 @@ private fun PlaybackErrorPanel(
                     }
                 }
             }
-            onOpenDiagnostics?.let {
-                FerrexActionButton(
-                    label = "Diagnostics / Export diagnostics",
-                    role = FerrexActionRole.Secondary,
-                    onClick = it,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            if (actions.diagnostics) {
+                onOpenDiagnostics?.let {
+                    FerrexActionButton(
+                        label = "Diagnostics / Export diagnostics",
+                        role = FerrexActionRole.Secondary,
+                        onClick = it,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }

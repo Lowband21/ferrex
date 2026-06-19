@@ -168,7 +168,18 @@ class PlaybackFoundationTest {
         assertTrue(error.actions.retry)
         assertTrue(error.actions.changeServer)
         assertTrue(error.actions.signOut)
+        assertTrue(error.actions.diagnostics)
         assertTrue(invalidations.isEmpty())
+    }
+
+    @Test
+    fun sessionInvalidatedActionsKeepServerSignOutDiagnosticsButDisableRetry() {
+        val actions = PlaybackRecoveryActions.sessionInvalidated()
+
+        assertFalse(actions.retry)
+        assertTrue(actions.changeServer)
+        assertTrue(actions.signOut)
+        assertTrue(actions.diagnostics)
     }
 
     @Test
@@ -198,6 +209,7 @@ class PlaybackFoundationTest {
             assertTrue(error.actions.retry)
             assertTrue(error.actions.changeServer)
             assertTrue(error.actions.signOut)
+            assertTrue(error.actions.diagnostics)
             assertTrue(invalidations.isEmpty())
         }
     }

@@ -3,6 +3,9 @@ package com.ferrex.android.core.mediaart
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
+import com.ferrex.android.ui.components.FerrexActionRole
+import com.ferrex.android.ui.components.MobileMediaCardPresenter
+import com.ferrex.android.ui.components.MobileMediaWatchState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -88,6 +91,28 @@ class MediaArtModelsTest {
         listOf(missing, pending, failed, stale, noFallbackFailed).forEach { state ->
             assertFalse("${state.stateLabel} should be screenshotable", state.screenshotLabels.isEmpty())
         }
+    }
+
+    @Test
+    fun mobileCardPresenterExposesArtworkProgressWatchAndActionStates() {
+        val poster = art(BrowseImageCategory.Poster)
+        val fallback = MediaArtFallback("http://ferrex.local/api/v1/images/iid/${poster.requestKey!!.iid}", "Poster IID fallback")
+        val state = MobileMediaCardPresenter.state(
+            art = poster,
+            resolution = ImageResolution.Pending(poster.requestKey!!, retryAfterMillis = 2500, retryAtMillis = 3000),
+            fallback = fallback,
+            progressFraction = 0.42f,
+            progressLabel = "42% watched • 20 min left",
+            watchState = MobileMediaWatchState.InProgress,
+            actionLabel = "Open",
+            actionRole = FerrexActionRole.Secondary,
+        )
+
+        assertTrue(state.visibleBadges.contains("In progress"))
+        assertTrue(state.visibleBadges.contains("Pending"))
+        assertTrue(state.visibleBadges.contains("Low-quality fallback"))
+        assertTrue(state.visibleBadges.contains("Action: Open"))
+        assertTrue(state.contentDescription("Signal", "Movie", "Library").contains("42% watched"))
     }
 
     @Test

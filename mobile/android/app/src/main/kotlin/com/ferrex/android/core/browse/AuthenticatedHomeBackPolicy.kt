@@ -10,6 +10,7 @@ enum class PhoneShellDestination(val label: String) {
 }
 
 enum class PhoneSystemBackAction {
+    CloseDiagnostics,
     ClosePlayback,
     CloseDetail,
     ReturnHome,
@@ -17,6 +18,7 @@ enum class PhoneSystemBackAction {
 }
 
 enum class PhoneExplicitBackAction {
+    CloseDiagnostics,
     ClosePlayback,
     CloseDetail,
     StayOnSurface,
@@ -31,14 +33,20 @@ enum class AuthenticatedDetailBackDestination {
 
 object AuthenticatedHomeBackPolicy {
     const val PHONE_BACK_BEHAVIOR_DOCUMENTATION: String =
-        "Home system Back exits the app; Libraries, Search, and Account/Server system Back return to Home; " +
-            "Detail explicit or system Back closes Detail and reveals its source surface; Playback explicit or system Back closes Playback before Detail."
+        "Diagnostics explicit or system Back closes Diagnostics first; Home system Back exits the app; " +
+            "Libraries, Search, and Account/Server system Back return to Home; " +
+            "Detail explicit or system Back closes Detail and reveals its source surface; Playback explicit or system Back closes Playback before Detail; " +
+            "Recovery surfaces keep retry, sign out, change server, reset connection, diagnostics, and cache recovery exits visible without Android app-data wipes."
 
     fun phoneSystemBackAction(
         hasActivePlayback: Boolean,
         hasSelectedDetail: Boolean,
         currentDestination: PhoneShellDestination = PhoneShellDestination.Home,
+        diagnosticsOpen: Boolean = false,
+        recoverySurfaceActive: Boolean = false,
     ): PhoneSystemBackAction = when {
+        diagnosticsOpen -> PhoneSystemBackAction.CloseDiagnostics
+        recoverySurfaceActive -> PhoneSystemBackAction.ExitApp
         hasActivePlayback -> PhoneSystemBackAction.ClosePlayback
         hasSelectedDetail -> PhoneSystemBackAction.CloseDetail
         currentDestination != PhoneShellDestination.Home -> PhoneSystemBackAction.ReturnHome
@@ -48,7 +56,9 @@ object AuthenticatedHomeBackPolicy {
     fun phoneExplicitBackAction(
         hasActivePlayback: Boolean,
         hasSelectedDetail: Boolean,
+        diagnosticsOpen: Boolean = false,
     ): PhoneExplicitBackAction = when {
+        diagnosticsOpen -> PhoneExplicitBackAction.CloseDiagnostics
         hasActivePlayback -> PhoneExplicitBackAction.ClosePlayback
         hasSelectedDetail -> PhoneExplicitBackAction.CloseDetail
         else -> PhoneExplicitBackAction.StayOnSurface

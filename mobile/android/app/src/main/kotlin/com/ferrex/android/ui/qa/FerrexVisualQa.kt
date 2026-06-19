@@ -47,9 +47,12 @@ object FerrexQaTags {
         const val Libraries = "phone.libraries"
         const val LibraryTabs = "phone.libraries.tabs"
         const val LibraryChooser = "phone.libraries.chooser"
+        const val LibraryControls = "phone.libraries.controls"
+        const val LibraryIndexStatus = "phone.libraries.index-status"
         const val LibraryGrid = "phone.libraries.grid"
         const val LibraryRecovery = "phone.library.recovery"
         const val Search = "phone.search"
+        const val SearchHeader = "phone.search.header"
         const val SearchPanel = "phone.search.panel"
         const val SearchField = "phone.search.field"
         const val SearchActions = "phone.search.actions"
@@ -63,6 +66,11 @@ object FerrexQaTags {
         const val AccountSummary = "phone.account-server.summary"
 
         fun navItem(destination: String): String = namespaced("phone", "shell", "nav", destination)
+        fun libraryAction(action: String): String = namespaced("phone", "libraries", "action", action)
+        fun libraryControl(control: String): String = namespaced("phone", "libraries", "control", control)
+        fun searchAction(action: String): String = namespaced("phone", "search", "action", action)
+        fun searchResult(result: String): String = namespaced("phone", "search", "result", result)
+        fun searchStatus(status: String): String = namespaced("phone", "search", "status", status)
     }
 
     object Tv {
@@ -436,30 +444,30 @@ object FerrexVisualQaScenarios {
             id = FerrexQaScenarioIds.PhoneHome,
             device = VisualQaDevice.Phone,
             kind = VisualQaScenarioKind.PhoneHome,
-            title = "Phone home",
-            description = "Authenticated phone home shell with resume, browse, and recovery sections from isolated QA state.",
+            title = "Phone Theater Plate home",
+            description = "Authenticated phone Home route on the Theater Plate stage; portrait and landscape/foldable QA keep resume, browse, search, and recovery actions visible.",
             testTag = FerrexQaTags.Phone.Home,
-            evidencePath = "Debug Visual QA → Phone home",
-            fixtureSamples = listOf("qa-user-local", "Aurora Station", "Offline recovery card"),
+            evidencePath = "Debug Visual QA → Phone home → portrait + landscape/foldable",
+            fixtureSamples = listOf("phone-portrait", "phone-landscape-foldable", "Theater Plate fallback stage", "Offline recovery card"),
         ),
         scenario(
             id = FerrexQaScenarioIds.PhoneSearch,
             device = VisualQaDevice.Phone,
             kind = VisualQaScenarioKind.PhoneSearch,
-            title = "Phone search",
-            description = "Phone search panel with deterministic resolved rows and a cache-miss recovery row.",
+            title = "Phone Theater Plate search",
+            description = "Phone Theater Plate search panel with staged query controls, deterministic resolved rows, and a cache-miss recovery row.",
             testTag = FerrexQaTags.Phone.Search,
-            evidencePath = "Debug Visual QA → Phone search → query qa",
+            evidencePath = "Debug Visual QA → Phone Theater Plate search → query qa",
             fixtureSamples = listOf("qa", "Aurora Station", "Episode unavailable in cache"),
         ),
         scenario(
             id = FerrexQaScenarioIds.PhoneBrowseGrid,
             device = VisualQaDevice.Phone,
             kind = VisualQaScenarioKind.PhoneBrowseGrid,
-            title = "Phone browse/grid",
-            description = "Phone library grid sample with movie, series, stale-cache, and retry affordances visible.",
+            title = "Phone Theater Plate browse/grid",
+            description = "Phone Theater Plate library browse sample with staged tabs, movie/series grids, stale-cache, and retry affordances visible.",
             testTag = FerrexQaTags.Phone.LibraryGrid,
-            evidencePath = "Debug Visual QA → Phone browse/grid",
+            evidencePath = "Debug Visual QA → Phone Theater Plate browse/grid",
             fixtureSamples = FerrexVisualQaFixtures.browseCards.map { it.stableKey },
         ),
         scenario(

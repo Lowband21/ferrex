@@ -463,7 +463,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = seasonMetadata(season, seasonStatus),
             facts = seasonFacts(season),
-            watchState = seasonWatchState(season, seasonStatus),
+            watchState = seasonWatchState(season, seasonStatus, series?.tmdbId, watchState.lastError),
             actions = actions,
             recovery = recoveryState(route, libraryFreshness),
             rails = rails,
@@ -500,7 +500,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = movieMetadata(movie, progress),
             facts = movieFacts(movie),
-            watchState = mediaWatchState(movie.id, "Movie watch state", progress),
+            watchState = mediaWatchState(movie.id, "Movie watch state", progress, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -561,7 +561,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = seriesMetadata(series, seriesStatus),
             facts = seriesFacts(series),
-            watchState = seriesWatchState(series, seriesStatus),
+            watchState = seriesWatchState(series, seriesStatus, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -636,15 +636,13 @@ object DetailPageMapper {
         val episodeStatus = seriesStatus?.episodeStatus(episode.seasonNumber, episode.episodeNumber)
         val resumeContract = DetailRouteContracts.episodeResume(episode, progress, result.route)
         val startOverContract = DetailRouteContracts.episodeStartOver(episode, result.route)
-        val heroImages = DetailImageSet(
-            poster = result.parentSeries?.images?.poster,
-            backdrop = result.parentSeries?.images?.backdrop,
-            still = episode.images.still ?: result.parentSeries?.images?.still,
-            posterFallbackPath = result.parentSeries?.images?.posterFallbackPath,
-            backdropFallbackPath = result.parentSeries?.images?.backdropFallbackPath,
-            stillFallbackPath = episode.images.stillFallbackPath ?: result.parentSeries?.images?.stillFallbackPath,
+        val hero = episodeHeroFor(
+            pageKey = "episode:${episode.id}",
+            title = episode.title,
+            parentSeries = result.parentSeries,
+            episodeImages = episode.images,
+            imageResolutions = imageResolutions,
         )
-        val hero = heroFor("episode:${episode.id}", episode.title, heroImages, imageResolutions)
         return page(
             stableKey = "episode:${episode.id}",
             kind = DetailPageKind.Episode,
@@ -656,7 +654,7 @@ object DetailPageMapper {
             hero = hero,
             metadata = episodeMetadata(episode, progress, episodeStatus),
             facts = episodeFacts(episode),
-            watchState = episodeWatchState(episode, progress, episodeStatus),
+            watchState = episodeWatchState(episode, progress, episodeStatus, watchState.lastError),
             actions = buildList {
                 addAll(
                     playbackActions(
@@ -1019,6 +1017,46 @@ object DetailPageMapper {
                 label = "$title poster",
                 surfaceKey = pageKey,
                 itemKey = "poster",
+                imageResolutions = imageResolutions,
+                grounding = MediaArtGrounding.TheaterPlateContactShadow,
+            )
+        }
+        return DetailHero(background = background, foreground = foreground)
+    }
+
+    private fun episodeHeroFor(
+        pageKey: String,
+        title: String,
+        parentSeries: SeriesDetail?,
+        episodeImages: DetailImageSet,
+        imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    ): DetailHero {
+        val backgroundKey = parentSeries?.images?.backdrop
+        val background = if (backgroundKey != null) {
+            artFor(
+                key = backgroundKey,
+                fallbackPath = parentSeries?.images?.backdropFallbackPath,
+                label = "${parentSeries?.title ?: title} backdrop",
+                surfaceKey = pageKey,
+                itemKey = "hero",
+                imageResolutions = imageResolutions,
+                grounding = MediaArtGrounding.Flat,
+            )
+        } else {
+            noArt(
+                label = "$title backdrop",
+                reason = "Episode backdrop is unavailable; Theater Plate uses a generated fallback while the episode still remains foreground.",
+            )
+        }
+        val foregroundKey = episodeImages.still ?: parentSeries?.images?.poster
+        val foreground = foregroundKey?.let { key ->
+            val stillForeground = key == episodeImages.still
+            artFor(
+                key = key,
+                fallbackPath = if (stillForeground) episodeImages.stillFallbackPath else parentSeries?.images?.posterFallbackPath,
+                label = if (stillForeground) "$title still" else "${parentSeries?.title ?: title} poster",
+                surfaceKey = pageKey,
+                itemKey = if (stillForeground) "still" else "poster",
                 imageResolutions = imageResolutions,
                 grounding = MediaArtGrounding.TheaterPlateContactShadow,
             )
@@ -1516,6 +1554,7 @@ object DetailPageMapper {
         scopeKey: String,
         label: String,
         progress: WatchMediaProgress?,
+        lastError: String? = null,
     ): DetailWatchState = when {
         progress == null -> DetailWatchState(
             scopeKey = scopeKey,
@@ -1523,7 +1562,10 @@ object DetailPageMapper {
             state = DetailWatchStateKind.Unknown,
             progress = 0f,
             pendingMutation = false,
-            message = "Watch state has not loaded yet. Retry watch state keeps this detail recoverable.",
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Watch state has not loaded yet. Retry watch state keeps this detail recoverable.",
+            ),
         )
         progress.isCompleted -> DetailWatchState(
             scopeKey = scopeKey,
@@ -1551,7 +1593,11 @@ object DetailPageMapper {
         )
     }
 
-    private fun seriesWatchState(series: SeriesDetail, status: WatchSeriesStatus?): DetailWatchState = when {
+    private fun seriesWatchState(
+        series: SeriesDetail,
+        status: WatchSeriesStatus?,
+        lastError: String? = null,
+    ): DetailWatchState = when {
         series.tmdbId == null -> DetailWatchState(
             scopeKey = series.id,
             label = "Series watch state",
@@ -1566,7 +1612,10 @@ object DetailPageMapper {
             state = DetailWatchStateKind.Unknown,
             progress = 0f,
             pendingMutation = false,
-            message = "Retry to load series watch state and next episode.",
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Retry to load series watch state and next episode.",
+            ),
         )
         status.isCompleted -> DetailWatchState(
             scopeKey = series.tmdbId.toString(),
@@ -1594,27 +1643,45 @@ object DetailPageMapper {
         )
     }
 
-    private fun seasonWatchState(season: SeasonDetail, status: WatchSeasonStatus?): DetailWatchState? = status?.let {
-        DetailWatchState(
+    private fun seasonWatchState(
+        season: SeasonDetail,
+        status: WatchSeasonStatus?,
+        tmdbSeriesId: Long?,
+        lastError: String? = null,
+    ): DetailWatchState? = when {
+        status != null -> DetailWatchState(
             scopeKey = "season:${season.id}",
             label = "Season watch state",
             state = when {
-                it.isCompleted -> DetailWatchStateKind.Watched
-                it.watched > 0 || it.inProgress > 0 -> DetailWatchStateKind.InProgress
+                status.isCompleted -> DetailWatchStateKind.Watched
+                status.watched > 0 || status.inProgress > 0 -> DetailWatchStateKind.InProgress
                 else -> DetailWatchStateKind.Unwatched
             },
-            progress = if (it.total > 0) (it.watched.toFloat() / it.total.toFloat()).coerceIn(0f, 1f) else 0f,
+            progress = if (status.total > 0) (status.watched.toFloat() / status.total.toFloat()).coerceIn(0f, 1f) else 0f,
             pendingMutation = false,
-            message = "${it.watched} of ${it.total} watched; ${it.inProgress} in progress.",
+            message = "${status.watched} of ${status.total} watched; ${status.inProgress} in progress.",
         )
+        tmdbSeriesId != null || !lastError.isNullOrBlank() -> DetailWatchState(
+            scopeKey = "season:${season.id}",
+            label = "Season watch state",
+            state = DetailWatchStateKind.Unknown,
+            progress = 0f,
+            pendingMutation = false,
+            message = watchRefreshMessage(
+                lastError = lastError,
+                fallback = "Retry to load season watch state.",
+            ),
+        )
+        else -> null
     }
 
     private fun episodeWatchState(
         episode: EpisodeDetail,
         progress: WatchMediaProgress?,
         status: WatchEpisodeStatus?,
+        lastError: String? = null,
     ): DetailWatchState {
-        val mediaState = mediaWatchState(episode.id, "Episode watch state", progress)
+        val mediaState = mediaWatchState(episode.id, "Episode watch state", progress, lastError)
         if (progress != null || status == null) return mediaState
         return DetailWatchState(
             scopeKey = episode.id,
@@ -1633,6 +1700,11 @@ object DetailPageMapper {
             },
         )
     }
+
+    private fun watchRefreshMessage(lastError: String?, fallback: String): String = lastError
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "Watch state refresh failed: $it. Retry watch state keeps playback actions visible." }
+        ?: fallback
 
     private fun mediaWatchMetadata(progress: WatchMediaProgress): DetailMetadataItem = when {
         progress.isCompleted -> DetailMetadataItem("Watched", DetailTone.Success, DetailMetadataKind.WatchState)

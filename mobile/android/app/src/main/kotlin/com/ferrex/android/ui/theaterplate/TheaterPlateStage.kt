@@ -372,6 +372,43 @@ fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): Ferr
         FerrexStageSurfaceVariant.StatusSlab -> if (tenFoot) 64.dp else if (compact) 44.dp else 52.dp
     }
 
+    val baseContainerAlpha = when (this) {
+        FerrexStageSurfaceVariant.ProjectionShelf -> 0.58f
+        FerrexStageSurfaceVariant.ControlShelf -> 0.48f
+        FerrexStageSurfaceVariant.RailBand -> 0.34f
+        FerrexStageSurfaceVariant.FactRibbon -> 0.26f
+        FerrexStageSurfaceVariant.NoticeSlab -> 0.52f
+        FerrexStageSurfaceVariant.EmptyState -> 0.42f
+        FerrexStageSurfaceVariant.StatusSlab -> 0.46f
+    }
+    val baseBorderAlpha = when (this) {
+        FerrexStageSurfaceVariant.ProjectionShelf -> 0.34f
+        FerrexStageSurfaceVariant.ControlShelf -> 0.54f
+        FerrexStageSurfaceVariant.RailBand -> 0.44f
+        FerrexStageSurfaceVariant.FactRibbon -> 0.38f
+        FerrexStageSurfaceVariant.NoticeSlab -> 0.62f
+        FerrexStageSurfaceVariant.EmptyState -> 0.50f
+        FerrexStageSurfaceVariant.StatusSlab -> 0.52f
+    }
+    val phoneContainerScale = if (tenFoot) 1f else when (this) {
+        FerrexStageSurfaceVariant.ProjectionShelf -> 0.78f
+        FerrexStageSurfaceVariant.ControlShelf -> 0.88f
+        FerrexStageSurfaceVariant.RailBand -> 0.68f
+        FerrexStageSurfaceVariant.FactRibbon -> 0.58f
+        FerrexStageSurfaceVariant.NoticeSlab -> 0.82f
+        FerrexStageSurfaceVariant.EmptyState -> 0.80f
+        FerrexStageSurfaceVariant.StatusSlab -> 0.62f
+    }
+    val phoneBorderScale = if (tenFoot) 1f else when (this) {
+        FerrexStageSurfaceVariant.ProjectionShelf -> 0.62f
+        FerrexStageSurfaceVariant.ControlShelf -> 0.78f
+        FerrexStageSurfaceVariant.RailBand -> 0.50f
+        FerrexStageSurfaceVariant.FactRibbon -> 0.42f
+        FerrexStageSurfaceVariant.NoticeSlab -> 0.72f
+        FerrexStageSurfaceVariant.EmptyState -> 0.66f
+        FerrexStageSurfaceVariant.StatusSlab -> 0.45f
+    }
+
     return FerrexStageSurfaceTokenSpec(
         variant = this,
         density = density,
@@ -388,24 +425,8 @@ fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): Ferr
         },
         minHeight = minHeight,
         borderWidth = if (tenFoot) FerrexDesignTokens.Focus.TvRestingBorder else 1.dp,
-        containerAlpha = when (this) {
-            FerrexStageSurfaceVariant.ProjectionShelf -> 0.58f
-            FerrexStageSurfaceVariant.ControlShelf -> 0.48f
-            FerrexStageSurfaceVariant.RailBand -> 0.34f
-            FerrexStageSurfaceVariant.FactRibbon -> 0.26f
-            FerrexStageSurfaceVariant.NoticeSlab -> 0.52f
-            FerrexStageSurfaceVariant.EmptyState -> 0.42f
-            FerrexStageSurfaceVariant.StatusSlab -> 0.46f
-        },
-        borderAlpha = when (this) {
-            FerrexStageSurfaceVariant.ProjectionShelf -> 0.34f
-            FerrexStageSurfaceVariant.ControlShelf -> 0.54f
-            FerrexStageSurfaceVariant.RailBand -> 0.44f
-            FerrexStageSurfaceVariant.FactRibbon -> 0.38f
-            FerrexStageSurfaceVariant.NoticeSlab -> 0.62f
-            FerrexStageSurfaceVariant.EmptyState -> 0.50f
-            FerrexStageSurfaceVariant.StatusSlab -> 0.52f
-        },
+        containerAlpha = (baseContainerAlpha * phoneContainerScale).coerceIn(0f, 1f),
+        borderAlpha = (baseBorderAlpha * phoneBorderScale).coerceIn(0f, 1f),
         denseBand = this in denseBandVariants,
         semanticName = semanticName,
     )

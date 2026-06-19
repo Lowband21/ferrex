@@ -176,6 +176,39 @@ class FerrexDetailPrimitivesTest {
     }
 
     @Test
+    fun watchFailureStatusAndRetryDoNotHidePlaybackActions() {
+        val page = page(
+            watchState = DetailWatchState(
+                scopeKey = "movie:1",
+                label = "Movie watch state",
+                state = DetailWatchStateKind.Unknown,
+                progress = 0f,
+                pendingMutation = false,
+                message = "Watch state refresh failed: offline. Retry watch state keeps playback actions visible.",
+            ),
+            actions = listOf(
+                DetailPageAction(
+                    kind = DetailPageActionKind.Play,
+                    label = "Play",
+                    role = DetailActionRole.Primary,
+                    playbackContract = playbackContract("movie"),
+                ),
+                DetailPageAction(
+                    kind = DetailPageActionKind.RetryWatch,
+                    label = "Retry watch state",
+                    role = DetailActionRole.Retry,
+                ),
+            ),
+        )
+
+        val presentation = DetailPrimitivePresenter.stage(page, DetailSurfaceInteractionMode.PhoneTouch)
+
+        assertTrue(presentation.slabs.single { it.title == "Movie watch state" }.message.contains("offline"))
+        assertTrue(presentation.actionShelf.actions.any { it.label == "Play" })
+        assertTrue(presentation.actionShelf.actions.any { it.label == "Retry watch state" })
+    }
+
+    @Test
     fun statusAndRecoverySlabsPreserveFallbackStatesAndRecoveryActions() {
         val page = page(
             emptyState = DetailEmptyState("No detail cached", "Retry cache sync to recover."),
@@ -378,6 +411,12 @@ class FerrexDetailPrimitivesTest {
         DetailPageAction(DetailPageActionKind.Diagnostics, "Diagnostics / Export diagnostics", DetailActionRole.Diagnostics),
     )
 
+    private fun noArt(label: String, reason: String): DetailPageArt = DetailPageArt(
+        role = DetailArtRole.None,
+        label = label,
+        mediaArt = null,
+        imageState = DetailImageState.NoArt(label = "missing", reason = reason),
+    )
     private fun playbackContract(id: String): PlaybackRouteContract = PlaybackRouteContract(
         targetMediaId = "file-$id",
         logicalMediaId = id,

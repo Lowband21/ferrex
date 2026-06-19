@@ -38,12 +38,21 @@ data class PlaybackRecoveryActions(
     val retry: Boolean,
     val changeServer: Boolean,
     val signOut: Boolean,
+    val diagnostics: Boolean = true,
 ) {
     companion object {
         fun forFailure(failure: PlaybackFailure): PlaybackRecoveryActions = PlaybackRecoveryActions(
             retry = failure.userRetryable,
             changeServer = true,
             signOut = true,
+            diagnostics = true,
+        )
+
+        fun sessionInvalidated(): PlaybackRecoveryActions = PlaybackRecoveryActions(
+            retry = false,
+            changeServer = true,
+            signOut = true,
+            diagnostics = true,
         )
     }
 }
