@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ferrex_core::api::types::ScanRunMode;
+use ferrex_core::database::repositories::manifest::PostgresManifestRepository;
 use ferrex_core::domain::scan::orchestration::{
     JobEvent, JobEventPayload, JobId, JobKind, MaintenanceLibrary,
     MaintenancePlanningLimits, config::MaintenanceConfig,
-    plan_maintenance_sweep,
+    plan_manifest_maintenance_sweep,
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
@@ -136,9 +137,13 @@ impl MaintenanceScheduler {
                 continue;
             }
 
-            let plan = match plan_maintenance_sweep(
+            let manifest = PostgresManifestRepository::new(
+                self.orchestrator.runtime.queue().pool().clone(),
+            );
+            let plan = match plan_manifest_maintenance_sweep(
                 &maintenance_library,
                 self.orchestrator.cursors.as_ref(),
+                &manifest,
                 limits,
                 now,
             )
@@ -268,23 +273,23 @@ impl MaintenanceScheduler {
     async fn observe_job_event(&self, event: JobEvent) {
         let (job_id, terminal_failure) = match event.payload {
             JobEventPayload::Completed {
-                kind: JobKind::FolderScan,
+                kind: JobKind::FolderScan | JobKind::ManifestScan,
                 job_id,
                 ..
             } => (job_id, false),
             JobEventPayload::DeadLettered {
-                kind: JobKind::FolderScan,
+                kind: JobKind::FolderScan | JobKind::ManifestScan,
                 job_id,
                 ..
             } => (job_id, true),
             JobEventPayload::Failed {
-                kind: JobKind::FolderScan,
+                kind: JobKind::FolderScan | JobKind::ManifestScan,
                 job_id,
                 retryable: false,
                 ..
             } => (job_id, true),
             JobEventPayload::Failed {
-                kind: JobKind::FolderScan,
+                kind: JobKind::FolderScan | JobKind::ManifestScan,
                 ..
             } => return,
             _ => return,

@@ -289,6 +289,7 @@ impl PostgresQueueService {
 
         let is_fast_path = match payload {
             JobPayload::FolderScan(job) => fast_reason(&job.scan_reason),
+            JobPayload::ManifestScan(job) => fast_reason(&job.scan_reason),
             JobPayload::MediaAnalyze(job) => fast_reason(&job.scan_reason),
             _ => false,
         };

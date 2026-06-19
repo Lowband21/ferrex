@@ -6,6 +6,7 @@ use ferrex_model::VideoMediaType;
 use tracing::{Instrument, debug, debug_span, warn};
 use uuid::Uuid;
 
+use crate::database::repository_ports::manifest::ManifestRepository;
 use crate::domain::scan::actors::image_fetch::ImageFetchActor;
 use crate::domain::scan::actors::index::{IndexCommand, IndexerActor};
 use crate::domain::scan::actors::metadata::{
@@ -14,6 +15,10 @@ use crate::domain::scan::actors::metadata::{
 use crate::domain::scan::actors::{
     analyze::{AnalysisContext, MediaAnalyzeActor, MediaAnalyzed},
     folder::FolderScanActor,
+};
+use crate::domain::scan::manifest::{
+    ManifestEntryBatch, ManifestLibraryRoot, ManifestScope,
+    ManifestSupportedMedia, ManifestWalkResult, ManifestWalker,
 };
 use crate::domain::scan::orchestration::{
     context::{FolderScanContext, SeriesLink, SeriesRef},
@@ -29,10 +34,14 @@ use crate::domain::scan::orchestration::{
     job::{
         AnalyzeScanHierarchy, DependencyKey, EnqueueRequest, EpisodeMatchJob,
         FolderScanJob, ImageFetchJob, IndexUpsertJob, JobHandle, JobPayload,
-        JobPriority, MediaAnalyzeJob, MediaFingerprint, MetadataEnrichJob,
-        ScanReason, SeriesResolveJob,
+        JobPriority, ManifestScanJob, MediaAnalyzeJob, MediaFingerprint,
+        MetadataEnrichJob, ScanReason, SeriesResolveJob,
     },
     lease::JobLease,
+    manifest_reconcile::{
+        ManifestMediaRepository, ManifestReconcileInput, ManifestReconciler,
+        ManifestReconciliationSummary,
+    },
     queue::QueueService,
     scan_cursor::{ScanCursor, ScanCursorId, ScanCursorRepository},
     series::SeriesResolverPort,
@@ -70,6 +79,190 @@ impl DispatchStatus {
 #[async_trait]
 pub trait JobDispatcher: Send + Sync {
     async fn dispatch(&self, lease: &JobLease) -> DispatchStatus;
+}
+
+/// Executes manifest root/partition jobs without coupling the dispatcher to a
+/// concrete persistence stack.
+#[async_trait]
+pub trait ManifestScanExecutor: Send + Sync {
+    async fn execute(
+        &self,
+        job: &ManifestScanJob,
+    ) -> Result<ManifestReconciliationSummary>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopManifestScanExecutor;
+
+#[async_trait]
+impl ManifestScanExecutor for NoopManifestScanExecutor {
+    async fn execute(
+        &self,
+        _job: &ManifestScanJob,
+    ) -> Result<ManifestReconciliationSummary> {
+        Err(MediaError::Internal(
+            "manifest scan executor not configured".into(),
+        ))
+    }
+}
+
+pub struct DefaultManifestScanExecutor<M, R, Q, E, C>
+where
+    M: ManifestRepository + ?Sized,
+    R: ManifestMediaRepository + ?Sized,
+    Q: QueueService + ?Sized,
+    E: ScanEventBus + ?Sized,
+    C: ScanCursorRepository + ?Sized,
+{
+    walker: ManifestWalker,
+    manifest: Arc<M>,
+    media: Arc<R>,
+    queue: Arc<Q>,
+    events: Arc<E>,
+    cursors: Arc<C>,
+}
+
+impl<M, R, Q, E, C> fmt::Debug for DefaultManifestScanExecutor<M, R, Q, E, C>
+where
+    M: ManifestRepository + ?Sized,
+    R: ManifestMediaRepository + ?Sized,
+    Q: QueueService + ?Sized,
+    E: ScanEventBus + ?Sized,
+    C: ScanCursorRepository + ?Sized,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DefaultManifestScanExecutor")
+            .field("walker", &self.walker)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<M, R, Q, E, C> DefaultManifestScanExecutor<M, R, Q, E, C>
+where
+    M: ManifestRepository + ?Sized,
+    R: ManifestMediaRepository + ?Sized,
+    Q: QueueService + ?Sized,
+    E: ScanEventBus + ?Sized,
+    C: ScanCursorRepository + ?Sized,
+{
+    pub fn new(
+        walker: ManifestWalker,
+        manifest: Arc<M>,
+        media: Arc<R>,
+        queue: Arc<Q>,
+        events: Arc<E>,
+        cursors: Arc<C>,
+    ) -> Self {
+        Self {
+            walker,
+            manifest,
+            media,
+            queue,
+            events,
+            cursors,
+        }
+    }
+
+    fn root_for_scope(scope: &ManifestScope) -> ManifestLibraryRoot {
+        match scope {
+            ManifestScope::Root(root) => ManifestLibraryRoot::new(
+                root.library_id,
+                root.library_type,
+                root.root_id,
+                root.root_path_norm.clone(),
+            ),
+            ManifestScope::Partition(partition) => ManifestLibraryRoot::new(
+                partition.root.library_id,
+                partition.root.library_type,
+                partition.root.root_id,
+                partition.root.root_path_norm.clone(),
+            ),
+        }
+    }
+
+    fn filter_walk_for_scope(
+        scope: &ManifestScope,
+        walk: ManifestWalkResult,
+    ) -> (Vec<ManifestEntryBatch>, Vec<ManifestSupportedMedia>) {
+        let Some(prefix) = manifest_scope_prefix(scope) else {
+            return (walk.batches, walk.supported_media);
+        };
+
+        let batches = walk
+            .batches
+            .into_iter()
+            .filter_map(|batch| {
+                let entries = batch
+                    .entries
+                    .into_iter()
+                    .filter(|entry| {
+                        path_in_manifest_prefix(entry.path_norm(), prefix)
+                    })
+                    .collect::<Vec<_>>();
+                (!entries.is_empty()).then_some(ManifestEntryBatch {
+                    scope: batch.scope,
+                    entries,
+                })
+            })
+            .collect();
+        let supported_media = walk
+            .supported_media
+            .into_iter()
+            .filter(|media| path_in_manifest_prefix(&media.path_norm, prefix))
+            .collect();
+
+        (batches, supported_media)
+    }
+}
+
+#[async_trait]
+impl<M, R, Q, E, C> ManifestScanExecutor
+    for DefaultManifestScanExecutor<M, R, Q, E, C>
+where
+    M: ManifestRepository + ?Sized,
+    R: ManifestMediaRepository + ?Sized,
+    Q: QueueService + ?Sized,
+    E: ScanEventBus + ?Sized,
+    C: ScanCursorRepository + ?Sized,
+{
+    async fn execute(
+        &self,
+        job: &ManifestScanJob,
+    ) -> Result<ManifestReconciliationSummary> {
+        let root = Self::root_for_scope(&job.scope);
+        let walk = self.walker.walk_root(&root).map_err(MediaError::Io)?;
+        let (batches, supported_media) =
+            Self::filter_walk_for_scope(&job.scope, walk);
+        let input = ManifestReconcileInput::successful(
+            uuid::Uuid::now_v7(),
+            job.scope.clone(),
+            batches,
+            supported_media,
+            job.scan_reason,
+        );
+        let reconciler = ManifestReconciler::new(
+            Arc::clone(&self.manifest),
+            Arc::clone(&self.media),
+            Arc::clone(&self.queue),
+            Arc::clone(&self.events),
+            Arc::clone(&self.cursors),
+        );
+        reconciler.reconcile_run(input).await
+    }
+}
+
+fn manifest_scope_prefix(scope: &ManifestScope) -> Option<&str> {
+    match scope {
+        ManifestScope::Root(_) => None,
+        ManifestScope::Partition(partition) => partition.prefix_norm.as_deref(),
+    }
+}
+
+fn path_in_manifest_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with(std::path::MAIN_SEPARATOR))
 }
 
 #[derive(Clone)]
@@ -125,6 +318,7 @@ where
     series_states: Arc<Box<dyn SeriesScanStateRepository>>,
     series_resolver: Arc<dyn SeriesResolverPort>,
     deltas: Arc<dyn FolderDeltaRepository>,
+    manifest_executor: Arc<dyn ManifestScanExecutor>,
 }
 
 impl<Q, E, C> fmt::Debug for DefaultJobDispatcher<Q, E, C>
@@ -143,6 +337,7 @@ where
             .field("series_states", &"SeriesScanStateRepository")
             .field("series_resolver", &"SeriesResolverPort")
             .field("deltas", &"FolderDeltaRepository")
+            .field("manifest_executor", &"ManifestScanExecutor")
             .finish()
     }
 }
@@ -171,7 +366,16 @@ where
             series_states,
             series_resolver,
             deltas: Arc::new(NoopFolderDeltaRepository),
+            manifest_executor: Arc::new(NoopManifestScanExecutor),
         }
+    }
+
+    pub fn with_manifest_executor(
+        mut self,
+        manifest_executor: Arc<dyn ManifestScanExecutor>,
+    ) -> Self {
+        self.manifest_executor = manifest_executor;
+        self
     }
 
     pub fn with_delta_repository(
@@ -1208,6 +1412,30 @@ where
         }
     }
 
+    async fn handle_manifest_scan(
+        &self,
+        job: &ManifestScanJob,
+    ) -> DispatchStatus {
+        match self.manifest_executor.execute(job).await {
+            Ok(summary) => {
+                debug!(
+                    target: "scan::manifest",
+                    library_id = %job.scope.library_id(),
+                    entries_seen = summary.entries_seen,
+                    supported_media_seen = summary.supported_media_seen,
+                    media_enqueued = summary.media_enqueued,
+                    media_moved = summary.media_moved,
+                    media_tombstoned = summary.media_tombstoned,
+                    trigger = ?job.trigger,
+                    reason = ?job.scan_reason,
+                    "manifest scan reconciled"
+                );
+                DispatchStatus::Success
+            }
+            Err(err) => self.handle_media_error(err),
+        }
+    }
+
     async fn handle_episode_match(
         &self,
         job: &EpisodeMatchJob,
@@ -1291,6 +1519,9 @@ where
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
             JobPayload::EpisodeMatch(job) => {
                 self.handle_episode_match(job).await
+            }
+            JobPayload::ManifestScan(job) => {
+                self.handle_manifest_scan(job).await
             }
         }
     }

@@ -230,5 +230,19 @@ pub fn stable_path_key(payload: &JobPayload) -> Option<SubjectKey> {
         JobPayload::EpisodeMatch(job) => {
             SubjectKey::path(job.path_norm.clone()).ok()
         }
+        JobPayload::ManifestScan(job) => {
+            let path = match &job.scope {
+                crate::domain::scan::manifest::ManifestScope::Root(root) => {
+                    root.root_path_norm.clone()
+                }
+                crate::domain::scan::manifest::ManifestScope::Partition(
+                    partition,
+                ) => partition
+                    .prefix_norm
+                    .clone()
+                    .unwrap_or_else(|| partition.root.root_path_norm.clone()),
+            };
+            SubjectKey::path(path).ok()
+        }
     }
 }
