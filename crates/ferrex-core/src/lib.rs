@@ -19,6 +19,7 @@
 //!
 //! - `database`: Enables database functionality (PostgreSQL/SQLx support)
 //! - `ffmpeg`: Enables FFmpeg-based metadata extraction
+//! - `scan-runtime`: Enables scanner queues, file watching, manifest walking, and orchestration
 //! - `test-utils`: Provides utilities for testing
 //!
 //! ## Architecture

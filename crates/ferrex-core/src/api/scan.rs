@@ -1,5 +1,11 @@
+use chrono::{DateTime, Utc};
 use ferrex_model::scan::scanner::settings;
 use serde::{Deserialize, Serialize};
+
+use crate::domain::scan::manifest::{
+    DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
+    DEFAULT_MANIFEST_WALK_PARTITION_LIMIT,
+};
 
 /// Ready-queue depths for scan-related workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +26,10 @@ pub struct ScanMetrics {
     pub active_scans: usize,
     #[serde(default)]
     pub incremental: IncrementalScanStatusView,
+    /// Manifest scan coverage, diagnostics, and recovery health surfaced at the
+    /// same level as queue/active scan metrics for admin dashboards.
+    #[serde(default)]
+    pub manifest: ManifestScanHealthView,
 }
 
 /// Minimal, feature-agnostic view of orchestrator configuration for admin surfaces.
@@ -32,6 +42,8 @@ pub struct ScanConfig {
     pub orchestrator: OrchestratorConfigView,
     #[serde(default)]
     pub incremental_policy: IncrementalScanPolicyView,
+    #[serde(default)]
+    pub manifest: ManifestScanConfigView,
 }
 
 /// Effective incremental-scanning policy exposed to operators.
@@ -98,10 +110,84 @@ pub struct IncrementalScanStatusView {
     pub stale_cursor_libraries: u64,
     pub stale_cursors: u64,
     pub oldest_cursor_staleness_ms: Option<u64>,
+    /// Backward-compatible aggregate alias for `manifest.stale_partitions`.
     #[serde(default)]
     pub manifest_stale_partitions: u64,
+    /// Backward-compatible aggregate alias for `manifest.deferred_watch_hints.pending`.
     #[serde(default)]
     pub manifest_pending_watch_hints: u64,
+    #[serde(default)]
+    pub manifest: ManifestScanHealthView,
+}
+
+/// Manifest scanner runtime bounds and operator-facing layout taxonomy surfaced by scan config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestScanConfigView {
+    pub max_entries_per_batch: usize,
+    pub max_entries_per_partition: usize,
+    pub max_depth: usize,
+    pub supported_movie_layouts: Vec<String>,
+    pub supported_series_layouts: Vec<String>,
+    pub diagnostic_codes: Vec<String>,
+}
+
+impl Default for ManifestScanConfigView {
+    fn default() -> Self {
+        Self {
+            max_entries_per_batch: DEFAULT_MANIFEST_WALK_BATCH_LIMIT,
+            max_entries_per_partition: DEFAULT_MANIFEST_WALK_PARTITION_LIMIT,
+            max_depth: DEFAULT_MANIFEST_WALK_MAX_DEPTH,
+            supported_movie_layouts: Vec::new(),
+            supported_series_layouts: Vec::new(),
+            diagnostic_codes: Vec::new(),
+        }
+    }
+}
+
+/// Manifest scan coverage, diagnostics, and recovery health for admin surfaces.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestScanHealthView {
+    pub run_counts: ManifestRunStatusCountsView,
+    pub deferred_watch_hints: ManifestDeferredWatchHintsHealthView,
+    pub diagnostics_by_code: Vec<ManifestDiagnosticCodeCountView>,
+    pub stale_partitions: u64,
+    pub oldest_manifest_lag_ms: Option<u64>,
+    pub stuck_runs: u64,
+    pub stuck_libraries: u64,
+    pub recovery_required: bool,
+}
+
+/// Counts of durable manifest runs by lifecycle status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestRunStatusCountsView {
+    pub pending: u64,
+    pub running: u64,
+    pub completed: u64,
+    pub completed_with_diagnostics: u64,
+    pub failed: u64,
+    pub canceled: u64,
+    pub stalled: u64,
+}
+
+/// Deferred filesystem-watch hints waiting for manifest recovery/replay.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestDeferredWatchHintsHealthView {
+    pub pending: u64,
+    pub applied: u64,
+    pub dropped: u64,
+    pub total: u64,
+    pub oldest_pending_lag_ms: Option<u64>,
+}
+
+/// Aggregated operator diagnostics grouped by stable manifest diagnostic code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestDiagnosticCodeCountView {
+    pub code: String,
+    pub count: u64,
+    pub info: u64,
+    pub warnings: u64,
+    pub errors: u64,
+    pub latest_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

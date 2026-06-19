@@ -39,3 +39,15 @@ Reported as diagnostics:
 - Non-media files are ignored with `scanner.layout.non_media_file`.
 
 Each diagnostic includes remediation text from `ManifestDiagnosticReason::remediation()` so UI and operator tooling can show the same recovery guidance without string matching on logs.
+
+## Recovery and diagnostics surfaces
+
+Manifest runs persist root/partition coverage in `manifest_runs`, latest path state in `manifest_entries`, per-code operator diagnostics in `manifest_diagnostics`, stale partition cursors in `manifest_partition_cursors`, and watch-event recovery hints in `manifest_deferred_watch_hints`.
+
+The scan config endpoint exposes manifest walker bounds (batch size, partition size, max depth), supported layout examples, and the stable diagnostic code list. Scan metrics/status payloads expose manifest run counts, diagnostics grouped by code, deferred watch hints by status, stale partition count, stuck run/library indicators, and `oldest_manifest_lag_ms` so admins can tell whether recovery has fallen behind.
+
+Recovery behavior is conservative: successful root or prefix-partition manifest runs may mark missing entries and tombstone unavailable media, but failed/stalled/canceled runs never delete or tombstone media. Filesystem watcher overflows enqueue a root manifest scan, and file-level watch bursts enqueue bounded partition scans; pending deferred watch hints are replayed during stuck-scan recovery.
+
+## DB-backed validation caveats
+
+End-to-end manifest tests use temporary media trees and PostgreSQL-backed validation so they can assert durable run, entry, diagnostic, move, delete, overflow, and active-run watch-event behavior. These tests require a `DATABASE_URL` with permission to create/drop isolated test databases; when no database URL is available, report the DB-backed manifest tests as skipped rather than treating them as Rust unit-test failures.
