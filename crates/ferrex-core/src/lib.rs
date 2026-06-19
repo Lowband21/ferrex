@@ -75,6 +75,11 @@ pub mod api;
 /// Domain module grouping core business logic.
 pub mod domain;
 
+/// Scan domain contracts and orchestration primitives.
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
+pub use domain::scan;
+
 /// Infrastructure adapters (database, external services, runtimes).
 pub mod infra;
 

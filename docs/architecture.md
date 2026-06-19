@@ -19,6 +19,7 @@ Ferrex is a Rust workspace with these primary crates:
 - `ferrex-contracts` – API contracts and schema glue.
 
 Related docs:
+- Scanner layout contract and diagnostics: `docs/scanner-layout-contract.md`
 - Scan/orchestration runtime details: `crates/ferrex-core/src/domain/scan/orchestration/runtime/README.md`
 - Player specifics and platform notes: `crates/ferrex-player/README.md`
 - Player crate dependency boundaries: `docs/player-dependency-boundaries.md`
