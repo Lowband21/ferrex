@@ -7,10 +7,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -78,6 +81,7 @@ import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexPosterCard
 import com.ferrex.android.ui.components.FerrexMobileMediaCard
+import com.ferrex.android.ui.components.FerrexMobileMediaGrid
 import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusAction
 import com.ferrex.android.ui.components.FerrexStatusCard
@@ -333,81 +337,75 @@ private fun PhoneSearchScenario(scenario: VisualQaScenario) {
 
 @Composable
 private fun PhoneBrowseGridScenario(scenario: VisualQaScenario) {
-    QaScrollableScenario(scenario = scenario) {
-        ScenarioTitle(scenario)
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = FerrexStageDensityFamily.Standard,
-            tone = FerrexStageSurfaceTone.Primary,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = FerrexQaTags.Phone.LibraryTabs,
-            contentDescription = "Phone browse Theater Plate tab controls",
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag(scenario.testTag)
+            .semantics { contentDescription = scenario.description },
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = FerrexDesignTokens.Space.ScreenPhoneHorizontal,
+                    vertical = FerrexDesignTokens.Space.ScreenPhoneVertical,
+                ),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                FerrexActionButton(label = "Movies", role = FerrexActionRole.Primary, onClick = {}, modifier = Modifier.weight(1f))
-                FerrexActionButton(label = "Series", role = FerrexActionRole.Secondary, onClick = {}, modifier = Modifier.weight(1f))
-            }
-        }
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.RailBand,
-            density = FerrexStageDensityFamily.Standard,
-            tone = FerrexStageSurfaceTone.Neutral,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = FerrexQaTags.Phone.LibraryGrid,
-            contentDescription = "Phone browse Theater Plate library grid",
-        ) {
-            Column(
+            ScenarioTitle(scenario)
+            FerrexStageSurface(
+                variant = FerrexStageSurfaceVariant.ControlShelf,
+                density = FerrexStageDensityFamily.Standard,
+                tone = FerrexStageSurfaceTone.Primary,
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+                testTag = FerrexQaTags.Phone.LibraryTabs,
+                contentDescription = "Phone browse compact controls: tabs, library chooser, sort/filter, status, and More recovery menu",
             ) {
-                TheaterPlateText(
-                    text = "Full grid",
-                    role = TheaterPlateTypographyRole.SectionTitle,
-                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
-                )
-                FerrexVisualQaFixtures.browseCards.forEach { card ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+                ) {
+                    FerrexActionButton(label = "Movies", role = FerrexActionRole.Primary, onClick = {})
+                    FerrexActionButton(label = "Series", role = FerrexActionRole.Secondary, onClick = {})
+                    FerrexActionButton(label = "Library: QA", role = FerrexActionRole.Cache, onClick = {})
+                    FerrexActionButton(label = "Sort", role = FerrexActionRole.Secondary, onClick = {})
+                    FerrexActionButton(label = "Filter", role = FerrexActionRole.Secondary, onClick = {})
+                    FerrexActionButton(label = "Status", role = FerrexActionRole.Secondary, onClick = {})
+                    FerrexActionButton(label = "More", role = FerrexActionRole.Secondary, onClick = {})
+                }
+            }
+            FerrexStageSurface(
+                variant = FerrexStageSurfaceVariant.RailBand,
+                density = FerrexStageDensityFamily.Standard,
+                tone = FerrexStageSurfaceTone.Neutral,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                testTag = FerrexQaTags.Phone.LibraryGrid,
+                contentDescription = "Phone browse dense library grid; the grid owns the vertical scroll below compact controls",
+            ) {
+                val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
+                FerrexMobileMediaGrid(
+                    gridKey = "phone-browse-grid-qa",
+                    items = FerrexVisualQaFixtures.browseCards,
+                    itemStableId = { it.stableKey },
+                    columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+                    modifier = Modifier.fillMaxSize(),
+                    contentDescription = "Dense phone browse grid with ${FerrexVisualQaFixtures.browseCards.size} cards",
+                    contentPadding = PaddingValues(
+                        horizontal = gridSpec.contentPaddingHorizontal,
+                        vertical = gridSpec.contentPaddingVertical,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+                    verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
+                ) { card, _ ->
                     PhoneBrowseCard(card)
                 }
             }
         }
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.StatusSlab,
-            density = FerrexStageDensityFamily.Standard,
-            tone = FerrexStageSurfaceTone.StaleOffline,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = FerrexQaTags.Phone.LibraryRecovery,
-            contentDescription = "Stale cache recovery: retry sync, cache repair, server change, reset connection, and diagnostics remain visible.",
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                TheaterPlateText(
-                    text = "Stale cache recovery",
-                    role = TheaterPlateTypographyRole.StatusTitle,
-                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
-                )
-                TheaterPlateText(
-                    text = "Retry sync, clear selected cache, change server, reset connection, and diagnostics remain visible without OS app-data wipes.",
-                    role = TheaterPlateTypographyRole.StatusCopy,
-                    densityRole = TheaterPlateDensityRole.PhoneLandscape,
-                    maxLines = 4,
-                )
-                FerrexActionButton(
-                    label = "Retry sync",
-                    role = FerrexActionRole.Retry,
-                    onClick = {},
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-            FerrexActionButton(label = "Clear selected cache", role = FerrexActionRole.Cache, onClick = {}, modifier = Modifier.weight(1f))
-            FerrexActionButton(label = "Change server", role = FerrexActionRole.Secondary, onClick = {}, modifier = Modifier.weight(1f))
-        }
-        FerrexActionButton(
-            label = "Reset connection",
-            role = FerrexActionRole.DestructiveReset,
-            onClick = {},
-            modifier = Modifier.fillMaxWidth(),
-        )
     }
 }
 
@@ -429,7 +427,7 @@ private fun PhoneBrowseCard(card: VisualQaMediaCardSample) {
         resolution = null,
         imageLoader = null,
         serverUrl = "https://qa.invalid",
-        layout = MobileMediaCardLayout.Grid,
+        layout = MobileMediaCardLayout.DenseGrid,
         state = MobileMediaCardState(
             actionLabel = "Open",
             actionRole = FerrexActionRole.Secondary,

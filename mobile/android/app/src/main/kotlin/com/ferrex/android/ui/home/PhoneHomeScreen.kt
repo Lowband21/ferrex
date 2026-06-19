@@ -3,13 +3,13 @@ package com.ferrex.android.ui.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,13 +17,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
 import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
@@ -571,7 +575,6 @@ fun PhoneHomeScreen(
                         selectedLibraryId = selectedBrowseLibraryId,
                         onSelect = { selectedDetailRoute = it.route },
                         onSyncSelected = { syncSelectedLibrary() },
-                        onRetry = { retryLibrary() },
                         onClearSelected = { clearSelectedLibraryCache() },
                         onChangeServer = onChangeServer,
                         onResetConnection = onResetConnection,
@@ -999,7 +1002,6 @@ private fun LibraryDestinationContent(
     selectedLibraryId: String?,
     onSelect: (LibraryMediaCard) -> Unit,
     onSyncSelected: () -> Unit,
-    onRetry: () -> Unit,
     onClearSelected: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
@@ -1027,6 +1029,46 @@ private fun LibraryDestinationContent(
             }
         }
 
+        var showLibraryChooser by remember { mutableStateOf(false) }
+        var showStatusDialog by remember { mutableStateOf(false) }
+        var showRecoveryDialog by remember { mutableStateOf(false) }
+        val activeLibraryId = when (selectedTab) {
+            HomeLibraryTab.Movies -> selectedMovieLibraryId
+            HomeLibraryTab.Series -> selectedSeriesLibraryId
+        }
+        val activeLibraryInfo = when (selectedTab) {
+            HomeLibraryTab.Movies -> selectedMovieInfo
+            HomeLibraryTab.Series -> selectedSeriesInfo
+        }
+        val activeLibraries = when (selectedTab) {
+            HomeLibraryTab.Movies -> movieLibraryInfos.ifEmpty { movieLibraries.map { it.library } }
+            HomeLibraryTab.Series -> seriesLibraryInfos.ifEmpty { seriesLibraries.map { it.library } }
+        }
+        val cachedLibraryIds = when (selectedTab) {
+            HomeLibraryTab.Movies -> movieLibraries.map { it.library.id }.toSet()
+            HomeLibraryTab.Series -> seriesLibraries.map { it.library.id }.toSet()
+        }
+        val activeCards = when (selectedTab) {
+            HomeLibraryTab.Movies -> indexedMovieCards.cards
+            HomeLibraryTab.Series -> selectedSeriesCards
+        }
+        val activeFullCount = when (selectedTab) {
+            HomeLibraryTab.Movies -> movieLibraries.firstOrNull { it.library.id == selectedMovieLibraryId }?.accessor?.movieCount ?: activeCards.size
+            HomeLibraryTab.Series -> seriesLibraries.firstOrNull { it.library.id == selectedSeriesLibraryId }?.accessor?.seriesReferenceCount ?: activeCards.size
+        }
+        val statusSummary = libraryGridStatusSummary(
+            selectedTab = selectedTab,
+            activeLibraryName = activeLibraryInfo?.name,
+            visibleCount = activeCards.size,
+            fullCachedCount = activeFullCount,
+            freshness = freshness,
+            movieIndexState = movieIndexState,
+            movieSort = movieSort,
+            movieFilter = movieFilter,
+            invalidIndexCount = indexedMovieCards.invalidIndexCount,
+            appendedMissingCount = indexedMovieCards.appendedMissingCount,
+        )
+
         TheaterPlateStage(
             analysis = stageAnalysis,
             adaptation = adaptation,
@@ -1034,61 +1076,97 @@ private fun LibraryDestinationContent(
             modifier = Modifier
                 .fillMaxSize()
                 .testTag(FerrexQaTags.Phone.Libraries),
-            contentDescription = "Phone Libraries Theater Plate stage with full cached grids and no-wipe recovery actions",
+            contentDescription = "Phone Libraries Theater Plate stage with compact controls, one dense grid scroll, and no-wipe recovery actions",
         ) {
-            LazyColumn(
+            Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(density.tokens().contentGap),
             ) {
-                item {
-                    DestinationStageHeader(
-                        title = "Libraries",
-                        body = "Browse full cached movie and series libraries on staged Theater Plate bands instead of burying the complete grids in Home.",
-                        density = density,
-                    )
-                }
-                item {
-                    LibraryBrowseSection(
+                LibraryCompactControls(
+                    selectedTab = selectedTab,
+                    onSelectedTab = onSelectedTab,
+                    selectedLibraryName = activeLibraryInfo?.name,
+                    libraryCount = activeLibraries.size,
+                    activeCardCount = activeCards.size,
+                    movieSort = movieSort,
+                    movieFilter = movieFilter,
+                    showMovieControls = selectedTab == HomeLibraryTab.Movies,
+                    statusSummary = statusSummary,
+                    density = density,
+                    onOpenLibraryChooser = { showLibraryChooser = true },
+                    onMovieSort = onMovieSort,
+                    onMovieFilter = onMovieFilter,
+                    onOpenStatus = { showStatusDialog = true },
+                    onOpenRecovery = { showRecoveryDialog = true },
+                )
+                if (activeCards.isEmpty()) {
+                    LibraryEmptyStatePanel(
                         selectedTab = selectedTab,
-                        onSelectedTab = onSelectedTab,
-                        movieLibraries = movieLibraries,
-                        seriesLibraries = seriesLibraries,
-                        movieLibraryInfos = movieLibraryInfos,
-                        seriesLibraryInfos = seriesLibraryInfos,
-                        selectedMovieLibraryId = selectedMovieLibraryId,
-                        selectedSeriesLibraryId = selectedSeriesLibraryId,
-                        onSelectedMovieLibrary = onSelectedMovieLibrary,
-                        onSelectedSeriesLibrary = onSelectedSeriesLibrary,
-                        selectedMovieInfo = selectedMovieInfo,
-                        selectedSeriesInfo = selectedSeriesInfo,
-                        movieSort = movieSort,
-                        movieFilter = movieFilter,
-                        onMovieSort = onMovieSort,
-                        onMovieFilter = onMovieFilter,
-                        movieIndexState = movieIndexState,
-                        indexedMovieCards = indexedMovieCards,
-                        selectedSeriesCards = selectedSeriesCards,
-                        imageResolutions = imageResolutions,
-                        imageLoaderAvailable = imageLoaderAvailable,
-                        imageLoader = imageLoader,
-                        scope = scope,
-                        density = density,
-                        onSelect = onSelect,
-                        onSyncSelected = onSyncSelected,
-                    )
-                }
-                item {
-                    LibraryRecoveryPanel(
+                        selectedLibraryName = activeLibraryInfo?.name,
                         freshness = freshness,
-                        selectedLibraryId = selectedLibraryId,
+                        selectedLibraryId = selectedLibraryId ?: activeLibraryId,
+                        statusSummary = statusSummary,
                         density = density,
-                        onRetry = onRetry,
+                        modifier = Modifier.weight(1f),
+                        onRetry = onSyncSelected,
                         onClearSelected = onClearSelected,
                         onChangeServer = onChangeServer,
                         onResetConnection = onResetConnection,
                         onOpenDiagnostics = onOpenDiagnostics,
                     )
+                } else {
+                    DenseLibraryGrid(
+                        cards = activeCards,
+                        imageResolutions = imageResolutions,
+                        imageLoaderAvailable = imageLoaderAvailable,
+                        imageLoader = imageLoader,
+                        scope = scope,
+                        density = density,
+                        modifier = Modifier.weight(1f),
+                        onSelect = onSelect,
+                    )
                 }
+            }
+            if (showLibraryChooser) {
+                LibraryChooserDialog(
+                    selectedTab = selectedTab,
+                    libraries = activeLibraries,
+                    selectedLibraryId = activeLibraryId,
+                    cachedIds = cachedLibraryIds,
+                    onDismiss = { showLibraryChooser = false },
+                    onSelectedLibrary = { libraryId ->
+                        when (selectedTab) {
+                            HomeLibraryTab.Movies -> onSelectedMovieLibrary(libraryId)
+                            HomeLibraryTab.Series -> onSelectedSeriesLibrary(libraryId)
+                        }
+                        showLibraryChooser = false
+                    },
+                )
+            }
+            if (showStatusDialog) {
+                LibraryStatusDialog(
+                    statusSummary = statusSummary,
+                    freshness = freshness,
+                    selectedLibraryName = activeLibraryInfo?.name,
+                    activeCardCount = activeCards.size,
+                    fullCachedCount = activeFullCount,
+                    selectedTab = selectedTab,
+                    onDismiss = { showStatusDialog = false },
+                    onRetry = onSyncSelected,
+                    onOpenDiagnostics = onOpenDiagnostics,
+                )
+            }
+            if (showRecoveryDialog) {
+                LibraryRecoveryDialog(
+                    freshness = freshness,
+                    selectedLibraryId = selectedLibraryId ?: activeLibraryId,
+                    onDismiss = { showRecoveryDialog = false },
+                    onRetry = onSyncSelected,
+                    onClearSelected = onClearSelected,
+                    onChangeServer = onChangeServer,
+                    onResetConnection = onResetConnection,
+                    onOpenDiagnostics = onOpenDiagnostics,
+                )
             }
         }
     }
@@ -1669,361 +1747,525 @@ private fun HomeShelfSection(
 }
 
 @Composable
-private fun LibraryBrowseSection(
+private fun LibraryCompactControls(
     selectedTab: HomeLibraryTab,
     onSelectedTab: (HomeLibraryTab) -> Unit,
-    movieLibraries: List<CachedMovieLibrary>,
-    seriesLibraries: List<CachedSeriesLibrary>,
-    movieLibraryInfos: List<LibraryInfo>,
-    seriesLibraryInfos: List<LibraryInfo>,
-    selectedMovieLibraryId: String?,
-    selectedSeriesLibraryId: String?,
-    onSelectedMovieLibrary: (String) -> Unit,
-    onSelectedSeriesLibrary: (String) -> Unit,
-    selectedMovieInfo: LibraryInfo?,
-    selectedSeriesInfo: LibraryInfo?,
+    selectedLibraryName: String?,
+    libraryCount: Int,
+    activeCardCount: Int,
     movieSort: MovieSortMode,
     movieFilter: MovieFilterMode,
+    showMovieControls: Boolean,
+    statusSummary: LibraryGridStatusSummary,
+    density: FerrexStageDensityFamily,
+    onOpenLibraryChooser: () -> Unit,
     onMovieSort: (MovieSortMode) -> Unit,
     onMovieFilter: (MovieFilterMode) -> Unit,
-    movieIndexState: MovieIndexUiState,
-    indexedMovieCards: com.ferrex.android.core.browse.IndexedMovieCards,
-    selectedSeriesCards: List<LibraryMediaCard>,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    density: FerrexStageDensityFamily,
-    onSelect: (LibraryMediaCard) -> Unit,
-    onSyncSelected: () -> Unit,
+    onOpenStatus: () -> Unit,
+    onOpenRecovery: () -> Unit,
 ) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    Column(verticalArrangement = Arrangement.spacedBy(density.tokens().contentGap)) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = density,
-            tone = FerrexStageSurfaceTone.Primary,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = FerrexQaTags.Phone.LibraryTabs,
-            contentDescription = "Library Theater Plate tab controls",
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-                HomeStageSectionTitle("Library browse", density)
-                TheaterPlateText(
-                    text = "Switch between complete movie grids and cached series bundles while preserving retry, reconciliation, and diagnostics paths.",
-                    role = TheaterPlateTypographyRole.StatusCopy,
-                    densityRole = typographyDensity,
-                    maxLines = 4,
-                )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-                ) {
-                    HomeLibraryTab.entries.forEach { tab ->
-                        FerrexActionButton(
-                            label = tab.label,
-                            role = if (tab == selectedTab) FerrexActionRole.Primary else FerrexActionRole.Secondary,
-                            onClick = { onSelectedTab(tab) },
-                            testTag = FerrexQaTags.Phone.libraryAction("tab-${tab.name}"),
-                            contentDescription = "Show ${tab.label} libraries",
-                        )
-                    }
-                }
-            }
-        }
-        when (selectedTab) {
-            HomeLibraryTab.Movies -> MovieLibrarySection(
-                movieLibraries = movieLibraries,
-                movieLibraryInfos = movieLibraryInfos,
-                selectedMovieLibraryId = selectedMovieLibraryId,
-                onSelectedMovieLibrary = onSelectedMovieLibrary,
-                selectedMovieInfo = selectedMovieInfo,
-                movieSort = movieSort,
-                movieFilter = movieFilter,
-                onMovieSort = onMovieSort,
-                onMovieFilter = onMovieFilter,
-                movieIndexState = movieIndexState,
-                indexedMovieCards = indexedMovieCards,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                density = density,
-                onSelect = onSelect,
-                onSyncSelected = onSyncSelected,
-            )
-            HomeLibraryTab.Series -> SeriesLibrarySection(
-                seriesLibraries = seriesLibraries,
-                seriesLibraryInfos = seriesLibraryInfos,
-                selectedSeriesLibraryId = selectedSeriesLibraryId,
-                onSelectedSeriesLibrary = onSelectedSeriesLibrary,
-                selectedSeriesInfo = selectedSeriesInfo,
-                selectedSeriesCards = selectedSeriesCards,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                density = density,
-                onSelect = onSelect,
-                onSyncSelected = onSyncSelected,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MovieLibrarySection(
-    movieLibraries: List<CachedMovieLibrary>,
-    movieLibraryInfos: List<LibraryInfo>,
-    selectedMovieLibraryId: String?,
-    onSelectedMovieLibrary: (String) -> Unit,
-    selectedMovieInfo: LibraryInfo?,
-    movieSort: MovieSortMode,
-    movieFilter: MovieFilterMode,
-    onMovieSort: (MovieSortMode) -> Unit,
-    onMovieFilter: (MovieFilterMode) -> Unit,
-    movieIndexState: MovieIndexUiState,
-    indexedMovieCards: com.ferrex.android.core.browse.IndexedMovieCards,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    density: FerrexStageDensityFamily,
-    onSelect: (LibraryMediaCard) -> Unit,
-    onSyncSelected: () -> Unit,
-) {
-    val cachedIds = movieLibraries.map { it.library.id }.toSet()
-    Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-        LibraryChooser(
-            libraries = movieLibraryInfos.ifEmpty { movieLibraries.map { it.library } },
-            selectedLibraryId = selectedMovieLibraryId,
-            cachedIds = cachedIds,
-            density = density,
-            onSelectedLibrary = onSelectedMovieLibrary,
-        )
-        MovieControls(
-            movieSort = movieSort,
-            movieFilter = movieFilter,
-            density = density,
-            onMovieSort = onMovieSort,
-            onMovieFilter = onMovieFilter,
-        )
-        MovieIndexStatus(
-            movieIndexState = movieIndexState,
-            totalCards = indexedMovieCards.cards.size,
-            fullCachedCount = movieLibraries.firstOrNull { it.library.id == selectedMovieLibraryId }?.accessor?.movieCount ?: 0,
-            invalidIndexCount = indexedMovieCards.invalidIndexCount,
-            appendedMissingCount = indexedMovieCards.appendedMissingCount,
-            density = density,
-        )
-        LibraryStageInfoBand(
-            title = selectedMovieInfo?.let { "Full movie grid • ${it.name}" } ?: "No movie library selected",
-            body = selectedMovieInfo?.let { "${indexedMovieCards.cards.size} visible item(s) from the selected cached library. Sorting/filtering keeps reconciliation visible and never silently caps the grid." }
-                ?: "Choose a movie library to populate the complete cached grid.",
-            density = density,
-        )
-        if (indexedMovieCards.cards.isEmpty()) {
-            EmptyBrowseState(
-                title = "No cached movies for this library",
-                body = "Retry sync to fetch every movie batch. The full grid will show all cached movie rows, not a first-batch preview.",
-                density = density,
-                onSyncSelected = onSyncSelected,
-            )
-        } else {
-            MediaGrid(
-                cards = indexedMovieCards.cards,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                density = density,
-                onSelect = onSelect,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SeriesLibrarySection(
-    seriesLibraries: List<CachedSeriesLibrary>,
-    seriesLibraryInfos: List<LibraryInfo>,
-    selectedSeriesLibraryId: String?,
-    onSelectedSeriesLibrary: (String) -> Unit,
-    selectedSeriesInfo: LibraryInfo?,
-    selectedSeriesCards: List<LibraryMediaCard>,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    density: FerrexStageDensityFamily,
-    onSelect: (LibraryMediaCard) -> Unit,
-    onSyncSelected: () -> Unit,
-) {
-    val cachedIds = seriesLibraries.map { it.library.id }.toSet()
-    Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-        LibraryChooser(
-            libraries = seriesLibraryInfos.ifEmpty { seriesLibraries.map { it.library } },
-            selectedLibraryId = selectedSeriesLibraryId,
-            cachedIds = cachedIds,
-            density = density,
-            onSelectedLibrary = onSelectedSeriesLibrary,
-        )
-        StateCard(
-            title = "Series controls disabled",
-            body = LibraryBrowseModels.unsupportedSeriesControlsCopy(),
-            density = density,
-            tone = FerrexStatusTone.StaleOffline,
-            variant = FerrexStageSurfaceVariant.StatusSlab,
-        )
-        LibraryStageInfoBand(
-            title = selectedSeriesInfo?.let { "Full series grid • ${it.name}" } ?: "No series library selected",
-            body = selectedSeriesInfo?.let { "${selectedSeriesCards.size} cached series across all bundles. Sorting/filtering remains disabled until server index endpoints support series." }
-                ?: "Choose a series library to populate cached series bundles.",
-            density = density,
-        )
-        if (selectedSeriesCards.isEmpty()) {
-            EmptyBrowseState(
-                title = "No cached series for this library",
-                body = "Retry sync to fetch complete series bundles. Series sorting/filtering is disabled until server index endpoints support series.",
-                density = density,
-                onSyncSelected = onSyncSelected,
-            )
-        } else {
-            MediaGrid(
-                cards = selectedSeriesCards,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                density = density,
-                onSelect = onSelect,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LibraryChooser(
-    libraries: List<LibraryInfo>,
-    selectedLibraryId: String?,
-    cachedIds: Set<String>,
-    density: FerrexStageDensityFamily,
-    onSelectedLibrary: (String) -> Unit,
-) {
-    if (libraries.isEmpty()) {
-        LibraryStageInfoBand(
-            title = "No libraries reported",
-            body = "This server has not reported movie or series libraries yet. Retry cache sync or use server recovery before wiping app data.",
-            density = density,
-            tone = FerrexStatusTone.StaleOffline,
-            variant = FerrexStageSurfaceVariant.EmptyState,
-            testTag = FerrexQaTags.Phone.LibraryChooser,
-        )
-        return
-    }
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ControlShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Cache,
-        modifier = Modifier.fillMaxWidth(),
-        testTag = FerrexQaTags.Phone.LibraryChooser,
-        contentDescription = "Library chooser Theater Plate controls",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = "Library chooser",
-                role = TheaterPlateTypographyRole.RailTitle,
-                densityRole = density.toTheaterPlateDensityRole(),
-            )
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                libraries.forEach { library ->
-                    val cached = library.id in cachedIds
-                    val label = if (cached) library.name else "${library.name} (not cached)"
-                    FerrexActionButton(
-                        label = label,
-                        role = if (library.id == selectedLibraryId) FerrexActionRole.Primary else if (cached) FerrexActionRole.Secondary else FerrexActionRole.Cache,
-                        onClick = { onSelectedLibrary(library.id) },
-                        testTag = FerrexQaTags.Phone.libraryAction("choose-${library.id}"),
-                        contentDescription = "Choose ${library.name}${if (cached) "" else "; cache not loaded"}",
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MovieControls(
-    movieSort: MovieSortMode,
-    movieFilter: MovieFilterMode,
-    density: FerrexStageDensityFamily,
-    onMovieSort: (MovieSortMode) -> Unit,
-    onMovieFilter: (MovieFilterMode) -> Unit,
-) {
+    var sortExpanded by remember { mutableStateOf(false) }
+    var filterExpanded by remember { mutableStateOf(false) }
+    val selectedLibraryLabel = selectedLibraryName ?: if (libraryCount == 0) "No libraries" else "Choose library"
     FerrexStageSurface(
         variant = FerrexStageSurfaceVariant.ControlShelf,
         density = density,
         tone = FerrexStageSurfaceTone.Primary,
         modifier = Modifier.fillMaxWidth(),
-        testTag = FerrexQaTags.Phone.LibraryControls,
-        contentDescription = "Movie sort and filter Theater Plate controls",
+        testTag = FerrexQaTags.Phone.LibraryTabs,
+        contentDescription = "Compact Libraries controls for tab, library, movie sort/filter, status, and recovery actions",
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = "Sort and filter",
-                role = TheaterPlateTypographyRole.RailTitle,
-                densityRole = density.toTheaterPlateDensityRole(),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        ) {
+            HomeLibraryTab.entries.forEach { tab ->
+                FerrexActionButton(
+                    label = tab.label,
+                    role = if (tab == selectedTab) FerrexActionRole.Primary else FerrexActionRole.Secondary,
+                    onClick = { onSelectedTab(tab) },
+                    testTag = FerrexQaTags.Phone.libraryAction("tab-${tab.name}"),
+                    contentDescription = "Show ${tab.label} libraries",
+                )
+            }
+            FerrexActionButton(
+                label = "Library: $selectedLibraryLabel",
+                role = FerrexActionRole.Cache,
+                onClick = onOpenLibraryChooser,
+                testTag = FerrexQaTags.Phone.LibraryChooser,
+                contentDescription = "Open library chooser. $libraryCount available; $activeCardCount visible cards.",
             )
-            TheaterPlateText(
-                text = "Movie sort uses /api/v1/libraries/{id}/indices/sorted with paging; filters use /indices/filter.",
-                role = TheaterPlateTypographyRole.StatusCopy,
-                densityRole = density.toTheaterPlateDensityRole(),
-                maxLines = 3,
-            )
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                MovieSortMode.entries.forEach { mode ->
+            if (showMovieControls) {
+                Box {
                     FerrexActionButton(
-                        label = mode.label,
-                        role = if (mode == movieSort) FerrexActionRole.Primary else FerrexActionRole.Secondary,
-                        onClick = { onMovieSort(mode) },
-                        testTag = FerrexQaTags.Phone.libraryControl("sort-${mode.name}"),
+                        label = "Sort: ${movieSort.label}",
+                        role = FerrexActionRole.Secondary,
+                        onClick = { sortExpanded = true },
+                        testTag = FerrexQaTags.Phone.libraryControl("sort"),
+                        contentDescription = "Open movie sort menu. Current sort ${movieSort.label}.",
                     )
+                    DropdownMenu(
+                        expanded = sortExpanded,
+                        onDismissRequest = { sortExpanded = false },
+                    ) {
+                        MovieSortMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    onMovieSort(mode)
+                                    sortExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Box {
+                    FerrexActionButton(
+                        label = "Filter: ${movieFilter.label}",
+                        role = FerrexActionRole.Secondary,
+                        onClick = { filterExpanded = true },
+                        testTag = FerrexQaTags.Phone.libraryControl("filter"),
+                        contentDescription = "Open movie filter menu. Current filter ${movieFilter.label}.",
+                    )
+                    DropdownMenu(
+                        expanded = filterExpanded,
+                        onDismissRequest = { filterExpanded = false },
+                    ) {
+                        MovieFilterMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.label) },
+                                onClick = {
+                                    onMovieFilter(mode)
+                                    filterExpanded = false
+                                },
+                            )
+                        }
+                    }
                 }
             }
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                MovieFilterMode.entries.forEach { mode ->
-                    FerrexActionButton(
-                        label = mode.label,
-                        role = if (mode == movieFilter) FerrexActionRole.Primary else FerrexActionRole.Secondary,
-                        onClick = { onMovieFilter(mode) },
-                        testTag = FerrexQaTags.Phone.libraryControl("filter-${mode.name}"),
-                    )
-                }
-            }
+            FerrexActionButton(
+                label = "Status: ${statusSummary.label}",
+                role = statusSummary.tone.toActionRole(),
+                onClick = onOpenStatus,
+                testTag = FerrexQaTags.Phone.LibraryIndexStatus,
+                contentDescription = "Open library status. ${statusSummary.detail}",
+            )
+            FerrexActionButton(
+                label = "More / Recovery",
+                role = statusSummary.tone.toActionRole(),
+                onClick = onOpenRecovery,
+                testTag = FerrexQaTags.Phone.LibraryRecovery,
+                contentDescription = "Open retry, clear cache, change server, reset connection, and diagnostics actions",
+            )
         }
     }
 }
 
 @Composable
-private fun MovieIndexStatus(
+private fun LibraryChooserDialog(
+    selectedTab: HomeLibraryTab,
+    libraries: List<LibraryInfo>,
+    selectedLibraryId: String?,
+    cachedIds: Set<String>,
+    onDismiss: () -> Unit,
+    onSelectedLibrary: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select ${selectedTab.label.lowercase()} library") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                if (libraries.isEmpty()) {
+                    Text("No ${selectedTab.label.lowercase()} libraries are cached or reported yet. Use Retry sync, Change server, Reset connection, or Diagnostics from More / Recovery before wiping app data.")
+                } else {
+                    libraries.forEach { library ->
+                        val cached = library.id in cachedIds
+                        FerrexActionButton(
+                            label = library.name,
+                            subtitle = if (cached) "Cached" else "Not cached yet",
+                            role = if (library.id == selectedLibraryId) FerrexActionRole.Primary else if (cached) FerrexActionRole.Secondary else FerrexActionRole.Cache,
+                            onClick = { onSelectedLibrary(library.id) },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = FerrexQaTags.Phone.libraryAction("choose-${library.id}"),
+                            contentDescription = "Choose ${library.name}${if (cached) "" else "; cache not loaded"}",
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
+}
+
+@Composable
+private fun LibraryStatusDialog(
+    statusSummary: LibraryGridStatusSummary,
+    freshness: LibraryFreshness,
+    selectedLibraryName: String?,
+    activeCardCount: Int,
+    fullCachedCount: Int,
+    selectedTab: HomeLibraryTab,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(statusSummary.title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                Text("Library: ${selectedLibraryName ?: "None selected"}")
+                Text("Grid: $activeCardCount visible of $fullCachedCount cached ${selectedTab.label.lowercase()} item(s).")
+                Text("Cache: ${cacheStatus.title}")
+                Text(statusSummary.detail)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onRetry()
+                    onDismiss()
+                },
+            ) { Text("Retry sync") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                TextButton(
+                    onClick = {
+                        onOpenDiagnostics()
+                        onDismiss()
+                    },
+                ) { Text("Diagnostics") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun LibraryRecoveryDialog(
+    freshness: LibraryFreshness,
+    selectedLibraryId: String?,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onClearSelected: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    val status = LibraryBrowseModels.libraryStatusCopy(freshness)
+    val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
+    fun runAndDismiss(action: () -> Unit) {
+        action()
+        onDismiss()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Library recovery") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                Text(status.title)
+                Text(status.detail)
+                if (actions.retry) {
+                    FerrexActionButton(
+                        label = "Retry sync",
+                        role = FerrexActionRole.Retry,
+                        onClick = { runAndDismiss(onRetry) },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = FerrexQaTags.Phone.libraryAction("retry"),
+                    )
+                }
+                if (actions.clearSelectedCache) {
+                    FerrexActionButton(
+                        label = "Clear selected cache",
+                        role = FerrexActionRole.Cache,
+                        onClick = { runAndDismiss(onClearSelected) },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = FerrexQaTags.Phone.libraryAction("clear-selected-cache"),
+                    )
+                }
+                if (actions.changeServer) {
+                    FerrexActionButton(
+                        label = "Change server",
+                        role = FerrexActionRole.Secondary,
+                        onClick = { runAndDismiss(onChangeServer) },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = FerrexQaTags.Phone.libraryAction("change-server"),
+                    )
+                }
+                if (actions.resetConnection) {
+                    FerrexActionButton(
+                        label = "Reset connection",
+                        role = FerrexActionRole.DestructiveReset,
+                        onClick = { runAndDismiss(onResetConnection) },
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = FerrexQaTags.Phone.libraryAction("reset-connection"),
+                    )
+                }
+                FerrexActionButton(
+                    label = "Diagnostics / Export diagnostics",
+                    role = FerrexActionRole.Secondary,
+                    onClick = { runAndDismiss(onOpenDiagnostics) },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = FerrexQaTags.Phone.libraryAction("diagnostics"),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
+}
+
+@Composable
+private fun LibraryEmptyStatePanel(
+    selectedTab: HomeLibraryTab,
+    selectedLibraryName: String?,
+    freshness: LibraryFreshness,
+    selectedLibraryId: String?,
+    statusSummary: LibraryGridStatusSummary,
+    density: FerrexStageDensityFamily,
+    modifier: Modifier = Modifier,
+    onRetry: () -> Unit,
+    onClearSelected: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
+) {
+    val actions = LibraryBrowseModels.recoveryActionVisibility(selectedLibraryId)
+    val title = selectedLibraryName?.let { "No cached ${selectedTab.label.lowercase()} for $it" } ?: "No ${selectedTab.label.lowercase()} library selected"
+    val body = buildList {
+        add(statusSummary.detail)
+        add("Retry sync, clear the selected cache, change server, reset connection, or open diagnostics from this panel without wiping app data.")
+    }.joinToString(" ")
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.EmptyState,
+        density = density,
+        tone = freshness.statusTone().toStageSurfaceTone(),
+        modifier = modifier.fillMaxWidth(),
+        testTag = FerrexQaTags.Phone.LibraryRecovery,
+        contentDescription = "$title. $body",
+    ) {
+        Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
+        ) {
+            TheaterPlateText(
+                text = title,
+                role = TheaterPlateTypographyRole.StatusTitle,
+                densityRole = density.toTheaterPlateDensityRole(),
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 3,
+            )
+            TheaterPlateText(
+                text = body,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = density.toTheaterPlateDensityRole(),
+                maxLines = 8,
+            )
+            if (actions.retry) {
+                FerrexActionButton(
+                    label = "Retry sync",
+                    role = FerrexActionRole.Retry,
+                    onClick = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = FerrexQaTags.Phone.libraryAction("retry"),
+                )
+            }
+            if (actions.clearSelectedCache) {
+                FerrexActionButton(
+                    label = "Clear selected cache",
+                    role = FerrexActionRole.Cache,
+                    onClick = onClearSelected,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = FerrexQaTags.Phone.libraryAction("clear-selected-cache"),
+                )
+            }
+            if (density == FerrexStageDensityFamily.Compact) {
+                Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                    if (actions.changeServer) {
+                        FerrexActionButton(
+                            label = "Change server",
+                            role = FerrexActionRole.Secondary,
+                            onClick = onChangeServer,
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = FerrexQaTags.Phone.libraryAction("change-server"),
+                        )
+                    }
+                    if (actions.resetConnection) {
+                        FerrexActionButton(
+                            label = "Reset connection",
+                            role = FerrexActionRole.DestructiveReset,
+                            onClick = onResetConnection,
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = FerrexQaTags.Phone.libraryAction("reset-connection"),
+                        )
+                    }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+                    if (actions.changeServer) {
+                        FerrexActionButton(
+                            label = "Change server",
+                            role = FerrexActionRole.Secondary,
+                            onClick = onChangeServer,
+                            modifier = Modifier.weight(1f),
+                            testTag = FerrexQaTags.Phone.libraryAction("change-server"),
+                        )
+                    }
+                    if (actions.resetConnection) {
+                        FerrexActionButton(
+                            label = "Reset connection",
+                            role = FerrexActionRole.DestructiveReset,
+                            onClick = onResetConnection,
+                            modifier = Modifier.weight(1f),
+                            testTag = FerrexQaTags.Phone.libraryAction("reset-connection"),
+                        )
+                    }
+                }
+            }
+            FerrexActionButton(
+                label = "Diagnostics / Export diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.libraryAction("diagnostics"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DenseLibraryGrid(
+    cards: List<LibraryMediaCard>,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoaderAvailable: Boolean,
+    imageLoader: coil.ImageLoader?,
+    scope: ServerCacheScope,
+    density: FerrexStageDensityFamily,
+    modifier: Modifier = Modifier,
+    onSelect: (LibraryMediaCard) -> Unit,
+) {
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.RailBand,
+        density = density,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = modifier.fillMaxWidth(),
+        testTag = FerrexQaTags.Phone.LibraryGrid,
+        contentDescription = "Dense library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
+    ) {
+        val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
+        FerrexMobileMediaGrid(
+            gridKey = "library-grid",
+            items = cards,
+            itemStableId = { it.stableKey },
+            columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+            modifier = Modifier.fillMaxSize(),
+            contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
+            contentPadding = PaddingValues(
+                horizontal = gridSpec.contentPaddingHorizontal,
+                vertical = gridSpec.contentPaddingVertical,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+            verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
+        ) { card, identity ->
+            MediaCardView(
+                card = card,
+                imageResolutions = imageResolutions,
+                imageLoaderAvailable = imageLoaderAvailable,
+                imageLoader = imageLoader,
+                scope = scope,
+                density = density,
+                semanticLabel = identity.semanticLabel(card.title),
+                itemIdentity = identity,
+                onClick = { onSelect(card) },
+            )
+        }
+    }
+}
+
+private data class LibraryGridStatusSummary(
+    val label: String,
+    val title: String,
+    val detail: String,
+    val tone: FerrexStatusTone,
+)
+
+private fun libraryGridStatusSummary(
+    selectedTab: HomeLibraryTab,
+    activeLibraryName: String?,
+    visibleCount: Int,
+    fullCachedCount: Int,
+    freshness: LibraryFreshness,
+    movieIndexState: MovieIndexUiState,
+    movieSort: MovieSortMode,
+    movieFilter: MovieFilterMode,
+    invalidIndexCount: Int,
+    appendedMissingCount: Int,
+): LibraryGridStatusSummary {
+    val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
+    val gridCount = if (fullCachedCount > 0 && visibleCount != fullCachedCount) "$visibleCount/$fullCachedCount" else "$visibleCount"
+    val libraryCopy = activeLibraryName ?: "No library selected"
+    val indexCopy = if (selectedTab == HomeLibraryTab.Movies) {
+        movieIndexStatusCopy(
+            movieIndexState = movieIndexState,
+            totalCards = visibleCount,
+            fullCachedCount = fullCachedCount,
+            invalidIndexCount = invalidIndexCount,
+            appendedMissingCount = appendedMissingCount,
+        )
+    } else {
+        LibraryBrowseModels.unsupportedSeriesControlsCopy()
+    }
+    val movieControlsCopy = if (selectedTab == HomeLibraryTab.Movies) {
+        " Selected movie controls: ${movieSort.label}; ${movieFilter.label}."
+    } else {
+        ""
+    }
+    val indexTone = if (selectedTab == HomeLibraryTab.Movies) movieIndexState.statusTone() else FerrexStatusTone.Secondary
+    val tone = when {
+        cacheStatus.isRecoverableError -> FerrexStatusTone.Error
+        cacheStatus.isStale -> FerrexStatusTone.StaleOffline
+        indexTone == FerrexStatusTone.Error -> FerrexStatusTone.Error
+        indexTone == FerrexStatusTone.StaleOffline -> FerrexStatusTone.StaleOffline
+        indexTone == FerrexStatusTone.Retry -> FerrexStatusTone.Retry
+        else -> FerrexStatusTone.Cache
+    }
+    val label = when {
+        cacheStatus.isRecoverableError -> "Recover"
+        cacheStatus.isStale -> "Stale"
+        selectedTab == HomeLibraryTab.Movies -> "Movies $gridCount"
+        else -> "Series $gridCount"
+    }
+    return LibraryGridStatusSummary(
+        label = label,
+        title = "${selectedTab.label} library status",
+        detail = "$libraryCopy • $gridCount visible cached item(s). ${cacheStatus.detail} $indexCopy$movieControlsCopy",
+        tone = tone,
+    )
+}
+
+private fun movieIndexStatusCopy(
     movieIndexState: MovieIndexUiState,
     totalCards: Int,
     fullCachedCount: Int,
     invalidIndexCount: Int,
     appendedMissingCount: Int,
-    density: FerrexStageDensityFamily,
-) {
-    val copy = when (movieIndexState) {
-        MovieIndexUiState.Idle -> "Movie index idle. Showing cached batch order."
+): String {
+    val base = when (movieIndexState) {
+        MovieIndexUiState.Idle -> "Movie index idle; showing cached batch order."
         MovieIndexUiState.Loading -> "Loading movie indices…"
         is MovieIndexUiState.Applied -> if (movieIndexState.filterMode == MovieFilterMode.All) {
             "Endpoint sorted $totalCards of $fullCachedCount cached movie(s) with ${movieIndexState.sortMode.label}."
@@ -2034,141 +2276,30 @@ private fun MovieIndexStatus(
         is MovieIndexUiState.Unsupported -> "Unsupported movie index request: ${movieIndexState.message}. Showing uncapped cached order."
         is MovieIndexUiState.Unavailable -> movieIndexState.message
     }
-    val tone = when (movieIndexState) {
-        is MovieIndexUiState.Error -> FerrexStatusTone.Error
-        is MovieIndexUiState.Unsupported,
-        is MovieIndexUiState.Unavailable -> FerrexStatusTone.StaleOffline
-        MovieIndexUiState.Loading -> FerrexStatusTone.Retry
-        else -> FerrexStatusTone.Cache
+    val reconciliation = if (invalidIndexCount > 0 || appendedMissingCount > 0) {
+        " Index reconciliation kept the grid complete: $invalidIndexCount invalid index value(s), $appendedMissingCount cached item(s) appended."
+    } else {
+        ""
     }
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.StatusSlab,
-        density = density,
-        tone = tone.toStageSurfaceTone(),
-        modifier = Modifier.fillMaxWidth(),
-        testTag = FerrexQaTags.Phone.LibraryIndexStatus,
-        contentDescription = "Movie index reconciliation status. $copy",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                if (movieIndexState == MovieIndexUiState.Loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                }
-                TheaterPlateText(
-                    text = copy,
-                    role = TheaterPlateTypographyRole.StatusCopy,
-                    densityRole = density.toTheaterPlateDensityRole(),
-                    maxLines = 4,
-                )
-            }
-            if (invalidIndexCount > 0 || appendedMissingCount > 0) {
-                TheaterPlateText(
-                    text = "Index reconciliation: $invalidIndexCount invalid index value(s), $appendedMissingCount cached item(s) appended to avoid a silent cap.",
-                    role = TheaterPlateTypographyRole.Metadata,
-                    densityRole = density.toTheaterPlateDensityRole(),
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 3,
-                )
-            }
-        }
-    }
+    return base + reconciliation
 }
 
-@Composable
-private fun LibraryStageInfoBand(
-    title: String,
-    body: String,
-    density: FerrexStageDensityFamily,
-    tone: FerrexStatusTone = FerrexStatusTone.Secondary,
-    variant: FerrexStageSurfaceVariant = FerrexStageSurfaceVariant.FactRibbon,
-    testTag: String? = null,
-) {
-    FerrexStageSurface(
-        variant = variant,
-        density = density,
-        tone = tone.toStageSurfaceTone(),
-        modifier = Modifier.fillMaxWidth(),
-        testTag = testTag,
-        contentDescription = "$title. $body",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            TheaterPlateText(
-                text = title,
-                role = TheaterPlateTypographyRole.FactLabel,
-                densityRole = density.toTheaterPlateDensityRole(),
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = body,
-                role = TheaterPlateTypographyRole.FactValue,
-                densityRole = density.toTheaterPlateDensityRole(),
-                maxLines = 4,
-            )
-        }
-    }
+private fun MovieIndexUiState.statusTone(): FerrexStatusTone = when (this) {
+    is MovieIndexUiState.Error -> FerrexStatusTone.Error
+    is MovieIndexUiState.Unsupported,
+    is MovieIndexUiState.Unavailable -> FerrexStatusTone.StaleOffline
+    MovieIndexUiState.Loading -> FerrexStatusTone.Retry
+    else -> FerrexStatusTone.Cache
 }
 
-@Composable
-private fun MediaGrid(
-    cards: List<LibraryMediaCard>,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    density: FerrexStageDensityFamily,
-    onSelect: (LibraryMediaCard) -> Unit,
-) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.RailBand,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.fillMaxWidth(),
-        testTag = FerrexQaTags.Phone.LibraryGrid,
-        contentDescription = "Library media grid Theater Plate band with ${cards.size} card${if (cards.size == 1) "" else "s"}",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = "Full grid",
-                role = TheaterPlateTypographyRole.SectionTitle,
-                densityRole = density.toTheaterPlateDensityRole(),
-            )
-            val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
-            FerrexMobileMediaGrid(
-                gridKey = "library-grid",
-                items = cards,
-                itemStableId = { it.stableKey },
-                columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
-                modifier = Modifier.heightIn(
-                    min = 220.dp,
-                    max = if (density == FerrexStageDensityFamily.Compact) {
-                        FerrexDesignTokens.DenseLibraryGrid.phoneCompactMaxHeight
-                    } else {
-                        FerrexDesignTokens.DenseLibraryGrid.phoneExpandedMaxHeight
-                    },
-                ),
-                contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
-                contentPadding = PaddingValues(
-                    horizontal = gridSpec.contentPaddingHorizontal,
-                    vertical = gridSpec.contentPaddingVertical,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
-                verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
-            ) { card, identity ->
-                MediaCardView(
-                    card = card,
-                    imageResolutions = imageResolutions,
-                    imageLoaderAvailable = imageLoaderAvailable,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                    density = density,
-                    semanticLabel = identity.semanticLabel(card.title),
-                    itemIdentity = identity,
-                    onClick = { onSelect(card) },
-                )
-            }
-        }
-    }
+private fun FerrexStatusTone.toActionRole(): FerrexActionRole = when (this) {
+    FerrexStatusTone.Primary -> FerrexActionRole.Primary
+    FerrexStatusTone.Retry -> FerrexActionRole.Retry
+    FerrexStatusTone.Secondary -> FerrexActionRole.Secondary
+    FerrexStatusTone.Cache -> FerrexActionRole.Cache
+    FerrexStatusTone.StaleOffline -> FerrexActionRole.StaleOffline
+    FerrexStatusTone.DestructiveReset -> FerrexActionRole.DestructiveReset
+    FerrexStatusTone.Error -> FerrexActionRole.Error
 }
 
 @Composable
@@ -2367,23 +2498,6 @@ private fun mobilePosterArt(
     ),
     grounding = grounding,
 )
-
-@Composable
-private fun EmptyBrowseState(
-    title: String,
-    body: String,
-    density: FerrexStageDensityFamily,
-    onSyncSelected: () -> Unit,
-) {
-    StateCard(
-        title = title,
-        body = body,
-        density = density,
-        tone = FerrexStatusTone.StaleOffline,
-        variant = FerrexStageSurfaceVariant.EmptyState,
-        action = "Retry selected library" to onSyncSelected,
-    )
-}
 
 @Composable
 private fun LibraryRecoveryPanel(
