@@ -179,9 +179,8 @@ object FerrexDesignTokens {
         )
         val phoneCompactMaxHeight = 620.dp
         val phoneExpandedMaxHeight = 760.dp
-        val tvControlRailWidth = 360.dp
-        val tvControlRailGap = Space.Xxl
-        val tvControlVerticalSpacing = Space.Md
+        val tvControlPanelMaxWidth = 560.dp
+        val tvTopControlGridGap = Space.Lg
         val tvCardHorizontalPadding = Space.Sm
         val tvCardVerticalPadding = Space.Sm
         val tvCopyGap = Space.Xxs
