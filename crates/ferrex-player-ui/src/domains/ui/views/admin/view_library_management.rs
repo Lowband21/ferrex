@@ -317,7 +317,7 @@ fn create_library_card<'a>(
     }
 }
 
-fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
+fn active_scan_panel_snapshots(state: &State) -> Vec<ScanSnapshotDto> {
     let mut scans: Vec<ScanSnapshotDto> = state
         .domains
         .library
@@ -327,6 +327,11 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
         .cloned()
         .collect();
     scans.sort_by_key(|snapshot| snapshot.started_at);
+    scans
+}
+
+fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
+    let scans = active_scan_panel_snapshots(state);
 
     if scans.is_empty() {
         if !state.domains.library.state.latest_progress.is_empty() {
@@ -647,6 +652,54 @@ fn truncate_path(path: &str) -> String {
     } else {
         let tail = &path[path.len() - (MAX_LEN.saturating_sub(3))..];
         format!("…{}", tail)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_core::player_prelude::{ScanRunMode, ScanStartDisposition};
+
+    fn scan_snapshot(library_id: LibraryId, scan_id: Uuid) -> ScanSnapshotDto {
+        ScanSnapshotDto {
+            scan_id,
+            library_id,
+            status: ScanLifecycleStatus::Running,
+            mode: ScanRunMode::Manual,
+            completed_items: 0,
+            total_items: 10,
+            retrying_items: 0,
+            dead_lettered_items: 0,
+            correlation_id: scan_id,
+            idempotency_key: format!("scan:{scan_id}:1"),
+            run_key: ScanRunMode::Manual.run_key(library_id),
+            disposition: Some(ScanStartDisposition::Created),
+            current_path: None,
+            started_at: chrono::Utc::now(),
+            terminal_at: None,
+            sequence: 1,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn admin_active_panel_has_one_card_for_one_library_mode() {
+        let mut state = State::new("http://localhost:3000".to_string());
+        let library_id = LibraryId(Uuid::now_v7());
+        let scan_id = Uuid::now_v7();
+
+        state
+            .domains
+            .library
+            .state
+            .active_scans
+            .insert(scan_id, scan_snapshot(library_id, scan_id));
+
+        let cards = active_scan_panel_snapshots(&state);
+
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].library_id, library_id);
+        assert_eq!(cards[0].mode, ScanRunMode::Manual);
+        assert_eq!(cards[0].run_key, ScanRunMode::Manual.run_key(library_id));
     }
 }
 

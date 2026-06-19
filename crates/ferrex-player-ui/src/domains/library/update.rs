@@ -1090,3 +1090,52 @@ fn mark_tabs_after_media_changes(
 
     active_needs_refresh
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrex_core::player_prelude::{
+        ScanCommandAcceptedResponse, ScanLifecycleStatus, ScanRunMode,
+        ScanStartDisposition,
+    };
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn double_click_scan_started_reuses_one_active_scan_entry() {
+        let mut state = State::new("http://localhost:3000".to_string());
+        let library_id = LibraryId(uuid::Uuid::now_v7());
+        let scan_id = uuid::Uuid::now_v7();
+        let correlation_id = uuid::Uuid::now_v7();
+        let response = ScanCommandAcceptedResponse {
+            scan_id,
+            correlation_id,
+            status: ScanLifecycleStatus::Pending,
+            mode: ScanRunMode::Manual,
+            idempotency_key: format!("scan-{scan_id}"),
+            run_key: ScanRunMode::Manual.run_key(library_id),
+            disposition: ScanStartDisposition::Created,
+        };
+
+        for _ in 0..2 {
+            let _ = update_library(
+                &mut state,
+                LibraryMessage::ScanStarted {
+                    library_id,
+                    response: response.clone(),
+                },
+            );
+        }
+
+        assert_eq!(state.domains.library.state.active_scans.len(), 1);
+        let snapshot = state
+            .domains
+            .library
+            .state
+            .active_scans
+            .get(&scan_id)
+            .expect("scan remains tracked once");
+        assert_eq!(snapshot.library_id, library_id);
+        assert_eq!(snapshot.correlation_id, correlation_id);
+        assert_eq!(snapshot.mode, ScanRunMode::Manual);
+        assert_eq!(snapshot.run_key, ScanRunMode::Manual.run_key(library_id));
+    }
+}
