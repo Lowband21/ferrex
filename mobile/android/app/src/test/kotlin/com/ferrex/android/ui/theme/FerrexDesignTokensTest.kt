@@ -5,6 +5,9 @@ import androidx.compose.ui.unit.dp
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexRecoveryActionKind
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.MobileMediaCardLayout
+import com.ferrex.android.ui.components.MobileMediaCardState
+import com.ferrex.android.ui.components.MobileMediaWatchState
 import com.ferrex.android.ui.components.TheaterPlateComponentMigrationNotes
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateTypographyGroup
@@ -52,6 +55,58 @@ class FerrexDesignTokensTest {
         assertEquals(338.dp, FerrexDesignTokens.Poster.TvCardMinHeight)
         assertEquals(1560.dp, FerrexDesignTokens.Tv.HomeMaxWidth)
         assertEquals(1320.dp, FerrexDesignTokens.Tv.DetailMaxWidth)
+    }
+
+    @Test
+    fun denseLibraryGridTokensMeetPhoneAndTvDensityTargets() {
+        val phoneGridWidth = 333.dp
+        val phoneSpec = FerrexDesignTokens.DenseLibraryGrid.phone
+
+        assertEquals(3, phoneSpec.columnsFor(phoneGridWidth))
+        assertEquals(1, MobileMediaCardLayout.DenseGrid.titleMaxLines)
+        assertEquals(1, MobileMediaCardLayout.DenseGrid.subtitleMaxLines)
+        assertEquals(1, MobileMediaCardLayout.DenseGrid.metadataMaxLines)
+        assertFalse(MobileMediaCardLayout.DenseGrid.showsActionBadge)
+        assertTrue(phoneSpec.minInteractiveSize >= 48.dp)
+
+        val tvGridWidthWithDenseControlRail = (
+            1920f -
+                FerrexDesignTokens.Space.ScreenTvHorizontal.value * 2f -
+                FerrexDesignTokens.DenseLibraryGrid.tvControlRailWidth.value -
+                FerrexDesignTokens.DenseLibraryGrid.tvControlRailGap.value
+            ).dp
+        val tvRouteHeight = (1080f - FerrexDesignTokens.Tv.FullScreenVerticalPadding.value * 2f).dp
+        val tvSpec = FerrexDesignTokens.DenseLibraryGrid.tv
+
+        assertTrue(tvSpec.columnsFor(tvGridWidthWithDenseControlRail) >= 10)
+        assertTrue(tvSpec.visibleRowsFor(tvRouteHeight) >= 2)
+        assertTrue(tvSpec.heightForRows(2) <= tvRouteHeight)
+        assertTrue(tvSpec.minInteractiveSize >= FerrexDesignTokens.Focus.TvButtonMinHeight)
+        assertTrue(FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.MediaArt).focusedBorder >= 2.dp)
+    }
+
+    @Test
+    fun denseGridCardDescriptionsKeepCompactVisualCopyAccessible() {
+        val state = MobileMediaCardState(
+            progressLabel = "87% complete",
+            watchState = MobileMediaWatchState.InProgress,
+            artworkLabels = listOf("Poster IID fallback"),
+            actionLabel = "Open",
+        )
+
+        val description = state.contentDescription(
+            title = "Aurora Station",
+            subtitle = "2026 • 102 min",
+            metadata = "Movies",
+        )
+
+        assertTrue(description.contains("Aurora Station"))
+        assertTrue(description.contains("2026 • 102 min"))
+        assertTrue(description.contains("Movies"))
+        assertTrue(description.contains("In progress"))
+        assertTrue(description.contains("87% complete"))
+        assertTrue(description.contains("Poster IID fallback"))
+        assertTrue(description.contains("Action: Open"))
     }
 
     @Test

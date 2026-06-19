@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.floor
 
 /** TV focus treatment families used by Theater Plate action, recovery, helper, and media-art surfaces. */
 enum class TvFocusTreatmentRole {
@@ -25,6 +26,51 @@ data class TvFocusTreatmentTokens(
     val focusedElevation: Dp,
     val mediaGroundingClearance: Dp,
 )
+
+/** Pure sizing contract for full-library dense grids without coupling home rails or detail cards. */
+data class DenseLibraryGridSpec(
+    val minCellWidth: Dp,
+    val horizontalSpacing: Dp,
+    val verticalSpacing: Dp,
+    val contentPaddingHorizontal: Dp,
+    val contentPaddingVertical: Dp,
+    val cardMinHeight: Dp,
+    val minInteractiveSize: Dp,
+) {
+    init {
+        require(minCellWidth.value.isFinite() && minCellWidth.value > 0f) { "Dense grid minimum cell width must be positive" }
+        require(horizontalSpacing.value.isFinite() && horizontalSpacing.value >= 0f) { "Dense grid horizontal spacing must be non-negative" }
+        require(verticalSpacing.value.isFinite() && verticalSpacing.value >= 0f) { "Dense grid vertical spacing must be non-negative" }
+        require(contentPaddingHorizontal.value.isFinite() && contentPaddingHorizontal.value >= 0f) { "Dense grid horizontal padding must be non-negative" }
+        require(contentPaddingVertical.value.isFinite() && contentPaddingVertical.value >= 0f) { "Dense grid vertical padding must be non-negative" }
+        require(cardMinHeight.value.isFinite() && cardMinHeight.value > 0f) { "Dense grid card minimum height must be positive" }
+        require(minInteractiveSize.value.isFinite() && minInteractiveSize.value >= 48f) { "Dense grid touch target must be at least 48dp" }
+    }
+
+    fun columnsFor(availableWidth: Dp): Int {
+        val contentWidth = (availableWidth.finiteDpValue() - (contentPaddingHorizontal.value * 2f)).coerceAtLeast(minCellWidth.value)
+        val denominator = minCellWidth.value + horizontalSpacing.value
+        return floor((contentWidth + horizontalSpacing.value) / denominator).toInt().coerceAtLeast(1)
+    }
+
+    fun visibleRowsFor(availableHeight: Dp): Int {
+        val contentHeight = (availableHeight.finiteDpValue() - (contentPaddingVertical.value * 2f)).coerceAtLeast(0f)
+        val denominator = cardMinHeight.value + verticalSpacing.value
+        return floor((contentHeight + verticalSpacing.value) / denominator).toInt().coerceAtLeast(0)
+    }
+
+    fun heightForRows(rowCount: Int): Dp {
+        val safeRows = rowCount.coerceAtLeast(0)
+        if (safeRows == 0) return (contentPaddingVertical.value * 2f).dp
+        return (
+            contentPaddingVertical.value * 2f +
+                cardMinHeight.value * safeRows +
+                verticalSpacing.value * (safeRows - 1)
+            ).dp
+    }
+}
+
+private fun Dp.finiteDpValue(): Float = value.takeIf { it.isFinite() && it > 0f } ?: 0f
 
 /**
  * Shared Android design tokens for the Ferrex Signal / private-cinema identity.
@@ -109,6 +155,36 @@ object FerrexDesignTokens {
         val TvWidth = 190.dp
         val TvGridMin = 190.dp
         val TvCardMinHeight = 338.dp
+    }
+
+    /** Dense full-library grid primitives used only by Android library grid routes. */
+    object DenseLibraryGrid {
+        val phone = DenseLibraryGridSpec(
+            minCellWidth = 96.dp,
+            horizontalSpacing = 6.dp,
+            verticalSpacing = Space.Sm,
+            contentPaddingHorizontal = Space.None,
+            contentPaddingVertical = Space.Xs,
+            cardMinHeight = 48.dp,
+            minInteractiveSize = 48.dp,
+        )
+        val tv = DenseLibraryGridSpec(
+            minCellWidth = 128.dp,
+            horizontalSpacing = Space.Md,
+            verticalSpacing = Space.Lg,
+            contentPaddingHorizontal = Space.None,
+            contentPaddingVertical = Space.Sm,
+            cardMinHeight = 252.dp,
+            minInteractiveSize = Focus.TvButtonMinHeight,
+        )
+        val phoneCompactMaxHeight = 620.dp
+        val phoneExpandedMaxHeight = 760.dp
+        val tvControlRailWidth = 360.dp
+        val tvControlRailGap = Space.Xxl
+        val tvControlVerticalSpacing = Space.Md
+        val tvCardHorizontalPadding = Space.Sm
+        val tvCardVerticalPadding = Space.Sm
+        val tvCopyGap = Space.Xxs
     }
 
     /** 10-foot layout and player-chrome dimensions that preserve TV ergonomics. */
