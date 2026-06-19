@@ -547,6 +547,329 @@ class AndroidVisualQaTest(unittest.TestCase):
         missing_label_checks = android_visual_qa.verify_accessibility_requirements(missing_label_nodes, requirements)
         self.assertTrue(any(check["status"] == "failed" for check in missing_label_checks))
 
+    def test_accessibility_dump_strategy_batches_only_validated_default_emulators(self) -> None:
+        phone_config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("phone.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="phone-helper",
+        )
+        tv_config = android_visual_qa.TargetConfig(
+            target="tv",
+            serial="emulator-5556",
+            default_serial="emulator-5556",
+            package="com.ferrex.android.tv.debug",
+            apk_path=Path("tv.apk"),
+            expected_size=android_visual_qa.TV_EXPECTED_SIZE,
+            screenshot_helper="tv-helper",
+        )
+
+        phone_strategy = android_visual_qa.accessibility_dump_strategy(phone_config, {"properties": {"sdk": "35"}})
+        tv_strategy = android_visual_qa.accessibility_dump_strategy(tv_config, {"properties": {"sdk": "34"}})
+        wrong_api_strategy = android_visual_qa.accessibility_dump_strategy(phone_config, {"properties": {"sdk": "34"}})
+        hardware_strategy = android_visual_qa.accessibility_dump_strategy(
+            android_visual_qa.TargetConfig(
+                target="phone",
+                serial="hardware-serial",
+                default_serial="emulator-5554",
+                package="com.ferrex.android.debug",
+                apk_path=Path("phone.apk"),
+                expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+                screenshot_helper="phone-helper",
+            ),
+            {"properties": {"sdk": "35"}},
+        )
+
+        self.assertTrue(phone_strategy.batched)
+        self.assertTrue(tv_strategy.batched)
+        self.assertFalse(wrong_api_strategy.batched)
+        self.assertFalse(hardware_strategy.batched)
+
+    def test_accessibility_batched_dump_quotes_script_for_remote_shell(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("phone.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="phone-helper",
+        )
+
+        with mock.patch.object(
+            android_visual_qa,
+            "adb_shell",
+            return_value=android_visual_qa.RunResult("<hierarchy />", "", 0),
+        ) as adb_shell:
+            xml_text = android_visual_qa.dump_accessibility_xml_batched("adb", config, "/sdcard/ferrex-a11y.xml")
+
+        self.assertEqual(xml_text, "<hierarchy />")
+        adb_shell.assert_called_once()
+        self.assertEqual(len(adb_shell.call_args.args), 3)
+        self.assertEqual(adb_shell.call_args.args[:2], ("adb", "emulator-5554"))
+        remote_command = adb_shell.call_args.args[2]
+        self.assertTrue(remote_command.startswith("sh -c "))
+        self.assertIn("/sdcard/ferrex-a11y.xml", remote_command)
+        self.assertEqual(adb_shell.call_args.kwargs["timeout"], 120)
+
+    def test_accessibility_one_stops_after_requirements_pass_and_records_steps(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("phone.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="phone-helper",
+        )
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        viewport = android_visual_qa.WmOverrideSnapshot("Physical size: 1080x2400", "Physical density: 440", None, None)
+        xml = '<hierarchy><node resource-id="phone.home" content-desc="Home" /></hierarchy>'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dump_mock = mock.Mock(
+                return_value=android_visual_qa.AccessibilityXmlDump(xml, command_strategy="batched-shell")
+            )
+            reachability_mock = mock.Mock()
+            with mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "apply_viewport_profile",
+                return_value=viewport,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                return_value={"properties": {"sdk": "35"}},
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "force_stop_package",
+            ), mock.patch.object(
+                android_visual_qa,
+                "launch_scenario",
+                return_value={"status": "started"},
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_scenario",
+                return_value=[],
+            ), mock.patch.object(
+                android_visual_qa,
+                "dump_accessibility_xml_result",
+                dump_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_accessibility_reachability_step",
+                reachability_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "restore_viewport_profile",
+                return_value={"restored": True},
+            ), mock.patch.object(
+                android_visual_qa.time,
+                "sleep",
+                return_value=None,
+            ):
+                record = android_visual_qa.accessibility_one(
+                    adb="adb",
+                    config=config,
+                    scenario=android_visual_qa.Scenario("phone-home", "phone"),
+                    profile=profile,
+                    output_dir=Path(tmp),
+                    settle_ms=1,
+                    log_lines=1,
+                    max_steps=6,
+                    exhaustive_dumps=False,
+                )
+
+            self.assertEqual(record["status"], "passed")
+            self.assertEqual(record["early_stop_reason"], "all_requirements_passed")
+            self.assertEqual(record["first_all_requirements_passed_step"], 0)
+            self.assertEqual(len(record["dump_paths"]), 1)
+            self.assertTrue(Path(record["dump_paths"][0]).exists())
+            self.assertEqual(record["node_count"], 1)
+            step = record["accessibility_steps"][0]
+            self.assertEqual(step["requirement_status"], {"root-tag": "passed"})
+            self.assertEqual(step["dump_path"], record["dump_paths"][0])
+            self.assertEqual(step["node_count"], 1)
+            self.assertIn("dump", step["timings_ms"])
+            self.assertIn("verify", step["timings_ms"])
+            self.assertEqual(record["dump_command_strategies_used"], ["batched-shell"])
+            dump_mock.assert_called_once()
+            reachability_mock.assert_not_called()
+
+    def test_accessibility_one_failed_checks_continue_until_no_progress_and_logcat(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("phone.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="phone-helper",
+        )
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        viewport = android_visual_qa.WmOverrideSnapshot("Physical size: 1080x2400", "Physical density: 440", None, None)
+        xml = '<hierarchy><node resource-id="unrelated" content-desc="Other" /></hierarchy>'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dump_mock = mock.Mock(
+                return_value=android_visual_qa.AccessibilityXmlDump(xml, command_strategy="safe-sequence")
+            )
+            reachability_mock = mock.Mock()
+            logcat_mock = mock.Mock(return_value={"path": "logcat.txt", "max_lines": 1, "status": "captured"})
+            with mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "apply_viewport_profile",
+                return_value=viewport,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                return_value={"properties": {"sdk": "35"}},
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "force_stop_package",
+            ), mock.patch.object(
+                android_visual_qa,
+                "launch_scenario",
+                return_value={"status": "started"},
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_scenario",
+                return_value=[],
+            ), mock.patch.object(
+                android_visual_qa,
+                "dump_accessibility_xml_result",
+                dump_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_accessibility_reachability_step",
+                reachability_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "capture_failure_logcat",
+                logcat_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "restore_viewport_profile",
+                return_value={"restored": True},
+            ), mock.patch.object(
+                android_visual_qa.time,
+                "sleep",
+                return_value=None,
+            ):
+                record = android_visual_qa.accessibility_one(
+                    adb="adb",
+                    config=config,
+                    scenario=android_visual_qa.Scenario("phone-home", "phone"),
+                    profile=profile,
+                    output_dir=Path(tmp),
+                    settle_ms=1,
+                    log_lines=1,
+                    max_steps=6,
+                    exhaustive_dumps=False,
+                )
+
+            self.assertEqual(record["status"], "failed")
+            self.assertEqual(record["early_stop_reason"], "no_progress")
+            self.assertEqual(record["stop_reason"], "no_progress")
+            self.assertEqual(len(record["dump_paths"]), 2)
+            self.assertTrue(all(Path(path).exists() for path in record["dump_paths"]))
+            self.assertIn("root-tag", record["accessibility_steps"][1]["failed_requirement_keys"])
+            self.assertTrue(record["accessibility_steps"][1]["no_new_nodes"])
+            self.assertEqual(record["accessibility_steps"][1]["no_progress_streak"], 1)
+            self.assertEqual(record["failure_logcat"], {"path": "logcat.txt", "max_lines": 1, "status": "captured"})
+            self.assertEqual(dump_mock.call_count, 2)
+            reachability_mock.assert_called_once()
+            logcat_mock.assert_called_once()
+
+    def test_accessibility_exhaustive_dumps_ignore_pass_and_no_progress_until_max_steps(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("phone.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="phone-helper",
+        )
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        viewport = android_visual_qa.WmOverrideSnapshot("Physical size: 1080x2400", "Physical density: 440", None, None)
+        xml = '<hierarchy><node resource-id="phone.home" content-desc="Home" /></hierarchy>'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dump_mock = mock.Mock(
+                return_value=android_visual_qa.AccessibilityXmlDump(xml, command_strategy="safe-sequence")
+            )
+            reachability_mock = mock.Mock()
+            with mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "apply_viewport_profile",
+                return_value=viewport,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                return_value={"properties": {"sdk": "35"}},
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "force_stop_package",
+            ), mock.patch.object(
+                android_visual_qa,
+                "launch_scenario",
+                return_value={"status": "started"},
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_scenario",
+                return_value=[],
+            ), mock.patch.object(
+                android_visual_qa,
+                "dump_accessibility_xml_result",
+                dump_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_accessibility_reachability_step",
+                reachability_mock,
+            ), mock.patch.object(
+                android_visual_qa,
+                "restore_viewport_profile",
+                return_value={"restored": True},
+            ), mock.patch.object(
+                android_visual_qa.time,
+                "sleep",
+                return_value=None,
+            ):
+                record = android_visual_qa.accessibility_one(
+                    adb="adb",
+                    config=config,
+                    scenario=android_visual_qa.Scenario("phone-home", "phone"),
+                    profile=profile,
+                    output_dir=Path(tmp),
+                    settle_ms=1,
+                    log_lines=1,
+                    max_steps=3,
+                    exhaustive_dumps=True,
+                )
+
+            self.assertEqual(record["status"], "passed")
+            self.assertEqual(record["stop_reason"], "max_steps")
+            self.assertNotIn("early_stop_reason", record)
+            self.assertEqual(record["first_all_requirements_passed_step"], 0)
+            self.assertEqual(len(record["dump_paths"]), 3)
+            self.assertEqual(dump_mock.call_count, 3)
+            self.assertEqual(reachability_mock.call_count, 2)
+
     def test_gate_smoke_selection_includes_phone_and_tv(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
 

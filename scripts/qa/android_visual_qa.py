@@ -18,6 +18,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -34,7 +35,8 @@ VISUAL_QA_ACTIVITY = "com.ferrex.android.qa.FerrexVisualQaActivity"
 DEFAULT_OUTPUT_DIR = Path("target/android-visual-qa")
 DEFAULT_SETTLE_MS = 1500
 DEFAULT_LOG_LINES = 240
-ACCESSIBILITY_REACHABILITY_STEPS = 6
+DEFAULT_ACCESSIBILITY_MAX_STEPS = 6
+VALIDATED_BATCHED_ACCESSIBILITY_DUMP_SDK: Mapping[str, str] = {"phone": "35", "tv": "34"}
 GATE_MODES = ("smoke", "complete")
 SCREENSHOT_MODE_FAST = "fast"
 SCREENSHOT_MODE_HELPER_COMPATIBLE = "helper-compatible"
@@ -499,6 +501,23 @@ class AccessibilityRequirement:
         if self.require_focusable:
             data["require_focusable"] = True
         return data
+
+
+@dataclass(frozen=True)
+class AccessibilityDumpStrategy:
+    name: str
+    batched: bool
+    reason: str
+
+    def to_json(self) -> dict[str, object]:
+        return {"name": self.name, "batched": self.batched, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class AccessibilityXmlDump:
+    xml_text: str
+    command_strategy: str
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2060,13 +2079,89 @@ def accessibility_requirements_for_scenario(scenario: Scenario) -> list[Accessib
     return legacy_accessibility_requirements(scenario)
 
 
-def dump_accessibility_xml(adb: str, config: TargetConfig) -> str:
-    remote_path = f"/sdcard/ferrex-visual-qa-accessibility-{os.getpid()}.xml"
+def accessibility_dump_strategy(
+    config: TargetConfig,
+    serial_metadata: Mapping[str, object] | None,
+) -> AccessibilityDumpStrategy:
+    expected_sdk = VALIDATED_BATCHED_ACCESSIBILITY_DUMP_SDK.get(config.target)
+    if config.serial != config.default_serial:
+        return AccessibilityDumpStrategy(
+            name="safe-sequence",
+            batched=False,
+            reason="non-default serial; using the proven dump/cat/rm sequence",
+        )
+
+    properties = serial_metadata.get("properties") if isinstance(serial_metadata, Mapping) else None
+    sdk = properties.get("sdk") if isinstance(properties, Mapping) else None
+    normalized_sdk = str(sdk).strip() if sdk is not None else ""
+    if expected_sdk is None or normalized_sdk != expected_sdk:
+        return AccessibilityDumpStrategy(
+            name="safe-sequence",
+            batched=False,
+            reason=(
+                f"default {config.target} serial reported API {normalized_sdk or 'unknown'}; "
+                f"batched dumps are validated for API {expected_sdk or 'unknown'}"
+            ),
+        )
+
+    return AccessibilityDumpStrategy(
+        name="batched-shell",
+        batched=True,
+        reason=f"validated default {config.target} serial on API {normalized_sdk}",
+    )
+
+
+def dump_accessibility_xml_safe(adb: str, config: TargetConfig, remote_path: str) -> str:
     try:
         adb_shell(adb, config.serial, "uiautomator", "dump", "--compressed", remote_path, timeout=90)
         return adb_shell(adb, config.serial, "cat", remote_path, timeout=30).stdout
     finally:
         adb_shell(adb, config.serial, "rm", "-f", remote_path, check=False, timeout=30)
+
+
+def dump_accessibility_xml_batched(adb: str, config: TargetConfig, remote_path: str) -> str:
+    script = (
+        f"remote='{remote_path}'; "
+        "uiautomator dump --compressed \"$remote\" >/dev/null 2>&1; "
+        "dump_status=$?; "
+        "if [ \"$dump_status\" -eq 0 ]; then "
+        "cat \"$remote\"; cat_status=$?; rm -f \"$remote\"; exit \"$cat_status\"; "
+        "else rm -f \"$remote\"; exit \"$dump_status\"; fi"
+    )
+    return adb_shell(adb, config.serial, f"sh -c {shlex.quote(script)}", timeout=120).stdout
+
+
+def dump_accessibility_xml_result(
+    adb: str,
+    config: TargetConfig,
+    strategy: AccessibilityDumpStrategy | None = None,
+) -> AccessibilityXmlDump:
+    remote_path = f"/sdcard/ferrex-visual-qa-accessibility-{os.getpid()}.xml"
+    selected = strategy or AccessibilityDumpStrategy(
+        name="safe-sequence",
+        batched=False,
+        reason="default safe sequence",
+    )
+    if selected.batched:
+        try:
+            return AccessibilityXmlDump(
+                xml_text=dump_accessibility_xml_batched(adb, config, remote_path),
+                command_strategy=selected.name,
+            )
+        except Exception as exc:  # noqa: BLE001 - fall back to the long-standing safe sequence.
+            return AccessibilityXmlDump(
+                xml_text=dump_accessibility_xml_safe(adb, config, remote_path),
+                command_strategy="safe-sequence",
+                fallback_reason=f"{selected.name} failed; retried with safe sequence: {redact_text(str(exc))}",
+            )
+    return AccessibilityXmlDump(
+        xml_text=dump_accessibility_xml_safe(adb, config, remote_path),
+        command_strategy=selected.name,
+    )
+
+
+def dump_accessibility_xml(adb: str, config: TargetConfig) -> str:
+    return dump_accessibility_xml_result(adb, config).xml_text
 
 
 def drive_accessibility_reachability_step(adb: str, config: TargetConfig, profile: ViewportProfile) -> None:
@@ -2175,6 +2270,47 @@ def verify_accessibility_requirements(
     return checks
 
 
+def accessibility_requirement_key(check: Mapping[str, object]) -> str:
+    requirement = check.get("requirement")
+    if isinstance(requirement, Mapping):
+        key = requirement.get("key")
+        if isinstance(key, str):
+            return key
+    return "unknown"
+
+
+def accessibility_requirement_status(checks: Sequence[Mapping[str, object]]) -> dict[str, str]:
+    return {accessibility_requirement_key(check): str(check.get("status") or "unknown") for check in checks}
+
+
+def passed_accessibility_requirement_keys(checks: Sequence[Mapping[str, object]]) -> set[str]:
+    return {accessibility_requirement_key(check) for check in checks if check.get("status") == "passed"}
+
+
+def failed_accessibility_requirement_keys(checks: Sequence[Mapping[str, object]]) -> list[str]:
+    return [accessibility_requirement_key(check) for check in checks if check.get("status") != "passed"]
+
+
+def all_accessibility_requirements_passed(checks: Sequence[Mapping[str, object]]) -> bool:
+    return bool(checks) and not failed_accessibility_requirement_keys(checks)
+
+
+def accessibility_node_fingerprint(node: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+    fields = (
+        "resource-id",
+        "class",
+        "text",
+        "content-desc",
+        "clickable",
+        "focusable",
+        "enabled",
+        "selected",
+        "scrollable",
+        "bounds",
+    )
+    return tuple((field, node.get(field, "")) for field in fields)
+
+
 def accessibility_one(
     *,
     adb: str,
@@ -2184,6 +2320,8 @@ def accessibility_one(
     output_dir: Path,
     settle_ms: int,
     log_lines: int,
+    max_steps: int = DEFAULT_ACCESSIBILITY_MAX_STEPS,
+    exhaustive_dumps: bool = False,
 ) -> dict[str, object]:
     started_at = utc_now()
     timing = TimingRecorder()
@@ -2191,6 +2329,7 @@ def accessibility_one(
     dump_path = output_dir / "accessibility" / profile.name / f"{scenario.id}.xml"
     failure_log_path = output_dir / "logs" / f"{profile.name}-{scenario.id}-accessibility-logcat.txt"
     requirements = accessibility_requirements_for_scenario(scenario)
+    max_steps = max(1, int(max_steps))
     record: dict[str, object] = {
         "target": config.target,
         "profile": profile.name,
@@ -2201,6 +2340,8 @@ def accessibility_one(
         "expected_dimensions": {"width": profile.expected_size[0], "height": profile.expected_size[1]},
         "requirements": [requirement.to_json() for requirement in requirements],
         "dump_path": str(dump_path),
+        "max_accessibility_steps": max_steps,
+        "exhaustive_accessibility_dumps": bool(exhaustive_dumps),
         "started_at": started_at,
         "status": "running",
     }
@@ -2215,7 +2356,10 @@ def accessibility_one(
                 viewport_before = apply_viewport_profile(adb, config, profile)
             record["viewport_before"] = viewport_before.to_json()
             with timing.step("metadata"):
-                record["serial_metadata"] = collect_serial_metadata(adb, config)
+                serial_metadata = collect_serial_metadata(adb, config)
+            record["serial_metadata"] = serial_metadata
+            dump_strategy = accessibility_dump_strategy(config, serial_metadata)
+            record["accessibility_dump_strategy"] = dump_strategy.to_json()
             with timing.step("package_metadata"):
                 record["package_metadata"] = collect_package_metadata(adb, config)
             with timing.step("force_stop"):
@@ -2229,25 +2373,117 @@ def accessibility_one(
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             nodes: list[dict[str, str]] = []
             dump_paths: list[str] = []
-            for step in range(ACCESSIBILITY_REACHABILITY_STEPS):
-                with timing.step("accessibility_dump"):
-                    xml_text = dump_accessibility_xml(adb, config)
+            steps: list[dict[str, object]] = []
+            seen_node_fingerprints: set[tuple[tuple[str, str], ...]] = set()
+            previous_passed_requirement_keys: set[str] = set()
+            no_progress_streak = 0
+            final_checks: list[dict[str, object]] = []
+            record["dump_paths"] = dump_paths
+            record["accessibility_steps"] = steps
+            record["dump_command_strategies_used"] = []
+            for step in range(max_steps):
                 step_path = accessibility_dump_path(dump_path, step)
+                step_timings: dict[str, int] = {}
+                step_record: dict[str, object] = {
+                    "step": step,
+                    "dump_path": str(step_path),
+                    "timings_ms": step_timings,
+                }
+                step_started = timing.now()
+                steps.append(step_record)
+
+                dump_started = timing.now()
+                with timing.step("accessibility_dump"):
+                    dump_result = dump_accessibility_xml_result(adb, config, dump_strategy)
+                step_timings["dump"] = timing.elapsed_ms_since(dump_started)
+                xml_text = dump_result.xml_text
                 step_path.write_text(redact_text(xml_text), encoding="utf-8")
                 dump_paths.append(str(step_path))
+                step_record["dump_command_strategy"] = dump_result.command_strategy
+                if dump_result.fallback_reason is not None:
+                    step_record["dump_fallback_reason"] = dump_result.fallback_reason
+                record["dump_command_strategies_used"] = sorted(
+                    {
+                        str(recorded_step["dump_command_strategy"])
+                        for recorded_step in steps
+                        if "dump_command_strategy" in recorded_step
+                    }
+                )
+
+                parse_started = timing.now()
                 with timing.step("accessibility_parse"):
-                    nodes.extend(parse_accessibility_nodes(xml_text))
-                if step < ACCESSIBILITY_REACHABILITY_STEPS - 1:
-                    with timing.step("accessibility_drive"):
-                        drive_accessibility_reachability_step(adb, config, profile)
-            record["dump_paths"] = dump_paths
-            with timing.step("accessibility_verify"):
-                checks = verify_accessibility_requirements(nodes, requirements)
-            failures = [check for check in checks if check["status"] != "passed"]
-            record["node_count"] = len(nodes)
-            record["checks"] = checks
+                    step_nodes = parse_accessibility_nodes(xml_text)
+                step_timings["parse"] = timing.elapsed_ms_since(parse_started)
+                step_fingerprints = {accessibility_node_fingerprint(node) for node in step_nodes}
+                new_node_fingerprints = step_fingerprints - seen_node_fingerprints
+                seen_node_fingerprints.update(step_fingerprints)
+                nodes.extend(step_nodes)
+                record["node_count"] = len(nodes)
+                record["unique_node_count"] = len(seen_node_fingerprints)
+                step_record["node_count"] = len(step_nodes)
+                step_record["unique_node_count"] = len(step_fingerprints)
+                step_record["new_node_count"] = len(new_node_fingerprints)
+                step_record["cumulative_node_count"] = len(nodes)
+                step_record["cumulative_unique_node_count"] = len(seen_node_fingerprints)
+
+                verify_started = timing.now()
+                with timing.step("accessibility_verify"):
+                    checks = verify_accessibility_requirements(nodes, requirements)
+                step_timings["verify"] = timing.elapsed_ms_since(verify_started)
+                final_checks = checks
+                record["checks"] = checks
+                passed_keys = passed_accessibility_requirement_keys(checks)
+                failed_keys = failed_accessibility_requirement_keys(checks)
+                newly_passed_keys = sorted(passed_keys - previous_passed_requirement_keys)
+                previous_passed_requirement_keys = set(passed_keys)
+                step_record["requirement_status"] = accessibility_requirement_status(checks)
+                step_record["checks"] = checks
+                step_record["passed_requirement_count"] = len(passed_keys)
+                step_record["failed_requirement_keys"] = failed_keys
+                step_record["newly_passed_requirement_keys"] = newly_passed_keys
+                step_record["all_requirements_passed"] = all_accessibility_requirements_passed(checks)
+
+                no_new_nodes = step > 0 and not new_node_fingerprints
+                no_requirement_progress = step > 0 and not newly_passed_keys
+                no_progress = no_new_nodes and no_requirement_progress
+                no_progress_streak = no_progress_streak + 1 if no_progress else 0
+                step_record["no_new_nodes"] = no_new_nodes
+                step_record["no_requirement_progress"] = no_requirement_progress
+                step_record["no_progress_streak"] = no_progress_streak
+
+                if all_accessibility_requirements_passed(checks) and "first_all_requirements_passed_step" not in record:
+                    record["first_all_requirements_passed_step"] = step
+
+                stop_reason: str | None = None
+                if all_accessibility_requirements_passed(checks) and not exhaustive_dumps:
+                    stop_reason = "all_requirements_passed"
+                    if step < max_steps - 1:
+                        record["early_stop_reason"] = stop_reason
+                        step_record["early_stop_reason"] = stop_reason
+                elif no_progress and not exhaustive_dumps and step < max_steps - 1:
+                    stop_reason = "no_progress"
+                    record["early_stop_reason"] = stop_reason
+                    step_record["early_stop_reason"] = stop_reason
+                elif step >= max_steps - 1:
+                    stop_reason = "max_steps"
+
+                if stop_reason is not None:
+                    record["stop_reason"] = stop_reason
+                    step_record["stop_reason"] = stop_reason
+                    step_timings["total"] = timing.elapsed_ms_since(step_started)
+                    break
+
+                drive_started = timing.now()
+                with timing.step("accessibility_drive"):
+                    drive_accessibility_reachability_step(adb, config, profile)
+                step_timings["drive"] = timing.elapsed_ms_since(drive_started)
+                step_timings["total"] = timing.elapsed_ms_since(step_started)
+
+            if not final_checks:
+                raise VisualQaError("no accessibility dumps captured")
+            failures = [check for check in final_checks if check["status"] != "passed"]
             if failures:
-                missing = ", ".join(str(check["requirement"]["key"]) for check in failures)
+                missing = ", ".join(failed_accessibility_requirement_keys(final_checks))
                 raise VisualQaError(f"missing accessibility requirement(s): {missing}")
             record["status"] = "passed"
         except Exception as exc:  # noqa: BLE001 - accessibility gate must emit diagnostics.
@@ -2289,6 +2525,8 @@ def run_accessibility(args: argparse.Namespace) -> int:
         "started_at": utc_now(),
         "output_dir": str(output_dir),
         "hardware_confirmation": bool(args.hardware),
+        "max_accessibility_steps": args.max_steps,
+        "exhaustive_accessibility_dumps": bool(args.exhaustive_dumps),
         "registry": registry.to_json(),
         "accessibility_plan": capture_plan_json(None, selected, profiles_by_target),
         "command_versions": collect_command_versions(adb, Path(__file__).resolve()),
@@ -2312,6 +2550,8 @@ def run_accessibility(args: argparse.Namespace) -> int:
                 output_dir=output_dir,
                 settle_ms=args.settle_ms,
                 log_lines=args.log_lines,
+                max_steps=args.max_steps,
+                exhaustive_dumps=args.exhaustive_dumps,
             )
             records.append(record)
             if record["status"] == "passed":
@@ -2789,6 +3029,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     accessibility.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
     accessibility.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
+    accessibility.add_argument(
+        "--max-steps",
+        "--accessibility-max-steps",
+        type=positive_int,
+        default=DEFAULT_ACCESSIBILITY_MAX_STEPS,
+        help="Maximum accessibility dump/drive steps before failing unresolved requirements",
+    )
+    accessibility.add_argument(
+        "--exhaustive-dumps",
+        "--exhaustive-accessibility-dumps",
+        action="store_true",
+        help="Capture all accessibility steps even after requirements pass or no-progress is detected",
+    )
     accessibility.add_argument("--adb", default=os.environ.get("ADB", "adb"), help="adb executable to use")
     accessibility.add_argument(
         "--profile",
