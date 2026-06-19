@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,10 +76,12 @@ import com.ferrex.android.core.mediaart.MediaArtObject
 import com.ferrex.android.core.mediaart.MediaArtRequest
 import com.ferrex.android.core.mediaart.MediaArtTargetIdentity
 import com.ferrex.android.core.mediaart.MediaRailItemIdentity
+import com.ferrex.android.core.playback.MediaRoutePersistence
 import com.ferrex.android.core.playback.PlaybackLaunchDecision
 import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
 import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
+import com.ferrex.android.core.playback.PlaybackRoutePersistence
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
@@ -118,6 +121,9 @@ import com.ferrex.android.ui.components.MobileMediaCardState
 import com.ferrex.android.ui.components.MobileMediaWatchState
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
+import com.ferrex.android.navigation.MediaRouteArgsSaver
+import com.ferrex.android.navigation.PlaybackRouteContractSaver
+import com.ferrex.android.navigation.enumNameSaver
 import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.detail.PhoneDetailScreen
 import com.ferrex.android.ui.player.PlayerScreen
@@ -165,15 +171,34 @@ fun PhoneHomeScreen(
     val emptyWatchState = remember { mutableStateOf(WatchRepositoryState()) }
     val watchState by watchRepository?.state?.collectAsState() ?: emptyWatchState
     val coroutineScope = rememberCoroutineScope()
-    var selectedDestination by remember { mutableStateOf(PhoneShellDestination.Home) }
-    var selectedTab by remember { mutableStateOf(HomeLibraryTab.Movies) }
-    var selectedMovieLibraryId by remember { mutableStateOf<String?>(null) }
-    var selectedSeriesLibraryId by remember { mutableStateOf<String?>(null) }
-    var movieSort by remember { mutableStateOf(MovieSortMode.TitleAsc) }
-    var movieFilter by remember { mutableStateOf(MovieFilterMode.All) }
+    val routePersistenceScope = remember(state.serverUrl, state.user.id) {
+        PlaybackRoutePersistence.scopeKey(state.serverUrl, state.user.id)
+    }
+    var selectedDestination by rememberSaveable(
+        routePersistenceScope,
+        stateSaver = enumNameSaver(PhoneShellDestination.entries, PhoneShellDestination.Home),
+    ) { mutableStateOf(PhoneShellDestination.Home) }
+    var selectedTab by rememberSaveable(
+        routePersistenceScope,
+        stateSaver = enumNameSaver(HomeLibraryTab.entries, HomeLibraryTab.Movies),
+    ) { mutableStateOf(HomeLibraryTab.Movies) }
+    var selectedMovieLibraryId by rememberSaveable(routePersistenceScope) { mutableStateOf<String?>(null) }
+    var selectedSeriesLibraryId by rememberSaveable(routePersistenceScope) { mutableStateOf<String?>(null) }
+    var movieSort by rememberSaveable(
+        routePersistenceScope,
+        stateSaver = enumNameSaver(MovieSortMode.entries, MovieSortMode.TitleAsc),
+    ) { mutableStateOf(MovieSortMode.TitleAsc) }
+    var movieFilter by rememberSaveable(
+        routePersistenceScope,
+        stateSaver = enumNameSaver(MovieFilterMode.entries, MovieFilterMode.All),
+    ) { mutableStateOf(MovieFilterMode.All) }
     var movieIndexState by remember { mutableStateOf<MovieIndexUiState>(MovieIndexUiState.Idle) }
-    var selectedDetailRoute by remember { mutableStateOf<MediaRouteArgs?>(null) }
-    var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
+    var selectedDetailRoute by rememberSaveable(routePersistenceScope, stateSaver = MediaRouteArgsSaver) {
+        mutableStateOf<MediaRouteArgs?>(null)
+    }
+    var activePlaybackContract by rememberSaveable(routePersistenceScope, stateSaver = PlaybackRouteContractSaver) {
+        mutableStateOf<PlaybackRouteContract?>(null)
+    }
     var playbackNotice by remember { mutableStateOf<String?>(null) }
     val homeConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Home)
     val detailConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Detail)
@@ -192,6 +217,12 @@ fun PhoneHomeScreen(
     }
     LaunchedEffect(selectedDetailRoute) {
         playbackNotice = null
+    }
+    LaunchedEffect(activePlaybackContract, selectedDetailRoute) {
+        val playbackRoute = activePlaybackContract ?: return@LaunchedEffect
+        if (selectedDetailRoute == null) {
+            selectedDetailRoute = MediaRoutePersistence.decodeRouteString(playbackRoute.sourceDetailRoute)
+        }
     }
 
     val movieLibraries = repositoryState?.movieLibraries.orEmpty()
@@ -486,8 +517,16 @@ fun PhoneHomeScreen(
                     onPlaybackSessionInvalidated()
                 },
                 onProgressCommitted = { refreshPlaybackProgress(playbackContract) },
-                onChangeServer = onChangeServer,
-                onSignOut = onSignOut,
+                onChangeServer = {
+                    activePlaybackContract = null
+                    selectedDetailRoute = null
+                    onChangeServer()
+                },
+                onSignOut = {
+                    activePlaybackContract = null
+                    selectedDetailRoute = null
+                    onSignOut()
+                },
                 onOpenDiagnostics = onOpenDiagnostics,
             )
         } else if (detailResult != null && selectedDetailRoute != null) {

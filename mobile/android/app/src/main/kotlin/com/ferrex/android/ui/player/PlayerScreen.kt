@@ -2,6 +2,10 @@
 
 package com.ferrex.android.ui.player
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.View
 import androidx.activity.compose.BackHandler
@@ -52,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +79,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -98,14 +106,18 @@ import com.ferrex.android.core.playback.PlaybackFailure
 import com.ferrex.android.core.playback.PlaybackFailureKind
 import com.ferrex.android.core.playback.PlaybackFailureMapper
 import com.ferrex.android.core.playback.PlaybackPlayerState
+import com.ferrex.android.core.playback.PlaybackOrientationRequest
 import com.ferrex.android.core.playback.PlaybackProgressReporter
 import com.ferrex.android.core.playback.PlaybackRecoveryActions
 import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
+import com.ferrex.android.core.playback.PlaybackSurfaceKind
 import com.ferrex.android.core.playback.PlaybackTicketTransport
 import com.ferrex.android.core.playback.PlaybackTrackOption
 import com.ferrex.android.core.playback.PlaybackTrackOptions
+import com.ferrex.android.core.playback.PlaybackWindowPolicy
+import com.ferrex.android.core.playback.PlaybackWindowPolicyDecision
 import com.ferrex.android.core.playback.TvPlaybackOverlayEffect
 import com.ferrex.android.core.playback.TvPlaybackOverlayEvent
 import com.ferrex.android.core.playback.TvPlaybackOverlayReducer
@@ -180,6 +192,13 @@ fun PlayerScreen(
         )
     }
     val playerState by controller.state.collectAsState()
+    var phoneOrientationLocked by rememberSaveable(route) { mutableStateOf(true) }
+    val windowPolicy = PlaybackWindowPolicy.forPlayback(
+        surface = chrome.surfaceKind(),
+        phoneOrientationLocked = phoneOrientationLocked,
+    )
+
+    PlaybackWindowPolicyEffect(windowPolicy)
 
     BackHandler(enabled = chrome == PlayerChrome.Phone || playerState !is PlaybackPlayerState.Ready) {
         onBack()
@@ -225,6 +244,9 @@ fun PlayerScreen(
                 streamingHttpClient = streamingHttpClient,
                 controller = controller,
                 chrome = chrome,
+                windowPolicy = windowPolicy,
+                phoneOrientationLocked = phoneOrientationLocked,
+                onPhoneOrientationLockChange = { phoneOrientationLocked = it },
                 onBack = onBack,
             )
             is PlaybackPlayerState.Error -> PlaybackErrorPanel(
@@ -249,6 +271,60 @@ fun PlayerScreen(
             )
         }
     }
+}
+
+@Composable
+private fun PlaybackWindowPolicyEffect(policy: PlaybackWindowPolicyDecision) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val restoresOrientation = policy.orientationRequest != PlaybackOrientationRequest.None
+
+    DisposableEffect(activity, policy.immersiveFullscreen, policy.transientSystemBarsBySwipe, restoresOrientation) {
+        if (activity == null || !policy.immersiveFullscreen) {
+            onDispose { }
+        } else {
+            val previousOrientation = activity.requestedOrientation
+            val window = activity.window
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            if (policy.transientSystemBarsBySwipe) {
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+
+            onDispose {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                if (restoresOrientation) {
+                    activity.requestedOrientation = previousOrientation
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(activity, policy.orientationRequest) {
+        if (activity == null) return@LaunchedEffect
+        when (policy.orientationRequest) {
+            PlaybackOrientationRequest.LockedLandscape -> {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            PlaybackOrientationRequest.UserControlled -> {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER
+            }
+            PlaybackOrientationRequest.None -> Unit
+        }
+    }
+}
+
+private fun PlayerChrome.surfaceKind(): PlaybackSurfaceKind = when (this) {
+    PlayerChrome.Phone -> PlaybackSurfaceKind.Phone
+    PlayerChrome.Tv -> PlaybackSurfaceKind.Tv
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -617,6 +693,9 @@ private fun PlayerContent(
     streamingHttpClient: OkHttpClient,
     controller: PlaybackController,
     chrome: PlayerChrome,
+    windowPolicy: PlaybackWindowPolicyDecision,
+    phoneOrientationLocked: Boolean,
+    onPhoneOrientationLockChange: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -789,25 +868,55 @@ private fun PlayerContent(
         }
 
         if (chrome == PlayerChrome.Phone && builtInControlsVisible) {
-            Surface(
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(12.dp),
-                onClick = {
-                    val modes = AspectRatioMode.entries
-                    aspectRatioMode = modes[(aspectRatioMode.ordinal + 1) % modes.size]
-                },
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                contentColor = Color.White,
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = "Display: ${aspectRatioMode.label}",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
+                if (windowPolicy.showsOrientationLockControl) {
+                    PhonePlayerOverlayButton(
+                        label = if (phoneOrientationLocked) "Orientation: Locked landscape" else "Orientation: Unlocked",
+                        contentDescription = if (phoneOrientationLocked) {
+                            "Unlock player orientation. Playback stays open while rotating."
+                        } else {
+                            "Lock player orientation to landscape. Playback stays open."
+                        },
+                        onClick = { onPhoneOrientationLockChange(!phoneOrientationLocked) },
+                    )
+                }
+                PhonePlayerOverlayButton(
+                    label = "Display: ${aspectRatioMode.label}",
+                    contentDescription = "Change video display mode. Current mode is ${aspectRatioMode.label}.",
+                    onClick = {
+                        val modes = AspectRatioMode.entries
+                        aspectRatioMode = modes[(aspectRatioMode.ordinal + 1) % modes.size]
+                    },
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PhonePlayerOverlayButton(
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.semantics { this.contentDescription = contentDescription },
+        onClick = onClick,
+        shape = RoundedCornerShape(4.dp),
+        color = Color.Black.copy(alpha = 0.6f),
+        contentColor = Color.White,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
