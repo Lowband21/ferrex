@@ -25,7 +25,8 @@ use uuid::Uuid;
 use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
 use crate::infra::scan::scan_manager::{
-    ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
+    ScanBroadcastFrame, ScanCommandAccepted, ScanControlError,
+    ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
@@ -101,15 +102,16 @@ pub async fn start_scan_handler(
 
     let accepted = state
         .scan_control()
-        .start_library_scan(LibraryId(library_id), request.correlation_id)
+        .start_library_scan(
+            LibraryId(library_id),
+            request.correlation_id,
+            request.effective_mode(),
+        )
         .await?;
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
@@ -122,10 +124,7 @@ pub async fn pause_scan_handler(
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
@@ -138,10 +137,7 @@ pub async fn resume_scan_handler(
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
@@ -154,11 +150,22 @@ pub async fn cancel_scan_handler(
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
+}
+
+fn scan_command_response(
+    accepted: ScanCommandAccepted,
+) -> ScanCommandAcceptedResponse {
+    ScanCommandAcceptedResponse {
+        scan_id: accepted.scan_id,
+        correlation_id: accepted.correlation_id,
+        status: accepted.status.into(),
+        mode: accepted.mode,
+        idempotency_key: accepted.idempotency_key,
+        run_key: accepted.run_key,
+        disposition: accepted.disposition,
+    }
 }
 
 pub async fn active_scans_handler(

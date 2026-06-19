@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                                    UPDATE orchestrator_jobs\n                                    SET correlation_id = COALESCE(correlation_id, $1),\n                                        updated_at = NOW()\n                                    WHERE id = $2\n                                      AND correlation_id IS NULL\n                                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b36a9dab68ada4d154ef7442b357084976a49ae0b0d28560e326c3ffeb5799a8"
+}

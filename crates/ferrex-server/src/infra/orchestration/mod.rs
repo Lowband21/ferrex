@@ -579,8 +579,13 @@ impl ScanOrchestrator {
         let lease = queue.dequeue(request).await?;
         if let Some(ref lease) = lease {
             let payload = &lease.job.payload;
-            let correlation_id =
-                self.correlations.fetch_or_generate(lease.job.id).await;
+            let correlation_id = self
+                .correlations
+                .fetch_persisted_or_generate(
+                    lease.job.id,
+                    lease.job.correlation_id,
+                )
+                .await;
             let event = JobEvent::from_job(
                 Some(correlation_id),
                 payload.library_id(),

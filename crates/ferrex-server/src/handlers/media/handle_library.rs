@@ -18,7 +18,7 @@ use ferrex_core::{
     api::types::{
         ApiResponse, CreateLibraryRequest, FetchMediaRequest,
         FilterIndicesRequest, IndicesResponse, LibraryMediaResponse,
-        UpdateLibraryRequest,
+        ScanRunMode, UpdateLibraryRequest,
     },
     types::LibraryType,
 };
@@ -822,7 +822,7 @@ pub async fn create_library_handler(
             if request.start_scan && library.enabled {
                 match state
                     .scan_control()
-                    .start_library_scan(library.id, None)
+                    .start_library_scan(library.id, None, ScanRunMode::Manual)
                     .await
                 {
                     Ok(accepted) => {

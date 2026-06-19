@@ -31,7 +31,7 @@ use std::{
 };
 
 use ferrex_core::player_prelude::{
-    Library, LibraryId, ScanLifecycleStatus, ScanSnapshotDto,
+    Library, LibraryId, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use ferrex_model::library::LibraryType;
@@ -654,12 +654,15 @@ pub fn update_library(
                     scan_id,
                     library_id,
                     status: ScanLifecycleStatus::Running,
+                    mode: ScanRunMode::Manual,
                     completed_items: 0,
                     total_items: 0,
                     retrying_items: 0,
                     dead_lettered_items: 0,
                     correlation_id,
                     idempotency_key: String::new(),
+                    run_key: ScanRunMode::Manual.run_key(library_id),
+                    disposition: None,
                     current_path: None,
                     started_at: chrono::Utc::now(),
                     terminal_at: None,

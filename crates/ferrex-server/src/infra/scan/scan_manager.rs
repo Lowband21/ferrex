@@ -2,8 +2,8 @@ use ferrex_model::{MediaID, SubjectKey};
 
 use ferrex_core::{
     api::types::{
-        ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
-        SeriesBundleResponse,
+        ScanLifecycleStatus as ApiScanLifecycleStatus, ScanRunMode,
+        ScanSnapshotDto, ScanStartDisposition, SeriesBundleResponse,
     },
     application::unit_of_work::AppUnitOfWork,
     domain::scan::{
@@ -203,6 +203,7 @@ impl ScanControlPlane {
         &self,
         library_id: LibraryId,
         correlation_id: Option<Uuid>,
+        mode: ScanRunMode,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
         let library = self
             .inner
@@ -219,12 +220,13 @@ impl ScanControlPlane {
 
         let correlation_id = correlation_id.unwrap_or_else(Uuid::now_v7);
         let scan_id = correlation_id;
+        let start_mode = start_mode_from_scan_run_mode(mode);
         let run = ScanRun::new(
             Arc::clone(&self.inner),
             scan_id,
             library_id,
             correlation_id,
-            StartMode::Bulk,
+            start_mode,
         );
 
         self.inner.register_run(run.clone()).await;
@@ -236,7 +238,7 @@ impl ScanControlPlane {
             .command_library(
                 library_id,
                 LibraryActorCommand::Start {
-                    mode: StartMode::Bulk,
+                    mode: start_mode,
                     correlation_id: Some(correlation_id),
                 },
             )
@@ -246,9 +248,15 @@ impl ScanControlPlane {
             return Err(ScanControlError::internal(err.to_string()));
         }
 
+        let run_key = mode.run_key(library_id);
         Ok(ScanCommandAccepted {
             scan_id,
             correlation_id,
+            status: ScanLifecycleStatus::Running,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Created,
         })
     }
 
@@ -351,9 +359,16 @@ impl ScanControlPlane {
         let run = self.inner.lookup(scan_id).await?;
         let correlation_id = Uuid::now_v7();
         run.pause(correlation_id).await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
             correlation_id,
+            status: ScanLifecycleStatus::Paused,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
@@ -364,9 +379,16 @@ impl ScanControlPlane {
         let run = self.inner.lookup(scan_id).await?;
         let correlation_id = Uuid::now_v7();
         run.resume(correlation_id).await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
             correlation_id,
+            status: ScanLifecycleStatus::Running,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
@@ -377,9 +399,16 @@ impl ScanControlPlane {
         let run = self.inner.lookup(scan_id).await?;
         let correlation_id = Uuid::now_v7();
         run.cancel(correlation_id).await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
             correlation_id,
+            status: ScanLifecycleStatus::Canceled,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
@@ -500,6 +529,11 @@ impl ScanControlPlaneInner {
 pub struct ScanCommandAccepted {
     pub scan_id: Uuid,
     pub correlation_id: Uuid,
+    pub status: ScanLifecycleStatus,
+    pub mode: ScanRunMode,
+    pub idempotency_key: String,
+    pub run_key: String,
+    pub disposition: ScanStartDisposition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -523,6 +557,22 @@ impl ScanLifecycleStatus {
             ScanLifecycleStatus::Failed => "failed",
             ScanLifecycleStatus::Canceled => "canceled",
         }
+    }
+}
+
+fn start_mode_from_scan_run_mode(mode: ScanRunMode) -> StartMode {
+    match mode {
+        ScanRunMode::Manual => StartMode::Bulk,
+        ScanRunMode::Maintenance => StartMode::Maintenance,
+        ScanRunMode::Resume => StartMode::Resume,
+    }
+}
+
+fn scan_run_mode_from_start_mode(mode: StartMode) -> ScanRunMode {
+    match mode {
+        StartMode::Bulk => ScanRunMode::Manual,
+        StartMode::Maintenance => ScanRunMode::Maintenance,
+        StartMode::Resume => ScanRunMode::Resume,
     }
 }
 
@@ -985,16 +1035,20 @@ impl ScanRun {
 
     async fn snapshot(&self) -> Result<ScanSnapshot, ScanControlError> {
         let state = self.state.lock().await;
+        let mode = scan_run_mode_from_start_mode(self.start_mode);
         Ok(ScanSnapshot {
             scan_id: state.scan_id,
             library_id: state.library_id,
             status: state.status.clone(),
+            mode,
             completed_items: state.completed_items,
             total_items: state.total_items,
             retrying_items: state.retrying_items,
             dead_lettered_items: state.dead_lettered_items,
             correlation_id: state.correlation_id,
             idempotency_key: state.current_idempotency_key(),
+            run_key: mode.run_key(state.library_id),
+            disposition: None,
             current_path: state.current_path.clone(),
             started_at: state.started_at,
             terminal_at: state.terminal_at,
@@ -2992,12 +3046,15 @@ pub struct ScanSnapshot {
     pub scan_id: Uuid,
     pub library_id: LibraryId,
     pub status: ScanLifecycleStatus,
+    pub mode: ScanRunMode,
     pub completed_items: u64,
     pub total_items: u64,
     pub retrying_items: u64,
     pub dead_lettered_items: u64,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
+    pub run_key: String,
+    pub disposition: Option<ScanStartDisposition>,
     pub current_path: Option<String>,
     pub started_at: DateTime<Utc>,
     pub terminal_at: Option<DateTime<Utc>>,
@@ -3010,12 +3067,15 @@ impl From<ScanSnapshot> for ScanSnapshotDto {
             scan_id: snapshot.scan_id,
             library_id: snapshot.library_id,
             status: snapshot.status.into(),
+            mode: snapshot.mode,
             completed_items: snapshot.completed_items,
             total_items: snapshot.total_items,
             retrying_items: snapshot.retrying_items,
             dead_lettered_items: snapshot.dead_lettered_items,
             correlation_id: snapshot.correlation_id,
             idempotency_key: snapshot.idempotency_key,
+            run_key: snapshot.run_key,
+            disposition: snapshot.disposition,
             current_path: snapshot.current_path,
             started_at: snapshot.started_at,
             terminal_at: snapshot.terminal_at,

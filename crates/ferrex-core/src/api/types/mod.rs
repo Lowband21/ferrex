@@ -55,7 +55,8 @@ pub use media_repo_sync::{
 pub use responses::{ApiResponse, MediaStats, MetadataRequest};
 pub use scan::{
     ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanLifecycleStatus, ScanSnapshotDto, StartScanRequest,
+    ScanCommandRequest, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
+    ScanStartDisposition, StartScanRequest,
 };
 pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
@@ -99,7 +100,8 @@ pub mod player {
     pub use super::scan::{
         ActiveScansResponse, LatestProgressResponse,
         ScanCommandAcceptedResponse, ScanCommandRequest, ScanLifecycleStatus,
-        ScanSnapshotDto, StartScanRequest, events::*,
+        ScanRunMode, ScanSnapshotDto, ScanStartDisposition, StartScanRequest,
+        events::*,
     };
     pub use super::setup::{
         ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,

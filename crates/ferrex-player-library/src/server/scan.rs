@@ -16,7 +16,13 @@ pub async fn start_library_scan(
     correlation_id: Option<Uuid>,
 ) -> Result<ScanCommandAcceptedResponse, anyhow::Error> {
     client
-        .start_library_scan(library_id, StartScanRequest { correlation_id })
+        .start_library_scan(
+            library_id,
+            StartScanRequest {
+                correlation_id,
+                mode: None,
+            },
+        )
         .await
         .map_err(|e| anyhow!(e.to_string()))
 }

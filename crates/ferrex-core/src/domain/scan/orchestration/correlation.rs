@@ -41,9 +41,22 @@ impl CorrelationCache {
     }
 
     pub async fn fetch_or_generate(&self, job_id: JobId) -> Uuid {
+        self.fetch_persisted_or_generate(job_id, None).await
+    }
+
+    pub async fn fetch_persisted_or_generate(
+        &self,
+        job_id: JobId,
+        persisted: Option<Uuid>,
+    ) -> Uuid {
         let mut guard = self.inner.lock().await;
         if let Some(existing) = guard.get(&job_id) {
             return *existing;
+        }
+
+        if let Some(correlation_id) = persisted {
+            guard.insert(job_id, correlation_id);
+            return correlation_id;
         }
 
         let fresh = Uuid::now_v7();
@@ -53,9 +66,21 @@ impl CorrelationCache {
     }
 
     pub async fn take_or_generate(&self, job_id: JobId) -> Uuid {
+        self.take_persisted_or_generate(job_id, None).await
+    }
+
+    pub async fn take_persisted_or_generate(
+        &self,
+        job_id: JobId,
+        persisted: Option<Uuid>,
+    ) -> Uuid {
         let mut guard = self.inner.lock().await;
         if let Some(existing) = guard.remove(&job_id) {
             return existing;
+        }
+
+        if let Some(correlation_id) = persisted {
+            return correlation_id;
         }
 
         let fresh = Uuid::now_v7();
