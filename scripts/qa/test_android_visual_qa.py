@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import struct
@@ -64,6 +65,31 @@ class AndroidVisualQaTest(unittest.TestCase):
             apk_path=self.repo_root() / f"build/{target}.apk",
             expected_size=(1080, 2400) if target == "phone" else (1920, 1080),
             screenshot_helper=f"ferrex-android-screenshot-{target}",
+        )
+
+    def write_output_metadata(
+        self,
+        apk_path: Path,
+        package: str,
+        *,
+        version_code: int = 1,
+        version_name: str = "0.1.0",
+    ) -> None:
+        apk_path.parent.mkdir(parents=True, exist_ok=True)
+        (apk_path.parent / "output-metadata.json").write_text(
+            json.dumps(
+                {
+                    "applicationId": package,
+                    "elements": [
+                        {
+                            "outputFile": apk_path.name,
+                            "versionCode": version_code,
+                            "versionName": version_name,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
         )
 
     def test_registry_parses_required_phone_and_tv_scenarios(self) -> None:
@@ -1886,7 +1912,10 @@ class AndroidVisualQaTest(unittest.TestCase):
 
         def fake_capture_plan(**kwargs: object) -> int:
             capture_args = kwargs["args"]
-            calls.append(f"capture:{kwargs['mode']}:warm={capture_args.warm}:workers={capture_args.target_workers}")
+            calls.append(
+                f"capture:{kwargs['mode']}:warm={capture_args.warm}:"
+                f"fast={capture_args.warm_fast_launch}:workers={capture_args.target_workers}"
+            )
             output_dir = Path(kwargs["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             (output_dir / "manifest.json").write_text(
@@ -1924,6 +1953,10 @@ class AndroidVisualQaTest(unittest.TestCase):
             )
             with mock.patch.object(
                 android_visual_qa,
+                "evaluate_warm_gate",
+                return_value={"status": "passed", "reason": "test freshness passed", "targets": {}},
+            ), mock.patch.object(
+                android_visual_qa,
                 "run_gate_command",
                 side_effect=fake_gate_command,
             ), mock.patch.object(
@@ -1944,10 +1977,409 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                "capture:smoke:warm=True:workers=2",
+                "capture:smoke:warm=True:fast=True:workers=2",
                 "primitive:android-emulator-qa.sh:check:all",
             ],
         )
+
+
+    def test_gate_help_documents_warm_flag(self) -> None:
+        stdout = io.StringIO()
+
+        with self.assertRaises(SystemExit), mock.patch("sys.stdout", stdout):
+            android_visual_qa.build_parser().parse_args(["gate", "--help"])
+
+        help_text = stdout.getvalue()
+        self.assertIn("--warm", help_text)
+        self.assertIn("conservative warm preparation", help_text)
+
+    def test_gate_settle_defaults_use_fast_warm_value_only_when_not_overridden(self) -> None:
+        self.assertEqual(android_visual_qa.effective_gate_settle_ms(SimpleNamespace(warm=False, settle_ms=None)), 1500)
+        self.assertEqual(android_visual_qa.effective_gate_settle_ms(SimpleNamespace(warm=True, settle_ms=None)), 100)
+        self.assertEqual(android_visual_qa.effective_gate_settle_ms(SimpleNamespace(warm=True, settle_ms=1500)), 1500)
+
+    def test_warm_gate_skips_preparation_when_freshness_passes(self) -> None:
+        calls: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone_config = self.target_config("phone", "emulator-5554")
+            tv_config = self.target_config("tv", "emulator-5556")
+            phone_config = android_visual_qa.TargetConfig(**{**phone_config.__dict__, "apk_path": root / "phone" / "app-mobile-debug.apk"})
+            tv_config = android_visual_qa.TargetConfig(**{**tv_config.__dict__, "apk_path": root / "tv" / "app-tv-debug.apk"})
+            phone_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            tv_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            phone_config.apk_path.write_bytes(b"fresh-phone-apk")
+            tv_config.apk_path.write_bytes(b"fresh-tv-apk")
+            self.write_output_metadata(phone_config.apk_path, phone_config.package, version_name="0.1.0")
+            self.write_output_metadata(tv_config.apk_path, tv_config.package, version_name="0.1.0-tv")
+            configs = {"phone": phone_config, "tv": tv_config}
+
+            def fake_serial_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb
+                if config.target == "phone":
+                    return {
+                        "properties": {"sdk": "35", "model": "sdk_gphone64_x86_64", "device": "emu64xa"},
+                        "leanback": False,
+                    }
+                return {
+                    "properties": {"sdk": "34", "model": "AOSP TV on x86", "device": "emulator_x86_arm"},
+                    "leanback": True,
+                }
+
+            def fake_package_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb
+                return {
+                    "package_name": config.package,
+                    "installed_package_path": f"/data/app/{config.package}/base.apk",
+                    "version_code": "1",
+                    "version_name": "0.1.0-tv" if config.target == "tv" else "0.1.0",
+                    "last_update_time": "2999-01-01 00:00:00",
+                    "host_apk": android_visual_qa.file_identity(config.apk_path),
+                }
+
+            def fake_device_apk_identity(
+                adb: str,
+                config: android_visual_qa.TargetConfig,
+                installed_path: str,
+            ) -> dict[str, object]:
+                del adb
+                identity = android_visual_qa.file_identity(config.apk_path)
+                return {
+                    "available": True,
+                    "path": installed_path,
+                    "bytes": identity["bytes"],
+                    "sha256": identity["sha256"],
+                }
+
+            def fake_gate_command(command: tuple[object, ...]) -> None:
+                command_parts = [os.fspath(part) for part in command]
+                calls.append(f"primitive:{Path(command_parts[0]).name}:{':'.join(command_parts[1:])}")
+
+            def fake_capture_plan(**kwargs: object) -> int:
+                calls.append(f"capture:{kwargs['mode']}")
+                output_dir = Path(kwargs["output_dir"])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "manifest.json").write_text(
+                    json.dumps({"schema_version": 1, "status": "passed", "output_dir": str(output_dir), "captures": [], "failures": []}),
+                    encoding="utf-8",
+                )
+                return 0
+
+            summary = android_visual_qa.ManifestSummary(
+                manifest_path=root / "manifest.json",
+                output_dir=root,
+                mode="smoke",
+                captures=(),
+            )
+            args = SimpleNamespace(
+                mode="smoke",
+                output_dir=tmp,
+                settle_ms=1,
+                log_lines=1,
+                adb="adb",
+                no_nix_screenshot=True,
+                screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                profile=None,
+                effective_argv=["gate", "--mode", "smoke", "--warm"],
+                warm=True,
+            )
+            with mock.patch.object(android_visual_qa, "resolve_executable", return_value="adb"), mock.patch.object(
+                android_visual_qa,
+                "target_configs",
+                return_value=configs,
+            ), mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "getprop",
+                return_value="1",
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                side_effect=fake_serial_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                side_effect=fake_package_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_device_apk_identity",
+                side_effect=fake_device_apk_identity,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_gate_command",
+                side_effect=fake_gate_command,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_capture_plan",
+                side_effect=fake_capture_plan,
+            ), mock.patch.object(
+                android_visual_qa,
+                "verify_manifest",
+                return_value=summary,
+            ), mock.patch.object(
+                android_visual_qa,
+                "print_artifact_summary",
+            ):
+                status = android_visual_qa.run_gate(args)
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, ["capture:smoke", "primitive:android-emulator-qa.sh:check:all"])
+        gate_primitives = manifest["timing_summary"]["gate_primitives"]
+        self.assertEqual(
+            [primitive["name"] for primitive in gate_primitives],
+            ["warm_freshness", "build", "start", "doctor", "install", "capture", "check", "verify"],
+        )
+        self.assertEqual(gate_primitives[0]["status"], "passed")
+        self.assertEqual([primitive["status"] for primitive in gate_primitives[1:5]], ["skipped"] * 4)
+        self.assertEqual(manifest["preparation"]["mode"], "warm")
+        self.assertFalse(manifest["preparation"]["fallback"])
+        self.assertTrue(manifest["preparation"]["warm_fast_launch"])
+        self.assertEqual(manifest["preparation"]["skipped_steps"], ["build", "start", "doctor", "install"])
+        self.assertIn("--warm", manifest["preparation"]["argv"])
+
+    def test_warm_gate_falls_back_when_apk_freshness_is_stale(self) -> None:
+        calls: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone_config = self.target_config("phone", "emulator-5554")
+            tv_config = self.target_config("tv", "emulator-5556")
+            phone_config = android_visual_qa.TargetConfig(**{**phone_config.__dict__, "apk_path": root / "phone" / "app-mobile-debug.apk"})
+            tv_config = android_visual_qa.TargetConfig(**{**tv_config.__dict__, "apk_path": root / "tv" / "app-tv-debug.apk"})
+            phone_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            tv_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            phone_config.apk_path.write_bytes(b"fresh-phone-apk")
+            tv_config.apk_path.write_bytes(b"fresh-tv-apk")
+            self.write_output_metadata(phone_config.apk_path, phone_config.package, version_name="0.1.0")
+            self.write_output_metadata(tv_config.apk_path, tv_config.package, version_name="0.1.0-tv")
+            configs = {"phone": phone_config, "tv": tv_config}
+
+            def fake_serial_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb
+                if config.target == "phone":
+                    return {
+                        "properties": {"sdk": "35", "model": "sdk_gphone64_x86_64", "device": "emu64xa"},
+                        "leanback": False,
+                    }
+                return {
+                    "properties": {"sdk": "34", "model": "AOSP TV on x86", "device": "emulator_x86_arm"},
+                    "leanback": True,
+                }
+
+            def fake_package_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb
+                return {
+                    "package_name": config.package,
+                    "installed_package_path": f"/data/app/{config.package}/base.apk",
+                    "version_code": "1",
+                    "version_name": "0.1.0-tv" if config.target == "tv" else "0.1.0",
+                    "last_update_time": "2000-01-01 00:00:00",
+                    "host_apk": android_visual_qa.file_identity(config.apk_path),
+                }
+
+            def fake_gate_command(command: tuple[object, ...]) -> None:
+                command_parts = [os.fspath(part) for part in command]
+                calls.append(f"primitive:{Path(command_parts[0]).name}:{':'.join(command_parts[1:])}")
+
+            def fake_capture_plan(**kwargs: object) -> int:
+                capture_args = kwargs["args"]
+                calls.append(f"capture:{kwargs['mode']}:fast={capture_args.warm_fast_launch}")
+                output_dir = Path(kwargs["output_dir"])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "manifest.json").write_text(
+                    json.dumps({"schema_version": 1, "status": "passed", "output_dir": str(output_dir), "captures": [], "failures": []}),
+                    encoding="utf-8",
+                )
+                return 0
+
+            summary = android_visual_qa.ManifestSummary(root / "manifest.json", root, "smoke", ())
+            args = SimpleNamespace(
+                mode="smoke",
+                output_dir=tmp,
+                settle_ms=1,
+                log_lines=1,
+                adb="adb",
+                no_nix_screenshot=True,
+                screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                profile=None,
+                effective_argv=["gate", "--mode", "smoke", "--warm"],
+                warm=True,
+            )
+            with mock.patch.object(android_visual_qa, "resolve_executable", return_value="adb"), mock.patch.object(
+                android_visual_qa,
+                "target_configs",
+                return_value=configs,
+            ), mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "getprop",
+                return_value="1",
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                side_effect=fake_serial_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                side_effect=fake_package_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_device_apk_identity",
+                return_value={"available": False, "unavailable_reason": "sha256sum unavailable"},
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_gate_command",
+                side_effect=fake_gate_command,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_capture_plan",
+                side_effect=fake_capture_plan,
+            ), mock.patch.object(
+                android_visual_qa,
+                "verify_manifest",
+                return_value=summary,
+            ), mock.patch.object(
+                android_visual_qa,
+                "print_artifact_summary",
+            ):
+                status = android_visual_qa.run_gate(args)
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "primitive:android-emulator-qa.sh:build",
+                "primitive:android-emulator-qa.sh:start",
+                "primitive:android-emulator-qa.sh:doctor",
+                "primitive:android-emulator-qa.sh:install:all",
+                "capture:smoke:fast=False",
+                "primitive:android-emulator-qa.sh:check:all",
+            ],
+        )
+        gate_primitives = manifest["timing_summary"]["gate_primitives"]
+        self.assertEqual(gate_primitives[0]["name"], "warm_freshness")
+        self.assertEqual(gate_primitives[0]["status"], "fallback")
+        self.assertEqual([primitive["status"] for primitive in gate_primitives[1:5]], ["passed"] * 4)
+        self.assertTrue(manifest["preparation"]["fallback"])
+        self.assertFalse(manifest["preparation"]["warm_fast_launch"])
+        self.assertIn("lastUpdateTime is older", manifest["preparation"]["fallback_reason"])
+
+    def test_warm_gate_falls_back_when_required_device_is_missing(self) -> None:
+        calls: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone_config = self.target_config("phone", "emulator-5554")
+            tv_config = self.target_config("tv", "emulator-5556")
+            phone_config = android_visual_qa.TargetConfig(**{**phone_config.__dict__, "apk_path": root / "phone" / "app-mobile-debug.apk"})
+            tv_config = android_visual_qa.TargetConfig(**{**tv_config.__dict__, "apk_path": root / "tv" / "app-tv-debug.apk"})
+            phone_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            tv_config.apk_path.parent.mkdir(parents=True, exist_ok=True)
+            phone_config.apk_path.write_bytes(b"fresh-phone-apk")
+            tv_config.apk_path.write_bytes(b"fresh-tv-apk")
+            self.write_output_metadata(phone_config.apk_path, phone_config.package, version_name="0.1.0")
+            self.write_output_metadata(tv_config.apk_path, tv_config.package, version_name="0.1.0-tv")
+            configs = {"phone": phone_config, "tv": tv_config}
+
+            def fake_serial_present(adb: str, serial: str) -> None:
+                del adb
+                if serial == "emulator-5554":
+                    raise android_visual_qa.VisualQaError("ADB serial emulator-5554 is not ready (state: missing)")
+
+            def fake_serial_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb, config
+                return {
+                    "properties": {"sdk": "34", "model": "AOSP TV on x86", "device": "emulator_x86_arm"},
+                    "leanback": True,
+                }
+
+            def fake_package_metadata(adb: str, config: android_visual_qa.TargetConfig) -> dict[str, object]:
+                del adb
+                return {
+                    "package_name": config.package,
+                    "installed_package_path": f"/data/app/{config.package}/base.apk",
+                    "version_code": "1",
+                    "version_name": "0.1.0-tv",
+                    "last_update_time": "2999-01-01 00:00:00",
+                    "host_apk": android_visual_qa.file_identity(config.apk_path),
+                }
+
+            def fake_gate_command(command: tuple[object, ...]) -> None:
+                command_parts = [os.fspath(part) for part in command]
+                calls.append(f"primitive:{Path(command_parts[0]).name}:{':'.join(command_parts[1:])}")
+
+            def fake_capture_plan(**kwargs: object) -> int:
+                calls.append(f"capture:{kwargs['mode']}")
+                output_dir = Path(kwargs["output_dir"])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir / "manifest.json").write_text(
+                    json.dumps({"schema_version": 1, "status": "passed", "output_dir": str(output_dir), "captures": [], "failures": []}),
+                    encoding="utf-8",
+                )
+                return 0
+
+            summary = android_visual_qa.ManifestSummary(root / "manifest.json", root, "smoke", ())
+            args = SimpleNamespace(
+                mode="smoke",
+                output_dir=tmp,
+                settle_ms=1,
+                log_lines=1,
+                adb="adb",
+                no_nix_screenshot=True,
+                screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                profile=None,
+                effective_argv=["gate", "--mode", "smoke", "--warm"],
+                warm=True,
+            )
+            with mock.patch.object(android_visual_qa, "resolve_executable", return_value="adb"), mock.patch.object(
+                android_visual_qa,
+                "target_configs",
+                return_value=configs,
+            ), mock.patch.object(
+                android_visual_qa,
+                "require_serial_present",
+                side_effect=fake_serial_present,
+            ), mock.patch.object(
+                android_visual_qa,
+                "getprop",
+                return_value="1",
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                side_effect=fake_serial_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                side_effect=fake_package_metadata,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_device_apk_identity",
+                return_value={"available": True, "bytes": len(b"fresh-tv-apk"), "sha256": android_visual_qa.file_identity(tv_config.apk_path)["sha256"]},
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_gate_command",
+                side_effect=fake_gate_command,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_capture_plan",
+                side_effect=fake_capture_plan,
+            ), mock.patch.object(
+                android_visual_qa,
+                "verify_manifest",
+                return_value=summary,
+            ), mock.patch.object(
+                android_visual_qa,
+                "print_artifact_summary",
+            ):
+                status = android_visual_qa.run_gate(args)
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertIn("primitive:android-emulator-qa.sh:start", calls)
+        self.assertEqual(manifest["timing_summary"]["gate_primitives"][0]["status"], "fallback")
+        self.assertTrue(manifest["preparation"]["fallback"])
+        self.assertIn("emulator-5554", manifest["preparation"]["fallback_reason"])
 
     def test_gate_runs_primitives_capture_and_verify_in_order(self) -> None:
         calls: list[str] = []

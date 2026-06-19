@@ -36,6 +36,7 @@ EXTRA_SCENARIO_ID = "com.ferrex.android.extra.QA_SCENARIO_ID"
 VISUAL_QA_ACTIVITY = "com.ferrex.android.qa.FerrexVisualQaActivity"
 DEFAULT_OUTPUT_DIR = Path("target/android-visual-qa")
 DEFAULT_SETTLE_MS = 1500
+DEFAULT_WARM_SETTLE_MS = 100
 DEFAULT_LOG_LINES = 240
 DEFAULT_ACCESSIBILITY_MAX_STEPS = 6
 VALIDATED_BATCHED_ACCESSIBILITY_DUMP_SDK: Mapping[str, str] = {"phone": "35", "tv": "34"}
@@ -46,6 +47,10 @@ SCREENSHOT_MODES = (SCREENSHOT_MODE_FAST, SCREENSHOT_MODE_HELPER_COMPATIBLE)
 SCREENSHOT_VALIDATION_ATTEMPTS = 3
 SCREENSHOT_VALIDATION_RETRY_DELAY_SECONDS = 0.5
 SMOKE_SCENARIO_IDS = ("phone-home", "tv-home-focus")
+WARM_FRESHNESS_STEP_NAME = "warm_freshness"
+WARM_FRESHNESS_POLICY = "conservative"
+WARM_PREPARATION_STEP_NAMES = ("build", "start", "doctor", "install")
+WARM_PREPARATION_PHASE = "preparation"
 
 PHONE_EXPECTED_SIZE = (1080, 2400)
 PHONE_LANDSCAPE_FOLDABLE_SIZE = (1800, 1200)
@@ -885,6 +890,206 @@ def file_identity(path: Path) -> dict[str, object]:
     }
 
 
+def parse_datetime_utc(value: object) -> dt.datetime | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    normalized = text.removesuffix("Z") + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d"):
+            try:
+                parsed = dt.datetime.strptime(text, fmt).replace(tzinfo=dt.UTC)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.UTC)
+    return parsed.astimezone(dt.UTC)
+
+
+def parse_gradle_output_metadata(apk_path: Path) -> dict[str, object]:
+    metadata_path = apk_path.with_name("output-metadata.json")
+    try:
+        parsed = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise VisualQaError(f"Gradle output metadata is unavailable for {apk_path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise VisualQaError(f"Gradle output metadata is not valid JSON: {metadata_path}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise VisualQaError(f"Gradle output metadata root must be an object: {metadata_path}")
+    application_id = parsed.get("applicationId")
+    elements = parsed.get("elements")
+    if not isinstance(application_id, str) or not application_id:
+        raise VisualQaError(f"Gradle output metadata is missing applicationId: {metadata_path}")
+    if not isinstance(elements, list) or not elements:
+        raise VisualQaError(f"Gradle output metadata is missing elements: {metadata_path}")
+    candidates = [element for element in elements if isinstance(element, Mapping)]
+    element = next((candidate for candidate in candidates if candidate.get("outputFile") == apk_path.name), None)
+    if element is None and len(candidates) == 1:
+        element = candidates[0]
+    if element is None:
+        raise VisualQaError(f"Gradle output metadata does not describe {apk_path.name}: {metadata_path}")
+    version_code = element.get("versionCode")
+    version_name = element.get("versionName")
+    if version_code is None or version_name is None:
+        raise VisualQaError(f"Gradle output metadata is missing versionCode/versionName for {apk_path.name}: {metadata_path}")
+    return {
+        "source": "gradle-output-metadata",
+        "metadata_path": str(metadata_path),
+        "package_name": application_id,
+        "version_code": str(version_code),
+        "version_name": str(version_name),
+        "output_file": str(element.get("outputFile") or apk_path.name),
+    }
+
+
+def parse_aapt2_badging(output: str) -> dict[str, object]:
+    package_line = next((line for line in output.splitlines() if line.startswith("package: ")), "")
+    if not package_line:
+        raise VisualQaError("aapt2 badging output did not contain a package line")
+
+    def field(name: str) -> str | None:
+        match = re.search(rf"\b{name}='([^']*)'", package_line)
+        return match.group(1) if match else None
+
+    package_name = field("name")
+    version_code = field("versionCode")
+    version_name = field("versionName")
+    if not package_name or version_code is None or version_name is None:
+        raise VisualQaError("aapt2 badging output is missing package name/version fields")
+    return {
+        "source": "aapt2-badging",
+        "package_name": package_name,
+        "version_code": version_code,
+        "version_name": version_name,
+    }
+
+
+def inferred_android_app_dir(config: TargetConfig) -> Path | None:
+    for parent in config.apk_path.parents:
+        if parent.name == "app" and (parent / "src").is_dir():
+            return parent
+    return None
+
+
+def iter_freshness_input_files(paths: Sequence[Path]) -> Iterator[Path]:
+    ignored_dir_names = {".gradle", ".idea", "build"}
+    for path in paths:
+        if path.is_file():
+            yield path
+        elif path.is_dir():
+            for root, dirs, files in os.walk(path):
+                dirs[:] = [name for name in dirs if name not in ignored_dir_names]
+                root_path = Path(root)
+                for file_name in files:
+                    yield root_path / file_name
+
+
+def collect_host_apk_input_freshness(config: TargetConfig, host_apk: Mapping[str, object]) -> dict[str, object]:
+    host_mtime = parse_datetime_utc(host_apk.get("mtime"))
+    if host_mtime is None:
+        return {"status": "unavailable", "reason": "host APK mtime is unavailable"}
+    app_dir = inferred_android_app_dir(config)
+    if app_dir is None:
+        return {"status": "unavailable", "reason": "could not infer Android app source directory from APK path"}
+    android_dir = app_dir.parent
+    candidate_paths = (
+        app_dir / "src",
+        app_dir / "build.gradle.kts",
+        app_dir / "lint.xml",
+        app_dir / "proguard-rules.pro",
+        android_dir / "build.gradle.kts",
+        android_dir / "settings.gradle.kts",
+        android_dir / "gradle.properties",
+        android_dir / "gradle",
+        android_dir / "gradlew",
+        android_dir / "gradlew.bat",
+    )
+    latest_path: Path | None = None
+    latest_mtime: dt.datetime | None = None
+    checked_count = 0
+    for path in iter_freshness_input_files(candidate_paths):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        checked_count += 1
+        mtime = dt.datetime.fromtimestamp(stat.st_mtime, dt.UTC)
+        if latest_mtime is None or mtime > latest_mtime:
+            latest_mtime = mtime
+            latest_path = path
+    if latest_mtime is None or latest_path is None:
+        return {"status": "unavailable", "reason": "no Android source/build input mtimes were readable"}
+    latest_iso = latest_mtime.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    data: dict[str, object] = {
+        "status": "fresh" if host_mtime >= latest_mtime else "stale",
+        "checked_file_count": checked_count,
+        "latest_input_path": str(latest_path),
+        "latest_input_mtime": latest_iso,
+        "host_apk_mtime": host_apk.get("mtime"),
+    }
+    if data["status"] == "stale":
+        data["reason"] = f"host APK is older than Android input {latest_path}"
+    else:
+        data["reason"] = "host APK mtime is not older than checked Android source/build inputs"
+    return data
+
+
+def collect_host_apk_metadata(config: TargetConfig) -> dict[str, object]:
+    host_apk = file_identity(config.apk_path)
+    if not host_apk.get("exists"):
+        raise VisualQaError(f"{config.target} host APK is missing at {config.apk_path}; run the build primitive first")
+
+    input_freshness = collect_host_apk_input_freshness(config, host_apk)
+    if input_freshness.get("status") == "stale":
+        raise VisualQaError(str(input_freshness.get("reason") or "host APK is older than Android source/build inputs"))
+
+    metadata_errors: list[str] = []
+    metadata: dict[str, object] | None = None
+    try:
+        metadata = parse_gradle_output_metadata(config.apk_path)
+    except VisualQaError as exc:
+        metadata_errors.append(str(exc))
+
+    if metadata is None:
+        aapt2 = shutil.which("aapt2")
+        if aapt2:
+            try:
+                metadata = parse_aapt2_badging(run_command([aapt2, "dump", "badging", config.apk_path], timeout=30).stdout)
+            except (OSError, subprocess.SubprocessError, VisualQaError) as exc:
+                metadata_errors.append(str(exc))
+        else:
+            metadata_errors.append("aapt2 is unavailable on PATH")
+
+    if metadata is None:
+        raise VisualQaError(
+            f"{config.target} host APK metadata could not be proven for {config.apk_path}: "
+            + "; ".join(redact_text(error) for error in metadata_errors)
+        )
+    package_name = metadata.get("package_name")
+    if package_name != config.package:
+        raise VisualQaError(
+            f"{config.target} host APK package mismatch for {config.apk_path}: expected {config.package}, got {package_name or 'empty'}"
+        )
+    return {
+        "package_name": package_name,
+        "version_code": metadata.get("version_code"),
+        "version_name": metadata.get("version_name"),
+        "metadata_source": metadata.get("source"),
+        "metadata": metadata,
+        "host_apk": host_apk,
+        "input_freshness": input_freshness,
+    }
+
+
 def collect_command_versions(adb: str, script_path: Path) -> dict[str, object]:
     versions: dict[str, object] = {
         "script": file_identity(script_path),
@@ -1432,6 +1637,327 @@ def collect_package_metadata(adb: str, config: TargetConfig) -> dict[str, object
     }
 
 
+def warm_check_record(name: str, status: str, reason: str, **fields: object) -> dict[str, object]:
+    record: dict[str, object] = {"name": name, "status": status, "reason": redact_text(reason)}
+    record.update(fields)
+    return record
+
+
+def expected_warm_target_metadata(config: TargetConfig) -> dict[str, object]:
+    if config.target == "phone":
+        return {
+            "serial": config.serial,
+            "sdk": os.environ.get("FERREX_ANDROID_PHONE_API", "35"),
+            "model": os.environ.get("FERREX_ANDROID_PHONE_MODEL", "sdk_gphone64_x86_64"),
+            "device": os.environ.get("FERREX_ANDROID_PHONE_DEVICE", "emu64xa"),
+            "leanback": False,
+        }
+    if config.target == "tv":
+        return {
+            "serial": config.serial,
+            "sdk": os.environ.get("FERREX_ANDROID_TV_API", "34"),
+            "model": os.environ.get("FERREX_ANDROID_TV_MODEL", "AOSP TV on x86"),
+            "device": os.environ.get("FERREX_ANDROID_TV_DEVICE", "emulator_x86_arm"),
+            "leanback": True,
+        }
+    raise VisualQaError(f"unknown warm target {config.target!r}")
+
+
+def collect_device_apk_identity(adb: str, config: TargetConfig, installed_path: str) -> dict[str, object]:
+    if not installed_path:
+        return {"available": False, "path": installed_path, "unavailable_reason": "installed package path is empty"}
+    quoted_path = shlex.quote(installed_path)
+    try:
+        sections = adb_shell_sections(
+            adb,
+            config.serial,
+            (
+                (
+                    "bytes",
+                    f"if [ -r {quoted_path} ]; then wc -c < {quoted_path} 2>/dev/null | tr -d ' '; fi",
+                ),
+                (
+                    "sha256",
+                    f"if command -v sha256sum >/dev/null 2>&1 && [ -r {quoted_path} ]; then sha256sum {quoted_path} 2>/dev/null | awk '{{print $1}}'; fi",
+                ),
+                (
+                    "mtime_epoch",
+                    f"if command -v stat >/dev/null 2>&1 && [ -r {quoted_path} ]; then stat -c %Y {quoted_path} 2>/dev/null; fi",
+                ),
+            ),
+            timeout=90,
+        )
+    except Exception as exc:  # noqa: BLE001 - identity probing should degrade to package timestamp evidence.
+        return {
+            "available": False,
+            "path": installed_path,
+            "unavailable_reason": redact_text(str(exc)),
+        }
+
+    identity: dict[str, object] = {"available": False, "path": installed_path}
+    bytes_text = sections.get("bytes", "").strip()
+    if bytes_text.isdigit():
+        identity["bytes"] = int(bytes_text)
+    sha256_text = sections.get("sha256", "").strip().splitlines()[0:1]
+    if sha256_text and re.fullmatch(r"[0-9a-fA-F]{64}", sha256_text[0]):
+        identity["sha256"] = sha256_text[0].lower()
+    mtime_text = sections.get("mtime_epoch", "").strip()
+    if re.fullmatch(r"\d+", mtime_text):
+        identity["mtime_epoch"] = int(mtime_text)
+    identity["available"] = any(key in identity for key in ("bytes", "sha256", "mtime_epoch"))
+    if not identity["available"]:
+        identity["unavailable_reason"] = "device APK bytes/hash/stat probes returned no data"
+    return identity
+
+
+def apk_freshness_check(
+    *,
+    adb: str,
+    config: TargetConfig,
+    host_metadata: Mapping[str, object],
+    package_metadata: Mapping[str, object],
+) -> dict[str, object]:
+    host_apk = host_metadata.get("host_apk")
+    if not isinstance(host_apk, Mapping):
+        return warm_check_record("freshness", "failed", "host APK identity is missing from warm evidence")
+    installed_path = package_metadata.get("installed_package_path")
+    if not isinstance(installed_path, str) or not installed_path:
+        return warm_check_record("freshness", "failed", "installed package path is missing from package metadata")
+
+    device_identity = collect_device_apk_identity(adb, config, installed_path)
+    host_bytes = non_negative_int(host_apk.get("bytes"))
+    host_sha256 = host_apk.get("sha256") if isinstance(host_apk.get("sha256"), str) else None
+    device_bytes = non_negative_int(device_identity.get("bytes"))
+    device_sha256 = device_identity.get("sha256") if isinstance(device_identity.get("sha256"), str) else None
+
+    if host_bytes is not None and device_bytes is not None and host_bytes != device_bytes:
+        return warm_check_record(
+            "freshness",
+            "failed",
+            f"installed APK size {device_bytes} does not match host APK size {host_bytes}",
+            host_apk=host_apk,
+            device_apk=device_identity,
+        )
+    if host_sha256 and device_sha256:
+        if host_sha256.lower() != device_sha256.lower():
+            return warm_check_record(
+                "freshness",
+                "failed",
+                "installed APK sha256 does not match host APK sha256",
+                host_apk=host_apk,
+                device_apk=device_identity,
+            )
+        return warm_check_record(
+            "freshness",
+            "passed",
+            "installed APK sha256 and size match the host APK",
+            proof="device_sha256_size",
+            host_apk=host_apk,
+            device_apk=device_identity,
+        )
+
+    host_mtime = parse_datetime_utc(host_apk.get("mtime"))
+    device_mtime_epoch = non_negative_int(device_identity.get("mtime_epoch"))
+    if host_mtime is not None and device_mtime_epoch is not None:
+        device_mtime = dt.datetime.fromtimestamp(device_mtime_epoch, dt.UTC)
+        if device_mtime >= host_mtime:
+            return warm_check_record(
+                "freshness",
+                "passed",
+                "installed APK device mtime is not older than the host APK mtime",
+                proof="device_apk_mtime_vs_host_mtime",
+                host_apk=host_apk,
+                device_apk=device_identity,
+            )
+
+    installed_update_time = parse_datetime_utc(package_metadata.get("last_update_time"))
+    if host_mtime is not None and installed_update_time is not None:
+        if installed_update_time >= host_mtime:
+            return warm_check_record(
+                "freshness",
+                "passed",
+                "installed package lastUpdateTime is not older than the host APK mtime",
+                proof="last_update_time_vs_host_mtime",
+                host_apk=host_apk,
+                device_apk=device_identity,
+                installed_last_update_time=package_metadata.get("last_update_time"),
+            )
+        return warm_check_record(
+            "freshness",
+            "failed",
+            "installed package lastUpdateTime is older than the host APK mtime",
+            host_apk=host_apk,
+            device_apk=device_identity,
+            installed_last_update_time=package_metadata.get("last_update_time"),
+        )
+
+    return warm_check_record(
+        "freshness",
+        "failed",
+        "freshness could not be proven from device hash/size or installed lastUpdateTime",
+        host_apk=host_apk,
+        device_apk=device_identity,
+        installed_last_update_time=package_metadata.get("last_update_time"),
+    )
+
+
+def evaluate_warm_target(adb: str, config: TargetConfig) -> dict[str, object]:
+    checks: list[dict[str, object]] = []
+
+    def failed(name: str, reason: str, **fields: object) -> dict[str, object]:
+        checks.append(warm_check_record(name, "failed", reason, **fields))
+        return {
+            "target": config.target,
+            "serial": config.serial,
+            "status": "fallback",
+            "reason": redact_text(reason),
+            "checks": checks,
+        }
+
+    try:
+        require_serial_present(adb, config.serial)
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        return failed("serial_ready", f"ADB serial {config.serial} is not ready: {exc}")
+    checks.append(warm_check_record("serial_ready", "passed", f"ADB serial {config.serial} is in device state"))
+
+    try:
+        boot_completed = getprop(adb, config.serial, "sys.boot_completed")
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        return failed("boot_completed", f"could not read sys.boot_completed on {config.serial}: {exc}")
+    if boot_completed != "1":
+        return failed("boot_completed", f"{config.serial} has sys.boot_completed={boot_completed or 'empty'}", value=boot_completed)
+    checks.append(warm_check_record("boot_completed", "passed", "sys.boot_completed=1", value=boot_completed))
+
+    try:
+        serial_metadata = collect_serial_metadata(adb, config)
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        return failed("target_metadata", f"could not collect target metadata for {config.serial}: {exc}")
+    props_raw = serial_metadata.get("properties")
+    props = props_raw if isinstance(props_raw, Mapping) else {}
+    expected = expected_warm_target_metadata(config)
+    actual = {
+        "serial": config.serial,
+        "sdk": props.get("sdk"),
+        "model": props.get("model"),
+        "device": props.get("device"),
+        "leanback": serial_metadata.get("leanback"),
+    }
+    mismatches = [key for key, expected_value in expected.items() if actual.get(key) != expected_value]
+    if mismatches:
+        return failed(
+            "target_metadata",
+            f"{config.target} target metadata mismatch on {config.serial}: {', '.join(mismatches)}",
+            expected=expected,
+            actual=actual,
+        )
+    checks.append(
+        warm_check_record(
+            "target_metadata",
+            "passed",
+            "serial target metadata matches the expected emulator profile",
+            expected=expected,
+            actual=actual,
+        )
+    )
+
+    try:
+        host_metadata = collect_host_apk_metadata(config)
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        return failed("host_apk", f"host APK metadata is not fresh/provable for {config.target}: {exc}")
+    checks.append(
+        warm_check_record(
+            "host_apk",
+            "passed",
+            "host APK exists and declares the expected package/version metadata",
+            metadata=host_metadata,
+        )
+    )
+
+    try:
+        package_metadata = collect_package_metadata(adb, config)
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        return failed("installed_package", f"installed package metadata is unavailable for {config.target}: {exc}")
+    version_mismatches: list[str] = []
+    for key in ("package_name", "version_code", "version_name"):
+        if str(package_metadata.get(key)) != str(host_metadata.get(key)):
+            version_mismatches.append(key)
+    if version_mismatches:
+        return failed(
+            "installed_package",
+            f"installed package metadata does not match host APK for {config.target}: {', '.join(version_mismatches)}",
+            expected={key: host_metadata.get(key) for key in ("package_name", "version_code", "version_name")},
+            actual={key: package_metadata.get(key) for key in ("package_name", "version_code", "version_name")},
+        )
+    checks.append(
+        warm_check_record(
+            "installed_package",
+            "passed",
+            "installed package name/version matches the host APK metadata",
+            metadata={key: package_metadata.get(key) for key in ("package_name", "version_code", "version_name", "installed_package_path", "last_update_time")},
+        )
+    )
+
+    freshness = apk_freshness_check(
+        adb=adb,
+        config=config,
+        host_metadata=host_metadata,
+        package_metadata=package_metadata,
+    )
+    checks.append(freshness)
+    if freshness.get("status") != "passed":
+        return {
+            "target": config.target,
+            "serial": config.serial,
+            "status": "fallback",
+            "reason": str(freshness.get("reason") or "freshness could not be proven"),
+            "checks": checks,
+        }
+
+    return {
+        "target": config.target,
+        "serial": config.serial,
+        "status": "passed",
+        "reason": "serial, boot, target metadata, package metadata, and APK freshness all passed",
+        "checks": checks,
+    }
+
+
+def warm_target_config_args() -> argparse.Namespace:
+    return argparse.Namespace(target="all", hardware=False, hardware_serial=None, expected_size=None)
+
+
+def evaluate_warm_gate(args: argparse.Namespace, repo_root: Path) -> dict[str, object]:
+    evidence: dict[str, object] = {
+        "policy": WARM_FRESHNESS_POLICY,
+        "requested": True,
+        "status": "fallback",
+        "reason": "warm freshness was not evaluated",
+        "targets": {},
+    }
+    try:
+        adb = resolve_executable(args.adb)
+        configs = target_configs(repo_root, warm_target_config_args())
+    except Exception as exc:  # noqa: BLE001 - warm preflight falls back to the full preparation path.
+        evidence["reason"] = redact_text(str(exc))
+        return evidence
+
+    target_results: dict[str, object] = {}
+    fallback_reasons: list[str] = []
+    for target in ("phone", "tv"):
+        result = evaluate_warm_target(adb, configs[target])
+        target_results[target] = result
+        if result.get("status") != "passed":
+            fallback_reasons.append(f"{target}: {result.get('reason')}")
+    evidence["targets"] = target_results
+    if fallback_reasons:
+        evidence["status"] = "fallback"
+        evidence["reason"] = "; ".join(redact_text(reason) for reason in fallback_reasons)
+    else:
+        evidence["status"] = "passed"
+        evidence["reason"] = "all warm freshness checks passed for phone and TV targets"
+    return evidence
+
+
 class RunCache:
     def __init__(self) -> None:
         self._entries: dict[str, dict[str, dict[str, object]]] = {
@@ -1722,7 +2248,13 @@ def wait_for_visual_qa_foreground(
         )
 
 
-def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[str, object]:
+def launch_scenario(
+    adb: str,
+    config: TargetConfig,
+    scenario: Scenario,
+    *,
+    stop_app: bool = True,
+) -> dict[str, object]:
     command = [
         adb,
         "-s",
@@ -1731,7 +2263,10 @@ def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[
         "am",
         "start",
         "-W",
-        "-S",
+    ]
+    if stop_app:
+        command.append("-S")
+    command += [
         "-f",
         "0x10008000",
         "-a",
@@ -1755,6 +2290,7 @@ def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[
             "action": ACTION_VISUAL_QA,
             "extra_scenario_id": EXTRA_SCENARIO_ID,
             "component": config.component,
+            "stop_app": stop_app,
             "stdout": redact_text(output),
         }
         try:
@@ -2515,6 +3051,7 @@ def capture_one(
     settle_ms: int,
     log_lines: int,
     screenshot_mode: str,
+    fast_launch: bool = False,
     run_cache: RunCache | None = None,
     viewport_events: list[dict[str, object]] | None = None,
     viewport_event_index: int | None = None,
@@ -2549,10 +3086,14 @@ def capture_one(
                 package_metadata = cache.package_metadata(adb, config)
             record["package_metadata"] = package_metadata.value
             add_cache_provenance(record, "package_metadata", package_metadata.provenance)
-            with timing.step("force_stop"):
-                force_stop_package(adb, config)
+            record["fast_launch"] = bool(fast_launch)
+            if fast_launch:
+                record["force_stop_skipped"] = "warm fast launch uses am start without -S while retaining NEW_TASK|CLEAR_TASK"
+            else:
+                with timing.step("force_stop"):
+                    force_stop_package(adb, config)
             with timing.step("launch"):
-                record["launch"] = launch_scenario(adb, config, scenario)
+                record["launch"] = launch_scenario(adb, config, scenario, stop_app=not fast_launch)
             with timing.step("drive"):
                 record["dpad_key_events"] = drive_scenario(adb, config, scenario)
             with timing.step("settle"):
@@ -3655,6 +4196,7 @@ def run_capture_target_plans(
                         settle_ms=args.settle_ms,
                         log_lines=args.log_lines,
                         screenshot_mode=screenshot_mode,
+                        fast_launch=bool(getattr(args, "warm_fast_launch", False)),
                         run_cache=run_cache,
                         viewport_events=viewport_events,
                         viewport_event_index=viewport_event_index,
@@ -3968,12 +4510,21 @@ def run_capture(args: argparse.Namespace) -> int:
     )
 
 
+def effective_gate_settle_ms(args: argparse.Namespace) -> int:
+    requested = getattr(args, "settle_ms", None)
+    if requested is not None:
+        return int(requested)
+    if bool(getattr(args, "warm", False)):
+        return DEFAULT_WARM_SETTLE_MS
+    return DEFAULT_SETTLE_MS
+
+
 def gate_capture_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
     return argparse.Namespace(
         target="all",
         scenario="all",
         output_dir=str(output_dir),
-        settle_ms=args.settle_ms,
+        settle_ms=effective_gate_settle_ms(args),
         log_lines=args.log_lines,
         adb=args.adb,
         no_nix_screenshot=args.no_nix_screenshot,
@@ -3984,6 +4535,7 @@ def gate_capture_args(args: argparse.Namespace, output_dir: Path) -> argparse.Na
         profile=getattr(args, "profile", None),
         target_workers=target_worker_count(args),
         warm=bool(getattr(args, "warm", False)),
+        warm_fast_launch=bool(getattr(args, "warm_fast_launch", False)),
         effective_argv=getattr(args, "effective_argv", sys.argv[1:]),
     )
 
@@ -3992,6 +4544,9 @@ def record_gate_primitive(
     name: str,
     gate_primitives: list[dict[str, object]],
     action: Callable[[], object],
+    *,
+    reason: str | None = None,
+    phase: str | None = None,
 ) -> object:
     started_at = utc_now()
     started = time.monotonic()
@@ -4006,6 +4561,10 @@ def record_gate_primitive(
             "ended_at": utc_now(),
             "error": redact_text(str(exc)),
         }
+        if reason:
+            record["reason"] = redact_text(reason)
+        if phase:
+            record["phase"] = phase
         if isinstance(exc, CommandError):
             record["returncode"] = exc.returncode
         gate_primitives.append(record)
@@ -4018,11 +4577,115 @@ def record_gate_primitive(
         "started_at": started_at,
         "ended_at": utc_now(),
     }
+    if reason:
+        record["reason"] = redact_text(reason)
+    if phase:
+        record["phase"] = phase
     if type(result) is int and result != 0:
         record["status"] = "failed"
         record["exit_status"] = result
     gate_primitives.append(record)
     return result
+
+
+def record_gate_skip(
+    name: str,
+    gate_primitives: list[dict[str, object]],
+    *,
+    reason: str,
+    phase: str = WARM_PREPARATION_PHASE,
+) -> None:
+    now = utc_now()
+    gate_primitives.append(
+        {
+            "name": name,
+            "status": "skipped",
+            "duration_ms": 0,
+            "started_at": now,
+            "ended_at": now,
+            "reason": redact_text(reason),
+            "phase": phase,
+        }
+    )
+
+
+def record_warm_freshness_probe(
+    args: argparse.Namespace,
+    repo_root: Path,
+    gate_primitives: list[dict[str, object]],
+) -> dict[str, object]:
+    started_at = utc_now()
+    started = time.monotonic()
+    evidence = evaluate_warm_gate(args, repo_root)
+    status = "passed" if evidence.get("status") == "passed" else "fallback"
+    gate_primitives.append(
+        {
+            "name": WARM_FRESHNESS_STEP_NAME,
+            "status": status,
+            "duration_ms": duration_ms_since(started),
+            "started_at": started_at,
+            "ended_at": utc_now(),
+            "reason": redact_text(str(evidence.get("reason") or "warm freshness evaluated")),
+            "phase": WARM_PREPARATION_PHASE,
+            "freshness_policy": WARM_FRESHNESS_POLICY,
+            "evidence": evidence,
+        }
+    )
+    return evidence
+
+
+def gate_step_for_summary(record: Mapping[str, object]) -> dict[str, object]:
+    keys = (
+        "name",
+        "status",
+        "duration_ms",
+        "started_at",
+        "ended_at",
+        "reason",
+        "error",
+        "phase",
+        "freshness_policy",
+        "returncode",
+        "exit_status",
+    )
+    summarized = {key: copy.deepcopy(record[key]) for key in keys if key in record}
+    if record.get("name") == WARM_FRESHNESS_STEP_NAME and isinstance(record.get("evidence"), Mapping):
+        summarized["evidence"] = copy.deepcopy(record["evidence"])
+    return summarized
+
+
+def gate_preparation_summary(args: argparse.Namespace, gate_primitives: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    preparation_steps = [
+        gate_step_for_summary(record)
+        for record in gate_primitives
+        if record.get("phase") == WARM_PREPARATION_PHASE or record.get("name") in WARM_PREPARATION_STEP_NAMES
+    ]
+    status_counts = Counter(str(step.get("status") or "unknown") for step in preparation_steps)
+    warm_step = next((step for step in preparation_steps if step.get("name") == WARM_FRESHNESS_STEP_NAME), None)
+    return {
+        "mode": "warm" if bool(getattr(args, "warm", False)) else "full",
+        "warm_requested": bool(getattr(args, "warm", False)),
+        "freshness_policy": WARM_FRESHNESS_POLICY,
+        "default_full_preparation": not bool(getattr(args, "warm", False)),
+        "argv": list(getattr(args, "effective_argv", sys.argv[1:])),
+        "capture_settle_ms": {
+            "requested": int(getattr(args, "settle_ms")) if getattr(args, "settle_ms", None) is not None else None,
+            "effective": effective_gate_settle_ms(args),
+            "full_default": DEFAULT_SETTLE_MS,
+            "warm_default": DEFAULT_WARM_SETTLE_MS if bool(getattr(args, "warm", False)) else None,
+        },
+        "warm_fast_launch": bool(getattr(args, "warm_fast_launch", False)),
+        "fallback": bool(warm_step and warm_step.get("status") == "fallback"),
+        "fallback_reason": warm_step.get("reason") if isinstance(warm_step, Mapping) and warm_step.get("status") == "fallback" else None,
+        "steps": preparation_steps,
+        "status_counts": dict(sorted(status_counts.items())),
+        "executed_steps": [
+            str(step.get("name"))
+            for step in preparation_steps
+            if step.get("status") in {"passed", "failed", "fallback"}
+        ],
+        "skipped_steps": [str(step.get("name")) for step in preparation_steps if step.get("status") == "skipped"],
+    }
 
 
 def gate_failure_record(gate_primitives: Sequence[Mapping[str, object]], error: Exception) -> dict[str, object]:
@@ -4067,6 +4730,7 @@ def write_gate_failure_manifest(
         "screenshot": screenshot_manifest_config(capture_args),
         "command_versions": collect_command_versions(args.adb, Path(__file__).resolve()),
         "profile_deferrals": [],
+        "preparation": gate_preparation_summary(args, gate_primitives),
         "captures": [],
         "failures": [gate_failure_record(gate_primitives, error)],
         "status": "failed",
@@ -4086,8 +4750,12 @@ def write_gate_failure_manifest(
 def update_gate_manifest_timing(
     manifest_path: Path,
     gate_primitives: Sequence[Mapping[str, object]],
+    *,
+    args: argparse.Namespace | None = None,
 ) -> dict[str, object]:
     manifest = read_json_object(manifest_path)
+    if args is not None:
+        manifest["preparation"] = gate_preparation_summary(args, gate_primitives)
     record_key = "captures" if isinstance(manifest.get("captures"), list) else "checks"
     return write_manifest_with_timing_summary(
         manifest_path,
@@ -4107,31 +4775,56 @@ def run_gate(args: argparse.Namespace) -> int:
     qa_script = repo_root / "scripts/qa/android-emulator-qa.sh"
     gate_primitives: list[dict[str, object]] = []
 
-    if getattr(args, "warm", False):
-        print("android-visual-qa: warm gate using prepared devices and installed APKs", file=sys.stderr)
-        steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = ()
-    else:
-        steps = (
-            ("build", (qa_script, "build")),
-            ("start", (qa_script, "start")),
-            ("doctor", (qa_script, "doctor")),
-            ("install", (qa_script, "install", "all")),
-        )
-    try:
-        for label, command in steps:
-            print(f"android-visual-qa: step {label}", file=sys.stderr)
-            record_gate_primitive(label, gate_primitives, lambda command=command: run_gate_command(command))
-    except Exception as exc:
-        write_gate_failure_manifest(
-            args=args,
-            repo_root=repo_root,
-            registry=registry,
-            selected=selected,
-            output_dir=output_dir,
-            gate_primitives=gate_primitives,
-            error=exc,
-        )
-        raise
+    steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = (
+        ("build", (qa_script, "build")),
+        ("start", (qa_script, "start")),
+        ("doctor", (qa_script, "doctor")),
+        ("install", (qa_script, "install", "all")),
+    )
+    warm_requested = bool(getattr(args, "warm", False))
+    setattr(args, "warm_fast_launch", False)
+    run_full_preparation = True
+    preparation_reason = "full preparation path (warm mode not requested)"
+    if warm_requested:
+        print("android-visual-qa: step warm freshness", file=sys.stderr)
+        warm_freshness = record_warm_freshness_probe(args, repo_root, gate_primitives)
+        if warm_freshness.get("status") == "passed":
+            setattr(args, "warm_fast_launch", True)
+            run_full_preparation = False
+            skip_reasons = {
+                "build": "warm freshness proved host APK identities and installed APK freshness",
+                "start": "warm freshness proved both deterministic serials are present and boot_completed=1",
+                "doctor": "warm freshness proved serial target metadata matches the expected emulator profiles",
+                "install": "warm freshness proved installed package names/versions and APK identities match the host APKs",
+            }
+            for label, _command in steps:
+                print(f"android-visual-qa: step {label} skipped (warm)", file=sys.stderr)
+                record_gate_skip(label, gate_primitives, reason=skip_reasons[label])
+        else:
+            preparation_reason = f"warm freshness fallback: {warm_freshness.get('reason') or 'freshness could not be proven'}"
+
+    if run_full_preparation:
+        try:
+            for label, command in steps:
+                print(f"android-visual-qa: step {label}", file=sys.stderr)
+                record_gate_primitive(
+                    label,
+                    gate_primitives,
+                    lambda command=command: run_gate_command(command),
+                    reason=preparation_reason,
+                    phase=WARM_PREPARATION_PHASE,
+                )
+        except Exception as exc:
+            write_gate_failure_manifest(
+                args=args,
+                repo_root=repo_root,
+                registry=registry,
+                selected=selected,
+                output_dir=output_dir,
+                gate_primitives=gate_primitives,
+                error=exc,
+            )
+            raise
 
     capture_args = gate_capture_args(args, output_dir)
     print(f"android-visual-qa: step capture ({args.mode})", file=sys.stderr)
@@ -4148,6 +4841,8 @@ def run_gate(args: argparse.Namespace) -> int:
                 command_name="android-visual-qa gate",
                 mode=args.mode,
             ),
+            reason=f"capture {args.mode} visual QA screenshots after gate preparation",
+            phase="capture",
         )
     except Exception as exc:
         write_gate_failure_manifest(
@@ -4161,16 +4856,22 @@ def run_gate(args: argparse.Namespace) -> int:
         )
         raise
     if type(capture_status) is int and capture_status != 0:
-        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives, args=args)
         print_timing_summary(timing_summary)
         return capture_status
 
     print("android-visual-qa: step check", file=sys.stderr)
     try:
-        record_gate_primitive("check", gate_primitives, lambda: run_gate_command((qa_script, "check", "all")))
+        record_gate_primitive(
+            "check",
+            gate_primitives,
+            lambda: run_gate_command((qa_script, "check", "all")),
+            reason="post-capture installed target metadata validation",
+            phase="validation",
+        )
     except Exception as exc:
         if manifest_path.exists():
-            timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+            timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives, args=args)
             print_timing_summary(timing_summary)
         else:
             write_gate_failure_manifest(
@@ -4190,13 +4891,15 @@ def run_gate(args: argparse.Namespace) -> int:
             "verify",
             gate_primitives,
             lambda: verify_manifest(manifest_path, mode=args.mode, repo_root=repo_root),
+            reason="verify manifest captures and required scenario coverage",
+            phase="validation",
         )
     except Exception as exc:
-        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives, args=args)
         print_timing_summary(timing_summary)
         raise
 
-    update_gate_manifest_timing(manifest_path, gate_primitives)
+    update_gate_manifest_timing(manifest_path, gate_primitives, args=args)
     summary = verify_manifest(manifest_path, mode=args.mode, repo_root=repo_root)
     print_artifact_summary(summary)
     return 0
@@ -4257,12 +4960,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory for PNGs and manifest; defaults to target/android-visual-qa/<mode>",
     )
     gate.add_argument(
+        "--settle-ms",
+        type=positive_int,
+        default=None,
+        help=(
+            f"Milliseconds to wait after scenario launch before each screenshot; default {DEFAULT_SETTLE_MS}. "
+            f"Warm gates use {DEFAULT_WARM_SETTLE_MS} unless this flag is explicitly set."
+        ),
+    )
+    gate.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
+    gate.add_argument(
         "--warm",
         action="store_true",
-        help="Use already prepared emulators/APKs and skip build/start/doctor/install setup before capture.",
+        help=(
+            "Opt in to conservative warm preparation: prove deterministic serial readiness, boot_completed, "
+            "target metadata, installed package version, and APK freshness before skipping build/start/doctor/install; "
+            "uses fast per-scenario relaunch only after freshness passes, keeps the warm settle default, "
+            "and falls back to the full preparation path when evidence is missing or stale."
+        ),
     )
-    gate.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
-    gate.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
     gate.add_argument(
         "--adb",
         default=os.environ.get("ADB", "adb"),
