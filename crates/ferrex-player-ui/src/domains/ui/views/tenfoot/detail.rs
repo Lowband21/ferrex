@@ -52,7 +52,8 @@ use iced::{
 };
 use uuid::Uuid;
 
-const TENFOOT_HEADER_HEIGHT: f32 = 0.0;
+const TENFOOT_HEADER_HEIGHT: f32 =
+    crate::infra::constants::layout::header::HEIGHT;
 const HERO_STILL_ASPECT: f32 = 16.0 / 9.0;
 const HERO_STILL_MAX_CONTENT_FRACTION: f32 = 0.42;
 const POSTER_CARD_ASPECT: f32 = 2.0 / 3.0;
@@ -3342,7 +3343,8 @@ mod tests {
                 .focus_vertical_bounds(&focus, &plan)
                 .expect("panel focus bounds");
             assert!((bounds.1 - panel_height(&plan)).abs() < 0.01);
-            assert!(bounds.0 >= foreground.stage.rect.bottom());
+            let header_height = plan.viewport_height - plan.available_height;
+            assert!(bounds.0 + header_height >= foreground.stage.rect.bottom());
         }
     }
 

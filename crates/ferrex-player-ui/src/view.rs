@@ -155,11 +155,15 @@ pub fn view(
         }
     };
 
-    // Add header if the view needs it
-    let content_with_header = if !tenfoot_home_active
-        && !tenfoot_detail_active
-        && state.domains.ui.state.view.has_header()
-    {
+    // Add the shared shell header whenever the active surface needs a top bar.
+    // 10-foot home/detail routes are rendered through dedicated TV surfaces, but
+    // they still use the same header container so the runtime mode switch stays
+    // available without exposing settings/admin/profile controls.
+    let should_show_header = state.domains.ui.state.view.has_header()
+        && (!state.interface_mode.is_tenfoot()
+            || tenfoot_home_active
+            || tenfoot_detail_active);
+    let content_with_header = if should_show_header {
         let header = view_header(state).map(DomainMessage::from);
 
         // Wrap header in a container with opaque background
@@ -167,43 +171,59 @@ pub fn view(
             .width(Length::Fill)
             .style(theme::Container::Header.style());
 
-        // Check if we need library controls bar
-        let controls_bar = match &state.domains.ui.state.view {
-            ViewState::Library => {
-                if let Some(lib_id) = state.domains.ui.state.scope.lib_id()
-                    && let Some(lib_type) = state.tab_manager.active_tab_type()
-                {
-                    view_library_controls_bar(state, lib_id, lib_type)
-                        .map(|bar| bar.map(DomainMessage::from))
-                } else {
-                    None
+        // Check if we need library controls bar. The 10-foot header keeps only
+        // primary navigation/search/fullscreen/mode controls; desktop-only
+        // library filters remain hidden in couch mode.
+        let controls_bar = if state.interface_mode.is_tenfoot() {
+            None
+        } else {
+            match &state.domains.ui.state.view {
+                ViewState::Library => {
+                    if let Some(lib_id) = state.domains.ui.state.scope.lib_id()
+                        && let Some(lib_type) =
+                            state.tab_manager.active_tab_type()
+                    {
+                        view_library_controls_bar(state, lib_id, lib_type)
+                            .map(|bar| bar.map(DomainMessage::from))
+                    } else {
+                        None
+                    }
                 }
+                _ => None,
             }
-            _ => None,
         };
 
-        // Check if this is a detail view that needs scrollable content
-        let scrollable_content = match &state.domains.ui.state.view {
-            ViewState::MovieDetail { .. }
-            | ViewState::SeriesDetail { .. }
-            | ViewState::SeasonDetail { .. }
-            | ViewState::EpisodeDetail { .. } => {
-                // Wrap content in scrollable for detail views
-                scrollable(content)
-                    .id(crate::domains::ui::views::detail::desktop_detail_scrollable_id())
-                    .on_scroll(|viewport| {
-                        DomainMessage::Ui(
-                            InteractionMessage::DetailViewScrolled(viewport)
+        // Check if this is a desktop detail view that needs scrollable content.
+        // 10-foot home/detail surfaces own their scroll state internally so TV
+        // focus restoration and Theater Plate scroll tracking remain intact.
+        let scrollable_content = if tenfoot_home_active || tenfoot_detail_active
+        {
+            content
+        } else {
+            match &state.domains.ui.state.view {
+                ViewState::MovieDetail { .. }
+                | ViewState::SeriesDetail { .. }
+                | ViewState::SeasonDetail { .. }
+                | ViewState::EpisodeDetail { .. } => {
+                    // Wrap content in scrollable for detail views
+                    scrollable(content)
+                        .id(crate::domains::ui::views::detail::desktop_detail_scrollable_id())
+                        .on_scroll(|viewport| {
+                            DomainMessage::Ui(
+                                InteractionMessage::DetailViewScrolled(
+                                    viewport,
+                                )
                                 .into(),
-                        )
-                    })
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            }
-            _ => {
-                // Library and other views already have their own scrollable
-                content
+                            )
+                        })
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                }
+                _ => {
+                    // Library and other views already have their own scrollable
+                    content
+                }
             }
         };
 
@@ -439,12 +459,8 @@ fn detail_theater_plate_context(
     })
 }
 
-fn detail_theater_plate_header_height(state: &State, view: &ViewState) -> f32 {
-    if state.interface_mode.is_tenfoot() {
-        0.0
-    } else {
-        view.header_height().unwrap_or(0.0)
-    }
+fn detail_theater_plate_header_height(_state: &State, view: &ViewState) -> f32 {
+    view.header_height().unwrap_or(0.0)
 }
 
 fn theater_plate_source_for_view(
@@ -706,7 +722,10 @@ fn theater_plate_cache_key(request: &ImageRequest) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::InterfaceMode;
+    use crate::{
+        infra::constants::layout::header::HEIGHT as HEADER_HEIGHT,
+        state::InterfaceMode,
+    };
     use ferrex_core::player_prelude::MovieID;
     use uuid::Uuid;
 
@@ -779,13 +798,16 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn tenfoot_theater_plate_uses_hidden_header_geometry() {
+    async fn tenfoot_theater_plate_uses_visible_header_geometry() {
         let state = detail_state(InterfaceMode::TenFoot);
         let context = detail_theater_plate_context(&state)
             .expect("theater plate context");
+        let expected_header_y = HEADER_HEIGHT / state.window_size.height;
 
-        assert_eq!(context.header_height, 0.0);
-        assert_eq!(context.layout.scrim_rect.y, 0.0);
+        assert_eq!(context.header_height, HEADER_HEIGHT);
+        assert!(
+            (context.layout.scrim_rect.y - expected_header_y).abs() < 0.001
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -806,7 +828,10 @@ mod tests {
             scrolled.layout.content_rect.y < base.layout.content_rect.y,
             "scrolled Theater Plate content rect should follow 10-foot detail content"
         );
-        assert_eq!(scrolled.layout.scrim_rect.y, 0.0);
+        let expected_header_y = HEADER_HEIGHT / state.window_size.height;
+        assert!(
+            (scrolled.layout.scrim_rect.y - expected_header_y).abs() < 0.001
+        );
     }
 }
 
