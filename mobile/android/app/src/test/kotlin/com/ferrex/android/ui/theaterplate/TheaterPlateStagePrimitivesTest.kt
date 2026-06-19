@@ -14,6 +14,7 @@ import com.ferrex.android.core.theaterplate.TheaterPlateLocalLuma
 import com.ferrex.android.core.theaterplate.TheaterPlatePalette
 import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
 import com.ferrex.android.core.theaterplate.TheaterPlateViewport
+import com.ferrex.android.ui.theme.FerrexChromeCategory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,7 +22,7 @@ import org.junit.Test
 
 class TheaterPlateStagePrimitivesTest {
     @Test
-    fun surfaceVariantsMapToSemanticLowRadiusTokens() {
+    fun surfaceVariantsMapToSemanticFlatTreatmentTokens() {
         val denseVariants = FerrexStageSurfaceVariant.entries
             .filter { it.tokenSpec(FerrexStageDensityFamily.Standard).denseBand }
             .toSet()
@@ -46,29 +47,68 @@ class TheaterPlateStagePrimitivesTest {
                 assertEquals(variant, token.variant)
                 assertEquals(density, token.density)
                 assertEquals(variant.semanticName, token.semanticName)
+                assertEquals(variant.defaultTreatment(), token.treatment)
                 assertTrue("${variant.name} semantic name", token.semanticName.isNotBlank())
-                assertTrue("${variant.name} radius should stay low", token.cornerRadius.value <= 14f)
+                assertEquals("${variant.name} radius should be square", 0.dp, token.cornerRadius)
+                assertEquals("${variant.name} resting border should be absent", 0.dp, token.borderWidth)
                 assertFinitePositive("${variant.name} horizontal padding", token.horizontalPadding)
                 assertFinitePositive("${variant.name} vertical padding", token.verticalPadding)
                 assertFinitePositive("${variant.name} min height", token.minHeight)
                 assertTrue("${variant.name} container alpha", token.containerAlpha in 0f..1f)
-                assertTrue("${variant.name} border alpha", token.borderAlpha in 0f..1f)
+                assertEquals("${variant.name} border alpha", 0f, token.borderAlpha, 0.0001f)
+                assertTrue("${variant.name} divider alpha", token.dividerAlpha in 0f..1f)
+                assertTrue("${variant.name} divider width", token.dividerWidth.value >= 0f)
+                if (token.treatment == FerrexStageSurfaceTreatment.StatusBand) {
+                    assertEquals(FerrexChromeCategory.StatusBand, token.treatment.chromeCategory)
+                    assertTrue("${variant.name} status band container", token.containerAlpha > 0f)
+                } else {
+                    assertFalse("${variant.name} ordinary section has no container", token.treatment.chromeCategory.allowsRestingContainer)
+                    assertEquals("${variant.name} ordinary section container", 0f, token.containerAlpha, 0.0001f)
+                }
             }
         }
     }
 
     @Test
-    fun phoneSurfaceTokensCalmNestedContainers() {
+    fun phoneSurfaceTokensRemoveDecorativeContainersButKeepStatusBands() {
         val phoneStatus = FerrexStageSurfaceVariant.StatusSlab.tokenSpec(FerrexStageDensityFamily.Standard)
         val phoneRail = FerrexStageSurfaceVariant.RailBand.tokenSpec(FerrexStageDensityFamily.Standard)
         val phoneControl = FerrexStageSurfaceVariant.ControlShelf.tokenSpec(FerrexStageDensityFamily.Standard)
         val tvStatus = FerrexStageSurfaceVariant.StatusSlab.tokenSpec(FerrexStageDensityFamily.TenFoot)
 
+        assertEquals(FerrexStageSurfaceTreatment.StatusBand, phoneStatus.treatment)
         assertTrue("phone status container stays quiet", phoneStatus.containerAlpha < 0.30f)
-        assertTrue("phone status border stays quiet", phoneStatus.borderAlpha < 0.25f)
-        assertTrue("passive rails should be quieter than controls", phoneRail.containerAlpha < phoneControl.containerAlpha)
-        assertTrue("passive rail outlines should be quieter than controls", phoneRail.borderAlpha < phoneControl.borderAlpha)
-        assertTrue("TV focus surfaces keep stronger outlines", tvStatus.borderAlpha > phoneStatus.borderAlpha)
+        assertEquals("phone status border is removed", 0f, phoneStatus.borderAlpha, 0.0001f)
+        assertEquals(FerrexStageSurfaceTreatment.DividerOnly, phoneRail.treatment)
+        assertEquals(FerrexStageSurfaceTreatment.DividerOnly, phoneControl.treatment)
+        assertEquals("passive rails should be transparent", 0f, phoneRail.containerAlpha, 0.0001f)
+        assertEquals("control shelves should be transparent", 0f, phoneControl.containerAlpha, 0.0001f)
+        assertTrue("passive rail divider stays available", phoneRail.dividerAlpha > 0f)
+        assertTrue("control shelf divider stays available", phoneControl.dividerAlpha > phoneRail.dividerAlpha)
+        assertEquals("TV status borders remain absent", 0f, tvStatus.borderAlpha, 0.0001f)
+    }
+
+    @Test
+    fun tokenOverridesSupportTransparentDividerAndStatusBandTreatments() {
+        val transparent = FerrexStageSurfaceVariant.NoticeSlab.tokenSpec(
+            density = FerrexStageDensityFamily.Standard,
+            treatment = FerrexStageSurfaceTreatment.Transparent,
+        )
+        val divider = FerrexStageSurfaceVariant.ProjectionShelf.tokenSpec(
+            density = FerrexStageDensityFamily.Standard,
+            treatment = FerrexStageSurfaceTreatment.DividerOnly,
+        )
+        val status = FerrexStageSurfaceVariant.RailBand.tokenSpec(
+            density = FerrexStageDensityFamily.Standard,
+            treatment = FerrexStageSurfaceTreatment.StatusBand,
+        )
+
+        assertEquals(0f, transparent.containerAlpha, 0.0001f)
+        assertEquals(0f, transparent.dividerAlpha, 0.0001f)
+        assertEquals(0f, divider.containerAlpha, 0.0001f)
+        assertTrue(divider.dividerAlpha > 0f)
+        assertTrue(status.containerAlpha > 0f)
+        assertEquals(0f, status.borderAlpha, 0.0001f)
     }
 
     @Test

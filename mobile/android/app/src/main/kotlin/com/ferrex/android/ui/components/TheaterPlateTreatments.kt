@@ -1,13 +1,11 @@
 package com.ferrex.android.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -333,27 +331,39 @@ object TheaterPlateComponentMigrationNotes {
     val all: List<TheaterPlateComponentMigrationNote> = listOf(
         TheaterPlateComponentMigrationNote(
             componentName = "FerrexStatusCard",
-            foundationSeam = "FerrexStageSurface(StatusSlab) plus TheaterPlateText status roles",
+            foundationSeam = "FerrexStageSurface(StatusSlab, StatusBand) plus TheaterPlateText status roles",
             preservedCallbacks = listOf("FerrexStatusAction.onClick", "loading", "testTag", "contentDescription"),
-            migrationNote = "Use for status/recovery copy until LOW-448 and LOW-449 migrate route shells; keep embedded action callbacks intact.",
+            migrationNote = "Use flat square status bands until LOW-448 and LOW-449 migrate route shells; keep embedded action callbacks intact.",
         ),
         TheaterPlateComponentMigrationNote(
             componentName = "FerrexActionButton",
-            foundationSeam = "FerrexActionRole/FerrexStatusTone mapped onto Theater Plate control shelves",
+            foundationSeam = "FerrexActionRole/FerrexStatusTone mapped onto Theater Plate divider-only control shelves",
             preservedCallbacks = listOf("onClick", "enabled", "testTag", "contentDescription", "subtitle"),
-            migrationNote = "Route migrations should wrap or restyle actions without dropping retry, reset, cache, diagnostics, or playback callbacks.",
+            migrationNote = "Route migrations should keep button affordances without reintroducing decorative section cards around retry, reset, cache, diagnostics, or playback callbacks.",
         ),
         TheaterPlateComponentMigrationNote(
             componentName = "FerrexPosterCard",
-            foundationSeam = "FerrexStageSurface(ProjectionShelf/RailBand) and media-art identity tags",
+            foundationSeam = "FerrexStageSurface(ProjectionShelf, Transparent) and media-art identity tags",
             preservedCallbacks = listOf("onClick", "testTag", "contentDescription", "content"),
-            migrationNote = "LOW-447 detail/rail parity can migrate cards incrementally while retaining existing media open callbacks and fallback artwork labels.",
+            migrationNote = "LOW-447 detail/rail parity can migrate cards incrementally as layout-only media objects while retaining existing media open callbacks and fallback artwork labels.",
+        ),
+        TheaterPlateComponentMigrationNote(
+            componentName = "FerrexMobileMediaCard",
+            foundationSeam = "FerrexStageSurface(ProjectionShelf, Transparent) wrapping mobile rail/grid copy",
+            preservedCallbacks = listOf("onClick", "testTag", "contentDescription", "MediaRailItemIdentity"),
+            migrationNote = "Mobile rails and dense grids keep stable identity, accessible badges, and open callbacks while the resting card container becomes layout-only.",
+        ),
+        TheaterPlateComponentMigrationNote(
+            componentName = "Mobile media badges",
+            foundationSeam = "FerrexChromeCategory.ProgressStatus badges with status fill and no resting border",
+            preservedCallbacks = listOf("progressLabel", "watchState", "artworkLabels", "actionLabel"),
+            migrationNote = "Badges remain functional status indicators for compact visual copy without becoming decorative bordered chips around media cards.",
         ),
         TheaterPlateComponentMigrationNote(
             componentName = "TV focus actions",
-            foundationSeam = "FerrexDesignTokens.Focus.tvTreatment and focusable Theater Plate action shelves",
+            foundationSeam = "FerrexDesignTokens.Focus.tvTreatment and focus-only Theater Plate action shelves",
             preservedCallbacks = listOf("onClick", "focus restoration key", "testTag", "contentDescription"),
-            migrationNote = "LOW-449 should keep D-pad focus restoration/actions stable while adopting Theater Plate ten-foot surfaces.",
+            migrationNote = "LOW-449 should keep D-pad focus restoration/actions stable while using focus-only outlines instead of resting TV card borders.",
         ),
     )
 
@@ -374,17 +384,16 @@ fun FerrexRecoveryActionPanel(
     contentDescription: String? = null,
 ) {
     val colors = tone.colors()
-    Card(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .withOptionalTheaterPlateTag(testTag)
             .withOptionalTheaterPlateContentDescription(contentDescription),
         shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        colors = CardDefaults.cardColors(
-            containerColor = colors.container,
-            contentColor = colors.content,
-        ),
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, colors.border.copy(alpha = 0.72f)),
+        color = colors.container,
+        contentColor = colors.content,
+        tonalElevation = FerrexDesignTokens.Space.None,
+        shadowElevation = FerrexDesignTokens.Space.None,
     ) {
         Column(
             modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),

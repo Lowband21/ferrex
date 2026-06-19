@@ -145,7 +145,7 @@ private val FerrexShapes = Shapes(
     small = FerrexDesignTokens.Shapes.Button,
     medium = FerrexDesignTokens.Shapes.PosterCard,
     large = FerrexDesignTokens.Shapes.Card,
-    extraLarge = FerrexDesignTokens.Shapes.RecoveryCard,
+    extraLarge = FerrexDesignTokens.Shapes.DialogPicker,
 )
 
 @Composable

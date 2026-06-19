@@ -502,7 +502,7 @@ private fun MobileMediaBadge(label: String, density: FerrexStageDensityFamily) {
         shape = FerrexDesignTokens.Shapes.Pill,
         color = colors.container,
         contentColor = colors.content,
-        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
+        border = null,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {

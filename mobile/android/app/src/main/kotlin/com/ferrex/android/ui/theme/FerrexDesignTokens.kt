@@ -27,6 +27,61 @@ data class TvFocusTreatmentTokens(
     val mediaGroundingClearance: Dp,
 )
 
+/**
+ * Android chrome categories used by shared primitives to separate functional affordances from
+ * decorative cards. Resting containers/borders are disallowed for normal layout sections; only
+ * explicit status, action, focus, dialog, or progress categories may keep visible chrome.
+ */
+enum class FerrexChromeCategory(
+    val allowsRestingContainer: Boolean,
+    val allowsRestingBorder: Boolean,
+    val allowsPersistentRoundedShape: Boolean,
+    val allowsFocusedOutline: Boolean,
+) {
+    LayoutOnly(
+        allowsRestingContainer = false,
+        allowsRestingBorder = false,
+        allowsPersistentRoundedShape = false,
+        allowsFocusedOutline = false,
+    ),
+    DividerOnly(
+        allowsRestingContainer = false,
+        allowsRestingBorder = false,
+        allowsPersistentRoundedShape = false,
+        allowsFocusedOutline = false,
+    ),
+    StatusBand(
+        allowsRestingContainer = true,
+        allowsRestingBorder = false,
+        allowsPersistentRoundedShape = false,
+        allowsFocusedOutline = false,
+    ),
+    FunctionalButton(
+        allowsRestingContainer = true,
+        allowsRestingBorder = true,
+        allowsPersistentRoundedShape = true,
+        allowsFocusedOutline = true,
+    ),
+    FocusOnly(
+        allowsRestingContainer = false,
+        allowsRestingBorder = false,
+        allowsPersistentRoundedShape = false,
+        allowsFocusedOutline = true,
+    ),
+    DialogPicker(
+        allowsRestingContainer = true,
+        allowsRestingBorder = true,
+        allowsPersistentRoundedShape = true,
+        allowsFocusedOutline = false,
+    ),
+    ProgressStatus(
+        allowsRestingContainer = true,
+        allowsRestingBorder = false,
+        allowsPersistentRoundedShape = true,
+        allowsFocusedOutline = false,
+    ),
+}
+
 /** Pure sizing contract for full-library dense grids without coupling home rails or detail cards. */
 data class DenseLibraryGridSpec(
     val minCellWidth: Dp,
@@ -128,15 +183,25 @@ object FerrexDesignTokens {
         val ScreenTvVertical = 40.dp
     }
 
-    /** Shape tokens for action buttons, status cards, posters, and TV focus rings. */
+    /** Radii document which chrome may stay rounded and which decorative containers must be flat. */
+    object ShapeRadii {
+        val DecorativeContainer = 0.dp
+        val Button = 14.dp
+        val FocusSurface = 16.dp
+        val DialogPicker = 22.dp
+        val Pill = 999.dp
+    }
+
+    /** Shape tokens for action buttons, layout-only containers, dialogs/pickers, and focus rings. */
     object Shapes {
-        val Button = RoundedCornerShape(14.dp)
-        val Card = RoundedCornerShape(20.dp)
-        val PosterCard = RoundedCornerShape(18.dp)
-        val PosterImage = RoundedCornerShape(14.dp)
-        val RecoveryCard = RoundedCornerShape(22.dp)
-        val FocusSurface = RoundedCornerShape(16.dp)
-        val Pill = RoundedCornerShape(999.dp)
+        val Button = RoundedCornerShape(ShapeRadii.Button)
+        val Card = RoundedCornerShape(ShapeRadii.DecorativeContainer)
+        val PosterCard = RoundedCornerShape(ShapeRadii.DecorativeContainer)
+        val PosterImage = RoundedCornerShape(ShapeRadii.DecorativeContainer)
+        val RecoveryCard = RoundedCornerShape(ShapeRadii.DecorativeContainer)
+        val FocusSurface = RoundedCornerShape(ShapeRadii.FocusSurface)
+        val DialogPicker = RoundedCornerShape(ShapeRadii.DialogPicker)
+        val Pill = RoundedCornerShape(ShapeRadii.Pill)
     }
 
     /** Motion durations in milliseconds; keep short enough for D-pad repeat and recovery flows. */
@@ -228,6 +293,7 @@ object FerrexDesignTokens {
         const val TvRestingScale = 1f
         val TvFocusedBorder = 3.dp
         val TvRestingBorder = 1.dp
+        val TvRestingFocusBorder = 0.dp
         val TvFocusedElevation = 6.dp
         val TvButtonMinHeight = 58.dp
 
@@ -236,7 +302,7 @@ object FerrexDesignTokens {
                 role = role,
                 restingScale = TvRestingScale,
                 focusedScale = TvFocusedScale,
-                restingBorder = TvRestingBorder,
+                restingBorder = TvRestingFocusBorder,
                 focusedBorder = TvFocusedBorder,
                 focusedElevation = TvFocusedElevation,
                 mediaGroundingClearance = Space.None,
@@ -245,7 +311,7 @@ object FerrexDesignTokens {
                 role = role,
                 restingScale = TvRestingScale,
                 focusedScale = 1.025f,
-                restingBorder = TvRestingBorder,
+                restingBorder = TvRestingFocusBorder,
                 focusedBorder = 2.dp,
                 focusedElevation = 4.dp,
                 mediaGroundingClearance = Space.Sm,
@@ -254,7 +320,7 @@ object FerrexDesignTokens {
                 role = role,
                 restingScale = TvRestingScale,
                 focusedScale = 1.04f,
-                restingBorder = TvRestingBorder,
+                restingBorder = TvRestingFocusBorder,
                 focusedBorder = TvFocusedBorder,
                 focusedElevation = TvFocusedElevation,
                 mediaGroundingClearance = Space.None,
@@ -263,7 +329,7 @@ object FerrexDesignTokens {
                 role = role,
                 restingScale = TvRestingScale,
                 focusedScale = 1.035f,
-                restingBorder = TvRestingBorder,
+                restingBorder = TvRestingFocusBorder,
                 focusedBorder = TvFocusedBorder,
                 focusedElevation = TvFocusedElevation,
                 mediaGroundingClearance = Space.None,
@@ -272,7 +338,7 @@ object FerrexDesignTokens {
                 role = role,
                 restingScale = TvRestingScale,
                 focusedScale = 1.02f,
-                restingBorder = TvRestingBorder,
+                restingBorder = TvRestingFocusBorder,
                 focusedBorder = 2.dp,
                 focusedElevation = 2.dp,
                 mediaGroundingClearance = Space.None,

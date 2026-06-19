@@ -205,10 +205,17 @@ fun TvFocusableSurface(
     val shape = FerrexDesignTokens.Shapes.FocusSurface
     val toneColors = tone.colors()
     val colors = tvFocusableColors(style = style, tone = tone, focused = focused, enabled = enabled)
-    val borderColor = when {
-        focused -> toneColors.accent
-        enabled -> toneColors.border.copy(alpha = 0.58f)
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val border = when {
+        focused -> BorderStroke(focusTreatment.focusedBorder, toneColors.accent)
+        focusTreatment.restingBorder.value > 0f && enabled -> BorderStroke(
+            focusTreatment.restingBorder,
+            toneColors.border.copy(alpha = 0.58f),
+        )
+        focusTreatment.restingBorder.value > 0f -> BorderStroke(
+            focusTreatment.restingBorder,
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+        )
+        else -> null
     }
 
     Surface(
@@ -238,7 +245,7 @@ fun TvFocusableSurface(
         shape = shape,
         color = colors.container,
         contentColor = colors.content,
-        border = BorderStroke(width = if (focused) focusTreatment.focusedBorder else focusTreatment.restingBorder, color = borderColor),
+        border = border,
         tonalElevation = if (focused) focusTreatment.focusedElevation else FerrexDesignTokens.Space.None,
     ) {
         Row(
@@ -434,7 +441,7 @@ private fun tvFocusableColors(
     val scheme = MaterialTheme.colorScheme
     if (!enabled) {
         return TvFocusableColors(
-            container = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContainer),
+            container = Color.Transparent,
             content = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent),
         )
     }
@@ -446,7 +453,7 @@ private fun tvFocusableColors(
             content = if (focused) scheme.onPrimary else semanticColors.content,
         )
         TvFocusableStyle.Secondary -> TvFocusableColors(
-            container = if (focused) semanticColors.container.copy(alpha = 0.92f) else semanticColors.container,
+            container = if (focused) semanticColors.container.copy(alpha = 0.92f) else Color.Transparent,
             content = semanticColors.content,
         )
         TvFocusableStyle.Destructive -> TvFocusableColors(
