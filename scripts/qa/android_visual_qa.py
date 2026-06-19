@@ -36,6 +36,11 @@ DEFAULT_SETTLE_MS = 1500
 DEFAULT_LOG_LINES = 240
 ACCESSIBILITY_REACHABILITY_STEPS = 6
 GATE_MODES = ("smoke", "complete")
+SCREENSHOT_MODE_FAST = "fast"
+SCREENSHOT_MODE_HELPER_COMPATIBLE = "helper-compatible"
+SCREENSHOT_MODES = (SCREENSHOT_MODE_FAST, SCREENSHOT_MODE_HELPER_COMPATIBLE)
+SCREENSHOT_VALIDATION_ATTEMPTS = 3
+SCREENSHOT_VALIDATION_RETRY_DELAY_SECONDS = 0.5
 SMOKE_SCENARIO_IDS = ("phone-home", "tv-home-focus")
 
 PHONE_EXPECTED_SIZE = (1080, 2400)
@@ -226,6 +231,36 @@ def adb_command_category(args: Sequence[str | os.PathLike[str]]) -> str | None:
     if verb in {"shell", "exec-out"} and index + 1 < len(string_args):
         return f"{verb}:{sanitized_category_token(string_args[index + 1])}"
     return verb
+
+
+def command_category(args: Sequence[str | os.PathLike[str]]) -> str:
+    adb_category = adb_command_category(args)
+    if adb_category is not None:
+        return adb_category
+    string_args = [os.fspath(arg) for arg in args]
+    if not string_args:
+        return "unknown"
+    return f"helper:{sanitized_category_token(Path(string_args[0]).name)}"
+
+
+def effective_screenshot_mode(args: argparse.Namespace) -> str:
+    mode = getattr(args, "screenshot_mode", None) or SCREENSHOT_MODE_FAST
+    if mode not in SCREENSHOT_MODES:
+        expected = ", ".join(SCREENSHOT_MODES)
+        raise VisualQaError(f"unknown screenshot mode {mode!r}; expected one of: {expected}")
+    if getattr(args, "no_nix_screenshot", False) and mode != SCREENSHOT_MODE_FAST:
+        raise VisualQaError("--no-nix-screenshot cannot be combined with --screenshot-mode helper-compatible")
+    return mode
+
+
+def screenshot_manifest_config(args: argparse.Namespace) -> dict[str, object]:
+    mode = effective_screenshot_mode(args)
+    return {
+        "mode": mode,
+        "default_mode": SCREENSHOT_MODE_FAST,
+        "helper_compatibility_mode": mode == SCREENSHOT_MODE_HELPER_COMPATIBLE,
+        "no_nix_screenshot_alias": bool(getattr(args, "no_nix_screenshot", False)),
+    }
 
 
 class TimingRecorder:
@@ -1027,13 +1062,30 @@ def wm_snapshot(adb: str, serial: str) -> WmOverrideSnapshot:
     )
 
 
+def set_viewport_profile(
+    adb: str,
+    config: TargetConfig,
+    profile: ViewportProfile,
+    *,
+    include_snapshot: bool = True,
+) -> dict[str, object]:
+    applied: dict[str, object] = {}
+    if profile.wm_size is not None:
+        wm_size = size_to_string(profile.wm_size)
+        adb_shell(adb, config.serial, "wm", "size", wm_size, timeout=30)
+        applied["wm_size"] = wm_size
+    if profile.wm_density is not None:
+        adb_shell(adb, config.serial, "wm", "density", str(profile.wm_density), timeout=30)
+        applied["wm_density"] = profile.wm_density
+    if include_snapshot:
+        applied["snapshot"] = wm_snapshot(adb, config.serial).to_json()
+    return applied
+
+
 def apply_viewport_profile(adb: str, config: TargetConfig, profile: ViewportProfile) -> WmOverrideSnapshot:
     before = wm_snapshot(adb, config.serial)
     try:
-        if profile.wm_size is not None:
-            adb_shell(adb, config.serial, "wm", "size", size_to_string(profile.wm_size), timeout=30)
-        if profile.wm_density is not None:
-            adb_shell(adb, config.serial, "wm", "density", str(profile.wm_density), timeout=30)
+        set_viewport_profile(adb, config, profile, include_snapshot=False)
     except Exception:
         restore_viewport_profile(adb, config, before)
         raise
@@ -1197,28 +1249,77 @@ def drive_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> list[s
     return keys
 
 
+def is_helper_compatible_profile(config: TargetConfig, profile: ViewportProfile) -> bool:
+    return profile.expected_size == config.expected_size
+
+
+def helper_compatibility_unavailable_reason(
+    config: TargetConfig,
+    helper_path: str | None,
+    helper_compatible_profile: bool,
+) -> str | None:
+    if not helper_compatible_profile:
+        return "viewport profile dimensions do not match the screenshot helper default framebuffer"
+    if config.serial != config.default_serial:
+        return f"serial {config.serial} does not match helper default serial {config.default_serial}"
+    if helper_path is None:
+        return f"{config.screenshot_helper} is not available on PATH"
+    return None
+
+
 def capture_screenshot(
     adb: str,
     config: TargetConfig,
     output_path: Path,
-    prefer_nix_helper: bool,
+    screenshot_mode: str,
+    *,
+    helper_compatible_profile: bool,
 ) -> dict[str, object]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    recorder = current_timing_recorder()
+    started = recorder.now() if recorder is not None else time.monotonic()
     helper_path = shutil.which(config.screenshot_helper)
-    if prefer_nix_helper and helper_path and config.serial == config.default_serial:
-        run_command([helper_path, output_path], timeout=120)
+    helper_requested = screenshot_mode == SCREENSHOT_MODE_HELPER_COMPATIBLE
+    helper_unavailable_reason = helper_compatibility_unavailable_reason(
+        config,
+        helper_path,
+        helper_compatible_profile,
+    )
+
+    if helper_requested and helper_unavailable_reason is None and helper_path is not None:
+        command = [helper_path, str(output_path)]
+        run_command(command, timeout=120)
+        duration_ms = recorder.elapsed_ms_since(started) if recorder is not None else duration_ms_since(started)
         return {
             "method": "nix-screenshot-helper",
-            "command": [helper_path, str(output_path)],
+            "requested_mode": screenshot_mode,
+            "helper_compatibility_mode": True,
+            "helper_used": True,
+            "command": command,
+            "command_category": command_category(command),
             "serial": config.serial,
+            "output_path": str(output_path),
+            "duration_ms": duration_ms,
         }
 
-    run_command_to_file([adb, "-s", config.serial, "exec-out", "screencap", "-p"], output_path, timeout=120)
-    return {
+    command = [adb, "-s", config.serial, "exec-out", "screencap", "-p"]
+    run_command_to_file(command, output_path, timeout=120)
+    duration_ms = recorder.elapsed_ms_since(started) if recorder is not None else duration_ms_since(started)
+    record: dict[str, object] = {
         "method": "adb-exec-out-screencap",
-        "command": [adb, "-s", config.serial, "exec-out", "screencap", "-p"],
+        "requested_mode": screenshot_mode,
+        "helper_compatibility_mode": helper_requested,
+        "helper_used": False,
+        "command": command,
+        "command_category": command_category(command),
         "serial": config.serial,
+        "output_path": str(output_path),
+        "duration_ms": duration_ms,
     }
+    if helper_requested and helper_unavailable_reason is not None:
+        record["helper_unavailable_reason"] = helper_unavailable_reason
+        record["fallback_method"] = "adb-exec-out-screencap"
+    return record
 
 
 def validate_png(path: Path, expected_size: tuple[int, int]) -> PngDimensions:
@@ -1238,6 +1339,122 @@ def validate_png(path: Path, expected_size: tuple[int, int]) -> PngDimensions:
             f"screenshot dimensions for {path} were {width}x{height}; expected {expected_width}x{expected_height}"
         )
     return PngDimensions(width=width, height=height)
+
+
+def screenshot_attempt_record(
+    capture: Mapping[str, object],
+    *,
+    attempt: int,
+    status: str,
+    error: str | None = None,
+    dimensions: PngDimensions | None = None,
+    preserved_path: Path | None = None,
+) -> dict[str, object]:
+    record = dict(capture)
+    record["attempt"] = attempt
+    record["status"] = status
+    if preserved_path is not None:
+        record["original_output_path"] = str(capture.get("output_path") or "")
+        record["output_path"] = str(preserved_path)
+        record["preserved"] = True
+    if dimensions is not None:
+        record["dimensions"] = dimensions.to_json()
+    if error is not None:
+        record["error"] = error
+    return record
+
+
+def preserve_invalid_screenshot_attempt(output_path: Path, attempt: int) -> Path | None:
+    if not output_path.exists():
+        return None
+    preserved_path = output_path.with_name(f"{output_path.stem}.attempt-{attempt}.invalid{output_path.suffix}")
+    output_path.replace(preserved_path)
+    return preserved_path
+
+
+def record_viewport_reapply(
+    record: dict[str, object],
+    *,
+    adb: str,
+    config: TargetConfig,
+    profile: ViewportProfile,
+    next_attempt: int,
+) -> None:
+    reapply_records = record.setdefault("viewport_reapply", [])
+    if isinstance(reapply_records, list):
+        reapply_records.append(
+            {
+                "next_attempt": next_attempt,
+                **set_viewport_profile(adb, config, profile),
+            }
+        )
+
+
+def capture_validated_screenshot(
+    *,
+    adb: str,
+    config: TargetConfig,
+    profile: ViewportProfile,
+    output_path: Path,
+    screenshot_mode: str,
+    timing: TimingRecorder,
+    record: dict[str, object],
+) -> PngDimensions:
+    helper_compatible_profile = is_helper_compatible_profile(config, profile)
+    validation_attempts: list[dict[str, object]] = []
+    for attempt in range(1, SCREENSHOT_VALIDATION_ATTEMPTS + 1):
+        with timing.step("screenshot"):
+            capture = capture_screenshot(
+                adb,
+                config,
+                output_path,
+                screenshot_mode,
+                helper_compatible_profile=helper_compatible_profile,
+            )
+        capture["attempt"] = attempt
+        record["screenshot_capture"] = capture
+        try:
+            with timing.step("png_validation"):
+                dimensions = validate_png(output_path, profile.expected_size)
+        except VisualQaError as exc:
+            error = redact_text(str(exc))
+            should_retry = attempt < SCREENSHOT_VALIDATION_ATTEMPTS
+            preserved_path = preserve_invalid_screenshot_attempt(output_path, attempt) if should_retry else None
+            validation_attempts.append(
+                screenshot_attempt_record(
+                    capture,
+                    attempt=attempt,
+                    status="failed",
+                    error=error,
+                    preserved_path=preserved_path,
+                )
+            )
+            record["screenshot_validation_attempts"] = validation_attempts
+            if not should_retry:
+                raise
+            with timing.step("viewport_reapply"):
+                record_viewport_reapply(
+                    record,
+                    adb=adb,
+                    config=config,
+                    profile=profile,
+                    next_attempt=attempt + 1,
+                )
+            with timing.step("screenshot_retry_delay"):
+                time.sleep(SCREENSHOT_VALIDATION_RETRY_DELAY_SECONDS)
+            continue
+        validation_attempts.append(
+            screenshot_attempt_record(
+                capture,
+                attempt=attempt,
+                status="passed",
+                dimensions=dimensions,
+            )
+        )
+        if attempt > 1:
+            record["screenshot_validation_attempts"] = validation_attempts
+        return dimensions
+    raise VisualQaError(f"failed to validate screenshot after {SCREENSHOT_VALIDATION_ATTEMPTS} attempts: {output_path}")
 
 
 def capture_failure_logcat(adb: str, config: TargetConfig, output_path: Path, max_lines: int) -> dict[str, object]:
@@ -1477,7 +1694,7 @@ def capture_one(
     output_dir: Path,
     settle_ms: int,
     log_lines: int,
-    prefer_nix_helper: bool,
+    screenshot_mode: str,
 ) -> dict[str, object]:
     started_at = utc_now()
     timing = TimingRecorder()
@@ -1517,11 +1734,15 @@ def capture_one(
                 record["dpad_key_events"] = drive_scenario(adb, config, scenario)
             with timing.step("settle"):
                 time.sleep(settle_ms / 1000.0)
-            prefer_helper_for_profile = prefer_nix_helper and profile.expected_size == config.expected_size
-            with timing.step("screenshot"):
-                record["screenshot_capture"] = capture_screenshot(adb, config, screenshot_path, prefer_helper_for_profile)
-            with timing.step("png_validation"):
-                dimensions = validate_png(screenshot_path, profile.expected_size)
+            dimensions = capture_validated_screenshot(
+                adb=adb,
+                config=config,
+                profile=profile,
+                output_path=screenshot_path,
+                screenshot_mode=screenshot_mode,
+                timing=timing,
+                record=record,
+            )
             record["dimensions"] = dimensions.to_json()
             record["status"] = "passed"
         except Exception as exc:  # noqa: BLE001 - capture must emit failure artifacts for any failure.
@@ -1544,6 +1765,119 @@ def capture_one(
             record["timings_ms"] = timing.timings_json(timing.elapsed_ms_since(total_started))
             record["adb_command_summary"] = timing.adb_command_summary()
     return record
+
+
+def capture_reference_for_comparison(record: Mapping[str, object]) -> dict[str, object]:
+    screenshot_capture = record.get("screenshot_capture")
+    capture_data = dict(screenshot_capture) if isinstance(screenshot_capture, Mapping) else {}
+    screenshot_path = str(capture_data.get("output_path") or record.get("screenshot_path") or "")
+    reference: dict[str, object] = {
+        "method": capture_data.get("method", "unknown"),
+        "serial": capture_data.get("serial", record.get("serial", "unknown")),
+        "output_path": screenshot_path,
+        "screenshot_path": str(record.get("screenshot_path") or screenshot_path),
+        "helper_compatibility_mode": bool(capture_data.get("helper_compatibility_mode", False)),
+        "helper_used": bool(capture_data.get("helper_used", False)),
+    }
+    for key in ("requested_mode", "command_category", "duration_ms"):
+        if key in capture_data:
+            reference[key] = capture_data[key]
+    dimensions = record.get("dimensions")
+    if isinstance(dimensions, Mapping):
+        reference["dimensions"] = dict(dimensions)
+    timings = record.get("timings_ms")
+    if isinstance(timings, Mapping) and "screenshot" in timings:
+        reference["timing_ms"] = timings["screenshot"]
+    return reference
+
+
+def compare_screenshot_methods(
+    *,
+    adb: str,
+    config: TargetConfig,
+    scenario: Scenario,
+    profile: ViewportProfile,
+    output_dir: Path,
+    fast_record: Mapping[str, object],
+) -> dict[str, object]:
+    helper_output = output_dir / "screenshot-method-comparison" / profile.name / f"{scenario.id}-helper-compatible.png"
+    helper_path = shutil.which(config.screenshot_helper)
+    unavailable_reason = helper_compatibility_unavailable_reason(
+        config,
+        helper_path,
+        is_helper_compatible_profile(config, profile),
+    )
+    comparison: dict[str, object] = {
+        "status": "running",
+        "target": config.target,
+        "profile": profile.name,
+        "scenario_id": scenario.id,
+        "serial": config.serial,
+        "started_at": utc_now(),
+        "fast_capture": capture_reference_for_comparison(fast_record),
+        "helper_compatible_output_path": str(helper_output),
+    }
+    if unavailable_reason is not None:
+        comparison["status"] = "unavailable"
+        comparison["unavailable_reason"] = unavailable_reason
+        comparison["ended_at"] = utc_now()
+        return comparison
+
+    timing = TimingRecorder()
+    total_started = timing.now()
+    viewport_before: WmOverrideSnapshot | None = None
+    helper_record: dict[str, object] = {}
+    with active_timing_recorder(timing):
+        try:
+            with timing.step("viewport_apply"):
+                viewport_before = apply_viewport_profile(adb, config, profile)
+            comparison["viewport_before"] = viewport_before.to_json()
+            dimensions = capture_validated_screenshot(
+                adb=adb,
+                config=config,
+                profile=profile,
+                output_path=helper_output,
+                screenshot_mode=SCREENSHOT_MODE_HELPER_COMPATIBLE,
+                timing=timing,
+                record=helper_record,
+            )
+            helper_capture = helper_record.get("screenshot_capture")
+            comparison["status"] = "passed"
+            comparison["helper_compatible_capture"] = {
+                **(dict(helper_capture) if isinstance(helper_capture, Mapping) else {}),
+                "dimensions": dimensions.to_json(),
+            }
+            for key in ("screenshot_validation_attempts", "viewport_reapply"):
+                if key in helper_record:
+                    comparison[f"helper_compatible_{key}"] = helper_record[key]
+        except Exception as exc:  # noqa: BLE001 - comparison evidence should be reported in the manifest.
+            comparison["status"] = "failed"
+            comparison["error"] = redact_text(str(exc))
+            for key in ("screenshot_capture", "screenshot_validation_attempts", "viewport_reapply"):
+                if key in helper_record:
+                    comparison[f"helper_compatible_{key}"] = helper_record[key]
+        finally:
+            if viewport_before is not None:
+                try:
+                    with timing.step("viewport_restore"):
+                        comparison["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
+                except Exception as exc:  # noqa: BLE001 - comparison evidence should include cleanup failures.
+                    comparison["viewport_restore_error"] = redact_text(str(exc))
+                    if comparison.get("status") == "passed":
+                        comparison["status"] = "failed"
+                        comparison["error"] = comparison["viewport_restore_error"]
+            comparison["ended_at"] = utc_now()
+            comparison["timings_ms"] = timing.timings_json(timing.elapsed_ms_since(total_started))
+            comparison["adb_command_summary"] = timing.adb_command_summary()
+    return comparison
+
+
+def should_compare_screenshot_methods(mode: str | None, args: argparse.Namespace) -> bool:
+    return (
+        mode == "smoke"
+        and effective_screenshot_mode(args) == SCREENSHOT_MODE_FAST
+        and not getattr(args, "no_nix_screenshot", False)
+    )
 
 
 def theater_plate_state_key(scenario_id: str) -> str | None:
@@ -2010,6 +2344,8 @@ def run_capture_plan(
     command_name: str,
     mode: str | None = None,
 ) -> int:
+    screenshot_mode = effective_screenshot_mode(args)
+    compare_methods = should_compare_screenshot_methods(mode, args)
     configs = target_configs(repo_root, args)
     profiles_by_target = selected_viewport_profiles(args, configs, selected)
     adb = resolve_executable(args.adb)
@@ -2024,12 +2360,14 @@ def run_capture_plan(
         "hardware_confirmation": bool(args.hardware),
         "registry": registry.to_json(),
         "capture_plan": capture_plan_json(mode, selected, profiles_by_target),
+        "screenshot": screenshot_manifest_config(args),
         "command_versions": collect_command_versions(adb, Path(__file__).resolve()),
         "captures": [],
         "failures": [],
     }
 
     captures: list[dict[str, object]] = []
+    screenshot_method_comparison: dict[str, object] | None = None
     for scenario in selected:
         config = configs[scenario.target]
         for profile in profiles_by_target[scenario.target]:
@@ -2045,15 +2383,46 @@ def run_capture_plan(
                 output_dir=output_dir,
                 settle_ms=args.settle_ms,
                 log_lines=args.log_lines,
-                prefer_nix_helper=not args.no_nix_screenshot,
+                screenshot_mode=screenshot_mode,
             )
             captures.append(record)
             if record["status"] == "passed":
                 print(f"android-visual-qa: wrote {record['screenshot_path']}", file=sys.stderr)
+                if (
+                    compare_methods
+                    and screenshot_method_comparison is None
+                    and is_helper_compatible_profile(config, profile)
+                ):
+                    screenshot_method_comparison = compare_screenshot_methods(
+                        adb=adb,
+                        config=config,
+                        scenario=scenario,
+                        profile=profile,
+                        output_dir=output_dir,
+                        fast_record=record,
+                    )
             else:
                 print(f"android-visual-qa: FAILED {profile.name}/{scenario.id}: {record['error']}", file=sys.stderr)
 
+    if compare_methods and screenshot_method_comparison is None:
+        screenshot_method_comparison = {
+            "status": "unavailable",
+            "unavailable_reason": "no passed default-emulator capture was available for helper-compatible comparison",
+            "started_at": utc_now(),
+            "ended_at": utc_now(),
+        }
+    if screenshot_method_comparison is not None:
+        manifest["screenshot_method_comparison"] = screenshot_method_comparison
+
     failures = [record for record in captures if record.get("status") != "passed"]
+    if isinstance(screenshot_method_comparison, Mapping) and screenshot_method_comparison.get("status") == "failed":
+        failures.append(
+            {
+                "status": "failed",
+                "step": "screenshot_method_comparison",
+                "error": screenshot_method_comparison.get("error", "screenshot method comparison failed"),
+            }
+        )
     manifest["captures"] = captures
     manifest["failures"] = failures
     manifest["ended_at"] = utc_now()
@@ -2089,6 +2458,7 @@ def gate_capture_args(args: argparse.Namespace, output_dir: Path) -> argparse.Na
         log_lines=args.log_lines,
         adb=args.adb,
         no_nix_screenshot=args.no_nix_screenshot,
+        screenshot_mode=effective_screenshot_mode(args),
         hardware=False,
         hardware_serial=None,
         expected_size=None,
@@ -2172,6 +2542,7 @@ def write_gate_failure_manifest(
         "hardware_confirmation": False,
         "registry": registry.to_json(),
         "capture_plan": capture_plan,
+        "screenshot": screenshot_manifest_config(capture_args),
         "command_versions": collect_command_versions(args.adb, Path(__file__).resolve()),
         "captures": [],
         "failures": [gate_failure_record(gate_primitives, error)],
@@ -2204,6 +2575,7 @@ def update_gate_manifest_timing(
 
 
 def run_gate(args: argparse.Namespace) -> int:
+    effective_screenshot_mode(args)
     repo_root = repo_root_from_script()
     registry = ScenarioRegistry.load(repo_root)
     selected = scenarios_for_gate_mode(registry, args.mode)
@@ -2365,9 +2737,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="adb executable to use for screenshot capture",
     )
     gate.add_argument(
+        "--screenshot-mode",
+        choices=SCREENSHOT_MODES,
+        default=SCREENSHOT_MODE_FAST,
+        help=(
+            "Screenshot path to use during capture: fast uses adb -s <serial> exec-out screencap -p "
+            "after the gate has prepared devices; helper-compatible invokes the Nix screenshot helper "
+            "for default emulator profiles when available. Defaults to fast."
+        ),
+    )
+    gate.add_argument(
         "--no-nix-screenshot",
         action="store_true",
-        help="Do not use ferrex-android-screenshot-phone/tv helpers; always use adb -s exec-out screencap",
+        help="Deprecated alias for --screenshot-mode fast; also disables the smoke helper comparison.",
     )
     gate.add_argument(
         "--profile",
@@ -2440,9 +2822,19 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
     capture.add_argument("--adb", default=os.environ.get("ADB", "adb"), help="adb executable to use")
     capture.add_argument(
+        "--screenshot-mode",
+        choices=SCREENSHOT_MODES,
+        default=SCREENSHOT_MODE_FAST,
+        help=(
+            "Screenshot path to use: fast uses adb -s <serial> exec-out screencap -p; "
+            "helper-compatible invokes the Nix screenshot helper for default emulator profiles when available. "
+            "Defaults to fast."
+        ),
+    )
+    capture.add_argument(
         "--no-nix-screenshot",
         action="store_true",
-        help="Do not use ferrex-android-screenshot-phone/tv helpers; always use adb -s exec-out screencap",
+        help="Deprecated alias for --screenshot-mode fast.",
     )
     capture.add_argument(
         "--profile",
