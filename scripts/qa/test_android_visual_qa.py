@@ -33,7 +33,12 @@ class AndroidVisualQaTest(unittest.TestCase):
             + b"\x08\x06\x00\x00\x00"
         )
 
-    def write_manifest(self, path: Path, captures: list[dict[str, object]]) -> None:
+    def write_manifest(
+        self,
+        path: Path,
+        captures: list[dict[str, object]],
+        profile_deferrals: list[dict[str, object]] | None = None,
+    ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -42,6 +47,7 @@ class AndroidVisualQaTest(unittest.TestCase):
                     "status": "passed",
                     "output_dir": str(path.parent),
                     "captures": captures,
+                    "profile_deferrals": profile_deferrals or [],
                     "failures": [],
                 }
             ),
@@ -101,6 +107,32 @@ class AndroidVisualQaTest(unittest.TestCase):
             with self.assertRaises(android_visual_qa.VisualQaError):
                 android_visual_qa.validate_png(png, (1920, 1080))
 
+    def test_capture_screenshot_removes_stale_helper_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "capture.png"
+            self.write_png(output, 1800, 1200)
+            config = SimpleNamespace(
+                serial="emulator-5554",
+                default_serial="emulator-5554",
+                screenshot_helper="ferrex-android-screenshot-phone",
+            )
+
+            with mock.patch.object(android_visual_qa.shutil, "which", return_value="/bin/helper"), mock.patch.object(
+                android_visual_qa,
+                "run_command",
+                return_value=android_visual_qa.RunResult(stdout="", stderr="", returncode=0),
+            ):
+                result = android_visual_qa.capture_screenshot(
+                    "adb",
+                    config,
+                    output,
+                    android_visual_qa.SCREENSHOT_MODE_HELPER_COMPATIBLE,
+                    helper_compatible_profile=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(result["method"], "nix-screenshot-helper")
+
     def test_redaction_removes_tokens_authorization_and_origins(self) -> None:
         sample = (
             "Authorization: Bearer secret-token\n"
@@ -119,6 +151,7 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertNotIn("media.example.com", redacted)
         self.assertIn("<redacted>", redacted)
         self.assertIn("<redacted-origin>", redacted)
+        self.assertEqual('password="redacted"', android_visual_qa.redact_xml_text('password="hunter2"'))
 
     def test_timing_summary_aggregates_records_breakdowns_and_adb(self) -> None:
         records = [
@@ -927,6 +960,10 @@ class AndroidVisualQaTest(unittest.TestCase):
         plan = android_visual_qa.capture_plan_json("smoke", selected, profiles)
 
         self.assertEqual([profile.name for profile in profiles["phone"]], ["phone-portrait", "phone-landscape-foldable"])
+        self.assertEqual(
+            android_visual_qa.REQUIRED_VIEWPORT_PROFILE_NAMES_BY_TARGET,
+            {"phone": ("phone-portrait", "phone-landscape-foldable"), "tv": ("tv-1080p", "tv-4k-scaled")},
+        )
         self.assertEqual([profile.expected_size for profile in profiles["tv"]], [(1920, 1080), (1920, 1080)])
         self.assertEqual(profiles["tv"][1].wm_size, (3840, 2160))
         self.assertEqual(plan["capture_count"], 4)
@@ -946,10 +983,11 @@ class AndroidVisualQaTest(unittest.TestCase):
           <node resource-id="phone.theater-plate.action.recovery.primary" content-desc="Retry" clickable="true" focusable="false" />
           <node resource-id="phone.theater-plate.media.recovery.hero" content-desc="Theater Plate media Recovery Queue: Server unreachable" clickable="true" focusable="false" />
           <node resource-id="phone.theater-plate.rail.recovery.primary" content-desc="Recovery rail" clickable="false" focusable="false" />
-          <node content-desc="Change server" clickable="true" focusable="false" />
-          <node content-desc="Clear cache" clickable="true" focusable="false" />
-          <node content-desc="Reset connection" clickable="true" focusable="false" />
-          <node content-desc="Diagnostics / Export diagnostics" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.retry" content-desc="Retry" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.change-server" content-desc="Change server" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.clear-cache" content-desc="Clear cache" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.reset-connection" content-desc="Reset connection" clickable="true" focusable="false" />
+          <node resource-id="phone.theater-plate.action.recovery.diagnostics" content-desc="Diagnostics / Export diagnostics" clickable="true" focusable="false" />
         </hierarchy>
         """
         nodes = android_visual_qa.parse_accessibility_nodes(xml)
@@ -1104,11 +1142,13 @@ class AndroidVisualQaTest(unittest.TestCase):
             self.assertEqual(record["early_stop_reason"], "all_requirements_passed")
             self.assertEqual(record["first_all_requirements_passed_step"], 0)
             self.assertEqual(len(record["dump_paths"]), 1)
+            self.assertEqual(record["dump_attempts"], [1])
             self.assertTrue(Path(record["dump_paths"][0]).exists())
             self.assertEqual(record["node_count"], 1)
             step = record["accessibility_steps"][0]
             self.assertEqual(step["requirement_status"], {"root-tag": "passed"})
             self.assertEqual(step["dump_path"], record["dump_paths"][0])
+            self.assertEqual(step["dump_attempts"], 1)
             self.assertEqual(step["node_count"], 1)
             self.assertIn("dump", step["timings_ms"])
             self.assertIn("verify", step["timings_ms"])
@@ -1128,7 +1168,7 @@ class AndroidVisualQaTest(unittest.TestCase):
         )
         profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
         viewport = android_visual_qa.WmOverrideSnapshot("Physical size: 1080x2400", "Physical density: 440", None, None)
-        xml = '<hierarchy><node resource-id="unrelated" content-desc="Other" /></hierarchy>'
+        xml = '<hierarchy><node resource-id="phone.search" content-desc="Search" /></hierarchy>'
 
         with tempfile.TemporaryDirectory() as tmp:
             dump_mock = mock.Mock(
@@ -1183,7 +1223,7 @@ class AndroidVisualQaTest(unittest.TestCase):
                 record = android_visual_qa.accessibility_one(
                     adb="adb",
                     config=config,
-                    scenario=android_visual_qa.Scenario("phone-home", "phone"),
+                    scenario=android_visual_qa.Scenario("phone-search", "phone"),
                     profile=profile,
                     output_dir=Path(tmp),
                     settle_ms=1,
@@ -1196,8 +1236,9 @@ class AndroidVisualQaTest(unittest.TestCase):
             self.assertEqual(record["early_stop_reason"], "no_progress")
             self.assertEqual(record["stop_reason"], "no_progress")
             self.assertEqual(len(record["dump_paths"]), 2)
+            self.assertEqual(record["dump_attempts"], [1, 1])
             self.assertTrue(all(Path(path).exists() for path in record["dump_paths"]))
-            self.assertIn("root-tag", record["accessibility_steps"][1]["failed_requirement_keys"])
+            self.assertIn("search-field", record["accessibility_steps"][1]["failed_requirement_keys"])
             self.assertTrue(record["accessibility_steps"][1]["no_new_nodes"])
             self.assertEqual(record["accessibility_steps"][1]["no_progress_streak"], 1)
             self.assertEqual(record["failure_logcat"], {"path": "logcat.txt", "max_lines": 1, "status": "captured"})
@@ -1281,8 +1322,104 @@ class AndroidVisualQaTest(unittest.TestCase):
             self.assertNotIn("early_stop_reason", record)
             self.assertEqual(record["first_all_requirements_passed_step"], 0)
             self.assertEqual(len(record["dump_paths"]), 3)
+            self.assertEqual(record["dump_attempts"], [1, 1, 1])
             self.assertEqual(dump_mock.call_count, 3)
             self.assertEqual(reachability_mock.call_count, 2)
+
+    def test_tv_recovery_accessibility_requirements_use_stable_focus_action_tags(self) -> None:
+        scenario = android_visual_qa.Scenario("tv-theater-plate-recovery", "tv")
+        requirements = android_visual_qa.accessibility_requirements_for_scenario(scenario)
+        recovery = {requirement.key: requirement for requirement in requirements if requirement.kind == "recovery-action"}
+
+        self.assertEqual(
+            {
+                "theater-recovery-retry",
+                "theater-recovery-change-server",
+                "theater-recovery-clear-cache",
+                "theater-recovery-reset-connection",
+                "theater-recovery-diagnostics",
+            },
+            set(recovery),
+        )
+        for action_key, action_label in android_visual_qa.THEATER_PLATE_RECOVERY_ACTIONS:
+            requirement = recovery[f"theater-recovery-{action_key}"]
+            self.assertEqual(requirement.tag, f"tv.theater-plate.action.recovery.{action_key}")
+            self.assertEqual(requirement.content_description, action_label)
+            self.assertTrue(requirement.require_clickable)
+            self.assertTrue(requirement.require_focusable)
+            self.assertTrue(requirement.require_button_role)
+            self.assertTrue(requirement.require_enabled)
+
+    def test_playback_accessibility_requirements_verify_disabled_semantics(self) -> None:
+        scenario = android_visual_qa.Scenario("tv-theater-plate-playback-entry", "tv")
+        requirements = android_visual_qa.accessibility_requirements_for_scenario(scenario)
+        xml = """
+        <hierarchy>
+          <node resource-id="tv.theater-plate.playback-entry" content-desc="Playback entry root" enabled="true" />
+          <node resource-id="tv.theater-plate.status.playback-entry" content-desc="Playback entry status: Playback entry uses a prepared route while preserving no-wipe exits." enabled="true" />
+          <node resource-id="tv.theater-plate.action.playback-entry.primary" class="android.widget.Button" content-desc="Resume playback" clickable="true" focusable="true" enabled="true" />
+          <node resource-id="tv.theater-plate.media.playback-entry.hero" class="android.widget.Button" content-desc="Theater Plate media Aurora Station: Resume at 30:42" clickable="true" focusable="true" enabled="true" />
+          <node resource-id="tv.theater-plate.rail.playback-entry.primary" content-desc="Playback entry rail" enabled="true" />
+          <node resource-id="tv.theater-plate.action.playback-entry.network-required" class="android.widget.Button" content-desc="Network playback requires a playback ticket" clickable="false" focusable="false" enabled="false" />
+        </hierarchy>
+        """
+        nodes = android_visual_qa.parse_accessibility_nodes(xml)
+
+        checks = android_visual_qa.verify_accessibility_requirements(nodes, requirements)
+
+        self.assertTrue(all(check["status"] == "passed" for check in checks), checks)
+        enabled_disabled_node = [
+            {**node, "enabled": "true"}
+            if node.get("resource-id") == "tv.theater-plate.action.playback-entry.network-required"
+            else node
+            for node in nodes
+        ]
+        failed_checks = android_visual_qa.verify_accessibility_requirements(enabled_disabled_node, requirements)
+        self.assertTrue(
+            any(
+                check["requirement"]["key"] == "theater-playback-disabled-network" and check["status"] == "failed"
+                for check in failed_checks
+            )
+        )
+
+    def test_accessibility_dump_retries_missing_remote_file(self) -> None:
+        cat_paths: list[str] = []
+
+        def fake_adb_shell(adb: str, serial: str, *shell_args: str, **kwargs: object) -> android_visual_qa.RunResult:
+            if shell_args[:2] == ("uiautomator", "dump"):
+                return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+            if shell_args and shell_args[0] == "cat":
+                cat_paths.append(shell_args[1])
+                if len(cat_paths) == 1:
+                    raise android_visual_qa.CommandError([adb, "-s", serial, "shell", *shell_args], 1, "", "No such file")
+                return android_visual_qa.RunResult(stdout="<hierarchy />", stderr="", returncode=0)
+            return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+
+        with mock.patch.object(android_visual_qa, "adb_shell", side_effect=fake_adb_shell):
+            xml = android_visual_qa.dump_accessibility_xml("adb", SimpleNamespace(serial="emulator-5556"))
+
+        self.assertEqual(xml, "<hierarchy />")
+        self.assertEqual(len(cat_paths), 2)
+        self.assertEqual(len(set(cat_paths)), 2)
+
+    def test_tv_accessibility_reachability_uses_dpad_not_touch_swipe(self) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def fake_adb_shell(adb: str, serial: str, *shell_args: str, **kwargs: object) -> android_visual_qa.RunResult:
+            calls.append(shell_args)
+            return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+
+        profile = android_visual_qa.VIEWPORT_PROFILES["tv-1080p"]
+        with mock.patch.object(android_visual_qa, "adb_shell", side_effect=fake_adb_shell):
+            android_visual_qa.drive_accessibility_reachability_step(
+                "adb",
+                SimpleNamespace(serial="emulator-5556", target="tv"),
+                profile,
+            )
+
+        self.assertTrue(calls)
+        self.assertTrue(all(call[:2] == ("input", "keyevent") for call in calls), calls)
+
 
     def test_gate_smoke_selection_includes_phone_and_tv(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
@@ -1322,32 +1459,40 @@ class AndroidVisualQaTest(unittest.TestCase):
     def test_verify_manifest_accepts_smoke_phone_and_tv_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            phone = root / "phone" / "phone-home.png"
-            tv = root / "tv" / "tv-home-focus.png"
-            self.write_png(phone, 1080, 2400)
-            self.write_png(tv, 1920, 1080)
-            manifest = root / "manifest.json"
-            self.write_manifest(
-                manifest,
-                [
+            captures: list[dict[str, object]] = []
+            for profile, width, height in (
+                ("phone-portrait", 1080, 2400),
+                ("phone-landscape-foldable", 1800, 1200),
+            ):
+                png = root / profile / "phone-home.png"
+                self.write_png(png, width, height)
+                captures.append(
                     {
                         "status": "passed",
                         "target": "phone",
+                        "profile": profile,
                         "scenario_id": "phone-home",
-                        "screenshot_path": str(phone),
-                        "expected_dimensions": {"width": 1080, "height": 2400},
-                        "dimensions": {"width": 1080, "height": 2400},
-                    },
+                        "screenshot_path": str(png),
+                        "expected_dimensions": {"width": width, "height": height},
+                        "dimensions": {"width": width, "height": height},
+                    }
+                )
+            for profile in ("tv-1080p", "tv-4k-scaled"):
+                png = root / profile / "tv-home-focus.png"
+                self.write_png(png, 1920, 1080)
+                captures.append(
                     {
                         "status": "passed",
                         "target": "tv",
+                        "profile": profile,
                         "scenario_id": "tv-home-focus",
-                        "screenshot_path": str(tv),
+                        "screenshot_path": str(png),
                         "expected_dimensions": {"width": 1920, "height": 1080},
                         "dimensions": {"width": 1920, "height": 1080},
-                    },
-                ],
-            )
+                    }
+                )
+            manifest = root / "manifest.json"
+            self.write_manifest(manifest, captures)
 
             summary = android_visual_qa.verify_manifest(
                 manifest,
@@ -1355,14 +1500,14 @@ class AndroidVisualQaTest(unittest.TestCase):
                 repo_root=self.repo_root(),
             )
 
-            self.assertEqual(summary.capture_count, 2)
-            self.assertEqual(summary.target_counts["phone"], 1)
-            self.assertEqual(summary.target_counts["tv"], 1)
+            self.assertEqual(summary.capture_count, 4)
+            self.assertEqual(summary.target_counts["phone"], 2)
+            self.assertEqual(summary.target_counts["tv"], 2)
 
     def test_verify_manifest_rejects_incomplete_smoke_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            phone = root / "phone" / "phone-home.png"
+            phone = root / "phone-portrait" / "phone-home.png"
             self.write_png(phone, 1080, 2400)
             manifest = root / "manifest.json"
             self.write_manifest(
@@ -1371,6 +1516,7 @@ class AndroidVisualQaTest(unittest.TestCase):
                     {
                         "status": "passed",
                         "target": "phone",
+                        "profile": "phone-portrait",
                         "scenario_id": "phone-home",
                         "screenshot_path": str(phone),
                         "expected_dimensions": {"width": 1080, "height": 2400},
@@ -1463,6 +1609,81 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertEqual(comparison["status"], "unavailable")
         self.assertIn("not available", comparison["unavailable_reason"])
         self.assertEqual(comparison["fast_capture"]["dimensions"], {"width": 1080, "height": 2400})
+
+    def test_verify_manifest_accepts_explicit_profile_deferrals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone = root / "phone-portrait" / "phone-home.png"
+            tv = root / "tv-1080p" / "tv-home-focus.png"
+            self.write_png(phone, 1080, 2400)
+            self.write_png(tv, 1920, 1080)
+            manifest = root / "manifest.json"
+            self.write_manifest(
+                manifest,
+                [
+                    {
+                        "status": "passed",
+                        "target": "phone",
+                        "profile": "phone-portrait",
+                        "scenario_id": "phone-home",
+                        "screenshot_path": str(phone),
+                        "expected_dimensions": {"width": 1080, "height": 2400},
+                        "dimensions": {"width": 1080, "height": 2400},
+                    },
+                    {
+                        "status": "passed",
+                        "target": "tv",
+                        "profile": "tv-1080p",
+                        "scenario_id": "tv-home-focus",
+                        "screenshot_path": str(tv),
+                        "expected_dimensions": {"width": 1920, "height": 1080},
+                        "dimensions": {"width": 1920, "height": 1080},
+                    },
+                ],
+                profile_deferrals=[
+                    {
+                        "target": "phone",
+                        "profile": "phone-landscape-foldable",
+                        "human_deferred": True,
+                        "reason": "No foldable/landscape phone emulator attached in this workspace.",
+                    },
+                    {
+                        "target": "tv",
+                        "profile": "tv-4k-scaled",
+                        "status": "human-deferred",
+                        "reason": "4K-scaled framebuffer confirmation requires a local TV emulator run.",
+                    },
+                ],
+            )
+
+            summary = android_visual_qa.verify_manifest(manifest, mode="smoke", repo_root=self.repo_root())
+
+            self.assertEqual(summary.capture_count, 2)
+
+    def test_verify_manifest_rejects_invalid_capture_profile_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            phone = root / "tv-1080p" / "phone-home.png"
+            self.write_png(phone, 1080, 2400)
+            manifest = root / "manifest.json"
+            self.write_manifest(
+                manifest,
+                [
+                    {
+                        "status": "passed",
+                        "target": "phone",
+                        "profile": "tv-1080p",
+                        "scenario_id": "phone-home",
+                        "screenshot_path": str(phone),
+                        "expected_dimensions": {"width": 1080, "height": 2400},
+                        "dimensions": {"width": 1080, "height": 2400},
+                    }
+                ],
+            )
+
+            with self.assertRaises(android_visual_qa.VisualQaError):
+                android_visual_qa.verify_manifest(manifest, repo_root=self.repo_root())
+
 
     def test_gate_runs_primitives_capture_and_verify_in_order(self) -> None:
         calls: list[str] = []

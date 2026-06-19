@@ -57,6 +57,10 @@ DEFAULT_VIEWPORT_PROFILE_NAMES = (
     "tv-1080p",
     "tv-4k-scaled",
 )
+REQUIRED_VIEWPORT_PROFILE_NAMES_BY_TARGET: Mapping[str, tuple[str, ...]] = {
+    "phone": ("phone-portrait", "phone-landscape-foldable"),
+    "tv": ("tv-1080p", "tv-4k-scaled"),
+}
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -551,6 +555,9 @@ class AccessibilityRequirement:
     require_content_description: bool = False
     require_clickable: bool = False
     require_focusable: bool = False
+    require_button_role: bool = False
+    require_enabled: bool = False
+    require_disabled: bool = False
 
     def to_json(self) -> dict[str, object]:
         data: dict[str, object] = {"key": self.key, "kind": self.kind}
@@ -566,6 +573,12 @@ class AccessibilityRequirement:
             data["require_clickable"] = True
         if self.require_focusable:
             data["require_focusable"] = True
+        if self.require_button_role:
+            data["require_button_role"] = True
+        if self.require_enabled:
+            data["require_enabled"] = True
+        if self.require_disabled:
+            data["require_disabled"] = True
         return data
 
 
@@ -679,6 +692,14 @@ THEATER_PLATE_PRIMARY_ACTIONS: Mapping[str, str] = {
     "playback-entry": "Resume playback",
 }
 
+THEATER_PLATE_RECOVERY_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("retry", "Retry"),
+    ("change-server", "Change server"),
+    ("clear-cache", "Clear cache"),
+    ("reset-connection", "Reset connection"),
+    ("diagnostics", "Diagnostics / Export diagnostics"),
+)
+
 LEGACY_SCENARIO_ROOT_TAGS: Mapping[str, str] = {
     "phone-home": "phone.home",
     "phone-search": "phone.search",
@@ -725,6 +746,10 @@ def redact_text(text: str) -> str:
     for pattern, replacement in REDACTION_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
     return redacted
+
+
+def redact_xml_text(text: str) -> str:
+    return redact_text(text).replace("<redacted-origin>", "redacted-origin").replace("<redacted>", "redacted")
 
 
 def bounded_lines(text: str, max_lines: int) -> str:
@@ -1551,6 +1576,9 @@ def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[
         "am",
         "start",
         "-W",
+        "-S",
+        "-f",
+        "0x10008000",
         "-a",
         ACTION_VISUAL_QA,
         "-c",
@@ -1623,6 +1651,7 @@ def capture_screenshot(
     helper_compatible_profile: bool,
 ) -> dict[str, object]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.unlink(missing_ok=True)
     recorder = current_timing_recorder()
     started = recorder.now() if recorder is not None else time.monotonic()
     helper_path = shutil.which(config.screenshot_helper)
@@ -1927,6 +1956,33 @@ def dimension_tuple(raw: object, field_name: str) -> tuple[int, int]:
     return (width, height)
 
 
+def parse_profile_deferrals(data: Mapping[str, object]) -> set[tuple[str, str]]:
+    raw = data.get("profile_deferrals", [])
+    if raw in (None, []):
+        return set()
+    if not isinstance(raw, list):
+        raise VisualQaError("profile_deferrals must be a list when provided")
+
+    deferrals: set[tuple[str, str]] = set()
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise VisualQaError(f"profile_deferrals[{index}] must be an object")
+        target = item.get("target")
+        profile = item.get("profile") or item.get("profile_name")
+        reason = item.get("reason") or item.get("rationale")
+        human_deferred = item.get("human_deferred") is True or item.get("status") == "human-deferred"
+        if target not in REQUIRED_VIEWPORT_PROFILE_NAMES_BY_TARGET:
+            raise VisualQaError(f"profile_deferrals[{index}] has invalid target: {target!r}")
+        if profile not in REQUIRED_VIEWPORT_PROFILE_NAMES_BY_TARGET[target]:
+            raise VisualQaError(f"profile_deferrals[{index}] has invalid profile for {target}: {profile!r}")
+        if not human_deferred:
+            raise VisualQaError(f"profile_deferrals[{index}] must set human_deferred=true or status='human-deferred'")
+        if not isinstance(reason, str) or not reason.strip():
+            raise VisualQaError(f"profile_deferrals[{index}] must include a non-empty reason")
+        deferrals.add((target, profile))
+    return deferrals
+
+
 def verify_manifest(
     manifest_path: Path,
     *,
@@ -1945,6 +2001,7 @@ def verify_manifest(
 
     verified: list[VerifiedCapture] = []
     seen_ids: set[str] = set()
+    seen_profile_pairs: set[tuple[str, str, str]] = set()
     for index, capture in enumerate(captures_raw):
         if not isinstance(capture, dict):
             raise VisualQaError(f"capture record {index} must be an object")
@@ -1960,6 +2017,10 @@ def verify_manifest(
             raise VisualQaError(f"capture record {index} has invalid target: {target!r}")
         if profile_name is not None and not isinstance(profile_name, str):
             raise VisualQaError(f"capture record {index} has invalid profile: {profile_name!r}")
+        if isinstance(profile_name, str):
+            profile = VIEWPORT_PROFILES.get(profile_name)
+            if profile is None or profile.target != target:
+                raise VisualQaError(f"capture record {index} has invalid profile for {target}: {profile_name!r}")
         if not isinstance(scenario_id, str) or not scenario_id:
             raise VisualQaError(f"capture record {index} has invalid scenario_id: {scenario_id!r}")
         if not isinstance(screenshot_raw, str) or not screenshot_raw:
@@ -1985,15 +2046,30 @@ def verify_manifest(
             )
         )
         seen_ids.add(scenario_id)
+        if profile_name is not None:
+            seen_profile_pairs.add((target, scenario_id, profile_name))
 
     if mode is not None:
         if mode not in GATE_MODES:
             raise VisualQaError(f"unknown verify mode {mode!r}; expected smoke or complete")
         registry = ScenarioRegistry.load(repo_root or repo_root_from_script())
-        required_ids = {scenario.id for scenario in scenarios_for_gate_mode(registry, mode)}
+        required_scenarios = scenarios_for_gate_mode(registry, mode)
+        required_ids = {scenario.id for scenario in required_scenarios}
         missing = sorted(required_ids - seen_ids)
         if missing:
             raise VisualQaError(f"{mode} manifest is missing required scenario(s): {', '.join(missing)}")
+        deferrals = parse_profile_deferrals(data)
+        missing_profile_captures = []
+        for scenario in required_scenarios:
+            for profile in REQUIRED_VIEWPORT_PROFILE_NAMES_BY_TARGET[scenario.target]:
+                if (scenario.target, scenario.id, profile) not in seen_profile_pairs and (scenario.target, profile) not in deferrals:
+                    missing_profile_captures.append(f"{scenario.target}/{profile}/{scenario.id}")
+        if missing_profile_captures:
+            raise VisualQaError(
+                f"{mode} manifest is missing required viewport profile capture(s): "
+                + ", ".join(missing_profile_captures[:12])
+                + (" ..." if len(missing_profile_captures) > 12 else "")
+            )
         if mode == "smoke":
             targets = {capture.target for capture in verified if capture.scenario_id in required_ids}
             if targets != {"phone", "tv"}:
@@ -2521,6 +2597,8 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                     kind="action",
                     content_description="Reset connection",
                     require_clickable=True,
+                    require_button_role=True,
+                    require_enabled=True,
                 ),
             ]
         )
@@ -2532,6 +2610,8 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                     kind="recovery-action",
                     content_description=label,
                     require_clickable=True,
+                    require_button_role=True,
+                    require_enabled=True,
                 )
             )
     elif scenario.id.startswith("tv-"):
@@ -2549,6 +2629,8 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                     content_description_contains="Aurora Station",
                     require_content_description=True,
                     require_focusable=True,
+                    require_button_role=True,
+                    require_enabled=True,
                 )
             )
         else:
@@ -2566,6 +2648,8 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                         tag=action_tag,
                         require_content_description=True,
                         require_focusable=True,
+                        require_button_role=True,
+                        require_enabled=True,
                     )
                 )
     return requirements
@@ -2595,8 +2679,10 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
             kind="action",
             tag=theater_plate_tag(target, "action", state_key, "primary"),
             content_description=primary_action,
-            require_clickable=target == "phone",
+            require_clickable=True,
             require_focusable=focus_required,
+            require_button_role=True,
+            require_enabled=True,
         ),
         AccessibilityRequirement(
             key="theater-media-hero",
@@ -2604,7 +2690,10 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
             tag=theater_plate_tag(target, "media", state_key, "hero"),
             content_description_contains="Theater Plate media",
             require_content_description=True,
+            require_clickable=True,
             require_focusable=focus_required,
+            require_button_role=True,
+            require_enabled=True,
         ),
         AccessibilityRequirement(
             key="theater-rail",
@@ -2613,14 +2702,18 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
             require_content_description=True,
         ),
     ]
-    if target == "phone" and state_key in {"stale-offline", "recovery"}:
-        for label in ("Retry", "Change server", "Clear cache", "Reset connection", "Diagnostics / Export diagnostics"):
+    if state_key in {"stale-offline", "recovery"}:
+        for action_key, action_label in THEATER_PLATE_RECOVERY_ACTIONS:
             requirements.append(
                 AccessibilityRequirement(
-                    key=f"theater-recovery-{label.lower().replace(' ', '-')}",
+                    key=f"theater-recovery-{action_key}",
                     kind="recovery-action",
-                    content_description=label,
+                    tag=theater_plate_tag(target, "action", state_key, action_key),
+                    content_description=action_label,
                     require_clickable=True,
+                    require_focusable=focus_required,
+                    require_button_role=True,
+                    require_enabled=True,
                 )
             )
     if state_key == "search":
@@ -2630,19 +2723,34 @@ def theater_plate_accessibility_requirements(scenario: Scenario, state_key: str)
                 kind="action",
                 tag=theater_plate_tag(target, "search", state_key, "field"),
                 content_description="Search Theater Plate",
-                require_clickable=target == "phone",
+                require_clickable=True,
                 require_focusable=focus_required,
+                require_button_role=True,
+                require_enabled=True,
             )
         )
     if state_key == "playback-entry":
-        requirements.append(
-            AccessibilityRequirement(
-                key="theater-playback-entry",
-                kind="action",
-                content_description="Resume playback",
-                require_clickable=target == "phone",
-                require_focusable=focus_required,
-            )
+        requirements.extend(
+            [
+                AccessibilityRequirement(
+                    key="theater-playback-entry",
+                    kind="action",
+                    tag=theater_plate_tag(target, "action", state_key, "primary"),
+                    content_description="Resume playback",
+                    require_clickable=True,
+                    require_focusable=focus_required,
+                    require_button_role=True,
+                    require_enabled=True,
+                ),
+                AccessibilityRequirement(
+                    key="theater-playback-disabled-network",
+                    kind="disabled-action",
+                    tag=theater_plate_tag(target, "action", state_key, "network-required"),
+                    content_description="Network playback requires a playback ticket",
+                    require_button_role=True,
+                    require_disabled=True,
+                ),
+            ]
         )
     return requirements
 
@@ -2652,6 +2760,13 @@ def accessibility_requirements_for_scenario(scenario: Scenario) -> list[Accessib
     if state_key is not None:
         return theater_plate_accessibility_requirements(scenario, state_key)
     return legacy_accessibility_requirements(scenario)
+
+
+def scenario_root_tag(requirements: Sequence[AccessibilityRequirement]) -> str | None:
+    for requirement in requirements:
+        if requirement.key in {"root-tag", "theater-root"} and requirement.tag:
+            return requirement.tag
+    return None
 
 
 def accessibility_dump_strategy(
@@ -2686,12 +2801,56 @@ def accessibility_dump_strategy(
     )
 
 
-def dump_accessibility_xml_safe(adb: str, config: TargetConfig, remote_path: str) -> str:
-    try:
-        adb_shell(adb, config.serial, "uiautomator", "dump", "--compressed", remote_path, timeout=90)
-        return adb_shell(adb, config.serial, "cat", remote_path, timeout=30).stdout
-    finally:
-        adb_shell(adb, config.serial, "rm", "-f", remote_path, check=False, timeout=30)
+def accessibility_remote_dump_path(attempt: int | None = None) -> str:
+    suffix = f"{os.getpid()}-{time.monotonic_ns()}"
+    if attempt is not None:
+        suffix = f"{suffix}-{attempt}"
+    return f"/sdcard/ferrex-visual-qa-accessibility-{suffix}.xml"
+
+
+def dump_accessibility_xml_safe(adb: str, config: TargetConfig, remote_path: str | None = None) -> str:
+    last_error: CommandError | None = None
+    for attempt in range(1, 4):
+        attempt_remote_path = remote_path if remote_path is not None and attempt == 1 else accessibility_remote_dump_path(attempt)
+        try:
+            adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
+            adb_shell(adb, config.serial, "uiautomator", "dump", "--compressed", attempt_remote_path, timeout=90)
+            xml_text = adb_shell(adb, config.serial, "cat", attempt_remote_path, timeout=30).stdout
+            adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
+            return xml_text
+        except CommandError as exc:
+            last_error = exc
+            adb_shell(adb, config.serial, "rm", "-f", attempt_remote_path, check=False, timeout=30)
+            if attempt == 3:
+                raise
+            time.sleep(0.75)
+    if last_error is not None:
+        raise last_error
+    raise VisualQaError("accessibility dump failed without an error")
+
+
+def dump_accessibility_nodes(
+    adb: str,
+    config: TargetConfig,
+    root_tag: str | None,
+    strategy: AccessibilityDumpStrategy | None = None,
+) -> tuple[AccessibilityXmlDump, list[dict[str, str]], int]:
+    attempts = 5
+    last_dump: AccessibilityXmlDump | None = None
+    last_nodes: list[dict[str, str]] = []
+    for attempt in range(1, attempts + 1):
+        dump_result = dump_accessibility_xml_result(adb, config, strategy)
+        nodes = parse_accessibility_nodes(dump_result.xml_text)
+        if root_tag is None or any(node_has_tag(node, root_tag) for node in nodes):
+            return dump_result, nodes, attempt
+        last_dump = dump_result
+        last_nodes = nodes
+        time.sleep(0.5)
+    if root_tag is not None:
+        raise VisualQaError(f"accessibility dump did not include scenario root tag after {attempts} attempt(s): {root_tag}")
+    if last_dump is not None:
+        return last_dump, last_nodes, attempts
+    raise VisualQaError("accessibility dump did not return any XML")
 
 
 def dump_accessibility_xml_batched(adb: str, config: TargetConfig, remote_path: str) -> str:
@@ -2711,7 +2870,7 @@ def dump_accessibility_xml_result(
     config: TargetConfig,
     strategy: AccessibilityDumpStrategy | None = None,
 ) -> AccessibilityXmlDump:
-    remote_path = f"/sdcard/ferrex-visual-qa-accessibility-{os.getpid()}.xml"
+    remote_path = accessibility_remote_dump_path()
     selected = strategy or AccessibilityDumpStrategy(
         name="safe-sequence",
         batched=False,
@@ -2742,9 +2901,9 @@ def dump_accessibility_xml(adb: str, config: TargetConfig) -> str:
 def drive_accessibility_reachability_step(adb: str, config: TargetConfig, profile: ViewportProfile) -> None:
     width, height = profile.expected_size
     if config.target == "tv":
-        for _ in range(5):
-            adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_DPAD_DOWN", timeout=30)
-            time.sleep(0.05)
+        adb_shell(adb, config.serial, "input", "keyevent", "KEYCODE_DPAD_DOWN", timeout=30)
+        time.sleep(0.25)
+        return
     adb_shell(
         adb,
         config.serial,
@@ -2821,9 +2980,24 @@ def node_matches_requirement(node: Mapping[str, str], requirement: Accessibility
             return False
     if requirement.require_content_description and not subtree_descriptions:
         return False
+    if requirement.require_button_role:
+        class_name = node.get("class", "") or node.get("className", "")
+        if (
+            "Button" not in class_name
+            and node.get("clickable") != "true"
+            and node.get("_ancestor_clickable") != "true"
+            and node.get("focusable") != "true"
+            and node.get("enabled") != "false"
+        ):
+            return False
     if requirement.require_clickable and node.get("clickable") != "true" and node.get("_ancestor_clickable") != "true":
-        return False
+        if not (requirement.require_button_role and node.get("focusable") == "true"):
+            return False
     if requirement.require_focusable and node.get("focusable") != "true" and node.get("_ancestor_focusable") != "true":
+        return False
+    if requirement.require_enabled and node.get("enabled") == "false":
+        return False
+    if requirement.require_disabled and node.get("enabled") != "false":
         return False
     return True
 
@@ -2949,18 +3123,21 @@ def accessibility_one(
             with timing.step("launch"):
                 record["launch"] = launch_scenario(adb, config, scenario)
             with timing.step("drive"):
-                record["dpad_key_events"] = drive_scenario(adb, config, scenario)
+                record["dpad_key_events"] = []
             with timing.step("settle"):
                 time.sleep(settle_ms / 1000.0)
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             nodes: list[dict[str, str]] = []
             dump_paths: list[str] = []
+            dump_attempts: list[int] = []
+            root_tag = scenario_root_tag(requirements)
             steps: list[dict[str, object]] = []
             seen_node_fingerprints: set[tuple[tuple[str, str], ...]] = set()
             previous_passed_requirement_keys: set[str] = set()
             no_progress_streak = 0
             final_checks: list[dict[str, object]] = []
             record["dump_paths"] = dump_paths
+            record["dump_attempts"] = dump_attempts
             record["accessibility_steps"] = steps
             record["dump_command_strategies_used"] = []
             for step in range(max_steps):
@@ -2976,11 +3153,13 @@ def accessibility_one(
 
                 dump_started = timing.now()
                 with timing.step("accessibility_dump"):
-                    dump_result = dump_accessibility_xml_result(adb, config, dump_strategy)
+                    dump_result, step_nodes, attempts = dump_accessibility_nodes(adb, config, root_tag, dump_strategy)
                 step_timings["dump"] = timing.elapsed_ms_since(dump_started)
                 xml_text = dump_result.xml_text
-                step_path.write_text(redact_text(xml_text), encoding="utf-8")
+                step_path.write_text(redact_xml_text(xml_text), encoding="utf-8")
                 dump_paths.append(str(step_path))
+                dump_attempts.append(attempts)
+                step_record["dump_attempts"] = attempts
                 step_record["dump_command_strategy"] = dump_result.command_strategy
                 if dump_result.fallback_reason is not None:
                     step_record["dump_fallback_reason"] = dump_result.fallback_reason
@@ -2992,10 +3171,6 @@ def accessibility_one(
                     }
                 )
 
-                parse_started = timing.now()
-                with timing.step("accessibility_parse"):
-                    step_nodes = parse_accessibility_nodes(xml_text)
-                step_timings["parse"] = timing.elapsed_ms_since(parse_started)
                 step_fingerprints = {accessibility_node_fingerprint(node) for node in step_nodes}
                 new_node_fingerprints = step_fingerprints - seen_node_fingerprints
                 seen_node_fingerprints.update(step_fingerprints)
@@ -3280,6 +3455,7 @@ def run_capture_plan(
         "screenshot": screenshot_manifest_config(args),
         "command_versions": command_versions.value,
         "command_versions_cache": command_versions.provenance,
+        "profile_deferrals": [],
         "captures": [],
         "failures": [],
         "viewport_events": [],
@@ -3546,6 +3722,7 @@ def write_gate_failure_manifest(
         "capture_plan": capture_plan,
         "screenshot": screenshot_manifest_config(capture_args),
         "command_versions": collect_command_versions(args.adb, Path(__file__).resolve()),
+        "profile_deferrals": [],
         "captures": [],
         "failures": [gate_failure_record(gate_primitives, error)],
         "status": "failed",

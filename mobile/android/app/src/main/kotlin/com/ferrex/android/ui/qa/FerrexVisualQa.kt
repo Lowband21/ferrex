@@ -319,6 +319,7 @@ data class VisualQaRecoveryActionSample(
     val label: String,
     val role: FerrexActionRole,
     val requiresDataWipe: Boolean = false,
+    val enabled: Boolean = true,
 )
 
 data class VisualQaMediaCardSample(
@@ -516,8 +517,8 @@ object FerrexVisualQaScenarios {
             id = FerrexQaScenarioIds.TvHomeFocus,
             device = VisualQaDevice.Tv,
             kind = VisualQaScenarioKind.TvHomeFocus,
-            title = "TV home focus",
-            description = "TV home action row with deterministic D-pad focus targets for search, retry, and diagnostics.",
+            title = "TV Theater Plate home focus",
+            description = "TV Theater Plate home stage with deterministic D-pad focus targets for search, retry, diagnostics, and recovery shelves.",
             testTag = FerrexQaTags.Tv.surface("home-actions"),
             evidencePath = "Debug Visual QA → TV home focus",
             fixtureSamples = listOf("tv.action.home-actions.search", "tv.action.home-actions.retry"),

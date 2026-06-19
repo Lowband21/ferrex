@@ -25,6 +25,9 @@ object TvHomeFocusPolicy {
         continueWatchingKeys.firstOrNull()?.let { key ->
             return TvFocusKey(SCREEN_HOME, SURFACE_CONTINUE_WATCHING, key)
         }
+        if (searchAvailable && ITEM_SEARCH in homeActionKeys) {
+            return TvFocusKey(SCREEN_HOME, SURFACE_HOME_ACTIONS, ITEM_SEARCH)
+        }
         homeActionKeys.firstOrNull()?.let { key ->
             return TvFocusKey(SCREEN_HOME, SURFACE_HOME_ACTIONS, key)
         }

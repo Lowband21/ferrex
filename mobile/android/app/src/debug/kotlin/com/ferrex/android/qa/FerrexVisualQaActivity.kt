@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +38,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -502,8 +505,15 @@ private fun TheaterPlateScenario(
                             TheaterPlateStatus(target = target, state = state, density = stageDensity)
                         } else {
                             TheaterPlateStatus(target = target, state = state, density = stageDensity)
+                            TheaterPlateRail(
+                                target = target,
+                                state = state,
+                                tv = true,
+                                densityRole = densityRole,
+                                density = stageDensity,
+                                compact = true,
+                            )
                             TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
-                            TheaterPlateRail(target = target, state = state, tv = true, densityRole = densityRole, density = stageDensity)
                         }
                     }
                     Column(
@@ -518,7 +528,7 @@ private fun TheaterPlateScenario(
                             TheaterPlateMediaCard(target = target, state = state, tv = true, densityRole = densityRole)
                             TheaterPlateActions(target = target, state = state, tv = true, includePrimary = false)
                         } else {
-                            TheaterPlateActions(target = target, state = state, tv = true)
+                            TheaterPlateActions(target = target, state = state, tv = true, includePrimary = true)
                         }
                     }
                 }
@@ -624,10 +634,12 @@ private fun QaTvTheaterPlateMediaCard(
             .fillMaxWidth()
             .widthIn(max = FerrexDesignTokens.Tv.DetailMaxWidth)
             .testTag(tag)
+            .clickable(onClick = {})
             .onFocusChanged { focused = it.isFocused }
             .semantics(mergeDescendants = true) {
                 role = Role.Button
                 this.contentDescription = contentDescription
+                onClick(label = contentDescription) { true }
             }
             .focusable(),
         shape = FerrexDesignTokens.Shapes.PosterCard,
@@ -688,15 +700,23 @@ private fun TheaterPlateActions(
 ) {
     val primary = VisualQaRecoveryActionSample("primary", state.primaryActionLabel, FerrexActionRole.Primary)
     val actions = buildList {
-        if (includePrimary) add(primary)
+        if (includePrimary || state == VisualQaTheaterPlateState.PlaybackEntry) add(primary)
         if (includeSupportingActions) {
             if (state == VisualQaTheaterPlateState.Recovery || state == VisualQaTheaterPlateState.StaleOffline) {
                 addAll(FerrexVisualQaFixtures.noWipeCacheRecoveryActions)
             } else {
+                if (state == VisualQaTheaterPlateState.PlaybackEntry) {
+                    add(
+                        VisualQaRecoveryActionSample(
+                            key = "network-required",
+                            label = "Network playback requires a playback ticket",
+                            role = FerrexActionRole.Secondary,
+                            enabled = false,
+                        ),
+                    )
+                    add(VisualQaRecoveryActionSample("start-over", "Start over", FerrexActionRole.Secondary))
+                }
                 add(VisualQaRecoveryActionSample("diagnostics", "Diagnostics / Export diagnostics", FerrexActionRole.Secondary))
-            }
-            if (state == VisualQaTheaterPlateState.PlaybackEntry) {
-                add(VisualQaRecoveryActionSample("start-over", "Start over", FerrexActionRole.Secondary))
             }
         }
     }
@@ -728,6 +748,7 @@ private fun TheaterPlateActions(
                     role = action.role,
                     onClick = {},
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = action.enabled,
                     testTag = FerrexQaTags.TheaterPlate.action(target, state.key, key),
                     contentDescription = action.label,
                 )
@@ -751,7 +772,10 @@ private fun TheaterPlateRail(
         variant = if (compact) FerrexStageSurfaceVariant.FactRibbon else FerrexStageSurfaceVariant.RailBand,
         density = density,
         tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.widthIn(max = if (tv) FerrexDesignTokens.Tv.DetailMaxWidth else 640.dp),
+        modifier = Modifier
+            .widthIn(max = if (tv) FerrexDesignTokens.Tv.DetailMaxWidth else 640.dp)
+            .then(if (tv) Modifier.focusable() else Modifier),
+        onClick = if (tv) ({}) else null,
         testTag = tag,
         contentDescription = description,
     ) {
@@ -1035,24 +1059,39 @@ private fun QaTvFocusableAction(
     var focused by remember { mutableStateOf(false) }
     val tone = action.role.statusTone()
     val colors = tone.colors()
+    val enabled = action.enabled
     Surface(
         modifier = Modifier
             .widthIn(max = FerrexDesignTokens.Tv.ActionPanelMaxWidth)
             .fillMaxWidth()
             .heightIn(min = FerrexDesignTokens.Focus.TvButtonMinHeight)
             .testTag(testTag)
+            .clickable(enabled = enabled, role = Role.Button, onClick = {})
             .onFocusChanged { focused = it.isFocused }
             .semantics(mergeDescendants = true) {
                 role = Role.Button
                 this.contentDescription = contentDescription
+                if (enabled) {
+                    onClick(label = contentDescription) { true }
+                } else {
+                    disabled()
+                }
             }
             .focusable(),
         shape = FerrexDesignTokens.Shapes.FocusSurface,
-        color = if (focused) colors.container.copy(alpha = 0.96f) else colors.container,
-        contentColor = colors.content,
+        color = when {
+            !enabled -> colors.container.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContainer)
+            focused -> colors.container.copy(alpha = 0.96f)
+            else -> colors.container
+        },
+        contentColor = if (enabled) colors.content else colors.content.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent),
         border = BorderStroke(
             width = if (focused) FerrexDesignTokens.Focus.TvFocusedBorder else FerrexDesignTokens.Focus.TvRestingBorder,
-            color = if (focused) colors.accent else colors.border,
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                focused -> colors.accent
+                else -> colors.border
+            },
         ),
     ) {
         Text(
@@ -1072,10 +1111,13 @@ private fun QaTvPosterCard(card: VisualQaMediaCardSample) {
         modifier = Modifier
             .fillMaxWidth()
             .testTag(card.testTag)
+            .clickable(onClick = {})
             .onFocusChanged { focused = it.isFocused }
             .semantics(mergeDescendants = true) {
+                val description = "${card.title} ${card.subtitle}"
                 role = Role.Button
-                contentDescription = "${card.title} ${card.subtitle}"
+                contentDescription = description
+                onClick(label = description) { true }
             }
             .focusable(),
         shape = FerrexDesignTokens.Shapes.PosterCard,
