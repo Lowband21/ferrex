@@ -108,6 +108,88 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertIn("<redacted>", redacted)
         self.assertIn("<redacted-origin>", redacted)
 
+    def test_timing_summary_aggregates_records_breakdowns_and_adb(self) -> None:
+        records = [
+            {
+                "target": "phone",
+                "profile": "phone-portrait",
+                "timings_ms": {"total": 100},
+                "screenshot_capture": {"method": "adb-exec-out-screencap"},
+                "adb_command_summary": {
+                    "total_count": 2,
+                    "total_duration_ms": 30,
+                    "categories": {"shell:wm": {"count": 2, "duration_ms": 30}},
+                },
+            },
+            {
+                "target": "phone",
+                "profile": "phone-landscape-foldable",
+                "timings_ms": {"total": 200},
+                "screenshot_capture": {"method": "nix-screenshot-helper"},
+                "adb_command_summary": {
+                    "total_count": 1,
+                    "total_duration_ms": 10,
+                    "categories": {"shell:am": {"count": 1, "duration_ms": 10}},
+                },
+            },
+            {
+                "target": "tv",
+                "profile": "tv-1080p",
+                "timings_ms": {"total": 300},
+                "screenshot_capture": {"method": "adb-exec-out-screencap"},
+                "adb_command_summary": {
+                    "total_count": 1,
+                    "total_duration_ms": 50,
+                    "categories": {"exec-out:screencap": {"count": 1, "duration_ms": 50}},
+                },
+            },
+        ]
+
+        summary = android_visual_qa.build_timing_summary(
+            records,
+            gate_primitives=[{"name": "build", "status": "passed", "duration_ms": 50}],
+            manifest_write_ms=7,
+        )
+
+        self.assertEqual(summary["record_count"], 3)
+        self.assertEqual(summary["total"], 657)
+        self.assertEqual(summary["p50"], 200)
+        self.assertEqual(summary["p95"], 300)
+        self.assertEqual(summary["max"], 300)
+        self.assertEqual(summary["target_breakdown"]["phone"]["total"], 300)
+        self.assertEqual(summary["profile_breakdown"]["tv-1080p"]["max"], 300)
+        self.assertEqual(summary["method_breakdown"]["adb-exec-out-screencap"]["count"], 2)
+        self.assertEqual(summary["gate_primitive_durations"], {"build": 50})
+        self.assertEqual(summary["adb_commands"]["total_count"], 4)
+        self.assertEqual(summary["adb_commands"]["categories"]["shell:wm"]["duration_ms"], 30)
+
+    def test_adb_timing_summary_records_categories_without_sensitive_args(self) -> None:
+        recorder = android_visual_qa.TimingRecorder()
+        recorder.record_adb_command(
+            [
+                "adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "am",
+                "start",
+                "--es",
+                "access_token",
+                "secret-token",
+                "https://media.example.com/private",
+            ],
+            12,
+        )
+
+        serialized = json.dumps(recorder.adb_command_summary(), sort_keys=True)
+
+        self.assertIn("shell:am", serialized)
+        self.assertIn("duration_ms", serialized)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("access_token", serialized)
+        self.assertNotIn("media.example.com", serialized)
+        self.assertNotIn("emulator-5554", serialized)
+
     def test_hardware_mode_requires_explicit_serial(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
             args = SimpleNamespace(
@@ -273,6 +355,20 @@ class AndroidVisualQaTest(unittest.TestCase):
 
         def fake_capture_plan(**kwargs: object) -> int:
             calls.append(f"capture:{kwargs['mode']}")
+            output_dir = Path(kwargs["output_dir"])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "passed",
+                        "output_dir": str(output_dir),
+                        "captures": [],
+                        "failures": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
             return 0
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -308,6 +404,8 @@ class AndroidVisualQaTest(unittest.TestCase):
                 "print_artifact_summary",
             ):
                 status = android_visual_qa.run_gate(args)
+            manifest = json.loads((Path(tmp) / "manifest.json").read_text(encoding="utf-8"))
+            gate_primitives = manifest["timing_summary"]["gate_primitives"]
 
         self.assertEqual(status, 0)
         self.assertEqual(
@@ -321,6 +419,11 @@ class AndroidVisualQaTest(unittest.TestCase):
                 "primitive:android-emulator-qa.sh:check:all",
             ],
         )
+        self.assertEqual(
+            [primitive["name"] for primitive in gate_primitives],
+            ["build", "start", "doctor", "install", "capture", "check", "verify"],
+        )
+        self.assertTrue(all(primitive["status"] == "passed" for primitive in gate_primitives))
 
 
 if __name__ == "__main__":
