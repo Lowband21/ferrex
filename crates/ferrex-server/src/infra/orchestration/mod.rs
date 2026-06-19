@@ -19,10 +19,14 @@ use ferrex_core::database::PostgresDatabase;
 use ferrex_core::database::repositories::{
     manifest::PostgresManifestRepository, media::PostgresMediaRepository,
 };
+use ferrex_core::database::repository_ports::manifest::{
+    ManifestDeferredWatchHintFilter, ManifestDeferredWatchHintStatus,
+    ManifestRepository,
+};
 use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
 use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
-    LibraryActorConfig, LibraryRootsId, NoopActorObserver, StartMode,
+    LibraryActorConfig, LibraryRootsId, NoopActorObserver,
     analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
     folder::{FolderScanActor, ScannerFileFilterPolicy},
 };
@@ -35,14 +39,19 @@ use ferrex_core::domain::scan::orchestration::{
     budget::InMemoryBudget,
     config::OrchestratorConfig,
     correlation::CorrelationCache,
-    dispatcher::{DefaultJobDispatcher, DispatcherActors, JobDispatcher},
+    dispatcher::{
+        DefaultJobDispatcher, DefaultManifestScanExecutor, DispatcherActors,
+        JobDispatcher,
+    },
     events::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind, JobPriority, ScanReason},
+    job::{
+        EnqueueRequest, JobHandle, JobKind, JobPriority, ManifestScanJob,
+        ManifestScanTrigger, ScanReason,
+    },
     lease::{DequeueRequest, JobLease},
-    manifest_reconcile::{ManifestReconcileInput, ManifestReconciler},
     queue::QueueService,
     runtime::{
         InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
@@ -56,9 +65,10 @@ use ferrex_core::domain::scan::orchestration::{
 };
 use ferrex_core::domain::scan::{
     FileChangeEventBus, FsWatchConfig, FsWatchObserver, FsWatchService,
-    ManifestLibraryRoot, ManifestRootId, ManifestScope, ManifestWalkLimits,
-    ManifestWalker, PostgresCursorRepository, PostgresFileChangeEventBus,
-    PostgresQueueService, ScannerLayoutContract, SeriesScanStateRepository,
+    ManifestPartitionId, ManifestPartitionScope, ManifestRootId,
+    ManifestRootScope, ManifestScope, ManifestWalkLimits, ManifestWalker,
+    PostgresCursorRepository, PostgresFileChangeEventBus, PostgresQueueService,
+    ScannerLayoutContract, SeriesScanStateRepository,
 };
 use ferrex_core::error::{MediaError, Result};
 use ferrex_core::infra::media::{
@@ -69,14 +79,6 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
 
 mod maintenance;
-
-fn scan_reason_for_start_mode(mode: StartMode) -> ScanReason {
-    match mode {
-        StartMode::Bulk => ScanReason::BulkSeed,
-        StartMode::Maintenance => ScanReason::MaintenanceSweep,
-        StartMode::Resume => ScanReason::UserRequested,
-    }
-}
 
 #[derive(Debug, Default)]
 struct ScanWatchObserver {
@@ -118,6 +120,12 @@ struct CursorHealth {
     oldest_cursor_staleness_ms: Option<u64>,
 }
 
+#[derive(Debug, Default)]
+struct ManifestHealth {
+    stale_partitions: u64,
+    pending_watch_hints: u64,
+}
+
 pub struct ScanOrchestrator {
     runtime: Arc<
         OrchestratorRuntime<
@@ -155,6 +163,20 @@ impl ScanOrchestrator {
     ) -> Result<Self> {
         let events = Arc::new(InProcJobEventBus::new(256));
         let correlations = CorrelationCache::default();
+        let manifest_contract = ScannerLayoutContract::new(
+            file_filters
+                .media_extensions()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            file_filters
+                .ignored_extensions()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            file_filters
+                .ignored_path_patterns()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+        );
         let actors = Arc::new(ActorSystem::new(
             Arc::clone(&tmdb),
             Arc::clone(&image_service),
@@ -184,6 +206,21 @@ impl ScanOrchestrator {
 
         let delta_repo =
             Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
+        let manifest_repo =
+            Arc::new(PostgresManifestRepository::new(queue.pool().clone()));
+        let manifest_media =
+            Arc::new(PostgresMediaRepository::new(queue.pool().clone()));
+        let manifest_executor = Arc::new(DefaultManifestScanExecutor::new(
+            ManifestWalker::new(
+                manifest_contract,
+                ManifestWalkLimits::default(),
+            ),
+            manifest_repo,
+            manifest_media,
+            Arc::clone(&queue),
+            Arc::clone(&events),
+            Arc::clone(&cursors),
+        ));
         let dispatcher: Arc<dyn JobDispatcher> = Arc::new(
             DefaultJobDispatcher::new(
                 Arc::clone(&queue),
@@ -194,7 +231,8 @@ impl ScanOrchestrator {
                 dispatcher_actors,
                 correlations.clone(),
             )
-            .with_delta_repository(delta_repo),
+            .with_delta_repository(delta_repo)
+            .with_manifest_executor(manifest_executor),
         );
 
         let watch_cfg = config.watch.clone();
@@ -271,114 +309,116 @@ impl ScanOrchestrator {
         library_id: LibraryId,
         command: LibraryActorCommand,
     ) -> Result<()> {
-        if let LibraryActorCommand::Start { mode, .. } = &command {
-            let reason = scan_reason_for_start_mode(*mode);
-            if let Err(err) =
-                self.reconcile_manifest_roots(library_id, reason).await
-            {
-                warn!(
-                    library_id = %library_id,
-                    error = %err,
-                    "manifest reconciliation failed; continuing with folder scan pipeline"
-                );
-            }
-        }
-
         self.runtime
             .submit_library_command(library_id, command)
             .await
     }
 
-    async fn reconcile_manifest_roots(
+    pub async fn recover_library_scan_state(
         &self,
         library_id: LibraryId,
-        scan_reason: ScanReason,
+        correlation_id: uuid::Uuid,
+    ) -> Result<()> {
+        self.command_library(
+            library_id,
+            LibraryActorCommand::RecoverStuckScan {
+                correlation_id: Some(correlation_id),
+            },
+        )
+        .await?;
+
+        if let Err(err) =
+            self.watchers.replay_unprocessed_events(library_id).await
+        {
+            warn!(
+                library = %library_id,
+                error = %err,
+                "failed to replay durable watch events during scan recovery"
+            );
+        }
+
+        self.replay_manifest_deferred_hints(library_id, correlation_id)
+            .await
+    }
+
+    async fn replay_manifest_deferred_hints(
+        &self,
+        library_id: LibraryId,
+        correlation_id: uuid::Uuid,
     ) -> Result<()> {
         let library = self
             .unit_of_work
             .libraries
             .get_library_reference(library_id.0)
             .await?;
-        let walker = ManifestWalker::new(
-            self.manifest_layout_contract(),
-            ManifestWalkLimits::default(),
+        let repo = PostgresManifestRepository::new(
+            self.runtime.queue().pool().clone(),
         );
-        let pool = self.runtime.queue().pool().clone();
-        let manifest = Arc::new(PostgresManifestRepository::new(pool.clone()));
-        let media = Arc::new(PostgresMediaRepository::new(pool));
-        let reconciler = ManifestReconciler::new(
-            manifest,
-            media,
-            self.runtime.queue(),
-            Arc::clone(&self.events),
-            Arc::clone(&self.cursors),
-        );
+        let hints = repo
+            .list_deferred_watch_hints(ManifestDeferredWatchHintFilter {
+                library_id: Some(library_id),
+                status: Some(ManifestDeferredWatchHintStatus::Pending),
+                available_before: Some(chrono::Utc::now()),
+                limit: Some(256),
+            })
+            .await?;
 
-        for (idx, root_path) in library.paths.iter().enumerate() {
-            let root_id = u16::try_from(idx).map_err(|_| {
-                MediaError::InvalidMedia(format!(
-                    "library {library_id} has more than {} manifest roots",
-                    u16::MAX
-                ))
-            })?;
-            let root = ManifestLibraryRoot::new(
-                library.id,
-                library.library_type,
-                ManifestRootId(root_id),
-                root_path.clone(),
-            );
-            let walk = match walker.walk_root(&root) {
-                Ok(walk) => walk,
-                Err(err) => {
-                    warn!(
-                        library_id = %library_id,
-                        root = %root_path.display(),
-                        error = %err,
-                        "manifest root walk failed; skipping this root"
-                    );
-                    continue;
-                }
+        for hint in hints {
+            let root = ManifestRootScope {
+                library_id,
+                library_type: library.library_type,
+                root_id: ManifestRootId(hint.root_id),
+                root_path_norm: hint.root_path_norm.clone(),
             };
-            let input = ManifestReconcileInput::successful(
-                uuid::Uuid::now_v7(),
-                ManifestScope::Root(root.root_scope()),
-                walk.batches,
-                walk.supported_media,
-                scan_reason,
+            let scope = if hint.path_norm == hint.root_path_norm
+                || hint.hint_kind == "overflow"
+            {
+                ManifestScope::Root(root)
+            } else {
+                ManifestScope::Partition(ManifestPartitionScope {
+                    root,
+                    partition_id: ManifestPartitionId(
+                        (hint.id.as_u128() & u128::from(u16::MAX)) as u16,
+                    ),
+                    prefix_norm: Some(hint.path_norm.clone()),
+                })
+            };
+            let mut request = EnqueueRequest::new(
+                JobPriority::P0,
+                ferrex_core::domain::scan::orchestration::JobPayload::ManifestScan(
+                    ManifestScanJob {
+                        scope,
+                        scan_reason: ScanReason::HotChange,
+                        enqueue_time: chrono::Utc::now(),
+                        trigger: ManifestScanTrigger::Recovery,
+                    },
+                ),
             );
-            let summary = reconciler.reconcile_run(input).await?;
-            info!(
-                library_id = %library_id,
-                root = %root_path.display(),
-                entries_seen = summary.entries_seen,
-                media_enqueued = summary.media_enqueued,
-                media_moved = summary.media_moved,
-                media_tombstoned = summary.media_tombstoned,
-                "manifest root reconciled into scan pipeline"
-            );
+            request.correlation_id = Some(correlation_id);
+            match self.enqueue(request).await {
+                Ok(_) => {
+                    let _ = repo
+                        .update_deferred_watch_hint_status(
+                            hint.id,
+                            ManifestDeferredWatchHintStatus::Applied,
+                            None,
+                        )
+                        .await;
+                }
+                Err(err) => {
+                    let _ = repo
+                        .update_deferred_watch_hint_status(
+                            hint.id,
+                            ManifestDeferredWatchHintStatus::Pending,
+                            Some(err.to_string()),
+                        )
+                        .await;
+                    return Err(err);
+                }
+            }
         }
 
         Ok(())
-    }
-
-    fn manifest_layout_contract(&self) -> ScannerLayoutContract {
-        ScannerLayoutContract::new(
-            self.actors
-                .file_filters
-                .media_extensions()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-            self.actors
-                .file_filters
-                .ignored_extensions()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-            self.actors
-                .file_filters
-                .ignored_path_patterns()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-        )
     }
 
     pub fn cursor_repository(&self) -> Arc<PostgresCursorRepository> {
@@ -441,6 +481,7 @@ impl ScanOrchestrator {
             self.watch_observer.snapshot();
         let file_watch = self.file_watch_health().await?;
         let cursor = self.cursor_health().await?;
+        let manifest = self.manifest_health(&libraries).await?;
 
         Ok(IncrementalScanStatusView {
             enabled_libraries,
@@ -460,6 +501,8 @@ impl ScanOrchestrator {
             stale_cursor_libraries: cursor.stale_cursor_libraries,
             stale_cursors: cursor.stale_cursors,
             oldest_cursor_staleness_ms: cursor.oldest_cursor_staleness_ms,
+            manifest_stale_partitions: manifest.stale_partitions,
+            manifest_pending_watch_hints: manifest.pending_watch_hints,
         })
     }
 
@@ -524,6 +567,48 @@ impl ScanOrchestrator {
             oldest_cursor_staleness_ms: row
                 .oldest_cursor_staleness_ms
                 .map(|value| value.max(0) as u64),
+        })
+    }
+
+    async fn manifest_health(
+        &self,
+        libraries: &[ferrex_core::types::library::Library],
+    ) -> Result<ManifestHealth> {
+        let repo = PostgresManifestRepository::new(
+            self.runtime.queue().pool().clone(),
+        );
+        let now = chrono::Utc::now();
+        let mut stale_partitions = 0u64;
+
+        for library in libraries
+            .iter()
+            .filter(|library| library.enabled && library.auto_scan)
+        {
+            let older_than = now
+                - chrono::Duration::minutes(
+                    library.scan_interval_minutes.max(1) as i64,
+                );
+            let stale = repo
+                .list_stale_partitions(library.id, older_than, 1_000)
+                .await?;
+            stale_partitions = stale_partitions
+                .saturating_add(stale.len().try_into().unwrap_or(u64::MAX));
+        }
+
+        let pending_watch_hints = repo
+            .list_deferred_watch_hints(ManifestDeferredWatchHintFilter {
+                status: Some(ManifestDeferredWatchHintStatus::Pending),
+                limit: Some(1_000),
+                ..ManifestDeferredWatchHintFilter::default()
+            })
+            .await?
+            .len()
+            .try_into()
+            .unwrap_or(u64::MAX);
+
+        Ok(ManifestHealth {
+            stale_partitions,
+            pending_watch_hints,
         })
     }
 
@@ -731,6 +816,7 @@ impl ScanOrchestrator {
         let queue = self.runtime.queue();
         Ok(ferrex_core::api::scan::ScanQueueDepths {
             folder_scan: queue.queue_depth(JobKind::FolderScan).await?,
+            manifest_scan: queue.queue_depth(JobKind::ManifestScan).await?,
             analyze: queue.queue_depth(JobKind::MediaAnalyze).await?,
             metadata: queue.queue_depth(JobKind::MetadataEnrich).await?,
             index: queue.queue_depth(JobKind::IndexUpsert).await?,

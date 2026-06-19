@@ -7,6 +7,7 @@ use crate::{
 };
 
 use super::config::PriorityWeights;
+use crate::domain::scan::manifest::ManifestScope;
 use crate::domain::scan::orchestration::context::{
     EpisodeScanHierarchy, FolderScanContext, MovieScanHierarchy, ScanNodeKind,
     SeasonScanHierarchy, SeriesHint, SeriesRootPath, SeriesScanHierarchy,
@@ -89,6 +90,7 @@ pub enum JobKind {
     IndexUpsert = 4,
     ImageFetch = 5,
     EpisodeMatch = 6,
+    ManifestScan = 7,
 }
 
 impl JobKind {
@@ -101,6 +103,7 @@ impl JobKind {
             4 => Ok(JobKind::IndexUpsert),
             5 => Ok(JobKind::ImageFetch),
             6 => Ok(JobKind::EpisodeMatch),
+            7 => Ok(JobKind::ManifestScan),
             _ => Err(MediaError::NotFound(
                 "Invalid JobKind provided".to_string(),
             )),
@@ -116,6 +119,7 @@ impl JobKind {
             JobKind::IndexUpsert,
             JobKind::ImageFetch,
             JobKind::EpisodeMatch,
+            JobKind::ManifestScan,
         ]
     }
 }
@@ -130,6 +134,7 @@ impl fmt::Display for JobKind {
             JobKind::IndexUpsert => write!(f, "index upsert"),
             JobKind::ImageFetch => write!(f, "fetch image"),
             JobKind::EpisodeMatch => write!(f, "match episode"),
+            JobKind::ManifestScan => write!(f, "scan manifest"),
         }
     }
 }
@@ -145,6 +150,7 @@ pub enum JobPayload {
     IndexUpsert(IndexUpsertJob),
     ImageFetch(ImageFetchJob),
     EpisodeMatch(EpisodeMatchJob),
+    ManifestScan(ManifestScanJob),
 }
 
 impl JobPayload {
@@ -157,6 +163,7 @@ impl JobPayload {
             JobPayload::IndexUpsert(_) => JobKind::IndexUpsert,
             JobPayload::ImageFetch(_) => JobKind::ImageFetch,
             JobPayload::EpisodeMatch(_) => JobKind::EpisodeMatch,
+            JobPayload::ManifestScan(_) => JobKind::ManifestScan,
         }
     }
 
@@ -169,6 +176,7 @@ impl JobPayload {
             JobPayload::IndexUpsert(job) => job.library_id,
             JobPayload::ImageFetch(job) => job.library_id,
             JobPayload::EpisodeMatch(job) => job.library_id,
+            JobPayload::ManifestScan(job) => job.scope.library_id(),
         }
     }
 
@@ -215,6 +223,10 @@ impl JobPayload {
                     job.library_id,
                     job.path_norm.clone(),
                 ),
+            },
+            JobPayload::ManifestScan(job) => DedupeKey::ManifestScan {
+                library_id: job.scope.library_id().to_uuid(),
+                scope_key: manifest_scan_dedupe_key(job),
             },
         }
     }
@@ -341,6 +353,10 @@ pub enum DedupeKey {
         image_id: Uuid,
         image_size: ImageSize,
     },
+    ManifestScan {
+        library_id: Uuid,
+        scope_key: String,
+    },
 }
 
 impl fmt::Display for DedupeKey {
@@ -382,7 +398,65 @@ impl fmt::Display for DedupeKey {
                 image_size.image_variant(),
                 image_size.width_name(),
             ),
+            DedupeKey::ManifestScan {
+                library_id,
+                scope_key,
+            } => write!(f, "manifest:{}:{}", library_id, scope_key),
         }
+    }
+}
+
+pub fn manifest_scope_key(scope: &ManifestScope) -> String {
+    match scope {
+        ManifestScope::Root(root) => {
+            format!("root:{}:{}", root.root_id.0, root.root_path_norm)
+        }
+        ManifestScope::Partition(partition) => format!(
+            "partition:{}:{}:{}",
+            partition.root.root_id.0,
+            partition.partition_id.0,
+            partition
+                .prefix_norm
+                .as_deref()
+                .unwrap_or(partition.root.root_path_norm.as_str())
+        ),
+    }
+}
+
+fn manifest_scan_dedupe_key(job: &ManifestScanJob) -> String {
+    let scope_key = manifest_scope_key(&job.scope);
+    if manifest_scan_trigger_can_merge(job.trigger) {
+        return scope_key;
+    }
+
+    let enqueue_nanos = job
+        .enqueue_time
+        .timestamp_nanos_opt()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| job.enqueue_time.timestamp_micros().to_string());
+    format!(
+        "{}:{}:{}",
+        scope_key,
+        manifest_scan_trigger_key(job.trigger),
+        enqueue_nanos
+    )
+}
+
+fn manifest_scan_trigger_can_merge(trigger: ManifestScanTrigger) -> bool {
+    matches!(
+        trigger,
+        ManifestScanTrigger::BulkStart | ManifestScanTrigger::Maintenance
+    )
+}
+
+fn manifest_scan_trigger_key(trigger: ManifestScanTrigger) -> &'static str {
+    match trigger {
+        ManifestScanTrigger::BulkStart => "bulk_start",
+        ManifestScanTrigger::Manual => "manual",
+        ManifestScanTrigger::Maintenance => "maintenance",
+        ManifestScanTrigger::WatchChange => "watch_change",
+        ManifestScanTrigger::WatchOverflow => "watch_overflow",
+        ManifestScanTrigger::Recovery => "recovery",
     }
 }
 
@@ -419,6 +493,25 @@ pub struct FolderScanJob {
     pub scan_reason: ScanReason,
     pub enqueue_time: DateTime<Utc>,
     pub device_id: Option<String>,
+}
+
+/// Manifest root or partition observation scheduled through the durable queue.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ManifestScanJob {
+    pub scope: ManifestScope,
+    pub scan_reason: ScanReason,
+    pub enqueue_time: DateTime<Utc>,
+    pub trigger: ManifestScanTrigger,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ManifestScanTrigger {
+    BulkStart,
+    Manual,
+    Maintenance,
+    WatchChange,
+    WatchOverflow,
+    Recovery,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -671,7 +764,9 @@ impl EnqueueRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::scan::manifest::{ManifestRootId, ManifestRootScope};
     use crate::domain::scan::orchestration::context::MovieRootPath;
+    use crate::types::LibraryType;
 
     #[test]
     fn media_analyze_dedupe_key_is_path_scoped() {
@@ -727,5 +822,36 @@ mod tests {
         .dedupe_key();
 
         assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn watch_manifest_dedupe_key_does_not_merge_into_active_bulk_root() {
+        let library_id =
+            LibraryId(Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb));
+        let scope = ManifestScope::Root(ManifestRootScope {
+            library_id,
+            library_type: LibraryType::Movies,
+            root_id: ManifestRootId(0),
+            root_path_norm: "/library".into(),
+        });
+        let enqueue_time = Utc::now();
+
+        let bulk_key = JobPayload::ManifestScan(ManifestScanJob {
+            scope: scope.clone(),
+            scan_reason: ScanReason::BulkSeed,
+            enqueue_time,
+            trigger: ManifestScanTrigger::BulkStart,
+        })
+        .dedupe_key();
+
+        let overflow_key = JobPayload::ManifestScan(ManifestScanJob {
+            scope,
+            scan_reason: ScanReason::WatcherOverflow,
+            enqueue_time,
+            trigger: ManifestScanTrigger::WatchOverflow,
+        })
+        .dedupe_key();
+
+        assert_ne!(bulk_key, overflow_key);
     }
 }

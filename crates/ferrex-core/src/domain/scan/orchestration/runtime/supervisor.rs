@@ -22,7 +22,7 @@ use crate::domain::scan::orchestration::{
     },
     job::{
         DedupeKey, EnqueueRequest, FolderScanJob, JobKind, JobPayload,
-        JobPriority, ScanReason,
+        JobPriority, ManifestScanJob, ScanReason,
     },
     lease::{DequeueRequest, LeaseRenewal, QueueSelector},
     queue::{LeaseExpiryScanner, QueueService},
@@ -238,6 +238,11 @@ where
         )
         .await;
         self.spawn_worker_pool(
+            JobKind::ManifestScan,
+            self.config.queue.max_parallel_scans,
+        )
+        .await;
+        self.spawn_worker_pool(
             JobKind::IndexUpsert,
             self.config.queue.max_parallel_index,
         )
@@ -419,6 +424,17 @@ where
                                     }
                                     crate::domain::scan::actors::LibraryActorEvent::EnqueueMetadataEnrich { job, priority, correlation_id } => {
                                         let payload = JobPayload::MetadataEnrich(*job);
+                                        let mut request = EnqueueRequest::new(priority, payload.clone());
+                                        request.correlation_id = correlation_id;
+                                        batch.push((payload, request));
+                                    }
+                                    crate::domain::scan::actors::LibraryActorEvent::EnqueueManifestScan { scope, priority, reason, trigger, correlation_id } => {
+                                        let payload = JobPayload::ManifestScan(ManifestScanJob {
+                                            scope: *scope,
+                                            scan_reason: reason,
+                                            enqueue_time: chrono::Utc::now(),
+                                            trigger,
+                                        });
                                         let mut request = EnqueueRequest::new(priority, payload.clone());
                                         request.correlation_id = correlation_id;
                                         batch.push((payload, request));
@@ -1375,6 +1391,7 @@ fn workload_for(kind: JobKind) -> WorkloadType {
         JobKind::MediaAnalyze => WorkloadType::MediaAnalysis,
         JobKind::MetadataEnrich => WorkloadType::MetadataEnrichment,
         JobKind::EpisodeMatch => WorkloadType::MetadataEnrichment,
+        JobKind::ManifestScan => WorkloadType::LibraryScan,
         JobKind::IndexUpsert => WorkloadType::Indexing,
         JobKind::ImageFetch => WorkloadType::ImageFetch,
     }

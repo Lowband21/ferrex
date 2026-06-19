@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanQueueDepths {
     pub folder_scan: usize,
+    #[serde(default)]
+    pub manifest_scan: usize,
     pub analyze: usize,
     pub metadata: usize,
     pub index: usize,
@@ -96,6 +98,10 @@ pub struct IncrementalScanStatusView {
     pub stale_cursor_libraries: u64,
     pub stale_cursors: u64,
     pub oldest_cursor_staleness_ms: Option<u64>,
+    #[serde(default)]
+    pub manifest_stale_partitions: u64,
+    #[serde(default)]
+    pub manifest_pending_watch_hints: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

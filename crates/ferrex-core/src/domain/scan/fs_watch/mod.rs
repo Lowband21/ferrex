@@ -254,6 +254,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                 flush_task,
                 tx: tx.clone(),
                 root_count: resolved_roots.len(),
+                roots: resolved_roots.clone(),
             },
         );
         drop(guard);
@@ -378,6 +379,7 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
                 flush_task,
                 tx: tx.clone(),
                 root_count: resolved_roots.len(),
+                roots: resolved_roots.clone(),
             },
         );
         drop(guard);
@@ -447,6 +449,36 @@ impl<O: FsWatchObserver + 'static> FsWatchService<O> {
         }
     }
 
+    /// Replay durable watch events left unprocessed after an unsafe dispatch or
+    /// interrupted watcher loop.
+    pub async fn replay_unprocessed_events(
+        &self,
+        library_id: LibraryId,
+    ) -> Result<()> {
+        let roots = {
+            let guard = self.libraries.read().await;
+            guard
+                .get(&library_id)
+                .map(|watch| watch.roots.clone())
+                .ok_or_else(|| {
+                    MediaError::Internal(format!(
+                        "watcher not registered for library {library_id}"
+                    ))
+                })?
+        };
+
+        replay_unacknowledged_events(
+            library_id,
+            &roots,
+            Arc::clone(&self.observer),
+            Arc::clone(&self.command_executor),
+            self.event_bus.clone(),
+            &self.consumer_group,
+            self.config.max_batch_events,
+        )
+        .await
+    }
+
     #[cfg(test)]
     pub async fn watcher_count(&self) -> usize {
         self.libraries.read().await.len()
@@ -501,6 +533,7 @@ struct LibraryWatch {
     flush_task: JoinHandle<()>,
     tx: mpsc::Sender<WatchMessage>,
     root_count: usize,
+    roots: Vec<(LibraryRootsId, PathBuf)>,
 }
 
 impl LibraryWatch {
@@ -510,6 +543,7 @@ impl LibraryWatch {
             flush_task,
             tx,
             root_count: _,
+            roots: _,
         } = self;
         // Drop watchers first — this stops the notify streams and
         // ensures all in-flight callbacks complete. Drop the retained sender
@@ -1463,14 +1497,13 @@ mod tests {
     use crate::domain::scan::orchestration::scan_cursor::normalize_path;
     use crate::domain::scan::orchestration::{
         CorrelationCache, DefaultLibraryActor, DependencyKey, DispatchStatus,
-        EnqueueRequest, FileSystemEvent, FileSystemEventKind, FolderScanJob,
-        InMemoryBudget, InProcJobEventBus, JobDispatcher, JobEvent,
-        JobEventPayload, JobHandle, JobId, JobKind, JobLease, JobPayload,
-        JobPriority, LeaseExpiryScanner, LeaseId, LeaseRenewal,
-        LibraryActorCommand, LibraryActorConfig, LibraryActorHandle,
-        LibraryCommandExecutor, LibraryRootsId, NoopActorObserver,
-        OrchestratorConfig, OrchestratorRuntime, OrchestratorRuntimeBuilder,
-        QueueService, ScanReason,
+        EnqueueRequest, FileSystemEvent, FileSystemEventKind, InMemoryBudget,
+        InProcJobEventBus, JobDispatcher, JobEvent, JobEventPayload, JobHandle,
+        JobId, JobKind, JobLease, JobPayload, JobPriority, LeaseExpiryScanner,
+        LeaseId, LeaseRenewal, LibraryActorCommand, LibraryActorConfig,
+        LibraryActorHandle, LibraryCommandExecutor, LibraryRootsId,
+        NoopActorObserver, OrchestratorConfig, OrchestratorRuntime,
+        OrchestratorRuntimeBuilder, QueueService, ScanReason,
     };
     use crate::error::{MediaError, Result};
     use crate::types::{
@@ -1496,7 +1529,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct RecordedRequest {
-        job: FolderScanJob,
+        payload: JobPayload,
         priority: JobPriority,
         correlation_id: Option<Uuid>,
     }
@@ -1545,13 +1578,11 @@ mod tests {
             accepted.insert(dedupe_key, job_id);
             drop(accepted);
 
-            if let JobPayload::FolderScan(job) = payload.clone() {
-                self.records.lock().await.push(RecordedRequest {
-                    job,
-                    priority: request.priority,
-                    correlation_id: request.correlation_id,
-                });
-            }
+            self.records.lock().await.push(RecordedRequest {
+                payload: payload.clone(),
+                priority: request.priority,
+                correlation_id: request.correlation_id,
+            });
 
             Ok(JobHandle::accepted(job_id, &payload, request.priority))
         }
@@ -1599,9 +1630,7 @@ mod tests {
                 .records()
                 .await
                 .into_iter()
-                .filter(|record| {
-                    JobPayload::FolderScan(record.job.clone()).kind() == kind
-                })
+                .filter(|record| record.payload.kind() == kind)
                 .count())
         }
 
@@ -1863,7 +1892,7 @@ mod tests {
             }
         })
         .await
-        .expect("queued folder scan records")
+        .expect("queued scan records")
     }
 
     async fn wait_for_enqueued_event(
@@ -2162,6 +2191,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fs_watch_service_replay_unprocessed_events_acks_after_recovery()
+    -> Result<()> {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let movie_dir = root.join("Durable Recovery");
+        std::fs::create_dir_all(&movie_dir).unwrap();
+        let media_path = movie_dir.join("feature.mkv");
+        std::fs::write(&media_path, b"movie").unwrap();
+
+        let library_id = LibraryId::new();
+        let bus = Arc::new(MemoryFileChangeEventBus::default());
+        let event_bus: Arc<dyn FileChangeEventBus> = bus.clone();
+        let executor = RecordingCommandExecutor::default();
+        let command_executor: Arc<dyn LibraryCommandExecutor> =
+            Arc::new(executor.clone());
+        let service: FsWatchService = FsWatchService::with_event_bus(
+            FsWatchConfig::default(),
+            Arc::new(NoopFsWatchObserver),
+            command_executor,
+            event_bus,
+        );
+
+        service
+            .register_library_for_test(
+                library_id,
+                vec![(LibraryRootsId(0), root.clone())],
+            )
+            .await?;
+        clear_startup_watch_noise(&bus, &executor).await;
+
+        let stored = durable_event(
+            library_id,
+            &root,
+            &media_path,
+            FileWatchEventType::Created,
+        )?;
+        assert!(bus.publish(stored.clone()).await?);
+
+        service.replay_unprocessed_events(library_id).await?;
+
+        let commands = wait_for_commands(&executor, 1).await;
+        assert!(matches!(commands[0], LibraryActorCommand::FsEvents { .. }));
+        assert_eq!(bus.acked().await, vec![stored.id]);
+        assert!(bus.events().await[0].processed);
+        service.unregister_library(library_id).await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn fs_watch_service_skips_duplicate_idempotency_keys() -> Result<()> {
         let tmp = tempdir().unwrap();
         let root = tmp.path().to_path_buf();
@@ -2269,7 +2347,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_fs_events_command_enqueues_deduped_folder_scan()
+    async fn direct_fs_events_command_enqueues_deduped_manifest_scan()
     -> Result<()> {
         let tmp = tempdir().unwrap();
         let root = tmp.path().to_path_buf();
@@ -2313,10 +2391,18 @@ mod tests {
         let record = &records[0];
         assert_eq!(record.priority, JobPriority::P0);
         assert_eq!(record.correlation_id, Some(correlation_id));
-        assert_eq!(record.job.scan_reason, ScanReason::HotChange);
+        let JobPayload::ManifestScan(job) = &record.payload else {
+            panic!("expected manifest scan payload");
+        };
+        assert_eq!(job.scan_reason, ScanReason::HotChange);
+        let crate::domain::scan::manifest::ManifestScope::Partition(partition) =
+            &job.scope
+        else {
+            panic!("hot change should target a manifest partition");
+        };
         assert_eq!(
-            record.job.context.folder_path_norm(),
-            normalize_path(&movie_dir)?.as_str()
+            partition.prefix_norm.as_deref(),
+            Some(normalize_path(&movie_dir)?.as_str())
         );
 
         let event = wait_for_enqueued_event(&mut job_rx).await;
@@ -2324,7 +2410,7 @@ mod tests {
         assert!(matches!(
             event.payload,
             JobEventPayload::Enqueued {
-                kind: JobKind::FolderScan,
+                kind: JobKind::ManifestScan,
                 priority: JobPriority::P0,
                 ..
             }
@@ -2334,8 +2420,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fs_watch_service_batch_enqueues_deduped_folder_scan() -> Result<()>
-    {
+    async fn fs_watch_service_batch_enqueues_deduped_manifest_scan()
+    -> Result<()> {
         let tmp = tempdir().unwrap();
         let root = tmp.path().to_path_buf();
         let movie_dir = root.join("Movie B");
@@ -2393,17 +2479,25 @@ mod tests {
         assert_eq!(records.len(), 1);
         let record = &records[0];
         assert_eq!(record.priority, JobPriority::P0);
-        assert_eq!(record.job.scan_reason, ScanReason::HotChange);
+        let JobPayload::ManifestScan(job) = &record.payload else {
+            panic!("expected manifest scan payload");
+        };
+        assert_eq!(job.scan_reason, ScanReason::HotChange);
+        let crate::domain::scan::manifest::ManifestScope::Partition(partition) =
+            &job.scope
+        else {
+            panic!("hot change should target a manifest partition");
+        };
         assert_eq!(
-            record.job.context.folder_path_norm(),
-            normalize_path(&movie_dir)?.as_str()
+            partition.prefix_norm.as_deref(),
+            Some(normalize_path(&movie_dir)?.as_str())
         );
 
         let event = wait_for_enqueued_event(&mut job_rx).await;
         assert!(matches!(
             event.payload,
             JobEventPayload::Enqueued {
-                kind: JobKind::FolderScan,
+                kind: JobKind::ManifestScan,
                 priority: JobPriority::P0,
                 ..
             }
@@ -2414,7 +2508,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fs_watch_service_overflow_enqueues_p0_rescan_for_root_child()
+    async fn fs_watch_service_overflow_enqueues_p0_manifest_root_scan()
     -> Result<()> {
         let tmp = tempdir().unwrap();
         let root = tmp.path().to_path_buf();
@@ -2438,7 +2532,7 @@ mod tests {
         service
             .register_library_for_test(
                 harness.library_id,
-                vec![(LibraryRootsId(0), root)],
+                vec![(LibraryRootsId(0), root.clone())],
             )
             .await?;
 
@@ -2456,17 +2550,22 @@ mod tests {
         assert_eq!(records.len(), 1);
         let record = &records[0];
         assert_eq!(record.priority, JobPriority::P0);
-        assert_eq!(record.job.scan_reason, ScanReason::WatcherOverflow);
-        assert_eq!(
-            record.job.context.folder_path_norm(),
-            normalize_path(&movie_dir)?.as_str()
-        );
+        let JobPayload::ManifestScan(job) = &record.payload else {
+            panic!("expected manifest scan payload");
+        };
+        assert_eq!(job.scan_reason, ScanReason::WatcherOverflow);
+        let crate::domain::scan::manifest::ManifestScope::Root(scope) =
+            &job.scope
+        else {
+            panic!("overflow should target the manifest root");
+        };
+        assert_eq!(scope.root_path_norm, normalize_path(&root)?);
 
         let event = wait_for_enqueued_event(&mut job_rx).await;
         assert!(matches!(
             event.payload,
             JobEventPayload::Enqueued {
-                kind: JobKind::FolderScan,
+                kind: JobKind::ManifestScan,
                 priority: JobPriority::P0,
                 ..
             }

@@ -1821,11 +1821,41 @@ impl ScanRun {
             let event = frame.event.clone();
             self.emit_frame(frame.event, frame.payload).await;
             if let Some(status) = finalize_status {
+                let failed = status == ScanLifecycleStatus::Failed;
                 self.finalize_history(status).await;
+                if failed {
+                    self.schedule_stuck_recovery().await;
+                }
             }
             matches!(event, ScanEventKind::Completed)
         } else {
             false
+        }
+    }
+
+    async fn schedule_stuck_recovery(&self) {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        let recovery_correlation = Uuid::now_v7();
+        match inner
+            .orchestrator
+            .recover_library_scan_state(self.library_id, recovery_correlation)
+            .await
+        {
+            Ok(()) => info!(
+                library = %self.library_id,
+                scan = %self.scan_id,
+                recovery_correlation = %recovery_correlation,
+                "scheduled manifest recovery sweep for stuck scan run"
+            ),
+            Err(err) => warn!(
+                library = %self.library_id,
+                scan = %self.scan_id,
+                recovery_correlation = %recovery_correlation,
+                error = %err,
+                "failed to schedule manifest recovery sweep for stuck scan run"
+            ),
         }
     }
 
@@ -3346,7 +3376,10 @@ impl ScanRunAggregatorInner {
         if let Some(run) = run {
             let completed = match event.payload {
                 JobEventPayload::Enqueued { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
+                    if matches!(
+                        kind,
+                        JobKind::FolderScan | JobKind::ManifestScan
+                    ) {
                         run.record_folder_enqueued(
                             &event.meta.idempotency_key,
                             job_id,
@@ -3357,7 +3390,10 @@ impl ScanRunAggregatorInner {
                     false
                 }
                 JobEventPayload::Completed { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
+                    if matches!(
+                        kind,
+                        JobKind::FolderScan | JobKind::ManifestScan
+                    ) {
                         run.record_folder_completed(
                             &event.meta.idempotency_key,
                             job_id,
@@ -3379,7 +3415,10 @@ impl ScanRunAggregatorInner {
                     job_id,
                     ..
                 } => {
-                    if kind == JobKind::FolderScan {
+                    if matches!(
+                        kind,
+                        JobKind::FolderScan | JobKind::ManifestScan
+                    ) {
                         run.record_folder_failure(
                             &event.meta.idempotency_key,
                             job_id,
@@ -3403,7 +3442,10 @@ impl ScanRunAggregatorInner {
                     }
                 }
                 JobEventPayload::DeadLettered { kind, job_id, .. } => {
-                    if kind == JobKind::FolderScan {
+                    if matches!(
+                        kind,
+                        JobKind::FolderScan | JobKind::ManifestScan
+                    ) {
                         run.record_folder_dead_lettered(
                             &event.meta.idempotency_key,
                             job_id,
@@ -3872,6 +3914,24 @@ impl ScanRunAggregatorInner {
         }
 
         let library_id = run.library_id();
+        if let Err(err) = self
+            .orchestrator
+            .command_library(
+                library_id,
+                LibraryActorCommand::ScanRunTerminal {
+                    correlation_id: Some(run.correlation_id()),
+                },
+            )
+            .await
+        {
+            warn!(
+                library = %library_id,
+                scan = %run.scan_id(),
+                error = %err,
+                "failed to clear library bulk mode after terminal scan"
+            );
+        }
+
         let command = LibraryActorCommand::Start {
             mode: StartMode::Maintenance,
             correlation_id: Some(Uuid::now_v7()),
