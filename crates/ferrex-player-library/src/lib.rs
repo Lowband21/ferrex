@@ -312,7 +312,7 @@ impl LibraryDomainState {
         &mut self,
         frame: ScanProgressEvent,
     ) -> bool {
-        let (old_key, new_key, is_active, scan_id) = {
+        let (old_key, new_key, is_active, scan_id, keep_snapshot) = {
             let Some(snapshot) = self.active_scans.get_mut(&frame.scan_id)
             else {
                 return false;
@@ -336,13 +336,20 @@ impl LibraryDomainState {
                 snapshot.status = status;
             }
 
+            let terminal = snapshot.status.is_terminal();
             (
                 old_key,
                 ActiveScanRunKey::from_snapshot(snapshot),
                 snapshot.status.is_active(),
                 snapshot.scan_id,
+                !terminal || progress_frame_has_recovery_affordance(&frame),
             )
         };
+
+        if !keep_snapshot {
+            self.remove_active_scan(scan_id);
+            return true;
+        }
 
         self.active_scan_runs.remove(&old_key);
         if is_active {
@@ -388,13 +395,28 @@ fn should_replace_active_snapshot(
     }
 }
 
+fn progress_frame_has_recovery_affordance(frame: &ScanProgressEvent) -> bool {
+    frame.needs_attention_items > 0
+        || frame.failed_items > 0
+        || frame.skipped_items > 0
+        || !frame.reason_details.is_empty()
+        || matches!(
+            frame.status.as_str(),
+            "failed_needs_attention" | "needs_attention" | "skipped"
+        )
+}
+
 fn scan_status_from_progress(status: &str) -> Option<ScanLifecycleStatus> {
     match status {
-        "pending" => Some(ScanLifecycleStatus::Pending),
-        "running" => Some(ScanLifecycleStatus::Running),
+        "pending" | "initializing" => Some(ScanLifecycleStatus::Pending),
+        "running" | "discovering" | "processing" | "quiescing" | "retrying" => {
+            Some(ScanLifecycleStatus::Running)
+        }
         "paused" => Some(ScanLifecycleStatus::Paused),
         "completed" => Some(ScanLifecycleStatus::Completed),
-        "failed" => Some(ScanLifecycleStatus::Failed),
+        "failed" | "failed_needs_attention" | "needs_attention" | "skipped" => {
+            Some(ScanLifecycleStatus::Failed)
+        }
         "canceled" | "cancelled" => Some(ScanLifecycleStatus::Canceled),
         _ => None,
     }

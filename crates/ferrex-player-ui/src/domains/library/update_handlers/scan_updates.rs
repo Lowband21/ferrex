@@ -300,6 +300,7 @@ fn reason_detail_needs_rescan(detail: &ScanPathReasonDetail) -> bool {
     }
 }
 
+#[cfg(test)]
 fn map_status(status: &str) -> Option<ScanLifecycleStatus> {
     match status {
         "pending" | "initializing" => Some(ScanLifecycleStatus::Pending),

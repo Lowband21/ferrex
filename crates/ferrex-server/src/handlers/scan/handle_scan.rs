@@ -680,7 +680,7 @@ fn default_keep_alive() -> KeepAlive {
 }
 
 #[cfg(test)]
-mod tests {
+mod sse_tests {
     use super::*;
     use chrono::Utc;
     use ferrex_core::types::ScanStageLatencySummary;

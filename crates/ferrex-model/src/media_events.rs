@@ -32,6 +32,7 @@ pub struct ScanStageLatencySummary {
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
+/// User-facing classification for path-level scan progress reasons.
 pub enum ScanPathReasonCategory {
     KnownUnchanged,
     Skipped,
@@ -46,6 +47,7 @@ pub enum ScanPathReasonCategory {
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
 #[cfg_attr(feature = "rkyv", rkyv(derive(Debug, PartialEq, Eq)))]
+/// User-facing detail for one path that was unchanged, skipped, retried, or needs attention.
 pub struct ScanPathReasonDetail {
     pub category: ScanPathReasonCategory,
     pub reason_code: String,

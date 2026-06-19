@@ -65,6 +65,9 @@ pub use media::{
 pub use media::{
     EpisodeReference, Media, MovieReference, SeasonReference, Series,
 };
+// Keep scan progress reason DTOs on the crate root so client-facing
+// prelude modules can import the public model surface without reaching into
+// media event internals.
 pub use media_events::{
     MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
     ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,

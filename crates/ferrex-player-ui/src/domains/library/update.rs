@@ -679,7 +679,8 @@ pub fn update_library(
         LibraryMessage::ScanProgressFrame(frame) => {
             let status = frame.status.clone();
             super::update_handlers::scan_updates::apply_scan_progress_frame(
-                state, frame,
+                state,
+                frame.clone(),
             );
 
             match status.as_str() {

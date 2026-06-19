@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::api::scan::IncrementalScanStatusView;
 use crate::types::ids::LibraryId;
-use crate::types::media_events::{ScanPathReasonDetail, ScanProgressEvent};
+use ferrex_model::{ScanPathReasonDetail, ScanProgressEvent};
 
 /// Public mode for a durable library scan run.
 ///
@@ -427,18 +427,16 @@ mod tests {
 
 /// Re-export media scan SSE payloads for downstream clients
 pub mod events {
-    pub use crate::types::media_events::{
+    pub use ferrex_model::{
         MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
         ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,
     };
 }
 
 #[cfg(test)]
-mod tests {
+mod snapshot_serde_tests {
     use super::*;
-    use crate::types::media_events::{
-        ScanPathReasonCategory, ScanPathReasonDetail,
-    };
+    use ferrex_model::{ScanPathReasonCategory, ScanPathReasonDetail};
 
     fn fixed_time() -> DateTime<Utc> {
         DateTime::<Utc>::from_timestamp(1_700_000_000, 0)

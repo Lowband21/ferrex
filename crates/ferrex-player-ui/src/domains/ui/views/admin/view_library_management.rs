@@ -14,8 +14,7 @@ use crate::{
 };
 use ferrex_core::player_prelude::{
     ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus,
-    ScanPathReasonCategory, ScanPathReasonDetail, ScanRunMode,
-    ScanSnapshotDto,
+    ScanPathReasonCategory, ScanPathReasonDetail, ScanRunMode, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use iced::widget::text_input;
@@ -860,6 +859,7 @@ fn reason_detail_copy(detail: &ScanPathReasonDetail) -> String {
     let message = detail
         .message
         .as_deref()
+        .filter(|message| !contains_dead_letter_term(message))
         .unwrap_or_else(|| fallback_reason_message(&detail.reason_code));
 
     if let Some(path) = &detail.path {
@@ -899,6 +899,17 @@ fn fallback_reason_message(reason_code: &str) -> &'static str {
         "temporary_scan_issue" => "A temporary scan issue is being retried",
         _ => "Review this path and rescan when it is ready",
     }
+}
+
+fn contains_dead_letter_term(text: &str) -> bool {
+    let compact: String = text
+        .chars()
+        .filter_map(|ch| {
+            let lower = ch.to_ascii_lowercase();
+            lower.is_ascii_alphanumeric().then_some(lower)
+        })
+        .collect();
+    compact.contains("deadletter")
 }
 
 fn reason_detail_needs_rescan(detail: &ScanPathReasonDetail) -> bool {
@@ -1022,6 +1033,24 @@ mod tests {
         assert!(copy.contains("Review this path and rescan"));
         assert!(!copy.contains("dead_letter"));
         assert!(!copy.contains("deadletter"));
+    }
+
+    #[test]
+    fn reason_copy_sanitizes_backend_dead_letter_terms() {
+        let detail = reason_detail(
+            ScanPathReasonCategory::NeedsAttention,
+            "deadletter_queue",
+            Some("dead-letter queue entry needs operator review"),
+        );
+
+        let copy = reason_detail_copy(&detail);
+        let normalized = copy.to_ascii_lowercase();
+        assert!(copy.contains("Needs attention"));
+        assert!(copy.contains("Review this path and rescan"));
+        assert!(!normalized.contains("dead_letter"));
+        assert!(!normalized.contains("dead-letter"));
+        assert!(!normalized.contains("deadletter"));
+        assert!(!normalized.contains("dead letter"));
     }
 
     #[test]

@@ -2908,6 +2908,61 @@ mod tests {
     }
 
     #[test]
+    fn folder_failures_keep_retrying_separate_from_needs_attention() {
+        let now = Utc::now();
+        let mut state = test_state();
+        state.update_item_status(
+            "retrying-job",
+            Some(JobId::new()),
+            ScanItemStatus::Retrying,
+            now,
+            SubjectKey::path("/library/retrying".to_string()).ok(),
+            Some("temporary scan issue".to_string()),
+        );
+        state.update_item_status(
+            "attention-job",
+            Some(JobId::new()),
+            ScanItemStatus::DeadLettered,
+            now,
+            SubjectKey::path("/library/attention".to_string()).ok(),
+            Some("dead_lettered_queue".to_string()),
+        );
+
+        let payload = state.build_payload();
+
+        assert_eq!(payload.retrying_items, 1);
+        assert_eq!(payload.failed_items, 1);
+        assert_eq!(payload.needs_attention_items, 1);
+        assert_eq!(payload.completed_items, 0);
+
+        let retrying = payload
+            .reason_details
+            .iter()
+            .find(|detail| detail.category == ScanPathReasonCategory::Retrying)
+            .expect("retrying reason detail");
+        assert!(retrying.retryable);
+        assert_eq!(retrying.action_hint.as_deref(), Some("wait_for_retry"));
+        assert!(!retrying.reason_code.contains("dead"));
+
+        let attention = payload
+            .reason_details
+            .iter()
+            .find(|detail| {
+                detail.category == ScanPathReasonCategory::NeedsAttention
+            })
+            .expect("needs-attention reason detail");
+        assert!(!attention.retryable);
+        assert_eq!(attention.action_hint.as_deref(), Some("rescan_library"));
+        assert_eq!(attention.reason_code, "needs_attention");
+        assert!(
+            payload
+                .reason_details
+                .iter()
+                .all(|detail| !detail.reason_code.contains("dead"))
+        );
+    }
+
+    #[test]
     fn progress_payload_exposes_user_safe_counters_and_reasons() {
         let now = Utc::now();
         let mut state = test_state();
@@ -3009,6 +3064,63 @@ mod tests {
         assert!(!state.reset_quiescence_after_activity(
             reset_at + ChronoDuration::milliseconds(1)
         ));
+    }
+
+    #[test]
+    fn retrograde_activity_after_quiescence_does_not_demote_terminal_item() {
+        let mut state = test_state();
+        let now = Utc::now();
+        let path = SubjectKey::path("/library/stable".to_string()).ok();
+
+        state.handle_state_event(ScanStateEvent::RunStarted, now);
+        state.update_item_status(
+            "stable-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now + ChronoDuration::milliseconds(1),
+            path.clone(),
+            None,
+        );
+        let quiescing = state.handle_state_event(
+            ScanStateEvent::AllItemsProcessed,
+            now + ChronoDuration::milliseconds(2),
+        );
+        assert!(matches!(
+            quiescing.map(|frame| frame.event),
+            Some(ScanEventKind::Quiescing)
+        ));
+
+        let demoted = state.update_item_status(
+            "stable-job",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now + ChronoDuration::milliseconds(3),
+            path,
+            None,
+        );
+
+        assert!(!demoted);
+        assert!(matches!(
+            state.item_states["stable-job"].status,
+            ScanItemStatus::Completed
+        ));
+        assert_eq!(state.completed_items, 1);
+        assert_eq!(state.total_items, 1);
+        assert_eq!(state.dead_lettered_items, 0);
+        assert_eq!(state.status, ScanLifecycleStatus::Running);
+        assert!(!state.reset_quiescence_after_activity(
+            now + ChronoDuration::milliseconds(4)
+        ));
+
+        let completed = state.handle_state_event(
+            ScanStateEvent::QuiescenceComplete,
+            now + ChronoDuration::milliseconds(5),
+        );
+        assert!(matches!(
+            completed.map(|frame| frame.event),
+            Some(ScanEventKind::Completed)
+        ));
+        assert_eq!(state.status, ScanLifecycleStatus::Completed);
     }
 
     #[test]
@@ -3997,7 +4109,7 @@ impl fmt::Display for ScanControlError {
 impl std::error::Error for ScanControlError {}
 
 #[cfg(test)]
-mod tests {
+mod durable_status_tests {
     use super::*;
 
     #[test]
