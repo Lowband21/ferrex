@@ -6,6 +6,7 @@ mod fuzzy_title_search;
 pub mod images;
 pub mod indices;
 pub mod library;
+pub mod manifest;
 pub mod media;
 pub mod media_references;
 pub mod processing_status;

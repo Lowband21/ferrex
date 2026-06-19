@@ -1,5 +1,6 @@
 use crate::database::repositories::{
     folder_inventory::PostgresFolderInventoryRepository,
+    manifest::PostgresManifestRepository,
     processing_status::PostgresProcessingStatusRepository,
     rbac::PostgresRbacRepository,
     sync_sessions::PostgresSyncSessionsRepository,
@@ -34,6 +35,7 @@ pub struct PostgresDatabase {
     watch_status: PostgresWatchStatusRepository,
     sync_sessions: PostgresSyncSessionsRepository,
     folder_inventory: PostgresFolderInventoryRepository,
+    manifest: PostgresManifestRepository,
     processing_status: PostgresProcessingStatusRepository,
 }
 
@@ -125,6 +127,7 @@ impl PostgresDatabase {
         let sync_sessions = PostgresSyncSessionsRepository::new(pool.clone());
         let folder_inventory =
             PostgresFolderInventoryRepository::new(pool.clone());
+        let manifest = PostgresManifestRepository::new(pool.clone());
         let processing_status =
             PostgresProcessingStatusRepository::new(pool.clone());
 
@@ -137,6 +140,7 @@ impl PostgresDatabase {
             watch_status,
             sync_sessions,
             folder_inventory,
+            manifest,
             processing_status,
         })
     }
@@ -340,6 +344,7 @@ impl PostgresDatabase {
         let sync_sessions = PostgresSyncSessionsRepository::new(pool.clone());
         let folder_inventory =
             PostgresFolderInventoryRepository::new(pool.clone());
+        let manifest = PostgresManifestRepository::new(pool.clone());
         let processing_status =
             PostgresProcessingStatusRepository::new(pool.clone());
         //let file_watch = PostgresFileWatchRepository::new(pool.clone());
@@ -353,6 +358,7 @@ impl PostgresDatabase {
             watch_status,
             sync_sessions,
             folder_inventory,
+            manifest,
             processing_status,
             //file_watch,
         }
@@ -478,6 +484,10 @@ impl PostgresDatabase {
         &self,
     ) -> &PostgresProcessingStatusRepository {
         &self.processing_status
+    }
+
+    pub fn manifest_repository(&self) -> &PostgresManifestRepository {
+        &self.manifest
     }
 
     /// Get connection pool statistics for monitoring
