@@ -69,6 +69,7 @@ pub enum UiShellMessage {
 
     // Cross-domain controls
     ToggleFullscreen,
+    ToggleInterfaceMode,
 }
 
 impl From<UiShellMessage> for UiMessage {
@@ -112,6 +113,7 @@ impl UiShellMessage {
             Self::SearchDetachedOpened(_) => "UI::SearchDetachedOpened",
             Self::FocusSearchInput => "UI::FocusSearchInput",
             Self::ToggleFullscreen => "UI::ToggleFullscreen",
+            Self::ToggleInterfaceMode => "UI::ToggleInterfaceMode",
         }
     }
 }
@@ -171,6 +173,9 @@ impl std::fmt::Debug for UiShellMessage {
             }
             UiShellMessage::ToggleFullscreen => {
                 write!(f, "UI::ToggleFullscreen")
+            }
+            UiShellMessage::ToggleInterfaceMode => {
+                write!(f, "UI::ToggleInterfaceMode")
             }
         }
     }

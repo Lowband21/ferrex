@@ -30,6 +30,10 @@ use lucide_icons::Icon;
     profiling::function
 )]
 pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    if state.interface_mode.is_tenfoot() {
+        return view_tenfoot_primary_header(state);
+    }
+
     let fonts = &state.domains.ui.state.size_provider.font;
 
     match &state.domains.ui.state.view {
@@ -102,7 +106,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 search_button,
                 button(
                     container(icon_text_with_size(
-                        if state.is_fullscreen {
+                        if fullscreen_active(state) {
                             Icon::Minimize
                         } else {
                             Icon::Maximize
@@ -170,6 +174,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
             );
+            right_section =
+                right_section.push(interface_mode_toggle_button(state));
 
             // Stack layout to achieve proper center alignment
             Stack::new()
@@ -255,7 +261,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 // Fullscreen toggle
                 button(
                     container(icon_text_with_size(
-                        if state.is_fullscreen {
+                        if fullscreen_active(state) {
                             Icon::Minimize
                         } else {
                             Icon::Maximize
@@ -304,6 +310,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .style(theme::Button::HeaderIcon.style())
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
+                interface_mode_toggle_button(state),
             ]
             .align_y(iced::Alignment::Center);
 
@@ -369,7 +376,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 // Fullscreen toggle
                 button(
                     container(icon_text_with_size(
-                        if state.is_fullscreen {
+                        if fullscreen_active(state) {
                             Icon::Minimize
                         } else {
                             Icon::Maximize
@@ -440,6 +447,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
             );
+            right_section =
+                right_section.push(interface_mode_toggle_button(state));
 
             Stack::new()
                 .push(
@@ -499,7 +508,7 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
             let mut right_section = row![
                 button(
                     container(icon_text_with_size(
-                        if state.is_fullscreen {
+                        if fullscreen_active(state) {
                             Icon::Minimize
                         } else {
                             Icon::Maximize
@@ -527,6 +536,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                 .width(Length::Fixed(HEIGHT))
                 .height(HEIGHT),
             );
+            right_section =
+                right_section.push(interface_mode_toggle_button(state));
 
             Stack::new()
                 .push(
@@ -585,6 +596,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
+            let right_section = row![interface_mode_toggle_button(state)]
+                .align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -600,13 +613,18 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     .align_y(iced::alignment::Vertical::Center),
                 )
                 .push(
-                    // Top layer: left section
-                    container(left_section)
-                        .width(Length::Fill)
-                        .height(HEIGHT)
-                        .padding([0, 0])
-                        .align_x(iced::alignment::Horizontal::Left)
-                        .align_y(iced::alignment::Vertical::Center),
+                    // Top layer: left and right sections
+                    row![
+                        container(left_section)
+                            .padding([0, 0])
+                            .align_y(iced::alignment::Vertical::Center),
+                        Space::new().width(Length::Fill),
+                        container(right_section)
+                            .padding([0, 0])
+                            .align_y(iced::alignment::Vertical::Center),
+                    ]
+                    .width(Length::Fill)
+                    .height(HEIGHT),
                 )
                 .width(Length::Fill)
                 .height(HEIGHT)
@@ -642,6 +660,8 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
 
             let left_section =
                 row(left_section_items).align_y(iced::Alignment::Center);
+            let right_section = row![interface_mode_toggle_button(state)]
+                .align_y(iced::Alignment::Center);
 
             Stack::new()
                 .push(
@@ -656,12 +676,17 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
                     .align_y(iced::alignment::Vertical::Center),
                 )
                 .push(
-                    container(left_section)
-                        .width(Length::Fill)
-                        .height(HEIGHT)
-                        .padding([0, 0])
-                        .align_x(iced::alignment::Horizontal::Left)
-                        .align_y(iced::alignment::Vertical::Center),
+                    row![
+                        container(left_section)
+                            .padding([0, 0])
+                            .align_y(iced::alignment::Vertical::Center),
+                        Space::new().width(Length::Fill),
+                        container(right_section)
+                            .padding([0, 0])
+                            .align_y(iced::alignment::Vertical::Center),
+                    ]
+                    .width(Length::Fill)
+                    .height(HEIGHT),
                 )
                 .width(Length::Fill)
                 .height(HEIGHT)
@@ -672,6 +697,144 @@ pub fn view_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
             Space::new().height(0).into()
         }
     }
+}
+
+fn view_tenfoot_primary_header<'a>(state: &'a State) -> Element<'a, UiMessage> {
+    let fonts = &state.domains.ui.state.size_provider.font;
+    let is_detail = matches!(
+        state.domains.ui.state.view,
+        ViewState::MovieDetail { .. }
+            | ViewState::SeriesDetail { .. }
+            | ViewState::SeasonDetail { .. }
+            | ViewState::EpisodeDetail { .. }
+    );
+
+    let mut left_section_items =
+        vec![shell_icon_button(Icon::House, UiShellMessage::NavigateHome)];
+
+    if is_detail || !state.domains.ui.state.navigation_history.is_empty() {
+        left_section_items.push(shell_icon_button(
+            Icon::ChevronLeft,
+            UiShellMessage::NavigateBack,
+        ));
+    }
+
+    if !is_detail {
+        left_section_items.push(Space::new().width(20).into());
+        left_section_items.push(
+            container(create_library_tabs(state))
+                .align_y(iced::alignment::Vertical::Center)
+                .into(),
+        );
+    }
+
+    let left_section = row(left_section_items).align_y(iced::Alignment::Center);
+
+    let title = if is_detail { "Details" } else { "Ferrex Home" };
+    let center_section = container(
+        text(title)
+            .size(fonts.subtitle)
+            .color(theme::MediaServerTheme::TEXT_PRIMARY),
+    )
+    .width(Length::Shrink)
+    .height(HEIGHT)
+    .align_x(iced::alignment::Horizontal::Center)
+    .align_y(iced::alignment::Vertical::Center);
+
+    let mut right_section = row![
+        shell_icon_button(Icon::Search, UiShellMessage::OpenSearchOverlay),
+        fullscreen_toggle_button(state),
+    ]
+    .align_y(iced::Alignment::Center);
+
+    if !state.domains.library.state.active_scans.is_empty() {
+        let active_count = state.domains.library.state.active_scans.len();
+        right_section = right_section.push(
+            container(
+                row![
+                    icon_text_with_size(Icon::FileScan, 16.0),
+                    text(format!(" {}", active_count))
+                        .size(fonts.caption)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([0, 12])
+            .style(theme::Container::HeaderAccent.style()),
+        );
+    }
+
+    right_section = right_section.push(interface_mode_toggle_button(state));
+
+    Stack::new()
+        .push(
+            container(center_section)
+                .width(Length::Fill)
+                .height(HEIGHT)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .push(
+            row![
+                container(left_section)
+                    .padding([0, 0])
+                    .align_y(iced::alignment::Vertical::Center),
+                Space::new().width(Length::Fill),
+                container(right_section)
+                    .padding([0, 0])
+                    .align_y(iced::alignment::Vertical::Center),
+            ]
+            .width(Length::Fill)
+            .height(HEIGHT),
+        )
+        .width(Length::Fill)
+        .height(HEIGHT)
+        .into()
+}
+
+fn shell_icon_button<'a>(
+    icon: Icon,
+    message: UiShellMessage,
+) -> Element<'a, UiMessage> {
+    button(
+        container(icon_text_with_size(icon, 16.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press(message.into())
+    .style(theme::Button::HeaderIcon.style())
+    .width(Length::Fixed(HEIGHT))
+    .height(HEIGHT)
+    .into()
+}
+
+fn fullscreen_active(state: &State) -> bool {
+    state.is_fullscreen
+        || state.domains.ui.state.is_fullscreen
+        || state.domains.player.state.is_fullscreen
+}
+
+fn fullscreen_toggle_button<'a>(state: &State) -> Element<'a, UiMessage> {
+    shell_icon_button(
+        if fullscreen_active(state) {
+            Icon::Minimize
+        } else {
+            Icon::Maximize
+        },
+        UiShellMessage::ToggleFullscreen,
+    )
+}
+
+fn interface_mode_toggle_button<'a>(state: &State) -> Element<'a, UiMessage> {
+    shell_icon_button(
+        if state.interface_mode.is_tenfoot() {
+            Icon::Monitor
+        } else {
+            Icon::Tv
+        },
+        UiShellMessage::ToggleInterfaceMode,
+    )
 }
 
 fn create_library_tabs<'a>(state: &'a State) -> Element<'a, UiMessage> {

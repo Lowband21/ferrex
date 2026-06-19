@@ -366,6 +366,10 @@ pub fn update_shell_ui(
             Task::none(),
             vec![CrossDomainEvent::MediaToggleFullscreen],
         ),
+        UiShellMessage::ToggleInterfaceMode => {
+            state.interface_mode = state.interface_mode.toggled();
+            DomainUpdateResult::task(Task::none())
+        }
         UiShellMessage::SelectLibraryAndMode(library_id) => {
             log::warn!(
                 "Legacy SelectLibraryAndMode called - migrating to SelectScope"
@@ -636,7 +640,14 @@ pub fn update_shell_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrex_core::player_prelude::LibraryId;
+    use crate::{
+        domains::{search::SearchPresentation, ui::types::ViewState},
+        state::InterfaceMode,
+    };
+    use ferrex_core::player_prelude::{
+        Library, LibraryId, LibraryType, MovieID,
+    };
+    use ferrex_model::MovieReferenceBatchSize;
     use uuid::Uuid;
 
     #[test]
@@ -679,5 +690,127 @@ mod tests {
         let debug_str = format!("{:?}", library);
         assert!(debug_str.starts_with("Library("));
         assert!(debug_str.contains(&lib_id.to_string()));
+    }
+
+    fn test_library(id: LibraryId) -> Library {
+        Library {
+            id,
+            name: "Runtime toggle library".to_string(),
+            library_type: LibraryType::Movies,
+            paths: Vec::new(),
+            scan_interval_minutes: 60,
+            last_scan: None,
+            enabled: true,
+            auto_scan: false,
+            watch_for_changes: false,
+            analyze_on_scan: false,
+            max_retry_attempts: 3,
+            movie_ref_batch_size: MovieReferenceBatchSize::default(),
+            created_at: ferrex_model::chrono::Utc::now(),
+            updated_at: ferrex_model::chrono::Utc::now(),
+            media: None,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn toggle_interface_mode_switches_between_desktop_and_tenfoot() {
+        let mut state = State::new("http://localhost:3000".to_string());
+
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+        let result =
+            update_shell_ui(&mut state, UiShellMessage::ToggleInterfaceMode);
+        assert!(result.events.is_empty());
+        assert_eq!(state.interface_mode, InterfaceMode::TenFoot);
+
+        let result =
+            update_shell_ui(&mut state, UiShellMessage::ToggleInterfaceMode);
+        assert!(result.events.is_empty());
+        assert_eq!(state.interface_mode, InterfaceMode::Desktop);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn toggle_interface_mode_preserves_session_state() {
+        let library_id = LibraryId(Uuid::from_u128(42));
+        let mut state = State::new_with_interface_mode(
+            "http://localhost:3000".to_string(),
+            InterfaceMode::Desktop,
+        );
+        state.is_authenticated = true;
+        state.domains.auth.state.is_authenticated = true;
+        state.loading = false;
+        state.domains.library.state.libraries = vec![test_library(library_id)];
+        state
+            .tab_manager
+            .set_libraries(&state.domains.library.state.libraries);
+        assert!(state.tab_manager.set_active_tab(TabId::Library(library_id)));
+        state.domains.ui.state.scope = Scope::Library(library_id);
+        state.domains.ui.state.current_library_id = Some(library_id);
+        state.domains.ui.state.view = ViewState::MovieDetail {
+            movie_id: MovieID(Uuid::from_u128(7)),
+            backdrop_handle: None,
+        };
+        state.domains.ui.state.navigation_history =
+            vec![ViewState::Library, ViewState::UserSettings];
+        state.domains.ui.state.search_query = "space opera".to_string();
+        state.domains.search.state.query = "space opera".to_string();
+        state.domains.search.state.presentation = SearchPresentation::Overlay;
+        state.domains.player.state.current_url =
+            Some("https://ferrex.invalid/stream/movie.m3u8".parse().unwrap());
+        state.domains.player.state.pending_resume_position = Some(123.0);
+        state.domains.player.state.last_valid_position = 456.0;
+        state.domains.player.state.last_valid_duration = 7_200.0;
+        state.domains.player.state.controls = false;
+
+        let view_before = format!("{:?}", state.domains.ui.state.view);
+        let history_before = state
+            .domains
+            .ui
+            .state
+            .navigation_history
+            .iter()
+            .map(|view| format!("{view:?}"))
+            .collect::<Vec<_>>();
+        let library_count = state.domains.library.state.libraries.len();
+        let active_tab = state.tab_manager.active_tab_id();
+        let player_url = state.domains.player.state.current_url.clone();
+
+        let result =
+            update_shell_ui(&mut state, UiShellMessage::ToggleInterfaceMode);
+
+        assert!(result.events.is_empty());
+        assert_eq!(state.interface_mode, InterfaceMode::TenFoot);
+        assert!(state.is_authenticated);
+        assert!(state.domains.auth.state.is_authenticated);
+        assert!(!state.loading);
+        assert_eq!(state.domains.library.state.libraries.len(), library_count);
+        assert_eq!(state.domains.ui.state.scope, Scope::Library(library_id));
+        assert_eq!(state.domains.ui.state.current_library_id, Some(library_id));
+        assert_eq!(state.tab_manager.active_tab_id(), active_tab);
+        assert_eq!(format!("{:?}", state.domains.ui.state.view), view_before);
+        assert_eq!(
+            state
+                .domains
+                .ui
+                .state
+                .navigation_history
+                .iter()
+                .map(|view| format!("{view:?}"))
+                .collect::<Vec<_>>(),
+            history_before
+        );
+        assert_eq!(state.domains.ui.state.search_query, "space opera");
+        assert_eq!(state.domains.search.state.query, "space opera");
+        assert_eq!(
+            state.domains.search.state.presentation,
+            SearchPresentation::Overlay
+        );
+        assert_eq!(state.domains.player.state.current_url, player_url);
+        assert_eq!(
+            state.domains.player.state.pending_resume_position,
+            Some(123.0)
+        );
+        assert_eq!(state.domains.player.state.last_valid_position, 456.0);
+        assert_eq!(state.domains.player.state.last_valid_duration, 7_200.0);
+        assert!(!state.domains.player.state.controls);
     }
 }

@@ -77,6 +77,13 @@ impl InterfaceMode {
     pub fn is_tenfoot(self) -> bool {
         matches!(self, Self::TenFoot)
     }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Desktop => Self::TenFoot,
+            Self::TenFoot => Self::Desktop,
+        }
+    }
 }
 
 /// Application state - refactored to use domain-driven architecture
