@@ -14,6 +14,8 @@
 //! - **Database Abstraction**: Trait-based database interface supporting multiple backends
 //! - **Metadata Processing**: Integration with TMDB for media metadata
 //! - **Query System**: Flexible media querying with filters and sorting
+//! - **Scan Observability**: Durable scan run timelines and failure summaries for
+//!   reconstructing scanner progress after process restarts
 //!
 //! ## Feature Flags
 //!
@@ -91,6 +93,14 @@ pub mod database;
 
 #[cfg(feature = "database")]
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+/// PostgreSQL scan observability repository exports for integration tests and
+/// higher-level crates that need to rebuild timeline read models directly.
+#[cfg(feature = "database")]
+pub use database::repositories::scan_observability as postgres_scan_observability;
+/// Scan observability repository port exports shared by adapters and tests.
+#[cfg(feature = "database")]
+pub use database::repository_ports::scan_observability;
 
 /// Error types and error handling utilities
 pub mod error;

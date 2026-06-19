@@ -955,6 +955,7 @@ where
                                             kind: job_kind,
                                             priority: job_priority,
                                             retryable: true,
+                                            error: Some(error.clone()),
                                         },
                                     );
                                     if let Err(err) = e.publish(event).await {
@@ -1003,6 +1004,7 @@ where
                                             job_id,
                                             kind: job_kind,
                                             priority: job_priority,
+                                            error: Some(error.clone()),
                                         },
                                     );
                                     if let Err(err) = e.publish(event).await {

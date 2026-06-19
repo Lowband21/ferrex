@@ -82,11 +82,15 @@ pub enum JobEventPayload {
         kind: JobKind,
         priority: JobPriority,
         retryable: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     DeadLettered {
         job_id: JobId,
         kind: JobKind,
         priority: JobPriority,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     ThroughputTick {
         queue_depths: Vec<(JobKind, usize)>,
