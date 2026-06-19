@@ -1,4 +1,4 @@
-use ferrex_model::{MediaID, SubjectKey};
+use ferrex_model::{LibraryType, MediaID, SubjectKey};
 
 use ferrex_core::{
     api::types::{
@@ -7,8 +7,11 @@ use ferrex_core::{
     },
     application::unit_of_work::AppUnitOfWork,
     database::repository_ports::scan_observability::{
-        NewScanRunEvent, ScanRunEventRecord, ScanRunFailureSummary,
-        ScanRunRecord, ScanRunSource, ScanRunStatus, ScanRunUpdate,
+        NewScanRunEvent, ScanRunEventPageRequest, ScanRunEventRecord,
+        ScanRunEventSequenceBounds, ScanRunFailurePage,
+        ScanRunFailurePageRequest, ScanRunFailureSummary, ScanRunPage,
+        ScanRunPageRequest, ScanRunRecord, ScanRunSource, ScanRunStatus,
+        ScanRunUpdate,
     },
     domain::scan::{
         actors::{
@@ -19,8 +22,16 @@ use ferrex_core::{
         orchestration::{
             JobEvent, LibraryActorCommand, LibraryScanRun,
             LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
+            context::{
+                FolderScanContext, MovieFolderScanContext, MovieRootPath,
+                SeasonFolderPath, SeasonFolderScanContext,
+                SeriesFolderScanContext, SeriesRootPath,
+            },
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
-            job::{JobId, JobKind},
+            job::{
+                EnqueueRequest, FolderScanJob, JobHandle, JobId, JobKind,
+                JobPayload, JobPriority, ScanReason,
+            },
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
         },
     },
@@ -586,11 +597,38 @@ impl ScanControlPlane {
         drop(guard);
 
         let mut snapshots = Vec::with_capacity(runs.len());
+        let mut seen = HashSet::new();
         for run in runs {
             if let Ok(snapshot) = run.snapshot().await {
+                seen.insert(snapshot.scan_id);
                 snapshots.push(snapshot);
             }
         }
+
+        match self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .active_runs_all()
+            .await
+        {
+            Ok(rows) => {
+                for row in rows {
+                    if seen.contains(&row.id) {
+                        continue;
+                    }
+                    if let Some(snapshot) =
+                        ScanSnapshot::from_observability(row)
+                    {
+                        snapshots.push(snapshot);
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(error = %err, "failed to load persisted active scan runs");
+            }
+        }
+
         snapshots
     }
 
@@ -669,6 +707,161 @@ impl ScanControlPlane {
         } else {
             Ok(frames)
         }
+    }
+
+    pub async fn runs_page(
+        &self,
+        request: ScanRunPageRequest,
+    ) -> Result<ScanRunPage, ScanControlError> {
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .runs_page(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))
+    }
+
+    pub async fn run_detail(
+        &self,
+        scan_id: Uuid,
+    ) -> Result<ScanRunRecord, ScanControlError> {
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .get_run(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    pub async fn run_events_page(
+        &self,
+        scan_id: Uuid,
+        after_sequence: Option<u64>,
+        limit: i64,
+    ) -> Result<ScanRunEventReplayPage, ScanControlError> {
+        let after_i64 =
+            after_sequence.map(|seq| seq.min(i64::MAX as u64) as i64);
+        let repo = &self.inner.unit_of_work.scan_observability;
+        let run = repo
+            .get_run(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::ScanNotFound)?;
+        let bounds = repo
+            .event_sequence_bounds(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        validate_replay_gap(scan_id, after_sequence, &bounds, run.sequence)?;
+
+        let events = repo
+            .events_page_for_run(ScanRunEventPageRequest {
+                run_id: scan_id,
+                after_sequence: after_i64,
+                limit,
+            })
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        let next_sequence = events
+            .last()
+            .map(|event| event.sequence.max(0) as u64)
+            .or(after_sequence);
+
+        Ok(ScanRunEventReplayPage {
+            events,
+            bounds,
+            requested_after_sequence: after_sequence,
+            next_sequence,
+        })
+    }
+
+    pub async fn run_failures_page(
+        &self,
+        request: ScanRunFailurePageRequest,
+    ) -> Result<ScanRunFailurePage, ScanControlError> {
+        if self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .get_run(request.run_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .is_none()
+        {
+            return Err(ScanControlError::ScanNotFound);
+        }
+
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .failure_summaries_page_for_run(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))
+    }
+
+    pub async fn recover_path(
+        &self,
+        library_id: LibraryId,
+        path: &str,
+        correlation_id: Option<Uuid>,
+    ) -> Result<ScanRecoveryAccepted, ScanControlError> {
+        let library = self
+            .inner
+            .unit_of_work
+            .libraries
+            .get_library(library_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::LibraryNotFound)?;
+
+        if !library.enabled {
+            return Err(ScanControlError::LibraryDisabled);
+        }
+
+        let normalized_path = normalize_path(std::path::Path::new(path))
+            .map_err(|err| {
+                ScanControlError::InvalidRecoveryTarget(err.to_string())
+            })?;
+        let owned_by_library = library
+            .paths
+            .iter()
+            .filter_map(|root| normalize_path(root).ok())
+            .any(|root| path_is_within(&root, &normalized_path));
+        if !owned_by_library {
+            return Err(ScanControlError::InvalidRecoveryTarget(
+                "path_not_owned_by_library".to_string(),
+            ));
+        }
+
+        let context = recovery_context_for_library(
+            library.library_type,
+            library_id,
+            &normalized_path,
+        )?;
+        let payload = JobPayload::FolderScan(FolderScanJob {
+            context,
+            scan_reason: ScanReason::UserRequested,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        });
+        let mut request = EnqueueRequest::new(JobPriority::P0, payload);
+        request.allow_merge = true;
+        request.correlation_id = correlation_id;
+
+        let handle = self
+            .inner
+            .orchestrator
+            .enqueue(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        Ok(ScanRecoveryAccepted {
+            library_id,
+            original_path: path.to_string(),
+            normalized_path,
+            handle,
+        })
     }
 }
 
@@ -810,6 +1003,130 @@ pub struct ScanCommandAccepted {
     pub disposition: ScanStartDisposition,
 }
 
+#[derive(Debug, Clone)]
+pub struct ScanRunEventReplayPage {
+    pub events: Vec<ScanRunEventRecord>,
+    pub bounds: ScanRunEventSequenceBounds,
+    pub requested_after_sequence: Option<u64>,
+    pub next_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanReplayGap {
+    pub scan_id: Uuid,
+    pub requested_after_sequence: u64,
+    pub min_available_sequence: Option<u64>,
+    pub max_available_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanRecoveryAccepted {
+    pub library_id: LibraryId,
+    pub original_path: String,
+    pub normalized_path: String,
+    pub handle: JobHandle,
+}
+
+fn validate_replay_gap(
+    scan_id: Uuid,
+    requested_after_sequence: Option<u64>,
+    bounds: &ScanRunEventSequenceBounds,
+    run_sequence: i64,
+) -> Result<(), ScanControlError> {
+    let Some(requested_after_sequence) = requested_after_sequence else {
+        return Ok(());
+    };
+
+    let min_available_sequence =
+        bounds.min_sequence.map(|value| value.max(0) as u64);
+    let max_available_sequence =
+        bounds.max_sequence.map(|value| value.max(0) as u64);
+    let requested_next = requested_after_sequence.saturating_add(1);
+
+    if let Some(min_available) = min_available_sequence {
+        if requested_next < min_available {
+            return Err(ScanControlError::ReplayGap(ScanReplayGap {
+                scan_id,
+                requested_after_sequence,
+                min_available_sequence,
+                max_available_sequence,
+            }));
+        }
+    } else if requested_after_sequence < run_sequence.max(0) as u64 {
+        return Err(ScanControlError::ReplayGap(ScanReplayGap {
+            scan_id,
+            requested_after_sequence,
+            min_available_sequence,
+            max_available_sequence,
+        }));
+    }
+
+    Ok(())
+}
+
+fn path_is_within(root_norm: &str, candidate_norm: &str) -> bool {
+    let root = std::path::Path::new(root_norm);
+    let candidate = std::path::Path::new(candidate_norm);
+    candidate == root || candidate.starts_with(root)
+}
+
+fn recovery_context_for_library(
+    library_type: LibraryType,
+    library_id: LibraryId,
+    normalized_path: &str,
+) -> Result<FolderScanContext, ScanControlError> {
+    match library_type {
+        LibraryType::Movies => {
+            Ok(FolderScanContext::Movie(MovieFolderScanContext {
+                library_id,
+                movie_root_path: MovieRootPath::try_new(normalized_path)
+                    .map_err(|err| {
+                        ScanControlError::InvalidRecoveryTarget(err.to_string())
+                    })?,
+            }))
+        }
+        LibraryType::Series => {
+            if let Ok(series_root_path) =
+                SeriesRootPath::try_new(normalized_path)
+            {
+                return Ok(FolderScanContext::Series(
+                    SeriesFolderScanContext {
+                        library_id,
+                        series_root_path,
+                    },
+                ));
+            }
+
+            let season_path = std::path::Path::new(normalized_path);
+            let Some(series_root) = season_path.parent() else {
+                return Err(ScanControlError::InvalidRecoveryTarget(
+                    "series_path_missing_parent".to_string(),
+                ));
+            };
+            let series_root_norm = series_root.to_string_lossy().to_string();
+            let series_root_path = SeriesRootPath::try_new(series_root_norm)
+                .map_err(|err| {
+                    ScanControlError::InvalidRecoveryTarget(err.to_string())
+                })?;
+            let (season_folder_path, season_number) =
+                SeasonFolderPath::try_new_under_series_root(
+                    &series_root_path,
+                    normalized_path,
+                )
+                .map_err(|err| {
+                    ScanControlError::InvalidRecoveryTarget(err.to_string())
+                })?;
+
+            Ok(FolderScanContext::Season(SeasonFolderScanContext {
+                library_id,
+                series_root_path,
+                season_folder_path,
+                season_number,
+            }))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanLifecycleStatus {
@@ -861,6 +1178,18 @@ fn scan_run_mode_from_start_mode(mode: StartMode) -> ScanRunMode {
     }
 }
 
+fn scan_run_mode_from_observability_source(
+    source: ScanRunSource,
+) -> ScanRunMode {
+    match source {
+        ScanRunSource::Manual => ScanRunMode::Manual,
+        ScanRunSource::Maintenance
+        | ScanRunSource::Watcher
+        | ScanRunSource::Orchestrator => ScanRunMode::Maintenance,
+        ScanRunSource::Retry => ScanRunMode::Resume,
+    }
+}
+
 fn repository_status_from_payload(
     status: &str,
 ) -> Option<ApiScanLifecycleStatus> {
@@ -879,7 +1208,9 @@ pub struct ScanBroadcastFrame {
 }
 
 impl ScanBroadcastFrame {
-    fn from_observability(record: ScanRunEventRecord) -> Option<Self> {
+    pub(crate) fn from_observability(
+        record: ScanRunEventRecord,
+    ) -> Option<Self> {
         let event =
             ScanEventKind::from_observability_kind(record.event_kind.as_str())?;
         let payload = serde_json::from_value(record.payload).ok()?;
@@ -4710,6 +5041,37 @@ pub struct ScanSnapshot {
     pub reason_details: Vec<ScanPathReasonDetail>,
 }
 
+impl ScanSnapshot {
+    fn from_observability(run: ScanRunRecord) -> Option<Self> {
+        let mode = scan_run_mode_from_observability_source(run.source);
+        let completed_items = run.completed_items.max(0) as u64;
+        let failed_items = run.dead_lettered_items.max(0) as u64;
+        Some(Self {
+            scan_id: run.id,
+            library_id: run.library_id,
+            status: ScanLifecycleStatus::from_observability(run.status)?,
+            mode,
+            completed_items,
+            total_items: run.total_items.max(0) as u64,
+            validated_items: completed_items,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items,
+            needs_attention_items: failed_items,
+            retrying_items: run.retrying_items.max(0) as u64,
+            correlation_id: run.correlation_id,
+            idempotency_key: run.idempotency_key,
+            run_key: mode.run_key(run.library_id),
+            disposition: None,
+            current_path: run.current_path,
+            started_at: run.started_at,
+            terminal_at: run.terminal_at,
+            sequence: run.sequence.max(0) as u64,
+            reason_details: Vec::new(),
+        })
+    }
+}
+
 impl From<ScanSnapshot> for ScanSnapshotDto {
     fn from(snapshot: ScanSnapshot) -> Self {
         ScanSnapshotDto {
@@ -4772,6 +5134,8 @@ pub enum ScanControlError {
     ScanNotFound,
     ScanNotRunning,
     ScanTerminal,
+    ReplayGap(ScanReplayGap),
+    InvalidRecoveryTarget(String),
     Internal(String),
 }
 
@@ -4784,6 +5148,10 @@ impl ScanControlError {
             ScanControlError::ScanNotFound => StatusCode::NOT_FOUND,
             ScanControlError::ScanNotRunning => StatusCode::CONFLICT,
             ScanControlError::ScanTerminal => StatusCode::GONE,
+            ScanControlError::ReplayGap(_) => StatusCode::CONFLICT,
+            ScanControlError::InvalidRecoveryTarget(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             ScanControlError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -4796,6 +5164,8 @@ impl ScanControlError {
             ScanControlError::ScanNotFound => "scan_not_found".into(),
             ScanControlError::ScanNotRunning => "scan_not_running".into(),
             ScanControlError::ScanTerminal => "scan_already_terminal".into(),
+            ScanControlError::ReplayGap(_) => "scan_event_replay_gap".into(),
+            ScanControlError::InvalidRecoveryTarget(reason) => reason.clone(),
             ScanControlError::Internal(reason) => reason.clone(),
         }
     }
@@ -4844,5 +5214,50 @@ mod durable_status_tests {
             ScanControlError::LibraryMismatch.message(),
             "scan_library_mismatch"
         );
+    }
+
+    #[test]
+    fn recovery_path_ownership_uses_path_components() {
+        assert!(path_is_within("/media/movies", "/media/movies"));
+        assert!(path_is_within("/media/movies", "/media/movies/A"));
+        assert!(!path_is_within("/media/movies", "/media/movies2/A"));
+    }
+
+    #[test]
+    fn replay_gap_detects_pruned_sequences() {
+        let scan_id = Uuid::now_v7();
+        let err = validate_replay_gap(
+            scan_id,
+            Some(1),
+            &ScanRunEventSequenceBounds {
+                min_sequence: Some(4),
+                max_sequence: Some(8),
+            },
+            8,
+        )
+        .unwrap_err();
+
+        match err {
+            ScanControlError::ReplayGap(gap) => {
+                assert_eq!(gap.scan_id, scan_id);
+                assert_eq!(gap.requested_after_sequence, 1);
+                assert_eq!(gap.min_available_sequence, Some(4));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replay_gap_allows_contiguous_terminal_replay() {
+        validate_replay_gap(
+            Uuid::now_v7(),
+            Some(3),
+            &ScanRunEventSequenceBounds {
+                min_sequence: Some(4),
+                max_sequence: Some(8),
+            },
+            8,
+        )
+        .expect("sequence 4 is retained and contiguous");
     }
 }

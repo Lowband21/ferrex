@@ -429,6 +429,283 @@ mod tests {
     }
 }
 
+/// Offset pagination metadata shared by durable scan observability endpoints.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ScanPageMeta {
+    pub limit: usize,
+    pub offset: usize,
+    pub count: usize,
+    pub total: usize,
+    pub has_more: bool,
+}
+
+impl ScanPageMeta {
+    pub fn new(
+        limit: usize,
+        offset: usize,
+        count: usize,
+        total: usize,
+    ) -> Self {
+        Self {
+            limit,
+            offset,
+            count,
+            total,
+            has_more: offset.saturating_add(count) < total,
+        }
+    }
+}
+
+/// Display-safe text for scan statuses, events, and failures.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ScanDisplayText {
+    pub label: String,
+    pub message: String,
+}
+
+/// Stable, display-safe wording for scan lifecycle/status strings.
+pub fn display_text_for_scan_status(status: &str) -> ScanDisplayText {
+    match status {
+        "pending" | "initializing" => ScanDisplayText {
+            label: "Pending".to_string(),
+            message: "Scan is waiting to start.".to_string(),
+        },
+        "running" | "discovering" | "processing" => ScanDisplayText {
+            label: "Running".to_string(),
+            message: "Scan is processing library changes.".to_string(),
+        },
+        "quiescing" => ScanDisplayText {
+            label: "Finishing".to_string(),
+            message: "Scan is waiting for queued work to settle.".to_string(),
+        },
+        "paused" => ScanDisplayText {
+            label: "Paused".to_string(),
+            message: "Scan is paused and can be resumed.".to_string(),
+        },
+        "completed" => ScanDisplayText {
+            label: "Completed".to_string(),
+            message: "Scan completed successfully.".to_string(),
+        },
+        "failed" => ScanDisplayText {
+            label: "Failed".to_string(),
+            message: "Scan needs attention before it can complete.".to_string(),
+        },
+        "canceled" | "cancelled" => ScanDisplayText {
+            label: "Canceled".to_string(),
+            message: "Scan was canceled before it completed.".to_string(),
+        },
+        _ => ScanDisplayText {
+            label: "Scan update".to_string(),
+            message: "Scan status changed.".to_string(),
+        },
+    }
+}
+
+/// Stable, display-safe wording for scan failure message codes.
+pub fn display_text_for_scan_failure(
+    category: &str,
+    message_code: &str,
+) -> ScanDisplayText {
+    let label = match category {
+        "filesystem_permission" => "Permission issue",
+        "filesystem_missing" => "Missing path",
+        "timeout" => "Timed out",
+        "content_not_indexed" => "No media found",
+        "scan_cancelled" => "Canceled",
+        "job_failure" => "Scan item failed",
+        _ => "Scan item failed",
+    };
+    let message = match message_code {
+        "scan.folder_permission_denied" => {
+            "Ferrex could not read this folder. Check filesystem permissions and retry."
+        }
+        "scan.folder_missing" => {
+            "The folder was not found. Check that the library path is still mounted."
+        }
+        "scan.folder_timeout" => {
+            "The folder scan timed out. Retry after storage responsiveness improves."
+        }
+        "scan.no_indexable_media" => {
+            "No supported media files were found in this folder."
+        }
+        "scan.cancelled" => "The scan item was canceled before it completed.",
+        _ => "This scan item failed. Retry after checking the library path.",
+    };
+
+    ScanDisplayText {
+        label: label.to_string(),
+        message: message.to_string(),
+    }
+}
+
+/// Durable scan run summary returned by scan observability endpoints.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunDto {
+    pub scan_id: Uuid,
+    pub library_id: LibraryId,
+    pub source: String,
+    pub status: String,
+    pub status_label: String,
+    pub status_message: String,
+    pub completed_items: u64,
+    pub total_items: u64,
+    pub retrying_items: u64,
+    pub dead_lettered_items: u64,
+    pub correlation_id: Uuid,
+    pub idempotency_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub last_event_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_at: Option<DateTime<Utc>>,
+    pub sequence: u64,
+    pub has_failures: bool,
+}
+
+/// Paginated durable scan run list.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunListResponse {
+    pub runs: Vec<ScanRunDto>,
+    pub page: ScanPageMeta,
+}
+
+/// Durable scan run detail, including safe terminal summary metadata.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunDetailResponse {
+    pub run: ScanRunDto,
+    #[serde(default)]
+    pub terminal_summary: serde_json::Value,
+}
+
+/// Durable scan event DTO with display-safe status text.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunEventDto {
+    pub event_id: Uuid,
+    pub scan_id: Uuid,
+    pub library_id: LibraryId,
+    pub sequence: u64,
+    pub event_kind: String,
+    pub status: String,
+    pub status_label: String,
+    pub status_message: String,
+    pub correlation_id: Uuid,
+    pub idempotency_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+    pub completed_items: u64,
+    pub total_items: u64,
+    pub retrying_items: u64,
+    pub dead_lettered_items: u64,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+/// Paginated durable scan events for a run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunEventsPageResponse {
+    pub scan_id: Uuid,
+    pub events: Vec<ScanRunEventDto>,
+    pub page: ScanPageMeta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay: Option<ScanReplayInfo>,
+}
+
+/// Debug/internal failure details intentionally separated from display fields.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanFailureDebugDetails {
+    pub raw_debug_details: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<Uuid>,
+    pub idempotency_key: String,
+}
+
+/// Display-safe failure summary for one scan subject.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanFailureDto {
+    pub scan_id: Uuid,
+    pub library_id: LibraryId,
+    pub subject_key: String,
+    pub category: String,
+    pub category_label: String,
+    pub message_code: String,
+    pub message: String,
+    pub occurrences: u32,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<ScanFailureDebugDetails>,
+}
+
+/// Paginated durable scan failures for a run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRunFailuresPageResponse {
+    pub scan_id: Uuid,
+    pub failures: Vec<ScanFailureDto>,
+    pub page: ScanPageMeta,
+}
+
+/// Scanner health view combining queue, watch, cursor, and durable run counters.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScannerHealthResponse {
+    pub queue_depths: crate::api::scan::ScanQueueDepths,
+    pub active_scans: usize,
+    pub retained_runs: usize,
+    pub failed_runs: usize,
+    pub incremental: IncrementalScanStatusView,
+}
+
+/// Request body for idempotently retrying a library path without deleting data.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRecoveryRequest {
+    pub library_id: LibraryId,
+    pub path: String,
+    #[serde(default)]
+    pub correlation_id: Option<Uuid>,
+}
+
+/// Response body for scan recovery/retry enqueue actions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanRecoveryResponse {
+    pub library_id: LibraryId,
+    pub path: String,
+    pub normalized_path: String,
+    pub job_id: Uuid,
+    pub accepted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_into: Option<Uuid>,
+    pub idempotency_key: String,
+    pub message: String,
+}
+
+/// Replay metadata for durable event pagination/SSE resume.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ScanReplayInfo {
+    pub requested_after_sequence: Option<u64>,
+    pub min_available_sequence: Option<u64>,
+    pub max_available_sequence: Option<u64>,
+    pub next_sequence: Option<u64>,
+    pub recoverable: bool,
+    pub recovery_hint: String,
+}
+
+/// Structured response returned when an event replay cursor is pruned/gapped.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ScanReplayGapResponse {
+    pub scan_id: Uuid,
+    pub requested_after_sequence: u64,
+    pub min_available_sequence: Option<u64>,
+    pub max_available_sequence: Option<u64>,
+    pub recoverable: bool,
+    pub recovery_hint: String,
+}
+
 /// Re-export media scan SSE payloads for downstream clients
 pub mod events {
     pub use ferrex_model::{
@@ -518,5 +795,41 @@ mod snapshot_serde_tests {
         assert_eq!(decoded.validated_items, completed_items);
         assert_eq!(decoded.failed_items, 6);
         assert_eq!(decoded.needs_attention_items, 6);
+    }
+}
+
+#[cfg(test)]
+mod observability_tests {
+    use super::*;
+
+    #[test]
+    fn failure_display_text_stays_safe_and_actionable() {
+        let permission = display_text_for_scan_failure(
+            "filesystem_permission",
+            "scan.folder_permission_denied",
+        );
+        assert_eq!(permission.label, "Permission issue");
+        assert!(permission.message.contains("permissions"));
+        assert!(!permission.message.contains("raw"));
+        assert!(!permission.message.contains("dead-letter"));
+
+        let unknown = display_text_for_scan_failure(
+            "postgres_dead_letter",
+            "debug.internal.error",
+        );
+        assert_eq!(unknown.label, "Scan item failed");
+        assert_eq!(
+            unknown.message,
+            "This scan item failed. Retry after checking the library path."
+        );
+    }
+
+    #[test]
+    fn pagination_meta_reports_has_more_without_overflow() {
+        let page = ScanPageMeta::new(50, usize::MAX - 5, 5, usize::MAX);
+        assert!(!page.has_more);
+
+        let page = ScanPageMeta::new(10, 20, 10, 35);
+        assert!(page.has_more);
     }
 }

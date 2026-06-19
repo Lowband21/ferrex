@@ -174,6 +174,46 @@ pub struct ScanRunRetentionPolicy {
     pub terminal_before: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ScanRunPageRequest {
+    pub library_id: Option<LibraryId>,
+    pub status: Option<ScanRunStatus>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanRunPage {
+    pub runs: Vec<ScanRunRecord>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScanRunEventPageRequest {
+    pub run_id: Uuid,
+    pub after_sequence: Option<i64>,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ScanRunEventSequenceBounds {
+    pub min_sequence: Option<i64>,
+    pub max_sequence: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScanRunFailurePageRequest {
+    pub run_id: Uuid,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanRunFailurePage {
+    pub failures: Vec<ScanRunFailureSummary>,
+    pub total: i64,
+}
+
 #[async_trait]
 pub trait ScanObservabilityRepository: Send + Sync {
     async fn create_run(&self, run: &ScanRunRecord) -> Result<bool>;
@@ -190,10 +230,14 @@ pub trait ScanObservabilityRepository: Send + Sync {
         failure: &ScanRunFailureSummary,
     ) -> Result<()>;
 
+    async fn get_run(&self, run_id: Uuid) -> Result<Option<ScanRunRecord>>;
+
     async fn active_runs(
         &self,
         library_id: LibraryId,
     ) -> Result<Vec<ScanRunRecord>>;
+
+    async fn active_runs_all(&self) -> Result<Vec<ScanRunRecord>>;
 
     async fn recent_runs(
         &self,
@@ -201,15 +245,35 @@ pub trait ScanObservabilityRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<ScanRunRecord>>;
 
+    async fn runs_page(
+        &self,
+        request: ScanRunPageRequest,
+    ) -> Result<ScanRunPage>;
+
     async fn events_for_run(
         &self,
         run_id: Uuid,
     ) -> Result<Vec<ScanRunEventRecord>>;
 
+    async fn events_page_for_run(
+        &self,
+        request: ScanRunEventPageRequest,
+    ) -> Result<Vec<ScanRunEventRecord>>;
+
+    async fn event_sequence_bounds(
+        &self,
+        run_id: Uuid,
+    ) -> Result<ScanRunEventSequenceBounds>;
+
     async fn failure_summaries_for_run(
         &self,
         run_id: Uuid,
     ) -> Result<Vec<ScanRunFailureSummary>>;
+
+    async fn failure_summaries_page_for_run(
+        &self,
+        request: ScanRunFailurePageRequest,
+    ) -> Result<ScanRunFailurePage>;
 
     async fn prune(&self, policy: ScanRunRetentionPolicy) -> Result<u64>;
 }

@@ -10,17 +10,27 @@ use base64::{
 use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::api::types::{
     ActiveScansResponse, ApiResponse, LatestProgressResponse,
-    ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
-    ScanStartDisposition, StartScanRequest,
+    ScanCommandAcceptedResponse, ScanCommandRequest, ScanFailureDebugDetails,
+    ScanFailureDto, ScanPageMeta, ScanRecoveryRequest, ScanRecoveryResponse,
+    ScanReplayGapResponse, ScanReplayInfo, ScanRunDetailResponse, ScanRunDto,
+    ScanRunEventDto, ScanRunEventsPageResponse, ScanRunFailuresPageResponse,
+    ScanRunListResponse, ScanSnapshotDto, ScanStartDisposition,
+    ScannerHealthResponse, StartScanRequest, display_text_for_scan_failure,
+    display_text_for_scan_status,
 };
 use ferrex_core::domain::scan::manifest::{
     DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
     DEFAULT_MANIFEST_WALK_PARTITION_LIMIT, ManifestDiagnosticReason,
 };
 use ferrex_core::error::MediaError;
+use ferrex_core::scan_observability::{
+    ScanRunEventRecord, ScanRunFailurePageRequest, ScanRunFailureSummary,
+    ScanRunPageRequest, ScanRunRecord, ScanRunStatus,
+};
 use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tracing::warn;
@@ -30,7 +40,8 @@ use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
 use crate::infra::scan::scan_manager::{
     ScanBroadcastFrame, ScanCommandAccepted, ScanControlError,
-    ScanControlPlane, ScanHistoryEntry,
+    ScanControlPlane, ScanHistoryEntry, ScanRecoveryAccepted, ScanReplayGap,
+    ScanRunEventReplayPage,
 };
 use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
@@ -46,18 +57,50 @@ const MEDIA_EVENT_REPLAY_WINDOW: Duration = Duration::from_secs(10 * 60);
 pub struct ScanHttpError {
     status: StatusCode,
     message: String,
+    replay_gap: Option<ScanReplayGapResponse>,
+}
+
+impl ScanHttpError {
+    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            replay_gap: None,
+        }
+    }
 }
 
 impl From<ScanControlError> for ScanHttpError {
     fn from(error: ScanControlError) -> Self {
         let status = error.status_code();
+        let replay_gap = match &error {
+            ScanControlError::ReplayGap(gap) => {
+                Some(scan_replay_gap_response(gap))
+            }
+            _ => None,
+        };
         let message = error.message();
-        Self { status, message }
+        Self {
+            status,
+            message,
+            replay_gap,
+        }
     }
 }
 
 impl IntoResponse for ScanHttpError {
     fn into_response(self) -> axum::response::Response {
+        if let Some(replay_gap) = self.replay_gap {
+            let payload = Json(json!({
+                "status": "error",
+                "error": self.message,
+                "message": replay_gap.recovery_hint,
+                "recoverable": true,
+                "recovery": replay_gap,
+            }));
+            return (self.status, payload).into_response();
+        }
+
         let payload = Json(ApiResponse::<()>::error(self.message));
         (self.status, payload).into_response()
     }
@@ -76,6 +119,28 @@ pub struct ProgressQuery {
 #[derive(Debug, Deserialize)]
 pub struct MediaEventsQuery {
     pub last_sequence: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunsQuery {
+    pub library_id: Option<Uuid>,
+    pub status: Option<String>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunEventsQuery {
+    pub after_sequence: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunFailuresQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+    #[serde(default)]
+    pub debug: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,10 +163,10 @@ pub async fn start_scan_handler(
     if demo_mode::is_demo_mode(&state)
         && !demo_mode::is_demo_library(&LibraryId(library_id))
     {
-        return Err(ScanHttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Library not found".to_string(),
-        });
+        return Err(ScanHttpError::new(
+            StatusCode::NOT_FOUND,
+            "Library not found",
+        ));
     }
 
     let accepted = state
@@ -259,6 +324,164 @@ pub async fn scan_events_handler(
     })))
 }
 
+pub async fn scan_runs_handler(
+    State(state): State<AppState>,
+    Query(query): Query<RunsQuery>,
+) -> Result<Json<ApiResponse<ScanRunListResponse>>, ScanHttpError> {
+    let limit = query.limit.unwrap_or(25).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
+    let status = parse_run_status_filter(query.status.as_deref())?;
+    let page = state
+        .scan_control()
+        .runs_page(ScanRunPageRequest {
+            library_id: query.library_id.map(LibraryId),
+            status,
+            limit: limit as i64,
+            offset: offset.min(i64::MAX as usize) as i64,
+        })
+        .await?;
+    let total = page.total.max(0) as usize;
+    let runs = page
+        .runs
+        .into_iter()
+        .map(|run| scan_run_to_dto(run, None))
+        .collect::<Vec<_>>();
+    let page_meta = ScanPageMeta::new(limit, offset, runs.len(), total);
+
+    Ok(Json(ApiResponse::success(ScanRunListResponse {
+        runs,
+        page: page_meta,
+    })))
+}
+
+pub async fn scan_run_detail_handler(
+    State(state): State<AppState>,
+    Path(scan_id): Path<Uuid>,
+) -> Result<Json<ApiResponse<ScanRunDetailResponse>>, ScanHttpError> {
+    let run = state.scan_control().run_detail(scan_id).await?;
+    let terminal_summary = run.terminal_summary.clone();
+    Ok(Json(ApiResponse::success(ScanRunDetailResponse {
+        run: scan_run_to_dto(run, None),
+        terminal_summary,
+    })))
+}
+
+pub async fn scan_run_events_handler(
+    State(state): State<AppState>,
+    Path(scan_id): Path<Uuid>,
+    Query(query): Query<RunEventsQuery>,
+) -> Result<Json<ApiResponse<ScanRunEventsPageResponse>>, ScanHttpError> {
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let replay = state
+        .scan_control()
+        .run_events_page(scan_id, query.after_sequence, limit as i64)
+        .await?;
+    let events = replay
+        .events
+        .iter()
+        .cloned()
+        .map(scan_event_to_dto)
+        .collect::<Vec<_>>();
+    let page = ScanPageMeta::new(
+        limit,
+        query.after_sequence.unwrap_or(0) as usize,
+        events.len(),
+        replay.bounds.max_sequence.unwrap_or(0).max(0) as usize,
+    );
+
+    Ok(Json(ApiResponse::success(ScanRunEventsPageResponse {
+        scan_id,
+        events,
+        page,
+        replay: Some(replay_info(&replay)),
+    })))
+}
+
+pub async fn scan_run_failures_handler(
+    State(state): State<AppState>,
+    Path(scan_id): Path<Uuid>,
+    Query(query): Query<RunFailuresQuery>,
+) -> Result<Json<ApiResponse<ScanRunFailuresPageResponse>>, ScanHttpError> {
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
+    let page = state
+        .scan_control()
+        .run_failures_page(ScanRunFailurePageRequest {
+            run_id: scan_id,
+            limit: limit as i64,
+            offset: offset.min(i64::MAX as usize) as i64,
+        })
+        .await?;
+    let total = page.total.max(0) as usize;
+    let failures = page
+        .failures
+        .into_iter()
+        .map(|failure| scan_failure_to_dto(failure, query.debug))
+        .collect::<Vec<_>>();
+
+    Ok(Json(ApiResponse::success(ScanRunFailuresPageResponse {
+        scan_id,
+        page: ScanPageMeta::new(limit, offset, failures.len(), total),
+        failures,
+    })))
+}
+
+pub async fn scanner_health_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<ScannerHealthResponse>>, ScanHttpError> {
+    let queue_depths = state
+        .scan_control()
+        .orchestrator()
+        .queue_depths()
+        .await
+        .map_err(|e: MediaError| {
+            ScanHttpError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
+    let active_scans = state.scan_control().active_scans().await.len();
+    let incremental = incremental_status(&state).await?;
+    let retained = state
+        .scan_control()
+        .runs_page(ScanRunPageRequest {
+            library_id: None,
+            status: None,
+            limit: 1,
+            offset: 0,
+        })
+        .await?;
+    let failed = state
+        .scan_control()
+        .runs_page(ScanRunPageRequest {
+            library_id: None,
+            status: Some(ScanRunStatus::Failed),
+            limit: 1,
+            offset: 0,
+        })
+        .await?;
+
+    Ok(Json(ApiResponse::success(ScannerHealthResponse {
+        queue_depths,
+        active_scans,
+        retained_runs: retained.total.max(0) as usize,
+        failed_runs: failed.total.max(0) as usize,
+        incremental,
+    })))
+}
+
+pub async fn scan_recovery_handler(
+    State(state): State<AppState>,
+    Json(request): Json<ScanRecoveryRequest>,
+) -> Result<impl IntoResponse, ScanHttpError> {
+    let accepted = state
+        .scan_control()
+        .recover_path(request.library_id, &request.path, request.correlation_id)
+        .await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ApiResponse::success(recovery_response(accepted))),
+    ))
+}
+
 pub async fn scan_progress_sse_handler(
     State(state): State<AppState>,
     Path(scan_id): Path<Uuid>,
@@ -289,9 +512,8 @@ pub async fn scan_metrics_handler(
         .orchestrator()
         .queue_depths()
         .await
-        .map_err(|e: MediaError| ScanHttpError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: e.to_string(),
+        .map_err(|e: MediaError| {
+            ScanHttpError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
     let active = state.scan_control().active_scans().await.len();
     let incremental = incremental_status(&state).await?;
@@ -430,9 +652,11 @@ async fn incremental_status(
         .orchestrator()
         .incremental_status()
         .await
-        .map_err(|err| ScanHttpError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: err.to_string(),
+        .map_err(|err| {
+            ScanHttpError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            )
         })
 }
 
@@ -440,6 +664,149 @@ fn watch_strategy_label(
     strategy: ferrex_core::domain::scan::orchestration::config::WatchStrategy,
 ) -> String {
     format!("{strategy:?}").to_ascii_lowercase()
+}
+
+fn parse_run_status_filter(
+    raw: Option<&str>,
+) -> Result<Option<ScanRunStatus>, ScanHttpError> {
+    raw.map(|value| {
+        ScanRunStatus::from_str(value).ok_or_else(|| {
+            ScanHttpError::new(
+                StatusCode::BAD_REQUEST,
+                format!("invalid scan run status filter: {value}"),
+            )
+        })
+    })
+    .transpose()
+}
+
+fn scan_run_to_dto(
+    run: ScanRunRecord,
+    has_failures: Option<bool>,
+) -> ScanRunDto {
+    let status = run.status.as_str().to_string();
+    let display = display_text_for_scan_status(&status);
+    ScanRunDto {
+        scan_id: run.id,
+        library_id: run.library_id,
+        source: run.source.as_str().to_string(),
+        status,
+        status_label: display.label,
+        status_message: display.message,
+        completed_items: run.completed_items.max(0) as u64,
+        total_items: run.total_items.max(0) as u64,
+        retrying_items: run.retrying_items.max(0) as u64,
+        dead_lettered_items: run.dead_lettered_items.max(0) as u64,
+        correlation_id: run.correlation_id,
+        idempotency_key: run.idempotency_key,
+        current_path: run.current_path,
+        started_at: run.started_at,
+        last_event_at: run.last_event_at,
+        terminal_at: run.terminal_at,
+        sequence: run.sequence.max(0) as u64,
+        has_failures: has_failures.unwrap_or(
+            run.dead_lettered_items > 0 || run.status == ScanRunStatus::Failed,
+        ),
+    }
+}
+
+fn scan_event_to_dto(record: ScanRunEventRecord) -> ScanRunEventDto {
+    let display = display_text_for_scan_status(&record.status);
+    ScanRunEventDto {
+        event_id: record.id,
+        scan_id: record.run_id,
+        library_id: record.library_id,
+        sequence: record.sequence.max(0) as u64,
+        event_kind: record.event_kind,
+        status: record.status,
+        status_label: display.label,
+        status_message: display.message,
+        correlation_id: record.correlation_id,
+        idempotency_key: record.idempotency_key,
+        subject_key: record.subject_key,
+        current_path: record.current_path,
+        occurred_at: record.occurred_at,
+        completed_items: record.completed_items.max(0) as u64,
+        total_items: record.total_items.max(0) as u64,
+        retrying_items: record.retrying_items.max(0) as u64,
+        dead_lettered_items: record.dead_lettered_items.max(0) as u64,
+        payload: record.payload,
+    }
+}
+
+fn scan_failure_to_dto(
+    failure: ScanRunFailureSummary,
+    include_debug: bool,
+) -> ScanFailureDto {
+    let display =
+        display_text_for_scan_failure(&failure.category, &failure.message_code);
+    let debug = include_debug.then(|| ScanFailureDebugDetails {
+        raw_debug_details: failure.raw_debug_details.clone(),
+        last_error: failure.last_error.clone(),
+        job_id: failure.job_id,
+        idempotency_key: failure.idempotency_key.clone(),
+    });
+
+    ScanFailureDto {
+        scan_id: failure.run_id,
+        library_id: failure.library_id,
+        subject_key: failure.subject_key,
+        category: failure.category,
+        category_label: display.label,
+        message_code: failure.message_code,
+        message: display.message,
+        occurrences: failure.occurrences.max(1) as u32,
+        first_seen_at: failure.first_seen_at,
+        last_seen_at: failure.last_seen_at,
+        retryable: failure.retryable,
+        debug,
+    }
+}
+
+fn replay_info(replay: &ScanRunEventReplayPage) -> ScanReplayInfo {
+    ScanReplayInfo {
+        requested_after_sequence: replay.requested_after_sequence,
+        min_available_sequence: replay
+            .bounds
+            .min_sequence
+            .map(|value| value.max(0) as u64),
+        max_available_sequence: replay
+            .bounds
+            .max_sequence
+            .map(|value| value.max(0) as u64),
+        next_sequence: replay.next_sequence,
+        recoverable: true,
+        recovery_hint: "Use the latest returned sequence as Last-Event-ID; if the stream reports a gap, refetch this run's events without a cursor.".to_string(),
+    }
+}
+
+fn scan_replay_gap_response(gap: &ScanReplayGap) -> ScanReplayGapResponse {
+    ScanReplayGapResponse {
+        scan_id: gap.scan_id,
+        requested_after_sequence: gap.requested_after_sequence,
+        min_available_sequence: gap.min_available_sequence,
+        max_available_sequence: gap.max_available_sequence,
+        recoverable: true,
+        recovery_hint: "Requested scan events are no longer retained. Refetch the run detail/events without Last-Event-ID, then resume from the newest sequence.".to_string(),
+    }
+}
+
+fn recovery_response(accepted: ScanRecoveryAccepted) -> ScanRecoveryResponse {
+    ScanRecoveryResponse {
+        library_id: accepted.library_id,
+        path: accepted.original_path,
+        normalized_path: accepted.normalized_path,
+        job_id: accepted.handle.job_id.0,
+        accepted: accepted.handle.accepted,
+        merged_into: accepted.handle.merged_into.map(|job_id| job_id.0),
+        idempotency_key: accepted.handle.dedupe_key,
+        message: if accepted.handle.accepted {
+            "Recovery scan enqueued without deleting user data.".to_string()
+        } else {
+            "Recovery scan already queued; existing retry work was reused."
+                .to_string()
+        },
+    }
 }
 
 pub async fn build_scan_progress_stream(
@@ -456,22 +823,24 @@ pub async fn build_scan_progress_stream(
     >,
     ScanControlError,
 > {
-    let history = scan_control.events(&scan_id).await?;
+    let replay = scan_control
+        .run_events_page(scan_id, last_sequence, 500)
+        .await?;
     let receiver = match scan_control.subscribe_scan(scan_id).await {
         Ok(receiver) => Some(receiver),
-        Err(ScanControlError::ScanNotFound) if !history.is_empty() => None,
+        Err(ScanControlError::ScanNotFound) => None,
         Err(err) => return Err(err),
     };
 
     Ok(scan_progress_stream_from_parts(
-        history,
+        replay.events,
         receiver,
         last_sequence,
     ))
 }
 
 fn scan_progress_stream_from_parts(
-    history: Vec<ScanBroadcastFrame>,
+    history: Vec<ScanRunEventRecord>,
     receiver: Option<tokio::sync::broadcast::Receiver<ScanBroadcastFrame>>,
     last_sequence: Option<u64>,
 ) -> Pin<
@@ -481,17 +850,26 @@ fn scan_progress_stream_from_parts(
             + 'static,
     >,
 > {
-    let history_events = scan_progress_history_events(history, last_sequence);
+    let mut history_last_sequence = last_sequence.unwrap_or(0);
+    let history_events = history
+        .into_iter()
+        .filter_map(ScanBroadcastFrame::from_observability)
+        .filter_map(|frame| {
+            history_last_sequence =
+                history_last_sequence.max(frame.payload.sequence);
+            scan_frame_to_event(frame)
+        })
+        .map(Ok::<Event, Infallible>)
+        .collect::<Vec<_>>();
     let history_stream = tokio_stream::iter(history_events);
 
     let Some(receiver) = receiver else {
         return Box::pin(history_stream);
     };
 
-    let initial_sequence = last_sequence.unwrap_or(0);
     let live_stream = async_stream::stream! {
         let mut live_receiver = BroadcastStream::new(receiver);
-        let mut last_seen_sequence = initial_sequence;
+        let mut last_seen_sequence = history_last_sequence;
         use tokio_stream::StreamExt;
 
         while let Some(frame_result) = live_receiver.next().await {
@@ -515,6 +893,7 @@ fn scan_progress_stream_from_parts(
     Box::pin(history_stream.chain(live_stream))
 }
 
+#[cfg(test)]
 fn scan_progress_history_events(
     history: Vec<ScanBroadcastFrame>,
     last_sequence: Option<u64>,
@@ -787,5 +1166,63 @@ mod sse_tests {
             2
         );
         assert_eq!(scan_progress_history_events(history, Some(3)).len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod observability_tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn run_status_filter_rejects_unknown_values() {
+        assert_eq!(
+            parse_run_status_filter(Some("failed")).unwrap(),
+            Some(ScanRunStatus::Failed)
+        );
+        let err = parse_run_status_filter(Some("dead_letter")).unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn failure_dto_hides_debug_details_by_default() {
+        let now = Utc::now();
+        let dto = scan_failure_to_dto(
+            ScanRunFailureSummary {
+                run_id: Uuid::now_v7(),
+                library_id: LibraryId(Uuid::now_v7()),
+                subject_key: "/media/movies/Broken".to_string(),
+                category: "filesystem_permission".to_string(),
+                message_code: "scan.folder_permission_denied".to_string(),
+                raw_debug_details: json!({"raw_error": "permission denied"}),
+                last_error: Some("permission denied".to_string()),
+                occurrences: 1,
+                first_seen_at: now,
+                last_seen_at: now,
+                retryable: true,
+                job_id: Some(Uuid::now_v7()),
+                idempotency_key: "folder:/media/movies/Broken".to_string(),
+            },
+            false,
+        );
+
+        assert_eq!(dto.category_label, "Permission issue");
+        assert!(dto.message.contains("permissions"));
+        assert!(dto.debug.is_none());
+    }
+
+    #[test]
+    fn replay_gap_response_is_recoverable() {
+        let scan_id = Uuid::now_v7();
+        let response = scan_replay_gap_response(&ScanReplayGap {
+            scan_id,
+            requested_after_sequence: 1,
+            min_available_sequence: Some(5),
+            max_available_sequence: Some(9),
+        });
+
+        assert_eq!(response.scan_id, scan_id);
+        assert!(response.recoverable);
+        assert!(response.recovery_hint.contains("Refetch"));
     }
 }

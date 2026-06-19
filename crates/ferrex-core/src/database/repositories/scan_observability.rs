@@ -1,11 +1,13 @@
 use async_trait::async_trait;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 use crate::{
     database::repository_ports::scan_observability::{
-        NewScanRunEvent, ScanObservabilityRepository, ScanRunEventRecord,
-        ScanRunFailureSummary, ScanRunRecord, ScanRunRetentionPolicy,
+        NewScanRunEvent, ScanObservabilityRepository, ScanRunEventPageRequest,
+        ScanRunEventRecord, ScanRunEventSequenceBounds, ScanRunFailurePage,
+        ScanRunFailurePageRequest, ScanRunFailureSummary, ScanRunPage,
+        ScanRunPageRequest, ScanRunRecord, ScanRunRetentionPolicy,
         ScanRunSource, ScanRunStatus, ScanRunUpdate,
     },
     error::{MediaError, Result},
@@ -102,6 +104,24 @@ fn row_to_failure(row: sqlx::postgres::PgRow) -> Result<ScanRunFailureSummary> {
         job_id: row.try_get("job_id")?,
         idempotency_key: row.try_get("idempotency_key")?,
     })
+}
+
+fn append_run_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    library_id: Option<LibraryId>,
+    status: Option<ScanRunStatus>,
+) {
+    let mut has_filter = false;
+    if let Some(library_id) = library_id {
+        query.push(" WHERE library_id = ");
+        query.push_bind(library_id.to_uuid());
+        has_filter = true;
+    }
+    if let Some(status) = status {
+        query.push(if has_filter { " AND " } else { " WHERE " });
+        query.push("status = ");
+        query.push_bind(status.as_str());
+    }
 }
 
 #[async_trait]
@@ -383,6 +403,40 @@ impl ScanObservabilityRepository for PostgresScanObservabilityRepository {
         Ok(())
     }
 
+    async fn get_run(&self, run_id: Uuid) -> Result<Option<ScanRunRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id,
+                library_id,
+                source,
+                status,
+                correlation_id,
+                idempotency_key,
+                sequence,
+                started_at,
+                last_event_at,
+                terminal_at,
+                current_path,
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                terminal_summary
+            FROM scan_runs
+            WHERE id = $1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!("failed to query scan run by id: {e}"))
+        })?;
+
+        row.map(row_to_run).transpose()
+    }
+
     async fn active_runs(
         &self,
         library_id: LibraryId,
@@ -413,6 +467,42 @@ impl ScanObservabilityRepository for PostgresScanObservabilityRepository {
             "#,
         )
         .bind(library_id.to_uuid())
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to query active scan runs: {e}"
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_run).collect()
+    }
+
+    async fn active_runs_all(&self) -> Result<Vec<ScanRunRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                library_id,
+                source,
+                status,
+                correlation_id,
+                idempotency_key,
+                sequence,
+                started_at,
+                last_event_at,
+                terminal_at,
+                current_path,
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                terminal_summary
+            FROM scan_runs
+            WHERE status IN ('pending', 'running', 'paused')
+            ORDER BY last_event_at DESC, started_at DESC
+            "#,
+        )
         .fetch_all(self.pool())
         .await
         .map_err(|e| {
@@ -498,6 +588,76 @@ impl ScanObservabilityRepository for PostgresScanObservabilityRepository {
         rows.into_iter().map(row_to_run).collect()
     }
 
+    async fn runs_page(
+        &self,
+        request: ScanRunPageRequest,
+    ) -> Result<ScanRunPage> {
+        let limit = request.limit.clamp(1, 100);
+        let offset = request.offset.max(0);
+
+        let mut query = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT
+                id,
+                library_id,
+                source,
+                status,
+                correlation_id,
+                idempotency_key,
+                sequence,
+                started_at,
+                last_event_at,
+                terminal_at,
+                current_path,
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                terminal_summary
+            FROM scan_runs
+            "#,
+        );
+        append_run_filters(&mut query, request.library_id, request.status);
+        query.push(
+            " ORDER BY COALESCE(terminal_at, last_event_at, started_at) DESC, started_at DESC, id DESC LIMIT ",
+        );
+        query.push_bind(limit);
+        query.push(" OFFSET ");
+        query.push_bind(offset);
+
+        let rows = query.build().fetch_all(self.pool()).await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to query paginated scan runs: {e}"
+            ))
+        })?;
+
+        let mut count_query = QueryBuilder::<Postgres>::new(
+            "SELECT COUNT(*)::bigint AS total FROM scan_runs",
+        );
+        append_run_filters(
+            &mut count_query,
+            request.library_id,
+            request.status,
+        );
+        let total: i64 = count_query
+            .build_query_scalar()
+            .fetch_one(self.pool())
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!(
+                    "failed to count paginated scan runs: {e}"
+                ))
+            })?;
+
+        Ok(ScanRunPage {
+            runs: rows
+                .into_iter()
+                .map(row_to_run)
+                .collect::<Result<Vec<_>>>()?,
+            total,
+        })
+    }
+
     async fn events_for_run(
         &self,
         run_id: Uuid,
@@ -539,6 +699,80 @@ impl ScanObservabilityRepository for PostgresScanObservabilityRepository {
         rows.into_iter().map(row_to_event).collect()
     }
 
+    async fn events_page_for_run(
+        &self,
+        request: ScanRunEventPageRequest,
+    ) -> Result<Vec<ScanRunEventRecord>> {
+        let limit = request.limit.clamp(1, 500);
+        let mut query = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT
+                id,
+                run_id,
+                library_id,
+                event_version,
+                event_kind,
+                status,
+                correlation_id,
+                idempotency_key,
+                sequence,
+                subject_key,
+                current_path,
+                occurred_at,
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                payload
+            FROM scan_run_events
+            WHERE run_id = 
+            "#,
+        );
+        query.push_bind(request.run_id);
+        if let Some(after_sequence) = request.after_sequence {
+            query.push(" AND sequence > ");
+            query.push_bind(after_sequence.max(0));
+        }
+        query.push(" ORDER BY sequence ASC, occurred_at ASC, id ASC LIMIT ");
+        query.push_bind(limit);
+
+        let rows = query.build().fetch_all(self.pool()).await.map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to query paginated scan run events: {e}"
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_event).collect()
+    }
+
+    async fn event_sequence_bounds(
+        &self,
+        run_id: Uuid,
+    ) -> Result<ScanRunEventSequenceBounds> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                MIN(sequence) AS min_sequence,
+                MAX(sequence) AS max_sequence
+            FROM scan_run_events
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to query scan event sequence bounds: {e}"
+            ))
+        })?;
+
+        Ok(ScanRunEventSequenceBounds {
+            min_sequence: row.try_get("min_sequence")?,
+            max_sequence: row.try_get("max_sequence")?,
+        })
+    }
+
     async fn failure_summaries_for_run(
         &self,
         run_id: Uuid,
@@ -574,6 +808,70 @@ impl ScanObservabilityRepository for PostgresScanObservabilityRepository {
         })?;
 
         rows.into_iter().map(row_to_failure).collect()
+    }
+
+    async fn failure_summaries_page_for_run(
+        &self,
+        request: ScanRunFailurePageRequest,
+    ) -> Result<ScanRunFailurePage> {
+        let limit = request.limit.clamp(1, 100);
+        let offset = request.offset.max(0);
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                run_id,
+                library_id,
+                subject_key,
+                category,
+                message_code,
+                raw_debug_details,
+                last_error,
+                occurrences,
+                first_seen_at,
+                last_seen_at,
+                retryable,
+                job_id,
+                idempotency_key
+            FROM scan_run_failures
+            WHERE run_id = $1
+            ORDER BY last_seen_at DESC, subject_key ASC
+            LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(request.run_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to query paginated scan run failures: {e}"
+            ))
+        })?;
+
+        let total: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM scan_run_failures
+            WHERE run_id = $1
+            "#,
+        )
+        .bind(request.run_id)
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "failed to count paginated scan run failures: {e}"
+            ))
+        })?;
+
+        Ok(ScanRunFailurePage {
+            failures: rows
+                .into_iter()
+                .map(row_to_failure)
+                .collect::<Result<Vec<_>>>()?,
+            total,
+        })
     }
 
     async fn prune(&self, policy: ScanRunRetentionPolicy) -> Result<u64> {

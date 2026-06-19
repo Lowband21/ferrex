@@ -5,11 +5,15 @@
 use anyhow::{Context, Result, bail};
 use chrono::{Duration as ChronoDuration, Utc};
 use ferrex_core::{
-    postgres_scan_observability::PostgresScanObservabilityRepository,
-    scan_observability::{
-        NewScanRunEvent, ScanObservabilityRepository, ScanRunFailureSummary,
-        ScanRunRecord, ScanRunRetentionPolicy, ScanRunSource, ScanRunStatus,
-        ScanRunUpdate,
+    database::{
+        repositories::scan_observability::PostgresScanObservabilityRepository,
+        repository_ports::scan_observability::{
+            NewScanRunEvent, ScanObservabilityRepository,
+            ScanRunEventPageRequest, ScanRunFailurePageRequest,
+            ScanRunFailureSummary, ScanRunPageRequest, ScanRunRecord,
+            ScanRunRetentionPolicy, ScanRunSource, ScanRunStatus,
+            ScanRunUpdate,
+        },
     },
     types::ids::LibraryId,
 };
@@ -185,11 +189,44 @@ async fn run_reconstruction_assertions(pool: PgPool) -> Result<()> {
     assert_eq!(recent[0].status, ScanRunStatus::Failed);
     assert_eq!(recent[0].dead_lettered_items, 1);
 
+    let looked_up = reconstructed
+        .get_run(run_id)
+        .await?
+        .context("scan run should be retained")?;
+    assert_eq!(looked_up.id, run_id);
+    assert_eq!(looked_up.status, ScanRunStatus::Failed);
+
+    let run_page = reconstructed
+        .runs_page(ScanRunPageRequest {
+            library_id: Some(library_id),
+            status: Some(ScanRunStatus::Failed),
+            limit: 1,
+            offset: 0,
+        })
+        .await?;
+    assert_eq!(run_page.total, 1);
+    assert_eq!(run_page.runs.len(), 1);
+    assert_eq!(run_page.runs[0].id, run_id);
+
     let events = reconstructed.events_for_run(run_id).await?;
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].event_kind, "started");
     assert_eq!(events[1].event_kind, "failed");
     assert_eq!(events[1].sequence, events[0].sequence + 1);
+
+    let bounds = reconstructed.event_sequence_bounds(run_id).await?;
+    assert_eq!(bounds.min_sequence, Some(events[0].sequence));
+    assert_eq!(bounds.max_sequence, Some(events[1].sequence));
+
+    let replay_page = reconstructed
+        .events_page_for_run(ScanRunEventPageRequest {
+            run_id,
+            after_sequence: Some(events[0].sequence),
+            limit: 10,
+        })
+        .await?;
+    assert_eq!(replay_page.len(), 1);
+    assert_eq!(replay_page[0].event_kind, "failed");
 
     let failures = reconstructed.failure_summaries_for_run(run_id).await?;
     assert_eq!(failures.len(), 1);
@@ -199,6 +236,16 @@ async fn run_reconstruction_assertions(pool: PgPool) -> Result<()> {
         failures[0].raw_debug_details["raw_error"],
         "permission denied: /media/movies/Broken"
     );
+
+    let failure_page = reconstructed
+        .failure_summaries_page_for_run(ScanRunFailurePageRequest {
+            run_id,
+            limit: 1,
+            offset: 0,
+        })
+        .await?;
+    assert_eq!(failure_page.total, 1);
+    assert_eq!(failure_page.failures.len(), 1);
 
     let pruned = reconstructed
         .prune(ScanRunRetentionPolicy {
