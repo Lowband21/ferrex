@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -186,6 +187,10 @@ fun TvFocusableSurface(
     focusRequester: FocusRequester? = null,
     minHeight: Dp = FerrexDesignTokens.Focus.TvButtonMinHeight,
     focusTreatmentRole: TvFocusTreatmentRole = TvFocusTreatmentRole.Action,
+    contentPadding: PaddingValues = PaddingValues(
+        horizontal = FerrexDesignTokens.Space.Xxl,
+        vertical = FerrexDesignTokens.Space.Md,
+    ),
     testTag: String? = null,
     onFocused: () -> Unit = {},
     content: @Composable RowScope.() -> Unit,
@@ -237,7 +242,7 @@ fun TvFocusableSurface(
         tonalElevation = if (focused) focusTreatment.focusedElevation else FerrexDesignTokens.Space.None,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = FerrexDesignTokens.Space.Xxl, vertical = FerrexDesignTokens.Space.Md),
+            modifier = Modifier.padding(contentPadding),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
             content = content,

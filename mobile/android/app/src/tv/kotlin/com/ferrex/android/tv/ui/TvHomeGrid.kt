@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -95,115 +96,123 @@ internal fun TvLibraryGridScreen(
     val lastGridTarget = focusRestorer.state.lastTarget(TvGridFocusPolicy.SCREEN_GRID)
     val preferredSurface = TvGridFocusPolicy.preferredSurface(lastGridTarget, hasCards = cards.isNotEmpty())
     TvFullScreenSurface {
-        Column(
+        val libraries = when (tab) {
+            HomeLibraryTab.Movies -> movieLibraryInfos
+            HomeLibraryTab.Series -> seriesLibraryInfos
+        }
+        val selectedId = when (tab) {
+            HomeLibraryTab.Movies -> selectedMovieLibraryId
+            HomeLibraryTab.Series -> selectedSeriesLibraryId
+        }
+        val cachedIds = when (tab) {
+            HomeLibraryTab.Movies -> cachedMovieLibraryIds
+            HomeLibraryTab.Series -> cachedSeriesLibraryIds
+        }
+        val onSelectedLibrary = when (tab) {
+            HomeLibraryTab.Movies -> onSelectedMovieLibrary
+            HomeLibraryTab.Series -> onSelectedSeriesLibrary
+        }
+        Row(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.DenseLibraryGrid.tvControlRailGap),
         ) {
-            TvButtonRow(
-                actions = listOf(TvButtonAction("back", "Back to Home", TvActionRole.Back, onSelect = onBack)),
-                focusRestorer = focusRestorer,
-                surfaceKey = TvGridFocusPolicy.SURFACE_HEADER,
-                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_HEADER,
-            )
-            Text(
-                text = selectedLibrary?.name ?: "${tab.label} library",
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Full ${tab.label.lowercase()} grid: ${cards.size} visible item(s), $fullCachedCount cached item(s). No first-10/12/30 cap is applied.",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Image manifest prefetch is bounded to ${cards.size.coerceAtMost(GRID_IMAGE_LOOKUP_LIMIT)} visible grid item(s); every cached item remains in the virtualized grid with stable keys.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "D-pad focus is contained at the poster-grid edges; Back and recovery rows remain reachable if items disappear.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TvButtonRow(
-                actions = HomeLibraryTab.entries.map { entry ->
-                    TvButtonAction(
-                        key = "tab-${entry.name.lowercase()}",
-                        label = entry.label,
-                        role = if (entry == tab) TvActionRole.Primary else TvActionRole.Cache,
-                        onSelect = { onSelectedTab(entry) },
-                    )
-                },
-                focusRestorer = focusRestorer,
-                surfaceKey = TvGridFocusPolicy.SURFACE_TABS,
-                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_TABS,
-            )
-            val libraries = when (tab) {
-                HomeLibraryTab.Movies -> movieLibraryInfos
-                HomeLibraryTab.Series -> seriesLibraryInfos
-            }
-            val selectedId = when (tab) {
-                HomeLibraryTab.Movies -> selectedMovieLibraryId
-                HomeLibraryTab.Series -> selectedSeriesLibraryId
-            }
-            val cachedIds = when (tab) {
-                HomeLibraryTab.Movies -> cachedMovieLibraryIds
-                HomeLibraryTab.Series -> cachedSeriesLibraryIds
-            }
-            val onSelectedLibrary = when (tab) {
-                HomeLibraryTab.Movies -> onSelectedMovieLibrary
-                HomeLibraryTab.Series -> onSelectedSeriesLibrary
-            }
-            if (libraries.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .width(FerrexDesignTokens.DenseLibraryGrid.tvControlRailWidth)
+                    .fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.DenseLibraryGrid.tvControlVerticalSpacing),
+            ) {
                 TvButtonRow(
-                    title = "Library chooser",
-                    actions = libraries.map { library ->
+                    actions = listOf(TvButtonAction("back", "Back to Home", TvActionRole.Back, onSelect = onBack)),
+                    focusRestorer = focusRestorer,
+                    surfaceKey = TvGridFocusPolicy.SURFACE_HEADER,
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_HEADER,
+                )
+                Text(
+                    text = selectedLibrary?.name ?: "${tab.label} library",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "${cards.size} visible • $fullCachedCount cached • no first-10/12/30 cap",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "Prefetch bounded to ${cards.size.coerceAtMost(GRID_IMAGE_LOOKUP_LIMIT)} visible key(s); stable grid keys keep every cached item virtualized.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "D-pad focus stays contained at grid edges while recovery remains in the side rail.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TvButtonRow(
+                    actions = HomeLibraryTab.entries.map { entry ->
                         TvButtonAction(
-                            key = library.id,
-                            label = if (library.id in cachedIds) library.name else "${library.name} (not cached)",
-                            role = if (library.id == selectedId) TvActionRole.Primary else TvActionRole.Cache,
-                            onSelect = { onSelectedLibrary(library.id) },
+                            key = "tab-${entry.name.lowercase()}",
+                            label = entry.label,
+                            role = if (entry == tab) TvActionRole.Primary else TvActionRole.Cache,
+                            onSelect = { onSelectedTab(entry) },
                         )
                     },
                     focusRestorer = focusRestorer,
-                    surfaceKey = TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
-                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
+                    surfaceKey = TvGridFocusPolicy.SURFACE_TABS,
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_TABS,
                 )
-            }
-            when (tab) {
-                HomeLibraryTab.Movies -> TvMovieGridControls(
-                    movieSort = movieSort,
-                    movieFilter = movieFilter,
-                    onMovieSort = onMovieSort,
-                    onMovieFilter = onMovieFilter,
-                    movieIndexState = movieIndexState,
-                    fullCachedCount = fullMovieCount,
-                    invalidIndexCount = indexedMovieCards.invalidIndexCount,
-                    appendedMissingCount = indexedMovieCards.appendedMissingCount,
+                if (libraries.isNotEmpty()) {
+                    TvButtonRow(
+                        title = "Library chooser",
+                        actions = libraries.map { library ->
+                            TvButtonAction(
+                                key = library.id,
+                                label = if (library.id in cachedIds) library.name else "${library.name} (not cached)",
+                                role = if (library.id == selectedId) TvActionRole.Primary else TvActionRole.Cache,
+                                onSelect = { onSelectedLibrary(library.id) },
+                            )
+                        },
+                        focusRestorer = focusRestorer,
+                        surfaceKey = TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
+                        autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_LIBRARY_CHOOSER,
+                    )
+                }
+                when (tab) {
+                    HomeLibraryTab.Movies -> TvMovieGridControls(
+                        movieSort = movieSort,
+                        movieFilter = movieFilter,
+                        onMovieSort = onMovieSort,
+                        onMovieFilter = onMovieFilter,
+                        movieIndexState = movieIndexState,
+                        fullCachedCount = fullMovieCount,
+                        invalidIndexCount = indexedMovieCards.invalidIndexCount,
+                        appendedMissingCount = indexedMovieCards.appendedMissingCount,
+                        focusRestorer = focusRestorer,
+                        preferredSurface = preferredSurface,
+                    )
+                    HomeLibraryTab.Series -> TvStateCopy(
+                        title = "Series controls disabled",
+                        body = LibraryBrowseModels.unsupportedSeriesControlsCopy(),
+                    )
+                }
+                TvButtonRow(
+                    actions = listOf(
+                        TvButtonAction("sync-selected", "Retry selected library", TvActionRole.Retry, onSelect = onSyncSelected),
+                        TvButtonAction("retry-all", "Retry all libraries", TvActionRole.Retry, onSelect = onRetryAll),
+                        TvButtonAction("clear-selected-cache", "Clear selected cache", TvActionRole.Cache, enabled = selectedId != null, onSelect = onClearSelected),
+                        TvButtonAction("clear-all-cache", "Clear all cache", TvActionRole.Destructive, onSelect = onClearAll),
+                        TvButtonAction("change-server", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
+                        TvButtonAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
+                        TvButtonAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
+                    ),
                     focusRestorer = focusRestorer,
-                    preferredSurface = preferredSurface,
-                )
-                HomeLibraryTab.Series -> TvStateCopy(
-                    title = "Series controls disabled",
-                    body = LibraryBrowseModels.unsupportedSeriesControlsCopy(),
+                    surfaceKey = TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
+                    autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
                 )
             }
-            TvButtonRow(
-                actions = listOf(
-                    TvButtonAction("sync-selected", "Retry selected library", TvActionRole.Retry, onSelect = onSyncSelected),
-                    TvButtonAction("retry-all", "Retry all libraries", TvActionRole.Retry, onSelect = onRetryAll),
-                    TvButtonAction("clear-selected-cache", "Clear selected cache", TvActionRole.Cache, enabled = selectedId != null, onSelect = onClearSelected),
-                    TvButtonAction("clear-all-cache", "Clear all cache", TvActionRole.Destructive, onSelect = onClearAll),
-                    TvButtonAction("change-server", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
-                    TvButtonAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
-                    TvButtonAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
-                ),
-                focusRestorer = focusRestorer,
-                surfaceKey = TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
-                autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_RECOVERY_ACTIONS,
-            )
             if (cards.isEmpty()) {
                 TvActionPanel(
+                    modifier = Modifier.weight(1f),
                     title = "No cached ${tab.label.lowercase()} for this library",
                     supportingText = "Retry selected library to fetch complete cached payloads. Empty, stale, corrupt, and offline states stay recoverable here.",
                     actions = listOf(
@@ -225,7 +234,9 @@ internal fun TvLibraryGridScreen(
                     focusRestorer = focusRestorer,
                     autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_CARDS,
                     onSelect = onSelect,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize(),
                 )
             }
         }
@@ -246,8 +257,8 @@ internal fun TvMovieGridControls(
     preferredSurface: String,
 ) {
     Text(
-        text = "Movie sort uses /api/v1/libraries/{id}/indices/sorted with paging; filters use /indices/filter.",
-        style = MaterialTheme.typography.bodyLarge,
+        text = "Sort/filter use paged movie index endpoints; uncapped cached order remains available on failure.",
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     TvButtonRow(
@@ -297,12 +308,12 @@ internal fun TvMovieGridControls(
                 strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
             )
         }
-        Text(copy, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+        Text(copy, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
     }
     if (invalidIndexCount > 0 || appendedMissingCount > 0) {
         Text(
             text = "Index reconciliation: $invalidIndexCount invalid index value(s), $appendedMissingCount cached item(s) appended to avoid a silent cap.",
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.primary,
         )
     }
@@ -337,14 +348,18 @@ internal fun TvPosterGrid(
             runCatching { requesters[restoredKey]?.requestFocus() }
         }
     }
+    val gridSpec = FerrexDesignTokens.DenseLibraryGrid.tv
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.TvGridMin),
+        columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
         modifier = modifier
             .fillMaxWidth()
             .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)),
-        contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Md),
-        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xxl),
+        contentPadding = PaddingValues(
+            horizontal = gridSpec.contentPaddingHorizontal,
+            vertical = gridSpec.contentPaddingVertical,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+        verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
     ) {
         items(gridItems, key = { it.second.focusKey }) { (card, identity) ->
             val itemKey = identity.renderKey
@@ -358,6 +373,7 @@ internal fun TvPosterGrid(
                 onFocused = { focusRestorer.record(TvGridFocusPolicy.SURFACE_CARDS, itemKey) },
                 onSelect = { onSelect(card) },
                 modifier = Modifier.fillMaxWidth(),
+                density = TvPosterCardDensity.DenseGrid,
                 testTag = FerrexQaTags.Tv.poster(TvGridFocusPolicy.SURFACE_CARDS, itemKey),
             )
         }

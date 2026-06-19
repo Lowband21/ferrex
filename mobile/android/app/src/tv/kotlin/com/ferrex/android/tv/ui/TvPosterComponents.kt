@@ -35,6 +35,7 @@ import com.ferrex.android.core.mediaart.MediaRailItemIdentity
 import com.ferrex.android.core.watch.ContinueWatchingCard
 import com.ferrex.android.tv.ui.foundation.TvFocusableSurface
 import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
+import com.ferrex.android.ui.theme.TvFocusTreatmentRole
 import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
@@ -134,55 +135,126 @@ internal fun TvPosterCard(
     onFocused: () -> Unit,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
+    density: TvPosterCardDensity = TvPosterCardDensity.Standard,
     testTag: String? = null,
 ) {
     TvFocusableSurface(
         onClick = onSelect,
-        semanticLabel = semanticLabel,
+        semanticLabel = entry.contentDescription(semanticLabel),
         modifier = modifier,
         focusRequester = focusRequester,
-        minHeight = FerrexDesignTokens.Poster.TvCardMinHeight,
+        minHeight = density.minHeight,
+        focusTreatmentRole = density.focusTreatmentRole,
+        contentPadding = density.contentPadding,
         testTag = testTag,
         onFocused = onFocused,
     ) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ProjectionShelf,
-            density = FerrexStageDensityFamily.TenFoot,
-            tone = FerrexStageSurfaceTone.Neutral,
-            modifier = Modifier.fillMaxWidth(),
-            contentDescription = null,
-        ) {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                Poster(
-                    imageKey = entry.imageKey,
-                    title = entry.title,
-                    fallbackPath = entry.publicFallbackPath,
-                    imageResolutions = imageResolutions,
-                    imageLoader = imageLoader,
-                    scope = scope,
-                )
+        when (density) {
+            TvPosterCardDensity.Standard -> StandardTvPosterCardContent(
+                entry = entry,
+                imageResolutions = imageResolutions,
+                imageLoader = imageLoader,
+                scope = scope,
+            )
+            TvPosterCardDensity.DenseGrid -> DenseTvPosterCardContent(
+                entry = entry,
+                imageResolutions = imageResolutions,
+                imageLoader = imageLoader,
+                scope = scope,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StandardTvPosterCardContent(
+    entry: TvPosterEntry,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoader: ImageLoader?,
+    scope: ServerCacheScope,
+) {
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.ProjectionShelf,
+        density = FerrexStageDensityFamily.TenFoot,
+        tone = FerrexStageSurfaceTone.Neutral,
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = null,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            Poster(
+                imageKey = entry.imageKey,
+                title = entry.title,
+                fallbackPath = entry.publicFallbackPath,
+                imageResolutions = imageResolutions,
+                imageLoader = imageLoader,
+                scope = scope,
+            )
+            TheaterPlateText(
+                text = entry.title,
+                role = TheaterPlateTypographyRole.RailTitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TheaterPlateText(
+                text = entry.subtitle,
+                role = TheaterPlateTypographyRole.RailSubtitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            entry.tertiary?.let {
                 TheaterPlateText(
-                    text = entry.title,
-                    role = TheaterPlateTypographyRole.RailTitle,
+                    text = it,
+                    role = TheaterPlateTypographyRole.FactLabel,
                     densityRole = TheaterPlateDensityRole.Tv1080p,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                TheaterPlateText(
-                    text = entry.subtitle,
-                    role = TheaterPlateTypographyRole.RailSubtitle,
-                    densityRole = TheaterPlateDensityRole.Tv1080p,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                entry.tertiary?.let {
-                    TheaterPlateText(
-                        text = it,
-                        role = TheaterPlateTypographyRole.FactLabel,
-                        densityRole = TheaterPlateDensityRole.Tv1080p,
-                    )
-                }
             }
+        }
+    }
+}
+
+@Composable
+private fun DenseTvPosterCardContent(
+    entry: TvPosterEntry,
+    imageResolutions: Map<ImageRequestKey, ImageResolution>,
+    imageLoader: ImageLoader?,
+    scope: ServerCacheScope,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.DenseLibraryGrid.tvCopyGap),
+    ) {
+        Poster(
+            imageKey = entry.imageKey,
+            title = entry.title,
+            fallbackPath = entry.publicFallbackPath,
+            imageResolutions = imageResolutions,
+            imageLoader = imageLoader,
+            scope = scope,
+        )
+        TheaterPlateText(
+            text = entry.title,
+            role = TheaterPlateTypographyRole.RailTitle,
+            densityRole = TheaterPlateDensityRole.Tv1080p,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TheaterPlateText(
+            text = entry.subtitle,
+            role = TheaterPlateTypographyRole.RailSubtitle,
+            densityRole = TheaterPlateDensityRole.Tv1080p,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        (entry.libraryName ?: entry.tertiary)?.let {
+            TheaterPlateText(
+                text = it,
+                role = TheaterPlateTypographyRole.FactLabel,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -235,6 +307,7 @@ internal fun ContinueWatchingCard.toPosterEntry(): TvPosterEntry = TvPosterEntry
     imageKey = imageKey,
     publicFallbackPath = null,
     route = route,
+    badges = listOfNotNull(progressLabel?.takeIf { it.isNotBlank() }?.let { "Progress: $it" }),
 )
 
 internal fun LibraryMediaCard.toPosterEntry(): TvPosterEntry = TvPosterEntry(
@@ -245,6 +318,8 @@ internal fun LibraryMediaCard.toPosterEntry(): TvPosterEntry = TvPosterEntry(
     imageKey = imageKey,
     publicFallbackPath = publicFallbackPath,
     route = route,
+    libraryName = libraryName,
+    badges = listOf(route.mediaType.displayName),
 )
 
 internal fun runtimeFallback(
@@ -273,7 +348,50 @@ internal data class TvPosterEntry(
     val imageKey: ImageRequestKey?,
     val publicFallbackPath: String?,
     val route: MediaRouteArgs?,
+    val libraryName: String? = null,
+    val badges: List<String> = emptyList(),
 )
+
+internal enum class TvPosterCardDensity {
+    Standard,
+    DenseGrid,
+}
+
+internal fun TvPosterEntry.contentDescription(
+    semanticLabel: String,
+    actionLabel: String = "Open",
+): String = buildList {
+    add(semanticLabel.takeIf { it.isNotBlank() } ?: title)
+    subtitle.takeIf { it.isNotBlank() }?.let(::add)
+    libraryName?.takeIf { it.isNotBlank() }?.let { add("Library: $it") }
+    if (libraryName == null) tertiary?.takeIf { it.isNotBlank() }?.let(::add)
+    badges.filter { it.isNotBlank() }.forEach(::add)
+    add("Action: $actionLabel")
+}.distinct().joinToString(". ")
+
+internal val TvPosterCardDensity.minHeight
+    get() = when (this) {
+        TvPosterCardDensity.Standard -> FerrexDesignTokens.Poster.TvCardMinHeight
+        TvPosterCardDensity.DenseGrid -> FerrexDesignTokens.DenseLibraryGrid.tv.cardMinHeight
+    }
+
+internal val TvPosterCardDensity.focusTreatmentRole
+    get() = when (this) {
+        TvPosterCardDensity.Standard -> TvFocusTreatmentRole.Action
+        TvPosterCardDensity.DenseGrid -> TvFocusTreatmentRole.MediaArt
+    }
+
+internal val TvPosterCardDensity.contentPadding
+    get() = when (this) {
+        TvPosterCardDensity.Standard -> PaddingValues(
+            horizontal = FerrexDesignTokens.Space.Xxl,
+            vertical = FerrexDesignTokens.Space.Md,
+        )
+        TvPosterCardDensity.DenseGrid -> PaddingValues(
+            horizontal = FerrexDesignTokens.DenseLibraryGrid.tvCardHorizontalPadding,
+            vertical = FerrexDesignTokens.DenseLibraryGrid.tvCardVerticalPadding,
+        )
+    }
 
 internal data class TvRailPosterItem(
     val entry: TvPosterEntry,

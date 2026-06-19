@@ -51,6 +51,7 @@ enum class MobileMediaCardLayout {
     Rail,
     CompactRail,
     Grid,
+    DenseGrid,
     ;
 
     val horizontal: Boolean get() = this == Hero
@@ -60,7 +61,8 @@ enum class MobileMediaCardLayout {
             Hero -> 2
             Rail,
             Grid -> 2
-            CompactRail -> 1
+            CompactRail,
+            DenseGrid -> 1
         }
 
     val subtitleMaxLines: Int
@@ -68,7 +70,28 @@ enum class MobileMediaCardLayout {
             Hero -> 2
             Rail,
             Grid -> 2
-            CompactRail -> 1
+            CompactRail,
+            DenseGrid -> 1
+        }
+
+    val metadataMaxLines: Int
+        get() = when (this) {
+            DenseGrid -> 1
+            else -> 2
+        }
+
+    val visibleBadgeLimit: Int
+        get() = when (this) {
+            DenseGrid -> 2
+            else -> 5
+        }
+
+    val showsActionBadge: Boolean get() = this != DenseGrid
+
+    val copyGap: Dp
+        get() = when (this) {
+            DenseGrid -> FerrexDesignTokens.Space.Xxs
+            else -> FerrexDesignTokens.Space.Xs
         }
 }
 
@@ -305,6 +328,7 @@ fun <T> FerrexMobileMediaGrid(
     modifier: Modifier = Modifier,
     testTag: String? = null,
     contentDescription: String? = null,
+    contentPadding: PaddingValues = PaddingValues(FerrexDesignTokens.Space.None),
     horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
     itemContent: @Composable (item: T, identity: MediaRailItemIdentity) -> Unit,
@@ -321,6 +345,7 @@ fun <T> FerrexMobileMediaGrid(
                         ?: "Media grid. ${items.size} item${if (items.size == 1) "" else "s"}."
                 },
             ),
+        contentPadding = contentPadding,
         horizontalArrangement = horizontalArrangement,
         verticalArrangement = verticalArrangement,
     ) {
@@ -397,9 +422,14 @@ private fun MobileMediaCardCopy(
     val typographyDensity = density.toMobileTypographyDensity()
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
+        verticalArrangement = Arrangement.spacedBy(layout.copyGap),
     ) {
-        MobileMediaBadges(state.visibleBadges, density)
+        MobileMediaBadges(
+            labels = state.visibleBadges,
+            density = density,
+            maxVisible = layout.visibleBadgeLimit,
+            includeActionBadges = layout.showsActionBadge,
+        )
         TheaterPlateText(
             text = title,
             role = TheaterPlateTypographyRole.RailTitle,
@@ -419,7 +449,7 @@ private fun MobileMediaCardCopy(
                 text = it,
                 role = TheaterPlateTypographyRole.Metadata,
                 densityRole = typographyDensity,
-                maxLines = 2,
+                maxLines = layout.metadataMaxLines,
             )
         }
         state.progressFraction?.let { progress ->
@@ -438,12 +468,21 @@ private fun MobileMediaCardCopy(
 }
 
 @Composable
-private fun MobileMediaBadges(labels: List<String>, density: FerrexStageDensityFamily) {
-    val visible = labels.filter { it.isNotBlank() }.distinct().take(5)
+private fun MobileMediaBadges(
+    labels: List<String>,
+    density: FerrexStageDensityFamily,
+    maxVisible: Int,
+    includeActionBadges: Boolean,
+) {
+    val visible = labels
+        .filter { it.isNotBlank() && (includeActionBadges || !it.startsWith("Action:")) }
+        .distinct()
+        .take(maxVisible.coerceAtLeast(0))
     if (visible.isEmpty()) return
 
+    val scrollState = rememberScrollState()
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = if (visible.size > 1) Modifier.horizontalScroll(scrollState) else Modifier,
         horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
     ) {
         visible.forEach { label ->

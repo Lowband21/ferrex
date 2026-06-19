@@ -2133,13 +2133,27 @@ private fun MediaGrid(
                 role = TheaterPlateTypographyRole.SectionTitle,
                 densityRole = density.toTheaterPlateDensityRole(),
             )
+            val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
             FerrexMobileMediaGrid(
                 gridKey = "library-grid",
                 items = cards,
                 itemStableId = { it.stableKey },
-                columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.PhoneGridMin),
-                modifier = Modifier.heightIn(min = 220.dp, max = if (density == FerrexStageDensityFamily.Compact) 620.dp else 760.dp),
+                columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+                modifier = Modifier.heightIn(
+                    min = 220.dp,
+                    max = if (density == FerrexStageDensityFamily.Compact) {
+                        FerrexDesignTokens.DenseLibraryGrid.phoneCompactMaxHeight
+                    } else {
+                        FerrexDesignTokens.DenseLibraryGrid.phoneExpandedMaxHeight
+                    },
+                ),
                 contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
+                contentPadding = PaddingValues(
+                    horizontal = gridSpec.contentPaddingHorizontal,
+                    vertical = gridSpec.contentPaddingVertical,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+                verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
             ) { card, identity ->
                 MediaCardView(
                     card = card,
@@ -2304,7 +2318,7 @@ private fun MediaCardView(
         imageLoader = imageLoader.takeIf { imageLoaderAvailable },
         serverUrl = scope.canonicalServerUrl,
         density = density,
-        layout = MobileMediaCardLayout.Grid,
+        layout = MobileMediaCardLayout.DenseGrid,
         state = libraryCardState(actionRole = FerrexActionRole.Secondary),
         modifier = Modifier.fillMaxWidth(),
         contentDescription = "$semanticLabel. ${card.subtitle}. ${card.libraryName}. Action: Open",
