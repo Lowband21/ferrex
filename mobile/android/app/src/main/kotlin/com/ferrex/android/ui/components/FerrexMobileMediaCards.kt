@@ -1,6 +1,7 @@
 package com.ferrex.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +26,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -210,6 +213,47 @@ fun FerrexMobileMediaCard(
     val description = contentDescription?.let { base ->
         (listOf(base) + cardState.visibleBadges).filter { it.isNotBlank() }.distinct().joinToString(". ")
     } ?: cardState.contentDescription(title, subtitle, metadata)
+
+    if (layout == MobileMediaCardLayout.DenseGrid) {
+        val clickableModifier = if (onClick != null) {
+            Modifier.clickable(
+                enabled = cardState.enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+        } else {
+            Modifier
+        }
+        Column(
+            modifier = modifier
+                .then(if (testTag == null) Modifier else Modifier.testTag(testTag))
+                .then(clickableModifier)
+                .semantics(mergeDescendants = true) {
+                    this.contentDescription = description
+                    if (onClick != null) role = Role.Button
+                },
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
+        ) {
+            MobileMediaArtwork(
+                art = art,
+                resolution = resolution,
+                imageLoader = imageLoader,
+                fallback = fallback,
+                contentDescription = description,
+            )
+            MobileMediaCardCopy(
+                title = title,
+                subtitle = subtitle,
+                metadata = metadata,
+                state = cardState,
+                density = density,
+                layout = layout,
+                onClick = onClick,
+            )
+        }
+        return
+    }
+
     val tone = cardState.surfaceTone()
 
     FerrexStageSurface(

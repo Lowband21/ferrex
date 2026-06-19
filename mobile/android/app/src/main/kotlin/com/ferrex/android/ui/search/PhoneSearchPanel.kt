@@ -48,9 +48,6 @@ import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
-import com.ferrex.android.ui.theaterplate.FerrexStageSurface
-import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
-import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theaterplate.tokens
 import kotlinx.coroutines.delay
 
@@ -125,51 +122,48 @@ fun PhoneSearchPanel(
             .testTag(FerrexQaTags.Phone.SearchPanel),
         verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
     ) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = density,
-            tone = FerrexStageSurfaceTone.Primary,
-            modifier = Modifier.fillMaxWidth(),
-            testTag = FerrexQaTags.Phone.SearchHeader,
-            contentDescription = "Search Theater Plate control band with query field and clear action",
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(FerrexQaTags.Phone.SearchHeader)
+                .semantics { contentDescription = "Flat search query section with query field and clear action" },
+            verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-                TheaterPlateText(
-                    text = "Search cached media",
-                    role = TheaterPlateTypographyRole.SectionTitle,
-                    densityRole = typographyDensity,
-                    maxLines = 2,
+            TheaterPlateText(
+                text = "Search cached media",
+                role = TheaterPlateTypographyRole.SectionTitle,
+                densityRole = typographyDensity,
+                maxLines = 2,
+            )
+            TheaterPlateText(
+                text = "Query the server and resolve rows through cached library data. Retry keeps cache misses repairable.",
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = typographyDensity,
+                maxLines = 3,
+            )
+            OutlinedTextField(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(FerrexQaTags.Phone.SearchField)
+                    .semantics { contentDescription = "Search media query field" },
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Movies, shows, seasons, episodes…") },
+                singleLine = true,
+                enabled = searchRepository != null,
+            )
+            if (query.isNotEmpty()) {
+                FerrexActionButton(
+                    label = "Clear search",
+                    role = FerrexActionRole.Secondary,
+                    onClick = {
+                        query = ""
+                        uiState = PhoneSearchUiState.Idle
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = FerrexQaTags.Phone.searchAction("clear"),
+                    contentDescription = "Clear search query",
                 )
-                TheaterPlateText(
-                    text = "Search posts the JSON media query contract and resolves results through the scoped library cache. Cache misses stay visible with retry instead of being dropped.",
-                    role = TheaterPlateTypographyRole.StatusCopy,
-                    densityRole = typographyDensity,
-                    maxLines = 5,
-                )
-                OutlinedTextField(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(FerrexQaTags.Phone.SearchField)
-                        .semantics { contentDescription = "Search media query field" },
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Movies, shows, seasons, episodes…") },
-                    singleLine = true,
-                    enabled = searchRepository != null,
-                )
-                if (query.isNotEmpty()) {
-                    FerrexActionButton(
-                        label = "Clear search",
-                        role = FerrexActionRole.Secondary,
-                        onClick = {
-                            query = ""
-                            uiState = PhoneSearchUiState.Idle
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        testTag = FerrexQaTags.Phone.searchAction("clear"),
-                        contentDescription = "Clear search query",
-                    )
-                }
             }
         }
         when (val state = uiState) {
@@ -250,48 +244,44 @@ private fun SearchOutcomeContent(
                     density = density,
                 )
             }
-            FerrexStageSurface(
-                variant = FerrexStageSurfaceVariant.RailBand,
-                density = density,
-                tone = FerrexStageSurfaceTone.Neutral,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag(FerrexQaTags.Phone.SearchResults),
-                contentDescription = "Search results Theater Plate band with ${outcome.rows.size} row${if (outcome.rows.size == 1) "" else "s"}",
+                    .testTag(FerrexQaTags.Phone.SearchResults)
+                    .semantics { contentDescription = "Flat search results section with ${outcome.rows.size} row${if (outcome.rows.size == 1) "" else "s"}" },
+                verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-                    TheaterPlateText(
-                        text = "Search results",
-                        role = TheaterPlateTypographyRole.SectionTitle,
-                        densityRole = density.toSearchTypographyDensity(),
-                    )
-                    outcome.rows.take(12).forEach { row ->
-                        when (row) {
-                            is SearchResultRow.Resolved -> ResolvedSearchRow(
-                                row = row,
-                                resolution = row.imageKey?.let(resolveImage),
-                                scope = scope,
-                                imageLoader = imageLoader,
-                                density = density,
-                                onOpenResult = onOpenResult,
-                            )
-                            is SearchResultRow.CacheMiss -> CacheMissRow(
-                                row = row,
-                                onRetry = onRetry,
-                                onClear = onClear,
-                                onOpenDiagnostics = onOpenDiagnostics,
-                                density = density,
-                            )
-                        }
-                    }
-                    if (outcome.rows.size > 12) {
-                        TheaterPlateText(
-                            text = "Showing 12 of ${outcome.rows.size} results. Narrow the query for more focused rows.",
-                            role = TheaterPlateTypographyRole.StatusCopy,
-                            densityRole = density.toSearchTypographyDensity(),
-                            maxLines = 3,
+                TheaterPlateText(
+                    text = "Search results",
+                    role = TheaterPlateTypographyRole.SectionTitle,
+                    densityRole = density.toSearchTypographyDensity(),
+                )
+                outcome.rows.take(12).forEach { row ->
+                    when (row) {
+                        is SearchResultRow.Resolved -> ResolvedSearchRow(
+                            row = row,
+                            resolution = row.imageKey?.let(resolveImage),
+                            scope = scope,
+                            imageLoader = imageLoader,
+                            density = density,
+                            onOpenResult = onOpenResult,
+                        )
+                        is SearchResultRow.CacheMiss -> CacheMissRow(
+                            row = row,
+                            onRetry = onRetry,
+                            onClear = onClear,
+                            onOpenDiagnostics = onOpenDiagnostics,
+                            density = density,
                         )
                     }
+                }
+                if (outcome.rows.size > 12) {
+                    TheaterPlateText(
+                        text = "Showing 12 of ${outcome.rows.size} results. Narrow the query for more focused rows.",
+                        role = TheaterPlateTypographyRole.StatusCopy,
+                        densityRole = density.toSearchTypographyDensity(),
+                        maxLines = 3,
+                    )
                 }
             }
         }
@@ -309,79 +299,74 @@ private fun ResolvedSearchRow(
 ) {
     val typographyDensity = density.toSearchTypographyDensity()
     val resultTag = FerrexQaTags.Phone.searchResult("${row.sourceId.type.routeSegment}-${row.sourceId.id}")
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.fillMaxWidth(),
-        testTag = resultTag,
-        contentDescription = "Search result ${row.title}. ${row.subtitle}. Action: Open.",
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(resultTag)
+            .semantics { contentDescription = "Search result ${row.title}. ${row.subtitle}. Action: Open." },
+        horizontalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val imageKey = row.imageKey
-            if (imageLoader != null && imageKey != null) {
-                Box(modifier = Modifier.width(76.dp)) {
-                    FerrexAsyncImage(
-                        resolution = resolution,
-                        imageLoader = imageLoader,
-                        contentDescription = row.title,
-                        category = imageKey.category,
-                        fallback = if (resolution !is ImageResolution.Ready) {
-                            row.runtimeFallback(scope.canonicalServerUrl)
-                        } else {
-                            null
-                        },
-                    )
-                }
-            } else {
-                FerrexPosterPlaceholder(
-                    label = if (imageKey == null) "No poster" else "Images unavailable",
-                    modifier = Modifier.width(76.dp),
+        val imageKey = row.imageKey
+        if (imageLoader != null && imageKey != null) {
+            Box(modifier = Modifier.width(76.dp)) {
+                FerrexAsyncImage(
+                    resolution = resolution,
+                    imageLoader = imageLoader,
+                    contentDescription = row.title,
+                    category = imageKey.category,
+                    fallback = if (resolution !is ImageResolution.Ready) {
+                        row.runtimeFallback(scope.canonicalServerUrl)
+                    } else {
+                        null
+                    },
                 )
             }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
-            ) {
-                TheaterPlateText(
-                    text = row.sourceId.type.jsonVariant,
-                    role = TheaterPlateTypographyRole.Metadata,
-                    densityRole = typographyDensity,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                TheaterPlateText(
-                    text = row.title,
-                    role = TheaterPlateTypographyRole.RailTitle,
-                    densityRole = typographyDensity,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                TheaterPlateText(
-                    text = row.subtitle,
-                    role = TheaterPlateTypographyRole.RailSubtitle,
-                    densityRole = typographyDensity,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                TheaterPlateText(
-                    text = "Image ${resolution?.label ?: "queued"}",
-                    role = TheaterPlateTypographyRole.Metadata,
-                    densityRole = typographyDensity,
-                    maxLines = 1,
-                )
-            }
-            FerrexActionButton(
-                label = "Open",
-                role = FerrexActionRole.Primary,
-                onClick = { onOpenResult(row.target) },
-                modifier = Modifier.width(92.dp),
-                testTag = FerrexQaTags.Phone.searchAction("open-${row.sourceId.type.routeSegment}-${row.sourceId.id}"),
-                contentDescription = "Open ${row.title}",
+        } else {
+            FerrexPosterPlaceholder(
+                label = if (imageKey == null) "No poster" else "Images unavailable",
+                modifier = Modifier.width(76.dp),
             )
         }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
+        ) {
+            TheaterPlateText(
+                text = row.sourceId.type.jsonVariant,
+                role = TheaterPlateTypographyRole.Metadata,
+                densityRole = typographyDensity,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            TheaterPlateText(
+                text = row.title,
+                role = TheaterPlateTypographyRole.RailTitle,
+                densityRole = typographyDensity,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TheaterPlateText(
+                text = row.subtitle,
+                role = TheaterPlateTypographyRole.RailSubtitle,
+                densityRole = typographyDensity,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TheaterPlateText(
+                text = "Image ${resolution?.label ?: "queued"}",
+                role = TheaterPlateTypographyRole.Metadata,
+                densityRole = typographyDensity,
+                maxLines = 1,
+            )
+        }
+        FerrexActionButton(
+            label = "Open",
+            role = FerrexActionRole.Primary,
+            onClick = { onOpenResult(row.target) },
+            modifier = Modifier.width(92.dp),
+            testTag = FerrexQaTags.Phone.searchAction("open-${row.sourceId.type.routeSegment}-${row.sourceId.id}"),
+            contentDescription = "Open ${row.title}",
+        )
     }
 }
 
@@ -492,24 +477,19 @@ private fun SearchActionRow(
 
 @Composable
 private fun SearchLoading(query: String, density: FerrexStageDensityFamily) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.FactRibbon,
-        density = density,
-        tone = FerrexStageSurfaceTone.Primary,
-        modifier = Modifier.fillMaxWidth(),
-        contentDescription = "Searching $query",
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { contentDescription = "Searching $query" },
+        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator()
-            TheaterPlateText(
-                text = "Searching “$query”…",
-                role = TheaterPlateTypographyRole.StatusCopy,
-                densityRole = density.toSearchTypographyDensity(),
-            )
-        }
+        CircularProgressIndicator()
+        TheaterPlateText(
+            text = "Searching “$query”…",
+            role = TheaterPlateTypographyRole.StatusCopy,
+            densityRole = density.toSearchTypographyDensity(),
+        )
     }
 }
 
@@ -521,47 +501,40 @@ private fun SearchStatusCard(
     tone: FerrexStatusTone = FerrexStatusTone.Secondary,
     testTag: String = FerrexQaTags.Phone.searchStatus(title),
 ) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.StatusSlab,
-        density = density,
-        tone = tone.toSearchSurfaceTone(),
-        modifier = Modifier.fillMaxWidth(),
-        testTag = testTag,
-        contentDescription = "$title. $body",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = title,
-                role = TheaterPlateTypographyRole.StatusTitle,
-                densityRole = density.toSearchTypographyDensity(),
-                color = MaterialTheme.colorScheme.primary,
-            )
-            TheaterPlateText(
-                text = body,
-                role = TheaterPlateTypographyRole.StatusCopy,
-                densityRole = density.toSearchTypographyDensity(),
-                maxLines = 6,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SearchCopy(message: String, density: FerrexStageDensityFamily, error: Boolean = false) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.FactRibbon,
-        density = density,
-        tone = if (error) FerrexStageSurfaceTone.Error else FerrexStageSurfaceTone.StaleOffline,
-        modifier = Modifier.fillMaxWidth(),
-        contentDescription = message,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(testTag)
+            .semantics(mergeDescendants = true) { contentDescription = "$title. $body" },
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
     ) {
         TheaterPlateText(
-            text = message,
+            text = title,
+            role = TheaterPlateTypographyRole.StatusTitle,
+            densityRole = density.toSearchTypographyDensity(),
+            color = tone.searchTitleColor(),
+        )
+        TheaterPlateText(
+            text = body,
             role = TheaterPlateTypographyRole.StatusCopy,
             densityRole = density.toSearchTypographyDensity(),
             maxLines = 4,
         )
     }
+}
+
+@Composable
+private fun SearchCopy(message: String, density: FerrexStageDensityFamily, error: Boolean = false) {
+    TheaterPlateText(
+        text = message,
+        role = TheaterPlateTypographyRole.StatusCopy,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = message },
+        densityRole = density.toSearchTypographyDensity(),
+        color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 3,
+    )
 }
 
 private fun SearchResultRow.Resolved.runtimeFallback(serverUrl: String): FerrexImageFallback? = runtimeFallback(
@@ -595,14 +568,12 @@ private fun FerrexStageDensityFamily.toSearchTypographyDensity(): TheaterPlateDe
     FerrexStageDensityFamily.TenFoot -> TheaterPlateDensityRole.Tv1080p
 }
 
-private fun FerrexStatusTone.toSearchSurfaceTone(): FerrexStageSurfaceTone = when (this) {
-    FerrexStatusTone.Primary,
-    FerrexStatusTone.Retry -> FerrexStageSurfaceTone.Primary
-    FerrexStatusTone.Secondary -> FerrexStageSurfaceTone.Neutral
-    FerrexStatusTone.Cache -> FerrexStageSurfaceTone.Cache
-    FerrexStatusTone.StaleOffline -> FerrexStageSurfaceTone.StaleOffline
-    FerrexStatusTone.DestructiveReset,
-    FerrexStatusTone.Error -> FerrexStageSurfaceTone.Error
+@Composable
+private fun FerrexStatusTone.searchTitleColor() = when (this) {
+    FerrexStatusTone.Error,
+    FerrexStatusTone.DestructiveReset -> MaterialTheme.colorScheme.error
+    FerrexStatusTone.StaleOffline -> MaterialTheme.colorScheme.tertiary
+    else -> MaterialTheme.colorScheme.primary
 }
 
 private sealed interface PhoneSearchUiState {
