@@ -23,7 +23,8 @@ use ferrex_core::{
     error::MediaError,
     player_prelude::MediaIDLike,
     types::{
-        LibraryId, Media, MediaEvent, ScanEventMetadata, ScanProgressEvent,
+        LibraryId, Media, MediaEvent, ScanEventMetadata,
+        ScanPathReasonCategory, ScanPathReasonDetail, ScanProgressEvent,
         ScanStageLatencySummary, events::ScanSseEventType,
     },
 };
@@ -58,7 +59,7 @@ use tokio::{
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
-const EVENT_VERSION: &str = "1";
+const EVENT_VERSION: &str = "2";
 const HISTORY_CAPACITY: usize = 256;
 const EVENT_HISTORY_CAPACITY: usize = 512;
 const MEDIA_EVENT_HISTORY_CAPACITY: usize = 512;
@@ -82,6 +83,70 @@ fn subject_key_path(key: &SubjectKey) -> Option<&str> {
 
 fn subject_key_path_owned(key: &SubjectKey) -> Option<String> {
     subject_key_path(key).map(str::to_string)
+}
+
+fn skipped_reason_code(outcome: Option<FolderScanOutcome>) -> &'static str {
+    match outcome {
+        Some(FolderScanOutcome::Missing) => "path_missing",
+        Some(FolderScanOutcome::Empty) => "no_supported_media_found",
+        Some(FolderScanOutcome::Unsupported) => "unsupported_media_layout",
+        Some(FolderScanOutcome::UnchangedCursor) => "unchanged_since_last_scan",
+        Some(FolderScanOutcome::Changed) | None => "skipped",
+    }
+}
+
+fn user_safe_reason_code(raw: &str) -> String {
+    let normalized: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = normalized.trim_matches('_');
+    let mut collapsed = String::new();
+    let mut previous_underscore = false;
+    for ch in trimmed.chars() {
+        if ch == '_' {
+            if !previous_underscore {
+                collapsed.push(ch);
+            }
+            previous_underscore = true;
+        } else {
+            collapsed.push(ch);
+            previous_underscore = false;
+        }
+    }
+
+    if collapsed.is_empty()
+        || collapsed.contains("dead_letter")
+        || collapsed.contains("deadletter")
+    {
+        "needs_attention".to_string()
+    } else {
+        collapsed
+    }
+}
+
+fn reason_message(reason_code: &str) -> &'static str {
+    match reason_code {
+        "unchanged_since_last_scan" => {
+            "Already up to date from a previous scan"
+        }
+        "path_missing" => "The path was not available during the scan",
+        "no_supported_media_found" => {
+            "No supported media files were found at this path"
+        }
+        "unsupported_media_layout" => {
+            "This path does not contain a supported media layout"
+        }
+        "temporary_scan_issue" => "A temporary scan issue is being retried",
+        "scan_cancelled" | "scan_canceled" => "The scan was canceled",
+        _ => "Review this path and rescan when it is ready",
+    }
 }
 
 /// Command dispatcher + read model for scan orchestration state.
@@ -120,6 +185,7 @@ struct ScanControlPlaneInner {
     active_by_scan_id: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
     active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
+    final_events: RwLock<HashMap<Uuid, VecDeque<ScanBroadcastFrame>>>,
     media_bus: Arc<MediaEventBus>,
     aggregator: ScanRunAggregator,
     movie_batch_notifiers: MovieBatchFinalizationNotifiers,
@@ -160,6 +226,7 @@ impl ScanControlPlane {
                 active_by_scan_id: RwLock::new(HashMap::new()),
                 active_by_run_key: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
+                final_events: RwLock::new(HashMap::new()),
                 media_bus,
                 aggregator,
                 movie_batch_notifiers: MovieBatchFinalizationNotifiers::new(),
@@ -490,8 +557,19 @@ impl ScanControlPlane {
         &self,
         scan_id: &Uuid,
     ) -> Result<Vec<ScanBroadcastFrame>, ScanControlError> {
-        let run = self.inner.lookup(scan_id).await?;
-        Ok(run.event_log().await)
+        let run = {
+            let guard = self.inner.active_by_scan_id.read().await;
+            guard.get(scan_id).cloned()
+        };
+        if let Some(run) = run {
+            return Ok(run.event_log().await);
+        }
+
+        let final_events = self.inner.final_events.read().await;
+        final_events
+            .get(scan_id)
+            .map(|events| events.iter().cloned().collect())
+            .ok_or(ScanControlError::ScanNotFound)
     }
 }
 
@@ -542,7 +620,12 @@ impl ScanControlPlaneInner {
         run_key: String,
         correlation_id: Uuid,
         snapshot: ScanHistoryEntry,
+        final_events: Vec<ScanBroadcastFrame>,
     ) {
+        {
+            let mut events = self.final_events.write().await;
+            events.insert(scan_id, final_events.into_iter().collect());
+        }
         {
             let mut by_scan_id = self.active_by_scan_id.write().await;
             by_scan_id.remove(&scan_id);
@@ -554,11 +637,21 @@ impl ScanControlPlaneInner {
             .await;
         self.aggregator.drop(&correlation_id).await;
 
-        let mut history = self.history.write().await;
-        if history.len() == HISTORY_CAPACITY {
-            history.pop_front();
+        let evicted_scan_id = {
+            let mut history = self.history.write().await;
+            let evicted = if history.len() == HISTORY_CAPACITY {
+                history.pop_front().map(|entry| entry.scan_id)
+            } else {
+                None
+            };
+            history.push_back(snapshot.clone());
+            evicted
+        };
+
+        if let Some(evicted_scan_id) = evicted_scan_id {
+            let mut events = self.final_events.write().await;
+            events.remove(&evicted_scan_id);
         }
-        history.push_back(snapshot.clone());
 
         // Rebuild precomputed sort positions for the completed library scan
         if snapshot.status == ScanLifecycleStatus::Completed {
@@ -734,6 +827,18 @@ struct ScanRunState {
     folder_outcomes_by_path: HashMap<String, FolderScanOutcome>,
     historical_cursor_count: u64,
     seed_completed: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ScanCounterSnapshot {
+    validated_items: u64,
+    known_unchanged_items: u64,
+    skipped_items: u64,
+    failed_items: u64,
+    needs_attention_items: u64,
+    retrying_items: u64,
+    completed_items: u64,
+    reason_details: Vec<ScanPathReasonDetail>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1177,15 +1282,20 @@ impl ScanRun {
     async fn snapshot(&self) -> Result<ScanSnapshot, ScanControlError> {
         let state = self.state.lock().await;
         let mode = scan_run_mode_from_start_mode(self.start_mode);
+        let counters = state.counter_snapshot();
         Ok(ScanSnapshot {
             scan_id: state.scan_id,
             library_id: state.library_id,
             status: state.status.clone(),
             mode,
-            completed_items: state.completed_items,
+            completed_items: counters.completed_items,
             total_items: state.total_items,
-            retrying_items: state.retrying_items,
-            dead_lettered_items: state.dead_lettered_items,
+            validated_items: counters.validated_items,
+            known_unchanged_items: counters.known_unchanged_items,
+            skipped_items: counters.skipped_items,
+            failed_items: counters.failed_items,
+            needs_attention_items: counters.needs_attention_items,
+            retrying_items: counters.retrying_items,
             correlation_id: state.correlation_id,
             idempotency_key: state.current_idempotency_key(),
             run_key: mode.run_key(state.library_id),
@@ -1194,6 +1304,7 @@ impl ScanRun {
             started_at: state.started_at,
             terminal_at: state.terminal_at,
             sequence: state.event_sequence,
+            reason_details: counters.reason_details,
         })
     }
 
@@ -1767,7 +1878,7 @@ impl ScanRun {
         let now = Instant::now();
         let pct = Self::progress_pct(
             payload.completed_items,
-            payload.dead_lettered_items.unwrap_or(0),
+            payload.needs_attention_items,
             payload.total_items,
         );
 
@@ -1833,8 +1944,8 @@ impl ScanRun {
                 status = %payload.status,
                 completed = payload.completed_items,
                 total = payload.total_items,
-                retrying = payload.retrying_items.unwrap_or(0),
-                dead_lettered = payload.dead_lettered_items.unwrap_or(0),
+                retrying = payload.retrying_items,
+                needs_attention = payload.needs_attention_items,
                 pct = pct,
                 root_completed = root_completed,
                 root_total = root_total,
@@ -1867,8 +1978,8 @@ impl ScanRun {
                 status: Some(status),
                 completed_items: payload.completed_items,
                 total_items: payload.total_items,
-                retrying_items: payload.retrying_items.unwrap_or(0),
-                dead_lettered_items: payload.dead_lettered_items.unwrap_or(0),
+                retrying_items: payload.retrying_items,
+                dead_lettered_items: payload.failed_items,
                 current_path: payload.current_path.clone(),
                 sequence: payload.sequence,
             })
@@ -1891,24 +2002,35 @@ impl ScanRun {
     async fn finalize_history(&self, terminal: ScanLifecycleStatus) {
         let (snapshot, progress, terminal_at, last_error) = {
             let state = self.state.lock().await;
+            let counters = state.counter_snapshot();
+            let completed_items = counters.completed_items;
+            let retrying_items = counters.retrying_items;
+            let failed_items = counters.failed_items;
             let terminal_at = state.terminal_at.unwrap_or_else(Utc::now);
             (
                 ScanHistoryEntry {
                     scan_id: state.scan_id,
                     library_id: state.library_id,
                     status: terminal.clone(),
-                    completed_items: state.completed_items,
+                    completed_items,
                     total_items: state.total_items,
+                    validated_items: counters.validated_items,
+                    known_unchanged_items: counters.known_unchanged_items,
+                    skipped_items: counters.skipped_items,
+                    failed_items,
+                    needs_attention_items: counters.needs_attention_items,
+                    retrying_items,
                     started_at: state.started_at,
                     terminal_at,
+                    reason_details: counters.reason_details,
                 },
                 LibraryScanRunProgressUpdate {
                     scan_id: state.scan_id,
                     status: None,
-                    completed_items: state.completed_items,
+                    completed_items,
                     total_items: state.total_items,
-                    retrying_items: state.retrying_items,
-                    dead_lettered_items: state.dead_lettered_items,
+                    retrying_items,
+                    dead_lettered_items: failed_items,
                     current_path: state.current_path.clone(),
                     sequence: state.event_sequence,
                 },
@@ -1916,6 +2038,7 @@ impl ScanRun {
                 state.last_error.clone(),
             )
         };
+        let final_events = self.event_log().await;
 
         if let Some(inner) = self.inner.upgrade() {
             if let Err(err) =
@@ -1956,6 +2079,7 @@ impl ScanRun {
                     self.run_key(),
                     self.correlation_id,
                     snapshot,
+                    final_events,
                 )
                 .await;
         }
@@ -2047,6 +2171,93 @@ impl ScanRunState {
                     | ScanLifecycleStatus::Failed
                     | ScanLifecycleStatus::Canceled
             )
+    }
+
+    fn counter_snapshot(&self) -> ScanCounterSnapshot {
+        let mut counters = ScanCounterSnapshot::default();
+        for item in self.item_states.values() {
+            match item.status {
+                ScanItemStatus::Completed => counters.validated_items += 1,
+                ScanItemStatus::KnownUnchanged => {
+                    counters.known_unchanged_items += 1;
+                }
+                ScanItemStatus::Skipped => counters.skipped_items += 1,
+                ScanItemStatus::DeadLettered => counters.failed_items += 1,
+                ScanItemStatus::Retrying => counters.retrying_items += 1,
+                ScanItemStatus::InProgress => {}
+            }
+
+            if let Some(detail) = self.reason_detail_for_item(item) {
+                counters.reason_details.push(detail);
+            }
+        }
+
+        counters.needs_attention_items = counters.failed_items;
+        counters.completed_items = counters
+            .validated_items
+            .saturating_add(counters.known_unchanged_items)
+            .saturating_add(counters.skipped_items);
+        counters
+    }
+
+    fn reason_detail_for_item(
+        &self,
+        item: &ScanItemState,
+    ) -> Option<ScanPathReasonDetail> {
+        let path = item.path_key.as_ref().and_then(subject_key_path_owned);
+        let outcome = path
+            .as_deref()
+            .and_then(|path| self.folder_outcomes_by_path.get(path))
+            .copied();
+
+        match item.status {
+            ScanItemStatus::KnownUnchanged => None,
+            ScanItemStatus::Skipped => {
+                let reason_code = skipped_reason_code(outcome);
+                Some(ScanPathReasonDetail {
+                    category: ScanPathReasonCategory::Skipped,
+                    message: Some(reason_message(reason_code).to_string()),
+                    reason_code: reason_code.to_string(),
+                    path,
+                    path_key: item.path_key.clone(),
+                    retryable: false,
+                    action_hint: Some("rescan_library".to_string()),
+                })
+            }
+            ScanItemStatus::Retrying => {
+                let reason_code = item
+                    .last_error
+                    .as_deref()
+                    .map(user_safe_reason_code)
+                    .unwrap_or_else(|| "temporary_scan_issue".to_string());
+                Some(ScanPathReasonDetail {
+                    category: ScanPathReasonCategory::Retrying,
+                    message: Some(reason_message(&reason_code).to_string()),
+                    reason_code,
+                    path,
+                    path_key: item.path_key.clone(),
+                    retryable: true,
+                    action_hint: Some("wait_for_retry".to_string()),
+                })
+            }
+            ScanItemStatus::DeadLettered => {
+                let reason_code = item
+                    .last_error
+                    .as_deref()
+                    .map(user_safe_reason_code)
+                    .unwrap_or_else(|| "needs_attention".to_string());
+                Some(ScanPathReasonDetail {
+                    category: ScanPathReasonCategory::NeedsAttention,
+                    message: Some(reason_message(&reason_code).to_string()),
+                    reason_code,
+                    path,
+                    path_key: item.path_key.clone(),
+                    retryable: false,
+                    action_hint: Some("rescan_library".to_string()),
+                })
+            }
+            ScanItemStatus::Completed | ScanItemStatus::InProgress => None,
+        }
     }
 
     fn rehydrate_from_cursors(&mut self, cursors: &[ScanCursor]) {
@@ -2311,13 +2522,20 @@ impl ScanRunState {
         &self,
         idempotency_key: String,
     ) -> ScanProgressEvent {
+        let counters = self.counter_snapshot();
         ScanProgressEvent {
             version: EVENT_VERSION.to_string(),
             scan_id: self.scan_id,
             library_id: self.library_id,
             status: self.status_string(),
-            completed_items: self.completed_items,
+            completed_items: counters.completed_items,
             total_items: self.total_items,
+            validated_items: counters.validated_items,
+            known_unchanged_items: counters.known_unchanged_items,
+            skipped_items: counters.skipped_items,
+            failed_items: counters.failed_items,
+            needs_attention_items: counters.needs_attention_items,
+            retrying_items: counters.retrying_items,
             sequence: self.event_sequence,
             current_path: self.current_path.clone(),
             path_key: self.path_key.clone(),
@@ -2325,10 +2543,8 @@ impl ScanRunState {
             correlation_id: self.correlation_id,
             idempotency_key,
             emitted_at: Utc::now(),
-            retrying_items: (self.retrying_items > 0)
-                .then_some(self.retrying_items),
-            dead_lettered_items: (self.dead_lettered_items > 0)
-                .then_some(self.dead_lettered_items),
+            terminal_at: self.terminal_at,
+            reason_details: counters.reason_details,
         }
     }
 
@@ -2689,6 +2905,90 @@ mod tests {
         );
         assert_eq!(dead.dead_lettered_items, 1);
         assert!(dead.can_enter_quiescing());
+    }
+
+    #[test]
+    fn progress_payload_exposes_user_safe_counters_and_reasons() {
+        let now = Utc::now();
+        let mut state = test_state();
+        state.update_item_status(
+            "validated-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now,
+            SubjectKey::path("/library/validated".to_string()).ok(),
+            None,
+        );
+        state.update_item_status(
+            "unchanged-job",
+            Some(JobId::new()),
+            ScanItemStatus::KnownUnchanged,
+            now,
+            SubjectKey::path("/library/unchanged".to_string()).ok(),
+            None,
+        );
+        state.folder_outcomes_by_path.insert(
+            "/library/skipped".to_string(),
+            FolderScanOutcome::Unsupported,
+        );
+        state.update_item_status(
+            "skipped-job",
+            Some(JobId::new()),
+            ScanItemStatus::Skipped,
+            now,
+            SubjectKey::path("/library/skipped".to_string()).ok(),
+            None,
+        );
+        state.update_item_status(
+            "retrying-job",
+            Some(JobId::new()),
+            ScanItemStatus::Retrying,
+            now,
+            SubjectKey::path("/library/retrying".to_string()).ok(),
+            Some("Permission denied".to_string()),
+        );
+        state.update_item_status(
+            "attention-job",
+            Some(JobId::new()),
+            ScanItemStatus::DeadLettered,
+            now,
+            SubjectKey::path("/library/attention".to_string()).ok(),
+            Some("dead_lettered_queue".to_string()),
+        );
+
+        let payload = state.build_payload();
+
+        assert_eq!(payload.completed_items, 3);
+        assert_eq!(payload.validated_items, 1);
+        assert_eq!(payload.known_unchanged_items, 1);
+        assert_eq!(payload.skipped_items, 1);
+        assert_eq!(payload.retrying_items, 1);
+        assert_eq!(payload.failed_items, 1);
+        assert_eq!(payload.needs_attention_items, 1);
+        assert!(
+            payload
+                .reason_details
+                .iter()
+                .any(|detail| detail.reason_code == "unsupported_media_layout")
+        );
+        assert!(
+            payload
+                .reason_details
+                .iter()
+                .any(|detail| detail.reason_code == "permission_denied")
+        );
+        assert!(
+            payload
+                .reason_details
+                .iter()
+                .any(|detail| detail.reason_code == "needs_attention")
+        );
+        assert!(
+            payload
+                .reason_details
+                .iter()
+                .all(|detail| !detail.reason_code.contains("dead"))
+        );
     }
 
     #[test]
@@ -3555,8 +3855,16 @@ pub struct ScanHistoryEntry {
     pub status: ScanLifecycleStatus,
     pub completed_items: u64,
     pub total_items: u64,
+    pub validated_items: u64,
+    pub known_unchanged_items: u64,
+    pub skipped_items: u64,
+    pub failed_items: u64,
+    pub needs_attention_items: u64,
+    pub retrying_items: u64,
     pub started_at: DateTime<Utc>,
     pub terminal_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reason_details: Vec<ScanPathReasonDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3567,8 +3875,12 @@ pub struct ScanSnapshot {
     pub mode: ScanRunMode,
     pub completed_items: u64,
     pub total_items: u64,
+    pub validated_items: u64,
+    pub known_unchanged_items: u64,
+    pub skipped_items: u64,
+    pub failed_items: u64,
+    pub needs_attention_items: u64,
     pub retrying_items: u64,
-    pub dead_lettered_items: u64,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
     pub run_key: String,
@@ -3577,6 +3889,8 @@ pub struct ScanSnapshot {
     pub started_at: DateTime<Utc>,
     pub terminal_at: Option<DateTime<Utc>>,
     pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reason_details: Vec<ScanPathReasonDetail>,
 }
 
 impl From<ScanSnapshot> for ScanSnapshotDto {
@@ -3588,8 +3902,12 @@ impl From<ScanSnapshot> for ScanSnapshotDto {
             mode: snapshot.mode,
             completed_items: snapshot.completed_items,
             total_items: snapshot.total_items,
+            validated_items: snapshot.validated_items,
+            known_unchanged_items: snapshot.known_unchanged_items,
+            skipped_items: snapshot.skipped_items,
+            failed_items: snapshot.failed_items,
+            needs_attention_items: snapshot.needs_attention_items,
             retrying_items: snapshot.retrying_items,
-            dead_lettered_items: snapshot.dead_lettered_items,
             correlation_id: snapshot.correlation_id,
             idempotency_key: snapshot.idempotency_key,
             run_key: snapshot.run_key,
@@ -3598,6 +3916,7 @@ impl From<ScanSnapshot> for ScanSnapshotDto {
             started_at: snapshot.started_at,
             terminal_at: snapshot.terminal_at,
             sequence: snapshot.sequence,
+            reason_details: snapshot.reason_details,
         }
     }
 }

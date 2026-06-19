@@ -66,7 +66,8 @@ pub use media::{
     EpisodeReference, Media, MovieReference, SeasonReference, Series,
 };
 pub use media_events::{
-    MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+    MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
+    ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,
 };
 #[cfg(feature = "rkyv")]
 pub use media_id::ArchivedMediaID;

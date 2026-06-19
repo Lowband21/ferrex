@@ -217,8 +217,12 @@ impl LibraryDomainState {
             mode: response.mode,
             completed_items: 0,
             total_items: 0,
+            validated_items: 0,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
             retrying_items: 0,
-            dead_lettered_items: 0,
             correlation_id: response.correlation_id,
             idempotency_key: response.idempotency_key.clone(),
             run_key,
@@ -227,6 +231,7 @@ impl LibraryDomainState {
             started_at: chrono::Utc::now(),
             terminal_at: None,
             sequence: 0,
+            reason_details: Vec::new(),
         });
     }
 
@@ -313,12 +318,15 @@ impl LibraryDomainState {
 
         snapshot.completed_items = frame.completed_items;
         snapshot.total_items = frame.total_items;
-        snapshot.retrying_items =
-            frame.retrying_items.unwrap_or(snapshot.retrying_items);
-        snapshot.dead_lettered_items = frame
-            .dead_lettered_items
-            .unwrap_or(snapshot.dead_lettered_items);
+        snapshot.validated_items = frame.validated_items;
+        snapshot.known_unchanged_items = frame.known_unchanged_items;
+        snapshot.skipped_items = frame.skipped_items;
+        snapshot.failed_items = frame.failed_items;
+        snapshot.needs_attention_items = frame.needs_attention_items;
+        snapshot.retrying_items = frame.retrying_items;
+        snapshot.reason_details = frame.reason_details.clone();
         snapshot.current_path = frame.current_path.clone();
+        snapshot.terminal_at = frame.terminal_at;
         snapshot.sequence = frame.sequence;
 
         if let Some(status) = scan_status_from_progress(&frame.status) {
@@ -471,8 +479,12 @@ mod tests {
             mode,
             completed_items: sequence,
             total_items: 100,
+            validated_items: sequence,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
             retrying_items: 0,
-            dead_lettered_items: 0,
             correlation_id: Uuid::now_v7(),
             idempotency_key: format!("scan-{scan_id}"),
             run_key: mode.run_key(library_id),
@@ -481,6 +493,7 @@ mod tests {
             started_at: Utc::now() + Duration::seconds(started_offset_secs),
             terminal_at: None,
             sequence,
+            reason_details: Vec::new(),
         }
     }
 
@@ -496,6 +509,12 @@ mod tests {
             status: status.into(),
             completed_items: 12,
             total_items: 24,
+            validated_items: 11,
+            known_unchanged_items: 1,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
+            retrying_items: 1,
             sequence: 2,
             current_path: Some("/media/movie.mkv".into()),
             path_key: None,
@@ -507,8 +526,8 @@ mod tests {
             correlation_id: Uuid::now_v7(),
             idempotency_key: format!("scan-{scan_id}"),
             emitted_at: Utc::now(),
-            retrying_items: Some(1),
-            dead_lettered_items: Some(0),
+            terminal_at: None,
+            reason_details: Vec::new(),
         }
     }
 

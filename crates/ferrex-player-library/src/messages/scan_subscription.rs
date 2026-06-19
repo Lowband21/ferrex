@@ -264,7 +264,10 @@ mod tests {
         Engine, engine::general_purpose::STANDARD as BASE64_STANDARD,
     };
     use chrono::Utc;
-    use ferrex_core::player_prelude::{LibraryId, ScanStageLatencySummary};
+    use ferrex_core::player_prelude::{
+        LibraryId, ScanPathReasonCategory, ScanPathReasonDetail,
+        ScanStageLatencySummary,
+    };
     use ferrex_model::SubjectKey;
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
@@ -277,6 +280,12 @@ mod tests {
             status: "running".to_string(),
             completed_items: 10,
             total_items: 100,
+            validated_items: 7,
+            known_unchanged_items: 2,
+            skipped_items: 1,
+            failed_items: 2,
+            needs_attention_items: 2,
+            retrying_items: 1,
             sequence: 42,
             current_path: Some("/path".to_string()),
             path_key: Some(SubjectKey::path("/path").expect("path key")),
@@ -288,8 +297,18 @@ mod tests {
             correlation_id: Uuid::now_v7(),
             idempotency_key: "idem".to_string(),
             emitted_at: Utc::now(),
-            retrying_items: Some(1),
-            dead_lettered_items: Some(2),
+            terminal_at: None,
+            reason_details: vec![ScanPathReasonDetail {
+                category: ScanPathReasonCategory::NeedsAttention,
+                reason_code: "needs_attention".to_string(),
+                message: Some(
+                    "Review this path and rescan when it is ready".to_string(),
+                ),
+                path: Some("/path".to_string()),
+                path_key: Some(SubjectKey::path("/path").expect("path key")),
+                retryable: false,
+                action_hint: Some("rescan_library".to_string()),
+            }],
         }
     }
 
@@ -317,7 +336,9 @@ mod tests {
         assert_eq!(decoded.correlation_id, event.correlation_id);
         assert_eq!(decoded.idempotency_key, event.idempotency_key);
         assert_eq!(decoded.retrying_items, event.retrying_items);
-        assert_eq!(decoded.dead_lettered_items, event.dead_lettered_items);
+        assert_eq!(decoded.failed_items, event.failed_items);
+        assert_eq!(decoded.needs_attention_items, event.needs_attention_items);
+        assert_eq!(decoded.reason_details, event.reason_details);
         assert_eq!(
             decoded.emitted_at.timestamp(),
             event.emitted_at.timestamp()
@@ -328,9 +349,28 @@ mod tests {
     fn decode_scan_progress_json_fallback() {
         let event = sample_progress_event();
         let json = serde_json::to_string(&event).expect("json encode");
+        assert!(!json.contains("dead_lettered_items"));
+        assert!(json.contains("needs_attention_items"));
 
         let decoded = decode_scan_progress_event(&json, event.scan_id)
             .expect("decode json event");
         assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn decode_scan_progress_legacy_json_maps_attention_count() {
+        let event = sample_progress_event();
+        let mut value = serde_json::to_value(&event).expect("json value");
+        let object = value.as_object_mut().expect("object payload");
+        object.remove("failed_items");
+        object.remove("needs_attention_items");
+        object.insert("dead_lettered_items".to_string(), serde_json::json!(4));
+        let json = serde_json::to_string(&value).expect("legacy json");
+
+        let decoded = decode_scan_progress_event(&json, event.scan_id)
+            .expect("decode legacy json event");
+        assert_eq!(decoded.failed_items, 4);
+        assert_eq!(decoded.needs_attention_items, 4);
+        assert_eq!(decoded.retrying_items, event.retrying_items);
     }
 }

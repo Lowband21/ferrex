@@ -37,5 +37,6 @@ pub use crate::domain::users::user::{
 };
 
 pub use crate::types::media_events::{
-    MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+    MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
+    ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,
 };

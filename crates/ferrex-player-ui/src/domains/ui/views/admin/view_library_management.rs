@@ -434,17 +434,21 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
             let (
                 completed_items,
                 total_items,
+                validated_items,
+                known_unchanged_items,
+                skipped_items,
+                needs_attention_items,
                 retrying_items,
-                dead_lettered_items,
                 current_path,
             ) = if let Some(event) = &progress {
                 (
                     event.completed_items,
                     event.total_items,
-                    event.retrying_items.unwrap_or(snapshot.retrying_items),
-                    event
-                        .dead_lettered_items
-                        .unwrap_or(snapshot.dead_lettered_items),
+                    event.validated_items,
+                    event.known_unchanged_items,
+                    event.skipped_items,
+                    event.needs_attention_items,
+                    event.retrying_items,
                     event
                         .current_path
                         .clone()
@@ -454,8 +458,11 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 (
                     snapshot.completed_items,
                     snapshot.total_items,
+                    snapshot.validated_items,
+                    snapshot.known_unchanged_items,
+                    snapshot.skipped_items,
+                    snapshot.needs_attention_items,
                     snapshot.retrying_items,
-                    snapshot.dead_lettered_items,
                     snapshot.current_path.clone(),
                 )
             };
@@ -511,11 +518,23 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 Space::new().width(20),
-                text(format!("Retries: {retrying_items}"))
+                text(format!("Validated: {validated_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().width(20),
-                text(format!("Dead-lettered: {dead_lettered_items}"))
+                text(format!("Unchanged: {known_unchanged_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Skipped: {skipped_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Retrying: {retrying_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Needs attention: {needs_attention_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().width(20),
