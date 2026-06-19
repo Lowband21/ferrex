@@ -3,15 +3,12 @@ package com.ferrex.android.tv.ui
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,7 +20,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import com.ferrex.android.core.diagnostics.AndroidDiagnosticsCore
 import com.ferrex.android.core.diagnostics.AndroidDisplayDiagnostics
@@ -41,8 +37,13 @@ import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvScaffold
 import com.ferrex.android.tv.ui.foundation.TvTitle
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
-import com.ferrex.android.ui.components.FerrexStatusTone
-import com.ferrex.android.ui.components.colors
+import com.ferrex.android.ui.components.TheaterPlateDensityRole
+import com.ferrex.android.ui.components.TheaterPlateText
+import com.ferrex.android.ui.components.TheaterPlateTypographyRole
+import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
+import com.ferrex.android.ui.theaterplate.FerrexStageSurface
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -146,10 +147,10 @@ fun TvDiagnosticsScreen(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(FerrexDesignTokens.Space.Xxl))
-        DiagnosticsStatusCard(panelState.exportStatus)
-        DiagnosticsStatusCard(panelState.clearStatus)
+        DiagnosticsActionStatusRow(panelState.exportStatus)
+        DiagnosticsActionStatusRow(panelState.clearStatus)
         if (diagnostics == null) {
-            DiagnosticsRowCard(
+            DiagnosticsStatusRow(
                 DiagnosticsSummaryRow(
                     label = "Diagnostics unavailable",
                     value = "This build did not provide the diagnostics core. Back and recovery exits remain available.",
@@ -158,7 +159,7 @@ fun TvDiagnosticsScreen(
         }
         val currentSnapshot = snapshot
         if (currentSnapshot == null) {
-            DiagnosticsRowCard(
+            DiagnosticsStatusRow(
                 DiagnosticsSummaryRow(
                     label = "Loading diagnostics summary",
                     value = "Preparing safe local summaries without rendering raw credentials or device identifiers.",
@@ -166,7 +167,7 @@ fun TvDiagnosticsScreen(
             )
         } else {
             DiagnosticsSummaryPresenter.rows(currentSnapshot, retainedCrashCount).forEach { row ->
-                DiagnosticsRowCard(row)
+                DiagnosticsStatusRow(row)
             }
         }
         Spacer(Modifier.height(FerrexDesignTokens.Space.Xl))
@@ -218,19 +219,19 @@ fun TvDiagnosticsScreen(
 }
 
 @Composable
-private fun DiagnosticsStatusCard(status: DiagnosticsActionStatus) {
+private fun DiagnosticsActionStatusRow(status: DiagnosticsActionStatus) {
     when (status) {
         DiagnosticsActionStatus.Idle -> Unit
-        DiagnosticsActionStatus.Running -> DiagnosticsRowCard(
+        DiagnosticsActionStatus.Running -> DiagnosticsStatusRow(
             DiagnosticsSummaryRow(
                 label = "Diagnostics action in progress",
                 value = "Please wait. Back remains available if you need to leave this screen.",
             ),
         )
-        is DiagnosticsActionStatus.Success -> DiagnosticsRowCard(
+        is DiagnosticsActionStatus.Success -> DiagnosticsStatusRow(
             DiagnosticsSummaryRow(label = "Diagnostics updated", value = status.message),
         )
-        is DiagnosticsActionStatus.Failure -> DiagnosticsRowCard(
+        is DiagnosticsActionStatus.Failure -> DiagnosticsStatusRow(
             DiagnosticsSummaryRow(label = "Diagnostics action failed", value = status.message),
             error = true,
         )
@@ -238,34 +239,30 @@ private fun DiagnosticsStatusCard(status: DiagnosticsActionStatus) {
 }
 
 @Composable
-private fun DiagnosticsRowCard(
+private fun DiagnosticsStatusRow(
     row: DiagnosticsSummaryRow,
     error: Boolean = false,
 ) {
-    val tone = if (error) FerrexStatusTone.Error else FerrexStatusTone.Secondary
-    val colors = tone.colors()
-    Card(
+    FerrexStageSurface(
+        variant = FerrexStageSurfaceVariant.StatusSlab,
+        density = FerrexStageDensityFamily.TenFoot,
+        tone = if (error) FerrexStageSurfaceTone.Error else FerrexStageSurfaceTone.StaleOffline,
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = FerrexDesignTokens.Space.Md),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        colors = CardDefaults.cardColors(
-            containerColor = colors.container,
-            contentColor = colors.content,
-        ),
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, colors.border.copy(alpha = 0.72f)),
+        contentDescription = "${row.label}. ${row.value}",
     ) {
-        Column(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-        ) {
-            Text(
+        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
+            TheaterPlateText(
                 text = row.label,
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.accent,
-                fontWeight = FontWeight.SemiBold,
+                role = TheaterPlateTypographyRole.StatusTitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
             )
-            Text(row.value, style = MaterialTheme.typography.titleMedium)
+            TheaterPlateText(
+                text = row.value,
+                role = TheaterPlateTypographyRole.StatusCopy,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
         }
     }
 }

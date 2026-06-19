@@ -721,18 +721,27 @@ private fun TvPlaybackActionPanel(
         firstEnabledKey?.let { key -> runCatching { requesters[key]?.requestFocus() } }
     }
 
-    Surface(
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(FerrexDesignTokens.Space.ScreenTvVertical)
-            .widthIn(max = FerrexDesignTokens.Tv.PlayerPanelMaxWidth),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        color = panelColors.container,
-        contentColor = panelColors.content,
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, panelColors.border.copy(alpha = 0.72f)),
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.90f),
+                        FerrexDesignTokens.Palette.SlateCanvas.copy(alpha = 0.74f),
+                        FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.90f),
+                    ),
+                ),
+            )
+            .padding(FerrexDesignTokens.Space.ScreenTvVertical),
+        contentAlignment = Alignment.Center,
     ) {
         Column(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Xxxl),
+            modifier = Modifier
+                .widthIn(max = FerrexDesignTokens.Tv.PlayerPanelMaxWidth)
+                .fillMaxWidth()
+                .focusGroup()
+                .padding(FerrexDesignTokens.Space.Xxxl),
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -1403,68 +1412,62 @@ private fun TrackSelectionPanel(
             .background(FerrexDesignTokens.Palette.SlateBlack.copy(alpha = 0.58f)),
         contentAlignment = Alignment.Center,
     ) {
-        Surface(
+        Column(
             modifier = Modifier
                 .padding(
                     horizontal = FerrexDesignTokens.Space.ScreenTvHorizontal,
                     vertical = FerrexDesignTokens.Space.ScreenTvVertical,
                 )
                 .widthIn(max = FerrexDesignTokens.Tv.PlayerPickerMaxWidth)
-                .focusGroup(),
-            shape = FerrexDesignTokens.Shapes.RecoveryCard,
-            color = panelColors.container,
-            contentColor = panelColors.content,
-            border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, panelColors.border.copy(alpha = 0.72f)),
+                .fillMaxWidth()
+                .focusGroup()
+                .padding(FerrexDesignTokens.Space.Xxxl),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
         ) {
-            Column(
-                modifier = Modifier.padding(FerrexDesignTokens.Space.Xxxl),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Lg),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = panelColors.accent,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(helperText, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Spacer(Modifier.width(FerrexDesignTokens.Space.Xxl))
-                    TvControlButton(
-                        onClick = onDismiss,
-                        modifier = (if (initialFocusKey == null) Modifier.focusRequester(initialFocusRequester) else Modifier)
-                            .semantics { contentDescription = "Close track picker" },
-                    ) {
-                        Text("Close")
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = panelColors.accent,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(helperText, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
                 }
-
-                if (!hasReportedTracks) {
-                    Text(emptyMessage, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = FerrexDesignTokens.Tv.TrackListMaxHeight),
-                    verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+                Spacer(Modifier.width(FerrexDesignTokens.Space.Xxl))
+                TvControlButton(
+                    onClick = onDismiss,
+                    modifier = (if (initialFocusKey == null) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                        .semantics { contentDescription = "Close track picker" },
                 ) {
-                    items(options, key = { it.option.key }) { option ->
-                        TrackOptionButton(
-                            option = option,
-                            onClick = { onSelect(option) },
-                            modifier = if (option.option.key == initialFocusKey) {
-                                Modifier.focusRequester(initialFocusRequester)
-                            } else {
-                                Modifier
-                            },
-                        )
-                    }
+                    Text("Close")
+                }
+            }
+
+            if (!hasReportedTracks) {
+                Text(emptyMessage, color = panelColors.content, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = FerrexDesignTokens.Tv.TrackListMaxHeight),
+                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+            ) {
+                items(options, key = { it.option.key }) { option ->
+                    TrackOptionButton(
+                        option = option,
+                        onClick = { onSelect(option) },
+                        modifier = if (option.option.key == initialFocusKey) {
+                            Modifier.focusRequester(initialFocusRequester)
+                        } else {
+                            Modifier
+                        },
+                    )
                 }
             }
         }
