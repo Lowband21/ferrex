@@ -37,17 +37,19 @@ After building and installing the debug APKs with `just android-qa-build` and `j
 ./scripts/qa/android-visual-qa.sh accessibility --target all --scenario all --output-dir target/android-visual-qa/theater-plate-a11y
 ```
 
-The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches each scenario through `com.ferrex.android.action.VISUAL_QA` on explicit phone/TV serials, applies the selected viewport profile with `wm size`/`wm density`, drives TV D-pad focus keys for the TV focus scenarios, and writes stable PNG paths plus `manifest.json` under the requested output directory:
+The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches each scenario through `com.ferrex.android.action.VISUAL_QA` on explicit phone/TV serials, applies the selected viewport profile with `wm size`/`wm density`, drives TV D-pad focus keys for the TV focus scenarios, captures prepared-run screenshots with direct `adb -s <serial> exec-out screencap -p` by default, and writes stable PNG paths plus `manifest.json` under the requested output directory:
 
 - `phone-portrait` validates screenshots as `1080x2400`.
 - `phone-landscape-foldable` validates screenshots as `1800x1200`.
 - `tv-1080p` validates screenshots as `1920x1080`.
 - `tv-4k-scaled` applies a `3840x2160` logical viewport/density override while validating the emulator framebuffer as `1920x1080`.
 - `<output>/<profile>/<scenario-id>.png` records the profile name, logical `wm size` override, and expected screenshot dimensions in `manifest.json` for every capture.
-- `manifest.json` records command/tool versions, APK/package metadata, serial metadata, scenario IDs, viewport profiles, dimensions, paths, and timestamps.
+- `manifest.json` records command/tool versions, APK/package metadata, serial metadata, scenario IDs, viewport profiles, dimensions, paths, timestamps, screenshot method, command category, output path, capture timing, and whether helper compatibility mode was requested or used.
+- Smoke gates attempt one helper-compatible screenshot comparison for a default emulator profile when the helper is available; otherwise the manifest records why the helper comparison was unavailable while keeping the main evidence on the fast path.
+- Transient PNG dimension mismatches are retried after reapplying the viewport; invalid attempts are preserved as `<scenario-id>.attempt-<n>.invalid.png` and recorded in `screenshot_validation_attempts`.
 - Failed captures include bounded redacted logcat snippets under `<output>/logs/`; redaction removes authorization values, bearer/basic tokens, token/ticket/password fields, URL origins, and private LAN origins.
 
-Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
+Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. `--screenshot-mode fast` is the default prepared-run path; use `--screenshot-mode helper-compatible` only when explicitly checking the legacy Nix screenshot helper behavior for default emulator profiles. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
 
 The accessibility subcommand writes `accessibility-manifest.json` plus UI Automator XML dumps under `<output>/accessibility/`. It fails when required recovery/action/status/focus/media nodes are missing stable tags, content descriptions, or action/focus affordances.
 

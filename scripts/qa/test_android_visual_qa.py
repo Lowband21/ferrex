@@ -190,6 +190,288 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertNotIn("media.example.com", serialized)
         self.assertNotIn("emulator-5554", serialized)
 
+    def test_fast_screenshot_path_uses_adb_with_evidence_metadata(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("app.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="ferrex-android-screenshot-phone",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "fast.png"
+
+            def fake_run_to_file(command: list[str], path: Path, *, timeout: int) -> android_visual_qa.RunResult:
+                self.write_png(path, 1080, 2400)
+                return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+
+            with mock.patch.object(android_visual_qa.shutil, "which", return_value="/bin/ferrex-android-screenshot-phone"), mock.patch.object(
+                android_visual_qa,
+                "run_command_to_file",
+                side_effect=fake_run_to_file,
+            ) as run_fast, mock.patch.object(android_visual_qa, "run_command") as run_helper:
+                capture = android_visual_qa.capture_screenshot(
+                    "adb",
+                    config,
+                    output,
+                    android_visual_qa.SCREENSHOT_MODE_FAST,
+                    helper_compatible_profile=True,
+                )
+
+            self.assertEqual(capture["method"], "adb-exec-out-screencap")
+            self.assertEqual(capture["requested_mode"], "fast")
+            self.assertEqual(capture["serial"], "emulator-5554")
+            self.assertEqual(capture["output_path"], str(output))
+            self.assertEqual(capture["command_category"], "exec-out:screencap")
+            self.assertFalse(capture["helper_compatibility_mode"])
+            self.assertFalse(capture["helper_used"])
+            self.assertIsInstance(capture["duration_ms"], int)
+            run_fast.assert_called_once()
+            run_helper.assert_not_called()
+            self.assertEqual(android_visual_qa.validate_png(output, (1080, 2400)).width, 1080)
+
+    def test_helper_compatible_screenshot_mode_invokes_helper_when_available(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("app.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="ferrex-android-screenshot-phone",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "helper.png"
+
+            def fake_run_command(command: list[str], *, timeout: int) -> android_visual_qa.RunResult:
+                self.write_png(Path(command[1]), 1080, 2400)
+                return android_visual_qa.RunResult(stdout="", stderr="", returncode=0)
+
+            with mock.patch.object(
+                android_visual_qa.shutil,
+                "which",
+                return_value="/nix/store/helper/bin/ferrex-android-screenshot-phone",
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_command",
+                side_effect=fake_run_command,
+            ) as run_helper, mock.patch.object(android_visual_qa, "run_command_to_file") as run_fast:
+                capture = android_visual_qa.capture_screenshot(
+                    "adb",
+                    config,
+                    output,
+                    android_visual_qa.SCREENSHOT_MODE_HELPER_COMPATIBLE,
+                    helper_compatible_profile=True,
+                )
+
+            self.assertEqual(capture["method"], "nix-screenshot-helper")
+            self.assertEqual(capture["requested_mode"], "helper-compatible")
+            self.assertEqual(capture["command_category"], "helper:ferrex-android-screenshot-phone")
+            self.assertTrue(capture["helper_compatibility_mode"])
+            self.assertTrue(capture["helper_used"])
+            run_helper.assert_called_once()
+            run_fast.assert_not_called()
+            self.assertEqual(android_visual_qa.validate_png(output, (1080, 2400)).height, 2400)
+
+    def test_capture_one_keeps_png_dimension_validation_mandatory(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("app.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="ferrex-android-screenshot-phone",
+        )
+        scenario = android_visual_qa.Scenario("phone-home", "phone")
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        snapshot = android_visual_qa.WmOverrideSnapshot(
+            raw_size="Physical size: 1080x2400",
+            raw_density="Physical density: 440",
+            override_size=None,
+            override_density=None,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+
+            def fake_capture(
+                adb: str,
+                target_config: android_visual_qa.TargetConfig,
+                output_path: Path,
+                screenshot_mode: str,
+                *,
+                helper_compatible_profile: bool,
+            ) -> dict[str, object]:
+                self.write_png(output_path, 100, 100)
+                return {
+                    "method": "adb-exec-out-screencap",
+                    "requested_mode": screenshot_mode,
+                    "serial": target_config.serial,
+                    "output_path": str(output_path),
+                    "command_category": "exec-out:screencap",
+                    "duration_ms": 1,
+                    "helper_compatibility_mode": False,
+                    "helper_used": False,
+                }
+
+            with mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "apply_viewport_profile",
+                return_value=snapshot,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                return_value={},
+            ), mock.patch.object(android_visual_qa, "force_stop_package"), mock.patch.object(
+                android_visual_qa,
+                "launch_scenario",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_scenario",
+                return_value=[],
+            ), mock.patch.object(
+                android_visual_qa,
+                "capture_screenshot",
+                side_effect=fake_capture,
+            ), mock.patch.object(
+                android_visual_qa,
+                "set_viewport_profile",
+                return_value={},
+            ), mock.patch.object(android_visual_qa.time, "sleep"), mock.patch.object(
+                android_visual_qa,
+                "capture_failure_logcat",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "restore_viewport_profile",
+                return_value={},
+            ):
+                record = android_visual_qa.capture_one(
+                    adb="adb",
+                    config=config,
+                    scenario=scenario,
+                    profile=profile,
+                    output_dir=Path(tmp),
+                    settle_ms=1,
+                    log_lines=1,
+                    screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                )
+
+        self.assertEqual(record["status"], "failed")
+        self.assertIn("screenshot dimensions", record["error"])
+        self.assertIn("png_validation", record["timings_ms"])
+        self.assertEqual(len(record["screenshot_validation_attempts"]), android_visual_qa.SCREENSHOT_VALIDATION_ATTEMPTS)
+
+    def test_capture_one_retries_transient_dimension_mismatch_and_preserves_invalid_attempt(self) -> None:
+        config = android_visual_qa.TargetConfig(
+            target="phone",
+            serial="emulator-5554",
+            default_serial="emulator-5554",
+            package="com.ferrex.android.debug",
+            apk_path=Path("app.apk"),
+            expected_size=android_visual_qa.PHONE_EXPECTED_SIZE,
+            screenshot_helper="ferrex-android-screenshot-phone",
+        )
+        scenario = android_visual_qa.Scenario("phone-home", "phone")
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        snapshot = android_visual_qa.WmOverrideSnapshot(
+            raw_size="Physical size: 1080x2400",
+            raw_density="Physical density: 440",
+            override_size=None,
+            override_density=None,
+        )
+        capture_calls = 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+
+            def fake_capture(
+                adb: str,
+                target_config: android_visual_qa.TargetConfig,
+                output_path: Path,
+                screenshot_mode: str,
+                *,
+                helper_compatible_profile: bool,
+            ) -> dict[str, object]:
+                nonlocal capture_calls
+                capture_calls += 1
+                dimensions = (100, 100) if capture_calls == 1 else profile.expected_size
+                self.write_png(output_path, dimensions[0], dimensions[1])
+                return {
+                    "method": "adb-exec-out-screencap",
+                    "requested_mode": screenshot_mode,
+                    "serial": target_config.serial,
+                    "output_path": str(output_path),
+                    "command_category": "exec-out:screencap",
+                    "duration_ms": 1,
+                    "helper_compatibility_mode": False,
+                    "helper_used": False,
+                }
+
+            with mock.patch.object(android_visual_qa, "require_serial_present"), mock.patch.object(
+                android_visual_qa,
+                "apply_viewport_profile",
+                return_value=snapshot,
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_serial_metadata",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "collect_package_metadata",
+                return_value={},
+            ), mock.patch.object(android_visual_qa, "force_stop_package"), mock.patch.object(
+                android_visual_qa,
+                "launch_scenario",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "drive_scenario",
+                return_value=[],
+            ), mock.patch.object(
+                android_visual_qa,
+                "capture_screenshot",
+                side_effect=fake_capture,
+            ), mock.patch.object(
+                android_visual_qa,
+                "set_viewport_profile",
+                return_value={"snapshot": {}},
+            ) as reapply, mock.patch.object(android_visual_qa.time, "sleep"), mock.patch.object(
+                android_visual_qa,
+                "restore_viewport_profile",
+                return_value={},
+            ):
+                record = android_visual_qa.capture_one(
+                    adb="adb",
+                    config=config,
+                    scenario=scenario,
+                    profile=profile,
+                    output_dir=Path(tmp),
+                    settle_ms=1,
+                    log_lines=1,
+                    screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                )
+
+            invalid_path = Path(tmp) / "phone-portrait" / "phone-home.attempt-1.invalid.png"
+            invalid_preserved = invalid_path.exists()
+
+        self.assertEqual(record["status"], "passed")
+        self.assertEqual(record["dimensions"], {"width": 1080, "height": 2400})
+        self.assertEqual(capture_calls, 2)
+        reapply.assert_called_once()
+        attempts = record["screenshot_validation_attempts"]
+        self.assertEqual([attempt["status"] for attempt in attempts], ["failed", "passed"])
+        self.assertEqual(attempts[0]["output_path"], str(invalid_path))
+        self.assertTrue(invalid_preserved)
+
     def test_hardware_mode_requires_explicit_serial(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
             args = SimpleNamespace(
@@ -283,6 +565,23 @@ class AndroidVisualQaTest(unittest.TestCase):
             [scenario.id for scenario in registry.scenarios],
         )
 
+    def test_default_complete_capture_plan_emits_78_captures(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
+        selected = android_visual_qa.scenarios_for_gate_mode(registry, "complete")
+        args = SimpleNamespace(
+            target="all",
+            hardware=False,
+            hardware_serial=None,
+            expected_size=None,
+            profile=None,
+        )
+        configs = android_visual_qa.target_configs(self.repo_root(), args)
+        profiles = android_visual_qa.selected_viewport_profiles(args, configs, selected)
+        plan = android_visual_qa.capture_plan_json("complete", selected, profiles)
+
+        self.assertEqual(plan["scenario_count"], 39)
+        self.assertEqual(plan["capture_count"], 78)
+
     def test_verify_manifest_accepts_smoke_phone_and_tv_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -345,6 +644,88 @@ class AndroidVisualQaTest(unittest.TestCase):
 
             with self.assertRaises(android_visual_qa.VisualQaError):
                 android_visual_qa.verify_manifest(manifest, mode="smoke", repo_root=self.repo_root())
+
+    def test_smoke_capture_plan_records_helper_comparison_unavailable(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry(
+            [android_visual_qa.Scenario("phone-home", "phone")],
+            self.repo_root() / "mobile/android/app/src/main/kotlin/com/ferrex/android/ui/qa/FerrexVisualQa.kt",
+        )
+        selected = [registry.by_id["phone-home"]]
+        args = SimpleNamespace(
+            target="all",
+            scenario="all",
+            settle_ms=1,
+            log_lines=1,
+            adb="adb",
+            no_nix_screenshot=False,
+            screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+            hardware=False,
+            hardware_serial=None,
+            expected_size=None,
+            profile=["phone-portrait"],
+            effective_argv=["gate", "--mode", "smoke"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+
+            def fake_capture_one(**kwargs: object) -> dict[str, object]:
+                screenshot_path = output_dir / "phone-portrait" / "phone-home.png"
+                self.write_png(screenshot_path, 1080, 2400)
+                return {
+                    "status": "passed",
+                    "target": "phone",
+                    "profile": "phone-portrait",
+                    "scenario_id": "phone-home",
+                    "serial": "emulator-5554",
+                    "screenshot_path": str(screenshot_path),
+                    "expected_dimensions": {"width": 1080, "height": 2400},
+                    "dimensions": {"width": 1080, "height": 2400},
+                    "screenshot_capture": {
+                        "method": "adb-exec-out-screencap",
+                        "requested_mode": "fast",
+                        "serial": "emulator-5554",
+                        "output_path": str(screenshot_path),
+                        "command_category": "exec-out:screencap",
+                        "duration_ms": 3,
+                        "helper_compatibility_mode": False,
+                        "helper_used": False,
+                    },
+                    "timings_ms": {"screenshot": 3, "total": 5},
+                    "adb_command_summary": {
+                        "total_count": 1,
+                        "total_duration_ms": 3,
+                        "categories": {"exec-out:screencap": {"count": 1, "duration_ms": 3}},
+                    },
+                }
+
+            with mock.patch.object(android_visual_qa, "resolve_executable", return_value="adb"), mock.patch.object(
+                android_visual_qa,
+                "collect_command_versions",
+                return_value={},
+            ), mock.patch.object(
+                android_visual_qa,
+                "capture_one",
+                side_effect=fake_capture_one,
+            ), mock.patch.object(android_visual_qa.shutil, "which", return_value=None):
+                status = android_visual_qa.run_capture_plan(
+                    args=args,
+                    repo_root=self.repo_root(),
+                    registry=registry,
+                    selected=selected,
+                    output_dir=output_dir,
+                    command_name="android-visual-qa gate",
+                    mode="smoke",
+                )
+            manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(manifest["screenshot"]["mode"], "fast")
+        self.assertEqual(manifest["captures"][0]["screenshot_capture"]["command_category"], "exec-out:screencap")
+        comparison = manifest["screenshot_method_comparison"]
+        self.assertEqual(comparison["status"], "unavailable")
+        self.assertIn("not available", comparison["unavailable_reason"])
+        self.assertEqual(comparison["fast_capture"]["dimensions"], {"width": 1080, "height": 2400})
 
     def test_gate_runs_primitives_capture_and_verify_in_order(self) -> None:
         calls: list[str] = []
