@@ -51,7 +51,27 @@ The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches ea
 
 Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. `--screenshot-mode fast` is the default prepared-run path; use `--screenshot-mode helper-compatible` only when explicitly checking the legacy Nix screenshot helper behavior for default emulator profiles. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
 
-The accessibility subcommand writes `accessibility-manifest.json` plus UI Automator XML dumps under `<output>/accessibility/`. It fails when required recovery/action/status/focus/media nodes are missing stable tags, content descriptions, or action/focus affordances.
+The accessibility subcommand writes `accessibility-manifest.json` plus UI Automator XML dumps under `<output>/accessibility/`. It fails when required recovery/action/status/focus/media nodes are missing stable tags, content descriptions, button roles, onClick/clickable affordances, TV focusability, or disabled semantics for playback-entry actions that cannot launch without a ticket.
+
+Expected local artifact paths (all ignored by source control) are:
+
+- `target/android-visual-qa/theater-plate/manifest.json`
+- `target/android-visual-qa/theater-plate/<profile>/<scenario-id>.png`
+- `target/android-visual-qa/theater-plate/logs/<profile>-<scenario-id>-failure-logcat.txt` only on failed captures
+- `target/android-visual-qa/theater-plate-a11y/accessibility-manifest.json`
+- `target/android-visual-qa/theater-plate-a11y/accessibility/<profile>/<scenario-id>.xml`
+- `target/android-visual-qa/theater-plate-a11y/logs/<profile>-<scenario-id>-accessibility-logcat.txt` only on failed accessibility checks
+
+If a profile cannot be captured in a given workspace, the manifest verifier only accepts an explicit human deferral recorded in `profile_deferrals`, for example:
+
+```json
+{
+  "target": "tv",
+  "profile": "tv-4k-scaled",
+  "human_deferred": true,
+  "reason": "No 4K-scaled Android TV emulator was attached in this workspace."
+}
+```
 
 ## Stable tag map for UI tests/manual QA
 
@@ -77,6 +97,7 @@ Theater Plate debug tags are generated for both `phone` and `tv` targets:
 - root: `<target>.theater-plate.<state>`
 - status: `<target>.theater-plate.status.<state>`
 - actions: `<target>.theater-plate.action.<state>.<action-key>`
+- playback-entry disabled ticket action: `<target>.theater-plate.action.playback-entry.network-required`
 - media: `<target>.theater-plate.media.<state>.hero`
 - rails: `<target>.theater-plate.rail.<state>.primary`
 - search field: `<target>.theater-plate.search.search.field`

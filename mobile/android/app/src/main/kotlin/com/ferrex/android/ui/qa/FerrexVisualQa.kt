@@ -319,6 +319,7 @@ data class VisualQaRecoveryActionSample(
     val label: String,
     val role: FerrexActionRole,
     val requiresDataWipe: Boolean = false,
+    val enabled: Boolean = true,
 )
 
 data class VisualQaMediaCardSample(

@@ -38,28 +38,42 @@ class FerrexVisualQaScenariosTest {
     fun theaterPlateScenariosCoverRequiredStatesForPhoneAndTv() {
         val theaterScenarios = FerrexVisualQaScenarios.all.filter { it.kind == VisualQaScenarioKind.TheaterPlate }
         val expectedStates = VisualQaTheaterPlateState.entries.toSet()
+        val requiredStateKeys = listOf(
+            "bright",
+            "dark",
+            "busy",
+            "missing-backdrop",
+            "long-title",
+            "missing-artwork",
+            "stale-offline",
+            "recovery",
+            "search",
+            "browse",
+            "detail",
+            "rails",
+            "playback-entry",
+        )
 
         assertEquals(expectedStates.size * 2, theaterScenarios.size)
         assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Phone }.mapNotNull { it.theaterPlateState }.toSet())
         assertEquals(expectedStates, theaterScenarios.filter { it.device == VisualQaDevice.Tv }.mapNotNull { it.theaterPlateState }.toSet())
-        assertEquals(
-            setOf(
-                "bright",
-                "dark",
-                "busy",
-                "missing-backdrop",
-                "long-title",
-                "missing-artwork",
-                "stale-offline",
-                "recovery",
-                "search",
-                "browse",
-                "detail",
-                "rails",
-                "playback-entry",
-            ),
-            expectedStates.map { it.key }.toSet(),
-        )
+        assertEquals(requiredStateKeys, VisualQaTheaterPlateState.entries.map { it.key })
+    }
+
+    @Test
+    fun tvTheaterPlateScenariosExposeStableRequiredTags() {
+        val tvScenarios = FerrexVisualQaScenarios.all.filter {
+            it.device == VisualQaDevice.Tv && it.kind == VisualQaScenarioKind.TheaterPlate
+        }
+        val requiredStateKeys = VisualQaTheaterPlateState.entries.map { it.key }
+
+        assertEquals(requiredStateKeys.map { "tv-theater-plate-$it" }, tvScenarios.map { it.id })
+        tvScenarios.forEach { scenario ->
+            val state = requireNotNull(scenario.theaterPlateState)
+            assertEquals(FerrexQaTags.TheaterPlate.root("tv", state.key), scenario.testTag)
+            assertEquals("Debug Visual QA → TV Theater Plate → ${state.label}", scenario.evidencePath)
+            assertTrue("${scenario.id} fixture includes state key", scenario.fixtureSamples.contains(state.key))
+        }
     }
 
     @Test
@@ -119,6 +133,7 @@ class FerrexVisualQaScenariosTest {
                 assertTrue("${scenario.id} cache recovery labels $labels", labels.contains("Clear cache"))
             }
             scenario.recoveryActions.forEach { action ->
+                assertTrue("${scenario.id} ${action.key} must stay enabled", action.enabled)
                 assertFalse("${scenario.id} ${action.key} must not require app data wipes", action.requiresDataWipe)
                 assertFalse(action.label.contains("pm clear", ignoreCase = true))
                 assertFalse(action.label.contains("wipe", ignoreCase = true))
