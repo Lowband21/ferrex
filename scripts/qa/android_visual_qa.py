@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -23,7 +26,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Iterator, Mapping, Sequence
 
 ACTION_VISUAL_QA = "com.ferrex.android.action.VISUAL_QA"
 EXTRA_SCENARIO_ID = "com.ferrex.android.extra.QA_SCENARIO_ID"
@@ -188,6 +191,253 @@ class RunResult:
     returncode: int
 
 
+ADB_OPTIONS_WITH_VALUE = frozenset(("-s", "-t", "-H", "-P", "-L"))
+
+
+def duration_ms_since(start: float, clock: Callable[[], float] | None = None) -> int:
+    now = (clock or time.monotonic)()
+    return max(0, int(round((now - start) * 1000)))
+
+
+def sanitized_category_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
+    return (token[:48] or "unknown").strip("-") or "unknown"
+
+
+def adb_command_category(args: Sequence[str | os.PathLike[str]]) -> str | None:
+    string_args = [os.fspath(arg) for arg in args]
+    if not string_args or Path(string_args[0]).name not in {"adb", "adb.exe"}:
+        return None
+
+    index = 1
+    while index < len(string_args):
+        arg = string_args[index]
+        if arg in ADB_OPTIONS_WITH_VALUE:
+            index += 2
+        elif arg.startswith("-"):
+            index += 1
+        else:
+            break
+
+    if index >= len(string_args):
+        return "adb"
+
+    verb = sanitized_category_token(string_args[index])
+    if verb in {"shell", "exec-out"} and index + 1 < len(string_args):
+        return f"{verb}:{sanitized_category_token(string_args[index + 1])}"
+    return verb
+
+
+class TimingRecorder:
+    def __init__(self, clock: Callable[[], float] | None = None):
+        self._clock = clock or time.monotonic
+        self._timings_ms: Counter[str] = Counter()
+        self._adb_categories: dict[str, dict[str, int]] = {}
+
+    def now(self) -> float:
+        return self._clock()
+
+    def elapsed_ms_since(self, start: float) -> int:
+        return duration_ms_since(start, self._clock)
+
+    def add_duration(self, name: str, duration_ms: int) -> None:
+        self._timings_ms[name] += max(0, int(duration_ms))
+
+    @contextmanager
+    def step(self, name: str) -> Iterator[None]:
+        started = self.now()
+        try:
+            yield
+        finally:
+            self.add_duration(name, self.elapsed_ms_since(started))
+
+    def record_adb_command(self, args: Sequence[str | os.PathLike[str]], duration_ms: int) -> None:
+        category = adb_command_category(args)
+        if category is None:
+            return
+        bucket = self._adb_categories.setdefault(category, {"count": 0, "duration_ms": 0})
+        bucket["count"] += 1
+        bucket["duration_ms"] += max(0, int(duration_ms))
+
+    def timings_json(self, total_ms: int | None = None) -> dict[str, int]:
+        data = {key: int(value) for key, value in sorted(self._timings_ms.items())}
+        if total_ms is not None:
+            data["total"] = max(0, int(total_ms))
+        return data
+
+    def adb_command_summary(self) -> dict[str, object]:
+        categories = {
+            category: {"count": values["count"], "duration_ms": values["duration_ms"]}
+            for category, values in sorted(self._adb_categories.items())
+        }
+        return {
+            "total_count": sum(values["count"] for values in categories.values()),
+            "total_duration_ms": sum(values["duration_ms"] for values in categories.values()),
+            "categories": categories,
+        }
+
+
+_CURRENT_TIMING_RECORDER: ContextVar[TimingRecorder | None] = ContextVar(
+    "android_visual_qa_timing_recorder",
+    default=None,
+)
+
+
+@contextmanager
+def active_timing_recorder(recorder: TimingRecorder) -> Iterator[None]:
+    token = _CURRENT_TIMING_RECORDER.set(recorder)
+    try:
+        yield
+    finally:
+        _CURRENT_TIMING_RECORDER.reset(token)
+
+
+def current_timing_recorder() -> TimingRecorder | None:
+    return _CURRENT_TIMING_RECORDER.get()
+
+
+@contextmanager
+def current_timing_step(name: str) -> Iterator[None]:
+    recorder = current_timing_recorder()
+    if recorder is None:
+        yield
+    else:
+        with recorder.step(name):
+            yield
+
+
+def record_current_adb_timing(args: Sequence[str | os.PathLike[str]], started: float, recorder: TimingRecorder | None) -> None:
+    if recorder is not None:
+        recorder.record_adb_command(args, recorder.elapsed_ms_since(started))
+
+
+def non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):
+        return max(0, int(round(value)))
+    return None
+
+
+def duration_distribution(values: Sequence[int]) -> dict[str, int]:
+    sorted_values = sorted(max(0, int(value)) for value in values)
+    if not sorted_values:
+        return {"count": 0, "total": 0, "p50": 0, "p95": 0, "max": 0}
+
+    def percentile(percent: int) -> int:
+        rank = max(0, math.ceil((percent / 100) * len(sorted_values)) - 1)
+        return sorted_values[min(rank, len(sorted_values) - 1)]
+
+    return {
+        "count": len(sorted_values),
+        "total": sum(sorted_values),
+        "p50": percentile(50),
+        "p95": percentile(95),
+        "max": sorted_values[-1],
+    }
+
+
+def record_total_ms(record: Mapping[str, object]) -> int | None:
+    timings = record.get("timings_ms")
+    if not isinstance(timings, Mapping):
+        return None
+    return non_negative_int(timings.get("total"))
+
+
+def record_method_name(record: Mapping[str, object]) -> str:
+    screenshot_capture = record.get("screenshot_capture")
+    if isinstance(screenshot_capture, Mapping):
+        method = screenshot_capture.get("method")
+        if isinstance(method, str) and method:
+            return method
+    if record.get("dump_paths") is not None or record.get("requirements") is not None:
+        return "uiautomator-accessibility"
+    return "unknown"
+
+
+def aggregate_adb_summaries(records: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    categories: dict[str, dict[str, int]] = {}
+    for record in records:
+        summary = record.get("adb_command_summary")
+        if not isinstance(summary, Mapping):
+            continue
+        raw_categories = summary.get("categories")
+        if not isinstance(raw_categories, Mapping):
+            continue
+        for category, raw_values in raw_categories.items():
+            if not isinstance(category, str) or not isinstance(raw_values, Mapping):
+                continue
+            count = non_negative_int(raw_values.get("count")) or 0
+            duration_ms = non_negative_int(raw_values.get("duration_ms")) or 0
+            bucket = categories.setdefault(category, {"count": 0, "duration_ms": 0})
+            bucket["count"] += count
+            bucket["duration_ms"] += duration_ms
+    return {
+        "total_count": sum(values["count"] for values in categories.values()),
+        "total_duration_ms": sum(values["duration_ms"] for values in categories.values()),
+        "categories": dict(sorted(categories.items())),
+    }
+
+
+def breakdown_by(records: Sequence[Mapping[str, object]], key_func: Callable[[Mapping[str, object]], str]) -> dict[str, dict[str, int]]:
+    values_by_key: dict[str, list[int]] = {}
+    for record in records:
+        total = record_total_ms(record)
+        if total is None:
+            continue
+        key = key_func(record) or "unknown"
+        values_by_key.setdefault(key, []).append(total)
+    return {key: duration_distribution(values) for key, values in sorted(values_by_key.items())}
+
+
+def build_timing_summary(
+    records: Sequence[Mapping[str, object]],
+    *,
+    gate_primitives: Sequence[Mapping[str, object]] | None = None,
+    manifest_write_ms: int | None = None,
+) -> dict[str, object]:
+    timed_records = [record for record in records if record_total_ms(record) is not None]
+    record_totals = [record_total_ms(record) or 0 for record in timed_records]
+    record_distribution = duration_distribution(record_totals)
+    gate_primitive_records = [dict(primitive) for primitive in (gate_primitives or ())]
+    gate_primitive_durations: dict[str, int] = {}
+    for primitive in gate_primitive_records:
+        name = primitive.get("name")
+        duration_ms = non_negative_int(primitive.get("duration_ms")) or 0
+        if isinstance(name, str) and name:
+            gate_primitive_durations[name] = gate_primitive_durations.get(name, 0) + duration_ms
+    manifest_write_duration = non_negative_int(manifest_write_ms) or 0
+    gate_total = sum(gate_primitive_durations.values())
+    has_capture_gate = any(primitive.get("name") == "capture" for primitive in gate_primitive_records)
+    total = gate_total if has_capture_gate else record_distribution["total"] + gate_total
+
+    return {
+        "total": total + manifest_write_duration,
+        "p50": record_distribution["p50"],
+        "p95": record_distribution["p95"],
+        "max": record_distribution["max"],
+        "record_count": record_distribution["count"],
+        "record_total": record_distribution["total"],
+        "gate_total": gate_total,
+        "records": record_distribution,
+        "target_breakdown": breakdown_by(
+            timed_records,
+            lambda record: str(record.get("target") or "unknown"),
+        ),
+        "profile_breakdown": breakdown_by(
+            timed_records,
+            lambda record: str(record.get("profile") or "unknown"),
+        ),
+        "method_breakdown": breakdown_by(timed_records, record_method_name),
+        "adb_commands": aggregate_adb_summaries(timed_records),
+        "gate_primitives": gate_primitive_records,
+        "gate_primitive_durations": gate_primitive_durations,
+        "manifest_write_ms": manifest_write_duration,
+    }
+
+
 @dataclass(frozen=True)
 class AccessibilityRequirement:
     key: str
@@ -231,6 +481,7 @@ class ManifestSummary:
     output_dir: Path
     mode: str | None
     captures: tuple[VerifiedCapture, ...]
+    timing_summary: Mapping[str, object] | None = None
 
     @property
     def capture_count(self) -> int:
@@ -371,14 +622,21 @@ def run_command(
     input_bytes: bytes | None = None,
 ) -> RunResult:
     string_args = [os.fspath(arg) for arg in args]
-    completed = subprocess.run(
-        string_args,
-        input=input_bytes,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        timeout=timeout,
-    )
+    recorder = current_timing_recorder()
+    timing_started = recorder.now() if recorder is not None else time.monotonic()
+    try:
+        completed = subprocess.run(
+            string_args,
+            input=input_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except Exception:
+        record_current_adb_timing(string_args, timing_started, recorder)
+        raise
+    record_current_adb_timing(string_args, timing_started, recorder)
     stdout = completed.stdout.decode("utf-8", errors="replace").replace("\r", "")
     stderr = completed.stderr.decode("utf-8", errors="replace").replace("\r", "")
     if check and completed.returncode != 0:
@@ -400,15 +658,22 @@ def run_command_to_file(
     timeout: int | float | None = 120,
 ) -> RunResult:
     string_args = [os.fspath(arg) for arg in args]
+    recorder = current_timing_recorder()
+    timing_started = recorder.now() if recorder is not None else time.monotonic()
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("wb") as handle:
-        completed = subprocess.run(
-            string_args,
-            stdout=handle,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=timeout,
-        )
+    try:
+        with output.open("wb") as handle:
+            completed = subprocess.run(
+                string_args,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+            )
+    except Exception:
+        record_current_adb_timing(string_args, timing_started, recorder)
+        raise
+    record_current_adb_timing(string_args, timing_started, recorder)
     stderr = completed.stderr.decode("utf-8", errors="replace").replace("\r", "")
     if completed.returncode != 0:
         raise CommandError(string_args, completed.returncode, "", stderr)
@@ -862,19 +1127,20 @@ def wait_for_visual_qa_foreground(
     scenario: Scenario,
     timeout_seconds: float = 8.0,
 ) -> dict[str, object]:
-    deadline = time.monotonic() + timeout_seconds
-    last_snapshot: dict[str, object] | None = None
-    while True:
-        last_snapshot = focused_window_snapshot(adb, config)
-        if last_snapshot["package_foreground"]:
-            waited_ms = int((timeout_seconds - max(deadline - time.monotonic(), 0)) * 1000)
-            return {"scenario_id": scenario.id, "waited_ms": waited_ms, **last_snapshot}
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.25)
-    raise VisualQaError(
-        f"{config.package}/{VISUAL_QA_ACTIVITY} did not become foreground for {scenario.id}: {last_snapshot}"
-    )
+    with current_timing_step("foreground_polling"):
+        deadline = time.monotonic() + timeout_seconds
+        last_snapshot: dict[str, object] | None = None
+        while True:
+            last_snapshot = focused_window_snapshot(adb, config)
+            if last_snapshot["package_foreground"]:
+                waited_ms = int((timeout_seconds - max(deadline - time.monotonic(), 0)) * 1000)
+                return {"scenario_id": scenario.id, "waited_ms": waited_ms, **last_snapshot}
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+        raise VisualQaError(
+            f"{config.package}/{VISUAL_QA_ACTIVITY} did not become foreground for {scenario.id}: {last_snapshot}"
+        )
 
 
 def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[str, object]:
@@ -907,7 +1173,7 @@ def launch_scenario(adb: str, config: TargetConfig, scenario: Scenario) -> dict[
             "action": ACTION_VISUAL_QA,
             "extra_scenario_id": EXTRA_SCENARIO_ID,
             "component": config.component,
-            "stdout": output,
+            "stdout": redact_text(output),
         }
         try:
             attempt_record["foreground"] = wait_for_visual_qa_foreground(adb, config, scenario)
@@ -1009,6 +1275,61 @@ def write_json(path: Path, data: Mapping[str, object]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def write_json_with_timing(path: Path, data: Mapping[str, object]) -> int:
+    started = time.monotonic()
+    write_json(path, data)
+    return duration_ms_since(started)
+
+
+def manifest_record_list(manifest: Mapping[str, object], record_key: str) -> list[Mapping[str, object]]:
+    raw_records = manifest.get(record_key)
+    if not isinstance(raw_records, list):
+        return []
+    return [record for record in raw_records if isinstance(record, Mapping)]
+
+
+def write_manifest_with_timing_summary(
+    manifest_path: Path,
+    manifest: dict[str, object],
+    *,
+    record_key: str,
+    gate_primitives: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    records = manifest_record_list(manifest, record_key)
+    manifest["timing_summary"] = build_timing_summary(records, gate_primitives=gate_primitives)
+    manifest_write_ms = write_json_with_timing(manifest_path, manifest)
+    manifest["timing_summary"] = build_timing_summary(
+        records,
+        gate_primitives=gate_primitives,
+        manifest_write_ms=manifest_write_ms,
+    )
+    write_json(manifest_path, manifest)
+    timing_summary = manifest.get("timing_summary")
+    return timing_summary if isinstance(timing_summary, dict) else {}
+
+
+def print_timing_summary(timing_summary: Mapping[str, object] | None) -> None:
+    if not isinstance(timing_summary, Mapping):
+        return
+    total = non_negative_int(timing_summary.get("total")) or 0
+    record_count = non_negative_int(timing_summary.get("record_count")) or 0
+    p50 = non_negative_int(timing_summary.get("p50")) or 0
+    p95 = non_negative_int(timing_summary.get("p95")) or 0
+    max_ms = non_negative_int(timing_summary.get("max")) or 0
+    gate_primitives = timing_summary.get("gate_primitives")
+    gate_count = len(gate_primitives) if isinstance(gate_primitives, list) else 0
+    adb_summary = timing_summary.get("adb_commands")
+    adb_count = 0
+    if isinstance(adb_summary, Mapping):
+        adb_count = non_negative_int(adb_summary.get("total_count")) or 0
+    print(
+        "android-visual-qa: timings "
+        f"total={total}ms records={record_count} p50={p50}ms p95={p95}ms max={max_ms}ms "
+        f"gate_steps={gate_count} adb_commands={adb_count}",
+        file=sys.stderr,
+    )
 
 
 def read_json_object(path: Path) -> dict[str, object]:
@@ -1115,11 +1436,13 @@ def verify_manifest(
 
     output_raw = data.get("output_dir")
     output_dir = Path(output_raw) if isinstance(output_raw, str) and output_raw else manifest_path.parent
+    timing_summary = data.get("timing_summary")
     return ManifestSummary(
         manifest_path=manifest_path,
         output_dir=output_dir,
         mode=mode,
         captures=tuple(verified),
+        timing_summary=timing_summary if isinstance(timing_summary, Mapping) else None,
     )
 
 
@@ -1142,6 +1465,7 @@ def print_artifact_summary(summary: ManifestSummary) -> None:
             f"{capture.screenshot_path}",
             file=sys.stderr,
         )
+    print_timing_summary(summary.timing_summary)
 
 
 def capture_one(
@@ -1156,6 +1480,8 @@ def capture_one(
     prefer_nix_helper: bool,
 ) -> dict[str, object]:
     started_at = utc_now()
+    timing = TimingRecorder()
+    total_started = timing.now()
     screenshot_path = output_dir / profile.name / f"{scenario.id}.png"
     failure_log_path = output_dir / "logs" / f"{profile.name}-{scenario.id}-failure-logcat.txt"
     record: dict[str, object] = {
@@ -1172,37 +1498,51 @@ def capture_one(
     }
     viewport_before: WmOverrideSnapshot | None = None
 
-    try:
-        require_serial_present(adb, config.serial)
-        viewport_before = apply_viewport_profile(adb, config, profile)
-        record["viewport_before"] = viewport_before.to_json()
-        record["serial_metadata"] = collect_serial_metadata(adb, config)
-        record["package_metadata"] = collect_package_metadata(adb, config)
-        force_stop_package(adb, config)
-        record["launch"] = launch_scenario(adb, config, scenario)
-        record["dpad_key_events"] = drive_scenario(adb, config, scenario)
-        time.sleep(settle_ms / 1000.0)
-        prefer_helper_for_profile = prefer_nix_helper and profile.expected_size == config.expected_size
-        record["screenshot_capture"] = capture_screenshot(adb, config, screenshot_path, prefer_helper_for_profile)
-        dimensions = validate_png(screenshot_path, profile.expected_size)
-        record["dimensions"] = dimensions.to_json()
-        record["ended_at"] = utc_now()
-        record["status"] = "passed"
-    except Exception as exc:  # noqa: BLE001 - capture must emit failure artifacts for any failure.
-        record["ended_at"] = utc_now()
-        record["status"] = "failed"
-        record["error"] = redact_text(str(exc))
-        record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
-    finally:
-        if viewport_before is not None:
-            try:
-                record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
-            except Exception as exc:  # noqa: BLE001 - never leave viewport restore failures silent.
-                restore_error = redact_text(str(exc))
-                record["viewport_restore_error"] = restore_error
-                if record.get("status") == "passed":
-                    record["status"] = "failed"
-                    record["error"] = restore_error
+    with active_timing_recorder(timing):
+        try:
+            with timing.step("serial_readiness"):
+                require_serial_present(adb, config.serial)
+            with timing.step("viewport_apply"):
+                viewport_before = apply_viewport_profile(adb, config, profile)
+            record["viewport_before"] = viewport_before.to_json()
+            with timing.step("metadata"):
+                record["serial_metadata"] = collect_serial_metadata(adb, config)
+            with timing.step("package_metadata"):
+                record["package_metadata"] = collect_package_metadata(adb, config)
+            with timing.step("force_stop"):
+                force_stop_package(adb, config)
+            with timing.step("launch"):
+                record["launch"] = launch_scenario(adb, config, scenario)
+            with timing.step("drive"):
+                record["dpad_key_events"] = drive_scenario(adb, config, scenario)
+            with timing.step("settle"):
+                time.sleep(settle_ms / 1000.0)
+            prefer_helper_for_profile = prefer_nix_helper and profile.expected_size == config.expected_size
+            with timing.step("screenshot"):
+                record["screenshot_capture"] = capture_screenshot(adb, config, screenshot_path, prefer_helper_for_profile)
+            with timing.step("png_validation"):
+                dimensions = validate_png(screenshot_path, profile.expected_size)
+            record["dimensions"] = dimensions.to_json()
+            record["status"] = "passed"
+        except Exception as exc:  # noqa: BLE001 - capture must emit failure artifacts for any failure.
+            record["status"] = "failed"
+            record["error"] = redact_text(str(exc))
+            with timing.step("failure_logcat"):
+                record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
+        finally:
+            if viewport_before is not None:
+                try:
+                    with timing.step("viewport_restore"):
+                        record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
+                except Exception as exc:  # noqa: BLE001 - never leave viewport restore failures silent.
+                    restore_error = redact_text(str(exc))
+                    record["viewport_restore_error"] = restore_error
+                    if record.get("status") == "passed":
+                        record["status"] = "failed"
+                        record["error"] = restore_error
+            record["ended_at"] = utc_now()
+            record["timings_ms"] = timing.timings_json(timing.elapsed_ms_since(total_started))
+            record["adb_command_summary"] = timing.adb_command_summary()
     return record
 
 
@@ -1512,6 +1852,8 @@ def accessibility_one(
     log_lines: int,
 ) -> dict[str, object]:
     started_at = utc_now()
+    timing = TimingRecorder()
+    total_started = timing.now()
     dump_path = output_dir / "accessibility" / profile.name / f"{scenario.id}.xml"
     failure_log_path = output_dir / "logs" / f"{profile.name}-{scenario.id}-accessibility-logcat.txt"
     requirements = accessibility_requirements_for_scenario(scenario)
@@ -1529,54 +1871,70 @@ def accessibility_one(
         "status": "running",
     }
     viewport_before: WmOverrideSnapshot | None = None
-    try:
-        if not requirements:
-            raise VisualQaError(f"no accessibility requirements registered for scenario {scenario.id}")
-        require_serial_present(adb, config.serial)
-        viewport_before = apply_viewport_profile(adb, config, profile)
-        record["viewport_before"] = viewport_before.to_json()
-        record["serial_metadata"] = collect_serial_metadata(adb, config)
-        record["package_metadata"] = collect_package_metadata(adb, config)
-        force_stop_package(adb, config)
-        record["launch"] = launch_scenario(adb, config, scenario)
-        record["dpad_key_events"] = drive_scenario(adb, config, scenario)
-        time.sleep(settle_ms / 1000.0)
-        dump_path.parent.mkdir(parents=True, exist_ok=True)
-        nodes: list[dict[str, str]] = []
-        dump_paths: list[str] = []
-        for step in range(ACCESSIBILITY_REACHABILITY_STEPS):
-            xml_text = dump_accessibility_xml(adb, config)
-            step_path = accessibility_dump_path(dump_path, step)
-            step_path.write_text(redact_text(xml_text), encoding="utf-8")
-            dump_paths.append(str(step_path))
-            nodes.extend(parse_accessibility_nodes(xml_text))
-            if step < ACCESSIBILITY_REACHABILITY_STEPS - 1:
-                drive_accessibility_reachability_step(adb, config, profile)
-        record["dump_paths"] = dump_paths
-        checks = verify_accessibility_requirements(nodes, requirements)
-        failures = [check for check in checks if check["status"] != "passed"]
-        record["node_count"] = len(nodes)
-        record["checks"] = checks
-        record["ended_at"] = utc_now()
-        if failures:
-            missing = ", ".join(str(check["requirement"]["key"]) for check in failures)
-            raise VisualQaError(f"missing accessibility requirement(s): {missing}")
-        record["status"] = "passed"
-    except Exception as exc:  # noqa: BLE001 - accessibility gate must emit diagnostics.
-        record["ended_at"] = utc_now()
-        record["status"] = "failed"
-        record["error"] = redact_text(str(exc))
-        record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
-    finally:
-        if viewport_before is not None:
-            try:
-                record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
-            except Exception as exc:  # noqa: BLE001
-                restore_error = redact_text(str(exc))
-                record["viewport_restore_error"] = restore_error
-                if record.get("status") == "passed":
-                    record["status"] = "failed"
-                    record["error"] = restore_error
+    with active_timing_recorder(timing):
+        try:
+            if not requirements:
+                raise VisualQaError(f"no accessibility requirements registered for scenario {scenario.id}")
+            with timing.step("serial_readiness"):
+                require_serial_present(adb, config.serial)
+            with timing.step("viewport_apply"):
+                viewport_before = apply_viewport_profile(adb, config, profile)
+            record["viewport_before"] = viewport_before.to_json()
+            with timing.step("metadata"):
+                record["serial_metadata"] = collect_serial_metadata(adb, config)
+            with timing.step("package_metadata"):
+                record["package_metadata"] = collect_package_metadata(adb, config)
+            with timing.step("force_stop"):
+                force_stop_package(adb, config)
+            with timing.step("launch"):
+                record["launch"] = launch_scenario(adb, config, scenario)
+            with timing.step("drive"):
+                record["dpad_key_events"] = drive_scenario(adb, config, scenario)
+            with timing.step("settle"):
+                time.sleep(settle_ms / 1000.0)
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            nodes: list[dict[str, str]] = []
+            dump_paths: list[str] = []
+            for step in range(ACCESSIBILITY_REACHABILITY_STEPS):
+                with timing.step("accessibility_dump"):
+                    xml_text = dump_accessibility_xml(adb, config)
+                step_path = accessibility_dump_path(dump_path, step)
+                step_path.write_text(redact_text(xml_text), encoding="utf-8")
+                dump_paths.append(str(step_path))
+                with timing.step("accessibility_parse"):
+                    nodes.extend(parse_accessibility_nodes(xml_text))
+                if step < ACCESSIBILITY_REACHABILITY_STEPS - 1:
+                    with timing.step("accessibility_drive"):
+                        drive_accessibility_reachability_step(adb, config, profile)
+            record["dump_paths"] = dump_paths
+            with timing.step("accessibility_verify"):
+                checks = verify_accessibility_requirements(nodes, requirements)
+            failures = [check for check in checks if check["status"] != "passed"]
+            record["node_count"] = len(nodes)
+            record["checks"] = checks
+            if failures:
+                missing = ", ".join(str(check["requirement"]["key"]) for check in failures)
+                raise VisualQaError(f"missing accessibility requirement(s): {missing}")
+            record["status"] = "passed"
+        except Exception as exc:  # noqa: BLE001 - accessibility gate must emit diagnostics.
+            record["status"] = "failed"
+            record["error"] = redact_text(str(exc))
+            with timing.step("failure_logcat"):
+                record["failure_logcat"] = capture_failure_logcat(adb, config, failure_log_path, log_lines)
+        finally:
+            if viewport_before is not None:
+                try:
+                    with timing.step("viewport_restore"):
+                        record["viewport_restore"] = restore_viewport_profile(adb, config, viewport_before)
+                except Exception as exc:  # noqa: BLE001
+                    restore_error = redact_text(str(exc))
+                    record["viewport_restore_error"] = restore_error
+                    if record.get("status") == "passed":
+                        record["status"] = "failed"
+                        record["error"] = restore_error
+            record["ended_at"] = utc_now()
+            record["timings_ms"] = timing.timings_json(timing.elapsed_ms_since(total_started))
+            record["adb_command_summary"] = timing.adb_command_summary()
     return record
 
 
@@ -1636,8 +1994,9 @@ def run_accessibility(args: argparse.Namespace) -> int:
     manifest["ended_at"] = utc_now()
     manifest["status"] = "failed" if failures else "passed"
     manifest_path = output_dir / "accessibility-manifest.json"
-    write_json(manifest_path, manifest)
+    timing_summary = write_manifest_with_timing_summary(manifest_path, manifest, record_key="checks")
     print(f"android-visual-qa: accessibility manifest {manifest_path}", file=sys.stderr)
+    print_timing_summary(timing_summary)
     return 1 if failures else 0
 
 
@@ -1700,8 +2059,9 @@ def run_capture_plan(
     manifest["ended_at"] = utc_now()
     manifest["status"] = "failed" if failures else "passed"
     manifest_path = output_dir / "manifest.json"
-    write_json(manifest_path, manifest)
+    timing_summary = write_manifest_with_timing_summary(manifest_path, manifest, record_key="captures")
     print(f"android-visual-qa: manifest {manifest_path}", file=sys.stderr)
+    print_timing_summary(timing_summary)
     return 1 if failures else 0
 
 
@@ -1720,24 +2080,8 @@ def run_capture(args: argparse.Namespace) -> int:
     )
 
 
-def run_gate(args: argparse.Namespace) -> int:
-    repo_root = repo_root_from_script()
-    registry = ScenarioRegistry.load(repo_root)
-    selected = scenarios_for_gate_mode(registry, args.mode)
-    output_dir = resolve_output_dir(repo_root, args.output_dir, args.mode)
-    qa_script = repo_root / "scripts/qa/android-emulator-qa.sh"
-
-    steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = (
-        ("build", (qa_script, "build")),
-        ("start", (qa_script, "start")),
-        ("doctor", (qa_script, "doctor")),
-        ("install", (qa_script, "install", "all")),
-    )
-    for label, command in steps:
-        print(f"android-visual-qa: step {label}", file=sys.stderr)
-        run_gate_command(command)
-
-    capture_args = argparse.Namespace(
+def gate_capture_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
+    return argparse.Namespace(
         target="all",
         scenario="all",
         output_dir=str(output_dir),
@@ -1751,22 +2095,210 @@ def run_gate(args: argparse.Namespace) -> int:
         profile=getattr(args, "profile", None),
         effective_argv=getattr(args, "effective_argv", sys.argv[1:]),
     )
-    print(f"android-visual-qa: step capture ({args.mode})", file=sys.stderr)
-    capture_status = run_capture_plan(
-        args=capture_args,
-        repo_root=repo_root,
-        registry=registry,
-        selected=selected,
-        output_dir=output_dir,
-        command_name="android-visual-qa gate",
-        mode=args.mode,
+
+
+def record_gate_primitive(
+    name: str,
+    gate_primitives: list[dict[str, object]],
+    action: Callable[[], object],
+) -> object:
+    started_at = utc_now()
+    started = time.monotonic()
+    try:
+        result = action()
+    except Exception as exc:
+        record: dict[str, object] = {
+            "name": name,
+            "status": "failed",
+            "duration_ms": duration_ms_since(started),
+            "started_at": started_at,
+            "ended_at": utc_now(),
+            "error": redact_text(str(exc)),
+        }
+        if isinstance(exc, CommandError):
+            record["returncode"] = exc.returncode
+        gate_primitives.append(record)
+        raise
+
+    record = {
+        "name": name,
+        "status": "passed",
+        "duration_ms": duration_ms_since(started),
+        "started_at": started_at,
+        "ended_at": utc_now(),
+    }
+    if type(result) is int and result != 0:
+        record["status"] = "failed"
+        record["exit_status"] = result
+    gate_primitives.append(record)
+    return result
+
+
+def gate_failure_record(gate_primitives: Sequence[Mapping[str, object]], error: Exception) -> dict[str, object]:
+    failed = next((primitive for primitive in reversed(gate_primitives) if primitive.get("status") == "failed"), None)
+    step = failed.get("name") if isinstance(failed, Mapping) and isinstance(failed.get("name"), str) else "gate"
+    return {
+        "status": "failed",
+        "step": step,
+        "error": redact_text(str(error)),
+    }
+
+
+def write_gate_failure_manifest(
+    *,
+    args: argparse.Namespace,
+    repo_root: Path,
+    registry: ScenarioRegistry,
+    selected: Sequence[Scenario],
+    output_dir: Path,
+    gate_primitives: Sequence[Mapping[str, object]],
+    error: Exception,
+) -> dict[str, object]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    capture_args = gate_capture_args(args, output_dir)
+    try:
+        configs = target_configs(repo_root, capture_args)
+        profiles_by_target = selected_viewport_profiles(capture_args, configs, selected)
+        capture_plan: object = capture_plan_json(args.mode, selected, profiles_by_target)
+    except Exception as plan_error:  # noqa: BLE001 - failure manifests should preserve primary errors.
+        capture_plan = {"mode": args.mode, "error": redact_text(str(plan_error))}
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "command": "android-visual-qa gate",
+        "argv": getattr(args, "effective_argv", sys.argv[1:]),
+        "started_at": utc_now(),
+        "ended_at": utc_now(),
+        "output_dir": str(output_dir),
+        "hardware_confirmation": False,
+        "registry": registry.to_json(),
+        "capture_plan": capture_plan,
+        "command_versions": collect_command_versions(args.adb, Path(__file__).resolve()),
+        "captures": [],
+        "failures": [gate_failure_record(gate_primitives, error)],
+        "status": "failed",
+    }
+    manifest_path = output_dir / "manifest.json"
+    timing_summary = write_manifest_with_timing_summary(
+        manifest_path,
+        manifest,
+        record_key="captures",
+        gate_primitives=gate_primitives,
     )
-    if capture_status != 0:
+    print(f"android-visual-qa: manifest {manifest_path}", file=sys.stderr)
+    print_timing_summary(timing_summary)
+    return manifest
+
+
+def update_gate_manifest_timing(
+    manifest_path: Path,
+    gate_primitives: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    manifest = read_json_object(manifest_path)
+    record_key = "captures" if isinstance(manifest.get("captures"), list) else "checks"
+    return write_manifest_with_timing_summary(
+        manifest_path,
+        manifest,
+        record_key=record_key,
+        gate_primitives=gate_primitives,
+    )
+
+
+def run_gate(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    registry = ScenarioRegistry.load(repo_root)
+    selected = scenarios_for_gate_mode(registry, args.mode)
+    output_dir = resolve_output_dir(repo_root, args.output_dir, args.mode)
+    manifest_path = output_dir / "manifest.json"
+    qa_script = repo_root / "scripts/qa/android-emulator-qa.sh"
+    gate_primitives: list[dict[str, object]] = []
+
+    steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = (
+        ("build", (qa_script, "build")),
+        ("start", (qa_script, "start")),
+        ("doctor", (qa_script, "doctor")),
+        ("install", (qa_script, "install", "all")),
+    )
+    try:
+        for label, command in steps:
+            print(f"android-visual-qa: step {label}", file=sys.stderr)
+            record_gate_primitive(label, gate_primitives, lambda command=command: run_gate_command(command))
+    except Exception as exc:
+        write_gate_failure_manifest(
+            args=args,
+            repo_root=repo_root,
+            registry=registry,
+            selected=selected,
+            output_dir=output_dir,
+            gate_primitives=gate_primitives,
+            error=exc,
+        )
+        raise
+
+    capture_args = gate_capture_args(args, output_dir)
+    print(f"android-visual-qa: step capture ({args.mode})", file=sys.stderr)
+    try:
+        capture_status = record_gate_primitive(
+            "capture",
+            gate_primitives,
+            lambda: run_capture_plan(
+                args=capture_args,
+                repo_root=repo_root,
+                registry=registry,
+                selected=selected,
+                output_dir=output_dir,
+                command_name="android-visual-qa gate",
+                mode=args.mode,
+            ),
+        )
+    except Exception as exc:
+        write_gate_failure_manifest(
+            args=args,
+            repo_root=repo_root,
+            registry=registry,
+            selected=selected,
+            output_dir=output_dir,
+            gate_primitives=gate_primitives,
+            error=exc,
+        )
+        raise
+    if type(capture_status) is int and capture_status != 0:
+        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+        print_timing_summary(timing_summary)
         return capture_status
 
+    print("android-visual-qa: step check", file=sys.stderr)
+    try:
+        record_gate_primitive("check", gate_primitives, lambda: run_gate_command((qa_script, "check", "all")))
+    except Exception as exc:
+        if manifest_path.exists():
+            timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+            print_timing_summary(timing_summary)
+        else:
+            write_gate_failure_manifest(
+                args=args,
+                repo_root=repo_root,
+                registry=registry,
+                selected=selected,
+                output_dir=output_dir,
+                gate_primitives=gate_primitives,
+                error=exc,
+            )
+        raise
+
     print("android-visual-qa: step verify", file=sys.stderr)
-    run_gate_command((qa_script, "check", "all"))
-    summary = verify_manifest(output_dir / "manifest.json", mode=args.mode, repo_root=repo_root)
+    try:
+        record_gate_primitive(
+            "verify",
+            gate_primitives,
+            lambda: verify_manifest(manifest_path, mode=args.mode, repo_root=repo_root),
+        )
+    except Exception as exc:
+        timing_summary = update_gate_manifest_timing(manifest_path, gate_primitives)
+        print_timing_summary(timing_summary)
+        raise
+
+    update_gate_manifest_timing(manifest_path, gate_primitives)
+    summary = verify_manifest(manifest_path, mode=args.mode, repo_root=repo_root)
     print_artifact_summary(summary)
     return 0
 
