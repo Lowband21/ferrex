@@ -48,6 +48,18 @@ class AndroidVisualQaTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def target_config(self, target: str = "phone", serial: str = "serial-1") -> android_visual_qa.TargetConfig:
+        package = "com.ferrex.android.debug" if target == "phone" else "com.ferrex.android.tv.debug"
+        return android_visual_qa.TargetConfig(
+            target=target,
+            serial=serial,
+            default_serial=serial,
+            package=package,
+            apk_path=self.repo_root() / f"build/{target}.apk",
+            expected_size=(1080, 2400) if target == "phone" else (1920, 1080),
+            screenshot_helper=f"ferrex-android-screenshot-{target}",
+        )
+
     def test_registry_parses_required_phone_and_tv_scenarios(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
 
@@ -189,6 +201,408 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertNotIn("access_token", serialized)
         self.assertNotIn("media.example.com", serialized)
         self.assertNotIn("emulator-5554", serialized)
+
+    def test_adb_shell_sections_quotes_remote_script_and_parses_sections(self) -> None:
+        output = "\n".join(
+            [
+                "__FERREX_VISUAL_QA_BEGIN_first__",
+                "one",
+                "__FERREX_VISUAL_QA_END_first__",
+                "__FERREX_VISUAL_QA_BEGIN_second__",
+                "two",
+                "__FERREX_VISUAL_QA_END_second__",
+            ]
+        )
+        with mock.patch.object(
+            android_visual_qa,
+            "adb_shell",
+            return_value=android_visual_qa.RunResult(output, "", 0),
+        ) as adb_shell:
+            sections = android_visual_qa.adb_shell_sections(
+                "adb",
+                "serial-1",
+                (("first", "printf one"), ("second", "printf two")),
+                timeout=12,
+            )
+
+        adb_shell.assert_called_once()
+        call_args = adb_shell.call_args.args
+        self.assertEqual(call_args[:2], ("adb", "serial-1"))
+        self.assertEqual(len(call_args), 3)
+        self.assertTrue(call_args[2].startswith("sh -c "))
+        self.assertIn("__FERREX_VISUAL_QA_BEGIN_first__", call_args[2])
+        self.assertEqual(sections, {"first": "one", "second": "two"})
+
+    def test_metadata_collectors_batch_shell_probes(self) -> None:
+        config = self.target_config()
+        calls: list[tuple[tuple[str, ...], int]] = []
+
+        def fake_sections(adb: str, serial: str, sections: object, *, timeout: int = 60) -> dict[str, str]:
+            del adb, serial
+            names = tuple(name for name, _ in sections)
+            calls.append((names, timeout))
+            if "package_path" in names:
+                return {
+                    "package_path": "package:/data/app/com.ferrex/base.apk",
+                    "package_dump": "  versionCode=42 minSdk=23\n  versionName=1.2.3\n  firstInstallTime=2026-01-01\n  lastUpdateTime=2026-01-02\n",
+                }
+            return {
+                "sdk": "35",
+                "release": "15",
+                "model": "Pixel",
+                "device": "emu",
+                "manufacturer": "Google",
+                "brand": "google",
+                "product": "sdk_phone64",
+                "abi": "arm64-v8a",
+                "wm_size": "Physical size: 1080x2400\nOverride size: 1080x2400",
+                "wm_density": "Physical density: 440\nOverride density: 440",
+                "features": "feature:android.software.leanback\nfeature:android.hardware.touchscreen",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            android_visual_qa,
+            "adb_shell_sections",
+            side_effect=fake_sections,
+        ):
+            config = android_visual_qa.TargetConfig(
+                **{**config.__dict__, "apk_path": Path(tmp) / "app.apk"}
+            )
+            config.apk_path.write_bytes(b"apk")
+            serial_metadata = android_visual_qa.collect_serial_metadata("adb", config)
+            package_metadata = android_visual_qa.collect_package_metadata("adb", config)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0][0],
+            (
+                "sdk",
+                "release",
+                "model",
+                "device",
+                "manufacturer",
+                "brand",
+                "product",
+                "abi",
+                "wm_size",
+                "wm_density",
+                "features",
+            ),
+        )
+        self.assertEqual(calls[0][1], 60)
+        self.assertEqual(calls[1][0], ("package_path", "package_dump"))
+        self.assertEqual(calls[1][1], 90)
+        self.assertTrue(serial_metadata["leanback"])
+        self.assertEqual(serial_metadata["properties"]["sdk"], "35")
+        self.assertEqual(package_metadata["installed_package_path"], "/data/app/com.ferrex/base.apk")
+        self.assertEqual(package_metadata["version_code"], "42")
+        self.assertTrue(package_metadata["host_apk"]["exists"])
+
+    def test_run_cache_reuses_metadata_and_reports_provenance(self) -> None:
+        config = self.target_config()
+        cache = android_visual_qa.RunCache()
+
+        with mock.patch.object(android_visual_qa, "require_serial_present") as require_serial, mock.patch.object(
+            android_visual_qa,
+            "collect_serial_metadata",
+            return_value={"serial": config.serial, "properties": {"sdk": "35"}},
+        ) as collect_serial, mock.patch.object(
+            android_visual_qa,
+            "collect_package_metadata",
+            return_value={"package_name": config.package, "host_apk": {"path": "app.apk"}},
+        ) as collect_package:
+            first_ready = cache.require_serial_present("adb", config)
+            second_ready = cache.require_serial_present("adb", config)
+            first_serial = cache.serial_metadata("adb", config)
+            first_serial.value["properties"] = {"sdk": "mutated"}
+            second_serial = cache.serial_metadata("adb", config)
+            first_package = cache.package_metadata("adb", config)
+            second_package = cache.package_metadata("adb", config)
+
+        require_serial.assert_called_once_with("adb", config.serial)
+        collect_serial.assert_called_once_with("adb", config)
+        collect_package.assert_called_once_with("adb", config)
+        self.assertFalse(first_ready.provenance["hit"])
+        self.assertTrue(second_ready.provenance["hit"])
+        self.assertFalse(first_serial.provenance["hit"])
+        self.assertTrue(second_serial.provenance["hit"])
+        self.assertEqual(second_serial.value["properties"], {"sdk": "35"})
+        self.assertFalse(first_package.provenance["hit"])
+        self.assertTrue(second_package.provenance["hit"])
+        summary = cache.summary()
+        self.assertEqual(summary["serial_readiness"]["lookups"], 2)
+        self.assertEqual(summary["serial_metadata"]["hits"], 1)
+        self.assertEqual(summary["serial_metadata"]["misses"], 1)
+        self.assertEqual(summary["package_metadata"]["entries"], 1)
+
+    def test_capture_command_failure_invalidates_cached_target_metadata(self) -> None:
+        config = self.target_config()
+        cache = android_visual_qa.RunCache()
+        scenario = android_visual_qa.Scenario("phone-home", "phone")
+        profile = android_visual_qa.VIEWPORT_PROFILES["phone-portrait"]
+        failure = android_visual_qa.CommandError(["adb", "shell", "am"], 1, "", "device offline")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            android_visual_qa,
+            "require_serial_present",
+        ), mock.patch.object(
+            android_visual_qa,
+            "collect_serial_metadata",
+            return_value={"serial": config.serial},
+        ), mock.patch.object(
+            android_visual_qa,
+            "collect_package_metadata",
+            return_value={"package_name": config.package},
+        ), mock.patch.object(
+            android_visual_qa,
+            "force_stop_package",
+        ), mock.patch.object(
+            android_visual_qa,
+            "launch_scenario",
+            side_effect=failure,
+        ), mock.patch.object(
+            android_visual_qa,
+            "capture_failure_logcat",
+            return_value={"path": "failure-logcat.txt", "redacted": True},
+        ):
+            record = android_visual_qa.capture_one(
+                adb="adb",
+                config=config,
+                scenario=scenario,
+                profile=profile,
+                output_dir=Path(tmp),
+                settle_ms=1,
+                log_lines=1,
+                screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+                run_cache=cache,
+                viewport_event_index=0,
+            )
+
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["failure_logcat"], {"path": "failure-logcat.txt", "redacted": True})
+        summary = cache.summary()
+        for category in ("serial_readiness", "serial_metadata", "package_metadata"):
+            self.assertEqual(summary[category]["entries"], 0)
+            self.assertEqual(summary[category]["invalidations"], 1)
+            self.assertEqual(summary[category]["invalidation_reasons"], {"record_failure": 1})
+
+    def test_viewport_apply_restores_previous_snapshot_on_partial_failure(self) -> None:
+        config = self.target_config()
+        profile = android_visual_qa.ViewportProfile(
+            name="test-profile",
+            target="phone",
+            expected_size=(1080, 2400),
+            wm_size=(1080, 2400),
+            wm_density=440,
+            description="test",
+        )
+        before = android_visual_qa.WmOverrideSnapshot(
+            raw_size="Physical size: 1080x2400",
+            raw_density="Physical density: 420",
+            override_size="1080x2400",
+            override_density=None,
+            accelerometer_rotation="0",
+            user_rotation="0",
+        )
+        failure = android_visual_qa.CommandError(["adb", "shell", "wm", "density"], 1, "", "wm failed")
+
+        with mock.patch.object(android_visual_qa, "wm_snapshot", return_value=before), mock.patch.object(
+            android_visual_qa,
+            "adb_shell",
+            side_effect=[failure],
+        ), mock.patch.object(android_visual_qa, "restore_viewport_profile") as restore:
+            with self.assertRaises(android_visual_qa.CommandError):
+                android_visual_qa.apply_viewport_profile_for_group("adb", config, profile)
+
+        restore.assert_called_once_with("adb", config, before)
+
+    def test_viewport_apply_skips_when_profile_is_already_active(self) -> None:
+        config = self.target_config()
+        profile = android_visual_qa.ViewportProfile(
+            name="active-profile",
+            target="phone",
+            expected_size=(1080, 2400),
+            wm_size=(1080, 2400),
+            wm_density=440,
+            description="active",
+        )
+        snapshot = android_visual_qa.WmOverrideSnapshot(
+            raw_size="Physical size: 1080x2400\nOverride size: 1080x2400",
+            raw_density="Physical density: 440\nOverride density: 440",
+            override_size="1080x2400",
+            override_density="440",
+            accelerometer_rotation="0",
+            user_rotation="0",
+        )
+
+        with mock.patch.object(android_visual_qa, "wm_snapshot", return_value=snapshot), mock.patch.object(
+            android_visual_qa,
+            "adb_shell",
+        ) as adb_shell:
+            evidence = android_visual_qa.apply_viewport_profile_for_group("adb", config, profile)
+
+        self.assertTrue(evidence.skipped)
+        self.assertEqual(evidence.actions, ())
+        self.assertEqual(evidence.before, snapshot)
+        self.assertEqual(evidence.after, snapshot)
+        adb_shell.assert_not_called()
+
+    def test_capture_plan_groups_profiles_and_preserves_record_order(self) -> None:
+        phone_config = self.target_config("phone", "phone-serial")
+        tv_config = self.target_config("tv", "tv-serial")
+        selected = [
+            android_visual_qa.Scenario("phone-a", "phone"),
+            android_visual_qa.Scenario("tv-a", "tv"),
+            android_visual_qa.Scenario("phone-b", "phone"),
+        ]
+        registry = android_visual_qa.ScenarioRegistry(selected, Path("registry.kt"))
+        phone_profiles = (
+            android_visual_qa.ViewportProfile("phone-p1", "phone", (1080, 2400), (1080, 2400), 440, "phone p1"),
+            android_visual_qa.ViewportProfile("phone-p2", "phone", (1800, 1200), (1800, 1200), 420, "phone p2"),
+        )
+        tv_profiles = (
+            android_visual_qa.ViewportProfile("tv-p1", "tv", (1920, 1080), (1920, 1080), 320, "tv p1"),
+        )
+        profiles_by_target = {"phone": phone_profiles, "tv": tv_profiles}
+        snapshot = android_visual_qa.WmOverrideSnapshot("size", "density", None, None)
+        args = SimpleNamespace(
+            hardware=False,
+            no_nix_screenshot=False,
+            screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+            log_lines=1,
+            settle_ms=1,
+            adb="adb",
+            effective_argv=["capture"],
+        )
+
+        def fake_apply(
+            *,
+            adb: str,
+            config: object,
+            profile: object,
+            viewport_events: list[dict[str, object]],
+            force: bool = False,
+        ) -> tuple[int, dict[str, object]]:
+            del adb, force
+            event = {
+                "index": len(viewport_events),
+                "operation": "apply",
+                "target": config.target,
+                "serial": config.serial,
+                "profile": profile.name,
+                "status": "passed",
+                "duration_ms": 1,
+            }
+            viewport_events.append(event)
+            return event["index"], event
+
+        def fake_restore(*, adb: str, config: object, initial_snapshot: object, viewport_events: list[dict[str, object]]) -> dict[str, object]:
+            del adb, initial_snapshot
+            event = {
+                "index": len(viewport_events),
+                "operation": "final_restore",
+                "target": config.target,
+                "serial": config.serial,
+                "status": "passed",
+                "duration_ms": 1,
+            }
+            viewport_events.append(event)
+            return event
+
+        def fake_capture_one(**kwargs: object) -> dict[str, object]:
+            scenario = kwargs["scenario"]
+            profile = kwargs["profile"]
+            config = kwargs["config"]
+            event_index = kwargs["viewport_event_index"]
+            return {
+                "target": config.target,
+                "profile": profile.name,
+                "scenario_id": scenario.id,
+                "serial": config.serial,
+                "status": "passed",
+                "screenshot_path": str(Path(kwargs["output_dir"]) / profile.name / f"{scenario.id}.png"),
+                "viewport_apply_event_index": event_index,
+                "timings_ms": {"total": 1},
+                "adb_command_summary": {"total_count": 0, "total_duration_ms": 0, "categories": {}},
+            }
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            android_visual_qa,
+            "target_configs",
+            return_value={"phone": phone_config, "tv": tv_config},
+        ), mock.patch.object(
+            android_visual_qa,
+            "selected_viewport_profiles",
+            return_value=profiles_by_target,
+        ), mock.patch.object(
+            android_visual_qa,
+            "resolve_executable",
+            return_value="adb",
+        ), mock.patch.object(
+            android_visual_qa,
+            "collect_command_versions",
+            return_value={"adb": {"path": "adb"}},
+        ), mock.patch.object(
+            android_visual_qa,
+            "require_serial_present",
+        ), mock.patch.object(
+            android_visual_qa,
+            "wm_snapshot",
+            return_value=snapshot,
+        ), mock.patch.object(
+            android_visual_qa,
+            "append_viewport_apply_event",
+            side_effect=fake_apply,
+        ), mock.patch.object(
+            android_visual_qa,
+            "append_final_viewport_restore_event",
+            side_effect=fake_restore,
+        ), mock.patch.object(
+            android_visual_qa,
+            "capture_one",
+            side_effect=fake_capture_one,
+        ):
+            status = android_visual_qa.run_capture_plan(
+                args=args,
+                repo_root=self.repo_root(),
+                registry=registry,
+                selected=selected,
+                output_dir=Path(tmp),
+                command_name="android-visual-qa capture",
+            )
+            manifest = json.loads((Path(tmp) / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [(record["profile"], record["scenario_id"]) for record in manifest["captures"]],
+            [
+                ("phone-p1", "phone-a"),
+                ("phone-p1", "phone-b"),
+                ("phone-p2", "phone-a"),
+                ("phone-p2", "phone-b"),
+                ("tv-p1", "tv-a"),
+            ],
+        )
+        self.assertEqual(
+            [(event["operation"], event.get("profile"), event["target"]) for event in manifest["viewport_events"]],
+            [
+                ("apply", "phone-p1", "phone"),
+                ("apply", "phone-p2", "phone"),
+                ("final_restore", None, "phone"),
+                ("apply", "tv-p1", "tv"),
+                ("final_restore", None, "tv"),
+            ],
+        )
+        self.assertEqual(
+            [(record["viewport_apply_event_index"], record["final_viewport_restore_event_index"]) for record in manifest["captures"]],
+            [(0, 2), (0, 2), (1, 2), (1, 2), (3, 4)],
+        )
+        self.assertEqual(
+            [event.get("record_count") for event in manifest["viewport_events"] if event["operation"] == "apply"],
+            [2, 2, 1],
+        )
+        self.assertEqual(manifest["cache_summary"]["serial_readiness"]["misses"], 2)
+        self.assertEqual(manifest["viewport_summary"]["event_count"], 5)
 
     def test_fast_screenshot_path_uses_adb_with_evidence_metadata(self) -> None:
         config = android_visual_qa.TargetConfig(
