@@ -3,6 +3,11 @@
 //! the entire crate.
 
 pub use crate::api::types::player::*;
+pub use crate::api::types::{
+    ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
+    ScanCommandRequest, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
+    ScanStartDisposition, StartScanRequest,
+};
 pub use crate::api::{ScanConfig, ScanMetrics};
 pub use crate::domain::theater_plate::*;
 pub use crate::domain::users::auth::device::{

@@ -11,7 +11,7 @@ use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::api::types::{
     ActiveScansResponse, ApiResponse, LatestProgressResponse,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
-    StartScanRequest,
+    ScanStartDisposition, StartScanRequest,
 };
 use ferrex_core::error::MediaError;
 use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
@@ -108,19 +108,23 @@ pub async fn start_scan_handler(
             request.effective_mode(),
         )
         .await?;
+    let status = scan_start_status(accepted.disposition);
 
     Ok((
-        StatusCode::ACCEPTED,
+        status,
         Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
 pub async fn pause_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().pause_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .pause_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -130,10 +134,13 @@ pub async fn pause_scan_handler(
 
 pub async fn resume_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().resume_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .resume_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -143,15 +150,25 @@ pub async fn resume_scan_handler(
 
 pub async fn cancel_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().cancel_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .cancel_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
         Json(ApiResponse::success(scan_command_response(accepted))),
     ))
+}
+
+fn scan_start_status(disposition: ScanStartDisposition) -> StatusCode {
+    match disposition {
+        ScanStartDisposition::Created => StatusCode::ACCEPTED,
+        ScanStartDisposition::Reused => StatusCode::OK,
+    }
 }
 
 fn scan_command_response(
@@ -165,6 +182,23 @@ fn scan_command_response(
         idempotency_key: accepted.idempotency_key,
         run_key: accepted.run_key,
         disposition: accepted.disposition,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_status_distinguishes_created_and_reused_runs() {
+        assert_eq!(
+            scan_start_status(ScanStartDisposition::Created),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            scan_start_status(ScanStartDisposition::Reused),
+            StatusCode::OK
+        );
     }
 }
 

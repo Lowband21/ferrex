@@ -553,6 +553,13 @@ async fn wire_app_resources(
         orchestrator,
         quiescence,
     ));
+    let rehydrated_runs = scan_control
+        .rehydrate_active_runs()
+        .await
+        .context("failed to rehydrate active library scan runs")?;
+    if rehydrated_runs > 0 {
+        info!(rehydrated_runs, "rehydrated active library scan runs");
+    }
 
     let websocket_manager = Arc::new(websocket::ConnectionManager::new());
 

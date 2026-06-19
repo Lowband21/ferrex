@@ -112,6 +112,8 @@ pub trait ScanRunRepository: Send + Sync {
         mode: ScanRunMode,
     ) -> Result<Option<LibraryScanRun>>;
 
+    async fn list_active(&self) -> Result<Vec<LibraryScanRun>>;
+
     async fn update_progress(
         &self,
         update: LibraryScanRunProgressUpdate,
@@ -150,7 +152,7 @@ impl PostgresScanRunRepository {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 struct LibraryScanRunRow {
     scan_id: Uuid,
     library_id: Uuid,
@@ -431,6 +433,43 @@ impl ScanRunRepository for PostgresScanRunRepository {
         row.map(row_to_run).transpose()
     }
 
+    async fn list_active(&self) -> Result<Vec<LibraryScanRun>> {
+        let rows = sqlx::query_as::<_, LibraryScanRunRow>(
+            r#"
+            SELECT
+                scan_id,
+                library_id,
+                mode,
+                run_key,
+                correlation_id,
+                status,
+                completed_items,
+                total_items,
+                retrying_items,
+                dead_lettered_items,
+                current_path,
+                last_error,
+                sequence,
+                started_at,
+                terminal_at,
+                created_at,
+                updated_at
+            FROM library_scan_runs
+            WHERE status::text IN ('pending','running','paused')
+            ORDER BY started_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            MediaError::Internal(format!(
+                "list active library scan runs failed: {e}"
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_run).collect()
+    }
+
     async fn update_progress(
         &self,
         update: LibraryScanRunProgressUpdate,
@@ -641,6 +680,15 @@ mod tests {
                 .cloned())
         }
 
+        async fn list_active(&self) -> Result<Vec<LibraryScanRun>> {
+            let guard = self.runs.lock().await;
+            Ok(guard
+                .values()
+                .filter(|run| run.is_active())
+                .cloned()
+                .collect())
+        }
+
         async fn update_progress(
             &self,
             update: LibraryScanRunProgressUpdate,
@@ -719,6 +767,42 @@ mod tests {
                 .scan_id,
             first.run.scan_id
         );
+    }
+
+    #[tokio::test]
+    async fn list_active_returns_only_non_terminal_runs() {
+        let repo = InMemoryScanRunRepository::default();
+        let active_library_id = LibraryId(Uuid::now_v7());
+        let terminal_library_id = LibraryId(Uuid::now_v7());
+
+        let active = repo
+            .get_or_create_active(NewLibraryScanRun::new(
+                active_library_id,
+                ScanRunMode::Manual,
+            ))
+            .await
+            .expect("active get_or_create succeeds");
+        let terminal = repo
+            .get_or_create_active(NewLibraryScanRun::new(
+                terminal_library_id,
+                ScanRunMode::Manual,
+            ))
+            .await
+            .expect("terminal get_or_create succeeds");
+        repo.mark_terminal(
+            terminal.run.scan_id,
+            ScanLifecycleStatus::Completed,
+            Utc::now(),
+            None,
+        )
+        .await
+        .expect("terminal mark succeeds");
+
+        let active_runs =
+            repo.list_active().await.expect("list active succeeds");
+
+        assert_eq!(active_runs.len(), 1);
+        assert_eq!(active_runs[0].scan_id, active.run.scan_id);
     }
 
     #[tokio::test]

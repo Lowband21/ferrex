@@ -33,6 +33,9 @@ use crate::database::{
         watch_status::WatchStatusRepository,
     },
 };
+use crate::domain::scan::orchestration::{
+    PostgresScanRunRepository, ScanRunRepository,
+};
 
 /// Aggregates all repository repository_ports used by application services.
 ///
@@ -60,6 +63,7 @@ pub struct AppUnitOfWork {
     pub folder_inventory: Arc<dyn FolderInventoryRepository>,
     pub processing_status: Arc<dyn ProcessingStatusRepositoryTrait>,
     pub indices: Arc<dyn IndicesRepository>,
+    pub scan_runs: Arc<dyn ScanRunRepository>,
 }
 
 impl fmt::Debug for AppUnitOfWork {
@@ -108,6 +112,7 @@ impl fmt::Debug for AppUnitOfWork {
                 &type_name_of_val(self.processing_status.as_ref()),
             )
             .field("indices", &type_name_of_val(self.indices.as_ref()))
+            .field("scan_runs", &type_name_of_val(self.scan_runs.as_ref()))
             .finish()
     }
 }
@@ -134,6 +139,7 @@ pub struct AppUnitOfWorkBuilder {
     folder_inventory: Option<Arc<dyn FolderInventoryRepository>>,
     processing_status: Option<Arc<dyn ProcessingStatusRepositoryTrait>>,
     indices: Option<Arc<dyn IndicesRepository>>,
+    scan_runs: Option<Arc<dyn ScanRunRepository>>,
 }
 
 impl fmt::Debug for AppUnitOfWorkBuilder {
@@ -155,6 +161,7 @@ impl fmt::Debug for AppUnitOfWorkBuilder {
             .field("folder_inventory", &self.folder_inventory.is_some())
             .field("processing_status", &self.processing_status.is_some())
             .field("indices", &self.indices.is_some())
+            .field("scan_runs", &self.scan_runs.is_some())
             .finish()
     }
 }
@@ -251,6 +258,10 @@ impl AppUnitOfWorkBuilder {
         self.indices = Some(repo);
         self
     }
+    pub fn with_scan_runs(mut self, repo: Arc<dyn ScanRunRepository>) -> Self {
+        self.scan_runs = Some(repo);
+        self
+    }
 
     /// Build a validated AppUnitOfWork. Returns a string error if any required
     /// repository is missing. Keep errors simple for ease of use at call sites.
@@ -304,6 +315,9 @@ impl AppUnitOfWorkBuilder {
             indices: self
                 .indices
                 .ok_or_else(|| "missing IndicesRepository".to_string())?,
+            scan_runs: self
+                .scan_runs
+                .ok_or_else(|| "missing ScanRunRepository".to_string())?,
         })
     }
 }
@@ -379,8 +393,12 @@ impl AppUnitOfWorkBuilder {
         self.indices = Some(indices);
 
         let processing_status: Arc<dyn ProcessingStatusRepositoryTrait> =
-            Arc::new(PostgresProcessingStatusRepository::new(pool));
+            Arc::new(PostgresProcessingStatusRepository::new(pool.clone()));
         self.processing_status = Some(processing_status);
+
+        let scan_runs: Arc<dyn ScanRunRepository> =
+            Arc::new(PostgresScanRunRepository::new(pool));
+        self.scan_runs = Some(scan_runs);
 
         self
     }
