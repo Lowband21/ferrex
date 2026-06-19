@@ -312,29 +312,43 @@ impl LibraryDomainState {
         &mut self,
         frame: ScanProgressEvent,
     ) -> bool {
-        let Some(snapshot) = self.active_scans.get_mut(&frame.scan_id) else {
-            return false;
+        let (old_key, new_key, is_active, scan_id) = {
+            let Some(snapshot) = self.active_scans.get_mut(&frame.scan_id)
+            else {
+                return false;
+            };
+            let old_key = ActiveScanRunKey::from_snapshot(snapshot);
+
+            snapshot.completed_items = frame.completed_items;
+            snapshot.total_items = frame.total_items;
+            snapshot.validated_items = frame.validated_items;
+            snapshot.known_unchanged_items = frame.known_unchanged_items;
+            snapshot.skipped_items = frame.skipped_items;
+            snapshot.failed_items = frame.failed_items;
+            snapshot.needs_attention_items = frame.needs_attention_items;
+            snapshot.retrying_items = frame.retrying_items;
+            snapshot.reason_details = frame.reason_details.clone();
+            snapshot.current_path = frame.current_path.clone();
+            snapshot.terminal_at = frame.terminal_at;
+            snapshot.sequence = frame.sequence;
+
+            if let Some(status) = scan_status_from_progress(&frame.status) {
+                snapshot.status = status;
+            }
+
+            (
+                old_key,
+                ActiveScanRunKey::from_snapshot(snapshot),
+                snapshot.status.is_active(),
+                snapshot.scan_id,
+            )
         };
 
-        snapshot.completed_items = frame.completed_items;
-        snapshot.total_items = frame.total_items;
-        snapshot.validated_items = frame.validated_items;
-        snapshot.known_unchanged_items = frame.known_unchanged_items;
-        snapshot.skipped_items = frame.skipped_items;
-        snapshot.failed_items = frame.failed_items;
-        snapshot.needs_attention_items = frame.needs_attention_items;
-        snapshot.retrying_items = frame.retrying_items;
-        snapshot.reason_details = frame.reason_details.clone();
-        snapshot.current_path = frame.current_path.clone();
-        snapshot.terminal_at = frame.terminal_at;
-        snapshot.sequence = frame.sequence;
-
-        if let Some(status) = scan_status_from_progress(&frame.status) {
-            snapshot.status = status.clone();
-            if status.is_terminal() {
-                self.remove_active_scan(frame.scan_id);
-                return true;
-            }
+        self.active_scan_runs.remove(&old_key);
+        if is_active {
+            self.active_scan_runs.insert(new_key, scan_id);
+        } else {
+            self.active_scan_runs.remove(&new_key);
         }
 
         self.latest_progress.insert(frame.scan_id, frame);
