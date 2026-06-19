@@ -251,6 +251,29 @@ pub enum ManifestDiagnosticReason {
 }
 
 impl ManifestDiagnosticReason {
+    /// Stable API-facing diagnostic reasons emitted by manifest classification.
+    pub const ALL: [Self; 14] = [
+        Self::HiddenOrSystemPath,
+        Self::IgnoredExtension,
+        Self::IgnoredPathPattern,
+        Self::NonMediaFile,
+        Self::PathOutsideRoot,
+        Self::MovieNestedFolderUnsupported,
+        Self::MovieExtrasUnsupported,
+        Self::SeriesLibraryRootMediaUnsupported,
+        Self::SeriesDirectEpisodeParseFailed,
+        Self::SeriesEpisodeParseFailed,
+        Self::SeriesSeasonMismatch,
+        Self::SeriesNestedFolderUnsupported,
+        Self::SeriesExtrasUnsupported,
+        Self::UnsupportedLayout,
+    ];
+
+    /// All stable API-facing diagnostic reasons emitted by manifest classification.
+    pub const fn all() -> &'static [Self] {
+        &Self::ALL
+    }
+
     /// Stable machine-readable diagnostic code for API/UI surfaces.
     pub const fn code(self) -> &'static str {
         match self {

@@ -13,7 +13,11 @@ use std::{
     },
 };
 
-use ferrex_core::api::{IncrementalScanStatusView, ScanQueueDepths};
+use ferrex_core::api::{
+    IncrementalScanStatusView, ManifestDeferredWatchHintsHealthView,
+    ManifestDiagnosticCodeCountView, ManifestRunStatusCountsView,
+    ManifestScanHealthView, ScanQueueDepths,
+};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
 use ferrex_core::database::repositories::{
@@ -75,6 +79,7 @@ use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
 };
 use ferrex_core::types::LibraryId;
+use sqlx::Row;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
 
@@ -122,8 +127,7 @@ struct CursorHealth {
 
 #[derive(Debug, Default)]
 struct ManifestHealth {
-    stale_partitions: u64,
-    pending_watch_hints: u64,
+    view: ManifestScanHealthView,
 }
 
 pub struct ScanOrchestrator {
@@ -501,8 +505,12 @@ impl ScanOrchestrator {
             stale_cursor_libraries: cursor.stale_cursor_libraries,
             stale_cursors: cursor.stale_cursors,
             oldest_cursor_staleness_ms: cursor.oldest_cursor_staleness_ms,
-            manifest_stale_partitions: manifest.stale_partitions,
-            manifest_pending_watch_hints: manifest.pending_watch_hints,
+            manifest_stale_partitions: manifest.view.stale_partitions,
+            manifest_pending_watch_hints: manifest
+                .view
+                .deferred_watch_hints
+                .pending,
+            manifest: manifest.view,
         })
     }
 
@@ -572,43 +580,164 @@ impl ScanOrchestrator {
 
     async fn manifest_health(
         &self,
-        libraries: &[ferrex_core::types::library::Library],
+        _libraries: &[ferrex_core::types::library::Library],
     ) -> Result<ManifestHealth> {
-        let repo = PostgresManifestRepository::new(
-            self.runtime.queue().pool().clone(),
-        );
-        let now = chrono::Utc::now();
-        let mut stale_partitions = 0u64;
+        let queue = self.runtime.queue();
+        let pool = queue.pool();
 
-        for library in libraries
-            .iter()
-            .filter(|library| library.enabled && library.auto_scan)
+        let mut run_counts = ManifestRunStatusCountsView::default();
+        for row in sqlx::query(
+            r#"
+            SELECT status, COUNT(*)::bigint AS count
+            FROM manifest_runs
+            GROUP BY status
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
         {
-            let older_than = now
-                - chrono::Duration::minutes(
-                    library.scan_interval_minutes.max(1) as i64,
-                );
-            let stale = repo
-                .list_stale_partitions(library.id, older_than, 1_000)
-                .await?;
-            stale_partitions = stale_partitions
-                .saturating_add(stale.len().try_into().unwrap_or(u64::MAX));
+            let status: String = row.try_get("status")?;
+            let count = nonnegative_i64_to_u64(row.try_get::<i64, _>("count")?);
+            match status.as_str() {
+                "pending" => run_counts.pending = count,
+                "running" => run_counts.running = count,
+                "completed" => run_counts.completed = count,
+                "completed_with_diagnostics" => {
+                    run_counts.completed_with_diagnostics = count;
+                }
+                "failed" => run_counts.failed = count,
+                "canceled" => run_counts.canceled = count,
+                "stalled" => run_counts.stalled = count,
+                _ => {}
+            }
         }
 
-        let pending_watch_hints = repo
-            .list_deferred_watch_hints(ManifestDeferredWatchHintFilter {
-                status: Some(ManifestDeferredWatchHintStatus::Pending),
-                limit: Some(1_000),
-                ..ManifestDeferredWatchHintFilter::default()
-            })
-            .await?
-            .len()
-            .try_into()
-            .unwrap_or(u64::MAX);
+        let deferred_row = sqlx::query(
+            r#"
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'pending')::bigint AS pending,
+                COUNT(*) FILTER (WHERE status = 'applied')::bigint AS applied,
+                COUNT(*) FILTER (WHERE status = 'dropped')::bigint AS dropped,
+                COUNT(*)::bigint AS total,
+                (EXTRACT(EPOCH FROM (
+                    NOW() - (MIN(created_at) FILTER (WHERE status = 'pending'))
+                )) * 1000)::bigint AS oldest_pending_lag_ms
+            FROM manifest_deferred_watch_hints
+            "#,
+        )
+        .fetch_one(pool)
+        .await?;
+        let deferred_watch_hints = ManifestDeferredWatchHintsHealthView {
+            pending: nonnegative_i64_to_u64(deferred_row.try_get("pending")?),
+            applied: nonnegative_i64_to_u64(deferred_row.try_get("applied")?),
+            dropped: nonnegative_i64_to_u64(deferred_row.try_get("dropped")?),
+            total: nonnegative_i64_to_u64(deferred_row.try_get("total")?),
+            oldest_pending_lag_ms: optional_nonnegative_i64_to_u64(
+                deferred_row.try_get("oldest_pending_lag_ms")?,
+            ),
+        };
+
+        let stale_row = sqlx::query(
+            r#"
+            WITH stale AS (
+                SELECT c.last_successful_at, c.updated_at
+                FROM manifest_partition_cursors c
+                JOIN libraries l ON l.id = c.library_id
+                WHERE l.enabled = true
+                  AND l.auto_scan = true
+                  AND (
+                      c.last_successful_at IS NULL
+                      OR c.last_successful_at < NOW() - (
+                          GREATEST(l.scan_interval_minutes, 1)::text || ' minutes'
+                      )::interval
+                  )
+            )
+            SELECT
+                COUNT(*)::bigint AS stale_partitions,
+                (EXTRACT(EPOCH FROM (
+                    NOW() - MIN(COALESCE(last_successful_at, updated_at))
+                )) * 1000)::bigint AS oldest_manifest_lag_ms
+            FROM stale
+            "#,
+        )
+        .fetch_one(pool)
+        .await?;
+        let stale_partitions =
+            nonnegative_i64_to_u64(stale_row.try_get("stale_partitions")?);
+        let oldest_manifest_lag_ms = optional_nonnegative_i64_to_u64(
+            stale_row.try_get("oldest_manifest_lag_ms")?,
+        );
+
+        let stall_timeout_ms = i64::try_from(
+            self.runtime.config().maintenance.run_stall_timeout_ms,
+        )
+        .unwrap_or(i64::MAX);
+        let stuck_row = sqlx::query(
+            r#"
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE status IN ('pending', 'running')
+                      AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
+                )::bigint AS stuck_runs,
+                COUNT(DISTINCT library_id) FILTER (
+                    WHERE status IN ('pending', 'running')
+                      AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
+                )::bigint AS stuck_libraries
+            FROM manifest_runs
+            "#,
+        )
+        .bind(stall_timeout_ms)
+        .fetch_one(pool)
+        .await?;
+        let stuck_runs =
+            nonnegative_i64_to_u64(stuck_row.try_get("stuck_runs")?);
+        let stuck_libraries =
+            nonnegative_i64_to_u64(stuck_row.try_get("stuck_libraries")?);
+
+        let mut diagnostics_by_code = Vec::new();
+        for row in sqlx::query(
+            r#"
+            SELECT
+                code,
+                COUNT(*)::bigint AS count,
+                COUNT(*) FILTER (WHERE severity = 'info')::bigint AS info,
+                COUNT(*) FILTER (WHERE severity = 'warning')::bigint AS warnings,
+                COUNT(*) FILTER (WHERE severity = 'error')::bigint AS errors,
+                MAX(created_at) AS latest_at
+            FROM manifest_diagnostics
+            GROUP BY code
+            ORDER BY count DESC, code ASC
+            LIMIT 64
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+        {
+            diagnostics_by_code.push(ManifestDiagnosticCodeCountView {
+                code: row.try_get("code")?,
+                count: nonnegative_i64_to_u64(row.try_get("count")?),
+                info: nonnegative_i64_to_u64(row.try_get("info")?),
+                warnings: nonnegative_i64_to_u64(row.try_get("warnings")?),
+                errors: nonnegative_i64_to_u64(row.try_get("errors")?),
+                latest_at: row.try_get("latest_at")?,
+            });
+        }
+
+        let recovery_required = stale_partitions > 0
+            || deferred_watch_hints.pending > 0
+            || stuck_runs > 0;
 
         Ok(ManifestHealth {
-            stale_partitions,
-            pending_watch_hints,
+            view: ManifestScanHealthView {
+                run_counts,
+                deferred_watch_hints,
+                diagnostics_by_code,
+                stale_partitions,
+                oldest_manifest_lag_ms,
+                stuck_runs,
+                stuck_libraries,
+                recovery_required,
+            },
         })
     }
 
@@ -823,6 +952,14 @@ impl ScanOrchestrator {
             image_fetch: queue.queue_depth(JobKind::ImageFetch).await?,
         })
     }
+}
+
+fn nonnegative_i64_to_u64(value: i64) -> u64 {
+    value.max(0) as u64
+}
+
+fn optional_nonnegative_i64_to_u64(value: Option<i64>) -> Option<u64> {
+    value.map(nonnegative_i64_to_u64)
 }
 
 impl ScanOrchestrator {

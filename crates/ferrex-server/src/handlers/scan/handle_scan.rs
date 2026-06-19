@@ -13,6 +13,10 @@ use ferrex_core::api::types::{
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
     ScanStartDisposition, StartScanRequest,
 };
+use ferrex_core::domain::scan::manifest::{
+    DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
+    DEFAULT_MANIFEST_WALK_PARTITION_LIMIT, ManifestDiagnosticReason,
+};
 use ferrex_core::error::MediaError;
 use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
 use rkyv::{rancor::Error as RkyvError, to_bytes};
@@ -31,8 +35,8 @@ use crate::infra::scan::scan_manager::{
 use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
     IncrementalScanStatusView, LeaseConfigView, MaintenanceConfigView,
-    MetadataLimitsView, OrchestratorConfigView, QueueConfigView,
-    RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
+    ManifestScanConfigView, MetadataLimitsView, OrchestratorConfigView,
+    QueueConfigView, RetryConfigView, ScanConfig, ScanMetrics, WatchConfigView,
 };
 
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
@@ -294,6 +298,7 @@ pub async fn scan_metrics_handler(
     Ok(Json(ApiResponse::success(ScanMetrics {
         queue_depths: depths,
         active_scans: active,
+        manifest: incremental.manifest.clone(),
         incremental,
     })))
 }
@@ -388,7 +393,33 @@ pub async fn scan_config_handler(
     Ok(Json(ApiResponse::success(ScanConfig {
         orchestrator: view,
         incremental_policy,
+        manifest: manifest_scan_config_view(),
     })))
+}
+
+fn manifest_scan_config_view() -> ManifestScanConfigView {
+    ManifestScanConfigView {
+        max_entries_per_batch: DEFAULT_MANIFEST_WALK_BATCH_LIMIT,
+        max_entries_per_partition: DEFAULT_MANIFEST_WALK_PARTITION_LIMIT,
+        max_depth: DEFAULT_MANIFEST_WALK_MAX_DEPTH,
+        supported_movie_layouts: vec![
+            "/Movies/Alien.mkv".to_string(),
+            "/Movies/Alien (1979)/Alien.mkv".to_string(),
+        ],
+        supported_series_layouts: vec![
+            "/Series/Fringe/Season 01/S01E01.mkv".to_string(),
+            "/Series/Fringe/Specials/S00E01.mkv".to_string(),
+            "/Series/Fringe/S01E02.mkv".to_string(),
+        ],
+        diagnostic_codes: manifest_diagnostic_codes(),
+    }
+}
+
+fn manifest_diagnostic_codes() -> Vec<String> {
+    ManifestDiagnosticReason::all()
+        .iter()
+        .map(|reason| reason.code().to_string())
+        .collect()
 }
 
 async fn incremental_status(
