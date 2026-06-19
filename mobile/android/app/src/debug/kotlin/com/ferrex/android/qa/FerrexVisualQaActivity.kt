@@ -10,6 +10,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -376,6 +377,25 @@ private fun PhoneBrowseGridScenario(scenario: VisualQaScenario) {
                     FerrexActionButton(label = "Filter", role = FerrexActionRole.Secondary, onClick = {})
                     FerrexActionButton(label = "Status", role = FerrexActionRole.Secondary, onClick = {})
                     FerrexActionButton(label = "More", role = FerrexActionRole.Secondary, onClick = {})
+                }
+            }
+            FerrexStageSurface(
+                variant = FerrexStageSurfaceVariant.ControlShelf,
+                density = FerrexStageDensityFamily.Standard,
+                tone = FerrexStageSurfaceTone.Cache,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.LibraryRecovery,
+                contentDescription = "Phone library recovery menu: Retry selected library, Reset connection, Diagnostics / Export diagnostics",
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+                ) {
+                    FerrexActionButton(label = "Retry selected", role = FerrexActionRole.Retry, onClick = {})
+                    FerrexActionButton(label = "Reset connection", role = FerrexActionRole.DestructiveReset, onClick = {})
+                    FerrexActionButton(label = "Diagnostics / Export diagnostics", role = FerrexActionRole.Secondary, onClick = {})
                 }
             }
             FerrexStageSurface(
@@ -1063,7 +1083,7 @@ private fun TvGridFocusScenario(scenario: VisualQaScenario) {
         ScenarioTitle(scenario, centered = true)
         FerrexStatusCard(
             title = "TV compact library grid",
-            body = "Compact top controls open modal panels while dense poster cards fill the remaining browse surface.",
+            body = "Compact top controls open modal panels while a 12-card dense poster grid fills the remaining browse surface without falling back to huge-card rows.",
             tone = FerrexStatusTone.Cache,
         )
         Column(
@@ -1093,20 +1113,7 @@ private fun TvGridFocusScenario(scenario: VisualQaScenario) {
                 }
             }
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-        ) {
-            FerrexVisualQaFixtures.browseCards.chunked(3).forEach { rowCards ->
-                Row(horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md)) {
-                    rowCards.forEach { card ->
-                        QaTvPosterCard(card, modifier = Modifier.width(164.dp))
-                    }
-                }
-            }
-        }
+        QaTvDensePosterGrid(cards = FerrexVisualQaFixtures.browseCards)
         QaTvActionPanel(
             surfaceKey = TvGridFocusPolicy.SURFACE_MOVIE_CONTROLS_PANEL,
             actions = listOf(
@@ -1130,6 +1137,41 @@ private fun TvGridFocusScenario(scenario: VisualQaScenario) {
                 VisualQaRecoveryActionSample("close", "Close panel", FerrexActionRole.Secondary),
             ),
         )
+    }
+}
+
+@Composable
+private fun QaTvDensePosterGrid(cards: List<VisualQaMediaCardSample>) {
+    val gridSpec = FerrexDesignTokens.DenseLibraryGrid.tv
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS))
+            .semantics {
+                contentDescription = "Dense TV poster grid with ${cards.size} cards below compact library controls"
+            },
+    ) {
+        val columnsPerRow = gridSpec.columnsFor(maxWidth).coerceIn(1, cards.size)
+        Column(verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing)) {
+            cards.chunked(columnsPerRow).forEach { rowCards ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+                ) {
+                    rowCards.forEach { card ->
+                        QaTvPosterCard(
+                            card = card,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = gridSpec.cardMinHeight),
+                        )
+                    }
+                    repeat(columnsPerRow - rowCards.size) {
+                        Box(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1233,13 +1275,16 @@ private fun QaTvPosterCard(
         ),
     ) {
         Column(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Sm),
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs),
+            modifier = Modifier.padding(
+                horizontal = FerrexDesignTokens.DenseLibraryGrid.tvCardHorizontalPadding,
+                vertical = FerrexDesignTokens.DenseLibraryGrid.tvCardVerticalPadding,
+            ),
+            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.DenseLibraryGrid.tvCopyGap),
         ) {
             FerrexPosterPlaceholder(label = card.imageLabel)
-            Text(text = card.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(text = card.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-            Text(text = card.libraryName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+            Text(text = card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = card.subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(text = card.libraryName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
         }
     }
 }
