@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.ferrex.android.core.auth.AuthConnectionHealth
 import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
@@ -36,6 +37,7 @@ import com.ferrex.android.core.playback.PlaybackLaunchDecision
 import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
 import com.ferrex.android.core.playback.PlaybackResumeProgressProvider
+import com.ferrex.android.core.playback.PlaybackRoutePersistence
 import com.ferrex.android.core.playback.PlaybackRouteContract
 import com.ferrex.android.core.playback.PlaybackStreamUrlFactory
 import com.ferrex.android.core.playback.PlaybackTicketTransport
@@ -48,6 +50,7 @@ import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.WatchRepository
 import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
+import com.ferrex.android.navigation.PlaybackRouteContractSaver
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -83,6 +86,9 @@ fun TvHomeScreen(
     val emptyWatchState = remember { mutableStateOf(WatchRepositoryState()) }
     val watchState by watchRepository?.state?.collectAsState() ?: emptyWatchState
     val coroutineScope = rememberCoroutineScope()
+    val routePersistenceScope = remember(state.serverUrl, state.user.id) {
+        PlaybackRoutePersistence.scopeKey(state.serverUrl, state.user.id)
+    }
     val homeFocusRestorer = rememberTvFocusRestorer(TvHomeFocusPolicy.SCREEN_HOME)
     val gridFocusRestorer = rememberTvFocusRestorer(TvGridFocusPolicy.SCREEN_GRID)
     val searchFocusRestorer = rememberTvFocusRestorer(TvSearchFocusPolicy.SCREEN_SEARCH)
@@ -95,7 +101,9 @@ fun TvHomeScreen(
     var movieSort by remember { mutableStateOf(MovieSortMode.TitleAsc) }
     var movieFilter by remember { mutableStateOf(MovieFilterMode.All) }
     var movieIndexState by remember { mutableStateOf<MovieIndexUiState>(MovieIndexUiState.Idle) }
-    var activePlaybackContract by remember { mutableStateOf<PlaybackRouteContract?>(null) }
+    var activePlaybackContract by rememberSaveable(routePersistenceScope, stateSaver = PlaybackRouteContractSaver) {
+        mutableStateOf<PlaybackRouteContract?>(null)
+    }
     var playbackNotice by remember { mutableStateOf<String?>(null) }
     val homeConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Home)
     val detailConnectionUi = state.connectionRecoveryUi(AuthenticatedConnectionSurface.Detail)
@@ -358,8 +366,14 @@ fun TvHomeScreen(
                 onPlaybackSessionInvalidated()
             },
             onProgressCommitted = { refreshPlaybackProgress(it) },
-            onChangeServer = onChangeServer,
-            onSignOut = onSignOut,
+            onChangeServer = {
+                activePlaybackContract = null
+                onChangeServer()
+            },
+            onSignOut = {
+                activePlaybackContract = null
+                onSignOut()
+            },
             onOpenDiagnostics = onOpenDiagnostics,
         )
     ) {
