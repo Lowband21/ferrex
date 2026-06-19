@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from contextvars import ContextVar
 import copy
@@ -206,6 +207,16 @@ class TargetViewportPlan:
     target: str
     profile: ViewportProfile
     scenarios: tuple[Scenario, ...]
+
+
+@dataclass(frozen=True)
+class TargetRunResult:
+    target: str
+    records: tuple[dict[str, object], ...]
+    viewport_events: tuple[dict[str, object], ...]
+    cache_summary: dict[str, object]
+    worker_timing: dict[str, object]
+    screenshot_method_comparison: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -931,23 +942,33 @@ class ScenarioRegistry:
 
     def select(self, target: str, scenario_id: str) -> list[Scenario]:
         normalized_target = normalize_target(target)
-        requested = scenario_id.strip()
-        if requested == "all":
+        requested_ids = [part.strip() for part in scenario_id.split(",") if part.strip()]
+        if not requested_ids:
+            raise VisualQaError("at least one scenario ID must be selected")
+        if "all" in requested_ids:
+            if len(requested_ids) > 1:
+                raise VisualQaError("scenario 'all' cannot be combined with explicit scenario IDs")
             return [
                 scenario
                 for scenario in self.scenarios
                 if normalized_target == "all" or scenario.target == normalized_target
             ]
 
-        scenario = self.by_id.get(requested)
-        if scenario is None:
-            available = ", ".join(scenario.id for scenario in self.scenarios)
-            raise VisualQaError(f"unknown visual QA scenario {requested!r}; available: {available}")
-        if normalized_target != "all" and scenario.target != normalized_target:
-            raise VisualQaError(
-                f"scenario {requested!r} belongs to {scenario.target}, not requested target {normalized_target}"
-            )
-        return [scenario]
+        selected: list[Scenario] = []
+        seen: set[str] = set()
+        for requested in requested_ids:
+            scenario = self.by_id.get(requested)
+            if scenario is None:
+                available = ", ".join(scenario.id for scenario in self.scenarios)
+                raise VisualQaError(f"unknown visual QA scenario {requested!r}; available: {available}")
+            if normalized_target != "all" and scenario.target != normalized_target:
+                raise VisualQaError(
+                    f"scenario {requested!r} belongs to {scenario.target}, not requested target {normalized_target}"
+                )
+            if scenario.id not in seen:
+                selected.append(scenario)
+                seen.add(scenario.id)
+        return selected
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -1530,6 +1551,140 @@ class RunCache:
                 "entries": len(entries),
             }
         return summary
+
+
+def target_worker_count(args: argparse.Namespace) -> int:
+    raw_value = getattr(args, "target_workers", 1)
+    try:
+        count = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise VisualQaError(f"--target-workers must be a positive integer, got {raw_value!r}") from exc
+    if count <= 0:
+        raise VisualQaError(f"--target-workers must be positive, got {count}")
+    return count
+
+
+def target_order_for_plans(plans: Sequence[TargetViewportPlan]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(plan.target for plan in plans))
+
+
+def effective_target_worker_count(
+    args: argparse.Namespace,
+    target_order: Sequence[str],
+    configs: Mapping[str, TargetConfig],
+) -> tuple[int, int]:
+    requested = target_worker_count(args)
+    effective = min(requested, len(target_order)) if target_order else 1
+    if effective > 1:
+        targets_by_serial: dict[str, list[str]] = {}
+        for target in target_order:
+            targets_by_serial.setdefault(configs[target].serial, []).append(target)
+        duplicate_serials = {
+            serial: targets
+            for serial, targets in targets_by_serial.items()
+            if len(targets) > 1
+        }
+        if duplicate_serials:
+            details = ", ".join(
+                f"{serial} ({'/'.join(targets)})"
+                for serial, targets in sorted(duplicate_serials.items())
+            )
+            raise VisualQaError(
+                "--target-workers requires unique ADB serials per concurrent target; "
+                f"duplicate serial assignment: {details}"
+            )
+    return requested, effective
+
+
+def target_worker_manifest_config(
+    *,
+    requested: int,
+    effective: int,
+    target_order: Sequence[str],
+    configs: Mapping[str, TargetConfig],
+    profiles_by_target: Mapping[str, Sequence[ViewportProfile]],
+    artifact_kind: str,
+) -> dict[str, object]:
+    return {
+        "requested_worker_count": requested,
+        "worker_count": effective,
+        "enabled": effective > 1,
+        "strategy": "one-worker-per-selected-target; each worker runs its target serially",
+        "artifact_kind": artifact_kind,
+        "deterministic_record_order": "target order from the scenario registry, then selected viewport profile order, then scenario registry order",
+        "targets": [
+            {
+                "target": target,
+                "serial": configs[target].serial,
+                "worker_index": index if effective > 1 else 0,
+                "viewport_profiles": [profile.name for profile in profiles_by_target.get(target, ())],
+                "output_subtrees": [
+                    f"accessibility/{profile.name}" if artifact_kind == "accessibility" else profile.name
+                    for profile in profiles_by_target.get(target, ())
+                ],
+                "failure_log_path_pattern": "logs/<profile>-<scenario>-*-logcat.txt",
+            }
+            for index, target in enumerate(target_order)
+        ],
+        "timings": [],
+    }
+
+
+def merge_cache_summaries(*summaries: Mapping[str, object]) -> dict[str, object]:
+    categories = sorted({category for summary in summaries for category in summary.keys()})
+    merged: dict[str, object] = {}
+    for category in categories:
+        hits = misses = invalidations = entries = 0
+        invalidation_reasons: Counter[str] = Counter()
+        for summary in summaries:
+            raw_category = summary.get(category)
+            if not isinstance(raw_category, Mapping):
+                continue
+            hits += non_negative_int(raw_category.get("hits")) or 0
+            misses += non_negative_int(raw_category.get("misses")) or 0
+            invalidations += non_negative_int(raw_category.get("invalidations")) or 0
+            entries += non_negative_int(raw_category.get("entries")) or 0
+            raw_reasons = raw_category.get("invalidation_reasons")
+            if isinstance(raw_reasons, Mapping):
+                for reason, value in raw_reasons.items():
+                    invalidation_reasons[str(reason)] += non_negative_int(value) or 0
+        merged[category] = {
+            "hits": hits,
+            "misses": misses,
+            "lookups": hits + misses,
+            "invalidations": invalidations,
+            "invalidation_reasons": dict(sorted(invalidation_reasons.items())),
+            "entries": entries,
+        }
+    return merged
+
+
+def offset_viewport_event_indices(
+    records: Sequence[Mapping[str, object]],
+    viewport_events: Sequence[Mapping[str, object]],
+    offset: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    adjusted_records = [copy.deepcopy(dict(record)) for record in records]
+    adjusted_events = [copy.deepcopy(dict(event)) for event in viewport_events]
+    if offset <= 0:
+        return adjusted_records, adjusted_events
+
+    for event in adjusted_events:
+        index = event.get("index")
+        if isinstance(index, int):
+            event["index"] = index + offset
+    for record in adjusted_records:
+        for key in ("viewport_apply_event_index", "final_viewport_restore_event_index"):
+            index = record.get(key)
+            if isinstance(index, int):
+                record[key] = index + offset
+        indices = record.get("viewport_apply_event_indices")
+        if isinstance(indices, list):
+            record["viewport_apply_event_indices"] = [
+                index + offset if isinstance(index, int) else index
+                for index in indices
+            ]
+    return adjusted_records, adjusted_events
 
 
 def force_stop_package(adb: str, config: TargetConfig) -> None:
@@ -3267,77 +3422,54 @@ def accessibility_one(
     return record
 
 
-def run_accessibility(args: argparse.Namespace) -> int:
-    repo_root = repo_root_from_script()
-    registry = ScenarioRegistry.load(repo_root)
-    selected = registry.select(args.target, args.scenario)
-    output_dir = resolve_output_dir(repo_root, args.output_dir)
-    configs = target_configs(repo_root, args)
-    profiles_by_target = selected_viewport_profiles(args, configs, selected)
-    adb = resolve_executable(args.adb)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
+def run_accessibility_target_plans(
+    *,
+    adb: str,
+    config: TargetConfig,
+    target_plans: Sequence[TargetViewportPlan],
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> TargetRunResult:
+    target = config.target
+    worker_started_at = utc_now()
+    worker_started = time.monotonic()
     run_cache = RunCache()
-    command_versions = run_cache.command_versions(adb, Path(__file__).resolve())
-    manifest: dict[str, object] = {
-        "schema_version": 1,
-        "command": "android-visual-qa accessibility",
-        "argv": getattr(args, "effective_argv", sys.argv[1:]),
-        "started_at": utc_now(),
-        "output_dir": str(output_dir),
-        "hardware_confirmation": bool(args.hardware),
-        "max_accessibility_steps": args.max_steps,
-        "exhaustive_accessibility_dumps": bool(args.exhaustive_dumps),
-        "registry": registry.to_json(),
-        "accessibility_plan": capture_plan_json(None, selected, profiles_by_target),
-        "command_versions": command_versions.value,
-        "command_versions_cache": command_versions.provenance,
-        "checks": [],
-        "failures": [],
-        "viewport_events": [],
-    }
-
     records: list[dict[str, object]] = []
     viewport_events: list[dict[str, object]] = []
-    plans = ordered_viewport_plans(selected, profiles_by_target)
-    for target in dict.fromkeys(plan.target for plan in plans):
-        config = configs[target]
-        target_plans = [plan for plan in plans if plan.target == target]
-        target_record_start = len(records)
-        initial_snapshot: WmOverrideSnapshot | None = None
-        try:
-            run_cache.require_serial_present(adb, config)
-            initial_snapshot = wm_snapshot(adb, config.serial)
-        except Exception as exc:  # noqa: BLE001 - emit per-scenario diagnostics instead of aborting the manifest.
-            if should_invalidate_target_cache(exc):
-                run_cache.invalidate_target(config, "viewport_setup")
-            for plan in target_plans:
-                for scenario in plan.scenarios:
-                    records.append(
-                        setup_failure_record(
-                            adb=adb,
-                            config=config,
-                            scenario=scenario,
-                            profile=plan.profile,
-                            output_dir=output_dir,
-                            log_lines=args.log_lines,
-                            stage="viewport_snapshot",
-                            error=exc,
-                            kind="accessibility",
-                            max_steps=args.max_steps,
-                            exhaustive_dumps=args.exhaustive_dumps,
-                        )
+    initial_snapshot: WmOverrideSnapshot | None = None
+    try:
+        run_cache.require_serial_present(adb, config)
+        initial_snapshot = wm_snapshot(adb, config.serial)
+    except Exception as exc:  # noqa: BLE001 - emit per-scenario diagnostics instead of aborting the manifest.
+        if should_invalidate_target_cache(exc):
+            run_cache.invalidate_target(config, "viewport_setup")
+        for plan in target_plans:
+            for scenario in plan.scenarios:
+                records.append(
+                    setup_failure_record(
+                        adb=adb,
+                        config=config,
+                        scenario=scenario,
+                        profile=plan.profile,
+                        output_dir=output_dir,
+                        log_lines=args.log_lines,
+                        stage="viewport_snapshot",
+                        error=exc,
+                        kind="accessibility",
+                        max_steps=args.max_steps,
+                        exhaustive_dumps=args.exhaustive_dumps,
                     )
-            restore_event = append_unavailable_final_viewport_restore_event(
-                config=config,
-                viewport_events=viewport_events,
-                error=exc,
-            )
-            for record in records[target_record_start:]:
-                if record.get("target") == target:
-                    record["final_viewport_restore_event_index"] = restore_event.get("index")
-            mark_target_restore_failure(records, target, restore_event)
-            continue
+                )
+        restore_event = append_unavailable_final_viewport_restore_event(
+            config=config,
+            viewport_events=viewport_events,
+            error=exc,
+        )
+        for record in records:
+            record["final_viewport_restore_event_index"] = restore_event.get("index")
+        mark_target_restore_failure(records, target, restore_event)
+    else:
         try:
             for plan in target_plans:
                 apply_event_position = len(viewport_events)
@@ -3405,102 +3537,79 @@ def run_accessibility(args: argparse.Namespace) -> int:
                 initial_snapshot=initial_snapshot,
                 viewport_events=viewport_events,
             )
-            for record in records[target_record_start:]:
-                if record.get("target") == target:
-                    record["final_viewport_restore_event_index"] = restore_event.get("index")
+            for record in records:
+                record["final_viewport_restore_event_index"] = restore_event.get("index")
             mark_target_restore_failure(records, target, restore_event)
 
-    failures = [record for record in records if record.get("status") != "passed"]
-    manifest["checks"] = records
-    manifest["failures"] = failures
-    manifest["viewport_events"] = viewport_events
-    manifest["cache_summary"] = run_cache.summary()
-    manifest["ended_at"] = utc_now()
-    manifest["status"] = "failed" if failures else "passed"
-    manifest_path = output_dir / "accessibility-manifest.json"
-    timing_summary = write_manifest_with_timing_summary(manifest_path, manifest, record_key="checks")
-    print(f"android-visual-qa: accessibility manifest {manifest_path}", file=sys.stderr)
-    print_timing_summary(timing_summary)
-    return 1 if failures else 0
-
-
-def run_capture_plan(
-    *,
-    args: argparse.Namespace,
-    repo_root: Path,
-    registry: ScenarioRegistry,
-    selected: Sequence[Scenario],
-    output_dir: Path,
-    command_name: str,
-    mode: str | None = None,
-) -> int:
-    screenshot_mode = effective_screenshot_mode(args)
-    compare_methods = should_compare_screenshot_methods(mode, args)
-    configs = target_configs(repo_root, args)
-    profiles_by_target = selected_viewport_profiles(args, configs, selected)
-    adb = resolve_executable(args.adb)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    run_cache = RunCache()
-    command_versions = run_cache.command_versions(adb, Path(__file__).resolve())
-    manifest: dict[str, object] = {
-        "schema_version": 1,
-        "command": command_name,
-        "argv": getattr(args, "effective_argv", sys.argv[1:]),
-        "started_at": utc_now(),
-        "output_dir": str(output_dir),
-        "hardware_confirmation": bool(args.hardware),
-        "registry": registry.to_json(),
-        "capture_plan": capture_plan_json(mode, selected, profiles_by_target),
-        "screenshot": screenshot_manifest_config(args),
-        "command_versions": command_versions.value,
-        "command_versions_cache": command_versions.provenance,
-        "profile_deferrals": [],
-        "captures": [],
-        "failures": [],
-        "viewport_events": [],
+    failure_count = sum(1 for record in records if record.get("status") != "passed")
+    worker_timing: dict[str, object] = {
+        "target": target,
+        "serial": config.serial,
+        "started_at": worker_started_at,
+        "ended_at": utc_now(),
+        "duration_ms": duration_ms_since(worker_started),
+        "status": "failed" if failure_count else "passed",
+        "record_count": len(records),
+        "failure_count": failure_count,
+        "viewport_event_count": len(viewport_events),
     }
+    return TargetRunResult(
+        target=target,
+        records=tuple(records),
+        viewport_events=tuple(viewport_events),
+        cache_summary=run_cache.summary(),
+        worker_timing=worker_timing,
+    )
 
+
+def run_capture_target_plans(
+    *,
+    adb: str,
+    config: TargetConfig,
+    target_plans: Sequence[TargetViewportPlan],
+    args: argparse.Namespace,
+    output_dir: Path,
+    screenshot_mode: str,
+    compare_methods: bool,
+) -> TargetRunResult:
+    target = config.target
+    worker_started_at = utc_now()
+    worker_started = time.monotonic()
+    run_cache = RunCache()
     captures: list[dict[str, object]] = []
     viewport_events: list[dict[str, object]] = []
     screenshot_method_comparison: dict[str, object] | None = None
-    plans = ordered_viewport_plans(selected, profiles_by_target)
-    for target in dict.fromkeys(plan.target for plan in plans):
-        config = configs[target]
-        target_plans = [plan for plan in plans if plan.target == target]
-        target_record_start = len(captures)
-        initial_snapshot: WmOverrideSnapshot | None = None
-        try:
-            run_cache.require_serial_present(adb, config)
-            initial_snapshot = wm_snapshot(adb, config.serial)
-        except Exception as exc:  # noqa: BLE001 - emit per-scenario diagnostics instead of aborting the manifest.
-            if should_invalidate_target_cache(exc):
-                run_cache.invalidate_target(config, "viewport_setup")
-            for plan in target_plans:
-                for scenario in plan.scenarios:
-                    captures.append(
-                        setup_failure_record(
-                            adb=adb,
-                            config=config,
-                            scenario=scenario,
-                            profile=plan.profile,
-                            output_dir=output_dir,
-                            log_lines=args.log_lines,
-                            stage="viewport_snapshot",
-                            error=exc,
-                            kind="capture",
-                        )
+    initial_snapshot: WmOverrideSnapshot | None = None
+    try:
+        run_cache.require_serial_present(adb, config)
+        initial_snapshot = wm_snapshot(adb, config.serial)
+    except Exception as exc:  # noqa: BLE001 - emit per-scenario diagnostics instead of aborting the manifest.
+        if should_invalidate_target_cache(exc):
+            run_cache.invalidate_target(config, "viewport_setup")
+        for plan in target_plans:
+            for scenario in plan.scenarios:
+                captures.append(
+                    setup_failure_record(
+                        adb=adb,
+                        config=config,
+                        scenario=scenario,
+                        profile=plan.profile,
+                        output_dir=output_dir,
+                        log_lines=args.log_lines,
+                        stage="viewport_snapshot",
+                        error=exc,
+                        kind="capture",
                     )
-            restore_event = append_unavailable_final_viewport_restore_event(
-                config=config,
-                viewport_events=viewport_events,
-                error=exc,
-            )
-            for record in captures[target_record_start:]:
-                if record.get("target") == target:
-                    record["final_viewport_restore_event_index"] = restore_event.get("index")
-            mark_target_restore_failure(captures, target, restore_event)
-            continue
+                )
+        restore_event = append_unavailable_final_viewport_restore_event(
+            config=config,
+            viewport_events=viewport_events,
+            error=exc,
+        )
+        for record in captures:
+            record["final_viewport_restore_event_index"] = restore_event.get("index")
+        mark_target_restore_failure(captures, target, restore_event)
+    else:
         try:
             for plan in target_plans:
                 apply_event_position = len(viewport_events)
@@ -3575,10 +3684,242 @@ def run_capture_plan(
                 initial_snapshot=initial_snapshot,
                 viewport_events=viewport_events,
             )
-            for record in captures[target_record_start:]:
-                if record.get("target") == target:
-                    record["final_viewport_restore_event_index"] = restore_event.get("index")
+            for record in captures:
+                record["final_viewport_restore_event_index"] = restore_event.get("index")
             mark_target_restore_failure(captures, target, restore_event)
+
+    failure_count = sum(1 for record in captures if record.get("status") != "passed")
+    if isinstance(screenshot_method_comparison, Mapping) and screenshot_method_comparison.get("status") == "failed":
+        failure_count += 1
+    worker_timing: dict[str, object] = {
+        "target": target,
+        "serial": config.serial,
+        "started_at": worker_started_at,
+        "ended_at": utc_now(),
+        "duration_ms": duration_ms_since(worker_started),
+        "status": "failed" if failure_count else "passed",
+        "record_count": len(captures),
+        "failure_count": failure_count,
+        "viewport_event_count": len(viewport_events),
+    }
+    return TargetRunResult(
+        target=target,
+        records=tuple(captures),
+        viewport_events=tuple(viewport_events),
+        cache_summary=run_cache.summary(),
+        worker_timing=worker_timing,
+        screenshot_method_comparison=screenshot_method_comparison,
+    )
+
+
+def collect_target_worker_results(
+    *,
+    target_order: Sequence[str],
+    worker_count: int,
+    runner: Callable[[str], TargetRunResult],
+) -> dict[str, TargetRunResult]:
+    if worker_count <= 1 or len(target_order) <= 1:
+        return {target: runner(target) for target in target_order}
+
+    results: dict[str, TargetRunResult] = {}
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ferrex-android-visual-qa") as executor:
+        futures = {executor.submit(runner, target): target for target in target_order}
+        for future in as_completed(futures):
+            target = futures[future]
+            results[target] = future.result()
+    return results
+
+
+def merge_target_run_results(
+    *,
+    results_by_target: Mapping[str, TargetRunResult],
+    target_order: Sequence[str],
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], dict[str, object] | None]:
+    records: list[dict[str, object]] = []
+    viewport_events: list[dict[str, object]] = []
+    cache_summaries: list[dict[str, object]] = []
+    worker_timings: list[dict[str, object]] = []
+    screenshot_method_comparison: dict[str, object] | None = None
+    for target in target_order:
+        result = results_by_target[target]
+        adjusted_records, adjusted_events = offset_viewport_event_indices(
+            result.records,
+            result.viewport_events,
+            len(viewport_events),
+        )
+        records.extend(adjusted_records)
+        viewport_events.extend(adjusted_events)
+        cache_summaries.append(result.cache_summary)
+        worker_timings.append(dict(result.worker_timing))
+        if screenshot_method_comparison is None and result.screenshot_method_comparison is not None:
+            screenshot_method_comparison = copy.deepcopy(result.screenshot_method_comparison)
+    return records, viewport_events, cache_summaries, worker_timings, screenshot_method_comparison
+
+
+def run_accessibility(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_script()
+    registry = ScenarioRegistry.load(repo_root)
+    selected = registry.select(args.target, args.scenario)
+    output_dir = resolve_output_dir(repo_root, args.output_dir)
+    return run_accessibility_plan(
+        args=args,
+        repo_root=repo_root,
+        registry=registry,
+        selected=selected,
+        output_dir=output_dir,
+    )
+
+
+def run_accessibility_plan(
+    *,
+    args: argparse.Namespace,
+    repo_root: Path,
+    registry: ScenarioRegistry,
+    selected: Sequence[Scenario],
+    output_dir: Path,
+) -> int:
+    configs = target_configs(repo_root, args)
+    profiles_by_target = selected_viewport_profiles(args, configs, selected)
+    adb = resolve_executable(args.adb)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    base_cache = RunCache()
+    command_versions = base_cache.command_versions(adb, Path(__file__).resolve())
+    plans = ordered_viewport_plans(selected, profiles_by_target)
+    target_order = target_order_for_plans(plans)
+    requested_workers, effective_workers = effective_target_worker_count(args, target_order, configs)
+    target_workers = target_worker_manifest_config(
+        requested=requested_workers,
+        effective=effective_workers,
+        target_order=target_order,
+        configs=configs,
+        profiles_by_target=profiles_by_target,
+        artifact_kind="accessibility",
+    )
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "command": "android-visual-qa accessibility",
+        "argv": getattr(args, "effective_argv", sys.argv[1:]),
+        "started_at": utc_now(),
+        "output_dir": str(output_dir),
+        "hardware_confirmation": bool(args.hardware),
+        "max_accessibility_steps": args.max_steps,
+        "exhaustive_accessibility_dumps": bool(args.exhaustive_dumps),
+        "registry": registry.to_json(),
+        "accessibility_plan": capture_plan_json(None, selected, profiles_by_target),
+        "target_workers": target_workers,
+        "command_versions": command_versions.value,
+        "command_versions_cache": command_versions.provenance,
+        "checks": [],
+        "failures": [],
+        "viewport_events": [],
+    }
+
+    def runner(target: str) -> TargetRunResult:
+        return run_accessibility_target_plans(
+            adb=adb,
+            config=configs[target],
+            target_plans=[plan for plan in plans if plan.target == target],
+            args=args,
+            output_dir=output_dir,
+        )
+
+    results_by_target = collect_target_worker_results(
+        target_order=target_order,
+        worker_count=effective_workers,
+        runner=runner,
+    )
+    records, viewport_events, cache_summaries, worker_timings, _ = merge_target_run_results(
+        results_by_target=results_by_target,
+        target_order=target_order,
+    )
+    manifest["target_workers"]["timings"] = worker_timings
+
+    failures = [record for record in records if record.get("status") != "passed"]
+    manifest["checks"] = records
+    manifest["failures"] = failures
+    manifest["viewport_events"] = viewport_events
+    manifest["cache_summary"] = merge_cache_summaries(base_cache.summary(), *cache_summaries)
+    manifest["ended_at"] = utc_now()
+    manifest["status"] = "failed" if failures else "passed"
+    manifest_path = output_dir / "accessibility-manifest.json"
+    timing_summary = write_manifest_with_timing_summary(manifest_path, manifest, record_key="checks")
+    print(f"android-visual-qa: accessibility manifest {manifest_path}", file=sys.stderr)
+    print_timing_summary(timing_summary)
+    return 1 if failures else 0
+
+
+def run_capture_plan(
+    *,
+    args: argparse.Namespace,
+    repo_root: Path,
+    registry: ScenarioRegistry,
+    selected: Sequence[Scenario],
+    output_dir: Path,
+    command_name: str,
+    mode: str | None = None,
+) -> int:
+    screenshot_mode = effective_screenshot_mode(args)
+    compare_methods = should_compare_screenshot_methods(mode, args)
+    configs = target_configs(repo_root, args)
+    profiles_by_target = selected_viewport_profiles(args, configs, selected)
+    adb = resolve_executable(args.adb)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    base_cache = RunCache()
+    command_versions = base_cache.command_versions(adb, Path(__file__).resolve())
+    plans = ordered_viewport_plans(selected, profiles_by_target)
+    target_order = target_order_for_plans(plans)
+    requested_workers, effective_workers = effective_target_worker_count(args, target_order, configs)
+    target_workers = target_worker_manifest_config(
+        requested=requested_workers,
+        effective=effective_workers,
+        target_order=target_order,
+        configs=configs,
+        profiles_by_target=profiles_by_target,
+        artifact_kind="capture",
+    )
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "command": command_name,
+        "argv": getattr(args, "effective_argv", sys.argv[1:]),
+        "started_at": utc_now(),
+        "output_dir": str(output_dir),
+        "hardware_confirmation": bool(args.hardware),
+        "registry": registry.to_json(),
+        "capture_plan": capture_plan_json(mode, selected, profiles_by_target),
+        "target_workers": target_workers,
+        "warm_gate": bool(getattr(args, "warm", False)),
+        "screenshot": screenshot_manifest_config(args),
+        "command_versions": command_versions.value,
+        "command_versions_cache": command_versions.provenance,
+        "profile_deferrals": [],
+        "captures": [],
+        "failures": [],
+        "viewport_events": [],
+    }
+
+    def runner(target: str) -> TargetRunResult:
+        return run_capture_target_plans(
+            adb=adb,
+            config=configs[target],
+            target_plans=[plan for plan in plans if plan.target == target],
+            args=args,
+            output_dir=output_dir,
+            screenshot_mode=screenshot_mode,
+            compare_methods=compare_methods,
+        )
+
+    results_by_target = collect_target_worker_results(
+        target_order=target_order,
+        worker_count=effective_workers,
+        runner=runner,
+    )
+    captures, viewport_events, cache_summaries, worker_timings, screenshot_method_comparison = merge_target_run_results(
+        results_by_target=results_by_target,
+        target_order=target_order,
+    )
+    manifest["target_workers"]["timings"] = worker_timings
 
     if compare_methods and screenshot_method_comparison is None:
         screenshot_method_comparison = {
@@ -3602,7 +3943,7 @@ def run_capture_plan(
     manifest["captures"] = captures
     manifest["failures"] = failures
     manifest["viewport_events"] = viewport_events
-    manifest["cache_summary"] = run_cache.summary()
+    manifest["cache_summary"] = merge_cache_summaries(base_cache.summary(), *cache_summaries)
     manifest["ended_at"] = utc_now()
     manifest["status"] = "failed" if failures else "passed"
     manifest_path = output_dir / "manifest.json"
@@ -3641,6 +3982,8 @@ def gate_capture_args(args: argparse.Namespace, output_dir: Path) -> argparse.Na
         hardware_serial=None,
         expected_size=None,
         profile=getattr(args, "profile", None),
+        target_workers=target_worker_count(args),
+        warm=bool(getattr(args, "warm", False)),
         effective_argv=getattr(args, "effective_argv", sys.argv[1:]),
     )
 
@@ -3720,6 +4063,7 @@ def write_gate_failure_manifest(
         "hardware_confirmation": False,
         "registry": registry.to_json(),
         "capture_plan": capture_plan,
+        "warm_gate": bool(getattr(args, "warm", False)),
         "screenshot": screenshot_manifest_config(capture_args),
         "command_versions": collect_command_versions(args.adb, Path(__file__).resolve()),
         "profile_deferrals": [],
@@ -3763,12 +4107,16 @@ def run_gate(args: argparse.Namespace) -> int:
     qa_script = repo_root / "scripts/qa/android-emulator-qa.sh"
     gate_primitives: list[dict[str, object]] = []
 
-    steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = (
-        ("build", (qa_script, "build")),
-        ("start", (qa_script, "start")),
-        ("doctor", (qa_script, "doctor")),
-        ("install", (qa_script, "install", "all")),
-    )
+    if getattr(args, "warm", False):
+        print("android-visual-qa: warm gate using prepared devices and installed APKs", file=sys.stderr)
+        steps: tuple[tuple[str, tuple[str | Path, ...]], ...] = ()
+    else:
+        steps = (
+            ("build", (qa_script, "build")),
+            ("start", (qa_script, "start")),
+            ("doctor", (qa_script, "doctor")),
+            ("install", (qa_script, "install", "all")),
+        )
     try:
         for label, command in steps:
             print(f"android-visual-qa: step {label}", file=sys.stderr)
@@ -3908,6 +4256,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Output directory for PNGs and manifest; defaults to target/android-visual-qa/<mode>",
     )
+    gate.add_argument(
+        "--warm",
+        action="store_true",
+        help="Use already prepared emulators/APKs and skip build/start/doctor/install setup before capture.",
+    )
     gate.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
     gate.add_argument("--log-lines", type=positive_int, default=DEFAULT_LOG_LINES)
     gate.add_argument(
@@ -3935,6 +4288,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Viewport profile(s) to capture: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
     )
+    gate.add_argument(
+        "--target-workers",
+        type=positive_int,
+        default=1,
+        help="Opt-in per-target concurrency; 2 runs phone and TV on separate serial-owning workers while each target remains serial.",
+    )
     gate.set_defaults(func=run_gate, hardware=False)
 
     verify = subparsers.add_parser("verify", help="Verify a captured manifest and print a concise artifact summary")
@@ -3959,7 +4318,7 @@ def build_parser() -> argparse.ArgumentParser:
     accessibility.add_argument(
         "--scenario",
         required=True,
-        help="Scenario ID from android-visual-qa list, or 'all' for the required target matrix",
+        help="Scenario ID from android-visual-qa list, a comma-separated list, or 'all' for the required target matrix",
     )
     accessibility.add_argument(
         "--output-dir",
@@ -3988,6 +4347,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Viewport profile(s) to check: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
     )
     accessibility.add_argument(
+        "--target-workers",
+        type=positive_int,
+        default=1,
+        help="Opt-in per-target concurrency; 2 runs phone and TV accessibility checks on separate serial-owning workers while each target remains serial.",
+    )
+    accessibility.add_argument(
         "--hardware",
         action="store_true",
         help="Use an explicitly supplied hardware serial instead of the emulator serial for the requested target",
@@ -4007,7 +4372,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument(
         "--scenario",
         required=True,
-        help="Scenario ID from android-visual-qa list, or 'all' for the required target matrix",
+        help="Scenario ID from android-visual-qa list, a comma-separated list, or 'all' for the required target matrix",
     )
     capture.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Output directory for PNGs and manifest")
     capture.add_argument("--settle-ms", type=positive_int, default=DEFAULT_SETTLE_MS)
@@ -4032,6 +4397,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         action="append",
         help="Viewport profile(s) to capture: all, phone-portrait, phone-landscape-foldable, tv-1080p, tv-4k-scaled. May be repeated or comma-separated; defaults to all.",
+    )
+    capture.add_argument(
+        "--target-workers",
+        type=positive_int,
+        default=1,
+        help="Opt-in per-target concurrency; 2 runs phone and TV on separate serial-owning workers while each target remains serial.",
     )
     capture.add_argument(
         "--hardware",

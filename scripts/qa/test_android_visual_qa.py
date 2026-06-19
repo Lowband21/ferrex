@@ -90,6 +90,15 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertTrue(phone_ids)
         self.assertTrue(all(scenario_id.startswith("phone-") for scenario_id in phone_ids))
 
+    def test_scenario_selection_accepts_comma_separated_phone_and_tv_ids(self) -> None:
+        registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
+
+        selected = registry.select("all", "phone-home,tv-home-focus,phone-home")
+
+        self.assertEqual([scenario.id for scenario in selected], ["phone-home", "tv-home-focus"])
+        with self.assertRaises(android_visual_qa.VisualQaError):
+            registry.select("all", "all,phone-home")
+
     def test_png_validation_reads_ihdr_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             png = Path(tmp) / "capture.png"
@@ -636,6 +645,176 @@ class AndroidVisualQaTest(unittest.TestCase):
         )
         self.assertEqual(manifest["cache_summary"]["serial_readiness"]["misses"], 2)
         self.assertEqual(manifest["viewport_summary"]["event_count"], 5)
+
+    def test_target_workers_merge_phone_and_tv_results_deterministically(self) -> None:
+        phone_config = self.target_config("phone", "phone-serial")
+        tv_config = self.target_config("tv", "tv-serial")
+        selected = [
+            android_visual_qa.Scenario("phone-a", "phone"),
+            android_visual_qa.Scenario("tv-a", "tv"),
+            android_visual_qa.Scenario("phone-b", "phone"),
+        ]
+        registry = android_visual_qa.ScenarioRegistry(selected, Path("registry.kt"))
+        phone_profiles = (
+            android_visual_qa.ViewportProfile("phone-p1", "phone", (1080, 2400), (1080, 2400), 440, "phone p1"),
+        )
+        tv_profiles = (
+            android_visual_qa.ViewportProfile("tv-p1", "tv", (1920, 1080), (1920, 1080), 320, "tv p1"),
+        )
+        profiles_by_target = {"phone": phone_profiles, "tv": tv_profiles}
+        snapshot = android_visual_qa.WmOverrideSnapshot("size", "density", None, None)
+        args = SimpleNamespace(
+            hardware=False,
+            no_nix_screenshot=False,
+            screenshot_mode=android_visual_qa.SCREENSHOT_MODE_FAST,
+            log_lines=1,
+            settle_ms=1,
+            adb="adb",
+            target_workers=2,
+            effective_argv=["capture", "--target-workers", "2"],
+        )
+
+        def fake_apply(
+            *,
+            adb: str,
+            config: object,
+            profile: object,
+            viewport_events: list[dict[str, object]],
+            force: bool = False,
+        ) -> tuple[int, dict[str, object]]:
+            del adb, force
+            event = {
+                "index": len(viewport_events),
+                "operation": "apply",
+                "target": config.target,
+                "serial": config.serial,
+                "profile": profile.name,
+                "status": "passed",
+                "duration_ms": 1,
+            }
+            viewport_events.append(event)
+            return event["index"], event
+
+        def fake_restore(*, adb: str, config: object, initial_snapshot: object, viewport_events: list[dict[str, object]]) -> dict[str, object]:
+            del adb, initial_snapshot
+            event = {
+                "index": len(viewport_events),
+                "operation": "final_restore",
+                "target": config.target,
+                "serial": config.serial,
+                "status": "passed",
+                "duration_ms": 1,
+            }
+            viewport_events.append(event)
+            return event
+
+        def fake_capture_one(**kwargs: object) -> dict[str, object]:
+            scenario = kwargs["scenario"]
+            profile = kwargs["profile"]
+            config = kwargs["config"]
+            event_index = kwargs["viewport_event_index"]
+            return {
+                "target": config.target,
+                "profile": profile.name,
+                "scenario_id": scenario.id,
+                "serial": config.serial,
+                "status": "passed",
+                "screenshot_path": str(Path(kwargs["output_dir"]) / profile.name / f"{scenario.id}.png"),
+                "viewport_apply_event_index": event_index,
+                "timings_ms": {"total": 1},
+                "adb_command_summary": {"total_count": 0, "total_duration_ms": 0, "categories": {}},
+            }
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            android_visual_qa,
+            "target_configs",
+            return_value={"phone": phone_config, "tv": tv_config},
+        ), mock.patch.object(
+            android_visual_qa,
+            "selected_viewport_profiles",
+            return_value=profiles_by_target,
+        ), mock.patch.object(
+            android_visual_qa,
+            "resolve_executable",
+            return_value="adb",
+        ), mock.patch.object(
+            android_visual_qa,
+            "collect_command_versions",
+            return_value={"adb": {"path": "adb"}},
+        ), mock.patch.object(
+            android_visual_qa,
+            "require_serial_present",
+        ), mock.patch.object(
+            android_visual_qa,
+            "wm_snapshot",
+            return_value=snapshot,
+        ), mock.patch.object(
+            android_visual_qa,
+            "append_viewport_apply_event",
+            side_effect=fake_apply,
+        ), mock.patch.object(
+            android_visual_qa,
+            "append_final_viewport_restore_event",
+            side_effect=fake_restore,
+        ), mock.patch.object(
+            android_visual_qa,
+            "capture_one",
+            side_effect=fake_capture_one,
+        ):
+            status = android_visual_qa.run_capture_plan(
+                args=args,
+                repo_root=self.repo_root(),
+                registry=registry,
+                selected=selected,
+                output_dir=Path(tmp),
+                command_name="android-visual-qa capture",
+            )
+            manifest = json.loads((Path(tmp) / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(manifest["target_workers"]["worker_count"], 2)
+        self.assertTrue(manifest["target_workers"]["enabled"])
+        self.assertEqual([target["target"] for target in manifest["target_workers"]["targets"]], ["phone", "tv"])
+        self.assertEqual([timing["target"] for timing in manifest["target_workers"]["timings"]], ["phone", "tv"])
+        self.assertEqual(
+            [(record["profile"], record["scenario_id"]) for record in manifest["captures"]],
+            [("phone-p1", "phone-a"), ("phone-p1", "phone-b"), ("tv-p1", "tv-a")],
+        )
+        self.assertEqual(
+            [(event["operation"], event.get("profile"), event["target"], event["index"]) for event in manifest["viewport_events"]],
+            [
+                ("apply", "phone-p1", "phone", 0),
+                ("final_restore", None, "phone", 1),
+                ("apply", "tv-p1", "tv", 2),
+                ("final_restore", None, "tv", 3),
+            ],
+        )
+        self.assertEqual(
+            [(record["viewport_apply_event_index"], record["final_viewport_restore_event_index"]) for record in manifest["captures"]],
+            [(0, 1), (0, 1), (2, 3)],
+        )
+
+    def test_target_workers_reject_duplicate_concurrent_serials(self) -> None:
+        configs = {
+            "phone": self.target_config("phone", "shared-serial"),
+            "tv": self.target_config("tv", "shared-serial"),
+        }
+
+        with self.assertRaises(android_visual_qa.VisualQaError):
+            android_visual_qa.effective_target_worker_count(
+                SimpleNamespace(target_workers=2),
+                ["phone", "tv"],
+                configs,
+            )
+
+        self.assertEqual(
+            android_visual_qa.effective_target_worker_count(
+                SimpleNamespace(target_workers=1),
+                ["phone", "tv"],
+                configs,
+            ),
+            (1, 1),
+        )
 
     def test_fast_screenshot_path_uses_adb_with_evidence_metadata(self) -> None:
         config = android_visual_qa.TargetConfig(
@@ -1684,6 +1863,91 @@ class AndroidVisualQaTest(unittest.TestCase):
             with self.assertRaises(android_visual_qa.VisualQaError):
                 android_visual_qa.verify_manifest(manifest, repo_root=self.repo_root())
 
+    def test_parser_accepts_target_workers_on_gate_capture_and_accessibility(self) -> None:
+        parser = android_visual_qa.build_parser()
+
+        gate = parser.parse_args(["gate", "--warm", "--target-workers", "2"])
+        capture = parser.parse_args(["capture", "--target", "all", "--scenario", "all", "--target-workers", "2"])
+        accessibility = parser.parse_args(
+            ["accessibility", "--target", "all", "--scenario", "all", "--target-workers", "2"]
+        )
+
+        self.assertTrue(gate.warm)
+        self.assertEqual(gate.target_workers, 2)
+        self.assertEqual(capture.target_workers, 2)
+        self.assertEqual(accessibility.target_workers, 2)
+
+    def test_warm_gate_skips_setup_before_capture(self) -> None:
+        calls: list[str] = []
+
+        def fake_gate_command(command: tuple[object, ...]) -> None:
+            command_parts = [os.fspath(part) for part in command]
+            calls.append(f"primitive:{Path(command_parts[0]).name}:{':'.join(command_parts[1:])}")
+
+        def fake_capture_plan(**kwargs: object) -> int:
+            capture_args = kwargs["args"]
+            calls.append(f"capture:{kwargs['mode']}:warm={capture_args.warm}:workers={capture_args.target_workers}")
+            output_dir = Path(kwargs["output_dir"])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "passed",
+                        "output_dir": str(output_dir),
+                        "captures": [],
+                        "failures": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = android_visual_qa.ManifestSummary(
+                manifest_path=Path(tmp) / "manifest.json",
+                output_dir=Path(tmp),
+                mode="smoke",
+                captures=(),
+            )
+            args = SimpleNamespace(
+                mode="smoke",
+                output_dir=tmp,
+                settle_ms=1,
+                log_lines=1,
+                adb="adb",
+                no_nix_screenshot=True,
+                warm=True,
+                target_workers=2,
+                profile=None,
+                effective_argv=["gate", "--mode", "smoke", "--warm", "--target-workers", "2"],
+            )
+            with mock.patch.object(
+                android_visual_qa,
+                "run_gate_command",
+                side_effect=fake_gate_command,
+            ), mock.patch.object(
+                android_visual_qa,
+                "run_capture_plan",
+                side_effect=fake_capture_plan,
+            ), mock.patch.object(
+                android_visual_qa,
+                "verify_manifest",
+                return_value=summary,
+            ), mock.patch.object(
+                android_visual_qa,
+                "print_artifact_summary",
+            ):
+                status = android_visual_qa.run_gate(args)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "capture:smoke:warm=True:workers=2",
+                "primitive:android-emulator-qa.sh:check:all",
+            ],
+        )
 
     def test_gate_runs_primitives_capture_and_verify_in_order(self) -> None:
         calls: list[str] = []
