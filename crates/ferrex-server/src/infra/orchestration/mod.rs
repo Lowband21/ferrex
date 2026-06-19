@@ -16,11 +16,13 @@ use std::{
 use ferrex_core::api::{IncrementalScanStatusView, ScanQueueDepths};
 use ferrex_core::application::unit_of_work::AppUnitOfWork;
 use ferrex_core::database::PostgresDatabase;
-use ferrex_core::database::repositories::media::PostgresMediaRepository;
+use ferrex_core::database::repositories::{
+    manifest::PostgresManifestRepository, media::PostgresMediaRepository,
+};
 use ferrex_core::domain::scan::actors::provider::TmdbMetadataActor;
 use ferrex_core::domain::scan::actors::{
     DefaultFolderScanActor, DefaultLibraryActor, LibraryActorCommand,
-    LibraryActorConfig, LibraryRootsId, NoopActorObserver,
+    LibraryActorConfig, LibraryRootsId, NoopActorObserver, StartMode,
     analyze::{DefaultMediaAnalyzeActor, MediaAnalyzeActor},
     folder::{FolderScanActor, ScannerFileFilterPolicy},
 };
@@ -38,8 +40,9 @@ use ferrex_core::domain::scan::orchestration::{
         JobEvent, JobEventPayload, JobEventPublisher, ScanEvent,
         stable_path_key,
     },
-    job::{EnqueueRequest, JobHandle, JobKind, JobPriority},
+    job::{EnqueueRequest, JobHandle, JobKind, JobPriority, ScanReason},
     lease::{DequeueRequest, JobLease},
+    manifest_reconcile::{ManifestReconcileInput, ManifestReconciler},
     queue::QueueService,
     runtime::{
         InProcJobEventBus, LibraryActorHandle, LibraryCommandExecutor,
@@ -53,8 +56,9 @@ use ferrex_core::domain::scan::orchestration::{
 };
 use ferrex_core::domain::scan::{
     FileChangeEventBus, FsWatchConfig, FsWatchObserver, FsWatchService,
-    PostgresCursorRepository, PostgresFileChangeEventBus, PostgresQueueService,
-    SeriesScanStateRepository,
+    ManifestLibraryRoot, ManifestRootId, ManifestScope, ManifestWalkLimits,
+    ManifestWalker, PostgresCursorRepository, PostgresFileChangeEventBus,
+    PostgresQueueService, ScannerLayoutContract, SeriesScanStateRepository,
 };
 use ferrex_core::error::{MediaError, Result};
 use ferrex_core::infra::media::{
@@ -62,9 +66,17 @@ use ferrex_core::infra::media::{
 };
 use ferrex_core::types::LibraryId;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 mod maintenance;
+
+fn scan_reason_for_start_mode(mode: StartMode) -> ScanReason {
+    match mode {
+        StartMode::Bulk => ScanReason::BulkSeed,
+        StartMode::Maintenance => ScanReason::MaintenanceSweep,
+        StartMode::Resume => ScanReason::UserRequested,
+    }
+}
 
 #[derive(Debug, Default)]
 struct ScanWatchObserver {
@@ -259,9 +271,114 @@ impl ScanOrchestrator {
         library_id: LibraryId,
         command: LibraryActorCommand,
     ) -> Result<()> {
+        if let LibraryActorCommand::Start { mode, .. } = &command {
+            let reason = scan_reason_for_start_mode(*mode);
+            if let Err(err) =
+                self.reconcile_manifest_roots(library_id, reason).await
+            {
+                warn!(
+                    library_id = %library_id,
+                    error = %err,
+                    "manifest reconciliation failed; continuing with folder scan pipeline"
+                );
+            }
+        }
+
         self.runtime
             .submit_library_command(library_id, command)
             .await
+    }
+
+    async fn reconcile_manifest_roots(
+        &self,
+        library_id: LibraryId,
+        scan_reason: ScanReason,
+    ) -> Result<()> {
+        let library = self
+            .unit_of_work
+            .libraries
+            .get_library_reference(library_id.0)
+            .await?;
+        let walker = ManifestWalker::new(
+            self.manifest_layout_contract(),
+            ManifestWalkLimits::default(),
+        );
+        let pool = self.runtime.queue().pool().clone();
+        let manifest = Arc::new(PostgresManifestRepository::new(pool.clone()));
+        let media = Arc::new(PostgresMediaRepository::new(pool));
+        let reconciler = ManifestReconciler::new(
+            manifest,
+            media,
+            self.runtime.queue(),
+            Arc::clone(&self.events),
+            Arc::clone(&self.cursors),
+        );
+
+        for (idx, root_path) in library.paths.iter().enumerate() {
+            let root_id = u16::try_from(idx).map_err(|_| {
+                MediaError::InvalidMedia(format!(
+                    "library {library_id} has more than {} manifest roots",
+                    u16::MAX
+                ))
+            })?;
+            let root = ManifestLibraryRoot::new(
+                library.id,
+                library.library_type,
+                ManifestRootId(root_id),
+                root_path.clone(),
+            );
+            let walk = match walker.walk_root(&root) {
+                Ok(walk) => walk,
+                Err(err) => {
+                    warn!(
+                        library_id = %library_id,
+                        root = %root_path.display(),
+                        error = %err,
+                        "manifest root walk failed; skipping this root"
+                    );
+                    continue;
+                }
+            };
+            let input = ManifestReconcileInput::successful(
+                uuid::Uuid::now_v7(),
+                ManifestScope::Root(root.root_scope()),
+                walk.batches,
+                walk.supported_media,
+                scan_reason,
+            );
+            let summary = reconciler.reconcile_run(input).await?;
+            info!(
+                library_id = %library_id,
+                root = %root_path.display(),
+                entries_seen = summary.entries_seen,
+                media_enqueued = summary.media_enqueued,
+                media_moved = summary.media_moved,
+                media_tombstoned = summary.media_tombstoned,
+                "manifest root reconciled into scan pipeline"
+            );
+        }
+
+        Ok(())
+    }
+
+    fn manifest_layout_contract(&self) -> ScannerLayoutContract {
+        ScannerLayoutContract::new(
+            self.actors
+                .file_filters
+                .media_extensions()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            self.actors
+                .file_filters
+                .ignored_extensions()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+            self.actors
+                .file_filters
+                .ignored_path_patterns()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+        )
     }
 
     pub fn cursor_repository(&self) -> Arc<PostgresCursorRepository> {

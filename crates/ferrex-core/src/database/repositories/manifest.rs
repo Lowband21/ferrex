@@ -12,8 +12,8 @@ use crate::{
         ManifestDeferredWatchHintFilter, ManifestDeferredWatchHintInput,
         ManifestDeferredWatchHintRecord, ManifestDeferredWatchHintStatus,
         ManifestDiagnosticFilter, ManifestDiagnosticRecord,
-        ManifestPartitionCursorRecord, ManifestRepository,
-        ManifestRunCompletion,
+        ManifestMissingEntryRecord, ManifestPartitionCursorRecord,
+        ManifestRepository, ManifestRunCompletion,
     },
     domain::scan::manifest::{
         ManifestDiagnostic, ManifestDiagnosticReason,
@@ -389,6 +389,81 @@ impl ManifestRepository for PostgresManifestRepository {
         let run = row_to_manifest_run(&row)?;
         self.upsert_partition_cursor_for_run(&run).await?;
         Ok(run)
+    }
+
+    async fn mark_missing_entries_after_successful_run(
+        &self,
+        run_id: Uuid,
+    ) -> Result<Vec<ManifestMissingEntryRecord>> {
+        let rows = sqlx::query(
+            r#"
+            WITH successful_run AS (
+                SELECT
+                    run_id,
+                    library_id,
+                    root_id,
+                    scope_kind,
+                    partition_prefix_norm
+                FROM manifest_runs
+                WHERE run_id = $1
+                  AND status = ANY (ARRAY['completed', 'completed_with_diagnostics'])
+            ), missing AS (
+                UPDATE manifest_entries entries
+                SET availability = 'missing',
+                    updated_at = NOW()
+                FROM successful_run run
+                WHERE entries.library_id = run.library_id
+                  AND entries.root_id = run.root_id
+                  AND entries.availability = 'available'
+                  AND entries.last_seen_run_id IS DISTINCT FROM run.run_id
+                  AND (
+                      run.scope_kind = 'root'
+                      OR (
+                          run.partition_prefix_norm IS NOT NULL
+                          AND (
+                              entries.path_norm = run.partition_prefix_norm
+                              OR entries.path_norm LIKE run.partition_prefix_norm || '/%'
+                          )
+                      )
+                  )
+                RETURNING
+                    entries.library_id,
+                    entries.root_id,
+                    entries.partition_id,
+                    entries.path_norm,
+                    entries.entry_kind
+            )
+            SELECT library_id, root_id, partition_id, path_norm, entry_kind
+            FROM missing
+            ORDER BY path_norm ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ManifestMissingEntryRecord {
+                    library_id: LibraryId(row.try_get("library_id")?),
+                    root_id: checked_u16(
+                        row.try_get::<i32, _>("root_id")?,
+                        "root_id",
+                    )?,
+                    partition_id: row
+                        .try_get::<Option<i32>, _>("partition_id")?
+                        .map(|value| {
+                            checked_u16(value, "partition_id")
+                                .map(ManifestPartitionId)
+                        })
+                        .transpose()?,
+                    path_norm: row.try_get("path_norm")?,
+                    entry_kind: decode_entry_kind(
+                        row.try_get::<String, _>("entry_kind")?.as_str(),
+                    )?,
+                })
+            })
+            .collect()
     }
 
     async fn list_stale_partitions(
@@ -1007,6 +1082,16 @@ fn encode_entry_kind(kind: ManifestEntryKind) -> &'static str {
     match kind {
         ManifestEntryKind::File => "file",
         ManifestEntryKind::Directory => "directory",
+    }
+}
+
+fn decode_entry_kind(value: &str) -> Result<ManifestEntryKind> {
+    match value {
+        "file" => Ok(ManifestEntryKind::File),
+        "directory" => Ok(ManifestEntryKind::Directory),
+        other => Err(MediaError::Internal(format!(
+            "unknown manifest entry kind: {other}"
+        ))),
     }
 }
 
@@ -1635,6 +1720,168 @@ mod tests {
                 .await?
                 .expect("updated hint");
             assert_eq!(applied.status, ManifestDeferredWatchHintStatus::Applied);
+
+            Ok(())
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn successful_manifest_run_marks_stale_entries_missing()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        with_manifest_test_db("successful_manifest_run_marks_stale_entries_missing", |pool| async move {
+            let repo = PostgresManifestRepository::new(pool.clone());
+            let library_id = LibraryId::new();
+            insert_library(&pool, library_id).await?;
+
+            let scope = root_scope(library_id);
+            let first_run = Uuid::now_v7();
+            repo.start_run(ManifestRun {
+                run_id: first_run,
+                scope: scope.clone(),
+                status: ManifestRunStatus::Running,
+                started_at: Utc::now(),
+                completed_at: None,
+                entries_seen: 0,
+                diagnostics_seen: 0,
+            })
+            .await?;
+            repo.upsert_batch_entries(
+                first_run,
+                &ManifestEntryBatch {
+                    scope: scope.clone(),
+                    entries: vec![
+                        ManifestEntry::Media(ManifestMediaEntry {
+                            scope: scope.clone(),
+                            path_norm: "/media/movies/Keep.mkv".to_string(),
+                            relative_path: "Keep.mkv".to_string(),
+                            fingerprint: ManifestFingerprint {
+                                size: 10,
+                                mtime_ms: Some(20),
+                                ..ManifestFingerprint::default()
+                            },
+                            classification: ManifestEntryClassification::Supported(
+                                ManifestSupportedClassification::MovieRootMedia,
+                            ),
+                            diagnostics: Vec::new(),
+                        }),
+                        ManifestEntry::Media(ManifestMediaEntry {
+                            scope: scope.clone(),
+                            path_norm: "/media/movies/Missing.mkv".to_string(),
+                            relative_path: "Missing.mkv".to_string(),
+                            fingerprint: ManifestFingerprint {
+                                size: 11,
+                                mtime_ms: Some(21),
+                                ..ManifestFingerprint::default()
+                            },
+                            classification: ManifestEntryClassification::Supported(
+                                ManifestSupportedClassification::MovieRootMedia,
+                            ),
+                            diagnostics: Vec::new(),
+                        }),
+                    ],
+                },
+            )
+            .await?;
+            repo.complete_run(ManifestRunCompletion {
+                run_id: first_run,
+                status: ManifestRunStatus::Completed,
+                completed_at: Utc::now(),
+                entries_seen: 2,
+                diagnostics_seen: 0,
+                error_message: None,
+            })
+            .await?;
+
+            let second_run = Uuid::now_v7();
+            repo.start_run(ManifestRun {
+                run_id: second_run,
+                scope: scope.clone(),
+                status: ManifestRunStatus::Running,
+                started_at: Utc::now(),
+                completed_at: None,
+                entries_seen: 0,
+                diagnostics_seen: 0,
+            })
+            .await?;
+            repo.upsert_batch_entries(
+                second_run,
+                &ManifestEntryBatch {
+                    scope: scope.clone(),
+                    entries: vec![ManifestEntry::Media(ManifestMediaEntry {
+                        scope: scope.clone(),
+                        path_norm: "/media/movies/Keep.mkv".to_string(),
+                        relative_path: "Keep.mkv".to_string(),
+                        fingerprint: ManifestFingerprint {
+                            size: 10,
+                            mtime_ms: Some(20),
+                            ..ManifestFingerprint::default()
+                        },
+                        classification: ManifestEntryClassification::Supported(
+                            ManifestSupportedClassification::MovieRootMedia,
+                        ),
+                        diagnostics: Vec::new(),
+                    })],
+                },
+            )
+            .await?;
+            repo.complete_run(ManifestRunCompletion {
+                run_id: second_run,
+                status: ManifestRunStatus::Completed,
+                completed_at: Utc::now(),
+                entries_seen: 1,
+                diagnostics_seen: 0,
+                error_message: None,
+            })
+            .await?;
+
+            let missing = repo
+                .mark_missing_entries_after_successful_run(second_run)
+                .await?;
+            assert_eq!(missing.len(), 1);
+            assert_eq!(missing[0].path_norm, "/media/movies/Missing.mkv");
+            assert_eq!(missing[0].entry_kind, ManifestEntryKind::File);
+
+            let keep_availability: String = sqlx::query_scalar(
+                "SELECT availability FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Keep.mkv'",
+            )
+            .bind(library_id.0)
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(keep_availability, "available");
+
+            let missing_availability: String = sqlx::query_scalar(
+                "SELECT availability FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Missing.mkv'",
+            )
+            .bind(library_id.0)
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(missing_availability, "missing");
+
+            let failed_run = Uuid::now_v7();
+            repo.start_run(ManifestRun {
+                run_id: failed_run,
+                scope,
+                status: ManifestRunStatus::Running,
+                started_at: Utc::now(),
+                completed_at: None,
+                entries_seen: 0,
+                diagnostics_seen: 0,
+            })
+            .await?;
+            repo.complete_run(ManifestRunCompletion {
+                run_id: failed_run,
+                status: ManifestRunStatus::Failed,
+                completed_at: Utc::now(),
+                entries_seen: 0,
+                diagnostics_seen: 0,
+                error_message: Some("walk failed".to_string()),
+            })
+            .await?;
+            let failed_missing = repo
+                .mark_missing_entries_after_successful_run(failed_run)
+                .await?;
+            assert!(failed_missing.is_empty());
 
             Ok(())
         })

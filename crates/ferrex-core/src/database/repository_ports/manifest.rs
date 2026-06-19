@@ -4,8 +4,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::domain::scan::manifest::{
-    ManifestDiagnosticSeverity, ManifestPartitionId, ManifestRun,
-    ManifestRunStatus,
+    ManifestDiagnosticSeverity, ManifestEntryKind, ManifestPartitionId,
+    ManifestRun, ManifestRunStatus,
 };
 use crate::error::Result;
 use crate::types::ids::LibraryId;
@@ -15,6 +15,17 @@ use crate::types::ids::LibraryId;
 pub struct ManifestBatchUpsertSummary {
     pub entries_upserted: u64,
     pub diagnostics_upserted: u64,
+}
+
+/// Manifest entry that was present in earlier state but absent from a
+/// successfully completed manifest scope.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManifestMissingEntryRecord {
+    pub library_id: LibraryId,
+    pub root_id: u16,
+    pub partition_id: Option<ManifestPartitionId>,
+    pub path_norm: String,
+    pub entry_kind: ManifestEntryKind,
 }
 
 /// Final state for a manifest run.
@@ -149,6 +160,14 @@ pub trait ManifestRepository: Send + Sync {
         &self,
         completion: ManifestRunCompletion,
     ) -> Result<ManifestRun>;
+
+    /// Mark entries from the completed scope as missing when they were not
+    /// observed by the successful run. Failed, canceled, stalled, or synthetic
+    /// prefix-less partition runs must not tombstone manifest state.
+    async fn mark_missing_entries_after_successful_run(
+        &self,
+        run_id: Uuid,
+    ) -> Result<Vec<ManifestMissingEntryRecord>>;
 
     async fn list_stale_partitions(
         &self,
