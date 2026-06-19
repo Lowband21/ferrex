@@ -1,22 +1,20 @@
 //! Individual step views for the setup wizard
 
 use crate::{
-    common::{focus::ids, messages::DomainMessage},
+    common::{
+        focus::{FocusMessage, ids},
+        messages::DomainMessage,
+    },
     domains::{
         auth::{
             messages as auth,
-            pin_policy::{
-                PinPolicyRules, pin_satisfies_policy, policy_label_for,
-            },
+            pin_policy::{PinPolicyRules, policy_label_for},
             security::secure_credential::SecureCredential,
             types::{PinEntryTarget, SetupClaimStatus},
         },
         ui::{
             theme,
-            views::auth::{
-                components::{error_message, primary_button, secondary_button},
-                pin_setup::{numeric_keypad, pin_display},
-            },
+            views::auth::components::{error_message, primary_button},
         },
     },
     infra::design_tokens::FontTokens,
@@ -25,7 +23,7 @@ use crate::{
 
 use iced::{
     Alignment, Element, Length, Theme,
-    widget::{Space, checkbox, column, container, row, text, text_input},
+    widget::{Space, checkbox, column, container, text, text_input},
 };
 
 /// Welcome step - brief introduction
@@ -347,19 +345,11 @@ pub fn view_pin_step<'a>(
     state: &'a State,
     pin: &'a SecureCredential,
     confirm_pin: &'a SecureCredential,
-    pin_entry_target: PinEntryTarget,
+    _pin_entry_target: PinEntryTarget,
     error: Option<&'a str>,
 ) -> Element<'a, DomainMessage> {
     let fonts = &state.domains.ui.state.size_provider.font;
     let policy: PinPolicyRules = (&state.domains.auth.state.pin_policy).into();
-    let max_length = policy.max_length;
-    let pin_is_valid = pin_satisfies_policy(pin.as_str(), policy);
-    let effective_target =
-        if pin_entry_target == PinEntryTarget::ConfirmPin && pin_is_valid {
-            PinEntryTarget::ConfirmPin
-        } else {
-            PinEntryTarget::Pin
-        };
 
     let mut content = column![
         text("Quick Access PIN")
@@ -403,11 +393,20 @@ pub fn view_pin_step<'a>(
             ))
             .push(Space::new().height(8));
 
-    // PIN display
     content = content.push(
-        container(pin_display(pin.as_str(), false, fonts.title, max_length))
+        text_input("Enter PIN", pin.as_str())
+            .on_input(|value| {
+                DomainMessage::Auth(auth::AuthMessage::UpdatePin(value))
+            })
+            .on_submit(DomainMessage::Focus(FocusMessage::Traverse {
+                backwards: false,
+            }))
+            .secure(true)
+            .id(ids::auth_first_run_pin())
+            .padding(12)
+            .size(fonts.body)
             .width(Length::Fill)
-            .align_x(Alignment::Center),
+            .style(theme::TextInput::style()),
     );
 
     content = content.push(Space::new().height(16));
@@ -424,56 +423,18 @@ pub fn view_pin_step<'a>(
             ))
             .push(Space::new().height(8));
 
-    // Confirm PIN display
     content = content.push(
-        container(pin_display(
-            confirm_pin.as_str(),
-            true,
-            fonts.title,
-            max_length,
-        ))
-        .width(Length::Fill)
-        .align_x(Alignment::Center),
-    );
-
-    content = content.push(Space::new().height(20));
-
-    let edit_pin = secondary_button("Edit PIN", fonts.caption).on_press(
-        DomainMessage::Auth(auth::AuthMessage::SelectPinEntryTarget(
-            PinEntryTarget::Pin,
-        )),
-    );
-    let mut edit_confirm = secondary_button("Confirm PIN", fonts.caption);
-    if pin_is_valid {
-        edit_confirm = edit_confirm.on_press(DomainMessage::Auth(
-            auth::AuthMessage::SelectPinEntryTarget(PinEntryTarget::ConfirmPin),
-        ));
-    }
-    content = content.push(
-        row![edit_pin, edit_confirm]
-            .spacing(8)
-            .align_y(Alignment::Center),
-    );
-
-    content = content.push(Space::new().height(20));
-
-    // Numeric keypad - target PIN or confirm_pin based on selected field.
-    let (keypad_value, is_confirm) = match effective_target {
-        PinEntryTarget::Pin => (pin.as_str(), false),
-        PinEntryTarget::ConfirmPin => (confirm_pin.as_str(), true),
-    };
-    let keypad = numeric_keypad(
-        keypad_value,
-        is_confirm,
-        fonts.title,
-        fonts.body,
-        max_length,
-    );
-
-    content = content.push(
-        container(keypad)
+        text_input("Confirm PIN", confirm_pin.as_str())
+            .on_input(|value| {
+                DomainMessage::Auth(auth::AuthMessage::UpdateConfirmPin(value))
+            })
+            .on_submit(DomainMessage::Auth(auth::AuthMessage::SetupNextStep))
+            .secure(true)
+            .id(ids::auth_first_run_confirm_pin())
+            .padding(12)
+            .size(fonts.body)
             .width(Length::Fill)
-            .align_x(Alignment::Center),
+            .style(theme::TextInput::style()),
     );
 
     content.into()

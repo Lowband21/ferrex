@@ -9,8 +9,11 @@ use once_cell::sync::Lazy;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusArea {
     AuthFirstRunSetup,
+    AuthFirstRunPinSetup,
     AuthPreAuthLogin,
     AuthPasswordEntry,
+    AuthPinEntry,
+    AuthPinSetup,
     LibraryForm,
 }
 
@@ -176,8 +179,11 @@ impl FocusArea {
     fn fields(self) -> &'static [FocusId] {
         match self {
             FocusArea::AuthFirstRunSetup => AUTH_FIRST_RUN_FIELDS,
+            FocusArea::AuthFirstRunPinSetup => AUTH_FIRST_RUN_PIN_FIELDS,
             FocusArea::AuthPreAuthLogin => AUTH_PRE_AUTH_FIELDS,
             FocusArea::AuthPasswordEntry => AUTH_PASSWORD_ENTRY_FIELDS,
+            FocusArea::AuthPinEntry => AUTH_PIN_ENTRY_FIELDS,
+            FocusArea::AuthPinSetup => AUTH_PIN_SETUP_FIELDS,
             FocusArea::LibraryForm => LIBRARY_FORM_FIELDS,
         }
     }
@@ -734,6 +740,59 @@ mod spatial_tests {
         );
         assert_eq!(focused_id(&state), Some("center"));
     }
+
+    #[test]
+    fn pin_login_focus_group_keeps_single_pin_field_focused() {
+        let mut manager = FocusManager::default();
+
+        let first = manager
+            .activate(FocusArea::AuthPinEntry)
+            .expect("pin login focus target");
+
+        assert_eq!(first, ids::auth_pin_entry());
+        assert_eq!(
+            manager.resolve_traverse(false, Some(&first)),
+            Some(ids::auth_pin_entry())
+        );
+        assert_eq!(
+            manager.resolve_traverse(true, Some(&first)),
+            Some(ids::auth_pin_entry())
+        );
+    }
+
+    #[test]
+    fn pin_setup_focus_groups_cycle_between_pin_and_confirmation() {
+        let mut manager = FocusManager::default();
+
+        let first = manager
+            .activate(FocusArea::AuthPinSetup)
+            .expect("pin setup focus target");
+
+        assert_eq!(first, ids::auth_pin_setup_pin());
+        assert_eq!(
+            manager.resolve_traverse(false, Some(&first)),
+            Some(ids::auth_pin_setup_confirm_pin())
+        );
+        assert_eq!(
+            manager.resolve_traverse(true, Some(&first)),
+            Some(ids::auth_pin_setup_confirm_pin())
+        );
+    }
+
+    #[test]
+    fn first_run_pin_focus_group_starts_on_pin_field() {
+        let mut manager = FocusManager::default();
+
+        let first = manager
+            .activate(FocusArea::AuthFirstRunPinSetup)
+            .expect("first-run pin focus target");
+
+        assert_eq!(first, ids::auth_first_run_pin());
+        assert_eq!(
+            manager.resolve_traverse(false, Some(&first)),
+            Some(ids::auth_first_run_confirm_pin())
+        );
+    }
 }
 
 /// Convenience helpers for referencing widget identifiers.
@@ -785,6 +844,23 @@ pub mod ids {
         AUTH_PASSWORD_ENTRY,
         "auth.credential.password"
     );
+    define_focus_id!(auth_pin_entry, AUTH_PIN_ENTRY, "auth.credential.pin");
+    define_focus_id!(
+        auth_pin_setup_pin,
+        AUTH_PIN_SETUP_PIN,
+        "auth.pin_setup.pin"
+    );
+    define_focus_id!(
+        auth_pin_setup_confirm_pin,
+        AUTH_PIN_SETUP_CONFIRM_PIN,
+        "auth.pin_setup.confirm_pin"
+    );
+    define_focus_id!(auth_first_run_pin, AUTH_FIRST_RUN_PIN, "auth.setup.pin");
+    define_focus_id!(
+        auth_first_run_confirm_pin,
+        AUTH_FIRST_RUN_CONFIRM_PIN,
+        "auth.setup.confirm_pin"
+    );
 
     // Pre-auth login form fields
     define_focus_id!(
@@ -812,11 +888,13 @@ pub mod ids {
 }
 
 use ids::{
-    AUTH_FIRST_RUN_CONFIRM_PASSWORD, AUTH_FIRST_RUN_DEVICE_NAME,
-    AUTH_FIRST_RUN_DISPLAY_NAME, AUTH_FIRST_RUN_PASSWORD,
-    AUTH_FIRST_RUN_SETUP_TOKEN, AUTH_FIRST_RUN_USERNAME, AUTH_PASSWORD_ENTRY,
-    AUTH_PRE_AUTH_PASSWORD, AUTH_PRE_AUTH_USERNAME, LIBRARY_FORM_NAME,
-    LIBRARY_FORM_PATHS, LIBRARY_FORM_SCAN_INTERVAL,
+    AUTH_FIRST_RUN_CONFIRM_PASSWORD, AUTH_FIRST_RUN_CONFIRM_PIN,
+    AUTH_FIRST_RUN_DEVICE_NAME, AUTH_FIRST_RUN_DISPLAY_NAME,
+    AUTH_FIRST_RUN_PASSWORD, AUTH_FIRST_RUN_PIN, AUTH_FIRST_RUN_SETUP_TOKEN,
+    AUTH_FIRST_RUN_USERNAME, AUTH_PASSWORD_ENTRY, AUTH_PIN_ENTRY,
+    AUTH_PIN_SETUP_CONFIRM_PIN, AUTH_PIN_SETUP_PIN, AUTH_PRE_AUTH_PASSWORD,
+    AUTH_PRE_AUTH_USERNAME, LIBRARY_FORM_NAME, LIBRARY_FORM_PATHS,
+    LIBRARY_FORM_SCAN_INTERVAL,
 };
 
 static AUTH_FIRST_RUN_FIELDS: &[FocusId] = &[
@@ -829,6 +907,14 @@ static AUTH_FIRST_RUN_FIELDS: &[FocusId] = &[
 ];
 
 static AUTH_PASSWORD_ENTRY_FIELDS: &[FocusId] = &[&AUTH_PASSWORD_ENTRY];
+
+static AUTH_PIN_ENTRY_FIELDS: &[FocusId] = &[&AUTH_PIN_ENTRY];
+
+static AUTH_PIN_SETUP_FIELDS: &[FocusId] =
+    &[&AUTH_PIN_SETUP_PIN, &AUTH_PIN_SETUP_CONFIRM_PIN];
+
+static AUTH_FIRST_RUN_PIN_FIELDS: &[FocusId] =
+    &[&AUTH_FIRST_RUN_PIN, &AUTH_FIRST_RUN_CONFIRM_PIN];
 
 static AUTH_PRE_AUTH_FIELDS: &[FocusId] =
     &[&AUTH_PRE_AUTH_USERNAME, &AUTH_PRE_AUTH_PASSWORD];
