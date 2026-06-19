@@ -57,6 +57,8 @@ import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.library.ServerCacheScope
+import com.ferrex.android.core.mediaart.MediaArtObject
+import com.ferrex.android.core.mediaart.MediaArtTargetIdentity
 import com.ferrex.android.core.search.MediaSearchCache
 import com.ferrex.android.core.search.MediaSearchRepository
 import com.ferrex.android.core.search.MediaSearchTransport
@@ -76,10 +78,13 @@ import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
 import com.ferrex.android.ui.components.FerrexPosterCard
+import com.ferrex.android.ui.components.FerrexMobileMediaCard
 import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusAction
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.MobileMediaCardLayout
+import com.ferrex.android.ui.components.MobileMediaCardState
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
 import com.ferrex.android.ui.components.TheaterPlateTypographyRole
@@ -386,27 +391,49 @@ private fun PhoneBrowseGridScenario(scenario: VisualQaScenario) {
 
 @Composable
 private fun PhoneBrowseCard(card: VisualQaMediaCardSample) {
-    FerrexPosterCard(
+    val art = remember(card.stableKey, card.imageLabel) {
+        qaMobileMediaArt(
+            surfaceKey = "phone-browse-grid",
+            itemKey = card.stableKey,
+            semanticLabel = card.title,
+            fallbackLabel = card.imageLabel,
+        )
+    }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = card.libraryName,
+        art = art,
+        resolution = null,
+        imageLoader = null,
+        serverUrl = "https://qa.invalid",
+        layout = MobileMediaCardLayout.Grid,
+        state = MobileMediaCardState(
+            actionLabel = "Open",
+            actionRole = FerrexActionRole.Secondary,
+        ),
         modifier = Modifier.fillMaxWidth(),
         testTag = FerrexQaTags.namespaced("phone", "poster", card.stableKey),
-        contentDescription = "${card.title} ${card.subtitle}",
+        contentDescription = "${card.title} ${card.subtitle}. Action: Open",
         onClick = {},
-    ) {
-        Row(
-            modifier = Modifier.padding(FerrexDesignTokens.Space.Md),
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FerrexPosterPlaceholder(label = card.imageLabel, modifier = Modifier.width(96.dp))
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-                Text(text = card.libraryName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(text = card.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = card.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            FerrexActionButton(label = "Open", role = FerrexActionRole.Secondary, onClick = {})
-        }
-    }
+    )
 }
+
+private fun qaMobileMediaArt(
+    surfaceKey: String,
+    itemKey: String,
+    semanticLabel: String,
+    fallbackLabel: String,
+): MediaArtObject = MediaArtObject.forCategory(
+    category = BrowseImageCategory.Poster,
+    request = null,
+    fallbackLabel = fallbackLabel,
+    targetIdentity = MediaArtTargetIdentity(
+        surfaceKey = surfaceKey,
+        itemKey = itemKey,
+        semanticLabel = semanticLabel,
+    ),
+)
 
 @Composable
 private fun PhoneDetailScenario(

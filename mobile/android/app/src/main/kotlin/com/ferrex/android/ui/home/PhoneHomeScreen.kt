@@ -14,10 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
@@ -40,9 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
@@ -65,15 +59,18 @@ import com.ferrex.android.core.browse.MovieSortMode
 import com.ferrex.android.core.browse.PhoneExplicitBackAction
 import com.ferrex.android.core.browse.PhoneShellDestination
 import com.ferrex.android.core.browse.PhoneSystemBackAction
+import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
-import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
-import com.ferrex.android.core.image.TmdbImageFallbackPolicy
-import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
+import com.ferrex.android.core.mediaart.MediaArtGrounding
+import com.ferrex.android.core.mediaart.MediaArtObject
+import com.ferrex.android.core.mediaart.MediaArtRequest
+import com.ferrex.android.core.mediaart.MediaArtTargetIdentity
+import com.ferrex.android.core.mediaart.MediaRailItemIdentity
 import com.ferrex.android.core.playback.PlaybackLaunchDecision
 import com.ferrex.android.core.playback.PlaybackLaunchPolicy
 import com.ferrex.android.core.playback.PlaybackProgressReporter
@@ -99,6 +96,7 @@ import com.ferrex.android.core.theaterplate.TheaterPlateImageSourceKind
 import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
 import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.watch.ContinueWatchingCard
+import com.ferrex.android.core.watch.ContinueWatchingProgressState
 import com.ferrex.android.core.watch.ContinueWatchingRepository
 import com.ferrex.android.core.watch.ContinueWatchingState
 import com.ferrex.android.core.watch.ContinueWatchingStatus
@@ -107,14 +105,16 @@ import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.ui.components.FerrexActionButton
 import com.ferrex.android.ui.components.FerrexActionRole
-import com.ferrex.android.ui.components.FerrexAsyncImage
-import com.ferrex.android.ui.components.FerrexImageFallback
-import com.ferrex.android.ui.components.FerrexPosterCard
-import com.ferrex.android.ui.components.FerrexPosterPlaceholder
+import com.ferrex.android.ui.components.FerrexMobileMediaCard
+import com.ferrex.android.ui.components.FerrexMobileMediaGrid
+import com.ferrex.android.ui.components.FerrexMobileMediaRail
 import com.ferrex.android.ui.components.FerrexSectionTitle
 import com.ferrex.android.ui.components.FerrexStatusAction
 import com.ferrex.android.ui.components.FerrexStatusCard
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.MobileMediaCardLayout
+import com.ferrex.android.ui.components.MobileMediaCardState
+import com.ferrex.android.ui.components.MobileMediaWatchState
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
 import com.ferrex.android.ui.components.TheaterPlateTypographyRole
@@ -1502,32 +1502,26 @@ private fun ContinueWatchingSection(
                 )
             }
             if (remainingCards.isNotEmpty()) {
-                TheaterPlateText(
-                    text = "More in progress",
-                    role = TheaterPlateTypographyRole.RailTitle,
-                    densityRole = typographyDensity,
-                )
-                val railItems = remember(remainingCards) {
-                    remainingCards.zip(
-                        MediaRailIdentityResolver.assign(
-                            railKey = "continue-watching-more",
-                            stableIds = remainingCards.map { it.stableKey },
-                        ),
+                FerrexMobileMediaRail(
+                    railKey = "continue-watching-more",
+                    title = "More in progress",
+                    subtitle = "Touch a card to open the preserved Continue Watching route.",
+                    items = remainingCards,
+                    itemStableId = { it.stableKey },
+                    density = density,
+                    contentDescription = "More Continue Watching items rail",
+                ) { card, identity ->
+                    ContinueWatchingCardView(
+                        card = card,
+                        imageResolutions = imageResolutions,
+                        imageLoaderAvailable = imageLoaderAvailable,
+                        imageLoader = imageLoader,
+                        scope = scope,
+                        density = density,
+                        itemIdentity = identity,
+                        semanticLabel = identity.semanticLabel(card.title),
+                        onClick = { onSelect(card) },
                     )
-                }
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-                    items(railItems, key = { it.second.renderKey }) { (card, identity) ->
-                        ContinueWatchingCardView(
-                            card = card,
-                            imageResolutions = imageResolutions,
-                            imageLoaderAvailable = imageLoaderAvailable,
-                            imageLoader = imageLoader,
-                            scope = scope,
-                            density = density,
-                            semanticLabel = identity.semanticLabel(card.title),
-                            onClick = { onSelect(card) },
-                        )
-                    }
                 }
             }
         }
@@ -1544,51 +1538,27 @@ private fun HomeShelfSection(
     density: FerrexStageDensityFamily,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.RailBand,
+    FerrexMobileMediaRail(
+        railKey = shelf.title,
+        title = shelf.title,
+        subtitle = "${shelf.subtitle} ${shelf.limitCopy}",
+        items = shelf.items,
+        itemStableId = { it.stableKey },
         density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
         modifier = Modifier.fillMaxWidth(),
-        contentDescription = "${shelf.title} Home shelf",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            HomeStageSectionTitle(shelf.title, density)
-            TheaterPlateText(
-                text = shelf.subtitle,
-                role = TheaterPlateTypographyRole.RailSubtitle,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = shelf.limitCopy,
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            val railItems = remember(shelf.title, shelf.items) {
-                shelf.items.zip(
-                    MediaRailIdentityResolver.assign(
-                        railKey = shelf.title,
-                        stableIds = shelf.items.map { it.stableKey },
-                    ),
-                )
-            }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-                items(railItems, key = { it.second.renderKey }) { (card, identity) ->
-                    HomeMediaRailCard(
-                        card = card,
-                        imageResolutions = imageResolutions,
-                        imageLoaderAvailable = imageLoaderAvailable,
-                        imageLoader = imageLoader,
-                        scope = scope,
-                        density = density,
-                        semanticLabel = identity.semanticLabel(card.title),
-                        onClick = { onSelect(card) },
-                    )
-                }
-            }
-        }
+        contentDescription = "${shelf.title} Home shelf rail",
+    ) { card, identity ->
+        HomeMediaRailCard(
+            card = card,
+            imageResolutions = imageResolutions,
+            imageLoaderAvailable = imageLoaderAvailable,
+            imageLoader = imageLoader,
+            scope = scope,
+            density = density,
+            itemIdentity = identity,
+            semanticLabel = identity.semanticLabel(card.title),
+            onClick = { onSelect(card) },
+        )
     }
 }
 
@@ -1879,26 +1849,25 @@ private fun MediaGrid(
     scope: ServerCacheScope,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
-    LazyVerticalGrid(
+    FerrexMobileMediaGrid(
+        gridKey = "library-grid",
+        items = cards,
+        itemStableId = { it.stableKey },
         columns = GridCells.Adaptive(minSize = FerrexDesignTokens.Poster.PhoneGridMin),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(FerrexQaTags.Phone.LibraryGrid)
-            .heightIn(min = 220.dp, max = 680.dp),
-        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-    ) {
-        items(cards, key = { it.stableKey }) { card ->
-            MediaCardView(
-                card = card,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                compact = false,
-                onClick = { onSelect(card) },
-            )
-        }
+        modifier = Modifier.heightIn(min = 220.dp, max = 680.dp),
+        testTag = FerrexQaTags.Phone.LibraryGrid,
+        contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
+    ) { card, identity ->
+        MediaCardView(
+            card = card,
+            imageResolutions = imageResolutions,
+            imageLoaderAvailable = imageLoaderAvailable,
+            imageLoader = imageLoader,
+            scope = scope,
+            semanticLabel = identity.semanticLabel(card.title),
+            itemIdentity = identity,
+            onClick = { onSelect(card) },
+        )
     }
 }
 
@@ -1912,63 +1881,32 @@ private fun ContinueWatchingHeroCard(
     density: FerrexStageDensityFamily,
     onClick: () -> Unit,
 ) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Primary,
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-        contentDescription = "Continue Watching ${card.title}",
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = null,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                modifier = Modifier.width(if (density == FerrexStageDensityFamily.Compact) 112.dp else 132.dp),
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-            ) {
-                TheaterPlateText(
-                    text = "Continue Watching",
-                    role = TheaterPlateTypographyRole.HeroEyebrow,
-                    densityRole = typographyDensity,
-                )
-                TheaterPlateText(
-                    text = card.title,
-                    role = TheaterPlateTypographyRole.RailTitle,
-                    densityRole = typographyDensity,
-                    maxLines = 2,
-                )
-                TheaterPlateText(
-                    text = card.subtitle,
-                    role = TheaterPlateTypographyRole.RailSubtitle,
-                    densityRole = typographyDensity,
-                    maxLines = 2,
-                )
-                TheaterPlateText(
-                    text = card.progressLabel,
-                    role = TheaterPlateTypographyRole.FactValue,
-                    densityRole = typographyDensity,
-                )
-                FerrexActionButton(
-                    label = "Open",
-                    role = FerrexActionRole.Primary,
-                    onClick = onClick,
-                )
-            }
-        }
+    val art = remember(card.imageKey, card.stableKey, card.title) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = null,
+            fallbackLabel = "No poster",
+            surfaceKey = "continue-watching-hero",
+            itemKey = card.stableKey,
+            semanticLabel = card.title,
+            grounding = MediaArtGrounding.TheaterPlateContactShadow,
+        )
     }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = "Continue Watching",
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.Hero,
+        state = continueWatchingCardState(card, actionRole = FerrexActionRole.Primary),
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "Continue Watching ${card.title}. ${card.progressLabel}. Action: Open",
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1979,48 +1917,35 @@ private fun ContinueWatchingCardView(
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
     density: FerrexStageDensityFamily,
+    itemIdentity: MediaRailItemIdentity,
     semanticLabel: String = card.title,
     onClick: () -> Unit,
 ) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneWidth),
-        onClick = onClick,
-        contentDescription = semanticLabel,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = null,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                semanticLabel = semanticLabel,
-            )
-            TheaterPlateText(
-                text = card.title,
-                role = TheaterPlateTypographyRole.RailTitle,
-                densityRole = typographyDensity,
-            )
-            TheaterPlateText(
-                text = card.subtitle,
-                role = TheaterPlateTypographyRole.RailSubtitle,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = card.progressLabel,
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = typographyDensity,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
+    val art = remember(card.imageKey, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = null,
+            fallbackLabel = "No poster",
+            surfaceKey = "continue-watching-more",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
+        )
     }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = null,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.Rail,
+        state = continueWatchingCardState(card),
+        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneWidth),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.progressLabel}. Action: Open",
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -2031,47 +1956,35 @@ private fun HomeMediaRailCard(
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
     density: FerrexStageDensityFamily,
+    itemIdentity: MediaRailItemIdentity,
     semanticLabel: String = card.title,
     onClick: () -> Unit,
 ) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneCompactWidth),
-        onClick = onClick,
-        contentDescription = semanticLabel,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = card.publicFallbackPath,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                semanticLabel = semanticLabel,
-            )
-            TheaterPlateText(
-                text = card.title,
-                role = TheaterPlateTypographyRole.RailTitle,
-                densityRole = typographyDensity,
-            )
-            TheaterPlateText(
-                text = card.subtitle,
-                role = TheaterPlateTypographyRole.RailSubtitle,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = card.libraryName,
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = typographyDensity,
-            )
-        }
+    val art = remember(card.imageKey, card.publicFallbackPath, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = card.publicFallbackPath,
+            fallbackLabel = "No poster",
+            surfaceKey = "home-shelf",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
+        )
     }
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = card.libraryName,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = density,
+        layout = MobileMediaCardLayout.CompactRail,
+        state = libraryCardState(actionRole = FerrexActionRole.Secondary),
+        modifier = Modifier.width(FerrexDesignTokens.Poster.PhoneCompactWidth),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.libraryName}. Action: Open",
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -2081,71 +1994,78 @@ private fun MediaCardView(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
-    compact: Boolean,
     semanticLabel: String = card.title,
+    itemIdentity: MediaRailItemIdentity,
     onClick: () -> Unit,
 ) {
-    FerrexPosterCard(
-        modifier = Modifier.width(if (compact) FerrexDesignTokens.Poster.PhoneCompactWidth else FerrexDesignTokens.Poster.PhoneWidth),
-        onClick = onClick,
-    ) {
-        Column(modifier = Modifier.padding(FerrexDesignTokens.Space.Sm), verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xs)) {
-            Poster(
-                imageKey = card.imageKey,
-                title = card.title,
-                fallbackPath = card.publicFallbackPath,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                semanticLabel = semanticLabel,
-            )
-            Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(card.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(card.libraryName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun Poster(
-    imageKey: ImageRequestKey?,
-    title: String,
-    fallbackPath: String?,
-    imageResolutions: Map<ImageRequestKey, ImageResolution>,
-    imageLoaderAvailable: Boolean,
-    imageLoader: coil.ImageLoader?,
-    scope: ServerCacheScope,
-    modifier: Modifier = Modifier,
-    semanticLabel: String = title,
-) {
-    if (imageKey == null || !imageLoaderAvailable || imageLoader == null) {
-        FerrexPosterPlaceholder(
-            if (imageKey == null) "No poster" else "Images unavailable",
-            modifier = modifier.semantics(mergeDescendants = true) { contentDescription = semanticLabel },
+    val art = remember(card.imageKey, card.publicFallbackPath, itemIdentity.focusKey, semanticLabel) {
+        mobilePosterArt(
+            imageKey = card.imageKey,
+            fallbackPath = card.publicFallbackPath,
+            fallbackLabel = "No poster",
+            surfaceKey = "library-grid",
+            itemKey = itemIdentity.renderKey,
+            semanticLabel = semanticLabel,
         )
-        return
     }
-    val resolution = imageResolutions[imageKey]
-    val fallback = if (resolution is ImageResolution.Pending || resolution is ImageResolution.Failed) {
-        PosterOnlyIidFallback.url(scope.canonicalServerUrl, imageKey)?.let { FerrexImageFallback(it, "Poster IID fallback") }
-            ?: TmdbImageFallbackPolicy.publicCdnUrl(
-                publicPath = fallbackPath,
-                category = imageKey.category,
-                productCopyAllowsPublicCdn = false,
-            )?.let { FerrexImageFallback(it, "TMDB fallback") }
-    } else {
-        null
-    }
-    FerrexAsyncImage(
-        resolution = resolution,
-        imageLoader = imageLoader,
-        contentDescription = semanticLabel,
-        modifier = modifier,
-        category = imageKey.category,
-        fallback = fallback,
+    FerrexMobileMediaCard(
+        title = card.title,
+        subtitle = card.subtitle,
+        metadata = card.libraryName,
+        art = art,
+        resolution = card.imageKey?.let(imageResolutions::get),
+        imageLoader = imageLoader.takeIf { imageLoaderAvailable },
+        serverUrl = scope.canonicalServerUrl,
+        density = FerrexStageDensityFamily.Standard,
+        layout = MobileMediaCardLayout.Grid,
+        state = libraryCardState(actionRole = FerrexActionRole.Secondary),
+        modifier = Modifier.fillMaxWidth(),
+        contentDescription = "$semanticLabel. ${card.subtitle}. ${card.libraryName}. Action: Open",
+        onClick = onClick,
     )
 }
+
+private fun continueWatchingCardState(
+    card: ContinueWatchingCard,
+    actionRole: FerrexActionRole = FerrexActionRole.Secondary,
+): MobileMediaCardState = MobileMediaCardState(
+    progressFraction = card.progressFraction,
+    progressLabel = card.progressLabel,
+    watchState = card.progressState.toMobileWatchState(),
+    actionLabel = "Open",
+    actionRole = actionRole,
+)
+
+private fun ContinueWatchingProgressState.toMobileWatchState(): MobileMediaWatchState = when (this) {
+    ContinueWatchingProgressState.Pending -> MobileMediaWatchState.Unwatched
+    ContinueWatchingProgressState.InProgress -> MobileMediaWatchState.InProgress
+    ContinueWatchingProgressState.Watched -> MobileMediaWatchState.Watched
+}
+
+private fun libraryCardState(actionRole: FerrexActionRole): MobileMediaCardState = MobileMediaCardState(
+    actionLabel = "Open",
+    actionRole = actionRole,
+)
+
+private fun mobilePosterArt(
+    imageKey: ImageRequestKey?,
+    fallbackPath: String?,
+    fallbackLabel: String,
+    surfaceKey: String,
+    itemKey: String,
+    semanticLabel: String,
+    grounding: MediaArtGrounding = MediaArtGrounding.CardObject,
+): MediaArtObject = MediaArtObject.forCategory(
+    category = imageKey?.category ?: BrowseImageCategory.Poster,
+    request = imageKey?.let { MediaArtRequest(it, fallbackPath) },
+    fallbackLabel = fallbackLabel,
+    targetIdentity = MediaArtTargetIdentity(
+        surfaceKey = surfaceKey,
+        itemKey = itemKey,
+        semanticLabel = semanticLabel,
+    ),
+    grounding = grounding,
+)
 
 @Composable
 private fun EmptyBrowseState(
