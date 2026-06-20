@@ -2,7 +2,7 @@ use crate::domains::library::messages::LibraryMessage;
 use crate::domains::library::server;
 use crate::state::State;
 use ferrex_core::player_prelude::{
-    LibraryId, ScanLifecycleStatus, ScanProgressEvent, ScanSnapshotDto,
+    LibraryId, ScanProgressEvent, ScanRunMode, ScanSnapshotDto,
 };
 use iced::Task;
 use uuid::Uuid;
@@ -11,6 +11,33 @@ pub fn handle_scan_library(
     state: &mut State,
     library_id: LibraryId,
 ) -> Task<LibraryMessage> {
+    if state
+        .domains
+        .library
+        .state
+        .active_scan_by_library_mode(library_id, ScanRunMode::Manual)
+        .is_some()
+    {
+        log::info!(
+            "Scan request ignored for library {} because a manual scan is already active",
+            library_id
+        );
+        return Task::done(LibraryMessage::FetchActiveScans);
+    }
+
+    if !state
+        .domains
+        .library
+        .state
+        .begin_scan_start(library_id, ScanRunMode::Manual)
+    {
+        log::debug!(
+            "Scan request ignored for library {} because a manual scan start is already pending",
+            library_id
+        );
+        return Task::none();
+    }
+
     let api_service = state.api_service.clone();
     Task::perform(
         async move {
@@ -21,8 +48,7 @@ pub fn handle_scan_library(
         move |result| match result {
             Ok(response) => LibraryMessage::ScanStarted {
                 library_id,
-                scan_id: response.scan_id,
-                correlation_id: response.correlation_id,
+                response,
             },
             Err(error) => LibraryMessage::ScanCommandFailed {
                 library_id: Some(library_id),
@@ -151,23 +177,11 @@ pub fn apply_active_scan_snapshot(
         );
     }
 
-    state.domains.library.state.active_scans.clear();
-    for snapshot in snapshots {
-        if matches!(
-            snapshot.status,
-            ScanLifecycleStatus::Completed
-                | ScanLifecycleStatus::Failed
-                | ScanLifecycleStatus::Canceled
-        ) {
-            continue;
-        }
-        state
-            .domains
-            .library
-            .state
-            .active_scans
-            .insert(snapshot.scan_id, snapshot);
-    }
+    state
+        .domains
+        .library
+        .state
+        .replace_active_scan_snapshots(snapshots);
 
     if state.domains.library.state.active_scans.is_empty() {
         log::debug!("No running scans after filtering terminal statuses");
@@ -184,33 +198,12 @@ pub fn apply_scan_progress_frame(state: &mut State, frame: ScanProgressEvent) {
         frame.total_items
     );
 
-    state
+    if !state
         .domains
         .library
         .state
-        .latest_progress
-        .insert(frame.scan_id, frame.clone());
-
-    if let Some(snapshot) = state
-        .domains
-        .library
-        .state
-        .active_scans
-        .get_mut(&frame.scan_id)
+        .apply_scan_progress_frame(frame.clone())
     {
-        snapshot.completed_items = frame.completed_items;
-        snapshot.total_items = frame.total_items;
-        snapshot.retrying_items =
-            frame.retrying_items.unwrap_or(snapshot.retrying_items);
-        snapshot.dead_lettered_items = frame
-            .dead_lettered_items
-            .unwrap_or(snapshot.dead_lettered_items);
-        snapshot.current_path = frame.current_path.clone();
-
-        if let Some(mapped) = map_status(&frame.status) {
-            snapshot.status = mapped;
-        }
-    } else {
         log::warn!(
             "Progress frame received for scan {} but no active snapshot is registered",
             frame.scan_id
@@ -219,19 +212,6 @@ pub fn apply_scan_progress_frame(state: &mut State, frame: ScanProgressEvent) {
 }
 
 pub fn remove_scan(state: &mut State, scan_id: Uuid) {
-    state.domains.library.state.active_scans.remove(&scan_id);
-    state.domains.library.state.latest_progress.remove(&scan_id);
+    state.domains.library.state.remove_active_scan(scan_id);
     log::info!("Removed scan {} from active tracking", scan_id);
-}
-
-fn map_status(status: &str) -> Option<ScanLifecycleStatus> {
-    match status {
-        "pending" => Some(ScanLifecycleStatus::Pending),
-        "running" => Some(ScanLifecycleStatus::Running),
-        "paused" => Some(ScanLifecycleStatus::Paused),
-        "completed" => Some(ScanLifecycleStatus::Completed),
-        "failed" => Some(ScanLifecycleStatus::Failed),
-        "canceled" | "cancelled" => Some(ScanLifecycleStatus::Canceled),
-        _ => None,
-    }
 }

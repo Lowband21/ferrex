@@ -1,6 +1,4 @@
-//! Postgres-backed persistence scaffolding for the orchestrator.
-//! NOTE: This file only defines function signatures and stubs (todo!()).
-//! Actual SQL implementations will be added after migrations are applied.
+//! Postgres-backed persistence for the scan orchestrator queue and cursors.
 
 use crate::error::Result;
 use async_trait::async_trait;
@@ -448,6 +446,7 @@ impl QueueService for PostgresQueueService {
         let kind = request.payload.kind() as i16;
         let dedupe_key = request.dedupe_key().to_string();
         let priority_val: i16 = request.priority as i16;
+        let correlation_id = request.correlation_id;
         let dependency_key = request
             .dependency_key
             .as_ref()
@@ -495,6 +494,21 @@ impl QueueService for PostgresQueueService {
                 .execute(&self.pool)
                 .await;
             }
+            if correlation_id.is_some() {
+                let _ = sqlx::query!(
+                    r#"
+                    UPDATE orchestrator_jobs
+                    SET correlation_id = COALESCE(correlation_id, $1),
+                        updated_at = NOW()
+                    WHERE id = $2
+                      AND correlation_id IS NULL
+                    "#,
+                    correlation_id,
+                    existing.id
+                )
+                .execute(&self.pool)
+                .await;
+            }
             return Ok(JobHandle::merged(
                 existing_id,
                 &request.payload,
@@ -510,9 +524,10 @@ impl QueueService for PostgresQueueService {
             INSERT INTO orchestrator_jobs (
                 id, library_id, kind, payload, priority, state,
                 attempts, available_at, lease_owner, lease_id, lease_expires_at,
-                dedupe_key, dependency_key, last_error, created_at, updated_at
+                dedupe_key, dependency_key, correlation_id, last_error,
+                created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, NULL, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
             "#,
             job_id.0,
             library_id,
@@ -521,7 +536,8 @@ impl QueueService for PostgresQueueService {
             priority_val,
             state,
             dedupe_key,
-            dependency_key
+            dependency_key,
+            correlation_id
         )
             .execute(&self.pool)
             .await;
@@ -600,6 +616,21 @@ impl QueueService for PostgresQueueService {
                                 row.id
                             );
                         }
+                        if correlation_id.is_some() {
+                            let _ = sqlx::query!(
+                                r#"
+                                UPDATE orchestrator_jobs
+                                SET correlation_id = COALESCE(correlation_id, $1),
+                                    updated_at = NOW()
+                                WHERE id = $2
+                                  AND correlation_id IS NULL
+                                "#,
+                                correlation_id,
+                                row.id
+                            )
+                            .execute(&self.pool)
+                            .await;
+                        }
                         return Ok(JobHandle::merged(
                             crate::domain::scan::orchestration::job::JobId(
                                 row.id,
@@ -617,16 +648,20 @@ impl QueueService for PostgresQueueService {
                             INSERT INTO orchestrator_jobs (
                                 id, library_id, kind, payload, priority, state,
                                 attempts, available_at, lease_owner, lease_id, lease_expires_at,
-                                dedupe_key, last_error, created_at, updated_at
+                                dedupe_key, dependency_key, correlation_id,
+                                last_error, created_at, updated_at
                             )
-                            VALUES ($1, $2, $3, $4, $5, 'ready', 0, NOW(), NULL, NULL, NULL, $6, NULL, NOW(), NOW())
+                            VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
                             "#,
                             job_id2.0,
                             library_id,
                             kind,
                             payload_json,
                             priority_val,
-                            dedupe_key
+                            state,
+                            dedupe_key,
+                            dependency_key,
+                            correlation_id
                         )
                             .execute(&self.pool)
                             .await;
@@ -733,6 +768,7 @@ impl QueueService for PostgresQueueService {
             let kind = request.payload.kind();
             let dedupe_key = request.dedupe_key().to_string();
             let priority_val: i16 = request.priority as u8 as i16;
+            let correlation_id = request.correlation_id;
             let dependency_key = request
                 .dependency_key
                 .as_ref()
@@ -780,6 +816,21 @@ impl QueueService for PostgresQueueService {
                     .execute(&mut *tx)
                     .await;
                 }
+                if correlation_id.is_some() {
+                    let _ = sqlx::query!(
+                        r#"
+                        UPDATE orchestrator_jobs
+                        SET correlation_id = COALESCE(correlation_id, $1),
+                            updated_at = NOW()
+                        WHERE id = $2
+                          AND correlation_id IS NULL
+                        "#,
+                        correlation_id,
+                        existing.id
+                    )
+                    .execute(&mut *tx)
+                    .await;
+                }
                 out.push(JobHandle::merged(
                     existing_id,
                     &request.payload,
@@ -794,9 +845,10 @@ impl QueueService for PostgresQueueService {
                 INSERT INTO orchestrator_jobs (
                     id, library_id, kind, payload, priority, state,
                     attempts, available_at, lease_owner, lease_id, lease_expires_at,
-                    dedupe_key, dependency_key, last_error, created_at, updated_at
+                    dedupe_key, dependency_key, correlation_id, last_error,
+                    created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, NULL, NOW(), NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW(), NULL, NULL, NULL, $7, $8, $9, NULL, NOW(), NOW())
                 "#,
                 job_id.0,
                 library_id,
@@ -805,7 +857,8 @@ impl QueueService for PostgresQueueService {
                 priority_val,
                 state,
                 dedupe_key,
-                dependency_key
+                dependency_key,
+                correlation_id
             )
                 .execute(&mut *tx)
                 .await;
@@ -862,6 +915,21 @@ impl QueueService for PostgresQueueService {
                                             "enqueue_many merge elevation failed: {e}"
                                         ))
                                     })?;
+                            }
+                            if correlation_id.is_some() {
+                                let _ = sqlx::query!(
+                                    r#"
+                                    UPDATE orchestrator_jobs
+                                    SET correlation_id = COALESCE(correlation_id, $1),
+                                        updated_at = NOW()
+                                    WHERE id = $2
+                                      AND correlation_id IS NULL
+                                    "#,
+                                    correlation_id,
+                                    row.id
+                                )
+                                .execute(&mut *tx)
+                                .await;
                             }
                             out.push(JobHandle::merged(
                                 crate::domain::scan::orchestration::job::JobId(
@@ -923,6 +991,7 @@ impl QueueService for PostgresQueueService {
             available_at: chrono::DateTime<chrono::Utc>,
             dedupe_key: String,
             dependency_key: Option<String>,
+            correlation_id: Option<Uuid>,
             created_at: chrono::DateTime<chrono::Utc>,
         }
 
@@ -954,7 +1023,8 @@ impl QueueService for PostgresQueueService {
                     LIMIT 1
                 )
                 SELECT j.id, j.payload, j.priority, j.attempts,
-                       j.available_at, j.dedupe_key, j.dependency_key, j.created_at
+                       j.available_at, j.dedupe_key, j.dependency_key,
+                       j.correlation_id, j.created_at
                 FROM orchestrator_jobs j
                 JOIN (
                     SELECT id FROM next
@@ -967,26 +1037,27 @@ impl QueueService for PostgresQueueService {
                 selector.library_id.as_uuid(),
                 priority
             )
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| {
-                    MediaError::Internal(format!("dequeue select failed: {e}"))
-                })?
-                .map(|row| SelectedRow {
-                    id: row.id,
-                    payload: row.payload,
-                    priority: row.priority,
-                    attempts: row.attempts,
-                    available_at: row.available_at,
-                    dedupe_key: row.dedupe_key,
-                    dependency_key: row.dependency_key,
-                    created_at: row.created_at,
-                })
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                MediaError::Internal(format!("dequeue select failed: {e}"))
+            })?
+            .map(|row| SelectedRow {
+                id: row.id,
+                payload: row.payload,
+                priority: row.priority,
+                attempts: row.attempts,
+                available_at: row.available_at,
+                dedupe_key: row.dedupe_key,
+                dependency_key: row.dependency_key,
+                correlation_id: row.correlation_id,
+                created_at: row.created_at,
+            })
         } else {
             sqlx::query!(
                 r#"
                 SELECT id, payload, priority, attempts, available_at,
-                       dedupe_key, dependency_key, created_at
+                       dedupe_key, dependency_key, correlation_id, created_at
                 FROM orchestrator_jobs
                 WHERE kind = $1
                   AND state = 'ready'
@@ -1008,6 +1079,7 @@ impl QueueService for PostgresQueueService {
                     available_at: row.available_at,
                     dedupe_key: row.dedupe_key,
                     dependency_key: row.dependency_key,
+                    correlation_id: row.correlation_id,
                     created_at: row.created_at,
                 })
         };
@@ -1085,6 +1157,7 @@ impl QueueService for PostgresQueueService {
             backoff_until: None,
             dedupe_key: row.dedupe_key,
             dependency_key: row.dependency_key.map(DependencyKey::from),
+            correlation_id: row.correlation_id,
             created_at: row.created_at,
             updated_at: chrono::Utc::now(),
         };
@@ -1121,8 +1194,8 @@ impl QueueService for PostgresQueueService {
               AND lease_expires_at > NOW()
             RETURNING
                 id, library_id, kind, payload, priority, attempts, available_at,
-                dedupe_key, dependency_key, created_at, updated_at,
-                lease_owner, lease_expires_at
+                dedupe_key, dependency_key, correlation_id, created_at,
+                updated_at, lease_owner, lease_expires_at
             "#,
             extend_ms,
             renewal.lease_id.0
@@ -1173,6 +1246,7 @@ impl QueueService for PostgresQueueService {
             backoff_until: None,
             dedupe_key: row.dedupe_key,
             dependency_key: row.dependency_key.map(DependencyKey::from),
+            correlation_id: row.correlation_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
         };

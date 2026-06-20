@@ -265,6 +265,8 @@ pub struct JobRecord {
     pub backoff_until: Option<DateTime<Utc>>,
     pub dedupe_key: String,
     pub dependency_key: Option<DependencyKey>,
+    #[serde(default)]
+    pub correlation_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -285,6 +287,7 @@ impl JobRecord {
             backoff_until: None,
             dedupe_key,
             dependency_key: None,
+            correlation_id: None,
             created_at: now,
             updated_at: now,
         }

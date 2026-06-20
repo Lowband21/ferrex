@@ -14,7 +14,8 @@ use ferrex_core::player_prelude::{
     LibraryType, Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
     MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
     MovieBatchSyncResponse, Platform, Role, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanConfig, ScanMetrics, SeriesBundleFetchRequest,
+    ScanCommandRequest, ScanConfig, ScanLifecycleStatus, ScanMetrics,
+    ScanRunMode, ScanStartDisposition, SeriesBundleFetchRequest,
     SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
     StartClaimResponse, StartScanRequest, UpdateLibraryRequest,
     UpdateProgressRequest, User, UserPermissions, UserPreferences,
@@ -361,9 +362,16 @@ impl ApiService for TestApiService {
         _library_id: LibraryId,
         _request: StartScanRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let mode = ScanRunMode::Manual;
+        let run_key = mode.run_key(_library_id);
         Ok(ScanCommandAcceptedResponse {
             scan_id: Uuid::now_v7(),
             correlation_id: Uuid::now_v7(),
+            status: ScanLifecycleStatus::Running,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Created,
         })
     }
 
@@ -372,9 +380,16 @@ impl ApiService for TestApiService {
         _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let mode = ScanRunMode::Manual;
+        let run_key = mode.run_key(_library_id);
         Ok(ScanCommandAcceptedResponse {
             scan_id: Uuid::now_v7(),
             correlation_id: Uuid::now_v7(),
+            status: ScanLifecycleStatus::Paused,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
@@ -383,9 +398,16 @@ impl ApiService for TestApiService {
         _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let mode = ScanRunMode::Manual;
+        let run_key = mode.run_key(_library_id);
         Ok(ScanCommandAcceptedResponse {
             scan_id: Uuid::now_v7(),
             correlation_id: Uuid::now_v7(),
+            status: ScanLifecycleStatus::Running,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
@@ -394,9 +416,16 @@ impl ApiService for TestApiService {
         _library_id: LibraryId,
         _request: ScanCommandRequest,
     ) -> RepositoryResult<ScanCommandAcceptedResponse> {
+        let mode = ScanRunMode::Manual;
+        let run_key = mode.run_key(_library_id);
         Ok(ScanCommandAcceptedResponse {
             scan_id: Uuid::now_v7(),
             correlation_id: Uuid::now_v7(),
+            status: ScanLifecycleStatus::Canceled,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 

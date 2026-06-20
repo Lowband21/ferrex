@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use ferrex_core::api::types::ScanRunMode;
 use ferrex_core::domain::scan::orchestration::{
     JobEvent, JobEventPayload, JobId, JobKind, MaintenanceLibrary,
     MaintenancePlanningLimits, config::MaintenanceConfig,
@@ -130,6 +131,7 @@ impl MaintenanceScheduler {
                 MaintenanceLibrary::from_library(&library);
             if self.is_in_flight(maintenance_library.id).await
                 || self.is_backing_off(maintenance_library.id, now).await
+                || self.manual_scan_active(maintenance_library.id).await
             {
                 continue;
             }
@@ -372,6 +374,27 @@ impl MaintenanceScheduler {
 
     async fn is_in_flight(&self, library_id: LibraryId) -> bool {
         self.in_flight.lock().await.contains_key(&library_id)
+    }
+
+    async fn manual_scan_active(&self, library_id: LibraryId) -> bool {
+        match self
+            .orchestrator
+            .unit_of_work
+            .scan_runs
+            .load_active(library_id, ScanRunMode::Manual)
+            .await
+        {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(err) => {
+                warn!(
+                    library = %library_id,
+                    error = %err,
+                    "failed to inspect active manual scan before maintenance scheduling"
+                );
+                true
+            }
+        }
     }
 
     async fn is_backing_off(

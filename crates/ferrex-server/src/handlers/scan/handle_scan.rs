@@ -11,7 +11,7 @@ use ferrex_core::api::ScanQueueDepths;
 use ferrex_core::api::types::{
     ActiveScansResponse, ApiResponse, LatestProgressResponse,
     ScanCommandAcceptedResponse, ScanCommandRequest, ScanSnapshotDto,
-    StartScanRequest,
+    ScanStartDisposition, StartScanRequest,
 };
 use ferrex_core::error::MediaError;
 use ferrex_core::types::{LibraryId, MediaEvent, ScanProgressEvent};
@@ -25,7 +25,8 @@ use uuid::Uuid;
 use crate::infra::app_state::AppState;
 use crate::infra::demo_mode;
 use crate::infra::scan::scan_manager::{
-    ScanBroadcastFrame, ScanControlError, ScanControlPlane, ScanHistoryEntry,
+    ScanBroadcastFrame, ScanCommandAccepted, ScanControlError,
+    ScanControlPlane, ScanHistoryEntry,
 };
 use ferrex_core::api::scan::{
     BudgetConfigView, BulkModeView, IncrementalScanPolicyView,
@@ -101,64 +102,104 @@ pub async fn start_scan_handler(
 
     let accepted = state
         .scan_control()
-        .start_library_scan(LibraryId(library_id), request.correlation_id)
+        .start_library_scan(
+            LibraryId(library_id),
+            request.correlation_id,
+            request.effective_mode(),
+        )
         .await?;
+    let status = scan_start_status(accepted.disposition);
 
     Ok((
-        StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        status,
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
 pub async fn pause_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().pause_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .pause_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
 pub async fn resume_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().resume_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .resume_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
 }
 
 pub async fn cancel_scan_handler(
     State(state): State<AppState>,
-    Path((_library_id,)): Path<(Uuid,)>,
+    Path((library_id,)): Path<(Uuid,)>,
     Json(request): Json<ScanCommandRequest>,
 ) -> Result<impl IntoResponse, ScanHttpError> {
-    let accepted = state.scan_control().cancel_scan(&request.scan_id).await?;
+    let accepted = state
+        .scan_control()
+        .cancel_scan(LibraryId(library_id), &request.scan_id)
+        .await?;
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(ApiResponse::success(ScanCommandAcceptedResponse {
-            scan_id: accepted.scan_id,
-            correlation_id: accepted.correlation_id,
-        })),
+        Json(ApiResponse::success(scan_command_response(accepted))),
     ))
+}
+
+fn scan_start_status(disposition: ScanStartDisposition) -> StatusCode {
+    match disposition {
+        ScanStartDisposition::Created => StatusCode::ACCEPTED,
+        ScanStartDisposition::Reused => StatusCode::OK,
+    }
+}
+
+fn scan_command_response(
+    accepted: ScanCommandAccepted,
+) -> ScanCommandAcceptedResponse {
+    ScanCommandAcceptedResponse {
+        scan_id: accepted.scan_id,
+        correlation_id: accepted.correlation_id,
+        status: accepted.status.into(),
+        mode: accepted.mode,
+        idempotency_key: accepted.idempotency_key,
+        run_key: accepted.run_key,
+        disposition: accepted.disposition,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_status_distinguishes_created_and_reused_runs() {
+        assert_eq!(
+            scan_start_status(ScanStartDisposition::Created),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            scan_start_status(ScanStartDisposition::Reused),
+            StatusCode::OK
+        );
+    }
 }
 
 pub async fn active_scans_handler(

@@ -2,8 +2,8 @@ use ferrex_model::{MediaID, SubjectKey};
 
 use ferrex_core::{
     api::types::{
-        ScanLifecycleStatus as ApiScanLifecycleStatus, ScanSnapshotDto,
-        SeriesBundleResponse,
+        ScanLifecycleStatus as ApiScanLifecycleStatus, ScanRunMode,
+        ScanSnapshotDto, ScanStartDisposition, SeriesBundleResponse,
     },
     application::unit_of_work::AppUnitOfWork,
     domain::scan::{
@@ -12,7 +12,8 @@ use ferrex_core::{
             index::{IndexingChange, IndexingOutcome},
         },
         orchestration::{
-            JobEvent, LibraryActorCommand, StartMode,
+            JobEvent, LibraryActorCommand, LibraryScanRun,
+            LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
             events::{JobEventPayload, ScanEvent},
             job::{JobId, JobKind},
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
@@ -90,7 +91,12 @@ pub struct ScanControlPlane {
 
 impl fmt::Debug for ScanControlPlane {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let active = self.inner.active.try_read().ok().map(|guard| guard.len());
+        let active = self
+            .inner
+            .active_by_scan_id
+            .try_read()
+            .ok()
+            .map(|guard| guard.len());
         let history =
             self.inner.history.try_read().ok().map(|guard| guard.len());
         let receiver_count = self.inner.media_bus.receiver_count();
@@ -110,7 +116,8 @@ impl fmt::Debug for ScanControlPlane {
 struct ScanControlPlaneInner {
     unit_of_work: Arc<AppUnitOfWork>,
     orchestrator: Arc<ScanOrchestrator>,
-    active: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
+    active_by_scan_id: RwLock<HashMap<Uuid, Arc<ScanRun>>>,
+    active_by_run_key: RwLock<HashMap<String, Arc<ScanRun>>>,
     history: RwLock<VecDeque<ScanHistoryEntry>>,
     media_bus: Arc<MediaEventBus>,
     aggregator: ScanRunAggregator,
@@ -149,7 +156,8 @@ impl ScanControlPlane {
             inner: Arc::new(ScanControlPlaneInner {
                 unit_of_work,
                 orchestrator,
-                active: RwLock::new(HashMap::new()),
+                active_by_scan_id: RwLock::new(HashMap::new()),
+                active_by_run_key: RwLock::new(HashMap::new()),
                 history: RwLock::new(VecDeque::with_capacity(HISTORY_CAPACITY)),
                 media_bus,
                 aggregator,
@@ -190,7 +198,7 @@ impl ScanControlPlane {
         &self,
         scan_id: Uuid,
     ) -> Result<broadcast::Receiver<ScanBroadcastFrame>, ScanControlError> {
-        let guard = self.inner.active.read().await;
+        let guard = self.inner.active_by_scan_id.read().await;
         guard
             .get(&scan_id)
             .cloned()
@@ -203,6 +211,7 @@ impl ScanControlPlane {
         &self,
         library_id: LibraryId,
         correlation_id: Option<Uuid>,
+        mode: ScanRunMode,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
         let library = self
             .inner
@@ -217,39 +226,75 @@ impl ScanControlPlane {
             return Err(ScanControlError::LibraryDisabled);
         }
 
-        let correlation_id = correlation_id.unwrap_or_else(Uuid::now_v7);
-        let scan_id = correlation_id;
-        let run = ScanRun::new(
-            Arc::clone(&self.inner),
-            scan_id,
-            library_id,
-            correlation_id,
-            StartMode::Bulk,
-        );
-
-        self.inner.register_run(run.clone()).await;
-        run.begin().await;
-
-        if let Err(err) = self
+        let requested_id = correlation_id.unwrap_or_else(Uuid::now_v7);
+        let get_or_create = self
             .inner
-            .orchestrator
-            .command_library(
-                library_id,
-                LibraryActorCommand::Start {
-                    mode: StartMode::Bulk,
-                    correlation_id: Some(correlation_id),
-                },
+            .unit_of_work
+            .scan_runs
+            .get_or_create_active(
+                NewLibraryScanRun::new(library_id, mode)
+                    .with_scan_id(requested_id)
+                    .with_correlation_id(requested_id)
+                    .running(),
             )
             .await
-        {
-            run.fail_with_reason("start_command_failed").await;
-            return Err(ScanControlError::internal(err.to_string()));
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        let durable = get_or_create.run;
+        let disposition = get_or_create.disposition;
+        let run = self.inner.register_durable_run(durable.clone()).await;
+
+        if disposition == ScanStartDisposition::Created {
+            run.begin().await;
+
+            if let Err(err) = self
+                .inner
+                .orchestrator
+                .command_library(
+                    durable.library_id,
+                    LibraryActorCommand::Start {
+                        mode: start_mode_from_scan_run_mode(durable.mode),
+                        correlation_id: Some(durable.correlation_id),
+                    },
+                )
+                .await
+            {
+                run.fail_with_reason("start_command_failed").await;
+                return Err(ScanControlError::internal(err.to_string()));
+            }
         }
 
+        let snapshot = run.snapshot().await?;
         Ok(ScanCommandAccepted {
-            scan_id,
-            correlation_id,
+            scan_id: durable.scan_id,
+            correlation_id: durable.correlation_id,
+            status: snapshot.status,
+            mode: durable.mode,
+            idempotency_key: durable.run_key.clone(),
+            run_key: durable.run_key,
+            disposition,
         })
+    }
+
+    pub async fn rehydrate_active_runs(
+        &self,
+    ) -> Result<usize, ScanControlError> {
+        let active_runs = self
+            .inner
+            .unit_of_work
+            .scan_runs
+            .list_active()
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        let mut restored = 0usize;
+        for durable in active_runs {
+            let run = self.inner.register_durable_run(durable).await;
+            run.seed_rehydrated_progress().await;
+            restored += 1;
+        }
+
+        Ok(restored)
     }
 
     pub async fn inject_created_folders(
@@ -346,45 +391,72 @@ impl ScanControlPlane {
 
     pub async fn pause_scan(
         &self,
+        library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup(scan_id).await?;
-        let correlation_id = Uuid::now_v7();
-        run.pause(correlation_id).await?;
+        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let requested_correlation_id = Uuid::now_v7();
+        run.pause(requested_correlation_id).await?;
+        let snapshot = run.snapshot().await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
-            correlation_id,
+            correlation_id: snapshot.correlation_id,
+            status: snapshot.status,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
     pub async fn resume_scan(
         &self,
+        library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup(scan_id).await?;
-        let correlation_id = Uuid::now_v7();
-        run.resume(correlation_id).await?;
+        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let requested_correlation_id = Uuid::now_v7();
+        run.resume(requested_correlation_id).await?;
+        let snapshot = run.snapshot().await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
-            correlation_id,
+            correlation_id: snapshot.correlation_id,
+            status: snapshot.status,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
     pub async fn cancel_scan(
         &self,
+        library_id: LibraryId,
         scan_id: &Uuid,
     ) -> Result<ScanCommandAccepted, ScanControlError> {
-        let run = self.inner.lookup(scan_id).await?;
-        let correlation_id = Uuid::now_v7();
-        run.cancel(correlation_id).await?;
+        let run = self.inner.lookup_for_library(scan_id, library_id).await?;
+        let requested_correlation_id = Uuid::now_v7();
+        run.cancel(requested_correlation_id).await?;
+        let snapshot = run.snapshot().await?;
+        let mode = scan_run_mode_from_start_mode(run.start_mode());
+        let run_key = mode.run_key(run.library_id());
         Ok(ScanCommandAccepted {
             scan_id: *scan_id,
-            correlation_id,
+            correlation_id: snapshot.correlation_id,
+            status: snapshot.status,
+            mode,
+            idempotency_key: run_key.clone(),
+            run_key,
+            disposition: ScanStartDisposition::Reused,
         })
     }
 
     pub async fn active_scans(&self) -> Vec<ScanSnapshot> {
-        let guard = self.inner.active.read().await;
+        let guard = self.inner.active_by_scan_id.read().await;
         let runs: Vec<_> = guard.values().cloned().collect();
         drop(guard);
 
@@ -403,7 +475,7 @@ impl ScanControlPlane {
     }
 
     pub async fn snapshot(&self, scan_id: &Uuid) -> Option<ScanSnapshot> {
-        let guard = self.inner.active.read().await;
+        let guard = self.inner.active_by_scan_id.read().await;
         let run = guard.get(scan_id).cloned();
         drop(guard);
         if let Some(run) = run {
@@ -423,10 +495,32 @@ impl ScanControlPlane {
 }
 
 impl ScanControlPlaneInner {
-    async fn register_run(&self, run: Arc<ScanRun>) {
+    async fn register_durable_run(
+        self: &Arc<Self>,
+        durable: LibraryScanRun,
+    ) -> Arc<ScanRun> {
+        let run = ScanRun::from_durable(Arc::clone(self), durable);
+        self.register_run(run).await
+    }
+
+    async fn register_run(&self, run: Arc<ScanRun>) -> Arc<ScanRun> {
+        let scan_id = run.scan_id();
+        let run_key = run.run_key();
+
         {
-            let mut guard = self.active.write().await;
-            guard.insert(run.scan_id(), Arc::clone(&run));
+            let mut by_scan_id = self.active_by_scan_id.write().await;
+            if let Some(existing) = by_scan_id.get(&scan_id).cloned() {
+                return existing;
+            }
+
+            let mut by_run_key = self.active_by_run_key.write().await;
+            if let Some(existing) = by_run_key.get(&run_key).cloned() {
+                by_scan_id.insert(scan_id, Arc::clone(&existing));
+                return existing;
+            }
+
+            by_scan_id.insert(scan_id, Arc::clone(&run));
+            by_run_key.insert(run_key, Arc::clone(&run));
         }
 
         self.movie_batch_notifiers
@@ -437,18 +531,22 @@ impl ScanControlPlaneInner {
             )
             .await;
 
-        self.aggregator.register(run).await;
+        self.aggregator.register(Arc::clone(&run)).await;
+        run
     }
 
     async fn finalize_run(
         &self,
         scan_id: Uuid,
+        run_key: String,
         correlation_id: Uuid,
         snapshot: ScanHistoryEntry,
     ) {
         {
-            let mut guard = self.active.write().await;
-            guard.remove(&scan_id);
+            let mut by_scan_id = self.active_by_scan_id.write().await;
+            by_scan_id.remove(&scan_id);
+            let mut by_run_key = self.active_by_run_key.write().await;
+            by_run_key.remove(&run_key);
         }
         self.movie_batch_notifiers
             .on_run_finished(snapshot.library_id)
@@ -488,11 +586,23 @@ impl ScanControlPlaneInner {
         &self,
         scan_id: &Uuid,
     ) -> Result<Arc<ScanRun>, ScanControlError> {
-        let guard = self.active.read().await;
+        let guard = self.active_by_scan_id.read().await;
         guard
             .get(scan_id)
             .cloned()
             .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    async fn lookup_for_library(
+        &self,
+        scan_id: &Uuid,
+        library_id: LibraryId,
+    ) -> Result<Arc<ScanRun>, ScanControlError> {
+        let run = self.lookup(scan_id).await?;
+        if run.library_id() != library_id {
+            return Err(ScanControlError::LibraryMismatch);
+        }
+        Ok(run)
     }
 }
 
@@ -500,6 +610,11 @@ impl ScanControlPlaneInner {
 pub struct ScanCommandAccepted {
     pub scan_id: Uuid,
     pub correlation_id: Uuid,
+    pub status: ScanLifecycleStatus,
+    pub mode: ScanRunMode,
+    pub idempotency_key: String,
+    pub run_key: String,
+    pub disposition: ScanStartDisposition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -523,6 +638,33 @@ impl ScanLifecycleStatus {
             ScanLifecycleStatus::Failed => "failed",
             ScanLifecycleStatus::Canceled => "canceled",
         }
+    }
+}
+
+fn start_mode_from_scan_run_mode(mode: ScanRunMode) -> StartMode {
+    match mode {
+        ScanRunMode::Manual => StartMode::Bulk,
+        ScanRunMode::Maintenance => StartMode::Maintenance,
+        ScanRunMode::Resume => StartMode::Resume,
+    }
+}
+
+fn scan_run_mode_from_start_mode(mode: StartMode) -> ScanRunMode {
+    match mode {
+        StartMode::Bulk => ScanRunMode::Manual,
+        StartMode::Maintenance => ScanRunMode::Maintenance,
+        StartMode::Resume => ScanRunMode::Resume,
+    }
+}
+
+fn repository_status_from_payload(
+    status: &str,
+) -> Option<ApiScanLifecycleStatus> {
+    match status {
+        "pending" => Some(ApiScanLifecycleStatus::Pending),
+        "paused" => Some(ApiScanLifecycleStatus::Paused),
+        "completed" | "failed" | "canceled" | "cancelled" => None,
+        _ => Some(ApiScanLifecycleStatus::Running),
     }
 }
 
@@ -604,6 +746,17 @@ enum ScanPhase {
 }
 
 impl ScanPhase {
+    fn from_lifecycle_status(status: &ScanLifecycleStatus) -> Self {
+        match status {
+            ScanLifecycleStatus::Pending => Self::Initializing,
+            ScanLifecycleStatus::Running => Self::Discovering,
+            ScanLifecycleStatus::Paused => Self::Discovering,
+            ScanLifecycleStatus::Completed => Self::Completed,
+            ScanLifecycleStatus::Failed => Self::Failed,
+            ScanLifecycleStatus::Canceled => Self::Canceled,
+        }
+    }
+
     fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Failed | Self::Canceled)
     }
@@ -674,45 +827,54 @@ impl ScanItemState {
 }
 
 impl ScanRun {
-    fn new(
+    fn from_durable(
         inner: Arc<ScanControlPlaneInner>,
-        scan_id: Uuid,
-        library_id: LibraryId,
-        correlation_id: Uuid,
-        mode: StartMode,
+        durable: LibraryScanRun,
     ) -> Arc<Self> {
         let (tx, _rx) = broadcast::channel(1024);
+        let status = ScanLifecycleStatus::from(durable.status.clone());
+        let phase = ScanPhase::from_lifecycle_status(&status);
+        let path_key = durable
+            .current_path
+            .as_ref()
+            .and_then(|path| SubjectKey::path(path.clone()).ok());
+        let last_idempotency_key = if durable.sequence > 0 {
+            format!("scan:{}:{}", durable.scan_id, durable.sequence)
+        } else {
+            String::new()
+        };
+
         Arc::new(ScanRun {
-            scan_id,
-            library_id,
-            correlation_id,
+            scan_id: durable.scan_id,
+            library_id: durable.library_id,
+            correlation_id: durable.correlation_id,
             state: Mutex::new(ScanRunState {
-                scan_id,
-                library_id,
-                phase: ScanPhase::Initializing,
-                status: ScanLifecycleStatus::Pending,
-                completed_items: 0,
-                total_items: 0,
-                dead_lettered_items: 0,
-                retrying_items: 0,
-                current_path: None,
-                path_key: None,
-                correlation_id,
-                idempotency_prefix: format!("scan:{}:", scan_id),
-                event_sequence: 0,
-                last_idempotency_key: String::new(),
-                started_at: Utc::now(),
-                terminal_at: None,
-                last_activity_at: None,
+                scan_id: durable.scan_id,
+                library_id: durable.library_id,
+                phase,
+                status,
+                completed_items: durable.completed_items,
+                total_items: durable.total_items,
+                dead_lettered_items: durable.dead_lettered_items,
+                retrying_items: durable.retrying_items,
+                current_path: durable.current_path,
+                path_key,
+                correlation_id: durable.correlation_id,
+                idempotency_prefix: format!("scan:{}:", durable.scan_id),
+                event_sequence: durable.sequence,
+                last_idempotency_key,
+                started_at: durable.started_at,
+                terminal_at: durable.terminal_at,
+                last_activity_at: Some(durable.updated_at),
                 quiescence_started_at: None,
-                last_error: None,
+                last_error: durable.last_error,
                 item_states: HashMap::new(),
                 index_successes_by_folder: HashMap::new(),
             }),
             tx,
             inner: Arc::downgrade(&inner),
             events: Mutex::new(VecDeque::with_capacity(EVENT_HISTORY_CAPACITY)),
-            start_mode: mode,
+            start_mode: start_mode_from_scan_run_mode(durable.mode),
             log: Mutex::new(ScanLogWatermark::default()),
         })
     }
@@ -733,6 +895,10 @@ impl ScanRun {
         self.start_mode
     }
 
+    fn run_key(&self) -> String {
+        scan_run_mode_from_start_mode(self.start_mode).run_key(self.library_id)
+    }
+
     fn subscribe(&self) -> broadcast::Receiver<ScanBroadcastFrame> {
         self.tx.subscribe()
     }
@@ -746,6 +912,22 @@ impl ScanRun {
             state.build_payload()
         };
         self.emit_frame(ScanEventKind::Started, emitted).await;
+    }
+
+    async fn seed_rehydrated_progress(&self) {
+        let payload = {
+            let state = self.state.lock().await;
+            state.build_current_payload()
+        };
+        let frame = ScanBroadcastFrame {
+            event: ScanEventKind::Progress,
+            payload,
+        };
+        let mut history = self.events.lock().await;
+        if history.len() == EVENT_HISTORY_CAPACITY {
+            history.pop_front();
+        }
+        history.push_back(frame);
     }
 
     async fn rehydrate_from_cursors(&self) {
@@ -985,16 +1167,20 @@ impl ScanRun {
 
     async fn snapshot(&self) -> Result<ScanSnapshot, ScanControlError> {
         let state = self.state.lock().await;
+        let mode = scan_run_mode_from_start_mode(self.start_mode);
         Ok(ScanSnapshot {
             scan_id: state.scan_id,
             library_id: state.library_id,
             status: state.status.clone(),
+            mode,
             completed_items: state.completed_items,
             total_items: state.total_items,
             retrying_items: state.retrying_items,
             dead_lettered_items: state.dead_lettered_items,
             correlation_id: state.correlation_id,
             idempotency_key: state.current_idempotency_key(),
+            run_key: mode.run_key(state.library_id),
+            disposition: None,
             current_path: state.current_path.clone(),
             started_at: state.started_at,
             terminal_at: state.terminal_at,
@@ -1485,6 +1671,8 @@ impl ScanRun {
             history.push_back(frame.clone());
         }
 
+        self.persist_progress_payload(&payload).await;
+
         let _ = self.tx.send(frame.clone());
         let error = if matches!(event, ScanEventKind::Failed) {
             self.failure_reason().await
@@ -1596,28 +1784,113 @@ impl ScanRun {
         }
     }
 
+    async fn persist_progress_payload(&self, payload: &ScanProgressEvent) {
+        let Some(status) = repository_status_from_payload(&payload.status)
+        else {
+            return;
+        };
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+
+        if let Err(err) = inner
+            .unit_of_work
+            .scan_runs
+            .update_progress(LibraryScanRunProgressUpdate {
+                scan_id: self.scan_id,
+                status: Some(status),
+                completed_items: payload.completed_items,
+                total_items: payload.total_items,
+                retrying_items: payload.retrying_items.unwrap_or(0),
+                dead_lettered_items: payload.dead_lettered_items.unwrap_or(0),
+                current_path: payload.current_path.clone(),
+                sequence: payload.sequence,
+            })
+            .await
+        {
+            warn!(
+                scan = %self.scan_id,
+                library = %self.library_id,
+                error = %err,
+                "failed to persist scan progress"
+            );
+        }
+    }
+
     async fn failure_reason(&self) -> Option<String> {
         let state = self.state.lock().await;
         state.last_error.clone()
     }
 
     async fn finalize_history(&self, terminal: ScanLifecycleStatus) {
-        let snapshot = {
+        let (snapshot, progress, terminal_at, last_error) = {
             let state = self.state.lock().await;
-            ScanHistoryEntry {
-                scan_id: state.scan_id,
-                library_id: state.library_id,
-                status: terminal.clone(),
-                completed_items: state.completed_items,
-                total_items: state.total_items,
-                started_at: state.started_at,
-                terminal_at: state.terminal_at.unwrap_or_else(Utc::now),
-            }
+            let terminal_at = state.terminal_at.unwrap_or_else(Utc::now);
+            (
+                ScanHistoryEntry {
+                    scan_id: state.scan_id,
+                    library_id: state.library_id,
+                    status: terminal.clone(),
+                    completed_items: state.completed_items,
+                    total_items: state.total_items,
+                    started_at: state.started_at,
+                    terminal_at,
+                },
+                LibraryScanRunProgressUpdate {
+                    scan_id: state.scan_id,
+                    status: None,
+                    completed_items: state.completed_items,
+                    total_items: state.total_items,
+                    retrying_items: state.retrying_items,
+                    dead_lettered_items: state.dead_lettered_items,
+                    current_path: state.current_path.clone(),
+                    sequence: state.event_sequence,
+                },
+                terminal_at,
+                state.last_error.clone(),
+            )
         };
 
         if let Some(inner) = self.inner.upgrade() {
+            if let Err(err) =
+                inner.unit_of_work.scan_runs.update_progress(progress).await
+            {
+                warn!(
+                    scan = %self.scan_id,
+                    status = ?terminal,
+                    error = %err,
+                    "failed to persist final scan progress; keeping run active"
+                );
+                return;
+            }
+
+            if let Err(err) = inner
+                .unit_of_work
+                .scan_runs
+                .mark_terminal(
+                    self.scan_id,
+                    terminal.clone().into(),
+                    terminal_at,
+                    last_error,
+                )
+                .await
+            {
+                warn!(
+                    scan = %self.scan_id,
+                    status = ?terminal,
+                    error = %err,
+                    "failed to persist terminal scan state; keeping run active"
+                );
+                return;
+            }
+
             inner
-                .finalize_run(self.scan_id, self.correlation_id, snapshot)
+                .finalize_run(
+                    self.scan_id,
+                    self.run_key(),
+                    self.correlation_id,
+                    snapshot,
+                )
                 .await;
         }
 
@@ -1989,6 +2262,17 @@ impl ScanRunState {
         let idempotency_key =
             format!("{}{}", self.idempotency_prefix, self.event_sequence);
         self.last_idempotency_key = idempotency_key.clone();
+        self.build_payload_with_idempotency_key(idempotency_key)
+    }
+
+    fn build_current_payload(&self) -> ScanProgressEvent {
+        self.build_payload_with_idempotency_key(self.current_idempotency_key())
+    }
+
+    fn build_payload_with_idempotency_key(
+        &self,
+        idempotency_key: String,
+    ) -> ScanProgressEvent {
         ScanProgressEvent {
             version: EVENT_VERSION.to_string(),
             scan_id: self.scan_id,
@@ -2992,12 +3276,15 @@ pub struct ScanSnapshot {
     pub scan_id: Uuid,
     pub library_id: LibraryId,
     pub status: ScanLifecycleStatus,
+    pub mode: ScanRunMode,
     pub completed_items: u64,
     pub total_items: u64,
     pub retrying_items: u64,
     pub dead_lettered_items: u64,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
+    pub run_key: String,
+    pub disposition: Option<ScanStartDisposition>,
     pub current_path: Option<String>,
     pub started_at: DateTime<Utc>,
     pub terminal_at: Option<DateTime<Utc>>,
@@ -3010,12 +3297,15 @@ impl From<ScanSnapshot> for ScanSnapshotDto {
             scan_id: snapshot.scan_id,
             library_id: snapshot.library_id,
             status: snapshot.status.into(),
+            mode: snapshot.mode,
             completed_items: snapshot.completed_items,
             total_items: snapshot.total_items,
             retrying_items: snapshot.retrying_items,
             dead_lettered_items: snapshot.dead_lettered_items,
             correlation_id: snapshot.correlation_id,
             idempotency_key: snapshot.idempotency_key,
+            run_key: snapshot.run_key,
+            disposition: snapshot.disposition,
             current_path: snapshot.current_path,
             started_at: snapshot.started_at,
             terminal_at: snapshot.terminal_at,
@@ -3037,10 +3327,24 @@ impl From<ScanLifecycleStatus> for ApiScanLifecycleStatus {
     }
 }
 
+impl From<ApiScanLifecycleStatus> for ScanLifecycleStatus {
+    fn from(value: ApiScanLifecycleStatus) -> Self {
+        match value {
+            ApiScanLifecycleStatus::Pending => ScanLifecycleStatus::Pending,
+            ApiScanLifecycleStatus::Running => ScanLifecycleStatus::Running,
+            ApiScanLifecycleStatus::Paused => ScanLifecycleStatus::Paused,
+            ApiScanLifecycleStatus::Completed => ScanLifecycleStatus::Completed,
+            ApiScanLifecycleStatus::Failed => ScanLifecycleStatus::Failed,
+            ApiScanLifecycleStatus::Canceled => ScanLifecycleStatus::Canceled,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ScanControlError {
     LibraryNotFound,
     LibraryDisabled,
+    LibraryMismatch,
     ScanNotFound,
     ScanNotRunning,
     ScanTerminal,
@@ -3052,6 +3356,7 @@ impl ScanControlError {
         match self {
             ScanControlError::LibraryNotFound => StatusCode::NOT_FOUND,
             ScanControlError::LibraryDisabled => StatusCode::CONFLICT,
+            ScanControlError::LibraryMismatch => StatusCode::BAD_REQUEST,
             ScanControlError::ScanNotFound => StatusCode::NOT_FOUND,
             ScanControlError::ScanNotRunning => StatusCode::CONFLICT,
             ScanControlError::ScanTerminal => StatusCode::GONE,
@@ -3063,6 +3368,7 @@ impl ScanControlError {
         match self {
             ScanControlError::LibraryNotFound => "library_not_found".into(),
             ScanControlError::LibraryDisabled => "library_disabled".into(),
+            ScanControlError::LibraryMismatch => "scan_library_mismatch".into(),
             ScanControlError::ScanNotFound => "scan_not_found".into(),
             ScanControlError::ScanNotRunning => "scan_not_running".into(),
             ScanControlError::ScanTerminal => "scan_already_terminal".into(),
@@ -3082,3 +3388,37 @@ impl fmt::Display for ScanControlError {
 }
 
 impl std::error::Error for ScanControlError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repository_status_maps_runtime_phases_to_durable_running() {
+        assert_eq!(
+            repository_status_from_payload("discovering"),
+            Some(ApiScanLifecycleStatus::Running)
+        );
+        assert_eq!(
+            repository_status_from_payload("quiescing"),
+            Some(ApiScanLifecycleStatus::Running)
+        );
+        assert_eq!(
+            repository_status_from_payload("paused"),
+            Some(ApiScanLifecycleStatus::Paused)
+        );
+        assert_eq!(repository_status_from_payload("completed"), None);
+    }
+
+    #[test]
+    fn library_mismatch_reports_client_error() {
+        assert_eq!(
+            ScanControlError::LibraryMismatch.status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ScanControlError::LibraryMismatch.message(),
+            "scan_library_mismatch"
+        );
+    }
+}

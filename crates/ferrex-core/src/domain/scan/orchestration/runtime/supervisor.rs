@@ -677,7 +677,10 @@ where
                             let current_expires_at = lease.expires_at;
 
                             let correlation_id = correlation_cache
-                                .fetch_or_generate(job_id)
+                                .fetch_persisted_or_generate(
+                                    job_id,
+                                    lease.job.correlation_id,
+                                )
                                 .await;
 
                             // Publish dequeue event
@@ -786,8 +789,9 @@ where
                                                 updated.expires_at;
                                             let correlation_id =
                                                 renew_correlations
-                                                    .fetch_or_generate(
+                                                    .fetch_persisted_or_generate(
                                                         updated.job.id,
+                                                        updated.job.correlation_id,
                                                     )
                                                     .await;
                                             let renew_event = JobEvent::from_job(
@@ -840,7 +844,10 @@ where
                                         );
                                     }
                                     let correlation_id = correlation_cache
-                                        .take_or_generate(job_id)
+                                        .take_persisted_or_generate(
+                                            job_id,
+                                            lease.job.correlation_id,
+                                        )
                                         .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
@@ -880,7 +887,10 @@ where
                                         );
                                     }
                                     let correlation_id = correlation_cache
-                                        .fetch_or_generate(job_id)
+                                        .fetch_persisted_or_generate(
+                                            job_id,
+                                            lease.job.correlation_id,
+                                        )
                                         .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
@@ -926,7 +936,10 @@ where
                                         );
                                     }
                                     let correlation_id = correlation_cache
-                                        .take_or_generate(job_id)
+                                        .take_persisted_or_generate(
+                                            job_id,
+                                            lease.job.correlation_id,
+                                        )
                                         .await;
                                     let event = JobEvent::from_job(
                                         Some(correlation_id),
