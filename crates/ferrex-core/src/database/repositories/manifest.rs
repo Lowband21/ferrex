@@ -3,7 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, QueryBuilder, Row, postgres::PgRow};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
@@ -56,7 +56,11 @@ impl PostgresManifestRepository {
             .unwrap_or_else(|| "root".to_string());
         let completed_at = run.completed_at.unwrap_or_else(Utc::now);
 
-        sqlx::query(
+        let entries_seen = u64_to_i64(run.entries_seen, "entries_seen")?;
+        let diagnostics_seen =
+            u64_to_i64(run.diagnostics_seen, "diagnostics_seen")?;
+
+        sqlx::query!(
             r#"
             INSERT INTO manifest_partition_cursors (
                 library_id,
@@ -88,18 +92,18 @@ impl PostgresManifestRepository {
                 backfilled_from_legacy = FALSE,
                 updated_at = NOW()
             "#,
+            parts.library_id.0,
+            parts.library_type,
+            parts.root_id,
+            parts.root_path_norm,
+            partition_key,
+            parts.partition_id,
+            parts.partition_prefix_norm,
+            run.run_id,
+            completed_at,
+            entries_seen,
+            diagnostics_seen
         )
-        .bind(parts.library_id.0)
-        .bind(parts.library_type)
-        .bind(parts.root_id)
-        .bind(parts.root_path_norm)
-        .bind(partition_key)
-        .bind(parts.partition_id)
-        .bind(parts.partition_prefix_norm)
-        .bind(run.run_id)
-        .bind(completed_at)
-        .bind(u64_to_i64(run.entries_seen, "entries_seen")?)
-        .bind(u64_to_i64(run.diagnostics_seen, "diagnostics_seen")?)
         .execute(&self.pool)
         .await?;
 
@@ -120,7 +124,11 @@ impl fmt::Debug for PostgresManifestRepository {
 impl ManifestRepository for PostgresManifestRepository {
     async fn start_run(&self, run: ManifestRun) -> Result<ManifestRun> {
         let parts = ScopeParts::from_scope(&run.scope)?;
-        let row = sqlx::query(
+        let entries_seen = u64_to_i64(run.entries_seen, "entries_seen")?;
+        let diagnostics_seen =
+            u64_to_i64(run.diagnostics_seen, "diagnostics_seen")?;
+        let row = sqlx::query_as!(
+            ManifestRunRow,
             r#"
             INSERT INTO manifest_runs (
                 run_id,
@@ -154,38 +162,38 @@ impl ManifestRepository for PostgresManifestRepository {
                 diagnostics_seen = EXCLUDED.diagnostics_seen,
                 updated_at = NOW()
             RETURNING
-                run_id,
-                library_id,
-                library_type,
-                scope_kind,
-                root_id,
-                root_path_norm,
+                run_id AS "run_id!",
+                library_id AS "library_id!",
+                library_type AS "library_type!",
+                scope_kind AS "scope_kind!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
                 partition_id,
                 partition_prefix_norm,
-                status,
-                started_at,
+                status AS "status!",
+                started_at AS "started_at!",
                 completed_at,
-                entries_seen,
-                diagnostics_seen
+                entries_seen AS "entries_seen!",
+                diagnostics_seen AS "diagnostics_seen!"
             "#,
+            run.run_id,
+            parts.library_id.0,
+            parts.library_type,
+            parts.scope_kind,
+            parts.root_id,
+            parts.root_path_norm,
+            parts.partition_id,
+            parts.partition_prefix_norm,
+            encode_run_status(run.status),
+            run.started_at,
+            run.completed_at,
+            entries_seen,
+            diagnostics_seen
         )
-        .bind(run.run_id)
-        .bind(parts.library_id.0)
-        .bind(parts.library_type)
-        .bind(parts.scope_kind)
-        .bind(parts.root_id)
-        .bind(parts.root_path_norm)
-        .bind(parts.partition_id)
-        .bind(parts.partition_prefix_norm)
-        .bind(encode_run_status(run.status))
-        .bind(run.started_at)
-        .bind(run.completed_at)
-        .bind(u64_to_i64(run.entries_seen, "entries_seen")?)
-        .bind(u64_to_i64(run.diagnostics_seen, "diagnostics_seen")?)
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_manifest_run(&row)
+        row_to_manifest_run(row)
     }
 
     async fn upsert_batch_entries(
@@ -205,8 +213,98 @@ impl ManifestRepository for PostgresManifestRepository {
             rows.push(row);
         }
 
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let library_ids: Vec<_> =
+            rows.iter().map(|row| row.library_id).collect();
+        let path_norms: Vec<_> =
+            rows.iter().map(|row| row.path_norm.clone()).collect();
+        let entry_kinds: Vec<_> =
+            rows.iter().map(|row| row.entry_kind.to_string()).collect();
+        let library_types: Vec<_> = rows
+            .iter()
+            .map(|row| row.library_type.to_string())
+            .collect();
+        let root_ids: Vec<_> = rows.iter().map(|row| row.root_id).collect();
+        let root_path_norms: Vec<_> =
+            rows.iter().map(|row| row.root_path_norm.clone()).collect();
+        let partition_ids: Vec<_> =
+            rows.iter().map(|row| row.partition_id).collect();
+        let partition_prefix_norms: Vec<_> = rows
+            .iter()
+            .map(|row| row.partition_prefix_norm.clone())
+            .collect();
+        let relative_paths: Vec<_> =
+            rows.iter().map(|row| row.relative_path.clone()).collect();
+        let classification_statuses: Vec<_> = rows
+            .iter()
+            .map(|row| row.classification_status.to_string())
+            .collect();
+        let classification_kinds: Vec<_> = rows
+            .iter()
+            .map(|row| row.classification_kind.clone())
+            .collect();
+        let classification_payloads: Vec<_> = rows
+            .iter()
+            .map(|row| row.classification_payload.clone())
+            .collect();
+        let fingerprint_device_ids: Vec<_> = rows
+            .iter()
+            .map(|row| row.fingerprint_device_id.clone())
+            .collect();
+        let fingerprint_inodes: Vec<_> = rows
+            .iter()
+            .map(|row| row.fingerprint_inode.clone())
+            .collect();
+        let fingerprint_sizes: Vec<_> =
+            rows.iter().map(|row| row.fingerprint_size).collect();
+        let fingerprint_mtime_ms: Vec<_> =
+            rows.iter().map(|row| row.fingerprint_mtime_ms).collect();
+        let fingerprint_weak_hashes: Vec<_> = rows
+            .iter()
+            .map(|row| row.fingerprint_weak_hash.clone())
+            .collect();
+
+        let entries_upserted = sqlx::query!(
             r#"
+            WITH input AS (
+                SELECT *
+                FROM UNNEST(
+                    $1::uuid[],
+                    $2::text[],
+                    $3::text[],
+                    $4::text[],
+                    $5::integer[],
+                    $6::text[],
+                    $7::integer[],
+                    $8::text[],
+                    $9::text[],
+                    $10::text[],
+                    $11::text[],
+                    $12::jsonb[],
+                    $13::text[],
+                    $14::text[],
+                    $15::bigint[],
+                    $16::bigint[],
+                    $17::text[]
+                ) AS row(
+                    library_id,
+                    path_norm,
+                    entry_kind,
+                    library_type,
+                    root_id,
+                    root_path_norm,
+                    partition_id,
+                    partition_prefix_norm,
+                    relative_path,
+                    classification_status,
+                    classification_kind,
+                    classification_payload,
+                    fingerprint_device_id,
+                    fingerprint_inode,
+                    fingerprint_size,
+                    fingerprint_mtime_ms,
+                    fingerprint_weak_hash
+                )
+            )
             INSERT INTO manifest_entries (
                 library_id,
                 path_norm,
@@ -230,35 +328,29 @@ impl ManifestRepository for PostgresManifestRepository {
                 availability,
                 source
             )
-            "#,
-        );
-
-        builder.push_values(rows.iter(), |mut b, row| {
-            b.push_bind(row.library_id)
-                .push_bind(&row.path_norm)
-                .push_bind(row.entry_kind)
-                .push_bind(row.library_type)
-                .push_bind(row.root_id)
-                .push_bind(&row.root_path_norm)
-                .push_bind(row.partition_id)
-                .push_bind(&row.partition_prefix_norm)
-                .push_bind(&row.relative_path)
-                .push_bind(row.classification_status)
-                .push_bind(&row.classification_kind)
-                .push_bind(&row.classification_payload)
-                .push_bind(&row.fingerprint_device_id)
-                .push_bind(&row.fingerprint_inode)
-                .push_bind(row.fingerprint_size)
-                .push_bind(row.fingerprint_mtime_ms)
-                .push_bind(&row.fingerprint_weak_hash)
-                .push_bind(run_id)
-                .push_bind(run_id)
-                .push_bind("available")
-                .push_bind("manifest");
-        });
-
-        builder.push(
-            r#"
+            SELECT
+                library_id,
+                path_norm,
+                entry_kind,
+                library_type,
+                root_id,
+                root_path_norm,
+                partition_id,
+                partition_prefix_norm,
+                relative_path,
+                classification_status,
+                classification_kind,
+                classification_payload,
+                fingerprint_device_id,
+                fingerprint_inode,
+                fingerprint_size,
+                fingerprint_mtime_ms,
+                fingerprint_weak_hash,
+                $18::uuid,
+                $18::uuid,
+                'available',
+                'manifest'
+            FROM input
             ON CONFLICT (library_id, path_norm)
             DO UPDATE SET
                 entry_kind = EXCLUDED.entry_kind,
@@ -283,15 +375,83 @@ impl ManifestRepository for PostgresManifestRepository {
                 source = 'manifest',
                 updated_at = NOW()
             "#,
-        );
-
-        let entries_result = builder.build().execute(&self.pool).await?;
+            &library_ids[..],
+            &path_norms[..],
+            &entry_kinds[..],
+            &library_types[..],
+            &root_ids[..],
+            &root_path_norms[..],
+            &partition_ids[..] as _,
+            &partition_prefix_norms[..] as _,
+            &relative_paths[..],
+            &classification_statuses[..],
+            &classification_kinds[..],
+            &classification_payloads[..],
+            &fingerprint_device_ids[..] as _,
+            &fingerprint_inodes[..] as _,
+            &fingerprint_sizes[..],
+            &fingerprint_mtime_ms[..] as _,
+            &fingerprint_weak_hashes[..] as _,
+            run_id
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
 
         let diagnostics_upserted = if diagnostics.is_empty() {
             0
         } else {
-            let mut diag_builder = QueryBuilder::<Postgres>::new(
+            let diagnostic_run_ids: Vec<_> =
+                diagnostics.iter().map(|row| row.run_id).collect();
+            let diagnostic_library_ids: Vec<_> =
+                diagnostics.iter().map(|row| row.library_id).collect();
+            let diagnostic_root_ids: Vec<_> =
+                diagnostics.iter().map(|row| row.root_id).collect();
+            let diagnostic_partition_ids: Vec<_> =
+                diagnostics.iter().map(|row| row.partition_id).collect();
+            let diagnostic_path_norms: Vec<_> = diagnostics
+                .iter()
+                .map(|row| row.path_norm.clone())
+                .collect();
+            let diagnostic_reasons: Vec<_> =
+                diagnostics.iter().map(|row| row.reason.clone()).collect();
+            let diagnostic_codes: Vec<_> =
+                diagnostics.iter().map(|row| row.code.clone()).collect();
+            let diagnostic_severities: Vec<_> = diagnostics
+                .iter()
+                .map(|row| row.severity.to_string())
+                .collect();
+            let diagnostic_remediations: Vec<_> = diagnostics
+                .iter()
+                .map(|row| row.remediation.clone())
+                .collect();
+
+            sqlx::query!(
                 r#"
+                WITH input AS (
+                    SELECT *
+                    FROM UNNEST(
+                        $1::uuid[],
+                        $2::uuid[],
+                        $3::integer[],
+                        $4::integer[],
+                        $5::text[],
+                        $6::text[],
+                        $7::text[],
+                        $8::text[],
+                        $9::text[]
+                    ) AS row(
+                        run_id,
+                        library_id,
+                        root_id,
+                        partition_id,
+                        path_norm,
+                        reason,
+                        code,
+                        severity,
+                        remediation
+                    )
+                )
                 INSERT INTO manifest_diagnostics (
                     run_id,
                     library_id,
@@ -303,40 +463,40 @@ impl ManifestRepository for PostgresManifestRepository {
                     severity,
                     remediation
                 )
-                "#,
-            );
-
-            diag_builder.push_values(diagnostics.iter(), |mut b, row| {
-                b.push_bind(row.run_id)
-                    .push_bind(row.library_id)
-                    .push_bind(row.root_id)
-                    .push_bind(row.partition_id)
-                    .push_bind(&row.path_norm)
-                    .push_bind(&row.reason)
-                    .push_bind(&row.code)
-                    .push_bind(row.severity)
-                    .push_bind(&row.remediation);
-            });
-
-            diag_builder.push(
-                r#"
+                SELECT
+                    run_id,
+                    library_id,
+                    root_id,
+                    partition_id,
+                    path_norm,
+                    reason,
+                    code,
+                    severity,
+                    remediation
+                FROM input
                 ON CONFLICT (run_id, path_norm, code)
                 DO UPDATE SET
                     reason = EXCLUDED.reason,
                     severity = EXCLUDED.severity,
                     remediation = EXCLUDED.remediation
                 "#,
-            );
-
-            diag_builder
-                .build()
-                .execute(&self.pool)
-                .await?
-                .rows_affected()
+                &diagnostic_run_ids[..],
+                &diagnostic_library_ids[..],
+                &diagnostic_root_ids[..],
+                &diagnostic_partition_ids[..] as _,
+                &diagnostic_path_norms[..],
+                &diagnostic_reasons[..],
+                &diagnostic_codes[..],
+                &diagnostic_severities[..],
+                &diagnostic_remediations[..]
+            )
+            .execute(&self.pool)
+            .await?
+            .rows_affected()
         };
 
         Ok(ManifestBatchUpsertSummary {
-            entries_upserted: entries_result.rows_affected(),
+            entries_upserted,
             diagnostics_upserted,
         })
     }
@@ -345,7 +505,11 @@ impl ManifestRepository for PostgresManifestRepository {
         &self,
         completion: ManifestRunCompletion,
     ) -> Result<ManifestRun> {
-        let row = sqlx::query(
+        let entries_seen = u64_to_i64(completion.entries_seen, "entries_seen")?;
+        let diagnostics_seen =
+            u64_to_i64(completion.diagnostics_seen, "diagnostics_seen")?;
+        let row = sqlx::query_as!(
+            ManifestRunRow,
             r#"
             UPDATE manifest_runs
             SET status = $2,
@@ -356,27 +520,27 @@ impl ManifestRepository for PostgresManifestRepository {
                 updated_at = NOW()
             WHERE run_id = $1
             RETURNING
-                run_id,
-                library_id,
-                library_type,
-                scope_kind,
-                root_id,
-                root_path_norm,
+                run_id AS "run_id!",
+                library_id AS "library_id!",
+                library_type AS "library_type!",
+                scope_kind AS "scope_kind!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
                 partition_id,
                 partition_prefix_norm,
-                status,
-                started_at,
+                status AS "status!",
+                started_at AS "started_at!",
                 completed_at,
-                entries_seen,
-                diagnostics_seen
+                entries_seen AS "entries_seen!",
+                diagnostics_seen AS "diagnostics_seen!"
             "#,
+            completion.run_id,
+            encode_run_status(completion.status),
+            completion.completed_at,
+            entries_seen,
+            diagnostics_seen,
+            completion.error_message
         )
-        .bind(completion.run_id)
-        .bind(encode_run_status(completion.status))
-        .bind(completion.completed_at)
-        .bind(u64_to_i64(completion.entries_seen, "entries_seen")?)
-        .bind(u64_to_i64(completion.diagnostics_seen, "diagnostics_seen")?)
-        .bind(completion.error_message)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| {
@@ -386,7 +550,7 @@ impl ManifestRepository for PostgresManifestRepository {
             ))
         })?;
 
-        let run = row_to_manifest_run(&row)?;
+        let run = row_to_manifest_run(row)?;
         self.upsert_partition_cursor_for_run(&run).await?;
         Ok(run)
     }
@@ -395,7 +559,8 @@ impl ManifestRepository for PostgresManifestRepository {
         &self,
         run_id: Uuid,
     ) -> Result<Vec<ManifestMissingEntryRecord>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query_as!(
+            ManifestMissingEntryRow,
             r#"
             WITH successful_run AS (
                 SELECT
@@ -433,37 +598,21 @@ impl ManifestRepository for PostgresManifestRepository {
                     entries.path_norm,
                     entries.entry_kind
             )
-            SELECT library_id, root_id, partition_id, path_norm, entry_kind
+            SELECT
+                library_id AS "library_id!",
+                root_id AS "root_id!",
+                partition_id,
+                path_norm AS "path_norm!",
+                entry_kind AS "entry_kind!"
             FROM missing
             ORDER BY path_norm ASC
             "#,
+            run_id
         )
-        .bind(run_id)
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter()
-            .map(|row| {
-                Ok(ManifestMissingEntryRecord {
-                    library_id: LibraryId(row.try_get("library_id")?),
-                    root_id: checked_u16(
-                        row.try_get::<i32, _>("root_id")?,
-                        "root_id",
-                    )?,
-                    partition_id: row
-                        .try_get::<Option<i32>, _>("partition_id")?
-                        .map(|value| {
-                            checked_u16(value, "partition_id")
-                                .map(ManifestPartitionId)
-                        })
-                        .transpose()?,
-                    path_norm: row.try_get("path_norm")?,
-                    entry_kind: decode_entry_kind(
-                        row.try_get::<String, _>("entry_kind")?.as_str(),
-                    )?,
-                })
-            })
-            .collect()
+        rows.into_iter().map(row_to_missing_entry).collect()
     }
 
     async fn list_stale_partitions(
@@ -472,88 +621,89 @@ impl ManifestRepository for PostgresManifestRepository {
         older_than: DateTime<Utc>,
         limit: u32,
     ) -> Result<Vec<ManifestPartitionCursorRecord>> {
-        let rows = sqlx::query(
+        let limit = i64::from(limit.max(1));
+        let rows = sqlx::query_as!(
+            ManifestPartitionCursorRow,
             r#"
             SELECT
-                library_id,
-                library_type,
-                root_id,
-                root_path_norm,
-                partition_key,
+                library_id AS "library_id!",
+                library_type AS "library_type!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
+                partition_key AS "partition_key!",
                 partition_id,
                 prefix_norm,
                 last_successful_run_id,
                 last_successful_at,
                 last_observed_at,
-                entries_seen,
-                diagnostics_seen,
-                supported_media_seen,
+                entries_seen AS "entries_seen!",
+                diagnostics_seen AS "diagnostics_seen!",
+                supported_media_seen AS "supported_media_seen!",
                 first_path_norm,
                 last_path_norm,
                 legacy_scan_path_hash,
-                backfilled_from_legacy,
-                updated_at
+                backfilled_from_legacy AS "backfilled_from_legacy!",
+                updated_at AS "updated_at!"
             FROM manifest_partition_cursors
             WHERE library_id = $1
               AND (last_successful_at IS NULL OR last_successful_at < $2)
             ORDER BY last_successful_at ASC NULLS FIRST, updated_at ASC, root_id ASC, partition_key ASC
             LIMIT $3
             "#,
+            library_id.0,
+            older_than,
+            limit
         )
-        .bind(library_id.0)
-        .bind(older_than)
-        .bind(i64::from(limit.max(1)))
         .fetch_all(&self.pool)
         .await?;
 
-        rows.iter().map(row_to_partition_cursor).collect()
+        rows.into_iter().map(row_to_partition_cursor).collect()
     }
 
     async fn list_diagnostics(
         &self,
         filter: ManifestDiagnosticFilter,
     ) -> Result<Vec<ManifestDiagnosticRecord>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let library_id = filter.library_id.map(|id| id.0);
+        let run_id = filter.run_id;
+        let severity = filter
+            .severity
+            .map(|severity| encode_severity(severity).to_string());
+        let code = filter.code;
+        let limit = i64::from(filter.limit.unwrap_or(100).max(1));
+
+        let rows = sqlx::query_as!(
+            ManifestDiagnosticRow,
             r#"
             SELECT
-                id,
-                run_id,
-                library_id,
-                root_id,
+                id AS "id!",
+                run_id AS "run_id!",
+                library_id AS "library_id!",
+                root_id AS "root_id!",
                 partition_id,
-                path_norm,
-                reason,
-                code,
-                severity,
-                remediation,
-                created_at
+                path_norm AS "path_norm!",
+                reason AS "reason!",
+                code AS "code!",
+                severity AS "severity!",
+                remediation AS "remediation!",
+                created_at AS "created_at!"
             FROM manifest_diagnostics
-            WHERE 1 = 1
+            WHERE ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::uuid IS NULL OR run_id = $2)
+              AND ($3::text IS NULL OR severity = $3)
+              AND ($4::text IS NULL OR code = $4)
+            ORDER BY created_at DESC, id DESC
+            LIMIT $5
             "#,
-        );
-
-        if let Some(library_id) = filter.library_id {
-            builder.push(" AND library_id = ");
-            builder.push_bind(library_id.0);
-        }
-        if let Some(run_id) = filter.run_id {
-            builder.push(" AND run_id = ");
-            builder.push_bind(run_id);
-        }
-        if let Some(severity) = filter.severity {
-            builder.push(" AND severity = ");
-            builder.push_bind(encode_severity(severity));
-        }
-        if let Some(code) = filter.code {
-            builder.push(" AND code = ");
-            builder.push_bind(code);
-        }
-
-        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
-        builder.push_bind(i64::from(filter.limit.unwrap_or(100).max(1)));
-
-        let rows = builder.build().fetch_all(&self.pool).await?;
-        rows.iter().map(row_to_diagnostic).collect()
+            library_id,
+            run_id,
+            severity,
+            code,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(row_to_diagnostic).collect()
     }
 
     async fn upsert_deferred_watch_hint(
@@ -561,7 +711,8 @@ impl ManifestRepository for PostgresManifestRepository {
         hint: ManifestDeferredWatchHintInput,
     ) -> Result<ManifestDeferredWatchHintRecord> {
         let id = hint.id.unwrap_or_else(Uuid::now_v7);
-        let row = sqlx::query(
+        let row = sqlx::query_as!(
+            ManifestDeferredHintRow,
             r#"
             INSERT INTO manifest_deferred_watch_hints (
                 id,
@@ -588,81 +739,81 @@ impl ManifestRepository for PostgresManifestRepository {
                 last_error = NULL,
                 updated_at = NOW()
             RETURNING
-                id,
-                library_id,
-                root_id,
-                root_path_norm,
-                path_norm,
-                hint_kind,
-                payload,
-                status,
-                idempotency_key,
-                attempts,
-                available_at,
+                id AS "id!",
+                library_id AS "library_id!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
+                path_norm AS "path_norm!",
+                hint_kind AS "hint_kind!",
+                payload AS "payload!",
+                status AS "status!",
+                idempotency_key AS "idempotency_key!",
+                attempts AS "attempts!",
+                available_at AS "available_at!",
                 last_error,
-                created_at,
-                updated_at
+                created_at AS "created_at!",
+                updated_at AS "updated_at!"
             "#,
+            id,
+            hint.library_id.0,
+            i32::from(hint.root_id),
+            hint.root_path_norm,
+            hint.path_norm,
+            hint.hint_kind,
+            hint.payload,
+            hint.idempotency_key,
+            hint.available_at
         )
-        .bind(id)
-        .bind(hint.library_id.0)
-        .bind(i32::from(hint.root_id))
-        .bind(hint.root_path_norm)
-        .bind(hint.path_norm)
-        .bind(hint.hint_kind)
-        .bind(hint.payload)
-        .bind(hint.idempotency_key)
-        .bind(hint.available_at)
         .fetch_one(&self.pool)
         .await?;
 
-        row_to_deferred_hint(&row)
+        row_to_deferred_hint(row)
     }
 
     async fn list_deferred_watch_hints(
         &self,
         filter: ManifestDeferredWatchHintFilter,
     ) -> Result<Vec<ManifestDeferredWatchHintRecord>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let library_id = filter.library_id.map(|id| id.0);
+        let status = filter
+            .status
+            .map(|status| encode_hint_status(status).to_string());
+        let available_before = filter.available_before;
+        let limit = i64::from(filter.limit.unwrap_or(100).max(1));
+
+        let rows = sqlx::query_as!(
+            ManifestDeferredHintRow,
             r#"
             SELECT
-                id,
-                library_id,
-                root_id,
-                root_path_norm,
-                path_norm,
-                hint_kind,
-                payload,
-                status,
-                idempotency_key,
-                attempts,
-                available_at,
+                id AS "id!",
+                library_id AS "library_id!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
+                path_norm AS "path_norm!",
+                hint_kind AS "hint_kind!",
+                payload AS "payload!",
+                status AS "status!",
+                idempotency_key AS "idempotency_key!",
+                attempts AS "attempts!",
+                available_at AS "available_at!",
                 last_error,
-                created_at,
-                updated_at
+                created_at AS "created_at!",
+                updated_at AS "updated_at!"
             FROM manifest_deferred_watch_hints
-            WHERE 1 = 1
+            WHERE ($1::uuid IS NULL OR library_id = $1)
+              AND ($2::text IS NULL OR status = $2)
+              AND ($3::timestamptz IS NULL OR available_at <= $3)
+            ORDER BY available_at ASC, created_at ASC
+            LIMIT $4
             "#,
-        );
-
-        if let Some(library_id) = filter.library_id {
-            builder.push(" AND library_id = ");
-            builder.push_bind(library_id.0);
-        }
-        if let Some(status) = filter.status {
-            builder.push(" AND status = ");
-            builder.push_bind(encode_hint_status(status));
-        }
-        if let Some(available_before) = filter.available_before {
-            builder.push(" AND available_at <= ");
-            builder.push_bind(available_before);
-        }
-
-        builder.push(" ORDER BY available_at ASC, created_at ASC LIMIT ");
-        builder.push_bind(i64::from(filter.limit.unwrap_or(100).max(1)));
-
-        let rows = builder.build().fetch_all(&self.pool).await?;
-        rows.iter().map(row_to_deferred_hint).collect()
+            library_id,
+            status,
+            available_before,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(row_to_deferred_hint).collect()
     }
 
     async fn update_deferred_watch_hint_status(
@@ -671,7 +822,9 @@ impl ManifestRepository for PostgresManifestRepository {
         status: ManifestDeferredWatchHintStatus,
         last_error: Option<String>,
     ) -> Result<Option<ManifestDeferredWatchHintRecord>> {
-        let row = sqlx::query(
+        let status = encode_hint_status(status);
+        let row = sqlx::query_as!(
+            ManifestDeferredHintRow,
             r#"
             UPDATE manifest_deferred_watch_hints
             SET status = $2,
@@ -680,29 +833,29 @@ impl ManifestRepository for PostgresManifestRepository {
                 updated_at = NOW()
             WHERE id = $1
             RETURNING
-                id,
-                library_id,
-                root_id,
-                root_path_norm,
-                path_norm,
-                hint_kind,
-                payload,
-                status,
-                idempotency_key,
-                attempts,
-                available_at,
+                id AS "id!",
+                library_id AS "library_id!",
+                root_id AS "root_id!",
+                root_path_norm AS "root_path_norm!",
+                path_norm AS "path_norm!",
+                hint_kind AS "hint_kind!",
+                payload AS "payload!",
+                status AS "status!",
+                idempotency_key AS "idempotency_key!",
+                attempts AS "attempts!",
+                available_at AS "available_at!",
                 last_error,
-                created_at,
-                updated_at
+                created_at AS "created_at!",
+                updated_at AS "updated_at!"
             "#,
+            id,
+            status,
+            last_error
         )
-        .bind(id)
-        .bind(encode_hint_status(status))
-        .bind(last_error)
         .fetch_optional(&self.pool)
         .await?;
 
-        row.as_ref().map(row_to_deferred_hint).transpose()
+        row.map(row_to_deferred_hint).transpose()
     }
 
     async fn backfill_legacy_manifest_state(
@@ -711,23 +864,283 @@ impl ManifestRepository for PostgresManifestRepository {
     ) -> Result<ManifestBackfillSummary> {
         let library_uuid = library_id.map(|id| id.0);
 
-        let media_entries = sqlx::query(MEDIA_BACKFILL_SQL)
-            .bind(library_uuid)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let media_entries = sqlx::query!(
+            r#"
+WITH source AS (
+    SELECT
+        mf.library_id,
+        l.library_type,
+        mf.file_path,
+        mf.filename,
+        mf.file_size,
+        mf.fingerprint_device_id,
+        mf.fingerprint_inode,
+        mf.fingerprint_size,
+        mf.fingerprint_mtime_ms,
+        mf.fingerprint_weak_hash,
+        COALESCE(root.root_id, 0) AS root_id,
+        COALESCE(root.root_path_norm, '') AS root_path_norm,
+        CASE
+            WHEN root.root_path_norm IS NULL OR root.root_path_norm = '' THEN mf.file_path
+            WHEN root.root_path_norm = '/' THEN ltrim(mf.file_path, '/')
+            WHEN mf.file_path = root.root_path_norm THEN ''
+            WHEN mf.file_path LIKE root.root_path_norm || '/%' THEN substr(mf.file_path, length(root.root_path_norm) + 2)
+            ELSE mf.file_path
+        END AS relative_path
+    FROM media_files mf
+    JOIN libraries l ON l.id = mf.library_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.root_id, candidate.root_path_norm
+        FROM (
+            SELECT
+                (ord - 1)::integer AS root_id,
+                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
+            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
+        ) candidate
+        WHERE mf.file_path = candidate.root_path_norm
+           OR (candidate.root_path_norm = '/' AND mf.file_path LIKE '/%')
+           OR (candidate.root_path_norm <> '/' AND mf.file_path LIKE candidate.root_path_norm || '/%')
+        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
+        LIMIT 1
+    ) root ON TRUE
+    WHERE mf.is_available = TRUE
+      AND ($1::uuid IS NULL OR mf.library_id = $1)
+)
+INSERT INTO manifest_entries (
+    library_id,
+    path_norm,
+    entry_kind,
+    library_type,
+    root_id,
+    root_path_norm,
+    relative_path,
+    classification_status,
+    classification_kind,
+    classification_payload,
+    fingerprint_device_id,
+    fingerprint_inode,
+    fingerprint_size,
+    fingerprint_mtime_ms,
+    fingerprint_weak_hash,
+    availability,
+    source
+)
+SELECT
+    library_id,
+    file_path,
+    'file',
+    library_type,
+    root_id,
+    root_path_norm,
+    relative_path,
+    'supported',
+    'legacy_media_file',
+    jsonb_build_object('source', 'media_files', 'filename', filename),
+    fingerprint_device_id,
+    CASE WHEN fingerprint_inode IS NULL THEN NULL ELSE fingerprint_inode::text END,
+    COALESCE(fingerprint_size, file_size, 0),
+    fingerprint_mtime_ms,
+    fingerprint_weak_hash,
+    'available',
+    'backfill'
+FROM source
+ON CONFLICT (library_id, path_norm)
+DO UPDATE SET
+    entry_kind = EXCLUDED.entry_kind,
+    library_type = EXCLUDED.library_type,
+    root_id = EXCLUDED.root_id,
+    root_path_norm = EXCLUDED.root_path_norm,
+    relative_path = EXCLUDED.relative_path,
+    classification_status = EXCLUDED.classification_status,
+    classification_kind = EXCLUDED.classification_kind,
+    classification_payload = EXCLUDED.classification_payload,
+    fingerprint_device_id = EXCLUDED.fingerprint_device_id,
+    fingerprint_inode = EXCLUDED.fingerprint_inode,
+    fingerprint_size = EXCLUDED.fingerprint_size,
+    fingerprint_mtime_ms = EXCLUDED.fingerprint_mtime_ms,
+    fingerprint_weak_hash = EXCLUDED.fingerprint_weak_hash,
+    availability = 'available',
+    source = CASE WHEN manifest_entries.source = 'manifest' THEN manifest_entries.source ELSE 'backfill' END,
+    updated_at = NOW()
+            "#,
+            library_uuid
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
 
-        let folder_entries = sqlx::query(FOLDER_BACKFILL_SQL)
-            .bind(library_uuid)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let folder_entries = sqlx::query!(
+            r#"
+WITH source AS (
+    SELECT
+        fi.library_id,
+        l.library_type,
+        fi.folder_path,
+        fi.folder_type,
+        fi.processing_status,
+        fi.discovery_source,
+        COALESCE(root.root_id, 0) AS root_id,
+        COALESCE(root.root_path_norm, '') AS root_path_norm,
+        CASE
+            WHEN root.root_path_norm IS NULL OR root.root_path_norm = '' THEN fi.folder_path
+            WHEN root.root_path_norm = '/' THEN ltrim(fi.folder_path, '/')
+            WHEN fi.folder_path = root.root_path_norm THEN ''
+            WHEN fi.folder_path LIKE root.root_path_norm || '/%' THEN substr(fi.folder_path, length(root.root_path_norm) + 2)
+            ELSE fi.folder_path
+        END AS relative_path
+    FROM folder_inventory fi
+    JOIN libraries l ON l.id = fi.library_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.root_id, candidate.root_path_norm
+        FROM (
+            SELECT
+                (ord - 1)::integer AS root_id,
+                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
+            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
+        ) candidate
+        WHERE fi.folder_path = candidate.root_path_norm
+           OR (candidate.root_path_norm = '/' AND fi.folder_path LIKE '/%')
+           OR (candidate.root_path_norm <> '/' AND fi.folder_path LIKE candidate.root_path_norm || '/%')
+        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
+        LIMIT 1
+    ) root ON TRUE
+    WHERE $1::uuid IS NULL OR fi.library_id = $1
+)
+INSERT INTO manifest_entries (
+    library_id,
+    path_norm,
+    entry_kind,
+    library_type,
+    root_id,
+    root_path_norm,
+    relative_path,
+    classification_status,
+    classification_kind,
+    classification_payload,
+    fingerprint_size,
+    availability,
+    source
+)
+SELECT
+    library_id,
+    folder_path,
+    'directory',
+    library_type,
+    root_id,
+    root_path_norm,
+    relative_path,
+    'supported',
+    'legacy_folder_' || folder_type,
+    jsonb_build_object(
+        'source', 'folder_inventory',
+        'folder_type', folder_type,
+        'processing_status', processing_status,
+        'discovery_source', discovery_source
+    ),
+    0,
+    'available',
+    'backfill'
+FROM source
+ON CONFLICT (library_id, path_norm)
+DO UPDATE SET
+    entry_kind = EXCLUDED.entry_kind,
+    library_type = EXCLUDED.library_type,
+    root_id = EXCLUDED.root_id,
+    root_path_norm = EXCLUDED.root_path_norm,
+    relative_path = EXCLUDED.relative_path,
+    classification_status = EXCLUDED.classification_status,
+    classification_kind = EXCLUDED.classification_kind,
+    classification_payload = EXCLUDED.classification_payload,
+    fingerprint_size = EXCLUDED.fingerprint_size,
+    availability = 'available',
+    source = CASE WHEN manifest_entries.source = 'manifest' THEN manifest_entries.source ELSE 'backfill' END,
+    updated_at = NOW()
+            "#,
+            library_uuid
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
 
-        let legacy_cursors = sqlx::query(SCAN_CURSOR_BACKFILL_SQL)
-            .bind(library_uuid)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let legacy_cursors = sqlx::query!(
+            r#"
+WITH source AS (
+    SELECT
+        sc.library_id,
+        l.library_type,
+        sc.path_hash,
+        sc.folder_path_norm,
+        sc.entry_count,
+        sc.last_scan_at,
+        COALESCE(root.root_id, 0) AS root_id,
+        COALESCE(root.root_path_norm, '') AS root_path_norm
+    FROM scan_cursors sc
+    JOIN libraries l ON l.id = sc.library_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.root_id, candidate.root_path_norm
+        FROM (
+            SELECT
+                (ord - 1)::integer AS root_id,
+                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
+            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
+        ) candidate
+        WHERE sc.folder_path_norm = candidate.root_path_norm
+           OR (candidate.root_path_norm = '/' AND sc.folder_path_norm LIKE '/%')
+           OR (candidate.root_path_norm <> '/' AND sc.folder_path_norm LIKE candidate.root_path_norm || '/%')
+        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
+        LIMIT 1
+    ) root ON TRUE
+    WHERE $1::uuid IS NULL OR sc.library_id = $1
+)
+INSERT INTO manifest_partition_cursors (
+    library_id,
+    library_type,
+    root_id,
+    root_path_norm,
+    partition_key,
+    prefix_norm,
+    last_observed_at,
+    entries_seen,
+    first_path_norm,
+    last_path_norm,
+    legacy_scan_path_hash,
+    backfilled_from_legacy,
+    backfilled_at
+)
+SELECT
+    library_id,
+    library_type,
+    root_id,
+    root_path_norm,
+    'legacy:' || path_hash::text,
+    folder_path_norm,
+    last_scan_at,
+    entry_count,
+    folder_path_norm,
+    folder_path_norm,
+    path_hash,
+    TRUE,
+    NOW()
+FROM source
+ON CONFLICT (library_id, root_id, partition_key)
+DO UPDATE SET
+    library_type = EXCLUDED.library_type,
+    root_path_norm = EXCLUDED.root_path_norm,
+    prefix_norm = EXCLUDED.prefix_norm,
+    last_observed_at = EXCLUDED.last_observed_at,
+    entries_seen = EXCLUDED.entries_seen,
+    first_path_norm = EXCLUDED.first_path_norm,
+    last_path_norm = EXCLUDED.last_path_norm,
+    legacy_scan_path_hash = EXCLUDED.legacy_scan_path_hash,
+    backfilled_from_legacy = TRUE,
+    backfilled_at = COALESCE(manifest_partition_cursors.backfilled_at, NOW()),
+    updated_at = NOW()
+            "#,
+            library_uuid
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
 
         Ok(ManifestBackfillSummary {
             media_entries,
@@ -880,25 +1293,101 @@ impl DiagnosticUpsertRow {
     }
 }
 
-fn row_to_manifest_run(row: &PgRow) -> Result<ManifestRun> {
-    let library_id = LibraryId(row.try_get("library_id")?);
-    let library_type = decode_library_type(
-        row.try_get::<String, _>("library_type")?.as_str(),
-    )?;
-    let root_id = checked_u16(row.try_get::<i32, _>("root_id")?, "root_id")?;
+#[derive(Debug)]
+struct ManifestRunRow {
+    run_id: Uuid,
+    library_id: Uuid,
+    library_type: String,
+    scope_kind: String,
+    root_id: i32,
+    root_path_norm: String,
+    partition_id: Option<i32>,
+    partition_prefix_norm: Option<String>,
+    status: String,
+    started_at: DateTime<Utc>,
+    completed_at: Option<DateTime<Utc>>,
+    entries_seen: i64,
+    diagnostics_seen: i64,
+}
+
+#[derive(Debug)]
+struct ManifestMissingEntryRow {
+    library_id: Uuid,
+    root_id: i32,
+    partition_id: Option<i32>,
+    path_norm: String,
+    entry_kind: String,
+}
+
+#[derive(Debug)]
+struct ManifestPartitionCursorRow {
+    library_id: Uuid,
+    library_type: String,
+    root_id: i32,
+    root_path_norm: String,
+    partition_key: String,
+    partition_id: Option<i32>,
+    prefix_norm: Option<String>,
+    last_successful_run_id: Option<Uuid>,
+    last_successful_at: Option<DateTime<Utc>>,
+    last_observed_at: Option<DateTime<Utc>>,
+    entries_seen: i64,
+    diagnostics_seen: i64,
+    supported_media_seen: i64,
+    first_path_norm: Option<String>,
+    last_path_norm: Option<String>,
+    legacy_scan_path_hash: Option<i64>,
+    backfilled_from_legacy: bool,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct ManifestDiagnosticRow {
+    id: Uuid,
+    run_id: Uuid,
+    library_id: Uuid,
+    root_id: i32,
+    partition_id: Option<i32>,
+    path_norm: String,
+    reason: String,
+    code: String,
+    severity: String,
+    remediation: String,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct ManifestDeferredHintRow {
+    id: Uuid,
+    library_id: Uuid,
+    root_id: i32,
+    root_path_norm: String,
+    path_norm: String,
+    hint_kind: String,
+    payload: Value,
+    status: String,
+    idempotency_key: String,
+    attempts: i32,
+    available_at: DateTime<Utc>,
+    last_error: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+fn row_to_manifest_run(row: ManifestRunRow) -> Result<ManifestRun> {
+    let library_id = LibraryId(row.library_id);
+    let library_type = decode_library_type(row.library_type.as_str())?;
+    let root_id = checked_u16(row.root_id, "root_id")?;
     let root = ManifestRootScope {
         library_id,
         library_type,
         root_id: ManifestRootId(root_id),
-        root_path_norm: row.try_get("root_path_norm")?,
+        root_path_norm: row.root_path_norm,
     };
-    let scope_kind: String = row.try_get("scope_kind")?;
-    let scope = match scope_kind.as_str() {
+    let scope = match row.scope_kind.as_str() {
         "root" => ManifestScope::Root(root),
         "partition" => {
-            let partition_id = row
-                .try_get::<Option<i32>, _>("partition_id")?
-                .ok_or_else(|| {
+            let partition_id = row.partition_id.ok_or_else(|| {
                 MediaError::Internal(
                     "manifest partition run is missing partition_id".into(),
                 )
@@ -909,7 +1398,7 @@ fn row_to_manifest_run(row: &PgRow) -> Result<ManifestRun> {
                     partition_id,
                     "partition_id",
                 )?),
-                prefix_norm: row.try_get("partition_prefix_norm")?,
+                prefix_norm: row.partition_prefix_norm,
             })
         }
         other => {
@@ -920,105 +1409,107 @@ fn row_to_manifest_run(row: &PgRow) -> Result<ManifestRun> {
     };
 
     Ok(ManifestRun {
-        run_id: row.try_get("run_id")?,
+        run_id: row.run_id,
         scope,
-        status: decode_run_status(
-            row.try_get::<String, _>("status")?.as_str(),
-        )?,
-        started_at: row.try_get("started_at")?,
-        completed_at: row.try_get("completed_at")?,
-        entries_seen: i64_to_u64(row.try_get("entries_seen")?, "entries_seen")?,
-        diagnostics_seen: i64_to_u64(
-            row.try_get("diagnostics_seen")?,
-            "diagnostics_seen",
-        )?,
+        status: decode_run_status(row.status.as_str())?,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        entries_seen: i64_to_u64(row.entries_seen, "entries_seen")?,
+        diagnostics_seen: i64_to_u64(row.diagnostics_seen, "diagnostics_seen")?,
+    })
+}
+
+fn row_to_missing_entry(
+    row: ManifestMissingEntryRow,
+) -> Result<ManifestMissingEntryRecord> {
+    Ok(ManifestMissingEntryRecord {
+        library_id: LibraryId(row.library_id),
+        root_id: checked_u16(row.root_id, "root_id")?,
+        partition_id: row
+            .partition_id
+            .map(|value| {
+                checked_u16(value, "partition_id").map(ManifestPartitionId)
+            })
+            .transpose()?,
+        path_norm: row.path_norm,
+        entry_kind: decode_entry_kind(row.entry_kind.as_str())?,
     })
 }
 
 fn row_to_partition_cursor(
-    row: &PgRow,
+    row: ManifestPartitionCursorRow,
 ) -> Result<ManifestPartitionCursorRecord> {
     Ok(ManifestPartitionCursorRecord {
-        library_id: LibraryId(row.try_get("library_id")?),
-        library_type: decode_library_type(
-            row.try_get::<String, _>("library_type")?.as_str(),
-        )?,
-        root_id: checked_u16(row.try_get::<i32, _>("root_id")?, "root_id")?,
-        root_path_norm: row.try_get("root_path_norm")?,
-        partition_key: row.try_get("partition_key")?,
+        library_id: LibraryId(row.library_id),
+        library_type: decode_library_type(row.library_type.as_str())?,
+        root_id: checked_u16(row.root_id, "root_id")?,
+        root_path_norm: row.root_path_norm,
+        partition_key: row.partition_key,
         partition_id: row
-            .try_get::<Option<i32>, _>("partition_id")?
+            .partition_id
             .map(|value| {
                 checked_u16(value, "partition_id").map(ManifestPartitionId)
             })
             .transpose()?,
-        prefix_norm: row.try_get("prefix_norm")?,
-        last_successful_run_id: row.try_get("last_successful_run_id")?,
-        last_successful_at: row.try_get("last_successful_at")?,
-        last_observed_at: row.try_get("last_observed_at")?,
-        entries_seen: i64_to_u64(row.try_get("entries_seen")?, "entries_seen")?,
-        diagnostics_seen: i64_to_u64(
-            row.try_get("diagnostics_seen")?,
-            "diagnostics_seen",
-        )?,
+        prefix_norm: row.prefix_norm,
+        last_successful_run_id: row.last_successful_run_id,
+        last_successful_at: row.last_successful_at,
+        last_observed_at: row.last_observed_at,
+        entries_seen: i64_to_u64(row.entries_seen, "entries_seen")?,
+        diagnostics_seen: i64_to_u64(row.diagnostics_seen, "diagnostics_seen")?,
         supported_media_seen: i64_to_u64(
-            row.try_get("supported_media_seen")?,
+            row.supported_media_seen,
             "supported_media_seen",
         )?,
-        first_path_norm: row.try_get("first_path_norm")?,
-        last_path_norm: row.try_get("last_path_norm")?,
-        legacy_scan_path_hash: row.try_get("legacy_scan_path_hash")?,
-        backfilled_from_legacy: row.try_get("backfilled_from_legacy")?,
-        updated_at: row.try_get("updated_at")?,
+        first_path_norm: row.first_path_norm,
+        last_path_norm: row.last_path_norm,
+        legacy_scan_path_hash: row.legacy_scan_path_hash,
+        backfilled_from_legacy: row.backfilled_from_legacy,
+        updated_at: row.updated_at,
     })
 }
 
-fn row_to_diagnostic(row: &PgRow) -> Result<ManifestDiagnosticRecord> {
+fn row_to_diagnostic(
+    row: ManifestDiagnosticRow,
+) -> Result<ManifestDiagnosticRecord> {
     Ok(ManifestDiagnosticRecord {
-        id: row.try_get("id")?,
-        run_id: row.try_get("run_id")?,
-        library_id: LibraryId(row.try_get("library_id")?),
-        root_id: checked_u16(row.try_get::<i32, _>("root_id")?, "root_id")?,
+        id: row.id,
+        run_id: row.run_id,
+        library_id: LibraryId(row.library_id),
+        root_id: checked_u16(row.root_id, "root_id")?,
         partition_id: row
-            .try_get::<Option<i32>, _>("partition_id")?
+            .partition_id
             .map(|value| {
                 checked_u16(value, "partition_id").map(ManifestPartitionId)
             })
             .transpose()?,
-        path_norm: row.try_get("path_norm")?,
-        reason: row.try_get("reason")?,
-        code: row.try_get("code")?,
-        severity: decode_severity(
-            row.try_get::<String, _>("severity")?.as_str(),
-        )?,
-        remediation: row.try_get("remediation")?,
-        created_at: row.try_get("created_at")?,
+        path_norm: row.path_norm,
+        reason: row.reason,
+        code: row.code,
+        severity: decode_severity(row.severity.as_str())?,
+        remediation: row.remediation,
+        created_at: row.created_at,
     })
 }
 
 fn row_to_deferred_hint(
-    row: &PgRow,
+    row: ManifestDeferredHintRow,
 ) -> Result<ManifestDeferredWatchHintRecord> {
     Ok(ManifestDeferredWatchHintRecord {
-        id: row.try_get("id")?,
-        library_id: LibraryId(row.try_get("library_id")?),
-        root_id: checked_u16(row.try_get::<i32, _>("root_id")?, "root_id")?,
-        root_path_norm: row.try_get("root_path_norm")?,
-        path_norm: row.try_get("path_norm")?,
-        hint_kind: row.try_get("hint_kind")?,
-        payload: row.try_get("payload")?,
-        status: decode_hint_status(
-            row.try_get::<String, _>("status")?.as_str(),
-        )?,
-        idempotency_key: row.try_get("idempotency_key")?,
-        attempts: i64_to_u64(
-            i64::from(row.try_get::<i32, _>("attempts")?),
-            "attempts",
-        )? as u32,
-        available_at: row.try_get("available_at")?,
-        last_error: row.try_get("last_error")?,
-        created_at: row.try_get("created_at")?,
-        updated_at: row.try_get("updated_at")?,
+        id: row.id,
+        library_id: LibraryId(row.library_id),
+        root_id: checked_u16(row.root_id, "root_id")?,
+        root_path_norm: row.root_path_norm,
+        path_norm: row.path_norm,
+        hint_kind: row.hint_kind,
+        payload: row.payload,
+        status: decode_hint_status(row.status.as_str())?,
+        idempotency_key: row.idempotency_key,
+        attempts: i64_to_u64(i64::from(row.attempts), "attempts")? as u32,
+        available_at: row.available_at,
+        last_error: row.last_error,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
     })
 }
 
@@ -1228,266 +1719,6 @@ fn i64_to_u64(value: i64, field: &str) -> Result<u64> {
     })
 }
 
-const MEDIA_BACKFILL_SQL: &str = r#"
-WITH source AS (
-    SELECT
-        mf.library_id,
-        l.library_type,
-        mf.file_path,
-        mf.filename,
-        mf.file_size,
-        mf.fingerprint_device_id,
-        mf.fingerprint_inode,
-        mf.fingerprint_size,
-        mf.fingerprint_mtime_ms,
-        mf.fingerprint_weak_hash,
-        COALESCE(root.root_id, 0) AS root_id,
-        COALESCE(root.root_path_norm, '') AS root_path_norm,
-        CASE
-            WHEN root.root_path_norm IS NULL OR root.root_path_norm = '' THEN mf.file_path
-            WHEN root.root_path_norm = '/' THEN ltrim(mf.file_path, '/')
-            WHEN mf.file_path = root.root_path_norm THEN ''
-            WHEN mf.file_path LIKE root.root_path_norm || '/%' THEN substr(mf.file_path, length(root.root_path_norm) + 2)
-            ELSE mf.file_path
-        END AS relative_path
-    FROM media_files mf
-    JOIN libraries l ON l.id = mf.library_id
-    LEFT JOIN LATERAL (
-        SELECT candidate.root_id, candidate.root_path_norm
-        FROM (
-            SELECT
-                (ord - 1)::integer AS root_id,
-                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
-            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
-        ) candidate
-        WHERE mf.file_path = candidate.root_path_norm
-           OR (candidate.root_path_norm = '/' AND mf.file_path LIKE '/%')
-           OR (candidate.root_path_norm <> '/' AND mf.file_path LIKE candidate.root_path_norm || '/%')
-        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
-        LIMIT 1
-    ) root ON TRUE
-    WHERE mf.is_available = TRUE
-      AND ($1::uuid IS NULL OR mf.library_id = $1)
-)
-INSERT INTO manifest_entries (
-    library_id,
-    path_norm,
-    entry_kind,
-    library_type,
-    root_id,
-    root_path_norm,
-    relative_path,
-    classification_status,
-    classification_kind,
-    classification_payload,
-    fingerprint_device_id,
-    fingerprint_inode,
-    fingerprint_size,
-    fingerprint_mtime_ms,
-    fingerprint_weak_hash,
-    availability,
-    source
-)
-SELECT
-    library_id,
-    file_path,
-    'file',
-    library_type,
-    root_id,
-    root_path_norm,
-    relative_path,
-    'supported',
-    'legacy_media_file',
-    jsonb_build_object('source', 'media_files', 'filename', filename),
-    fingerprint_device_id,
-    CASE WHEN fingerprint_inode IS NULL THEN NULL ELSE fingerprint_inode::text END,
-    COALESCE(fingerprint_size, file_size, 0),
-    fingerprint_mtime_ms,
-    fingerprint_weak_hash,
-    'available',
-    'backfill'
-FROM source
-ON CONFLICT (library_id, path_norm)
-DO UPDATE SET
-    entry_kind = EXCLUDED.entry_kind,
-    library_type = EXCLUDED.library_type,
-    root_id = EXCLUDED.root_id,
-    root_path_norm = EXCLUDED.root_path_norm,
-    relative_path = EXCLUDED.relative_path,
-    classification_status = EXCLUDED.classification_status,
-    classification_kind = EXCLUDED.classification_kind,
-    classification_payload = EXCLUDED.classification_payload,
-    fingerprint_device_id = EXCLUDED.fingerprint_device_id,
-    fingerprint_inode = EXCLUDED.fingerprint_inode,
-    fingerprint_size = EXCLUDED.fingerprint_size,
-    fingerprint_mtime_ms = EXCLUDED.fingerprint_mtime_ms,
-    fingerprint_weak_hash = EXCLUDED.fingerprint_weak_hash,
-    availability = 'available',
-    source = CASE WHEN manifest_entries.source = 'manifest' THEN manifest_entries.source ELSE 'backfill' END,
-    updated_at = NOW()
-"#;
-
-const FOLDER_BACKFILL_SQL: &str = r#"
-WITH source AS (
-    SELECT
-        fi.library_id,
-        l.library_type,
-        fi.folder_path,
-        fi.folder_type,
-        fi.processing_status,
-        fi.discovery_source,
-        COALESCE(root.root_id, 0) AS root_id,
-        COALESCE(root.root_path_norm, '') AS root_path_norm,
-        CASE
-            WHEN root.root_path_norm IS NULL OR root.root_path_norm = '' THEN fi.folder_path
-            WHEN root.root_path_norm = '/' THEN ltrim(fi.folder_path, '/')
-            WHEN fi.folder_path = root.root_path_norm THEN ''
-            WHEN fi.folder_path LIKE root.root_path_norm || '/%' THEN substr(fi.folder_path, length(root.root_path_norm) + 2)
-            ELSE fi.folder_path
-        END AS relative_path
-    FROM folder_inventory fi
-    JOIN libraries l ON l.id = fi.library_id
-    LEFT JOIN LATERAL (
-        SELECT candidate.root_id, candidate.root_path_norm
-        FROM (
-            SELECT
-                (ord - 1)::integer AS root_id,
-                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
-            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
-        ) candidate
-        WHERE fi.folder_path = candidate.root_path_norm
-           OR (candidate.root_path_norm = '/' AND fi.folder_path LIKE '/%')
-           OR (candidate.root_path_norm <> '/' AND fi.folder_path LIKE candidate.root_path_norm || '/%')
-        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
-        LIMIT 1
-    ) root ON TRUE
-    WHERE $1::uuid IS NULL OR fi.library_id = $1
-)
-INSERT INTO manifest_entries (
-    library_id,
-    path_norm,
-    entry_kind,
-    library_type,
-    root_id,
-    root_path_norm,
-    relative_path,
-    classification_status,
-    classification_kind,
-    classification_payload,
-    fingerprint_size,
-    availability,
-    source
-)
-SELECT
-    library_id,
-    folder_path,
-    'directory',
-    library_type,
-    root_id,
-    root_path_norm,
-    relative_path,
-    'supported',
-    'legacy_folder_' || folder_type,
-    jsonb_build_object(
-        'source', 'folder_inventory',
-        'folder_type', folder_type,
-        'processing_status', processing_status,
-        'discovery_source', discovery_source
-    ),
-    0,
-    'available',
-    'backfill'
-FROM source
-ON CONFLICT (library_id, path_norm)
-DO UPDATE SET
-    entry_kind = EXCLUDED.entry_kind,
-    library_type = EXCLUDED.library_type,
-    root_id = EXCLUDED.root_id,
-    root_path_norm = EXCLUDED.root_path_norm,
-    relative_path = EXCLUDED.relative_path,
-    classification_status = EXCLUDED.classification_status,
-    classification_kind = EXCLUDED.classification_kind,
-    classification_payload = EXCLUDED.classification_payload,
-    fingerprint_size = EXCLUDED.fingerprint_size,
-    availability = 'available',
-    source = CASE WHEN manifest_entries.source = 'manifest' THEN manifest_entries.source ELSE 'backfill' END,
-    updated_at = NOW()
-"#;
-
-const SCAN_CURSOR_BACKFILL_SQL: &str = r#"
-WITH source AS (
-    SELECT
-        sc.library_id,
-        l.library_type,
-        sc.path_hash,
-        sc.folder_path_norm,
-        sc.entry_count,
-        sc.last_scan_at,
-        COALESCE(root.root_id, 0) AS root_id,
-        COALESCE(root.root_path_norm, '') AS root_path_norm
-    FROM scan_cursors sc
-    JOIN libraries l ON l.id = sc.library_id
-    LEFT JOIN LATERAL (
-        SELECT candidate.root_id, candidate.root_path_norm
-        FROM (
-            SELECT
-                (ord - 1)::integer AS root_id,
-                COALESCE(NULLIF(regexp_replace(path_value, '/+$', ''), ''), '/') AS root_path_norm
-            FROM unnest(l.paths) WITH ORDINALITY AS paths(path_value, ord)
-        ) candidate
-        WHERE sc.folder_path_norm = candidate.root_path_norm
-           OR (candidate.root_path_norm = '/' AND sc.folder_path_norm LIKE '/%')
-           OR (candidate.root_path_norm <> '/' AND sc.folder_path_norm LIKE candidate.root_path_norm || '/%')
-        ORDER BY length(candidate.root_path_norm) DESC, candidate.root_id ASC
-        LIMIT 1
-    ) root ON TRUE
-    WHERE $1::uuid IS NULL OR sc.library_id = $1
-)
-INSERT INTO manifest_partition_cursors (
-    library_id,
-    library_type,
-    root_id,
-    root_path_norm,
-    partition_key,
-    prefix_norm,
-    last_observed_at,
-    entries_seen,
-    first_path_norm,
-    last_path_norm,
-    legacy_scan_path_hash,
-    backfilled_from_legacy,
-    backfilled_at
-)
-SELECT
-    library_id,
-    library_type,
-    root_id,
-    root_path_norm,
-    'legacy:' || path_hash::text,
-    folder_path_norm,
-    last_scan_at,
-    entry_count,
-    folder_path_norm,
-    folder_path_norm,
-    path_hash,
-    TRUE,
-    NOW()
-FROM source
-ON CONFLICT (library_id, root_id, partition_key)
-DO UPDATE SET
-    library_type = EXCLUDED.library_type,
-    root_path_norm = EXCLUDED.root_path_norm,
-    prefix_norm = EXCLUDED.prefix_norm,
-    last_observed_at = EXCLUDED.last_observed_at,
-    entries_seen = EXCLUDED.entries_seen,
-    first_path_norm = EXCLUDED.first_path_norm,
-    last_path_norm = EXCLUDED.last_path_norm,
-    legacy_scan_path_hash = EXCLUDED.legacy_scan_path_hash,
-    backfilled_from_legacy = TRUE,
-    backfilled_at = COALESCE(manifest_partition_cursors.backfilled_at, NOW()),
-    updated_at = NOW()
-"#;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1528,7 +1759,7 @@ mod tests {
                 .max_connections(5)
                 .after_connect(|conn, _| {
                     Box::pin(async move {
-                        sqlx::query("SET search_path = ferrex, public")
+                        sqlx::query!("SET search_path = ferrex, public")
                             .execute(&mut *conn)
                             .await?;
                         Ok(())
@@ -1555,15 +1786,17 @@ mod tests {
         pool: &PgPool,
         library_id: LibraryId,
     ) -> std::result::Result<(), sqlx::Error> {
-        sqlx::query(
+        let name = format!("Manifest Test Library {library_id}");
+        let paths = vec!["/media/movies".to_string()];
+        sqlx::query!(
             r#"
             INSERT INTO libraries (id, name, paths, library_type, created_at, updated_at)
             VALUES ($1, $2, $3, 'movies', NOW(), NOW())
             "#,
+            library_id.0,
+            name,
+            &paths[..]
         )
-        .bind(library_id.0)
-        .bind(format!("Manifest Test Library {library_id}"))
-        .bind(vec!["/media/movies".to_string()])
         .execute(pool)
         .await?;
         Ok(())
@@ -1842,18 +2075,18 @@ mod tests {
             assert_eq!(missing[0].path_norm, "/media/movies/Missing.mkv");
             assert_eq!(missing[0].entry_kind, ManifestEntryKind::File);
 
-            let keep_availability: String = sqlx::query_scalar(
+            let keep_availability = sqlx::query_scalar!(
                 "SELECT availability FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Keep.mkv'",
+                library_id.0
             )
-            .bind(library_id.0)
             .fetch_one(&pool)
             .await?;
             assert_eq!(keep_availability, "available");
 
-            let missing_availability: String = sqlx::query_scalar(
+            let missing_availability = sqlx::query_scalar!(
                 "SELECT availability FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Missing.mkv'",
+                library_id.0
             )
-            .bind(library_id.0)
             .fetch_one(&pool)
             .await?;
             assert_eq!(missing_availability, "missing");
@@ -1898,7 +2131,9 @@ mod tests {
 
             let available_file_id = Uuid::now_v7();
             let unavailable_file_id = Uuid::now_v7();
-            sqlx::query(
+            let available_media_id = Uuid::now_v7();
+            let unavailable_media_id = Uuid::now_v7();
+            sqlx::query!(
                 r#"
                 INSERT INTO media_files (
                     id, library_id, media_id, media_type, file_path, filename, file_size, is_available
@@ -1907,34 +2142,34 @@ mod tests {
                     ($1, $2, $3, 'movie'::media_type, '/media/movies/Alien.mkv', 'Alien.mkv', 42, TRUE),
                     ($4, $2, $5, 'movie'::media_type, '/media/movies/Missing.mkv', 'Missing.mkv', 99, FALSE)
                 "#,
+                available_file_id,
+                library_id.0,
+                available_media_id,
+                unavailable_file_id,
+                unavailable_media_id
             )
-            .bind(available_file_id)
-            .bind(library_id.0)
-            .bind(Uuid::now_v7())
-            .bind(unavailable_file_id)
-            .bind(Uuid::now_v7())
             .execute(&pool)
             .await?;
 
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 INSERT INTO folder_inventory (library_id, folder_path, folder_type, processing_status)
                 VALUES ($1, '/media/movies/Alien', 'movie', 'completed')
                 "#,
+                library_id.0
             )
-            .bind(library_id.0)
             .execute(&pool)
             .await?;
 
-            sqlx::query(
+            sqlx::query!(
                 r#"
                 INSERT INTO scan_cursors (
                     library_id, path_hash, folder_path_norm, listing_hash, entry_count, last_scan_at
                 )
                 VALUES ($1, 12345, '/media/movies/Alien', 'listing', 1, NOW())
                 "#,
+                library_id.0
             )
-            .bind(library_id.0)
             .execute(&pool)
             .await?;
 
@@ -1945,33 +2180,33 @@ mod tests {
             assert_eq!(summary.folder_entries, 1);
             assert_eq!(summary.legacy_cursors, 1);
 
-            let unavailable_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM media_files WHERE library_id = $1 AND is_available = FALSE",
+            let unavailable_count = sqlx::query_scalar!(
+                "SELECT COUNT(*)::bigint AS \"count!\" FROM media_files WHERE library_id = $1 AND is_available = FALSE",
+                library_id.0
             )
-            .bind(library_id.0)
             .fetch_one(&pool)
             .await?;
             assert_eq!(unavailable_count, 1);
 
-            let backfilled_media_count: i64 = sqlx::query_scalar(
+            let backfilled_media_count = sqlx::query_scalar!(
                 r#"
-                SELECT COUNT(*)
+                SELECT COUNT(*)::bigint AS "count!"
                 FROM manifest_entries
                 WHERE library_id = $1
                   AND entry_kind = 'file'
                   AND source = 'backfill'
                   AND availability = 'available'
                 "#,
+                library_id.0
             )
-            .bind(library_id.0)
             .fetch_one(&pool)
             .await?;
             assert_eq!(backfilled_media_count, 1);
 
-            let missing_manifest_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Missing.mkv'",
+            let missing_manifest_count = sqlx::query_scalar!(
+                "SELECT COUNT(*)::bigint AS \"count!\" FROM manifest_entries WHERE library_id = $1 AND path_norm = '/media/movies/Missing.mkv'",
+                library_id.0
             )
-            .bind(library_id.0)
             .fetch_one(&pool)
             .await?;
             assert_eq!(missing_manifest_count, 0);

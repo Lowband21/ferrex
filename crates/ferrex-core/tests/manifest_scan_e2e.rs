@@ -24,7 +24,7 @@ use ferrex_core::{
     },
     types::{LibraryId, LibraryReference, LibraryType},
 };
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{Executor, PgPool, postgres::PgPoolOptions};
 use tempfile::TempDir;
 use url::Url;
 use uuid::Uuid;
@@ -57,15 +57,15 @@ impl TestDatabase {
                 )
             })?;
 
-        sqlx::query(&format!(
-            "CREATE DATABASE {}",
-            quote_ident(&database_name)
-        ))
-        .execute(&admin_pool)
-        .await
-        .with_context(|| {
-            format!("failed to create test database {database_name}")
-        })?;
+        admin_pool
+            .execute(
+                format!("CREATE DATABASE {}", quote_ident(&database_name))
+                    .as_str(),
+            )
+            .await
+            .with_context(|| {
+                format!("failed to create test database {database_name}")
+            })?;
         admin_pool.close().await;
 
         let database_url =
@@ -105,15 +105,18 @@ impl TestDatabase {
                 )
             })?;
 
-        let drop_result = sqlx::query(&format!(
-            "DROP DATABASE IF EXISTS {} WITH (FORCE)",
-            quote_ident(&self.database_name)
-        ))
-        .execute(&admin_pool)
-        .await
-        .with_context(|| {
-            format!("failed to drop test database {}", self.database_name)
-        });
+        let drop_result = admin_pool
+            .execute(
+                format!(
+                    "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                    quote_ident(&self.database_name)
+                )
+                .as_str(),
+            )
+            .await
+            .with_context(|| {
+                format!("failed to drop test database {}", self.database_name)
+            });
         admin_pool.close().await;
         drop_result.map(|_| ())
     }
@@ -524,7 +527,12 @@ async fn insert_library(
 ) -> Result<LibraryId> {
     let id = Uuid::now_v7();
     let root_norm = norm(root)?;
-    sqlx::query(
+    let library_type = match library_type {
+        LibraryType::Movies => "movies",
+        LibraryType::Series => "tvshows",
+    };
+    let paths = vec![root_norm];
+    sqlx::query!(
         r#"
         INSERT INTO libraries (
             id, name, library_type, paths, scan_interval_minutes, last_scan,
@@ -532,14 +540,11 @@ async fn insert_library(
         )
         VALUES ($1, $2, $3, $4, 60, NULL, true, true, true, false)
         "#,
+        id,
+        name,
+        library_type,
+        &paths[..]
     )
-    .bind(id)
-    .bind(name)
-    .bind(match library_type {
-        LibraryType::Movies => "movies",
-        LibraryType::Series => "tvshows",
-    })
-    .bind(vec![root_norm])
     .execute(pool)
     .await?;
     Ok(LibraryId(id))
@@ -551,18 +556,18 @@ async fn count_manifest_entries(
     entry_kind: &str,
     classification_status: &str,
 ) -> Result<i64> {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         r#"
-        SELECT COUNT(*)::bigint
+        SELECT COUNT(*)::bigint AS "count!"
         FROM manifest_entries
         WHERE library_id = $1
           AND entry_kind = $2
           AND classification_status = $3
         "#,
+        library_id.0,
+        entry_kind,
+        classification_status
     )
-    .bind(library_id.0)
-    .bind(entry_kind)
-    .bind(classification_status)
     .fetch_one(pool)
     .await
     .map_err(Into::into)
@@ -571,32 +576,31 @@ async fn count_manifest_entries(
 async fn diagnostic_counts_by_code(
     pool: &PgPool,
 ) -> Result<BTreeMap<String, i64>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
-        SELECT code, COUNT(*)::bigint AS count
+        SELECT code AS "code!", COUNT(*)::bigint AS "count!"
         FROM manifest_diagnostics
         GROUP BY code
-        "#,
+        "#
     )
     .fetch_all(pool)
     .await?;
     let mut counts = BTreeMap::new();
     for row in rows {
-        use sqlx::Row;
-        counts.insert(row.try_get("code")?, row.try_get("count")?);
+        counts.insert(row.code, row.count);
     }
     Ok(counts)
 }
 
 async fn count_ready_jobs(pool: &PgPool, kind: JobKind) -> Result<i64> {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         r#"
-        SELECT COUNT(*)::bigint
+        SELECT COUNT(*)::bigint AS "count!"
         FROM orchestrator_jobs
         WHERE kind = $1 AND state = 'ready'
         "#,
+        kind as i16
     )
-    .bind(kind as i16)
     .fetch_one(pool)
     .await
     .map_err(Into::into)
@@ -607,7 +611,7 @@ async fn seed_media_file_from_manifest(
     library_id: LibraryId,
     path_norm: &str,
 ) -> Result<()> {
-    let inserted = sqlx::query(
+    let inserted = sqlx::query!(
         r#"
         INSERT INTO media_files (
             library_id, media_id, media_type, file_path, filename, file_size,
@@ -630,9 +634,9 @@ async fn seed_media_file_from_manifest(
         FROM manifest_entries
         WHERE library_id = $1 AND path_norm = $2
         "#,
+        library_id.0,
+        path_norm
     )
-    .bind(library_id.0)
-    .bind(path_norm)
     .execute(pool)
     .await?
     .rows_affected();
@@ -648,7 +652,7 @@ async fn current_media_path(
     pool: &PgPool,
     library_id: LibraryId,
 ) -> Result<Option<String>> {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         r#"
         SELECT file_path
         FROM media_files
@@ -656,8 +660,8 @@ async fn current_media_path(
         ORDER BY updated_at DESC
         LIMIT 1
         "#,
+        library_id.0
     )
-    .bind(library_id.0)
     .fetch_optional(pool)
     .await
     .map_err(Into::into)
@@ -668,15 +672,15 @@ async fn media_available(
     library_id: LibraryId,
     path_norm: &str,
 ) -> Result<Option<bool>> {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         r#"
         SELECT is_available
         FROM media_files
         WHERE library_id = $1 AND file_path = $2
         "#,
+        library_id.0,
+        path_norm
     )
-    .bind(library_id.0)
-    .bind(path_norm)
     .fetch_optional(pool)
     .await
     .map_err(Into::into)

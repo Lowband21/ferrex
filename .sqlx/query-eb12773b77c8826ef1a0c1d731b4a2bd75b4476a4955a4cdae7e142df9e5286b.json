@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM scan_cursors\n            WHERE library_id = $1\n              AND EXISTS (\n                  SELECT 1\n                  FROM UNNEST($2::text[], $3::text[]) AS prefixes(root, child_pattern)\n                  WHERE folder_path_norm = prefixes.root\n                     OR folder_path_norm LIKE prefixes.child_pattern\n              )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb12773b77c8826ef1a0c1d731b4a2bd75b4476a4955a4cdae7e142df9e5286b"
+}

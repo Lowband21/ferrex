@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COUNT(*) FILTER (WHERE status = 'pending')::bigint AS \"pending!\",\n                COUNT(*) FILTER (WHERE status = 'applied')::bigint AS \"applied!\",\n                COUNT(*) FILTER (WHERE status = 'dropped')::bigint AS \"dropped!\",\n                COUNT(*)::bigint AS \"total!\",\n                (EXTRACT(EPOCH FROM (\n                    NOW() - (MIN(created_at) FILTER (WHERE status = 'pending'))\n                )) * 1000)::bigint AS oldest_pending_lag_ms\n            FROM manifest_deferred_watch_hints\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "applied!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "dropped!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "oldest_pending_lag_ms",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ecb91123e030af55382203f13784cfa3a21a93dbf5f96c5275ffead350cef39f"
+}

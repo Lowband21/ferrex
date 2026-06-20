@@ -1100,43 +1100,63 @@ impl ManifestMediaRepository for PostgresMediaRepository {
         scope: &crate::domain::scan::manifest::ManifestScope,
         observed_paths: &[String],
     ) -> Result<Vec<StoredMediaFile>> {
-        let mut builder = QueryBuilder::<Postgres>::new(
+        let library_uuid = scope.library_id().to_uuid();
+        let (prefix_root, child_pattern) =
+            if let Some(prefix) = manifest_scope_reconciliation_prefix(scope) {
+                let root = normalized_sql_prefix_root(prefix);
+                let child_pattern = sql_child_prefix_pattern(&root);
+                (Some(root), Some(child_pattern))
+            } else if observed_paths.is_empty() {
+                return Ok(Vec::new());
+            } else {
+                (None, None)
+            };
+        let observed_paths = observed_paths.to_vec();
+
+        let rows = sqlx::query!(
             r#"
-            SELECT id, media_id, media_type::text AS media_type, file_path, file_size,
+            SELECT id, media_id, media_type::text AS "media_type!", file_path, file_size,
                    is_available, fingerprint_device_id, fingerprint_inode,
                    fingerprint_size, fingerprint_mtime_ms, fingerprint_weak_hash
             FROM media_files
-            WHERE library_id = 
+            WHERE library_id = $1
+              AND (
+                  ($2::text IS NOT NULL AND (file_path = $2 OR file_path LIKE $3))
+                  OR ($2::text IS NULL AND file_path = ANY($4::text[]))
+              )
+            ORDER BY file_path ASC
             "#,
-        );
-        let library_uuid = scope.library_id().to_uuid();
-        builder.push_bind(library_uuid);
-
-        if let Some(prefix) = manifest_scope_reconciliation_prefix(scope) {
-            let root = normalized_sql_prefix_root(prefix);
-            builder.push(" AND (file_path = ");
-            builder.push_bind(root.clone());
-            builder.push(" OR file_path LIKE ");
-            builder.push_bind(sql_child_prefix_pattern(&root));
-            builder.push(")");
-        } else if observed_paths.is_empty() {
-            return Ok(Vec::new());
-        } else {
-            builder.push(" AND file_path = ANY(");
-            builder.push_bind(observed_paths);
-            builder.push(")");
-        }
-
-        builder.push(" ORDER BY file_path ASC");
-
-        let rows = builder.build().fetch_all(self.pool()).await.map_err(|e| {
+            library_uuid,
+            prefix_root,
+            child_pattern,
+            &observed_paths[..]
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| {
             MediaError::Internal(format!(
                 "Failed to list manifest reconciliation media for library {}: {}",
                 scope.library_id(), e
             ))
         })?;
 
-        rows.into_iter().map(Self::stored_media_from_row).collect()
+        rows.into_iter()
+            .map(|row| {
+                Self::stored_media_from_parts(
+                    row.id,
+                    row.media_id,
+                    row.media_type,
+                    row.file_path,
+                    row.file_size,
+                    row.is_available,
+                    row.fingerprint_device_id,
+                    row.fingerprint_inode,
+                    row.fingerprint_size,
+                    row.fingerprint_mtime_ms,
+                    row.fingerprint_weak_hash,
+                )
+            })
+            .collect()
     }
 
     async fn move_media_by_path(

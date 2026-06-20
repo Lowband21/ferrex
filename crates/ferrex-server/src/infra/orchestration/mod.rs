@@ -79,7 +79,6 @@ use ferrex_core::infra::media::{
     image_service::ImageService, providers::TmdbApiProvider,
 };
 use ferrex_core::types::LibraryId;
-use sqlx::Row;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
 
@@ -586,19 +585,18 @@ impl ScanOrchestrator {
         let pool = queue.pool();
 
         let mut run_counts = ManifestRunStatusCountsView::default();
-        for row in sqlx::query(
+        for row in sqlx::query!(
             r#"
-            SELECT status, COUNT(*)::bigint AS count
+            SELECT status AS "status!", COUNT(*)::bigint AS "count!"
             FROM manifest_runs
             GROUP BY status
-            "#,
+            "#
         )
         .fetch_all(pool)
         .await?
         {
-            let status: String = row.try_get("status")?;
-            let count = nonnegative_i64_to_u64(row.try_get::<i64, _>("count")?);
-            match status.as_str() {
+            let count = nonnegative_i64_to_u64(row.count);
+            match row.status.as_str() {
                 "pending" => run_counts.pending = count,
                 "running" => run_counts.running = count,
                 "completed" => run_counts.completed = count,
@@ -612,32 +610,32 @@ impl ScanOrchestrator {
             }
         }
 
-        let deferred_row = sqlx::query(
+        let deferred_row = sqlx::query!(
             r#"
             SELECT
-                COUNT(*) FILTER (WHERE status = 'pending')::bigint AS pending,
-                COUNT(*) FILTER (WHERE status = 'applied')::bigint AS applied,
-                COUNT(*) FILTER (WHERE status = 'dropped')::bigint AS dropped,
-                COUNT(*)::bigint AS total,
+                COUNT(*) FILTER (WHERE status = 'pending')::bigint AS "pending!",
+                COUNT(*) FILTER (WHERE status = 'applied')::bigint AS "applied!",
+                COUNT(*) FILTER (WHERE status = 'dropped')::bigint AS "dropped!",
+                COUNT(*)::bigint AS "total!",
                 (EXTRACT(EPOCH FROM (
                     NOW() - (MIN(created_at) FILTER (WHERE status = 'pending'))
                 )) * 1000)::bigint AS oldest_pending_lag_ms
             FROM manifest_deferred_watch_hints
-            "#,
+            "#
         )
         .fetch_one(pool)
         .await?;
         let deferred_watch_hints = ManifestDeferredWatchHintsHealthView {
-            pending: nonnegative_i64_to_u64(deferred_row.try_get("pending")?),
-            applied: nonnegative_i64_to_u64(deferred_row.try_get("applied")?),
-            dropped: nonnegative_i64_to_u64(deferred_row.try_get("dropped")?),
-            total: nonnegative_i64_to_u64(deferred_row.try_get("total")?),
+            pending: nonnegative_i64_to_u64(deferred_row.pending),
+            applied: nonnegative_i64_to_u64(deferred_row.applied),
+            dropped: nonnegative_i64_to_u64(deferred_row.dropped),
+            total: nonnegative_i64_to_u64(deferred_row.total),
             oldest_pending_lag_ms: optional_nonnegative_i64_to_u64(
-                deferred_row.try_get("oldest_pending_lag_ms")?,
+                deferred_row.oldest_pending_lag_ms,
             ),
         };
 
-        let stale_row = sqlx::query(
+        let stale_row = sqlx::query!(
             r#"
             WITH stale AS (
                 SELECT c.last_successful_at, c.updated_at
@@ -653,73 +651,70 @@ impl ScanOrchestrator {
                   )
             )
             SELECT
-                COUNT(*)::bigint AS stale_partitions,
+                COUNT(*)::bigint AS "stale_partitions!",
                 (EXTRACT(EPOCH FROM (
                     NOW() - MIN(COALESCE(last_successful_at, updated_at))
                 )) * 1000)::bigint AS oldest_manifest_lag_ms
             FROM stale
-            "#,
+            "#
         )
         .fetch_one(pool)
         .await?;
         let stale_partitions =
-            nonnegative_i64_to_u64(stale_row.try_get("stale_partitions")?);
-        let oldest_manifest_lag_ms = optional_nonnegative_i64_to_u64(
-            stale_row.try_get("oldest_manifest_lag_ms")?,
-        );
+            nonnegative_i64_to_u64(stale_row.stale_partitions);
+        let oldest_manifest_lag_ms =
+            optional_nonnegative_i64_to_u64(stale_row.oldest_manifest_lag_ms);
 
         let stall_timeout_ms = i64::try_from(
             self.runtime.config().maintenance.run_stall_timeout_ms,
         )
         .unwrap_or(i64::MAX);
-        let stuck_row = sqlx::query(
+        let stuck_row = sqlx::query!(
             r#"
             SELECT
                 COUNT(*) FILTER (
                     WHERE status IN ('pending', 'running')
                       AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
-                )::bigint AS stuck_runs,
+                )::bigint AS "stuck_runs!",
                 COUNT(DISTINCT library_id) FILTER (
                     WHERE status IN ('pending', 'running')
                       AND started_at < NOW() - ($1::bigint * interval '1 millisecond')
-                )::bigint AS stuck_libraries
+                )::bigint AS "stuck_libraries!"
             FROM manifest_runs
             "#,
+            stall_timeout_ms
         )
-        .bind(stall_timeout_ms)
         .fetch_one(pool)
         .await?;
-        let stuck_runs =
-            nonnegative_i64_to_u64(stuck_row.try_get("stuck_runs")?);
-        let stuck_libraries =
-            nonnegative_i64_to_u64(stuck_row.try_get("stuck_libraries")?);
+        let stuck_runs = nonnegative_i64_to_u64(stuck_row.stuck_runs);
+        let stuck_libraries = nonnegative_i64_to_u64(stuck_row.stuck_libraries);
 
         let mut diagnostics_by_code = Vec::new();
-        for row in sqlx::query(
+        for row in sqlx::query!(
             r#"
             SELECT
-                code,
-                COUNT(*)::bigint AS count,
-                COUNT(*) FILTER (WHERE severity = 'info')::bigint AS info,
-                COUNT(*) FILTER (WHERE severity = 'warning')::bigint AS warnings,
-                COUNT(*) FILTER (WHERE severity = 'error')::bigint AS errors,
+                code AS "code!",
+                COUNT(*)::bigint AS "count!",
+                COUNT(*) FILTER (WHERE severity = 'info')::bigint AS "info!",
+                COUNT(*) FILTER (WHERE severity = 'warning')::bigint AS "warnings!",
+                COUNT(*) FILTER (WHERE severity = 'error')::bigint AS "errors!",
                 MAX(created_at) AS latest_at
             FROM manifest_diagnostics
             GROUP BY code
-            ORDER BY count DESC, code ASC
+            ORDER BY COUNT(*) DESC, code ASC
             LIMIT 64
-            "#,
+            "#
         )
         .fetch_all(pool)
         .await?
         {
             diagnostics_by_code.push(ManifestDiagnosticCodeCountView {
-                code: row.try_get("code")?,
-                count: nonnegative_i64_to_u64(row.try_get("count")?),
-                info: nonnegative_i64_to_u64(row.try_get("info")?),
-                warnings: nonnegative_i64_to_u64(row.try_get("warnings")?),
-                errors: nonnegative_i64_to_u64(row.try_get("errors")?),
-                latest_at: row.try_get("latest_at")?,
+                code: row.code,
+                count: nonnegative_i64_to_u64(row.count),
+                info: nonnegative_i64_to_u64(row.info),
+                warnings: nonnegative_i64_to_u64(row.warnings),
+                errors: nonnegative_i64_to_u64(row.errors),
+                latest_at: row.latest_at,
             });
         }
 

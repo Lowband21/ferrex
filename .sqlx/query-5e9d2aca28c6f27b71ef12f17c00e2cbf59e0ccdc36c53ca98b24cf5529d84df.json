@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)::bigint AS \"count!\"\n        FROM orchestrator_jobs\n        WHERE kind = $1 AND state = 'ready'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int2"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5e9d2aca28c6f27b71ef12f17c00e2cbf59e0ccdc36c53ca98b24cf5529d84df"
+}

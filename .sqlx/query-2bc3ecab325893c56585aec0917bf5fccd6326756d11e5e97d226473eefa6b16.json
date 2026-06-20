@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO scan_cursors (\n                    library_id, path_hash, folder_path_norm, listing_hash, entry_count, last_scan_at\n                )\n                VALUES ($1, 12345, '/media/movies/Alien', 'listing', 1, NOW())\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2bc3ecab325893c56585aec0917bf5fccd6326756d11e5e97d226473eefa6b16"
+}
