@@ -17,7 +17,8 @@ Expected result: `BUILD SUCCESSFUL`. The focused test verifies:
 - every `FerrexActionRole` maps to the expected `FerrexStatusTone`;
 - deterministic visual-QA samples expose unique stable tags, descriptions, manual evidence paths, and synthetic media fixtures;
 - phone and TV library-grid scenarios explicitly document compact controls plus dense grids, with enough synthetic poster cards to catch regressions back to vertical huge-card lists;
-- dynamic phone/TV tag builders sanitize spaces, punctuation, and mixed case into predictable namespaces.
+- dynamic phone/TV tag builders sanitize spaces, punctuation, and mixed case into predictable namespaces;
+- phone and TV debug QA scenarios cover the migrated flat Home, Library, Search, Detail, Player, Recovery, and Diagnostics surfaces.
 
 Full Android CI-compatible gate after source changes:
 
@@ -50,7 +51,7 @@ The runner reads the debug scenario registry in `FerrexVisualQa.kt`, launches ea
 - Transient PNG dimension mismatches are retried after reapplying the viewport; invalid attempts are preserved as `<scenario-id>.attempt-<n>.invalid.png` and recorded in `screenshot_validation_attempts`.
 - Failed captures include bounded redacted logcat snippets under `<output>/logs/`; redaction removes authorization values, bearer/basic tokens, token/ticket/password fields, URL origins, and private LAN origins.
 
-Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. `--screenshot-mode fast` is the default prepared-run path; use `--screenshot-mode helper-compatible` only when explicitly checking the legacy Nix screenshot helper behavior for default emulator profiles. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
+Use `./scripts/qa/android-visual-qa.sh list --target all` to list the current matrix. The flat UI coverage scenarios include `phone-home`, `phone-browse-grid`, `phone-search`, `phone-movie-detail`, `phone-playback-entry`, `phone-recovery-offline-stale`, `phone-diagnostics`, `tv-home-focus`, `tv-grid-focus`, `tv-search-focus`, `tv-detail-focus`, `tv-recovery-focus`, `tv-diagnostics-focus`, and the phone/TV Theater Plate states including `*-theater-plate-playback-entry`. `--profile` can narrow the default all-profile matrix, for example `--profile phone-portrait --profile tv-1080p`. `--screenshot-mode fast` is the default prepared-run path; use `--screenshot-mode helper-compatible` only when explicitly checking the legacy Nix screenshot helper behavior for default emulator profiles. Hardware confirmation is opt-in only and requires an explicit serial, for example `--hardware --hardware-serial "$SERIAL"` or `FERREX_ANDROID_HARDWARE_SERIAL`; no physical device serials, IPs, or server origins are committed as defaults.
 
 The accessibility subcommand writes `accessibility-manifest.json` plus UI Automator XML dumps under `<output>/accessibility/`. It fails when required recovery/action/status/focus/media nodes are missing stable tags, content descriptions, button roles, onClick/clickable affordances, TV focusability, or disabled semantics for playback-entry actions that cannot launch without a ticket.
 
@@ -84,17 +85,20 @@ Key phone tags:
 - `phone.home`, `phone.home.header`, `phone.home.continue-watching`, `phone.home.browse-find`, `phone.home.server-recovery`
 - `phone.libraries`, `phone.libraries.tabs`, `phone.libraries.chooser`, `phone.libraries.controls`, `phone.libraries.index-status`, `phone.libraries.grid`, `phone.library.recovery`
 - `phone.search`, `phone.search.panel`, `phone.search.field`, `phone.search.actions`, `phone.search.results`
+- `phone.detail.movie`, `phone.detail.series`, `phone.detail.season-episode`, `phone.playback-entry`
+- `phone.recovery.offline-stale`, `phone.diagnostics`, `phone.diagnostics.actions`, `phone.diagnostics.action.export`, `phone.diagnostics.action.clear`
 - `phone.account-server`, `phone.account-server.summary`
 
 Key TV tags:
 
-- top-level: `tv.home`, `tv.search`, `tv.search.field`, `tv.search.results`, `tv.detail`
+- top-level: `tv.home`, `tv.search`, `tv.search.field`, `tv.search.results`, `tv.detail`, `tv.diagnostics`
 - compact full-grid controls: `tv.surface.grid-top-controls`, `tv.action.grid-top-controls.media-type`, `tv.action.grid-top-controls.library`, `tv.action.grid-top-controls.sort-filter`, `tv.action.grid-top-controls.status-more`
 - dense full-grid posters: `tv.surface.grid-cards`, `tv.poster.grid-cards.<stable-item-key>`
 - modal grid panels: `tv.surface.grid-movie-controls-panel`, `tv.surface.grid-status-panel`, plus `tv.action.<panel>.<action-key>` for sort/filter/retry/cache/diagnostics exits
 - generic focus surfaces: `tv.surface.<surface-key>`
 - generic focus actions: `tv.action.<surface-key>.<action-key>`
 - poster targets: `tv.poster.<surface-key>.<stable-item-key>`
+- diagnostics actions: `tv.action.diagnostics-actions.export`, `tv.action.diagnostics-actions.clear`, `tv.action.diagnostics-actions.back`
 
 Theater Plate debug tags are generated for both `phone` and `tv` targets:
 
@@ -116,6 +120,20 @@ The phone and TV library-grid debug scenarios are the visual canaries for the co
 - `tv-grid-focus` renders compact D-pad top controls (`grid-top-controls`), a dense synthetic 12-card poster grid (`grid-cards`), and modal sort/filter plus status/recovery panels. The cards use dense grid token spacing/copy and stable `tv.poster.grid-cards.*` tags; TV home rails keep their larger 10-foot rail dimensions and must not inherit the dense full-grid treatment.
 - Recovery controls remain explicit, tagged, and no-wipe: Retry selected/all, Clear selected/all cache, Change server, Reset connection, and Diagnostics / Export diagnostics stay reachable from the status/More panel.
 - Screenshots, UI Automator dumps, logcat snippets, and videos for these scenarios must follow the redaction rules below before attachment.
+
+## Flat UI surface contract
+
+Use the following matrix when reviewing screenshots, UI Automator dumps, or manual device sessions. Decorative cards/rounded panels should not reappear on layout-only sections; status/recovery bands may use flat tinted slabs and dividers, while functional buttons, dialogs, focus rings, and TV D-pad targets keep their interactive shape/focus treatment.
+
+| Surface | Phone flat expectation | TV flat expectation |
+| --- | --- | --- |
+| Home | Header, Continue Watching, Browse and find, and Server & recovery read as flat sections with stable tags; connection/cache recovery stays inline. | Home actions and shelves use Theater Plate/flat focus surfaces, visible focus scale/border, and no stranded retry/diagnostics exits. |
+| Library | Tabs, chooser, sort/filter/status/More controls collapse into compact flat controls; one dense grid owns scroll and media cards keep accessible descriptions. | Compact top controls open modal panels; dense poster grid shows at least the tested 1080p density, stable poster tags, and focused media-art grounding. |
+| Search | Field, Retry/Clear, result rows, stale/cache-miss/error cards, and Diagnostics action are tagged and contrast-safe. | Search field, result/retry/clear actions, result rows, and cache-miss recovery are D-pad reachable with `tv.action.search-results.*` tags. |
+| Detail | Movie, series, and episode details use flat Theater Plate primitives; phone omits redundant visible Back while keeping playback/cache recovery inline. | Detail starts with a safe Back focus target, preserves play/watch/cache/diagnostics actions, and uses focus-only outlines instead of resting card chrome. |
+| Player | Playback-entry/debug state preserves resume/start-over/network-ticket recovery actions and disabled semantics where a ticket is unavailable. | Theater Plate playback-entry and TV playback recovery actions expose disabled network-required semantics, D-pad focus, and Back/change-server/sign-out/diagnostics exits. |
+| Recovery | Retry, Sign out, Change server, Reset connection, Diagnostics, and cache repair exits remain visible without asking for OS app-data wipes. | Recovery panels keep all no-wipe exits focusable and tagged; destructive reset uses destructive tone, not hidden platform wipe instructions. |
+| Diagnostics | Settings & Diagnostics uses flat status bands, export/share and clear diagnostics/logs actions, no visible Back button, and redacted/safe summaries only. | TV diagnostics keeps export, clear, and Back D-pad actions in `diagnostics-actions`, flat status slabs, and redacted/safe summary copy. |
 
 ## Theater Plate migration seams
 
@@ -156,6 +174,7 @@ Phone paths to capture/verify:
 | Search | Query field, Retry/Clear actions, result rows, stale/cache-miss/error cards, and diagnostics action remain visible and tagged. |
 | Account & Server | Retry, Change server, Sign out, Reset connection, Diagnostics, and cache recovery exits remain visible; reset/change paths do not require OS app-data wipe. |
 | Detail/Player if available | Playback/watch actions and error recovery copy preserve token contrast and expose labeled actions. |
+| Diagnostics | Settings & Diagnostics shows flat status bands plus Export / Share diagnostics and Clear diagnostics/logs; no visible Back button is present, Android back remains available, and summaries avoid raw credentials/device IDs. |
 
 ## Manual Android TV runbook
 
@@ -188,6 +207,7 @@ TV paths to capture/verify:
 | Search | Search field is focusable, Back/Retry/Clear are tagged, result rows expose `Open <title>` descriptions, and cache-miss recovery actions remain reachable. |
 | Detail | Back starts as a safe focus target; playback/watch actions and missing-detail recovery actions are tagged and have visible focus. |
 | Recovery/errors | Retry, clear cache, Change server, Reset connection, Sign out, and Diagnostics actions stay reachable without OS app-data wipe. |
+| Diagnostics | Export / Share diagnostics, Clear diagnostics/logs, and Back focus targets live in `tv.action.diagnostics-actions.*`; status slabs remain flat and safe summaries avoid raw credentials/device IDs. |
 
 ## Screenshot, video, logcat, and redaction requirements
 

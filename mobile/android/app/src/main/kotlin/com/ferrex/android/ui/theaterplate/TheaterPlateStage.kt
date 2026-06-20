@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -43,6 +44,7 @@ import com.ferrex.android.core.theaterplate.TheaterPlateDownsample
 import com.ferrex.android.core.theaterplate.TheaterPlateGradeClass
 import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.theaterplate.TheaterPlateViewportClass
+import com.ferrex.android.ui.theme.FerrexChromeCategory
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlin.math.ceil
 import kotlin.math.max
@@ -321,17 +323,43 @@ enum class FerrexStageSurfaceTone {
     Error,
 }
 
+/** Resting chrome treatment for stage sections; ordinary sections are flat or divider-only. */
+enum class FerrexStageSurfaceTreatment(
+    val chromeCategory: FerrexChromeCategory,
+    val drawsDivider: Boolean,
+    val drawsContainer: Boolean,
+) {
+    Transparent(
+        chromeCategory = FerrexChromeCategory.LayoutOnly,
+        drawsDivider = false,
+        drawsContainer = false,
+    ),
+    DividerOnly(
+        chromeCategory = FerrexChromeCategory.DividerOnly,
+        drawsDivider = true,
+        drawsContainer = false,
+    ),
+    StatusBand(
+        chromeCategory = FerrexChromeCategory.StatusBand,
+        drawsDivider = false,
+        drawsContainer = true,
+    ),
+}
+
 @Immutable
 data class FerrexStageSurfaceTokenSpec(
     val variant: FerrexStageSurfaceVariant,
     val density: FerrexStageDensityFamily,
+    val treatment: FerrexStageSurfaceTreatment,
     val horizontalPadding: Dp,
     val verticalPadding: Dp,
     val cornerRadius: Dp,
     val minHeight: Dp,
     val borderWidth: Dp,
+    val dividerWidth: Dp,
     val containerAlpha: Float,
     val borderAlpha: Float,
+    val dividerAlpha: Float,
     val denseBand: Boolean,
     val semanticName: String,
 )
@@ -346,7 +374,20 @@ fun FerrexStageSurfaceVariant.defaultTone(): FerrexStageSurfaceTone = when (this
     FerrexStageSurfaceVariant.StatusSlab -> FerrexStageSurfaceTone.StaleOffline
 }
 
-fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): FerrexStageSurfaceTokenSpec {
+fun FerrexStageSurfaceVariant.defaultTreatment(): FerrexStageSurfaceTreatment = when (this) {
+    FerrexStageSurfaceVariant.ProjectionShelf -> FerrexStageSurfaceTreatment.Transparent
+    FerrexStageSurfaceVariant.ControlShelf,
+    FerrexStageSurfaceVariant.RailBand,
+    FerrexStageSurfaceVariant.FactRibbon -> FerrexStageSurfaceTreatment.DividerOnly
+    FerrexStageSurfaceVariant.NoticeSlab,
+    FerrexStageSurfaceVariant.EmptyState,
+    FerrexStageSurfaceVariant.StatusSlab -> FerrexStageSurfaceTreatment.StatusBand
+}
+
+fun FerrexStageSurfaceVariant.tokenSpec(
+    density: FerrexStageDensityFamily,
+    treatment: FerrexStageSurfaceTreatment = defaultTreatment(),
+): FerrexStageSurfaceTokenSpec {
     val compact = density == FerrexStageDensityFamily.Compact
     val tenFoot = density == FerrexStageDensityFamily.TenFoot
     val densityTokens = density.tokens()
@@ -381,7 +422,7 @@ fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): Ferr
         FerrexStageSurfaceVariant.EmptyState -> 0.42f
         FerrexStageSurfaceVariant.StatusSlab -> 0.46f
     }
-    val baseBorderAlpha = when (this) {
+    val baseDividerAlpha = when (this) {
         FerrexStageSurfaceVariant.ProjectionShelf -> 0.34f
         FerrexStageSurfaceVariant.ControlShelf -> 0.54f
         FerrexStageSurfaceVariant.RailBand -> 0.44f
@@ -399,7 +440,7 @@ fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): Ferr
         FerrexStageSurfaceVariant.EmptyState -> 0.80f
         FerrexStageSurfaceVariant.StatusSlab -> 0.62f
     }
-    val phoneBorderScale = if (tenFoot) 1f else when (this) {
+    val phoneDividerScale = if (tenFoot) 1f else when (this) {
         FerrexStageSurfaceVariant.ProjectionShelf -> 0.62f
         FerrexStageSurfaceVariant.ControlShelf -> 0.78f
         FerrexStageSurfaceVariant.RailBand -> 0.50f
@@ -412,21 +453,24 @@ fun FerrexStageSurfaceVariant.tokenSpec(density: FerrexStageDensityFamily): Ferr
     return FerrexStageSurfaceTokenSpec(
         variant = this,
         density = density,
+        treatment = treatment,
         horizontalPadding = horizontal,
         verticalPadding = vertical,
-        cornerRadius = when (this) {
-            FerrexStageSurfaceVariant.ProjectionShelf -> 14.dp
-            FerrexStageSurfaceVariant.ControlShelf -> 12.dp
-            FerrexStageSurfaceVariant.RailBand -> 10.dp
-            FerrexStageSurfaceVariant.FactRibbon -> 8.dp
-            FerrexStageSurfaceVariant.NoticeSlab -> 12.dp
-            FerrexStageSurfaceVariant.EmptyState -> 14.dp
-            FerrexStageSurfaceVariant.StatusSlab -> 10.dp
-        },
+        cornerRadius = FerrexDesignTokens.ShapeRadii.DecorativeContainer,
         minHeight = minHeight,
-        borderWidth = if (tenFoot) FerrexDesignTokens.Focus.TvRestingBorder else 1.dp,
-        containerAlpha = (baseContainerAlpha * phoneContainerScale).coerceIn(0f, 1f),
-        borderAlpha = (baseBorderAlpha * phoneBorderScale).coerceIn(0f, 1f),
+        borderWidth = FerrexDesignTokens.Space.None,
+        dividerWidth = if (treatment.drawsDivider) FerrexDesignTokens.Focus.TvRestingBorder else FerrexDesignTokens.Space.None,
+        containerAlpha = if (treatment.drawsContainer) {
+            (baseContainerAlpha * phoneContainerScale).coerceIn(0f, 1f)
+        } else {
+            0f
+        },
+        borderAlpha = 0f,
+        dividerAlpha = if (treatment.drawsDivider) {
+            (baseDividerAlpha * phoneDividerScale).coerceIn(0f, 1f)
+        } else {
+            0f
+        },
         denseBand = this in denseBandVariants,
         semanticName = semanticName,
     )
@@ -519,13 +563,14 @@ fun FerrexStageSurface(
     modifier: Modifier = Modifier,
     density: FerrexStageDensityFamily = FerrexStageDensityFamily.Standard,
     tone: FerrexStageSurfaceTone = variant.defaultTone(),
+    treatment: FerrexStageSurfaceTreatment = variant.defaultTreatment(),
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     contentDescription: String? = null,
     testTag: String? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val tokenSpec = remember(variant, density) { variant.tokenSpec(density) }
+    val tokenSpec = remember(variant, density, treatment) { variant.tokenSpec(density, treatment) }
     val colors = tone.colors(tokenSpec)
     val clickableModifier = if (onClick != null) {
         Modifier.clickable(
@@ -541,12 +586,13 @@ fun FerrexStageSurface(
         modifier = modifier
             .defaultMinSize(minHeight = tokenSpec.minHeight)
             .then(testTagModifier(testTag))
+            .then(stageSurfaceDividerModifier(tokenSpec, colors))
             .then(clickableModifier)
             .then(stageSurfaceSemantics(contentDescription, onClick != null)),
         shape = RoundedCornerShape(tokenSpec.cornerRadius),
         color = colors.container,
         contentColor = colors.content,
-        border = BorderStroke(tokenSpec.borderWidth, colors.border),
+        border = stageSurfaceBorder(tokenSpec, colors),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
@@ -630,6 +676,7 @@ private data class StageSurfaceColors(
     val container: Color,
     val content: Color,
     val border: Color,
+    val divider: Color,
 )
 
 @Composable
@@ -657,10 +704,42 @@ private fun FerrexStageSurfaceTone.colors(tokenSpec: FerrexStageSurfaceTokenSpec
     }
 
     return StageSurfaceColors(
-        container = base.copy(alpha = tokenSpec.containerAlpha.controlOrZero()),
+        container = if (tokenSpec.containerAlpha > 0f) {
+            base.copy(alpha = tokenSpec.containerAlpha.controlOrZero())
+        } else {
+            Color.Transparent
+        },
         content = content,
         border = border.copy(alpha = tokenSpec.borderAlpha.controlOrZero()),
+        divider = border.copy(alpha = tokenSpec.dividerAlpha.controlOrZero()),
     )
+}
+
+private fun stageSurfaceBorder(
+    tokenSpec: FerrexStageSurfaceTokenSpec,
+    colors: StageSurfaceColors,
+): BorderStroke? = if (tokenSpec.borderWidth.value > 0f && colors.border.alpha > 0f) {
+    BorderStroke(tokenSpec.borderWidth, colors.border)
+} else {
+    null
+}
+
+private fun stageSurfaceDividerModifier(
+    tokenSpec: FerrexStageSurfaceTokenSpec,
+    colors: StageSurfaceColors,
+): Modifier = if (tokenSpec.dividerWidth.value > 0f && colors.divider.alpha > 0f) {
+    Modifier.drawBehind {
+        val stroke = tokenSpec.dividerWidth.toPx()
+        val y = size.height - stroke / 2f
+        drawLine(
+            color = colors.divider,
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = stroke,
+        )
+    }
+} else {
+    Modifier
 }
 
 private val denseBandVariants = setOf(

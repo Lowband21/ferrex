@@ -2,6 +2,7 @@ package com.ferrex.android.tv.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,10 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import coil.ImageLoader
-import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthenticatedConnectionUi
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.browse.HomeLibraryTab
+import com.ferrex.android.core.browse.HomeShelf
 import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.MediaRouteArgs
 import com.ferrex.android.core.image.ImageRequestKey
@@ -168,9 +169,10 @@ internal fun TvHomeContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl, Alignment.Top),
         ) {
-            TvHomeHeroPlate(
+            TvHomeAccountLine(
                 userCopy = "Signed in as ${state.user.displayName ?: state.user.username}",
                 serverCopy = "Server: ${state.serverUrl}",
+                connectionCopy = if (connectionStatus.visible) connectionStatus.title else "Online",
             )
             if (connectionStatus.visible) {
                 TvHomeStatusSlab(
@@ -301,52 +303,31 @@ internal fun TvHomeContent(
 }
 
 @Composable
-private fun TvHomeHeroPlate(
+private fun TvHomeAccountLine(
     userCopy: String,
     serverCopy: String,
+    connectionCopy: String,
 ) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = FerrexStageDensityFamily.TenFoot,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.fillMaxWidth(),
-        contentDescription = "Theater Plate home hero",
-        testTag = FerrexQaTags.Tv.surface("home-hero"),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Tv.surface("home-account-line")),
+        horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Xl),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-            TheaterPlateText(
-                text = "Theater Plate home",
-                role = TheaterPlateTypographyRole.HeroEyebrow,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-            )
-            TheaterPlateText(
-                text = FerrexShellCopy.TV_TITLE,
-                role = TheaterPlateTypographyRole.HeroTitle,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = FerrexShellCopy.TV_SUBTITLE,
-                role = TheaterPlateTypographyRole.HeroSubtitle,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-            )
-            TheaterPlateText(
-                text = FerrexShellCopy.TV_BODY,
-                role = TheaterPlateTypographyRole.HeroBody,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-                maxLines = 3,
-            )
-            TheaterPlateText(
-                text = userCopy,
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-            )
-            TheaterPlateText(
-                text = serverCopy,
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = TheaterPlateDensityRole.Tv1080p,
-            )
-        }
+        TheaterPlateText(
+            text = userCopy,
+            role = TheaterPlateTypographyRole.FactValue,
+            densityRole = TheaterPlateDensityRole.Tv1080p,
+            modifier = Modifier.weight(1f),
+        )
+        TheaterPlateText(
+            text = "$connectionCopy • $serverCopy",
+            role = TheaterPlateTypographyRole.Metadata,
+            densityRole = TheaterPlateDensityRole.Tv1080p,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(2f),
+        )
     }
 }
 
@@ -379,6 +360,21 @@ private fun TvHomeStatusSlab(
             )
         }
     }
+}
+
+@Composable
+private fun TvShelfStatusLine(text: String) {
+    TheaterPlateText(
+        text = text,
+        role = TheaterPlateTypographyRole.Metadata,
+        densityRole = TheaterPlateDensityRole.Tv1080p,
+    )
+}
+
+private fun HomeShelf.tvFlatShelfCopy(): String = if (fullItemCount > items.size) {
+    "Preview ${items.size}/$fullItemCount • Browse all for the full grid."
+} else {
+    "$fullItemCount cached item(s)."
 }
 
 @Composable
@@ -421,23 +417,15 @@ internal fun ContinueWatchingSection(
             surfaceKey = TvHomeFocusPolicy.SURFACE_CONTINUE_WATCHING,
             autoFocus = autoFocus,
         )
-        is ContinueWatchingStatus.StaleOffline -> TvHomeStatusSlab(
-            title = "Stale/offline Continue Watching",
-            body = "Showing ${status.itemCount} stale/offline item(s): ${status.message}",
-            tone = FerrexStageSurfaceTone.StaleOffline,
-            tagKey = "continue-watching-status",
+        is ContinueWatchingStatus.StaleOffline -> TvShelfStatusLine(
+            "Stale/offline • showing ${status.itemCount} cached item(s): ${status.message}",
         )
-        is ContinueWatchingStatus.Fresh -> TvHomeStatusSlab(
-            title = "Continue Watching ready",
-            body = "${status.itemCount} current item(s) from /api/v1/watch/continue.",
-            tone = FerrexStageSurfaceTone.Primary,
-            tagKey = "continue-watching-status",
-        )
+        is ContinueWatchingStatus.Fresh -> Unit
     }
     if (entries.isNotEmpty()) {
         TvPosterRow(
             title = null,
-            supportingText = "Resume targets open cached details and ticketed playback actions.",
+            supportingText = "",
             entries = entries,
             imageResolutions = imageResolutions,
             imageLoader = imageLoader,
@@ -464,7 +452,7 @@ internal fun TvShelfSection(
     val entries = remember(shelf.items) { shelf.items.map { it.toPosterEntry() } }
     TvPosterRow(
         title = shelf.title,
-        supportingText = shelf.subtitle + " " + shelf.limitCopy,
+        supportingText = shelf.tvFlatShelfCopy(),
         entries = entries,
         imageResolutions = imageResolutions,
         imageLoader = imageLoader,
@@ -501,7 +489,7 @@ internal fun TvLibraryEntrySection(
 ) {
     TvSectionHeader("Library")
     TvButtonRow(
-        supportingText = "Choose a media type, pick a library, then open a full virtualized grid with no first-page cap.",
+        supportingText = "Choose type and library; Browse all opens the full virtualized grid.",
         actions = HomeLibraryTab.entries.map { tab ->
             TvButtonAction(
                 key = "tab-${tab.name.lowercase()}",

@@ -19,6 +19,10 @@ import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.components.theaterPlateDensityForViewport
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.qa.FerrexVisualQaSamples
+import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTreatment
+import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
+import com.ferrex.android.ui.theaterplate.tokenSpec
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -55,6 +59,54 @@ class FerrexDesignTokensTest {
         assertEquals(338.dp, FerrexDesignTokens.Poster.TvCardMinHeight)
         assertEquals(1560.dp, FerrexDesignTokens.Tv.HomeMaxWidth)
         assertEquals(1320.dp, FerrexDesignTokens.Tv.DetailMaxWidth)
+    }
+
+    @Test
+    fun chromeCategoriesDocumentFlatSectionContract() {
+        assertEquals(
+            setOf(
+                FerrexChromeCategory.LayoutOnly,
+                FerrexChromeCategory.DividerOnly,
+                FerrexChromeCategory.StatusBand,
+                FerrexChromeCategory.FunctionalButton,
+                FerrexChromeCategory.FocusOnly,
+                FerrexChromeCategory.DialogPicker,
+                FerrexChromeCategory.ProgressStatus,
+            ),
+            FerrexChromeCategory.entries.toSet(),
+        )
+
+        assertFalse(FerrexChromeCategory.LayoutOnly.allowsRestingContainer)
+        assertFalse(FerrexChromeCategory.LayoutOnly.allowsRestingBorder)
+        assertFalse(FerrexChromeCategory.LayoutOnly.allowsPersistentRoundedShape)
+        assertFalse(FerrexChromeCategory.DividerOnly.allowsRestingContainer)
+        assertFalse(FerrexChromeCategory.DividerOnly.allowsRestingBorder)
+        assertTrue(FerrexChromeCategory.StatusBand.allowsRestingContainer)
+        assertFalse(FerrexChromeCategory.StatusBand.allowsRestingBorder)
+        assertFalse(FerrexChromeCategory.StatusBand.allowsPersistentRoundedShape)
+        assertTrue(FerrexChromeCategory.FunctionalButton.allowsPersistentRoundedShape)
+        assertFalse(FerrexChromeCategory.FocusOnly.allowsRestingContainer)
+        assertFalse(FerrexChromeCategory.FocusOnly.allowsRestingBorder)
+        assertTrue(FerrexChromeCategory.FocusOnly.allowsFocusedOutline)
+        assertTrue(FerrexChromeCategory.DialogPicker.allowsPersistentRoundedShape)
+        assertTrue(FerrexChromeCategory.ProgressStatus.allowsRestingContainer)
+        assertFalse(FerrexChromeCategory.ProgressStatus.allowsRestingBorder)
+    }
+
+    @Test
+    fun decorativeShapeTokensDefaultToSquareWhileFunctionalChromeKeepsShape() {
+        val projectionShelf = FerrexStageSurfaceVariant.ProjectionShelf.tokenSpec(FerrexStageDensityFamily.Standard)
+        val statusSlab = FerrexStageSurfaceVariant.StatusSlab.tokenSpec(FerrexStageDensityFamily.Standard)
+
+        assertEquals(0.dp, FerrexDesignTokens.ShapeRadii.DecorativeContainer)
+        assertEquals(0.dp, projectionShelf.cornerRadius)
+        assertEquals(FerrexStageSurfaceTreatment.Transparent, projectionShelf.treatment)
+        assertEquals(0.dp, statusSlab.cornerRadius)
+        assertEquals(FerrexStageSurfaceTreatment.StatusBand, statusSlab.treatment)
+        assertTrue(FerrexDesignTokens.ShapeRadii.Button > 0.dp)
+        assertTrue(FerrexDesignTokens.ShapeRadii.FocusSurface > 0.dp)
+        assertTrue(FerrexDesignTokens.ShapeRadii.DialogPicker > 0.dp)
+        assertTrue(FerrexDesignTokens.ShapeRadii.Pill > FerrexDesignTokens.ShapeRadii.Button)
     }
 
     @Test
@@ -197,16 +249,27 @@ class FerrexDesignTokensTest {
         val notes = TheaterPlateComponentMigrationNotes.all.associateBy { it.componentName }
 
         assertEquals(
-            setOf("FerrexStatusCard", "FerrexActionButton", "FerrexPosterCard", "TV focus actions"),
+            setOf(
+                "FerrexStatusCard",
+                "FerrexActionButton",
+                "FerrexPosterCard",
+                "FerrexMobileMediaCard",
+                "Mobile media badges",
+                "TV focus actions",
+            ),
             notes.keys,
         )
         assertTrue(notes.getValue("FerrexStatusCard").preservedCallbacks.contains("FerrexStatusAction.onClick"))
         assertTrue(notes.getValue("FerrexActionButton").preservedCallbacks.contains("onClick"))
         assertTrue(notes.getValue("FerrexPosterCard").preservedCallbacks.contains("onClick"))
+        assertTrue(notes.getValue("FerrexMobileMediaCard").preservedCallbacks.contains("MediaRailItemIdentity"))
+        assertTrue(notes.getValue("Mobile media badges").preservedCallbacks.contains("progressLabel"))
         assertTrue(notes.getValue("TV focus actions").preservedCallbacks.contains("focus restoration key"))
         assertTrue(notes.getValue("FerrexPosterCard").migrationNote.contains("LOW-447"))
         assertTrue(notes.getValue("FerrexStatusCard").migrationNote.contains("LOW-448"))
         assertTrue(notes.getValue("TV focus actions").migrationNote.contains("LOW-449"))
+        assertTrue(notes.getValue("FerrexMobileMediaCard").migrationNote.contains("layout-only"))
+        assertTrue(notes.getValue("Mobile media badges").foundationSeam.contains("ProgressStatus"))
         notes.values.forEach { note ->
             assertTrue(note.foundationSeam.isNotBlank())
             assertTrue(note.preservedCallbacks.size >= 4)
@@ -223,9 +286,12 @@ class FerrexDesignTokensTest {
         val helper = FerrexDesignTokens.Focus.tvTreatment(TvFocusTreatmentRole.Helper)
 
         assertEquals(FerrexDesignTokens.Focus.TvFocusedScale, action.focusedScale)
+        assertEquals(FerrexDesignTokens.Focus.TvRestingFocusBorder, action.restingBorder)
+        assertEquals(FerrexDesignTokens.Focus.TvRestingFocusBorder, mediaArt.restingBorder)
         assertEquals(FerrexDesignTokens.Focus.TvFocusedBorder, action.focusedBorder)
         assertTrue(mediaArt.focusedScale < action.focusedScale)
         assertTrue(mediaArt.focusedBorder < action.focusedBorder)
+        assertTrue(mediaArt.focusedBorder > mediaArt.restingBorder)
         assertTrue(mediaArt.mediaGroundingClearance > mediaArt.focusedBorder)
         assertEquals(FerrexDesignTokens.Focus.TvFocusedBorder, recovery.focusedBorder)
         assertEquals(FerrexDesignTokens.Focus.TvFocusedElevation, destructive.focusedElevation)
@@ -243,6 +309,8 @@ class FerrexDesignTokensTest {
             ContrastCheck("destructive action content", FerrexDesignTokens.Palette.SlateBlack, FerrexDesignTokens.Palette.Error),
             ContrastCheck("error container copy", FerrexDesignTokens.Palette.TextPrimary, FerrexDesignTokens.Palette.ErrorDim),
             ContrastCheck("focus wash copy", FerrexDesignTokens.Palette.TextPrimary, FerrexDesignTokens.Palette.FocusWash.compositeOver(FerrexDesignTokens.Palette.SlatePanel, alpha = 0x33 / 255f)),
+            ContrastCheck("flat layout-only section copy", FerrexDesignTokens.Palette.TextPrimary, FerrexDesignTokens.Palette.SlateCanvas),
+            ContrastCheck("flat media metadata on canvas", FerrexDesignTokens.Palette.TextSecondary, FerrexDesignTokens.Palette.SlateCanvas),
         ).forEach { it.assertPasses() }
     }
 

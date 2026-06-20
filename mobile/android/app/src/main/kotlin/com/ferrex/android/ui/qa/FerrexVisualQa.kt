@@ -63,6 +63,8 @@ object FerrexQaTags {
         const val SeasonEpisode = "phone.detail.season-episode"
         const val PlaybackEntry = "phone.playback-entry"
         const val RecoveryOfflineStale = "phone.recovery.offline-stale"
+        const val Diagnostics = "phone.diagnostics"
+        const val DiagnosticsActions = "phone.diagnostics.actions"
         const val AccountServer = "phone.account-server"
         const val AccountSummary = "phone.account-server.summary"
 
@@ -80,6 +82,7 @@ object FerrexQaTags {
         const val SearchField = "tv.search.field"
         const val SearchResults = "tv.search.results"
         const val Detail = "tv.detail"
+        const val Diagnostics = "tv.diagnostics"
 
         fun surface(surfaceKey: String): String = namespaced("tv", "surface", surfaceKey)
         fun action(surfaceKey: String, actionKey: String): String = namespaced("tv", "action", surfaceKey, actionKey)
@@ -146,11 +149,13 @@ enum class VisualQaScenarioKind {
     PhoneSeasonEpisode,
     PhonePlaybackEntry,
     PhoneRecoveryOfflineStale,
+    PhoneDiagnostics,
     TvHomeFocus,
     TvGridFocus,
     TvDetailFocus,
     TvSearchFocus,
     TvRecoveryFocus,
+    TvDiagnosticsFocus,
     TheaterPlate,
 }
 
@@ -350,11 +355,13 @@ object FerrexQaScenarioIds {
     const val PhoneSeasonEpisode = "phone-season-episode"
     const val PhonePlaybackEntry = "phone-playback-entry"
     const val PhoneRecoveryOfflineStale = "phone-recovery-offline-stale"
+    const val PhoneDiagnostics = "phone-diagnostics"
     const val TvHomeFocus = "tv-home-focus"
     const val TvGridFocus = "tv-grid-focus"
     const val TvDetailFocus = "tv-detail-focus"
     const val TvSearchFocus = "tv-search-focus"
     const val TvRecoveryFocus = "tv-recovery-focus"
+    const val TvDiagnosticsFocus = "tv-diagnostics-focus"
     const val PhoneTheaterPlateBright = "phone-theater-plate-bright"
     const val PhoneTheaterPlateDark = "phone-theater-plate-dark"
     const val PhoneTheaterPlateBusy = "phone-theater-plate-busy"
@@ -407,11 +414,13 @@ object FerrexVisualQaScenarios {
         FerrexQaScenarioIds.PhoneSeasonEpisode,
         FerrexQaScenarioIds.PhonePlaybackEntry,
         FerrexQaScenarioIds.PhoneRecoveryOfflineStale,
+        FerrexQaScenarioIds.PhoneDiagnostics,
         FerrexQaScenarioIds.TvHomeFocus,
         FerrexQaScenarioIds.TvGridFocus,
         FerrexQaScenarioIds.TvDetailFocus,
         FerrexQaScenarioIds.TvSearchFocus,
         FerrexQaScenarioIds.TvRecoveryFocus,
+        FerrexQaScenarioIds.TvDiagnosticsFocus,
         FerrexQaScenarioIds.PhoneTheaterPlateBright,
         FerrexQaScenarioIds.PhoneTheaterPlateDark,
         FerrexQaScenarioIds.PhoneTheaterPlateBusy,
@@ -523,6 +532,16 @@ object FerrexVisualQaScenarios {
             recoveryActions = FerrexVisualQaFixtures.noWipeRecoveryActions,
         ),
         scenario(
+            id = FerrexQaScenarioIds.PhoneDiagnostics,
+            device = VisualQaDevice.Phone,
+            kind = VisualQaScenarioKind.PhoneDiagnostics,
+            title = "Phone diagnostics",
+            description = "Phone flat diagnostics surface with safe status bands, export/clear actions, and no visible Back control; auth, server, cache, and playback data stay untouched.",
+            testTag = FerrexQaTags.Phone.Diagnostics,
+            evidencePath = "Debug Visual QA → Phone diagnostics",
+            fixtureSamples = listOf(FerrexQaTags.Phone.DiagnosticsActions, "Export / Share diagnostics", "Clear diagnostics/logs"),
+        ),
+        scenario(
             id = FerrexQaScenarioIds.TvHomeFocus,
             device = VisualQaDevice.Tv,
             kind = VisualQaScenarioKind.TvHomeFocus,
@@ -580,6 +599,16 @@ object FerrexVisualQaScenarios {
             evidencePath = "Debug Visual QA → TV recovery focus",
             fixtureSamples = listOf("tv.action.recovery-actions.retry", "tv.action.recovery-actions.reset-connection"),
             recoveryActions = FerrexVisualQaFixtures.noWipeRecoveryActions,
+        ),
+        scenario(
+            id = FerrexQaScenarioIds.TvDiagnosticsFocus,
+            device = VisualQaDevice.Tv,
+            kind = VisualQaScenarioKind.TvDiagnosticsFocus,
+            title = "TV diagnostics focus",
+            description = "TV flat diagnostics surface with D-pad focus for export, clear logs, and Back while status slabs avoid rendering raw credentials or private device identifiers.",
+            testTag = FerrexQaTags.Tv.Diagnostics,
+            evidencePath = "Debug Visual QA → TV diagnostics focus",
+            fixtureSamples = listOf("tv.action.diagnostics-actions.export", "tv.action.diagnostics-actions.clear", "Safe summaries only"),
         ),
     ) + theaterPlateScenarios(VisualQaDevice.Phone) + theaterPlateScenarios(VisualQaDevice.Tv)
 

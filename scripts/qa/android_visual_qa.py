@@ -83,6 +83,7 @@ TV_DPAD_SEQUENCES: Mapping[str, tuple[str, ...]] = {
     "tv-detail-focus": ("KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_RIGHT"),
     "tv-search-focus": ("KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_RIGHT"),
     "tv-recovery-focus": ("KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_RIGHT"),
+    "tv-diagnostics-focus": ("KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_RIGHT"),
 }
 
 REDACTION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -738,11 +739,13 @@ LEGACY_SCENARIO_ROOT_TAGS: Mapping[str, str] = {
     "phone-season-episode": "phone.detail.season-episode",
     "phone-playback-entry": "phone.playback-entry",
     "phone-recovery-offline-stale": "phone.recovery.offline-stale",
+    "phone-diagnostics": "phone.diagnostics",
     "tv-home-focus": "tv.surface.home-actions",
     "tv-grid-focus": "tv.surface.grid-cards",
     "tv-detail-focus": "tv.detail",
     "tv-search-focus": "tv.search",
     "tv-recovery-focus": "tv.surface.recovery-actions",
+    "tv-diagnostics-focus": "tv.diagnostics",
 }
 
 
@@ -3453,6 +3456,30 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                     require_enabled=True,
                 )
             )
+    elif scenario.id == "phone-diagnostics":
+        requirements.extend(
+            [
+                AccessibilityRequirement(key="diagnostics-actions", kind="tag", tag="phone.diagnostics.actions"),
+                AccessibilityRequirement(
+                    key="diagnostics-export",
+                    kind="action",
+                    tag="phone.diagnostics.action.export",
+                    content_description="Export / Share diagnostics",
+                    require_clickable=True,
+                    require_button_role=True,
+                    require_enabled=True,
+                ),
+                AccessibilityRequirement(
+                    key="diagnostics-clear",
+                    kind="action",
+                    tag="phone.diagnostics.action.clear",
+                    content_description="Clear diagnostics/logs",
+                    require_clickable=True,
+                    require_button_role=True,
+                    require_enabled=True,
+                ),
+            ]
+        )
     elif scenario.id.startswith("tv-"):
         surface = root_tag
         if surface:
@@ -3478,6 +3505,7 @@ def legacy_accessibility_requirements(scenario: Scenario) -> list[AccessibilityR
                 "tv-detail-focus": "tv.action.detail-actions.play",
                 "tv-search-focus": "tv.action.search-results.field",
                 "tv-recovery-focus": "tv.action.recovery-actions.retry",
+                "tv-diagnostics-focus": "tv.action.diagnostics-actions.export",
             }.get(scenario.id)
             if action_tag:
                 requirements.append(

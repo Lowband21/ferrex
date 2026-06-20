@@ -87,6 +87,7 @@ import com.ferrex.android.ui.detail.DetailPrimitivePresenter
 import com.ferrex.android.ui.detail.DetailRailItemPresentation
 import com.ferrex.android.ui.detail.DetailRailPresentation
 import com.ferrex.android.ui.detail.DetailSlabPresentation
+import com.ferrex.android.ui.detail.DetailStagePresentation
 import com.ferrex.android.ui.detail.DetailSurfaceInteractionMode
 import com.ferrex.android.ui.detail.FerrexDetailHero
 import com.ferrex.android.ui.detail.FerrexDetailMediaObject
@@ -146,6 +147,35 @@ fun TvMediaDetailScreen(
     }
     val focusPageKey = page?.stableKey ?: detailResult?.route?.stableKey ?: "loading"
     val focusRestorer = rememberTvFocusRestorer(TvDetailFocusPolicy.screen(focusPageKey))
+    val initialBackTarget = TvDetailFocusPolicy.initialDetailTarget(focusPageKey)
+    val lastFocusTarget = focusRestorer.state.lastTarget(focusRestorer.screen)
+    val shouldAutoFocusBack = lastFocusTarget == null || lastFocusTarget.surface == initialBackTarget.surface
+    val backButton = TvDetailButton(
+        key = initialBackTarget.item,
+        label = "Back",
+        role = DetailActionRole.Back,
+        enabled = true,
+        testTag = FerrexQaTags.Tv.action(TvDetailFocusPolicy.SURFACE_BACK, TvDetailFocusPolicy.ITEM_BACK),
+        contentDescription = "Back to previous TV surface",
+        onSelect = onBack,
+    )
+    val connectionButtons = buildList {
+        if (connectionStatus.visible) {
+            add(
+                TvDetailButton(
+                    key = "retry-connection",
+                    label = connectionStatus.retryLabel,
+                    role = DetailActionRole.Retry,
+                    enabled = connectionStatus.retryEnabled,
+                    testTag = FerrexQaTags.Tv.action(TvDetailFocusPolicy.SURFACE_CONNECTION, "retry-connection"),
+                    contentDescription = connectionStatus.retryLabel,
+                    onSelect = onRetryConnection,
+                ),
+            )
+        }
+    }
+    val shouldAutoFocusConnection = connectionButtons.any { it.enabled } &&
+        lastFocusTarget?.surface == TvDetailFocusPolicy.SURFACE_CONNECTION
 
     TvScaffold(
         modifier = Modifier.testTag(FerrexQaTags.Tv.Detail),
@@ -157,35 +187,20 @@ fun TvMediaDetailScreen(
     ) {
         key(focusPageKey) {
             TvDetailActionShelf(
-                buttons = buildList {
-                    add(
-                        TvDetailButton(
-                            key = TvDetailFocusPolicy.ITEM_BACK,
-                            label = "Back",
-                            role = DetailActionRole.Back,
-                            enabled = true,
-                            testTag = FerrexQaTags.Tv.action(TvDetailFocusPolicy.SURFACE_BACK, TvDetailFocusPolicy.ITEM_BACK),
-                            contentDescription = "Back to the previous TV screen",
-                            onSelect = onBack,
-                        ),
-                    )
-                    if (connectionStatus.visible) {
-                        add(
-                            TvDetailButton(
-                                key = "retry-connection",
-                                label = connectionStatus.retryLabel,
-                                role = DetailActionRole.Retry,
-                                enabled = connectionStatus.retryEnabled,
-                                testTag = FerrexQaTags.Tv.action(TvDetailFocusPolicy.SURFACE_BACK, "retry-connection"),
-                                contentDescription = connectionStatus.retryLabel,
-                                onSelect = onRetryConnection,
-                            ),
-                        )
-                    }
-                },
+                buttons = listOf(backButton),
                 surfaceKey = TvDetailFocusPolicy.SURFACE_BACK,
                 focusRestorer = focusRestorer,
-                autoFocus = true,
+                autoFocus = shouldAutoFocusBack,
+                title = "Navigation",
+                contentDescription = "TV detail navigation actions",
+            )
+            TvDetailActionShelf(
+                buttons = connectionButtons,
+                surfaceKey = TvDetailFocusPolicy.SURFACE_CONNECTION,
+                focusRestorer = focusRestorer,
+                autoFocus = shouldAutoFocusConnection,
+                title = "Connection recovery",
+                contentDescription = "TV detail connection recovery actions",
             )
         }
         TvDetailConnectionAndNotice(
@@ -195,7 +210,7 @@ fun TvMediaDetailScreen(
         )
         Spacer(Modifier.height(FerrexDesignTokens.Space.Md))
         if (page == null) {
-            TvDetailLoadingState(onRetryCacheSync = onRetryCacheSync)
+            TvDetailLoadingState(onRetryCacheSync = onRetryCacheSync, autoFocus = !shouldAutoFocusBack && !shouldAutoFocusConnection)
         } else {
             TvDetailPageContent(
                 page = page,
@@ -203,6 +218,7 @@ fun TvMediaDetailScreen(
                 imageLoader = imageLoader,
                 scope = scope,
                 focusRestorer = focusRestorer,
+                allowInitialAutoFocus = !shouldAutoFocusBack && !shouldAutoFocusConnection,
                 onAction = { action ->
                     action.dispatchDetailAction(
                         page = page,
@@ -268,7 +284,7 @@ private fun TvDetailConnectionAndNotice(
 }
 
 @Composable
-private fun TvDetailLoadingState(onRetryCacheSync: () -> Unit) {
+private fun TvDetailLoadingState(onRetryCacheSync: () -> Unit, autoFocus: Boolean) {
     TvDetailStatusSurface(
         title = "Details loading",
         body = "Library cache is resolving the selected media.",
@@ -291,7 +307,7 @@ private fun TvDetailLoadingState(onRetryCacheSync: () -> Unit) {
         ),
         surfaceKey = "detail-loading",
         focusRestorer = null,
-        autoFocus = false,
+        autoFocus = autoFocus,
     )
 }
 
@@ -347,12 +363,18 @@ private fun TvDetailPageContent(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     focusRestorer: TvFocusRestorer,
+    allowInitialAutoFocus: Boolean,
     onAction: (DetailPageAction) -> Unit,
     onRailItemActivated: (DetailRail, DetailRailItem) -> Unit,
 ) {
     val interactionMode = DetailSurfaceInteractionMode.TvDpad
     val presentation = remember(page, interactionMode) { DetailPrimitivePresenter.stage(page, interactionMode) }
     val lastTarget = focusRestorer.state.lastTarget(focusRestorer.screen)
+    val initialFocusSurface = if (allowInitialAutoFocus && lastTarget == null) {
+        page.initialTvDetailFocusSurface(presentation)
+    } else {
+        null
+    }
 
     Column(
         modifier = Modifier
@@ -381,7 +403,7 @@ private fun TvDetailPageContent(
                 presentations = presentation.actionShelf.actions,
                 surfaceKey = TvDetailFocusPolicy.SURFACE_ACTIONS,
                 focusRestorer = focusRestorer,
-                autoFocus = lastTarget?.surface == TvDetailFocusPolicy.SURFACE_ACTIONS,
+                autoFocus = lastTarget?.surface == TvDetailFocusPolicy.SURFACE_ACTIONS || initialFocusSurface == TvDetailFocusPolicy.SURFACE_ACTIONS,
                 onAction = onAction,
                 title = "Playback and watch actions",
                 testTag = presentation.actionShelf.testTag,
@@ -394,7 +416,8 @@ private fun TvDetailPageContent(
                 slab = slab,
                 sourceActions = sourceActions,
                 focusRestorer = focusRestorer,
-                autoFocus = lastTarget?.surface == TvDetailFocusPolicy.recoverySurface(slab.testTag),
+                autoFocus = lastTarget?.surface == TvDetailFocusPolicy.recoverySurface(slab.testTag) ||
+                    initialFocusSurface == TvDetailFocusPolicy.recoverySurface(slab.testTag),
                 onAction = onAction,
             )
         }
@@ -408,12 +431,27 @@ private fun TvDetailPageContent(
                 serverUrl = scope.canonicalServerUrl,
                 focusRestorer = focusRestorer,
                 surfaceKey = surfaceKey,
-                autoFocus = lastTarget?.surface == surfaceKey,
+                autoFocus = lastTarget?.surface == surfaceKey || initialFocusSurface == surfaceKey,
                 onRailItemActivated = onRailItemActivated,
             )
         }
     }
 }
+
+private fun DetailPageModel.initialTvDetailFocusSurface(presentation: DetailStagePresentation): String? {
+    if (actions.zip(presentation.actionShelf.actions).tvRenderableActionPairs().any { (_, action) -> action.enabled }) {
+        return TvDetailFocusPolicy.SURFACE_ACTIONS
+    }
+    presentation.slabs.firstOrNull { slab ->
+        recovery.actions.zip(slab.actions).tvRenderableActionPairs().any { (_, action) -> action.enabled }
+    }?.let { slab ->
+        return TvDetailFocusPolicy.recoverySurface(slab.testTag)
+    }
+    return rails.firstOrNull { it.items.isNotEmpty() }?.stableKey?.let(TvDetailFocusPolicy::railSurface)
+}
+
+private fun List<Pair<DetailPageAction, DetailActionPresentation>>.tvRenderableActionPairs(): List<Pair<DetailPageAction, DetailActionPresentation>> =
+    filterNot { (action, _) -> action.kind == DetailPageActionKind.Back }
 
 @Composable
 private fun TvDetailPageActionShelf(
@@ -428,7 +466,7 @@ private fun TvDetailPageActionShelf(
     contentDescription: String,
 ) {
     TvDetailActionShelf(
-        buttons = actions.zip(presentations).map { (action, presentation) ->
+        buttons = actions.zip(presentations).tvRenderableActionPairs().map { (action, presentation) ->
             TvDetailButton(
                 key = presentation.key,
                 label = presentation.label,
@@ -457,7 +495,7 @@ private fun TvDetailStatusSlab(
     autoFocus: Boolean,
     onAction: (DetailPageAction) -> Unit,
 ) {
-    val recoveryPairs = sourceActions.zip(slab.actions)
+    val recoveryPairs = sourceActions.zip(slab.actions).tvRenderableActionPairs()
     val recoverySurfaceKey = TvDetailFocusPolicy.recoverySurface(slab.testTag)
     FerrexStageSurface(
         variant = FerrexStageSurfaceVariant.StatusSlab,

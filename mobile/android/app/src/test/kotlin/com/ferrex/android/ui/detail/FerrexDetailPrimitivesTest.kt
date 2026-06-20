@@ -235,6 +235,36 @@ class FerrexDetailPrimitivesTest {
     }
 
     @Test
+    fun phoneDetailOmitsRedundantBackActionsWhileKeepingRecoveryInline() {
+        val page = page(
+            actions = fullRecoveryActions(),
+            emptyState = DetailEmptyState("No detail cached", "Retry cache sync to recover."),
+            recovery = DetailRecoveryState(
+                freshness = DetailFreshnessNotice(
+                    kind = DetailFreshnessKind.StaleOffline,
+                    title = "Offline cache",
+                    message = "Showing stale library data.",
+                ),
+                actions = fullRecoveryActions(),
+            ),
+        )
+
+        val stage = DetailPrimitivePresenter.stage(page, DetailSurfaceInteractionMode.PhoneTouch)
+        val visibleActionLabels = stage.actionShelf.actions.map { it.label }
+        val slabActionLabels = stage.slabs.flatMap { it.actions.map { action -> action.label } }
+
+        assertFalse(visibleActionLabels.contains("Back"))
+        assertFalse(slabActionLabels.contains("Back"))
+        assertTrue(visibleActionLabels.contains("Retry cache sync"))
+        assertTrue(slabActionLabels.contains("Retry cache sync"))
+        assertTrue(slabActionLabels.contains("Clear selected cache"))
+        assertTrue(slabActionLabels.contains("Change server"))
+        assertTrue(slabActionLabels.contains("Reset connection"))
+        assertTrue(slabActionLabels.contains("Diagnostics / Export diagnostics"))
+        assertTrue(stage.slabs.all { !it.contentDescription.contains("Recovery actions: Back") })
+    }
+
+    @Test
     fun tvStageSummarizesDetailSurfacesAndImageRecoveryStates() {
         val page = page(
             actions = listOf(

@@ -98,10 +98,14 @@ class AndroidVisualQaTest(unittest.TestCase):
         self.assertIn("phone-home", registry.by_id)
         self.assertIn("tv-home-focus", registry.by_id)
         self.assertIn("phone-theater-plate-bright", registry.by_id)
+        self.assertIn("phone-diagnostics", registry.by_id)
+        self.assertIn("tv-diagnostics-focus", registry.by_id)
         self.assertIn("tv-theater-plate-playback-entry", registry.by_id)
         self.assertEqual("phone", registry.by_id["phone-home"].target)
         self.assertEqual("tv", registry.by_id["tv-home-focus"].target)
         self.assertEqual("phone", registry.by_id["phone-theater-plate-bright"].target)
+        self.assertEqual("phone", registry.by_id["phone-diagnostics"].target)
+        self.assertEqual("tv", registry.by_id["tv-diagnostics-focus"].target)
         self.assertEqual("tv", registry.by_id["tv-theater-plate-playback-entry"].target)
         self.assertEqual(registry.scenarios[0].id, "phone-home")
         self.assertEqual(len(registry.scenarios), len({scenario.id for scenario in registry.scenarios}))
@@ -1296,6 +1300,23 @@ class AndroidVisualQaTest(unittest.TestCase):
         missing_label_checks = android_visual_qa.verify_accessibility_requirements(missing_label_nodes, requirements)
         self.assertTrue(any(check["status"] == "failed" for check in missing_label_checks))
 
+    def test_diagnostics_accessibility_requirements_use_stable_flat_action_tags(self) -> None:
+        phone_requirements = android_visual_qa.accessibility_requirements_for_scenario(
+            android_visual_qa.Scenario("phone-diagnostics", "phone")
+        )
+        tv_requirements = android_visual_qa.accessibility_requirements_for_scenario(
+            android_visual_qa.Scenario("tv-diagnostics-focus", "tv")
+        )
+
+        self.assertTrue(any(requirement.tag == "phone.diagnostics.actions" for requirement in phone_requirements))
+        phone_export = next(requirement for requirement in phone_requirements if requirement.key == "diagnostics-export")
+        self.assertEqual(phone_export.tag, "phone.diagnostics.action.export")
+        self.assertEqual(phone_export.content_description, "Export / Share diagnostics")
+        tv_export = next(requirement for requirement in tv_requirements if requirement.key == "tv-primary-action")
+        self.assertEqual(tv_export.tag, "tv.action.diagnostics-actions.export")
+        self.assertTrue(tv_export.require_focusable)
+        self.assertTrue(tv_export.require_button_role)
+
     def test_accessibility_dump_strategy_batches_only_validated_default_emulators(self) -> None:
         phone_config = android_visual_qa.TargetConfig(
             target="phone",
@@ -1772,7 +1793,7 @@ class AndroidVisualQaTest(unittest.TestCase):
             [scenario.id for scenario in registry.scenarios],
         )
 
-    def test_default_complete_capture_plan_emits_78_captures(self) -> None:
+    def test_default_complete_capture_plan_emits_82_captures(self) -> None:
         registry = android_visual_qa.ScenarioRegistry.load(self.repo_root())
         selected = android_visual_qa.scenarios_for_gate_mode(registry, "complete")
         args = SimpleNamespace(
@@ -1786,8 +1807,8 @@ class AndroidVisualQaTest(unittest.TestCase):
         profiles = android_visual_qa.selected_viewport_profiles(args, configs, selected)
         plan = android_visual_qa.capture_plan_json("complete", selected, profiles)
 
-        self.assertEqual(plan["scenario_count"], 39)
-        self.assertEqual(plan["capture_count"], 78)
+        self.assertEqual(plan["scenario_count"], 41)
+        self.assertEqual(plan["capture_count"], 82)
 
     def test_verify_manifest_accepts_smoke_phone_and_tv_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

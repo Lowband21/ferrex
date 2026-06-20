@@ -41,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import com.ferrex.android.FerrexShellCopy
 import com.ferrex.android.core.auth.AuthConnectionHealth
 import com.ferrex.android.core.auth.AuthenticatedConnectionSurface
 import com.ferrex.android.core.auth.AuthenticatedConnectionUi
@@ -743,13 +742,16 @@ private fun HomeDestinationContent(
                         density = density,
                     )
                 }
-                item {
-                    HomeStatusBands(
-                        connectionStatus = connectionStatus,
-                        freshness = freshness,
-                        density = density,
-                        onRetryConnection = onRetryConnection,
-                    )
+                if (phoneHomeShouldShowStatusNotices(connectionStatus.visible, freshness)) {
+                    item {
+                        HomeStatusBands(
+                            connectionStatus = connectionStatus,
+                            freshness = freshness,
+                            density = density,
+                            onRetryConnection = onRetryConnection,
+                            onOpenAccountServer = onOpenAccountServer,
+                        )
+                    }
                 }
                 item {
                     ContinueWatchingSection(
@@ -795,9 +797,7 @@ private fun HomeDestinationContent(
                 }
                 item {
                     HomeUtilityPanel(
-                        state = state,
                         connectionStatus = connectionStatus,
-                        freshness = freshness,
                         density = density,
                         onRetryConnection = onRetryConnection,
                         onOpenAccountServer = onOpenAccountServer,
@@ -815,6 +815,7 @@ private fun HomeStatusBands(
     freshness: LibraryFreshness,
     density: FerrexStageDensityFamily,
     onRetryConnection: () -> Unit,
+    onOpenAccountServer: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
         if (connectionStatus.visible) {
@@ -833,28 +834,23 @@ private fun HomeStatusBands(
                     null
                 },
             )
-        } else {
-            HomeStageStatusBand(
-                title = "Online",
-                body = "Home remains cache-aware; library and search entry points stay available even when cache refreshes later need recovery.",
-                density = density,
-                variant = FerrexStageSurfaceVariant.FactRibbon,
-                tone = FerrexStatusTone.Secondary,
-            )
         }
 
-        val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
-        HomeStageStatusBand(
-            title = "Library cache • ${cacheStatus.title}",
-            body = cacheStatus.detail,
-            density = density,
-            variant = if (homeStageHasCacheRecoveryState(freshness)) {
-                FerrexStageSurfaceVariant.StatusSlab
-            } else {
-                FerrexStageSurfaceVariant.FactRibbon
-            },
-            tone = freshness.statusTone(),
-        )
+        if (homeStageHasCacheRecoveryState(freshness)) {
+            val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
+            HomeStageStatusBand(
+                title = "Library cache • ${cacheStatus.title}",
+                body = cacheStatus.detail,
+                density = density,
+                variant = FerrexStageSurfaceVariant.StatusSlab,
+                tone = freshness.statusTone(),
+                action = HomeStageAction(
+                    label = "Open recovery",
+                    role = freshness.statusTone().toActionRole(),
+                    onClick = onOpenAccountServer,
+                ),
+            )
+        }
     }
 }
 
@@ -1260,13 +1256,6 @@ private fun SearchDestinationContent(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(density.tokens().contentGap),
             ) {
-                item {
-                    DestinationStageHeader(
-                        title = "Search",
-                        body = "Search is a dedicated Theater Plate surface that uses the real media query contract and scoped cache; cache misses stay visible with retry.",
-                        density = density,
-                    )
-                }
                 if (connectionStatus.visible) {
                     item {
                         HomeStageStatusBand(
@@ -1299,8 +1288,8 @@ private fun SearchDestinationContent(
                 }
                 item {
                     StateCard(
-                        title = "Need account or server recovery?",
-                        body = "Use Account for sign out, change server, reset connection, diagnostics, and cache recovery without wiping app data.",
+                        title = "Account and server recovery",
+                        body = "Sign out, change server, reset connection, diagnostics, and cache repair stay available without wiping app data.",
                         density = density,
                         variant = FerrexStageSurfaceVariant.ControlShelf,
                         action = "Open Account" to onOpenAccountServer,
@@ -1383,42 +1372,6 @@ private fun DestinationHeader(
 }
 
 @Composable
-private fun DestinationStageHeader(
-    title: String,
-    body: String,
-    density: FerrexStageDensityFamily,
-) {
-    val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = Modifier.fillMaxWidth(),
-        contentDescription = "$title Theater Plate destination header",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = "Theater Plate",
-                role = TheaterPlateTypographyRole.HeroEyebrow,
-                densityRole = typographyDensity,
-            )
-            TheaterPlateText(
-                text = title,
-                role = TheaterPlateTypographyRole.HeroTitle,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = body,
-                role = TheaterPlateTypographyRole.HeroBody,
-                densityRole = typographyDensity,
-                maxLines = 5,
-            )
-        }
-    }
-}
-
-@Composable
 private fun HomeHeader(
     state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
@@ -1426,62 +1379,40 @@ private fun HomeHeader(
     density: FerrexStageDensityFamily,
 ) {
     val typographyDensity = density.toTheaterPlateDensityRole()
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.ProjectionShelf,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(FerrexQaTags.Phone.HomeHeader),
-        contentDescription = "Phone Home header stage",
+        verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(density.tokens().surfaceGap)) {
-            TheaterPlateText(
-                text = "Ferrex Home",
-                role = TheaterPlateTypographyRole.HeroEyebrow,
-                densityRole = typographyDensity,
+        TheaterPlateText(
+            text = phoneHomeSignedInLine(
+                displayName = state.user.displayName,
+                username = state.user.username,
+                connectionTitle = connectionStatus.title,
+                serverUrl = state.serverUrl,
+            ),
+            role = TheaterPlateTypographyRole.Metadata,
+            densityRole = typographyDensity,
+            maxLines = 2,
+        )
+        if (state.requiresPinSetup) {
+            HomeStageStatusBand(
+                title = "PIN setup required",
+                body = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server; this app will not show a fake PIN setup flow.",
+                density = density,
+                variant = FerrexStageSurfaceVariant.NoticeSlab,
+                tone = FerrexStatusTone.Retry,
             )
-            TheaterPlateText(
-                text = FerrexShellCopy.MOBILE_TITLE,
-                role = TheaterPlateTypographyRole.HeroTitle,
-                densityRole = typographyDensity,
-                maxLines = 3,
+        }
+        playbackNotice?.let {
+            HomeStageStatusBand(
+                title = "Playback notice",
+                body = it,
+                density = density,
+                variant = FerrexStageSurfaceVariant.NoticeSlab,
+                tone = FerrexStatusTone.Primary,
             )
-            TheaterPlateText(
-                text = FerrexShellCopy.MOBILE_SUBTITLE,
-                role = TheaterPlateTypographyRole.HeroSubtitle,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = "Signed in as ${state.user.displayName ?: state.user.username} • ${connectionStatus.title} • ${state.serverUrl}",
-                role = TheaterPlateTypographyRole.Metadata,
-                densityRole = typographyDensity,
-                maxLines = 2,
-            )
-            TheaterPlateText(
-                text = FerrexShellCopy.MOBILE_BODY,
-                role = TheaterPlateTypographyRole.HeroBody,
-                densityRole = typographyDensity,
-            )
-            if (state.requiresPinSetup) {
-                HomeStageStatusBand(
-                    title = "PIN setup required",
-                    body = "PIN setup is required by this server before PIN sign-in can be used. Use password sign-in or configure PIN support on the server; this app will not show a fake PIN setup flow.",
-                    density = density,
-                    variant = FerrexStageSurfaceVariant.NoticeSlab,
-                    tone = FerrexStatusTone.Retry,
-                )
-            }
-            playbackNotice?.let {
-                HomeStageStatusBand(
-                    title = "Playback notice",
-                    body = it,
-                    density = density,
-                    variant = FerrexStageSurfaceVariant.NoticeSlab,
-                    tone = FerrexStatusTone.Primary,
-                )
-            }
         }
     }
 }
@@ -1518,9 +1449,7 @@ private fun HomeEntrySection(
 
 @Composable
 private fun HomeUtilityPanel(
-    state: SessionState.Authenticated,
     connectionStatus: AuthenticatedConnectionUi,
-    freshness: LibraryFreshness,
     density: FerrexStageDensityFamily,
     onRetryConnection: () -> Unit,
     onOpenAccountServer: () -> Unit,
@@ -1546,15 +1475,6 @@ private fun HomeUtilityPanel(
                 } else {
                     null
                 },
-            )
-        } else {
-            val cacheStatus = LibraryBrowseModels.libraryStatusCopy(freshness)
-            HomeStageStatusBand(
-                title = "Recovery exits are ready",
-                body = "${state.user.displayName ?: state.user.username} is signed in. Account keeps sign out, change server, reset connection, diagnostics, and cache repair visible without wiping app data. Cache: ${cacheStatus.title}.",
-                density = density,
-                variant = FerrexStageSurfaceVariant.StatusSlab,
-                tone = freshness.statusTone(),
             )
         }
         HomeStageActionButtons(
@@ -2197,41 +2117,33 @@ private fun DenseLibraryGrid(
     modifier: Modifier = Modifier,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
-    FerrexStageSurface(
-        variant = FerrexStageSurfaceVariant.RailBand,
-        density = density,
-        tone = FerrexStageSurfaceTone.Neutral,
-        modifier = modifier.fillMaxWidth(),
+    val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
+    FerrexMobileMediaGrid(
+        gridKey = "library-grid",
+        items = cards,
+        itemStableId = { it.stableKey },
+        columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+        modifier = modifier.fillMaxSize(),
         testTag = FerrexQaTags.Phone.LibraryGrid,
-        contentDescription = "Dense library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
-    ) {
-        val gridSpec = FerrexDesignTokens.DenseLibraryGrid.phone
-        FerrexMobileMediaGrid(
-            gridKey = "library-grid",
-            items = cards,
-            itemStableId = { it.stableKey },
-            columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
-            modifier = Modifier.fillMaxSize(),
-            contentDescription = "Library media grid with ${cards.size} card${if (cards.size == 1) "" else "s"}",
-            contentPadding = PaddingValues(
-                horizontal = gridSpec.contentPaddingHorizontal,
-                vertical = gridSpec.contentPaddingVertical,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
-            verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
-        ) { card, identity ->
-            MediaCardView(
-                card = card,
-                imageResolutions = imageResolutions,
-                imageLoaderAvailable = imageLoaderAvailable,
-                imageLoader = imageLoader,
-                scope = scope,
-                density = density,
-                semanticLabel = identity.semanticLabel(card.title),
-                itemIdentity = identity,
-                onClick = { onSelect(card) },
-            )
-        }
+        contentDescription = "Dense library media grid with ${cards.size} item${if (cards.size == 1) "" else "s"}; no enclosing rail band",
+        contentPadding = PaddingValues(
+            horizontal = gridSpec.contentPaddingHorizontal,
+            vertical = gridSpec.contentPaddingVertical,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(gridSpec.horizontalSpacing),
+        verticalArrangement = Arrangement.spacedBy(gridSpec.verticalSpacing),
+    ) { card, identity ->
+        MediaCardView(
+            card = card,
+            imageResolutions = imageResolutions,
+            imageLoaderAvailable = imageLoaderAvailable,
+            imageLoader = imageLoader,
+            scope = scope,
+            density = density,
+            semanticLabel = identity.semanticLabel(card.title),
+            itemIdentity = identity,
+            onClick = { onSelect(card) },
+        )
     }
 }
 
@@ -2696,6 +2608,18 @@ private fun StateCard(
         }
     }
 }
+
+internal fun phoneHomeSignedInLine(
+    displayName: String?,
+    username: String,
+    connectionTitle: String,
+    serverUrl: String,
+): String = "Signed in as ${displayName?.takeIf { it.isNotBlank() } ?: username} • $connectionTitle • $serverUrl"
+
+internal fun phoneHomeShouldShowStatusNotices(
+    connectionVisible: Boolean,
+    freshness: LibraryFreshness,
+): Boolean = connectionVisible || homeStageHasCacheRecoveryState(freshness)
 
 private fun LibraryFreshness.statusTone(): FerrexStatusTone = when (this) {
     LibraryFreshness.Empty,

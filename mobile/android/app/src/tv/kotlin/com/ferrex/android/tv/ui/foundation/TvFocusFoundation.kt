@@ -68,10 +68,6 @@ import com.ferrex.android.ui.components.TheaterPlateTypographyRole
 import com.ferrex.android.ui.components.colors
 import com.ferrex.android.ui.components.statusTone
 import com.ferrex.android.ui.qa.FerrexQaTags
-import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
-import com.ferrex.android.ui.theaterplate.FerrexStageSurface
-import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
-import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import com.ferrex.android.ui.theme.TvFocusTreatmentRole
 
@@ -205,10 +201,17 @@ fun TvFocusableSurface(
     val shape = FerrexDesignTokens.Shapes.FocusSurface
     val toneColors = tone.colors()
     val colors = tvFocusableColors(style = style, tone = tone, focused = focused, enabled = enabled)
-    val borderColor = when {
-        focused -> toneColors.accent
-        enabled -> toneColors.border.copy(alpha = 0.58f)
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val border = when {
+        focused -> BorderStroke(focusTreatment.focusedBorder, toneColors.accent)
+        focusTreatment.restingBorder.value > 0f && enabled -> BorderStroke(
+            focusTreatment.restingBorder,
+            toneColors.border.copy(alpha = 0.58f),
+        )
+        focusTreatment.restingBorder.value > 0f -> BorderStroke(
+            focusTreatment.restingBorder,
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+        )
+        else -> null
     }
 
     Surface(
@@ -238,7 +241,7 @@ fun TvFocusableSurface(
         shape = shape,
         color = colors.container,
         contentColor = colors.content,
-        border = BorderStroke(width = if (focused) focusTreatment.focusedBorder else focusTreatment.restingBorder, color = borderColor),
+        border = border,
         tonalElevation = if (focused) focusTreatment.focusedElevation else FerrexDesignTokens.Space.None,
     ) {
         Row(
@@ -349,74 +352,52 @@ fun TvActionPanel(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
     ) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = FerrexStageDensityFamily.TenFoot,
-            tone = actions.surfaceTone(),
-            modifier = Modifier.fillMaxWidth(),
-            contentDescription = title ?: "$surfaceKey action panel",
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+        title?.let {
+            TheaterPlateText(
+                text = it,
+                role = TheaterPlateTypographyRole.RecoveryTitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                textAlign = TextAlign.Center,
+            )
+        }
+        supportingText?.takeIf { it.isNotBlank() }?.let {
+            TheaterPlateText(
+                text = it,
+                role = TheaterPlateTypographyRole.RecoveryCopy,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+                textAlign = TextAlign.Center,
+            )
+        }
+        actions.forEach { action ->
+            val actionTone = action.role.statusTone()
+            TvFocusableButton(
+                label = action.label,
+                enabled = action.enabled && !action.busy,
+                style = action.role.focusableStyle(),
+                tone = actionTone,
+                focusTreatmentRole = action.role.focusTreatmentRole(),
+                contentDescription = action.contentDescription,
+                onClick = action.onSelect,
+                focusRequester = requesters[action.key],
+                testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
+                onFocused = { focusRestorer?.record(surface = surfaceKey, item = action.key) },
+                modifier = Modifier
+                    .widthIn(max = buttonMaxWidth)
+                    .fillMaxWidth(),
             ) {
-                title?.let {
-                    TheaterPlateText(
-                        text = it,
-                        role = TheaterPlateTypographyRole.RecoveryTitle,
-                        densityRole = TheaterPlateDensityRole.Tv1080p,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                supportingText?.let {
-                    TheaterPlateText(
-                        text = it,
-                        role = TheaterPlateTypographyRole.RecoveryCopy,
-                        densityRole = TheaterPlateDensityRole.Tv1080p,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                actions.forEach { action ->
-                    val actionTone = action.role.statusTone()
-                    TvFocusableButton(
-                        label = action.label,
-                        enabled = action.enabled && !action.busy,
-                        style = action.role.focusableStyle(),
-                        tone = actionTone,
-                        focusTreatmentRole = action.role.focusTreatmentRole(),
-                        contentDescription = action.contentDescription,
-                        onClick = action.onSelect,
-                        focusRequester = requesters[action.key],
-                        testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
-                        onFocused = { focusRestorer?.record(surface = surfaceKey, item = action.key) },
+                if (action.busy) {
+                    CircularProgressIndicator(
                         modifier = Modifier
-                            .widthIn(max = buttonMaxWidth)
-                            .fillMaxWidth(),
-                    ) {
-                        if (action.busy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .padding(end = FerrexDesignTokens.Space.Md)
-                                    .size(FerrexDesignTokens.Space.Xxl),
-                                color = actionTone.colors().accent,
-                                strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
-                            )
-                        }
-                        Text(action.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    }
+                            .padding(end = FerrexDesignTokens.Space.Md)
+                            .size(FerrexDesignTokens.Space.Xxl),
+                        color = actionTone.colors().accent,
+                        strokeWidth = FerrexDesignTokens.Focus.TvRestingBorder,
+                    )
                 }
+                Text(action.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
         }
     }
-}
-
-private fun List<TvActionPanelAction>.surfaceTone(): FerrexStageSurfaceTone = when {
-    any { it.role == TvActionRole.Destructive } -> FerrexStageSurfaceTone.Error
-    any { it.role == TvActionRole.Retry || it.role == TvActionRole.Primary } -> FerrexStageSurfaceTone.Primary
-    any { it.role == TvActionRole.Cache } -> FerrexStageSurfaceTone.Cache
-    any { it.role == TvActionRole.Recovery || it.role == TvActionRole.SettingsExit } -> FerrexStageSurfaceTone.StaleOffline
-    else -> FerrexStageSurfaceTone.Neutral
 }
 
 private data class TvFocusableColors(
@@ -434,7 +415,7 @@ private fun tvFocusableColors(
     val scheme = MaterialTheme.colorScheme
     if (!enabled) {
         return TvFocusableColors(
-            container = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContainer),
+            container = Color.Transparent,
             content = scheme.onSurface.copy(alpha = FerrexDesignTokens.StatusAlpha.DisabledContent),
         )
     }
@@ -446,7 +427,7 @@ private fun tvFocusableColors(
             content = if (focused) scheme.onPrimary else semanticColors.content,
         )
         TvFocusableStyle.Secondary -> TvFocusableColors(
-            container = if (focused) semanticColors.container.copy(alpha = 0.92f) else semanticColors.container,
+            container = if (focused) semanticColors.container.copy(alpha = 0.92f) else Color.Transparent,
             content = semanticColors.content,
         )
         TvFocusableStyle.Destructive -> TvFocusableColors(

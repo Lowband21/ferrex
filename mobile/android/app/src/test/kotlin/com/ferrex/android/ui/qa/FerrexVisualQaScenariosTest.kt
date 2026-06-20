@@ -62,6 +62,43 @@ class FerrexVisualQaScenariosTest {
     }
 
     @Test
+    fun debugRegistryCoversFlatPhoneAndTvSurfaceMatrix() {
+        val phoneIds = FerrexVisualQaScenarios.all.filter { it.device == VisualQaDevice.Phone }.map { it.id }.toSet()
+        val tvIds = FerrexVisualQaScenarios.all.filter { it.device == VisualQaDevice.Tv }.map { it.id }.toSet()
+
+        mapOf(
+            "Home" to FerrexQaScenarioIds.PhoneHome,
+            "Library" to FerrexQaScenarioIds.PhoneBrowseGrid,
+            "Search" to FerrexQaScenarioIds.PhoneSearch,
+            "Detail" to FerrexQaScenarioIds.PhoneMovieDetail,
+            "Player" to FerrexQaScenarioIds.PhonePlaybackEntry,
+            "Recovery" to FerrexQaScenarioIds.PhoneRecoveryOfflineStale,
+            "Diagnostics" to FerrexQaScenarioIds.PhoneDiagnostics,
+        ).forEach { (surface, scenarioId) ->
+            assertTrue("phone $surface scenario", phoneIds.contains(scenarioId))
+        }
+        mapOf(
+            "Home" to FerrexQaScenarioIds.TvHomeFocus,
+            "Library" to FerrexQaScenarioIds.TvGridFocus,
+            "Search" to FerrexQaScenarioIds.TvSearchFocus,
+            "Detail" to FerrexQaScenarioIds.TvDetailFocus,
+            "Player" to FerrexQaScenarioIds.TvTheaterPlatePlaybackEntry,
+            "Recovery" to FerrexQaScenarioIds.TvRecoveryFocus,
+            "Diagnostics" to FerrexQaScenarioIds.TvDiagnosticsFocus,
+        ).forEach { (surface, scenarioId) ->
+            assertTrue("tv $surface scenario", tvIds.contains(scenarioId))
+        }
+
+        val phoneDiagnostics = FerrexVisualQaScenarios.find(FerrexQaScenarioIds.PhoneDiagnostics)!!
+        val tvDiagnostics = FerrexVisualQaScenarios.find(FerrexQaScenarioIds.TvDiagnosticsFocus)!!
+        assertEquals(FerrexQaTags.Phone.Diagnostics, phoneDiagnostics.testTag)
+        assertEquals(FerrexQaTags.Tv.Diagnostics, tvDiagnostics.testTag)
+        assertTrue(phoneDiagnostics.description.contains("flat"))
+        assertTrue(phoneDiagnostics.description.contains("no visible Back"))
+        assertTrue(tvDiagnostics.description.contains("D-pad focus"))
+    }
+
+    @Test
     fun tvTheaterPlateScenariosExposeStableRequiredTags() {
         val tvScenarios = FerrexVisualQaScenarios.all.filter {
             it.device == VisualQaDevice.Tv && it.kind == VisualQaScenarioKind.TheaterPlate

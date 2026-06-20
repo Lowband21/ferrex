@@ -150,7 +150,6 @@ internal fun TvLibraryGridScreen(
                         fullCachedCount = fullCachedCount,
                         movieSort = movieSort,
                         movieFilter = movieFilter,
-                        onBack = onBack,
                         onOpenPanel = { openPanel = it },
                     ),
                     focusRestorer = focusRestorer,
@@ -239,10 +238,8 @@ private fun tvGridTopActions(
     fullCachedCount: Int,
     movieSort: MovieSortMode,
     movieFilter: MovieFilterMode,
-    onBack: () -> Unit,
     onOpenPanel: (TvGridControlPanel) -> Unit,
 ): List<TvButtonAction> = buildList {
-    add(TvButtonAction("back", "Back", TvActionRole.Back, onSelect = onBack))
     add(
         TvButtonAction(
             key = "media-type",
@@ -298,7 +295,7 @@ private fun TvGridEmptyState(
     TvActionPanel(
         modifier = modifier,
         title = "No cached ${tab.label.lowercase()} for this library",
-        supportingText = "Retry selected or all libraries to fetch complete cached payloads. Empty, stale, corrupt, and offline states stay recoverable without clearing app data.",
+        supportingText = "Retry cached payloads; recovery never requires clearing app data.",
         actions = gridRecoveryActions(
             selectedId = selectedId,
             onSyncSelected = onSyncSelected,
@@ -353,7 +350,7 @@ private fun TvGridControlPanelOverlay(
     when (panel) {
         TvGridControlPanel.MediaType -> {
             title = "Choose media type"
-            supportingText = "Switch between movie and series libraries without leaving the full-library grid."
+            supportingText = "Switch between movie and series grids."
             actions = HomeLibraryTab.entries.map { entry ->
                 TvActionPanelAction(
                     key = "tab-${entry.name.lowercase()}",
@@ -365,7 +362,7 @@ private fun TvGridControlPanelOverlay(
         }
         TvGridControlPanel.Library -> {
             title = "Choose ${tab.label.lowercase()} library"
-            supportingText = "Cached libraries open immediately; uncached libraries remain selectable so Retry selected can fetch them."
+            supportingText = "Cached libraries open immediately; uncached selections can be retried."
             actions = libraries.map { library ->
                 val cached = library.id in cachedIds
                 TvActionPanelAction(
@@ -505,9 +502,7 @@ private fun gridStatusSupportingText(
     invalidIndexCount: Int,
     appendedMissingCount: Int,
 ): String = buildList {
-    add("${selectedLibrary?.name ?: "Selected ${tab.label.lowercase()} library"}: $visibleCount visible • $fullCachedCount cached • no first-10/12/30 cap.")
-    add("Dense poster cards fill the route below the compact control row; home rails keep their separate TV poster sizing.")
-    add("Prefetch is bounded to ${visibleCount.coerceAtMost(GRID_IMAGE_LOOKUP_LIMIT)} visible key(s), while stable grid keys keep every cached item virtualized.")
+    add("${selectedLibrary?.name ?: "Selected ${tab.label.lowercase()} library"}: $visibleCount visible • $fullCachedCount cached • uncapped grid.")
     if (tab == HomeLibraryTab.Movies) {
         add(movieIndexStatusCopy(movieIndexState, fullCachedCount))
         movieIndexReconciliationCopy(invalidIndexCount, appendedMissingCount)?.let(::add)
@@ -522,7 +517,7 @@ private fun movieControlsSupportingText(
     invalidIndexCount: Int,
     appendedMissingCount: Int,
 ): String = buildList {
-    add("Sort/filter use paged movie index endpoints; uncapped cached order remains available on failure.")
+    add("Sort/filter use movie index endpoints; failures keep the full cached grid visible.")
     add(movieIndexStatusCopy(movieIndexState, fullCachedCount))
     movieIndexReconciliationCopy(invalidIndexCount, appendedMissingCount)?.let(::add)
 }.joinToString(separator = "\n")

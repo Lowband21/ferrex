@@ -126,7 +126,7 @@ internal fun TvSearchScreen(
         ) {
             Text("Search", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Text(
-                text = "Search uses the protected JSON media query contract and resolves rows through the scoped library cache. Cache misses stay visible with retry.",
+                text = "Type at least two characters. Cache misses stay visible with retry actions.",
                 style = MaterialTheme.typography.titleMedium,
             )
             OutlinedTextField(

@@ -68,47 +68,37 @@ internal fun TvButtonRow(
             .testTag(FerrexQaTags.Tv.surface(surfaceKey)),
         verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
     ) {
-        FerrexStageSurface(
-            variant = FerrexStageSurfaceVariant.ControlShelf,
-            density = FerrexStageDensityFamily.TenFoot,
-            tone = actions.surfaceTone(),
-            modifier = Modifier.fillMaxWidth(),
-            contentDescription = title ?: "$surfaceKey actions",
+        title?.let { TvSectionHeader(it) }
+        supportingText?.takeIf { it.isNotBlank() }?.let {
+            TheaterPlateText(
+                text = it,
+                role = TheaterPlateTypographyRole.ActionSubtitle,
+                densityRole = TheaterPlateDensityRole.Tv1080p,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .focusGroup(),
+            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm)) {
-                title?.let { TvSectionHeader(it) }
-                supportingText?.let {
-                    TheaterPlateText(
-                        text = it,
-                        role = TheaterPlateTypographyRole.ActionSubtitle,
-                        densityRole = TheaterPlateDensityRole.Tv1080p,
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .focusGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    actions.forEach { action ->
-                        TvFocusableButton(
-                            label = action.label,
-                            onClick = action.onSelect,
-                            enabled = action.enabled,
-                            style = action.role.toFocusableStyle(),
-                            tone = action.role.sharedActionRole.statusTone(),
-                            focusRequester = requesters[action.key],
-                            testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
-                            onFocused = { focusRestorer?.record(surfaceKey, action.key) },
-                            modifier = Modifier.widthIn(
-                                min = FerrexDesignTokens.Tv.ActionMinWidth,
-                                max = FerrexDesignTokens.Tv.ActionMaxWidth,
-                            ),
-                        )
-                    }
-                }
+            actions.forEach { action ->
+                TvFocusableButton(
+                    label = action.label,
+                    onClick = action.onSelect,
+                    enabled = action.enabled,
+                    style = action.role.toFocusableStyle(),
+                    tone = action.role.sharedActionRole.statusTone(),
+                    focusRequester = requesters[action.key],
+                    testTag = FerrexQaTags.Tv.action(surfaceKey, action.key),
+                    onFocused = { focusRestorer?.record(surfaceKey, action.key) },
+                    modifier = Modifier.widthIn(
+                        min = FerrexDesignTokens.Tv.ActionMinWidth,
+                        max = FerrexDesignTokens.Tv.ActionMaxWidth,
+                    ),
+                )
             }
         }
     }
@@ -166,13 +156,6 @@ internal fun TvFullScreenSurface(content: @Composable BoxScope.() -> Unit) {
             content = content,
         )
     }
-}
-
-private fun List<TvButtonAction>.surfaceTone(): FerrexStageSurfaceTone = when {
-    any { it.role == TvActionRole.Destructive } -> FerrexStageSurfaceTone.Error
-    any { it.role == TvActionRole.Retry || it.role == TvActionRole.Primary } -> FerrexStageSurfaceTone.Primary
-    any { it.role == TvActionRole.Cache } -> FerrexStageSurfaceTone.Cache
-    else -> FerrexStageSurfaceTone.Neutral
 }
 
 internal fun TvActionRole.toFocusableStyle(): TvFocusableStyle = when (this) {

@@ -14,19 +14,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -134,17 +135,16 @@ fun FerrexStatusCard(
     contentDescription: String? = null,
 ) {
     val colors = tone.colors()
-    Card(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .withFerrexTestTag(testTag)
             .withFerrexContentDescription(contentDescription),
-        shape = FerrexDesignTokens.Shapes.RecoveryCard,
-        colors = CardDefaults.cardColors(
-            containerColor = colors.container,
-            contentColor = colors.content,
-        ),
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, colors.border.copy(alpha = 0.72f)),
+        shape = RectangleShape,
+        color = colors.container,
+        contentColor = colors.content,
+        tonalElevation = FerrexDesignTokens.Space.None,
+        shadowElevation = FerrexDesignTokens.Space.None,
     ) {
         Column(
             modifier = Modifier.padding(FerrexDesignTokens.Space.Lg),
@@ -287,13 +287,12 @@ fun FerrexPosterCard(
     val baseModifier = modifier
         .withFerrexTestTag(testTag)
         .withFerrexContentDescription(contentDescription)
-    val cardModifier = if (onClick != null) baseModifier.clickable(onClick = onClick) else baseModifier
-    Card(
-        modifier = cardModifier,
-        shape = FerrexDesignTokens.Shapes.PosterCard,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        border = BorderStroke(FerrexDesignTokens.Focus.TvRestingBorder, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-    ) {
+    val cardModifier = if (onClick != null) {
+        baseModifier.clickable(role = Role.Button, onClick = onClick)
+    } else {
+        baseModifier
+    }
+    Box(modifier = cardModifier) {
         content()
     }
 }

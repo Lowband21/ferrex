@@ -3,9 +3,9 @@ package com.ferrex.android.ui.diagnostics
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,8 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -28,7 +26,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.diagnostics.AndroidDiagnosticsCore
@@ -41,9 +44,28 @@ import com.ferrex.android.core.diagnostics.DiagnosticsPanelState
 import com.ferrex.android.core.diagnostics.DiagnosticsSnapshot
 import com.ferrex.android.core.diagnostics.DiagnosticsSummaryPresenter
 import com.ferrex.android.core.diagnostics.DiagnosticsSummaryRow
+import com.ferrex.android.ui.qa.FerrexQaTags
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+internal object PhoneDiagnosticsPresentation {
+    val RootTag: String = FerrexQaTags.namespaced("phone", "diagnostics")
+    val HeaderTag: String = FerrexQaTags.namespaced("phone", "diagnostics", "header")
+    val ActionsTag: String = FerrexQaTags.namespaced("phone", "diagnostics", "actions")
+    val VisibleBackActionLabel: String? = null
+
+    fun statusTag(key: String): String = FerrexQaTags.namespaced("phone", "diagnostics", "status", key)
+
+    fun actionTag(key: String): String = FerrexQaTags.namespaced("phone", "diagnostics", "action", key)
+
+    fun statusDescription(title: String, body: String): String = "$title. $body"
+
+    fun actionLabels(exportRunning: Boolean, clearRunning: Boolean): List<String> = listOf(
+        if (exportRunning) "Preparing export…" else "Export / Share diagnostics",
+        if (clearRunning) "Clearing diagnostics…" else "Clear diagnostics/logs",
+    )
+}
 
 @Composable
 fun PhoneDiagnosticsScreen(
@@ -75,7 +97,7 @@ fun PhoneDiagnosticsScreen(
 
     fun exportDiagnostics() {
         if (diagnostics == null) {
-            dispatch(DiagnosticsPanelEvent.ExportFailed("Diagnostics are unavailable in this build. Back and recovery exits remain available."))
+            dispatch(DiagnosticsPanelEvent.ExportFailed("Diagnostics are unavailable in this build. Android back and recovery exits remain available."))
             return
         }
         scope.launch {
@@ -86,7 +108,7 @@ fun PhoneDiagnosticsScreen(
                 }
             }
             val file = result.getOrElse { throwable ->
-                dispatch(DiagnosticsPanelEvent.ExportFailed(throwable.safeMessage("Diagnostics export failed. Retry or go back.")))
+                dispatch(DiagnosticsPanelEvent.ExportFailed(throwable.safeMessage("Diagnostics export failed. Retry or use Android back.")))
                 return@launch
             }
             val shareResult = runCatching {
@@ -98,8 +120,8 @@ fun PhoneDiagnosticsScreen(
                 refreshSummary()
             }.onFailure { throwable ->
                 val message = when (throwable) {
-                    is ActivityNotFoundException -> "No app can share the diagnostics export. Retry after installing a file/share target, or go back."
-                    else -> throwable.safeMessage("Diagnostics share failed. Retry or go back.")
+                    is ActivityNotFoundException -> "No app can share the diagnostics export. Retry after installing a file/share target, or use Android back."
+                    else -> throwable.safeMessage("Diagnostics share failed. Retry or use Android back.")
                 }
                 dispatch(DiagnosticsPanelEvent.ExportFailed(message))
             }
@@ -120,7 +142,7 @@ fun PhoneDiagnosticsScreen(
                 dispatch(DiagnosticsPanelEvent.ClearSucceeded)
                 refreshSummary()
             }.onFailure { throwable ->
-                dispatch(DiagnosticsPanelEvent.ClearFailed(throwable.safeMessage("Diagnostics clear failed. Retry or go back.")))
+                dispatch(DiagnosticsPanelEvent.ClearFailed(throwable.safeMessage("Diagnostics clear failed. Retry or use Android back.")))
             }
         }
     }
@@ -151,12 +173,15 @@ fun PhoneDiagnosticsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag(PhoneDiagnosticsPresentation.RootTag)
                 .padding(horizontal = 24.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onBack) { Text("Back") }
+                Column(
+                    modifier = Modifier.testTag(PhoneDiagnosticsPresentation.HeaderTag),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
                         text = "Settings & Diagnostics",
                         style = MaterialTheme.typography.headlineMedium,
@@ -170,30 +195,30 @@ fun PhoneDiagnosticsScreen(
                 }
             }
             item {
-                DiagnosticsStatusCard(status = panelState.exportStatus)
+                DiagnosticsStatusBand(status = panelState.exportStatus)
             }
             item {
-                DiagnosticsStatusCard(status = panelState.clearStatus)
+                DiagnosticsStatusBand(status = panelState.clearStatus)
             }
             if (diagnostics == null) {
                 item {
-                    StateCard(
+                    StateBand(
                         title = "Diagnostics unavailable",
-                        body = "This build did not provide the diagnostics core. Back and recovery exits remain available.",
+                        body = "This build did not provide the diagnostics core. Android back and recovery exits remain available.",
                     )
                 }
             }
             val currentSnapshot = snapshot
             if (currentSnapshot == null) {
                 item {
-                    StateCard(
+                    StateBand(
                         title = "Loading diagnostics summary",
                         body = "Preparing safe local summaries without rendering raw credentials or device identifiers.",
                     )
                 }
             } else {
                 items(DiagnosticsSummaryPresenter.rows(currentSnapshot, retainedCrashCount), key = { it.label }) { row ->
-                    DiagnosticsRowCard(row)
+                    DiagnosticsSummaryBand(row)
                 }
             }
             item {
@@ -202,7 +227,6 @@ fun PhoneDiagnosticsScreen(
                     clearRunning = panelState.clearStatus is DiagnosticsActionStatus.Running,
                     onExport = { exportDiagnostics() },
                     onClear = { dispatch(DiagnosticsPanelEvent.ClearRequested) },
-                    onBack = onBack,
                 )
             }
         }
@@ -215,40 +239,48 @@ private fun DiagnosticsActions(
     clearRunning: Boolean,
     onExport: () -> Unit,
     onClear: () -> Unit,
-    onBack: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val labels = PhoneDiagnosticsPresentation.actionLabels(exportRunning, clearRunning)
+    Column(
+        modifier = Modifier.testTag(PhoneDiagnosticsPresentation.ActionsTag),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Button(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PhoneDiagnosticsPresentation.actionTag("export"))
+                .semantics { contentDescription = labels[0] },
             enabled = !exportRunning && !clearRunning,
             onClick = onExport,
         ) {
-            Text(if (exportRunning) "Preparing export…" else "Export / Share diagnostics")
+            Text(labels[0])
         }
         OutlinedButton(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(PhoneDiagnosticsPresentation.actionTag("clear"))
+                .semantics { contentDescription = labels[1] },
             enabled = !exportRunning && !clearRunning,
             onClick = onClear,
         ) {
-            Text(if (clearRunning) "Clearing diagnostics…" else "Clear diagnostics/logs")
+            Text(labels[1])
         }
-        TextButton(modifier = Modifier.fillMaxWidth(), onClick = onBack) { Text("Back") }
     }
 }
 
 @Composable
-private fun DiagnosticsStatusCard(status: DiagnosticsActionStatus) {
+private fun DiagnosticsStatusBand(status: DiagnosticsActionStatus) {
     when (status) {
         DiagnosticsActionStatus.Idle -> Unit
-        DiagnosticsActionStatus.Running -> StateCard(
+        DiagnosticsActionStatus.Running -> StateBand(
             title = "Diagnostics action in progress",
-            body = "Please wait. Back remains available if you need to leave this screen.",
+            body = "Please wait. Android back remains available if you need to leave this screen.",
         )
-        is DiagnosticsActionStatus.Success -> StateCard(
+        is DiagnosticsActionStatus.Success -> StateBand(
             title = "Diagnostics updated",
             body = status.message,
         )
-        is DiagnosticsActionStatus.Failure -> StateCard(
+        is DiagnosticsActionStatus.Failure -> StateBand(
             title = "Diagnostics action failed",
             body = status.message,
             error = true,
@@ -257,33 +289,58 @@ private fun DiagnosticsStatusCard(status: DiagnosticsActionStatus) {
 }
 
 @Composable
-private fun DiagnosticsRowCard(row: DiagnosticsSummaryRow) {
-    StateCard(title = row.label, body = row.value)
+private fun DiagnosticsSummaryBand(row: DiagnosticsSummaryRow) {
+    StateBand(title = row.label, body = row.value)
 }
 
 @Composable
-private fun StateCard(
+private fun StateBand(
     title: String,
     body: String,
     error: Boolean = false,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary,
-                )
-            }
-            Text(text = body, style = MaterialTheme.typography.bodyMedium)
-        }
+    val scheme = MaterialTheme.colorScheme
+    val background = if (error) {
+        scheme.errorContainer.copy(alpha = 0.28f)
+    } else {
+        scheme.surfaceVariant.copy(alpha = 0.18f)
     }
+    val titleColor = if (error) scheme.error else scheme.primary
+    val textColor = if (error) scheme.onErrorContainer else scheme.onSurface
+    val dividerColor = if (error) scheme.error.copy(alpha = 0.65f) else scheme.outline.copy(alpha = 0.42f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(PhoneDiagnosticsPresentation.statusTag(title))
+            .semantics(mergeDescendants = true) {
+                contentDescription = PhoneDiagnosticsPresentation.statusDescription(title, body)
+            }
+            .background(background)
+            .drawBehind { drawBottomDivider(dividerColor) }
+            .padding(horizontal = 0.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = titleColor,
+        )
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor,
+        )
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBottomDivider(color: Color) {
+    val stroke = 1.dp.toPx()
+    drawLine(
+        color = color,
+        start = androidx.compose.ui.geometry.Offset(0f, size.height - stroke / 2f),
+        end = androidx.compose.ui.geometry.Offset(size.width, size.height - stroke / 2f),
+        strokeWidth = stroke,
+    )
 }
 
 private fun Throwable.safeMessage(fallback: String): String = message?.takeIf { it.isNotBlank() } ?: fallback
