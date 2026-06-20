@@ -578,6 +578,7 @@ pub async fn scan_config_handler(
                 .max_root_entries_per_library,
             error_backoff_ms: cfg.maintenance.error_backoff_ms,
             run_stall_timeout_ms: cfg.maintenance.run_stall_timeout_ms,
+            scan_run_retention_days: cfg.maintenance.scan_run_retention_days,
         },
         lease: LeaseConfigView {
             lease_ttl_secs: cfg.lease.lease_ttl_secs,
@@ -607,6 +608,9 @@ pub async fn scan_config_handler(
         maintenance_max_root_entries_per_library: cfg
             .maintenance
             .max_root_entries_per_library,
+        maintenance_scan_run_retention_days: cfg
+            .maintenance
+            .scan_run_retention_days,
         media_extensions: scanner.video_extensions.clone(),
         ignored_extensions: scanner.ignored_extensions.clone(),
         ignored_path_patterns: scanner.ignored_path_patterns.clone(),

@@ -186,6 +186,7 @@ mod tests {
         ScannerHealthResponse {
             queue_depths: ScanQueueDepths {
                 folder_scan: 0,
+                manifest_scan: 0,
                 analyze: 0,
                 metadata: 0,
                 index: 0,

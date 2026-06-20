@@ -416,6 +416,14 @@ pub mod orchestration {
                 )
             )]
             pub run_stall_timeout_ms: u64,
+            /// Number of days to retain terminal scan observability runs before pruning.
+            #[cfg_attr(
+                feature = "serde",
+                serde(
+                    default = "MaintenanceConfig::default_scan_run_retention_days"
+                )
+            )]
+            pub scan_run_retention_days: u32,
         }
 
         impl Default for MaintenanceConfig {
@@ -428,6 +436,8 @@ pub mod orchestration {
                         Self::default_max_root_entries_per_library(),
                     error_backoff_ms: Self::default_error_backoff_ms(),
                     run_stall_timeout_ms: Self::default_run_stall_timeout_ms(),
+                    scan_run_retention_days:
+                        Self::default_scan_run_retention_days(),
                 }
             }
         }
@@ -455,6 +465,10 @@ pub mod orchestration {
 
             const fn default_run_stall_timeout_ms() -> u64 {
                 30 * 60 * 1_000
+            }
+
+            const fn default_scan_run_retention_days() -> u32 {
+                30
             }
         }
 
