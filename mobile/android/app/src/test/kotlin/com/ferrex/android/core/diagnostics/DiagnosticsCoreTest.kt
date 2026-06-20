@@ -168,6 +168,21 @@ class DiagnosticsCoreTest {
                 status = ManifestImageStatus.Ready("image-token-secret"),
             ),
         )
+        imageCache.writeManifestEntry(
+            scope,
+            ImageManifestRecord(
+                key = ImageRequestKey(UUID(0, 3).toString(), BrowseImageCategory.Backdrop),
+                status = ManifestImageStatus.Pending(2_000),
+            ),
+        )
+        imageCache.writeManifestEntry(
+            scope,
+            ImageManifestRecord(
+                key = ImageRequestKey(UUID(0, 4).toString(), BrowseImageCategory.Profile),
+                status = ManifestImageStatus.Failed("not available"),
+            ),
+        )
+        imageCache.markStaleOffline(scope, "offline")
         val coilBlob = imageCache.coilDiskCacheDir(scope).resolve("blob")
         coilBlob.writeText("blob-bytes")
 
@@ -205,6 +220,7 @@ class DiagnosticsCoreTest {
         assertFalse(combined.contains("raw-username"))
         assertFalse(combined.contains("session-secret"))
         assertFalse(combined.contains("local-device-secret"))
+        assertFalse(combined.contains("image-token-secret"))
         assertEquals(1, cache.library?.cachedMovieBatchFiles)
         assertEquals("series-cache-incomplete", cache.library?.health?.state)
         assertEquals("${library.id}".sha256Short(), cache.library?.health?.selectedLibraryIdHash)
@@ -213,7 +229,11 @@ class DiagnosticsCoreTest {
         assertEquals(400, cache.library?.health?.expectedSeriesBundles)
         assertEquals(364, cache.library?.health?.pendingSeriesBundles)
         assertEquals(16, cache.library?.health?.failedSeriesBundles)
-        assertEquals(1, cache.image?.manifestEntryFiles)
+        assertEquals(3, cache.image?.manifestEntryFiles)
+        assertEquals(1, cache.image?.manifestStatus?.readyCount)
+        assertEquals(1, cache.image?.manifestStatus?.pendingCount)
+        assertEquals(1, cache.image?.manifestStatus?.failedCount)
+        assertEquals(3, cache.image?.manifestStatus?.staleCount)
         assertTrue((cache.image?.coilBlobBytes ?: 0L) > 0L)
     }
 

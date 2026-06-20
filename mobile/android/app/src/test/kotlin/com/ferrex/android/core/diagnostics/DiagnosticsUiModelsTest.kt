@@ -114,6 +114,21 @@ class DiagnosticsUiModelsTest {
                     coilBlobBytes = 1024L,
                     quarantineFileCount = 1,
                     staleOfflineMarkerPresent = false,
+                    manifestStatus = ImageManifestStatusDiagnosticsSummary(
+                        readyCount = 5,
+                        pendingCount = 1,
+                        failedCount = 1,
+                        staleCount = 1,
+                    ),
+                    lastManifestBatch = ImageManifestBatchDiagnosticsSummary(
+                        lastOutcome = "success",
+                        lastKind = "retry",
+                        lastRetryEpochMs = 42L,
+                        lastRequestedKeyCount = 2,
+                        lastResponseRecordCount = 2,
+                        lastReadyCount = 1,
+                        lastPendingCount = 1,
+                    ),
                 ),
             ),
         )
@@ -127,6 +142,9 @@ class DiagnosticsUiModelsTest {
         assertTrue(rendered.contains("pending 364"))
         assertTrue(rendered.contains("failed 16"))
         assertTrue(rendered.contains("2 crash file"))
+        assertTrue(rendered.contains("5 ready"))
+        assertTrue(rendered.contains("1 pending"))
+        assertTrue(rendered.contains("last retry success"))
         listOf(
             "access-secret",
             "refresh-secret",

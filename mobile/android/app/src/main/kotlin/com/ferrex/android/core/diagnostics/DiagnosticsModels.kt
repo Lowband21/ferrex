@@ -145,8 +145,39 @@ data class ImageCacheDiagnosticsSummary(
     val coilBlobBytes: Long,
     val quarantineFileCount: Int,
     val staleOfflineMarkerPresent: Boolean,
+    val quarantineReasonFileCount: Int = 0,
+    val lastQuarantineEpochMs: Long? = null,
+    val manifestStatus: ImageManifestStatusDiagnosticsSummary = ImageManifestStatusDiagnosticsSummary(),
+    val lastManifestBatch: ImageManifestBatchDiagnosticsSummary? = null,
     val selectedClearDropsCoilBlobsForScope: Boolean = true,
     val allClearPreservesLibraryAndWatchState: Boolean = true,
+)
+
+@Serializable
+data class ImageManifestStatusDiagnosticsSummary(
+    val readyCount: Int = 0,
+    val pendingCount: Int = 0,
+    val failedCount: Int = 0,
+    val staleCount: Int = 0,
+    val corruptCount: Int = 0,
+)
+
+@Serializable
+data class ImageManifestBatchDiagnosticsSummary(
+    val lastOutcome: String? = null,
+    val lastKind: String? = null,
+    val lastRequestEpochMs: Long? = null,
+    val lastSuccessEpochMs: Long? = null,
+    val lastFailureEpochMs: Long? = null,
+    val lastRetryEpochMs: Long? = null,
+    val lastRequestedKeyCount: Int = 0,
+    val lastResponseRecordCount: Int = 0,
+    val lastReadyCount: Int = 0,
+    val lastPendingCount: Int = 0,
+    val lastFailedCount: Int = 0,
+    val lastFailureKind: String? = null,
+    val lastFailureClassification: String? = null,
+    val lastFailureHttpCode: Int? = null,
 )
 
 @Serializable

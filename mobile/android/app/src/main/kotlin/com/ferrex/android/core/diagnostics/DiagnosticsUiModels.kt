@@ -165,9 +165,17 @@ object DiagnosticsSummaryPresenter {
             add(
                 DiagnosticsSummaryRow(
                     label = "Image cache",
-                    value = "scope ${image.scopeDirectoryName} • ${image.approximateBytes.formatBytes()} • ${image.manifestEntryFiles} manifest file(s) • ${image.coilBlobBytes.formatBytes()} Coil blob(s) • ${image.quarantineFileCount} quarantine file(s)",
+                    value = "scope ${image.scopeDirectoryName} • ${image.approximateBytes.formatBytes()} • ${image.manifestEntryFiles} manifest file(s) • ${image.manifestStatus.readyCount} ready • ${image.manifestStatus.pendingCount} pending • ${image.manifestStatus.failedCount} failed • ${image.manifestStatus.staleCount} stale • ${image.manifestStatus.corruptCount} corrupt • ${image.coilBlobBytes.formatBytes()} Coil blob(s) • ${image.quarantineFileCount} quarantine file(s)",
                 ),
             )
+            image.lastManifestBatch?.let { batch ->
+                add(
+                    DiagnosticsSummaryRow(
+                        label = "Image manifest recovery",
+                        value = batch.describeForDiagnostics(),
+                    ),
+                )
+            }
         }
         add(
             DiagnosticsSummaryRow(
@@ -182,6 +190,26 @@ object DiagnosticsSummaryPresenter {
             ),
         )
     }
+
+    private fun ImageManifestBatchDiagnosticsSummary.describeForDiagnostics(): String = buildList {
+        add("last ${lastKind ?: "manifest"} ${lastOutcome ?: "unknown"}")
+        add("requested $lastRequestedKeyCount key(s)")
+        add("response $lastResponseRecordCount record(s)")
+        add("ready $lastReadyCount")
+        add("pending $lastPendingCount")
+        add("failed $lastFailedCount")
+        lastRetryEpochMs?.let { add("last retry $it") }
+        lastFailureEpochMs?.let { failureAt ->
+            add(
+                buildString {
+                    append("last failure ").append(failureAt)
+                    lastFailureKind?.let { append(" ").append(it) }
+                    lastFailureClassification?.let { append("/").append(it) }
+                    lastFailureHttpCode?.let { append(" HTTP ").append(it) }
+                },
+            )
+        }
+    }.joinToString(" • ")
 
     private fun Boolean.yesNo(): String = if (this) "yes" else "no"
 
