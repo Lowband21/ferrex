@@ -1,8 +1,10 @@
 package com.ferrex.android.tv.ui
 
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +28,7 @@ import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
+import com.ferrex.android.core.image.VisibleImageRequestPlanner
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryKind
@@ -93,6 +96,10 @@ fun TvHomeScreen(
     val homeFocusRestorer = rememberTvFocusRestorer(TvHomeFocusPolicy.SCREEN_HOME)
     val gridFocusRestorer = rememberTvFocusRestorer(TvGridFocusPolicy.SCREEN_GRID)
     val searchFocusRestorer = rememberTvFocusRestorer(TvSearchFocusPolicy.SCREEN_SEARCH)
+    val libraryGridState = rememberLazyGridState()
+    val libraryGridVisibleIndices by remember {
+        derivedStateOf { libraryGridState.layoutInfo.visibleItemsInfo.map { it.index } }
+    }
 
     var childScreen by remember { mutableStateOf<TvHomeChild?>(null) }
     var searchQuery by remember(scope.directoryName) { mutableStateOf("") }
@@ -241,15 +248,27 @@ fun TvHomeScreen(
     val gridCardsForImages = when ((childScreen as? TvHomeChild.Grid)?.tab ?: selectedTab) {
         HomeLibraryTab.Movies -> indexedMovieCards.cards
         HomeLibraryTab.Series -> selectedSeriesCards
+    }.takeIf { childScreen is TvHomeChild.Grid }.orEmpty()
+    val visibleGridImageKeys = remember(gridCardsForImages, libraryGridVisibleIndices) {
+        VisibleImageRequestPlanner.visibleWindowKeys(
+            items = gridCardsForImages,
+            visibleIndices = libraryGridVisibleIndices,
+            overscanBefore = GRID_IMAGE_OVERSCAN_ITEMS,
+        ) { it.imageKey }
     }
-    val browseImageKeys = remember(continueState, shelves, gridCardsForImages, childScreen) {
+    val gridImageKeys = remember(gridCardsForImages, visibleGridImageKeys) {
+        VisibleImageRequestPlanner.mergeVisibleWithCappedPrefetch(
+            visibleKeys = visibleGridImageKeys,
+            prefetchKeys = gridCardsForImages.mapNotNull { it.imageKey },
+            prefetchLimit = GRID_IMAGE_PREFETCH_LIMIT,
+        )
+    }
+    val browseImageKeys = remember(continueState, shelves, gridImageKeys) {
         buildList {
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
-            if (childScreen is TvHomeChild.Grid) {
-                gridCardsForImages.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
-            }
-        }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT)
+            addAll(gridImageKeys)
+        }.distinctBy { it.cacheKey }
     }
     val imageKeys = remember(browseImageKeys, detailResult) {
         (DetailCache.imageKeys(detailResult) + browseImageKeys).distinctBy { it.cacheKey }.toSet()
@@ -465,6 +484,7 @@ fun TvHomeScreen(
             imageLoader = imageLoader,
             scope = scope,
             focusRestorer = gridFocusRestorer,
+            gridState = libraryGridState,
             onSelect = { openDetail(it.route, TvReturnTarget.Grid(screen.tab)) },
             libraryFreshness = when (screen.tab) {
                 HomeLibraryTab.Movies -> selectedMovieFreshness

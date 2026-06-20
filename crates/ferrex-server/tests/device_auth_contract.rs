@@ -450,9 +450,29 @@ async fn pin_login_profiles_lockout_and_revoked_fallback(
     let refreshed_access = pin_refresh_body["data"]["access_token"]
         .as_str()
         .context("refreshed access token")?;
-    let revoke = server
+    let playback_scoped_revoke = server
         .post(v1::auth::device::REVOKE)
         .add_header("Authorization", bearer(refreshed_access))
+        .json(&json!({ "device_id": device_session_id }))
+        .await;
+    playback_scoped_revoke.assert_status(StatusCode::FORBIDDEN);
+
+    let full_login = device_login(
+        &server,
+        username,
+        password,
+        test_device_info(device_id, "pin-hw"),
+        Some(&public_key),
+        true,
+    )
+    .await;
+    assert_eq!(full_login["scope"], json!("full"));
+    let full_access_token = full_login["access_token"]
+        .as_str()
+        .context("full access token")?;
+    let revoke = server
+        .post(v1::auth::device::REVOKE)
+        .add_header("Authorization", bearer(full_access_token))
         .json(&json!({ "device_id": device_session_id }))
         .await;
     revoke.assert_status_ok();

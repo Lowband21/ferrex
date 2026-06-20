@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +71,7 @@ import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
+import com.ferrex.android.core.image.VisibleImageRequestPlanner
 import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.mediaart.MediaArtGrounding
@@ -306,6 +310,10 @@ fun PhoneHomeScreen(
         LibraryBrowseModels.homeShelves(movieLibraries, seriesLibraries)
     }
     val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
+    val libraryGridState = rememberLazyGridState()
+    val libraryGridVisibleIndices by remember {
+        derivedStateOf { libraryGridState.layoutInfo.visibleItemsInfo.map { it.index } }
+    }
     val detailResult = remember(repositoryState, selectedDetailRoute) {
         selectedDetailRoute?.let { DetailCache.resolve(repositoryState, it) }
     }
@@ -331,16 +339,34 @@ fun PhoneHomeScreen(
             }
         }
     }
-    val imageKeys = remember(continueState, shelves, indexedMovieCards, selectedSeriesCards, selectedTab, selectedDestination, detailResult) {
+    val activeGridCardsForImages = remember(indexedMovieCards, selectedSeriesCards, selectedTab, selectedDestination) {
+        if (selectedDestination == PhoneShellDestination.Libraries) {
+            if (selectedTab == HomeLibraryTab.Movies) indexedMovieCards.cards else selectedSeriesCards
+        } else {
+            emptyList()
+        }
+    }
+    val visibleGridImageKeys = remember(activeGridCardsForImages, libraryGridVisibleIndices) {
+        VisibleImageRequestPlanner.visibleWindowKeys(
+            items = activeGridCardsForImages,
+            visibleIndices = libraryGridVisibleIndices,
+            overscanBefore = GRID_IMAGE_OVERSCAN_ITEMS,
+        ) { it.imageKey }
+    }
+    val gridImageKeys = remember(activeGridCardsForImages, visibleGridImageKeys) {
+        VisibleImageRequestPlanner.mergeVisibleWithCappedPrefetch(
+            visibleKeys = visibleGridImageKeys,
+            prefetchKeys = activeGridCardsForImages.mapNotNull { it.imageKey },
+            prefetchLimit = GRID_IMAGE_PREFETCH_LIMIT,
+        )
+    }
+    val imageKeys = remember(continueState, shelves, gridImageKeys, detailResult) {
         buildList {
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
-            if (selectedDestination == PhoneShellDestination.Libraries) {
-                val gridCards = if (selectedTab == HomeLibraryTab.Movies) indexedMovieCards.cards else selectedSeriesCards
-                gridCards.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
-            }
+            addAll(gridImageKeys)
             DetailCache.imageKeys(detailResult).forEach(::add)
-        }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT).toSet()
+        }.distinctBy { it.cacheKey }.toSet()
     }
     val visibleImageState = rememberVisibleImageResolutionState(
         scope = scope,
@@ -618,6 +644,7 @@ fun PhoneHomeScreen(
                         imageLoaderAvailable = imageLoader != null,
                         imageLoader = imageLoader,
                         scope = scope,
+                        gridState = libraryGridState,
                         freshness = when (selectedTab) {
                             HomeLibraryTab.Movies -> selectedMovieFreshness
                             HomeLibraryTab.Series -> selectedSeriesFreshness
@@ -1053,6 +1080,7 @@ private fun LibraryDestinationContent(
     imageLoaderAvailable: Boolean,
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
+    gridState: LazyGridState,
     freshness: LibraryFreshness,
     selectedLibraryId: String?,
     onSelect: (LibraryMediaCard) -> Unit,
@@ -1177,6 +1205,7 @@ private fun LibraryDestinationContent(
                         imageLoader = imageLoader,
                         scope = scope,
                         density = density,
+                        gridState = gridState,
                         modifier = Modifier.weight(1f),
                         onSelect = onSelect,
                     )
@@ -2144,6 +2173,7 @@ private fun DenseLibraryGrid(
     imageLoader: coil.ImageLoader?,
     scope: ServerCacheScope,
     density: FerrexStageDensityFamily,
+    gridState: LazyGridState,
     modifier: Modifier = Modifier,
     onSelect: (LibraryMediaCard) -> Unit,
 ) {
@@ -2153,6 +2183,7 @@ private fun DenseLibraryGrid(
         items = cards,
         itemStableId = { it.stableKey },
         columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+        state = gridState,
         modifier = modifier.fillMaxSize(),
         testTag = FerrexQaTags.Phone.LibraryGrid,
         contentDescription = "Dense library media grid with ${cards.size} item${if (cards.size == 1) "" else "s"}; no enclosing rail band",
@@ -2738,7 +2769,8 @@ private sealed interface MovieIndexUiState {
     data class Unavailable(val message: String) : MovieIndexUiState
 }
 
-private const val GRID_IMAGE_LOOKUP_LIMIT = 80
+private const val GRID_IMAGE_PREFETCH_LIMIT = 80
+private const val GRID_IMAGE_OVERSCAN_ITEMS = 24
 
 
 private fun SearchDetailTarget.toMediaRouteArgs(): MediaRouteArgs? {

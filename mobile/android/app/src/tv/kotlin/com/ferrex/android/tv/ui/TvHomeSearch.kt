@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +44,7 @@ import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
+import com.ferrex.android.core.image.VisibleImageRequestPlanner
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.search.MediaSearchOutcome
 import com.ferrex.android.core.search.MediaSearchRepository
@@ -106,8 +110,23 @@ internal fun TvSearchScreen(
     }
 
     val rows = ((uiState as? TvSearchUiState.Loaded)?.outcome as? MediaSearchOutcome.Results)?.rows.orEmpty()
-    val visibleKeys = remember(rows) {
-        rows.filterIsInstance<SearchResultRow.Resolved>().mapNotNull { it.imageKey }.distinctBy { it.cacheKey }.take(SEARCH_IMAGE_LOOKUP_LIMIT)
+    val resultListState = rememberLazyListState()
+    val visibleResultIndices by remember {
+        derivedStateOf { resultListState.layoutInfo.visibleItemsInfo.map { it.index } }
+    }
+    val visibleSearchImageKeys = remember(rows, visibleResultIndices) {
+        VisibleImageRequestPlanner.visibleWindowKeys(
+            items = rows,
+            visibleIndices = visibleResultIndices,
+            overscanBefore = SEARCH_IMAGE_OVERSCAN_ITEMS,
+        ) { row -> (row as? SearchResultRow.Resolved)?.imageKey }
+    }
+    val visibleKeys = remember(rows, visibleSearchImageKeys) {
+        VisibleImageRequestPlanner.mergeVisibleWithCappedPrefetch(
+            visibleKeys = visibleSearchImageKeys,
+            prefetchKeys = rows.filterIsInstance<SearchResultRow.Resolved>().mapNotNull { it.imageKey },
+            prefetchLimit = SEARCH_IMAGE_PREFETCH_LIMIT,
+        )
     }
     val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
     val resolutions = rememberVisibleImageResolutionState(
@@ -177,6 +196,7 @@ internal fun TvSearchScreen(
                     onRetry = { retryNonce += 1 },
                     focusRestorer = focusRestorer,
                     preferredSurface = preferredSurface,
+                    resultListState = resultListState,
                     onOpenDiagnostics = onOpenDiagnostics,
                     modifier = Modifier.weight(1f),
                 )
@@ -196,6 +216,7 @@ internal fun TvSearchOutcome(
     onRetry: () -> Unit,
     focusRestorer: TvFocusRestorer,
     preferredSurface: String,
+    resultListState: LazyListState,
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -236,14 +257,14 @@ internal fun TvSearchOutcome(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (rows.size > SEARCH_RESULT_DISPLAY_LIMIT) {
+            if (rows.size > SEARCH_IMAGE_PREFETCH_LIMIT) {
                 Text(
-                    text = "Showing ${SEARCH_RESULT_DISPLAY_LIMIT} of ${rows.size} search result(s). Narrow the query for more focused rows.",
+                    text = "Showing all ${rows.size} search result(s). Artwork resolves for the visible window as you scroll.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val visibleRows = rows.take(SEARCH_RESULT_DISPLAY_LIMIT)
+            val visibleRows = rows
             val rowKeys = visibleRows.map { it.searchStableKey() }
             val rowRequesters = remember(rowKeys) { rowKeys.associateWith { FocusRequester() } }
             val restoredRowKey = rowKeys.firstOrNull()?.let { fallback ->
@@ -258,6 +279,7 @@ internal fun TvSearchOutcome(
                 modifier = modifier
                     .fillMaxWidth()
                     .testTag(FerrexQaTags.Tv.SearchResults),
+                state = resultListState,
                 verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Md),
                 contentPadding = PaddingValues(vertical = FerrexDesignTokens.Space.Sm),
             ) {
@@ -396,6 +418,6 @@ internal sealed interface TvSearchUiState {
     data class Loaded(val outcome: MediaSearchOutcome) : TvSearchUiState
 }
 
-internal const val SEARCH_IMAGE_LOOKUP_LIMIT = 48
-internal const val SEARCH_RESULT_DISPLAY_LIMIT = 20
+internal const val SEARCH_IMAGE_PREFETCH_LIMIT = 48
+internal const val SEARCH_IMAGE_OVERSCAN_ITEMS = 8
 internal const val SEARCH_DEBOUNCE_MILLIS = 350L

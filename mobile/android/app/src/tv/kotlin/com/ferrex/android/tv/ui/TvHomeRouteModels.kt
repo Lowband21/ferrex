@@ -51,4 +51,5 @@ internal sealed interface MovieIndexUiState {
     data class Unavailable(val message: String) : MovieIndexUiState
 }
 
-internal const val GRID_IMAGE_LOOKUP_LIMIT = 96
+internal const val GRID_IMAGE_PREFETCH_LIMIT = 96
+internal const val GRID_IMAGE_OVERSCAN_ITEMS = 32
