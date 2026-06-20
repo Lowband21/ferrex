@@ -244,6 +244,16 @@ fun PhoneHomeScreen(
     val selectedSeriesLibrary = seriesLibraries.firstOrNull { it.library.id == selectedSeriesLibraryId }
     val selectedMovieInfo = selectedMovieLibrary?.library ?: movieLibraryInfos.firstOrNull { it.id == selectedMovieLibraryId }
     val selectedSeriesInfo = selectedSeriesLibrary?.library ?: seriesLibraryInfos.firstOrNull { it.id == selectedSeriesLibraryId }
+    val selectedMovieFreshness = repositoryState?.takeIf { it.selectedLibraryId == selectedMovieInfo?.id }?.freshness ?: LibraryFreshness.Empty
+    val selectedSeriesFreshness = repositoryState?.takeIf { it.selectedLibraryId == selectedSeriesInfo?.id }?.freshness ?: LibraryFreshness.Empty
+
+    LaunchedEffect(libraryRepository, scope.directoryName, selectedDestination, selectedTab, selectedSeriesInfo?.id) {
+        if (selectedDestination == PhoneShellDestination.Libraries && selectedTab == HomeLibraryTab.Series) {
+            selectedSeriesInfo?.let { library ->
+                libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
+            }
+        }
+    }
 
     LaunchedEffect(selectedDestination, selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
         if (selectedDestination != PhoneShellDestination.Libraries || selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
@@ -453,9 +463,7 @@ fun PhoneHomeScreen(
     }
 
     fun retryLibrary() {
-        coroutineScope.launch {
-            libraryRepository?.refreshLibraries(scope, selectedBrowseLibraryId ?: repositoryState?.selectedLibraryId)
-        }
+        syncSelectedLibrary()
     }
 
     fun clearSelectedLibraryCache() {
@@ -543,6 +551,7 @@ fun PhoneHomeScreen(
                 onRetryConnection = onRetryConnection,
                 onRetryCacheSync = { retryDetailCacheSync(selectedDetailRoute) },
                 onClearSelectedCache = { selectedDetailRoute?.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
+                onClearAllCache = { libraryRepository?.clearAllCache(scope) },
                 onChangeServer = onChangeServer,
                 onResetConnection = onResetConnection,
                 onRetryWatch = { retryDetailWatch(detailResult) },
@@ -553,7 +562,7 @@ fun PhoneHomeScreen(
                 onMarkSeriesWatched = { tmdbId, watched -> runNetworkAction { watchRepository?.markSeriesWatched(tmdbId, watched) } },
                 onPlaybackContract = { launchPlayback(it) },
                 onOpenDiagnostics = onOpenDiagnostics,
-                libraryFreshness = repositoryState?.freshness,
+                libraryFreshness = repositoryState?.takeIf { it.selectedLibraryId == selectedDetailRoute?.libraryId }?.freshness,
                 onOpenDetail = { selectedDetailRoute = it },
             )
         } else {
@@ -609,7 +618,10 @@ fun PhoneHomeScreen(
                         imageLoaderAvailable = imageLoader != null,
                         imageLoader = imageLoader,
                         scope = scope,
-                        freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+                        freshness = when (selectedTab) {
+                            HomeLibraryTab.Movies -> selectedMovieFreshness
+                            HomeLibraryTab.Series -> selectedSeriesFreshness
+                        },
                         selectedLibraryId = selectedBrowseLibraryId,
                         onSelect = { selectedDetailRoute = it.route },
                         onSyncSelected = { syncSelectedLibrary() },
@@ -627,6 +639,11 @@ fun PhoneHomeScreen(
                         connectionStatus = homeConnectionUi,
                         onOpenResult = { openSearchResult(it) },
                         onRetryConnection = onRetryConnection,
+                        selectedLibraryId = selectedBrowseLibraryId,
+                        onClearSelected = { clearSelectedLibraryCache() },
+                        onClearAll = { libraryRepository?.clearAllCache(scope) },
+                        onChangeServer = onChangeServer,
+                        onResetConnection = onResetConnection,
                         onOpenAccountServer = { selectedDestination = PhoneShellDestination.AccountServer },
                         onOpenDiagnostics = onOpenDiagnostics,
                     )
@@ -634,7 +651,10 @@ fun PhoneHomeScreen(
                         contentPadding = contentPadding,
                         state = state,
                         connectionStatus = homeConnectionUi,
-                        freshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+                        freshness = when (selectedTab) {
+                            HomeLibraryTab.Movies -> selectedMovieFreshness
+                            HomeLibraryTab.Series -> selectedSeriesFreshness
+                        },
                         selectedLibraryId = selectedBrowseLibraryId,
                         onRetryConnection = onRetryConnection,
                         onRetryLibrary = { retryLibrary() },
@@ -1217,6 +1237,11 @@ private fun SearchDestinationContent(
     connectionStatus: AuthenticatedConnectionUi,
     onOpenResult: (SearchDetailTarget) -> Unit,
     onRetryConnection: () -> Unit,
+    selectedLibraryId: String?,
+    onClearSelected: () -> Unit,
+    onClearAll: () -> Unit,
+    onChangeServer: () -> Unit,
+    onResetConnection: () -> Unit,
     onOpenAccountServer: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
@@ -1283,6 +1308,11 @@ private fun SearchDestinationContent(
                         imagePipeline = imagePipeline,
                         onOpenResult = onOpenResult,
                         onOpenDiagnostics = onOpenDiagnostics,
+                        selectedLibraryId = selectedLibraryId,
+                        onClearSelectedCache = onClearSelected,
+                        onClearAllCache = onClearAll,
+                        onChangeServer = onChangeServer,
+                        onResetConnection = onResetConnection,
                         density = density,
                     )
                 }
@@ -2625,7 +2655,8 @@ private fun LibraryFreshness.statusTone(): FerrexStatusTone = when (this) {
     LibraryFreshness.Empty,
     LibraryFreshness.Syncing,
     is LibraryFreshness.Fresh -> FerrexStatusTone.Secondary
-    is LibraryFreshness.StaleOffline -> FerrexStatusTone.StaleOffline
+    is LibraryFreshness.StaleOffline,
+    is LibraryFreshness.SeriesCacheIncomplete -> FerrexStatusTone.StaleOffline
     is LibraryFreshness.CorruptRebuilding -> FerrexStatusTone.Cache
     is LibraryFreshness.ErrorRetryable -> FerrexStatusTone.Error
 }
@@ -2648,7 +2679,8 @@ private fun homeStageSeedColor(
     connectionStatus.health != AuthConnectionHealth.Online -> TheaterPlateColor.rgb(51, 65, 85)
     freshness is LibraryFreshness.ErrorRetryable -> TheaterPlateColor.rgb(127, 29, 29)
     freshness is LibraryFreshness.CorruptRebuilding -> TheaterPlateColor.rgb(49, 46, 129)
-    freshness is LibraryFreshness.StaleOffline -> TheaterPlateColor.rgb(71, 85, 105)
+    freshness is LibraryFreshness.StaleOffline ||
+        freshness is LibraryFreshness.SeriesCacheIncomplete -> TheaterPlateColor.rgb(71, 85, 105)
     freshness is LibraryFreshness.Fresh -> TheaterPlateColor.rgb(22, 78, 99)
     freshness is LibraryFreshness.Syncing -> TheaterPlateColor.rgb(56, 189, 248)
     LibraryFreshness.Empty == freshness -> TheaterPlateColor.rgb(30, 41, 59)
@@ -2665,6 +2697,7 @@ private fun homeStageHasCacheRecoveryState(freshness: LibraryFreshness): Boolean
     LibraryFreshness.Syncing,
     is LibraryFreshness.Fresh -> false
     is LibraryFreshness.StaleOffline,
+    is LibraryFreshness.SeriesCacheIncomplete,
     is LibraryFreshness.CorruptRebuilding,
     is LibraryFreshness.ErrorRetryable -> true
 }

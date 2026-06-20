@@ -15,7 +15,9 @@ interface LibrarySyncTransport {
     suspend fun syncMovieBatches(libraryId: String, cachedVersions: Map<Int, Long>): LibrarySyncResult<MovieBatchSyncPlan>
     suspend fun fetchMovieBatch(libraryId: String, batchId: Int): LibrarySyncResult<ByteArray>
     suspend fun syncSeriesBundles(libraryId: String, cachedVersions: Map<String, Long>): LibrarySyncResult<SeriesBundleSyncPlan>
-    suspend fun fetchSeriesBundle(libraryId: String, seriesId: String): LibrarySyncResult<ByteArray>
+    suspend fun fetchSeriesBundles(libraryId: String, seriesIds: List<String>): LibrarySyncResult<ByteArray>
+    suspend fun fetchSeriesBundle(libraryId: String, seriesId: String): LibrarySyncResult<ByteArray> =
+        fetchSeriesBundles(libraryId, listOf(seriesId))
 }
 
 class OkHttpLibrarySyncTransport(
@@ -76,10 +78,10 @@ class OkHttpLibrarySyncTransport(
         }
     }
 
-    override suspend fun fetchSeriesBundle(libraryId: String, seriesId: String): LibrarySyncResult<ByteArray> = executeBinary(
+    override suspend fun fetchSeriesBundles(libraryId: String, seriesIds: List<String>): LibrarySyncResult<ByteArray> = executeBinary(
         binaryPost(
             path = Routes.seriesBundlesFetch(libraryId),
-            body = LibraryFlatBuffers.buildSeriesBundleFetchRequest(listOf(seriesId)),
+            body = LibraryFlatBuffers.buildSeriesBundleFetchRequest(seriesIds),
         ),
     )
 

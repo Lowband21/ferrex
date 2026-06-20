@@ -6,6 +6,7 @@ import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.LibraryFreshness
+import com.ferrex.android.core.library.cacheHealthSummary
 import com.ferrex.android.core.mediaart.MediaArtGrounding
 import com.ferrex.android.core.mediaart.MediaArtObject
 import com.ferrex.android.core.mediaart.MediaArtRequest
@@ -205,6 +206,7 @@ enum class DetailPageActionKind {
     RetryWatch,
     RetryCache,
     ClearSelectedCache,
+    ClearAllCache,
     ChangeServer,
     ResetConnection,
     Diagnostics,
@@ -803,6 +805,7 @@ object DetailPageMapper {
                         ),
                     )
                 }
+                add(DetailPageAction(DetailPageActionKind.ClearAllCache, "Clear all cache", DetailActionRole.DestructiveReset))
                 if (visibility.changeServer) {
                     add(DetailPageAction(DetailPageActionKind.ChangeServer, "Change server", DetailActionRole.Secondary))
                 }
@@ -818,32 +821,37 @@ object DetailPageMapper {
         LibraryFreshness.Empty -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.Empty,
             title = "Library cache is empty",
-            message = "Retry cache sync or change server/reset connection to recover details.",
+            message = "${cacheHealthSummary()} Retry cache sync or change server/reset connection to recover details.",
         )
         LibraryFreshness.Syncing -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.Syncing,
             title = "Syncing library cache",
-            message = "Cached details stay mounted while the detail cache refreshes.",
+            message = "${cacheHealthSummary()} Cached details stay mounted while the detail cache refreshes.",
         )
         is LibraryFreshness.Fresh -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.Fresh,
             title = "Library cache is fresh",
-            message = "$itemCount cached item(s) available for this server and user.",
+            message = "${cacheHealthSummary()} Available for this server and user.",
         )
         is LibraryFreshness.StaleOffline -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.StaleOffline,
             title = "Stale/offline library cache",
-            message = "Showing $itemCount cached item(s): $message",
+            message = "${cacheHealthSummary()} Reason: $message",
+        )
+        is LibraryFreshness.SeriesCacheIncomplete -> DetailFreshnessNotice(
+            kind = DetailFreshnessKind.StaleOffline,
+            title = "Series cache is incomplete",
+            message = "${cacheHealthSummary()} Retry continues this series cache repair. Reason: $message",
         )
         is LibraryFreshness.CorruptRebuilding -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.RecoverableError,
-            title = "Cache needs rebuild",
-            message = message,
+            title = "Corrupt cache needs rebuild",
+            message = "${cacheHealthSummary()} $message",
         )
         is LibraryFreshness.ErrorRetryable -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.RecoverableError,
             title = "Library sync failed",
-            message = message,
+            message = "${cacheHealthSummary()} $message",
         )
     }
 

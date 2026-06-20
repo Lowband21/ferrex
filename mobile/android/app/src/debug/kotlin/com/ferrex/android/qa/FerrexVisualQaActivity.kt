@@ -525,6 +525,7 @@ private fun PhoneDetailScenario(
             onRetryConnection = {},
             onRetryCacheSync = {},
             onClearSelectedCache = {},
+            onClearAllCache = {},
             onChangeServer = {},
             onResetConnection = {},
             onRetryWatch = {},

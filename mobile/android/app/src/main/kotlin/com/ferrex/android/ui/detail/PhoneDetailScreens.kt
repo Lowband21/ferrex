@@ -65,6 +65,7 @@ fun PhoneDetailScreen(
     onRetryConnection: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
+    onClearAllCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
     onRetryWatch: () -> Unit,
@@ -134,6 +135,7 @@ fun PhoneDetailScreen(
                         onBack = onBack,
                         onRetryCacheSync = onRetryCacheSync,
                         onClearSelectedCache = onClearSelectedCache,
+                        onClearAllCache = onClearAllCache,
                         onChangeServer = onChangeServer,
                         onResetConnection = onResetConnection,
                         onRetryWatch = onRetryWatch,
@@ -339,6 +341,7 @@ private fun DetailPageAction.dispatchPhoneDetailAction(
     onBack: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
+    onClearAllCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
     onRetryWatch: () -> Unit,
@@ -357,6 +360,7 @@ private fun DetailPageAction.dispatchPhoneDetailAction(
         DetailPageActionKind.Back -> onBack()
         DetailPageActionKind.RetryCache -> onRetryCacheSync()
         DetailPageActionKind.ClearSelectedCache -> onClearSelectedCache()
+        DetailPageActionKind.ClearAllCache -> onClearAllCache()
         DetailPageActionKind.ChangeServer -> onChangeServer()
         DetailPageActionKind.ResetConnection -> onResetConnection()
         DetailPageActionKind.Diagnostics -> onOpenDiagnostics()

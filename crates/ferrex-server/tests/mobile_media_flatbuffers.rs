@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{collections::HashSet, net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result};
 use axum::{Router, body::Bytes, http::StatusCode, http::header};
@@ -33,6 +33,8 @@ use ferrex_server::infra::{app_state::AppState, startup::NoopStartupHooks};
 
 mod common;
 use common::build_test_app_with_hooks;
+
+const LARGE_SERIES_COUNT: usize = 80;
 
 fn bearer(token: &str) -> String {
     format!("Bearer {token}")
@@ -472,6 +474,136 @@ async fn seed_series(
     Ok((library_id, series_id, season_id, episode_id))
 }
 
+async fn seed_series_in_library(
+    state: &AppState,
+    pool: &PgPool,
+    library_id: LibraryId,
+    index: usize,
+) -> Result<SeriesID> {
+    let series_id = SeriesID(Uuid::now_v7());
+    let season_id = SeasonID(Uuid::now_v7());
+    let episode_id = EpisodeID(Uuid::now_v7());
+    let tmdb_id = 20_000 + index as u64;
+    let title = format!("Large Fixture Series {index:03}");
+    let slug = format!("large-fixture-series-{index:03}");
+    let series_poster_iid = Uuid::now_v7();
+    let season_poster_iid = Uuid::now_v7();
+    seed_primary_image(
+        pool,
+        series_id.to_uuid(),
+        "series",
+        "poster",
+        series_poster_iid,
+    )
+    .await?;
+    seed_primary_image(
+        pool,
+        season_id.to_uuid(),
+        "season",
+        "poster",
+        season_poster_iid,
+    )
+    .await?;
+    let now = Utc::now();
+
+    let mut series_details = make_series_details(&title);
+    series_details.id = tmdb_id;
+    series_details.name = title.clone();
+    series_details.original_name = Some(title.clone());
+    series_details.number_of_episodes = Some(1);
+    series_details.available_episodes = Some(1);
+    series_details.primary_poster_iid = Some(series_poster_iid);
+
+    let series = Series {
+        id: series_id,
+        library_id,
+        tmdb_id,
+        title: title.clone().into(),
+        details: series_details,
+        endpoint: format!("/api/v1/series/{slug}").into(),
+        discovered_at: now,
+        created_at: now,
+        theme_color: None,
+    };
+
+    let mut season_details = make_season_details();
+    season_details.id = 30_000 + index as u64;
+    season_details.name = format!("Season {index:03}");
+    season_details.primary_poster_iid = Some(season_poster_iid);
+    let season = SeasonReference {
+        id: season_id,
+        library_id,
+        season_number: 1.into(),
+        series_id,
+        tmdb_series_id: tmdb_id,
+        details: season_details,
+        endpoint: format!("/api/v1/series/{slug}/season/1").into(),
+        discovered_at: now,
+        created_at: now,
+        theme_color: None,
+    };
+
+    let mut episode_details = make_episode_details();
+    episode_details.id = 40_000 + index as u64;
+    episode_details.name = format!("Episode {index:03}");
+    episode_details.production_code = Some(format!("LFS{index:03}"));
+    let episode = EpisodeReference {
+        id: episode_id,
+        library_id,
+        episode_number: 1.into(),
+        season_number: 1.into(),
+        season_id,
+        series_id,
+        tmdb_series_id: tmdb_id,
+        details: episode_details,
+        endpoint: format!("/api/v1/series/{slug}/season/1/episode/1").into(),
+        file: make_media_file(MediaID::Episode(episode_id), library_id),
+        discovered_at: now,
+        created_at: now,
+    };
+
+    state
+        .unit_of_work()
+        .media_refs
+        .store_series_reference(&series)
+        .await
+        .context("store large fixture series")?;
+    state
+        .unit_of_work()
+        .media_refs
+        .store_season_reference(&season)
+        .await
+        .context("store large fixture season")?;
+    state
+        .unit_of_work()
+        .media_refs
+        .store_episode_reference(&episode)
+        .await
+        .context("store large fixture episode")?;
+
+    Ok(series_id)
+}
+
+async fn seed_large_series_library(
+    state: &AppState,
+    pool: &PgPool,
+    count: usize,
+) -> Result<(LibraryId, Vec<SeriesID>)> {
+    let library_id = create_library(
+        state,
+        make_library("Large Series", LibraryType::Series),
+    )
+    .await?;
+    let mut series_ids = Vec::with_capacity(count);
+    for index in 0..count {
+        series_ids.push(
+            seed_series_in_library(state, pool, library_id, index).await?,
+        );
+    }
+    series_ids.sort_by_key(|id| id.to_uuid());
+    Ok((library_id, series_ids))
+}
+
 fn fb_image_manifest_request(iid: Uuid) -> Vec<u8> {
     let mut builder = FlatBufferBuilder::new();
     let iid = uuid_to_fb(&iid);
@@ -491,6 +623,176 @@ fn fb_image_manifest_request(iid: Uuid) -> Vec<u8> {
     );
     builder.finish(request, None);
     builder.finished_data().to_vec()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedSeriesBundleSync {
+    stale_series_ids: Vec<Uuid>,
+    deleted_series_ids: Vec<Uuid>,
+    server_versions: Vec<batch_sync::SeriesBundleVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedSeriesBundleFetch {
+    series_ids: Vec<Uuid>,
+    versions: Vec<u64>,
+    item_counts: Vec<usize>,
+    item_variants: Vec<Vec<fb::media::MediaVariant>>,
+}
+
+fn sorted_series_uuids(series_ids: &[SeriesID]) -> Vec<Uuid> {
+    let mut ids = series_ids.iter().map(|id| id.to_uuid()).collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids
+}
+
+fn sorted_unique_uuids(mut ids: Vec<Uuid>) -> Vec<Uuid> {
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn series_version_ids(
+    versions: &[batch_sync::SeriesBundleVersion],
+) -> Vec<Uuid> {
+    versions.iter().map(|version| version.series_id).collect()
+}
+
+fn assert_unique_uuids(ids: &[Uuid]) {
+    let unique = ids.iter().copied().collect::<HashSet<_>>();
+    assert_eq!(unique.len(), ids.len(), "duplicate UUIDs: {ids:?}");
+}
+
+async fn versioning_row_count(
+    pool: &PgPool,
+    library_id: LibraryId,
+) -> Result<i64> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM series_bundle_versioning WHERE library_id = $1",
+    )
+    .bind(library_id.to_uuid())
+    .fetch_one(pool)
+    .await
+    .context("count series bundle versioning rows")
+}
+
+async fn series_bundle_versions(
+    state: &AppState,
+    library_id: LibraryId,
+) -> Result<Vec<batch_sync::SeriesBundleVersion>> {
+    let mut versions = state
+        .unit_of_work()
+        .media_refs
+        .list_finalized_series_bundle_versions(&library_id)
+        .await
+        .context("list finalized series bundle versions")?;
+    versions.sort_by_key(|record| record.series_id.to_uuid());
+    Ok(versions
+        .into_iter()
+        .map(|record| batch_sync::SeriesBundleVersion {
+            series_id: record.series_id.to_uuid(),
+            version: record.version,
+        })
+        .collect())
+}
+
+fn parse_series_bundle_sync_response(
+    bytes: &[u8],
+) -> Result<ParsedSeriesBundleSync> {
+    let response =
+        flatbuffers::root::<fb::library::SeriesBundleSyncResponse>(bytes)?;
+
+    let stale = response
+        .stale_series_ids()
+        .context("missing stale_series_ids")?;
+    let mut stale_series_ids = Vec::with_capacity(stale.len());
+    for index in 0..stale.len() {
+        let id = stale.get(index);
+        stale_series_ids.push(fb_to_uuid(&id));
+    }
+
+    let deleted = response
+        .deleted_series_ids()
+        .context("missing deleted_series_ids")?;
+    let mut deleted_series_ids = Vec::with_capacity(deleted.len());
+    for index in 0..deleted.len() {
+        let id = deleted.get(index);
+        deleted_series_ids.push(fb_to_uuid(&id));
+    }
+
+    let versions = response
+        .server_versions()
+        .context("missing server_versions")?;
+    let mut server_versions = Vec::with_capacity(versions.len());
+    for index in 0..versions.len() {
+        let version = versions.get(index);
+        server_versions.push(batch_sync::SeriesBundleVersion {
+            series_id: fb_to_uuid(version.series_id()),
+            version: version.version(),
+        });
+    }
+
+    Ok(ParsedSeriesBundleSync {
+        stale_series_ids,
+        deleted_series_ids,
+        server_versions,
+    })
+}
+
+fn parse_series_bundle_fetch_response(
+    bytes: &[u8],
+) -> Result<ParsedSeriesBundleFetch> {
+    let response =
+        flatbuffers::root::<fb::library::SeriesBundleFetchResponse>(bytes)?;
+    let bundles = response.bundles().context("missing bundles")?;
+    let mut series_ids = Vec::with_capacity(bundles.len());
+    let mut versions = Vec::with_capacity(bundles.len());
+    let mut item_counts = Vec::with_capacity(bundles.len());
+    let mut item_variants = Vec::with_capacity(bundles.len());
+    for index in 0..bundles.len() {
+        let bundle = bundles.get(index);
+        series_ids.push(fb_to_uuid(bundle.series_id()));
+        versions.push(bundle.version());
+        let items = bundle.items().context("missing bundle items")?;
+        item_counts.push(items.len());
+        let mut variants = Vec::with_capacity(items.len());
+        for item_index in 0..items.len() {
+            variants.push(items.get(item_index).variant_type());
+        }
+        item_variants.push(variants);
+    }
+
+    Ok(ParsedSeriesBundleFetch {
+        series_ids,
+        versions,
+        item_counts,
+        item_variants,
+    })
+}
+
+async fn post_series_bundle_sync_flatbuffers(
+    server: &TestServer,
+    token: &str,
+    library_id: LibraryId,
+    manifest: &[batch_sync::SeriesBundleVersion],
+) -> Result<ParsedSeriesBundleSync> {
+    let sync_path = replace_param(
+        v1::libraries::series_bundles::SYNC,
+        "{id}",
+        library_id.to_uuid().to_string(),
+    );
+    let response = server
+        .post(&sync_path)
+        .add_header("Authorization", bearer(token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .content_type(FLATBUFFERS_MIME)
+        .bytes(Bytes::from(
+            batch_sync::serialize_series_bundle_sync_request(manifest),
+        ))
+        .await;
+    response.assert_status_ok();
+    assert_content_type_starts_with(&response, FLATBUFFERS_MIME)?;
+    parse_series_bundle_sync_response(response.as_bytes().as_ref())
 }
 
 #[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
@@ -817,6 +1119,233 @@ async fn series_bundles_support_flatbuffers_and_preserve_rkyv(
     assert_eq!(rkyv_bundle.series_id, series_id);
     assert_eq!(rkyv_bundle.seasons.len(), 1);
     assert_eq!(rkyv_bundle.episodes.len(), 1);
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn series_bundle_sync_flatbuffers_manifests_are_complete_and_repair_versioning(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, state, _tempdir) = build_server(pool.clone()).await?;
+    let token = login_test_user(&server, "media_fb_series_sync_large").await?;
+    let (library_id, series_ids) =
+        seed_large_series_library(&state, &pool, LARGE_SERIES_COUNT).await?;
+    let expected_series_ids = sorted_series_uuids(&series_ids);
+
+    assert_eq!(expected_series_ids.len(), LARGE_SERIES_COUNT);
+    assert_eq!(versioning_row_count(&pool, library_id).await?, 0);
+
+    let empty_manifest =
+        post_series_bundle_sync_flatbuffers(&server, &token, library_id, &[])
+            .await?;
+    assert_eq!(empty_manifest.stale_series_ids, expected_series_ids);
+    assert!(empty_manifest.deleted_series_ids.is_empty());
+    assert_eq!(empty_manifest.server_versions.len(), LARGE_SERIES_COUNT);
+    assert_eq!(
+        series_version_ids(&empty_manifest.server_versions),
+        expected_series_ids
+    );
+    assert!(
+        empty_manifest
+            .server_versions
+            .iter()
+            .all(|version| version.version >= 1),
+        "all repaired server versions should be non-zero"
+    );
+
+    let repaired_versions = series_bundle_versions(&state, library_id).await?;
+    assert_eq!(repaired_versions, empty_manifest.server_versions);
+    assert_eq!(
+        versioning_row_count(&pool, library_id).await?,
+        LARGE_SERIES_COUNT as i64
+    );
+
+    let repeated_empty_manifest =
+        post_series_bundle_sync_flatbuffers(&server, &token, library_id, &[])
+            .await?;
+    assert_eq!(repeated_empty_manifest, empty_manifest);
+    assert_eq!(
+        series_bundle_versions(&state, library_id).await?,
+        repaired_versions
+    );
+
+    let partial_client_manifest = repaired_versions
+        .iter()
+        .take(17)
+        .copied()
+        .collect::<Vec<_>>();
+    let partial_sync = post_series_bundle_sync_flatbuffers(
+        &server,
+        &token,
+        library_id,
+        &partial_client_manifest,
+    )
+    .await?;
+    let expected_partial_versions = repaired_versions[17..].to_vec();
+    assert_eq!(
+        partial_sync.stale_series_ids,
+        series_version_ids(&expected_partial_versions)
+    );
+    assert!(partial_sync.deleted_series_ids.is_empty());
+    assert_eq!(partial_sync.server_versions, expected_partial_versions);
+
+    let stale_indices = [0, LARGE_SERIES_COUNT / 2, LARGE_SERIES_COUNT - 1];
+    let mut stale_client_manifest = repaired_versions.clone();
+    for index in stale_indices {
+        stale_client_manifest[index].version =
+            stale_client_manifest[index].version.saturating_sub(1);
+    }
+    let expected_stale_versions = stale_indices
+        .iter()
+        .map(|index| repaired_versions[*index])
+        .collect::<Vec<_>>();
+    let stale_sync = post_series_bundle_sync_flatbuffers(
+        &server,
+        &token,
+        library_id,
+        &stale_client_manifest,
+    )
+    .await?;
+    assert_eq!(
+        stale_sync.stale_series_ids,
+        series_version_ids(&expected_stale_versions)
+    );
+    assert!(stale_sync.deleted_series_ids.is_empty());
+    assert_eq!(stale_sync.server_versions, expected_stale_versions);
+
+    let deleted_series_id = Uuid::now_v7();
+    let mut deleted_client_manifest = repaired_versions.clone();
+    deleted_client_manifest.push(batch_sync::SeriesBundleVersion {
+        series_id: deleted_series_id,
+        version: 99,
+    });
+    let deleted_sync = post_series_bundle_sync_flatbuffers(
+        &server,
+        &token,
+        library_id,
+        &deleted_client_manifest,
+    )
+    .await?;
+    assert!(deleted_sync.stale_series_ids.is_empty());
+    assert_eq!(deleted_sync.deleted_series_ids, vec![deleted_series_id]);
+    assert!(deleted_sync.server_versions.is_empty());
+
+    Ok(())
+}
+
+#[sqlx::test(migrator = "ferrex_core::MIGRATOR")]
+async fn series_bundle_fetch_and_collection_flatbuffers_are_complete_for_large_library(
+    pool: PgPool,
+) -> Result<()> {
+    let (server, state, _tempdir) = build_server(pool.clone()).await?;
+    let token = login_test_user(&server, "media_fb_series_fetch_large").await?;
+    let (library_id, series_ids) =
+        seed_large_series_library(&state, &pool, LARGE_SERIES_COUNT).await?;
+    let expected_series_ids = sorted_series_uuids(&series_ids);
+
+    let collection_path = replace_param(
+        v1::libraries::series_bundles::COLLECTION,
+        "{id}",
+        library_id.to_uuid().to_string(),
+    );
+    let fb_collection = server
+        .get(&collection_path)
+        .add_header("Authorization", bearer(&token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .await;
+    fb_collection.assert_status_ok();
+    assert_content_type_starts_with(&fb_collection, FLATBUFFERS_MIME)?;
+    let collection =
+        parse_series_bundle_fetch_response(fb_collection.as_bytes().as_ref())?;
+    assert_eq!(collection.series_ids, expected_series_ids);
+    assert!(collection.versions.iter().all(|version| *version >= 1));
+    assert_eq!(collection.item_counts, vec![3; LARGE_SERIES_COUNT]);
+    assert_eq!(
+        collection.item_variants,
+        vec![
+            vec![
+                fb::media::MediaVariant::SeriesReference,
+                fb::media::MediaVariant::SeasonReference,
+                fb::media::MediaVariant::EpisodeReference,
+            ];
+            LARGE_SERIES_COUNT
+        ]
+    );
+    assert_unique_uuids(&collection.series_ids);
+
+    let fetch_path = replace_param(
+        v1::libraries::series_bundles::FETCH,
+        "{id}",
+        library_id.to_uuid().to_string(),
+    );
+    let requested_series_ids = vec![
+        series_ids[17].to_uuid(),
+        series_ids[3].to_uuid(),
+        series_ids[17].to_uuid(),
+        series_ids[65].to_uuid(),
+        series_ids[0].to_uuid(),
+        series_ids[LARGE_SERIES_COUNT - 1].to_uuid(),
+        series_ids[42].to_uuid(),
+        series_ids[9].to_uuid(),
+        series_ids[64].to_uuid(),
+    ];
+    let expected_requested_ids =
+        sorted_unique_uuids(requested_series_ids.clone());
+    let fetch = server
+        .post(&fetch_path)
+        .add_header("Authorization", bearer(&token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .content_type(FLATBUFFERS_MIME)
+        .bytes(Bytes::from(
+            batch_sync::serialize_series_bundle_fetch_request(
+                &requested_series_ids,
+            ),
+        ))
+        .await;
+    fetch.assert_status_ok();
+    assert_content_type_starts_with(&fetch, FLATBUFFERS_MIME)?;
+    let fetched =
+        parse_series_bundle_fetch_response(fetch.as_bytes().as_ref())?;
+    assert_eq!(fetched.series_ids, expected_requested_ids);
+    assert!(fetched.versions.iter().all(|version| *version >= 1));
+    assert_eq!(fetched.item_counts, vec![3; expected_requested_ids.len()]);
+    assert_eq!(
+        fetched.item_variants,
+        vec![
+            vec![
+                fb::media::MediaVariant::SeriesReference,
+                fb::media::MediaVariant::SeasonReference,
+                fb::media::MediaVariant::EpisodeReference,
+            ];
+            expected_requested_ids.len()
+        ]
+    );
+    assert_unique_uuids(&fetched.series_ids);
+
+    let missing_id = Uuid::now_v7();
+    let missing = server
+        .post(&fetch_path)
+        .add_header("Authorization", bearer(&token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .content_type(FLATBUFFERS_MIME)
+        .bytes(Bytes::from(
+            batch_sync::serialize_series_bundle_fetch_request(&[
+                series_ids[0].to_uuid(),
+                missing_id,
+            ]),
+        ))
+        .await;
+    missing.assert_status(StatusCode::NOT_FOUND);
+
+    let invalid = server
+        .post(&fetch_path)
+        .add_header("Authorization", bearer(&token))
+        .add_header("Accept", FLATBUFFERS_MIME)
+        .content_type(FLATBUFFERS_MIME)
+        .bytes(Bytes::from_static(b"not-a-flatbuffer"))
+        .await;
+    invalid.assert_status(StatusCode::BAD_REQUEST);
 
     Ok(())
 }

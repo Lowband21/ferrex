@@ -164,7 +164,10 @@ class MediaSearchRepository(
     }
 
     private val LibraryFreshness.isStaleForSearch: Boolean
-        get() = this is LibraryFreshness.StaleOffline || this is LibraryFreshness.CorruptRebuilding || this is LibraryFreshness.ErrorRetryable
+        get() = this is LibraryFreshness.StaleOffline ||
+            this is LibraryFreshness.SeriesCacheIncomplete ||
+            this is LibraryFreshness.CorruptRebuilding ||
+            this is LibraryFreshness.ErrorRetryable
 }
 
 fun SearchMediaId.toCachedLookupKey(): CachedMediaLookupKey = CachedMediaLookupKey(
