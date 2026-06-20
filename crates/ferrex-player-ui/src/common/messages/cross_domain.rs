@@ -566,10 +566,15 @@ fn handle_authentication_complete(state: &State) -> Task<DomainMessage> {
         library::messages::LibraryMessage::LoadLibraries,
     )));
 
-    // Check for active scans
+    // Check for active scans and load durable scan dashboard state.
     log::info!("[CrossDomain] Creating CheckActiveScans task");
     tasks.push(Task::done(DomainMessage::Library(
         library::messages::LibraryMessage::FetchActiveScans,
+    )));
+    tasks.push(Task::done(DomainMessage::Library(
+        library::messages::LibraryMessage::RefreshScanDashboard(
+            ferrex_player_library::scan_dashboard::ScanDashboardRefreshReason::InitialLoad,
+        ),
     )));
 
     // Additional initialization tasks can be added here
