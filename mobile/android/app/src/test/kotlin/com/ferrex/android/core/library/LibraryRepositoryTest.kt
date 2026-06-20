@@ -191,6 +191,7 @@ class LibraryRepositoryTest {
         assertEquals(sortedIds.size, incomplete.expectedBundles)
         assertEquals(secondChunk, incomplete.remainingBundleIds)
         assertEquals(RetryClassification.InvalidResponse, incomplete.classification)
+        assertEquals(secondChunk.size, incomplete.failedBundleCount)
         assertEquals(firstChunk.toSet(), fixture.cache.cachedSeriesBundleVersions(fixture.scope, library.id).keys)
 
         fixture.transport.requestedSeriesBundles.clear()
@@ -265,6 +266,40 @@ class LibraryRepositoryTest {
         assertEquals(mapOf(seriesId to 5L), fixture.cache.cachedSeriesBundleVersions(fixture.scope, library.id))
         assertEquals(listOf(seriesId), state.seriesAccessor?.seriesIds)
         assertTrue(state.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun seriesSyncKeepsCachedGridMountedWhileBackgroundRepairRuns() = runTest {
+        val fixture = Fixture(StandardTestDispatcher(testScheduler))
+        val library = seriesLibrary()
+        val seriesId = uuid(230).toString()
+        fixture.cache.writeSeriesBundle(fixture.scope, library.id, seriesId, 5L, seriesBundleFetchResponse(seriesId, version = 5L, itemCount = 1))
+        val releaseSync = CompletableDeferred<Unit>()
+        fixture.transport.seriesSync = { cached ->
+            fixture.capturedSeriesVersions = cached
+            releaseSync.await()
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = emptyList(),
+                    deletedSeriesIds = emptyList(),
+                    serverVersions = mapOf(seriesId to 5L),
+                ),
+            )
+        }
+
+        val syncing = async { fixture.repository.syncSeriesLibrary(fixture.scope, library) }
+        runCurrent()
+
+        val syncingState = fixture.repository.state.value
+        assertTrue(syncingState.freshness is LibraryFreshness.Syncing)
+        assertEquals(listOf(seriesId), syncingState.seriesAccessor?.seriesIds)
+        assertEquals(mapOf(seriesId to 5L), fixture.capturedSeriesVersions)
+
+        releaseSync.complete(Unit)
+        val finalState = syncing.await()
+
+        assertEquals(listOf(seriesId), finalState.seriesAccessor?.seriesIds)
+        assertTrue(finalState.freshness is LibraryFreshness.Fresh)
     }
 
     @Test

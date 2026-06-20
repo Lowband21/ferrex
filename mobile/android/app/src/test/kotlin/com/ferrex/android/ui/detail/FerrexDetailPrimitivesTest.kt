@@ -436,6 +436,7 @@ class FerrexDetailPrimitivesTest {
             role = DetailActionRole.Cache,
             targetId = "library",
         ),
+        DetailPageAction(DetailPageActionKind.ClearAllCache, "Clear all cache", DetailActionRole.DestructiveReset),
         DetailPageAction(DetailPageActionKind.ChangeServer, "Change server", DetailActionRole.Secondary),
         DetailPageAction(DetailPageActionKind.ResetConnection, "Reset connection", DetailActionRole.DestructiveReset),
         DetailPageAction(DetailPageActionKind.Diagnostics, "Diagnostics / Export diagnostics", DetailActionRole.Diagnostics),

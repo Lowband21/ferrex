@@ -105,6 +105,18 @@ data class CachedMediaResyncSummary(
     val bounded: Boolean,
 )
 
+data class LibraryCacheHealthCounts(
+    val cachedItems: Int? = null,
+    val expectedItems: Int? = null,
+    val pendingItems: Int? = null,
+    val failedItems: Int? = null,
+    val cachedSeriesBundles: Int? = null,
+    val expectedSeriesBundles: Int? = null,
+    val pendingSeriesBundles: Int? = null,
+    val failedSeriesBundles: Int? = null,
+    val quarantinedPayloads: Int? = null,
+)
+
 sealed interface LibraryFreshness {
     val label: String
 
@@ -138,6 +150,7 @@ sealed interface LibraryFreshness {
         val remainingBundleIds: List<String>,
         val itemCount: Int,
         val classification: RetryClassification,
+        val failedBundleCount: Int = 0,
     ) : LibraryFreshness {
         override val label: String = "series-cache-incomplete"
     }
@@ -163,6 +176,40 @@ enum class RetryClassification {
     NotFound,
     NotRetryable,
     InvalidResponse,
+}
+
+fun LibraryFreshness.cacheHealthCounts(): LibraryCacheHealthCounts = when (this) {
+    LibraryFreshness.Empty -> LibraryCacheHealthCounts(cachedItems = 0)
+    LibraryFreshness.Syncing -> LibraryCacheHealthCounts()
+    is LibraryFreshness.Fresh -> LibraryCacheHealthCounts(
+        cachedItems = itemCount,
+        expectedItems = itemCount,
+        pendingItems = 0,
+        failedItems = 0,
+    )
+    is LibraryFreshness.StaleOffline -> LibraryCacheHealthCounts(cachedItems = itemCount)
+    is LibraryFreshness.SeriesCacheIncomplete -> LibraryCacheHealthCounts(
+        cachedItems = itemCount,
+        cachedSeriesBundles = completedBundles,
+        expectedSeriesBundles = expectedBundles,
+        pendingSeriesBundles = remainingBundleIds.size,
+        failedSeriesBundles = failedBundleCount.coerceAtLeast(0),
+    )
+    is LibraryFreshness.CorruptRebuilding -> LibraryCacheHealthCounts(
+        failedItems = quarantinedFiles,
+        quarantinedPayloads = quarantinedFiles,
+    )
+    is LibraryFreshness.ErrorRetryable -> LibraryCacheHealthCounts(failedItems = 1)
+}
+
+fun LibraryFreshness.cacheHealthSummary(): String = when (this) {
+    LibraryFreshness.Empty -> "Cached 0 item(s); expected, pending, and failed counts are unknown until sync completes."
+    LibraryFreshness.Syncing -> "Syncing selected library cache; cached, expected, pending, and failed counts are updating."
+    is LibraryFreshness.Fresh -> "Cached $itemCount/$itemCount expected item(s); pending 0; failed 0."
+    is LibraryFreshness.StaleOffline -> "Cached $itemCount item(s); expected, pending, and failed counts are unknown while offline/stale."
+    is LibraryFreshness.SeriesCacheIncomplete -> "Cached $itemCount item(s); series bundles cached $completedBundles/$expectedBundles expected; pending ${remainingBundleIds.size}; failed ${failedBundleCount.coerceAtLeast(0)}."
+    is LibraryFreshness.CorruptRebuilding -> "Quarantined $quarantinedFiles corrupt payload(s); cached and expected counts may be partial until Retry rebuilds."
+    is LibraryFreshness.ErrorRetryable -> "Sync request failed (${classification.name}); cached, expected, and pending counts are unavailable."
 }
 
 sealed interface LibrarySyncFailure {

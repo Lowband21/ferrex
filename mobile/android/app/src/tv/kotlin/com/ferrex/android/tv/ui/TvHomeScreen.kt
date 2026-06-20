@@ -29,6 +29,7 @@ import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.LibraryFreshness
+import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryKind
 import com.ferrex.android.core.library.LibraryRepository
 import com.ferrex.android.core.library.LibraryRepositoryState
@@ -145,6 +146,16 @@ fun TvHomeScreen(
     val selectedSeriesLibrary = seriesLibraries.firstOrNull { it.library.id == selectedSeriesLibraryId }
     val selectedMovieInfo = selectedMovieLibrary?.library ?: movieLibraryInfos.firstOrNull { it.id == selectedMovieLibraryId }
     val selectedSeriesInfo = selectedSeriesLibrary?.library ?: seriesLibraryInfos.firstOrNull { it.id == selectedSeriesLibraryId }
+    val selectedMovieFreshness = repositoryState?.takeIf { it.selectedLibraryId == selectedMovieInfo?.id }?.freshness ?: LibraryFreshness.Empty
+    val selectedSeriesFreshness = repositoryState?.takeIf { it.selectedLibraryId == selectedSeriesInfo?.id }?.freshness ?: LibraryFreshness.Empty
+
+    LaunchedEffect(libraryRepository, scope.directoryName, childScreen, selectedSeriesInfo?.id) {
+        if ((childScreen as? TvHomeChild.Grid)?.tab == HomeLibraryTab.Series) {
+            selectedSeriesInfo?.let { library ->
+                libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
+            }
+        }
+    }
 
     LaunchedEffect(selectedTab, selectedMovieLibrary?.library?.id, selectedMovieLibrary?.accessor, movieSort, movieFilter, libraryIndexTransport, state.connectionHealth) {
         if (selectedTab != HomeLibraryTab.Movies || selectedMovieLibrary == null) {
@@ -255,6 +266,38 @@ fun TvHomeScreen(
     fun openDetail(route: MediaRouteArgs, returnTo: TvReturnTarget) {
         playbackNotice = null
         childScreen = TvHomeChild.Detail(route, returnTo)
+    }
+
+    suspend fun syncLibrary(library: LibraryInfo) {
+        when (library.kind) {
+            LibraryKind.Movies -> libraryRepository?.syncMovieLibrary(scope, library, repositoryState?.libraries.orEmpty())
+            LibraryKind.Series -> libraryRepository?.syncSeriesLibrary(scope, library, repositoryState?.libraries.orEmpty())
+            LibraryKind.Unknown -> Unit
+        }
+    }
+
+    fun syncSelectedLibrary(tab: HomeLibraryTab) {
+        coroutineScope.launch {
+            when (tab) {
+                HomeLibraryTab.Movies -> selectedMovieInfo?.let { syncLibrary(it) } ?: libraryRepository?.refreshLibraries(scope)
+                HomeLibraryTab.Series -> selectedSeriesInfo?.let { syncLibrary(it) } ?: libraryRepository?.refreshLibraries(scope)
+            }
+        }
+    }
+
+    fun retryAllLibrariesForTab(tab: HomeLibraryTab) {
+        coroutineScope.launch {
+            val plan = LibraryBrowseModels.retryAllTargetPlan(tab, repositoryState?.libraries.orEmpty())
+            if (plan.libraries.isEmpty()) {
+                val selectedLibraryId = when (tab) {
+                    HomeLibraryTab.Movies -> selectedMovieInfo?.id
+                    HomeLibraryTab.Series -> selectedSeriesInfo?.id
+                }
+                selectedLibraryId?.let { libraryRepository?.refreshLibraries(scope, it) }
+            } else {
+                plan.libraries.forEach { syncLibrary(it) }
+            }
+        }
     }
 
     fun retryDetailCacheSync(route: MediaRouteArgs?) {
@@ -425,19 +468,13 @@ fun TvHomeScreen(
             scope = scope,
             focusRestorer = gridFocusRestorer,
             onSelect = { openDetail(it.route, TvReturnTarget.Grid(screen.tab)) },
-            onSyncSelected = {
-                coroutineScope.launch {
-                    when (screen.tab) {
-                        HomeLibraryTab.Movies -> selectedMovieInfo?.let {
-                            libraryRepository?.syncMovieLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                        } ?: libraryRepository?.refreshLibraries(scope)
-                        HomeLibraryTab.Series -> selectedSeriesInfo?.let {
-                            libraryRepository?.syncSeriesLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                        } ?: libraryRepository?.refreshLibraries(scope)
-                    }
-                }
+            libraryFreshness = when (screen.tab) {
+                HomeLibraryTab.Movies -> selectedMovieFreshness
+                HomeLibraryTab.Series -> selectedSeriesFreshness
             },
-            onRetryAll = { coroutineScope.launch { libraryRepository?.refreshLibraries(scope, repositoryState?.selectedLibraryId) } },
+            retryAllLabel = LibraryBrowseModels.retryAllTargetPlan(screen.tab, repositoryState?.libraries.orEmpty()).label,
+            onSyncSelected = { syncSelectedLibrary(screen.tab) },
+            onRetryAll = { retryAllLibrariesForTab(screen.tab) },
             onClearSelected = {
                 val libraryId = when (screen.tab) {
                     HomeLibraryTab.Movies -> selectedMovieInfo?.id
@@ -454,7 +491,7 @@ fun TvHomeScreen(
         is TvHomeChild.Detail -> TvMediaDetailScreen(
             detailResult = detailResult,
             watchState = watchState,
-            libraryFreshness = repositoryState?.freshness ?: LibraryFreshness.Empty,
+            libraryFreshness = repositoryState?.takeIf { it.selectedLibraryId == screen.route.libraryId }?.freshness ?: LibraryFreshness.Empty,
             imageResolutions = imageResolutions,
             imageLoader = imageLoader,
             scope = scope,
@@ -464,6 +501,7 @@ fun TvHomeScreen(
             onRetryConnection = onRetryConnection,
             onRetryCacheSync = { retryDetailCacheSync(screen.route) },
             onClearSelectedCache = { screen.route.libraryId?.let { libraryRepository?.clearSelectedCache(scope, it) } },
+            onClearAllCache = { libraryRepository?.clearAllCache(scope) },
             onChangeServer = onChangeServer,
             onResetConnection = onResetConnection,
             onRetryWatch = { retryDetailWatch(detailResult) },
@@ -507,19 +545,8 @@ fun TvHomeScreen(
                 childScreen = TvHomeChild.Grid(it)
             },
             onOpenDetail = { openDetail(it, TvReturnTarget.Home) },
-            onRetryLibraries = { coroutineScope.launch { libraryRepository?.refreshLibraries(scope, repositoryState?.selectedLibraryId) } },
-            onSyncSelected = {
-                coroutineScope.launch {
-                    when (selectedTab) {
-                        HomeLibraryTab.Movies -> selectedMovieInfo?.let {
-                            libraryRepository?.syncMovieLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                        } ?: libraryRepository?.refreshLibraries(scope)
-                        HomeLibraryTab.Series -> selectedSeriesInfo?.let {
-                            libraryRepository?.syncSeriesLibrary(scope, it, repositoryState?.libraries.orEmpty())
-                        } ?: libraryRepository?.refreshLibraries(scope)
-                    }
-                }
-            },
+            onRetryLibraries = { syncSelectedLibrary(selectedTab) },
+            onSyncSelected = { syncSelectedLibrary(selectedTab) },
             onClearSelected = {
                 val libraryId = when (selectedTab) {
                     HomeLibraryTab.Movies -> selectedMovieInfo?.id

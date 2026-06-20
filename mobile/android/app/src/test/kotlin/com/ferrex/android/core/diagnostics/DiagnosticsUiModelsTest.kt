@@ -97,6 +97,14 @@ class DiagnosticsUiModelsTest {
                     cachedSeriesBundleFiles = 3,
                     quarantineFileCount = 0,
                     staleOfflineMarkerPresent = false,
+                    health = CacheHealthDiagnosticsSummary(
+                        state = "series-cache-incomplete",
+                        cachedItems = 172,
+                        cachedSeriesBundles = 36,
+                        expectedSeriesBundles = 400,
+                        pendingSeriesBundles = 364,
+                        failedSeriesBundles = 16,
+                    ),
                 ),
                 image = ImageCacheDiagnosticsSummary(
                     scopeDirectoryName = "scope-hash",
@@ -115,6 +123,9 @@ class DiagnosticsUiModelsTest {
         assertTrue(rendered.contains("App/build"))
         assertTrue(rendered.contains("https://ferrex.local"))
         assertTrue(rendered.contains("user hash user-hash"))
+        assertTrue(rendered.contains("series bundles cached 36/400 expected"))
+        assertTrue(rendered.contains("pending 364"))
+        assertTrue(rendered.contains("failed 16"))
         assertTrue(rendered.contains("2 crash file"))
         listOf(
             "access-secret",

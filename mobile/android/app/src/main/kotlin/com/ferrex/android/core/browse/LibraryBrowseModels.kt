@@ -6,7 +6,9 @@ import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
+import com.ferrex.android.core.library.LibraryKind
 import com.ferrex.android.core.library.MovieLibraryAccessor
+import com.ferrex.android.core.library.cacheHealthSummary
 import com.ferrex.android.core.library.RetryClassification
 import com.ferrex.android.core.library.SeriesLibraryAccessor
 import com.ferrex.android.core.library.toJavaUuidOrNull
@@ -99,6 +101,22 @@ data class LibraryRecoveryActionVisibility(
     val changeServer: Boolean,
     val resetConnection: Boolean,
 )
+
+data class LibraryRetryTargetPlan(
+    val label: String,
+    val libraries: List<LibraryInfo>,
+)
+
+object LibraryRecoveryActionKeys {
+    const val RetrySelected = "sync-selected"
+    const val RetryAll = "retry-all"
+    const val RetryCacheSync = "retry-cache-sync"
+    const val ClearSelectedCache = "clear-selected-cache"
+    const val ClearAllCache = "clear-all-cache"
+    const val ChangeServer = "change-server"
+    const val ResetConnection = "reset-connection"
+    const val Diagnostics = "diagnostics"
+}
 
 enum class HomeLibraryTab(val label: String) {
     Movies("Movies"),
@@ -260,34 +278,34 @@ object LibraryBrowseModels {
     fun libraryStatusCopy(freshness: LibraryFreshness): LibraryStatusCopy = when (freshness) {
         LibraryFreshness.Empty -> LibraryStatusCopy(
             title = "Library cache is empty",
-            detail = "Retry to sync libraries, or change server/reset connection if this server is wrong.",
+            detail = "${freshness.cacheHealthSummary()} Retry to sync libraries, or change server/reset connection if this server is wrong.",
         )
         LibraryFreshness.Syncing -> LibraryStatusCopy(
             title = "Syncing library cache",
-            detail = "Movies and series remain recoverable while cached payloads update.",
+            detail = "${freshness.cacheHealthSummary()} Movies and series remain usable while cached payloads update.",
         )
         is LibraryFreshness.Fresh -> LibraryStatusCopy(
             title = "Library cache is fresh",
-            detail = "${freshness.itemCount} cached item(s) available for this server and user.",
+            detail = "${freshness.cacheHealthSummary()} Available for this server and user.",
         )
         is LibraryFreshness.StaleOffline -> LibraryStatusCopy(
             title = "Stale/offline library cache",
-            detail = "Showing ${freshness.itemCount} cached item(s): ${freshness.message}",
+            detail = "${freshness.cacheHealthSummary()} Reason: ${freshness.message}",
             isStale = true,
         )
         is LibraryFreshness.SeriesCacheIncomplete -> LibraryStatusCopy(
-            title = "Series cache is still syncing",
-            detail = "Showing ${freshness.itemCount} cached item(s): ${freshness.message}",
+            title = "Series cache is incomplete",
+            detail = "${freshness.cacheHealthSummary()} Retry continues the selected series library repair without clearing app data. Reason: ${freshness.message}",
             isStale = true,
         )
         is LibraryFreshness.CorruptRebuilding -> LibraryStatusCopy(
-            title = "Cache needs rebuild",
-            detail = freshness.message,
+            title = "Corrupt cache needs rebuild",
+            detail = "${freshness.cacheHealthSummary()} ${freshness.message}",
             isRecoverableError = true,
         )
         is LibraryFreshness.ErrorRetryable -> LibraryStatusCopy(
             title = if (freshness.classification == RetryClassification.AuthRequired) "Library sync needs sign-in" else "Library sync failed",
-            detail = freshness.message,
+            detail = "${freshness.cacheHealthSummary()} ${freshness.message}",
             isRecoverableError = true,
         )
     }
@@ -298,6 +316,26 @@ object LibraryBrowseModels {
         changeServer = true,
         resetConnection = true,
     )
+
+    fun retryAllTargetPlan(tab: HomeLibraryTab, libraries: List<LibraryInfo>): LibraryRetryTargetPlan {
+        val kind = when (tab) {
+            HomeLibraryTab.Movies -> LibraryKind.Movies
+            HomeLibraryTab.Series -> LibraryKind.Series
+        }
+        val activeTypeLibraries = libraries.filter { it.kind == kind }
+        val label = "Retry all ${tab.label.lowercase()} libraries"
+        return LibraryRetryTargetPlan(label = label, libraries = activeTypeLibraries)
+    }
+
+    fun recoveryActionKeys(selectedLibraryId: String?, includeRetryAll: Boolean): List<String> = buildList {
+        add(LibraryRecoveryActionKeys.RetrySelected)
+        if (includeRetryAll) add(LibraryRecoveryActionKeys.RetryAll)
+        if (selectedLibraryId != null) add(LibraryRecoveryActionKeys.ClearSelectedCache)
+        add(LibraryRecoveryActionKeys.ClearAllCache)
+        add(LibraryRecoveryActionKeys.ChangeServer)
+        add(LibraryRecoveryActionKeys.ResetConnection)
+        add(LibraryRecoveryActionKeys.Diagnostics)
+    }
 
     fun unsupportedSeriesControlsCopy(): String =
         "Series sort and filters are disabled because the current index endpoints only support movie libraries. The full cached series grid remains available."

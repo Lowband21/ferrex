@@ -113,6 +113,7 @@ fun TvMediaDetailScreen(
     onRetryConnection: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
+    onClearAllCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
     onRetryWatch: () -> Unit,
@@ -225,6 +226,7 @@ fun TvMediaDetailScreen(
                         onBack = onBack,
                         onRetryCacheSync = onRetryCacheSync,
                         onClearSelectedCache = onClearSelectedCache,
+                        onClearAllCache = onClearAllCache,
                         onChangeServer = onChangeServer,
                         onResetConnection = onResetConnection,
                         onRetryWatch = onRetryWatch,
@@ -882,6 +884,7 @@ private fun DetailPageAction.dispatchDetailAction(
     onBack: () -> Unit,
     onRetryCacheSync: () -> Unit,
     onClearSelectedCache: () -> Unit,
+    onClearAllCache: () -> Unit,
     onChangeServer: () -> Unit,
     onResetConnection: () -> Unit,
     onRetryWatch: () -> Unit,
@@ -900,6 +903,7 @@ private fun DetailPageAction.dispatchDetailAction(
         DetailPageActionKind.Back -> onBack()
         DetailPageActionKind.RetryCache -> onRetryCacheSync()
         DetailPageActionKind.ClearSelectedCache -> onClearSelectedCache()
+        DetailPageActionKind.ClearAllCache -> onClearAllCache()
         DetailPageActionKind.ChangeServer -> onChangeServer()
         DetailPageActionKind.ResetConnection -> onResetConnection()
         DetailPageActionKind.Diagnostics -> onOpenDiagnostics()

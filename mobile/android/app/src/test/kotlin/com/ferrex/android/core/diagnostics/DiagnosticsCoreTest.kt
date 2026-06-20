@@ -10,7 +10,9 @@ import com.ferrex.android.core.image.ManifestImageStatus
 import com.ferrex.android.core.library.LibraryDiskCache
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryKind
+import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepositoryState
+import com.ferrex.android.core.library.RetryClassification
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.playback.PlaybackDiagnosticLog
 import org.junit.Assert.assertEquals
@@ -174,7 +176,20 @@ class DiagnosticsCoreTest {
         val cache = SafeCacheDiagnostics.summarize(
             library = libraryCache.diagnosticSnapshot(scope),
             image = imageCache.diagnosticSnapshot(scope),
-            state = LibraryRepositoryState(scope = scope, libraries = listOf(library)),
+            state = LibraryRepositoryState(
+                scope = scope,
+                libraries = listOf(library),
+                selectedLibraryId = library.id,
+                freshness = LibraryFreshness.SeriesCacheIncomplete(
+                    message = "network interrupted",
+                    completedBundles = 36,
+                    expectedBundles = 400,
+                    remainingBundleIds = (0 until 364).map { "series-$it" },
+                    itemCount = 172,
+                    classification = RetryClassification.Retryable,
+                    failedBundleCount = 16,
+                ),
+            ),
         )
         val combined = "$auth $server $cache"
 
@@ -191,6 +206,13 @@ class DiagnosticsCoreTest {
         assertFalse(combined.contains("session-secret"))
         assertFalse(combined.contains("local-device-secret"))
         assertEquals(1, cache.library?.cachedMovieBatchFiles)
+        assertEquals("series-cache-incomplete", cache.library?.health?.state)
+        assertEquals("${library.id}".sha256Short(), cache.library?.health?.selectedLibraryIdHash)
+        assertEquals(172, cache.library?.health?.cachedItems)
+        assertEquals(36, cache.library?.health?.cachedSeriesBundles)
+        assertEquals(400, cache.library?.health?.expectedSeriesBundles)
+        assertEquals(364, cache.library?.health?.pendingSeriesBundles)
+        assertEquals(16, cache.library?.health?.failedSeriesBundles)
         assertEquals(1, cache.image?.manifestEntryFiles)
         assertTrue((cache.image?.coilBlobBytes ?: 0L) > 0L)
     }

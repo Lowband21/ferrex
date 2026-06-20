@@ -63,6 +63,11 @@ fun PhoneSearchPanel(
     onOpenResult: (SearchDetailTarget) -> Unit,
     modifier: Modifier = Modifier,
     onOpenDiagnostics: (() -> Unit)? = null,
+    selectedLibraryId: String? = null,
+    onClearSelectedCache: (() -> Unit)? = null,
+    onClearAllCache: (() -> Unit)? = null,
+    onChangeServer: (() -> Unit)? = null,
+    onResetConnection: (() -> Unit)? = null,
     initialQuery: String = "",
     searchDebounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
     density: FerrexStageDensityFamily = FerrexStageDensityFamily.Standard,
@@ -184,6 +189,11 @@ fun PhoneSearchPanel(
                 },
                 resolveImage = { key -> resolutions[key] },
                 onOpenDiagnostics = onOpenDiagnostics,
+                selectedLibraryId = selectedLibraryId,
+                onClearSelectedCache = onClearSelectedCache,
+                onClearAllCache = onClearAllCache,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
             )
         }
     }
@@ -200,6 +210,11 @@ private fun SearchOutcomeContent(
     onClear: () -> Unit,
     resolveImage: (ImageRequestKey) -> ImageResolution?,
     onOpenDiagnostics: (() -> Unit)?,
+    selectedLibraryId: String?,
+    onClearSelectedCache: (() -> Unit)?,
+    onClearAllCache: (() -> Unit)?,
+    onChangeServer: (() -> Unit)?,
+    onResetConnection: (() -> Unit)?,
 ) {
     when (outcome) {
         MediaSearchOutcome.Idle -> SearchCopy("Enter at least two characters to search the current server.", density)
@@ -209,7 +224,17 @@ private fun SearchOutcomeContent(
                 body = "No cached media matched “${outcome.query}”. Try a shorter title or alternate spelling, then retry sync if the item should be cached.",
                 density = density,
             )
-            SearchActionRow(onRetry = onRetry, onClear = onClear, density = density)
+            SearchActionRow(
+                onRetry = onRetry,
+                onClear = onClear,
+                density = density,
+                selectedLibraryId = selectedLibraryId,
+                onClearSelectedCache = onClearSelectedCache,
+                onClearAllCache = onClearAllCache,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
+                onOpenDiagnostics = onOpenDiagnostics,
+            )
         }
         is MediaSearchOutcome.Failure -> {
             val title = when (outcome.kind) {
@@ -225,6 +250,11 @@ private fun SearchOutcomeContent(
                 retryEnabled = outcome.retryable,
                 onOpenDiagnostics = onOpenDiagnostics,
                 density = density,
+                selectedLibraryId = selectedLibraryId,
+                onClearSelectedCache = onClearSelectedCache,
+                onClearAllCache = onClearAllCache,
+                onChangeServer = onChangeServer,
+                onResetConnection = onResetConnection,
             )
         }
         is MediaSearchOutcome.Results -> {
@@ -272,6 +302,11 @@ private fun SearchOutcomeContent(
                             onClear = onClear,
                             onOpenDiagnostics = onOpenDiagnostics,
                             density = density,
+                            selectedLibraryId = selectedLibraryId,
+                            onClearSelectedCache = onClearSelectedCache,
+                            onClearAllCache = onClearAllCache,
+                            onChangeServer = onChangeServer,
+                            onResetConnection = onResetConnection,
                         )
                     }
                 }
@@ -377,6 +412,11 @@ private fun CacheMissRow(
     onClear: () -> Unit,
     onOpenDiagnostics: (() -> Unit)?,
     density: FerrexStageDensityFamily,
+    selectedLibraryId: String?,
+    onClearSelectedCache: (() -> Unit)?,
+    onClearAllCache: (() -> Unit)?,
+    onChangeServer: (() -> Unit)?,
+    onResetConnection: (() -> Unit)?,
 ) {
     SearchStatusCard(
         title = row.title,
@@ -398,6 +438,11 @@ private fun CacheMissRow(
         retryEnabled = row.retryable,
         onOpenDiagnostics = onOpenDiagnostics,
         density = density,
+        selectedLibraryId = selectedLibraryId,
+        onClearSelectedCache = onClearSelectedCache,
+        onClearAllCache = onClearAllCache,
+        onChangeServer = onChangeServer,
+        onResetConnection = onResetConnection,
     )
 }
 
@@ -408,69 +453,78 @@ private fun SearchActionRow(
     retryEnabled: Boolean = true,
     onOpenDiagnostics: (() -> Unit)? = null,
     density: FerrexStageDensityFamily,
+    selectedLibraryId: String? = null,
+    onClearSelectedCache: (() -> Unit)? = null,
+    onClearAllCache: (() -> Unit)? = null,
+    onChangeServer: (() -> Unit)? = null,
+    onResetConnection: (() -> Unit)? = null,
 ) {
-    val modifier = Modifier
-        .fillMaxWidth()
-        .testTag(FerrexQaTags.Phone.SearchActions)
-    if (density == FerrexStageDensityFamily.Compact) {
-        Column(
-            modifier = modifier,
-            verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-        ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FerrexQaTags.Phone.SearchActions),
+        verticalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
+    ) {
+        FerrexActionButton(
+            label = "Retry sync / search",
+            role = FerrexActionRole.Retry,
+            enabled = retryEnabled,
+            onClick = onRetry,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = FerrexQaTags.Phone.searchAction("retry"),
+        )
+        FerrexActionButton(
+            label = "Clear search",
+            role = FerrexActionRole.Secondary,
+            onClick = onClear,
+            modifier = Modifier.fillMaxWidth(),
+            testTag = FerrexQaTags.Phone.searchAction("clear-results"),
+        )
+        onClearSelectedCache?.let {
             FerrexActionButton(
-                label = "Retry sync / search",
-                role = FerrexActionRole.Retry,
-                enabled = retryEnabled,
-                onClick = onRetry,
+                label = "Clear selected cache",
+                role = FerrexActionRole.Cache,
+                enabled = selectedLibraryId != null,
+                onClick = it,
                 modifier = Modifier.fillMaxWidth(),
-                testTag = FerrexQaTags.Phone.searchAction("retry"),
+                testTag = FerrexQaTags.Phone.searchAction("clear-selected-cache"),
             )
-            FerrexActionButton(
-                label = "Clear search",
-                role = FerrexActionRole.Secondary,
-                onClick = onClear,
-                modifier = Modifier.fillMaxWidth(),
-                testTag = FerrexQaTags.Phone.searchAction("clear-results"),
-            )
-            onOpenDiagnostics?.let {
-                FerrexActionButton(
-                    label = "Diagnostics",
-                    role = FerrexActionRole.Secondary,
-                    onClick = it,
-                    modifier = Modifier.fillMaxWidth(),
-                    testTag = FerrexQaTags.Phone.searchAction("diagnostics"),
-                )
-            }
         }
-    } else {
-        Row(
-            modifier = modifier,
-            horizontalArrangement = Arrangement.spacedBy(FerrexDesignTokens.Space.Sm),
-        ) {
+        onClearAllCache?.let {
             FerrexActionButton(
-                label = "Retry sync / search",
-                role = FerrexActionRole.Retry,
-                enabled = retryEnabled,
-                onClick = onRetry,
-                modifier = Modifier.weight(1f),
-                testTag = FerrexQaTags.Phone.searchAction("retry"),
+                label = "Clear all cache",
+                role = FerrexActionRole.DestructiveReset,
+                onClick = it,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.searchAction("clear-all-cache"),
             )
+        }
+        onChangeServer?.let {
             FerrexActionButton(
-                label = "Clear search",
+                label = "Change server",
                 role = FerrexActionRole.Secondary,
-                onClick = onClear,
-                modifier = Modifier.weight(1f),
-                testTag = FerrexQaTags.Phone.searchAction("clear-results"),
+                onClick = it,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.searchAction("change-server"),
             )
-            onOpenDiagnostics?.let {
-                FerrexActionButton(
-                    label = "Diagnostics",
-                    role = FerrexActionRole.Secondary,
-                    onClick = it,
-                    modifier = Modifier.weight(1f),
-                    testTag = FerrexQaTags.Phone.searchAction("diagnostics"),
-                )
-            }
+        }
+        onResetConnection?.let {
+            FerrexActionButton(
+                label = "Reset connection",
+                role = FerrexActionRole.DestructiveReset,
+                onClick = it,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.searchAction("reset-connection"),
+            )
+        }
+        onOpenDiagnostics?.let {
+            FerrexActionButton(
+                label = "Diagnostics",
+                role = FerrexActionRole.Secondary,
+                onClick = it,
+                modifier = Modifier.fillMaxWidth(),
+                testTag = FerrexQaTags.Phone.searchAction("diagnostics"),
+            )
         }
     }
 }

@@ -101,6 +101,22 @@ data class CacheDiagnosticsSummary(
 )
 
 @Serializable
+data class CacheHealthDiagnosticsSummary(
+    val state: String,
+    val selectedLibraryIdHash: String? = null,
+    val cachedItems: Int? = null,
+    val expectedItems: Int? = null,
+    val pendingItems: Int? = null,
+    val failedItems: Int? = null,
+    val cachedSeriesBundles: Int? = null,
+    val expectedSeriesBundles: Int? = null,
+    val pendingSeriesBundles: Int? = null,
+    val failedSeriesBundles: Int? = null,
+    val quarantinedPayloads: Int? = null,
+    val retryClassification: String? = null,
+)
+
+@Serializable
 data class LibraryCacheDiagnosticsSummary(
     val scopeDirectoryName: String,
     val relativeScopePath: String,
@@ -115,6 +131,7 @@ data class LibraryCacheDiagnosticsSummary(
     val cachedEpisodeCount: Int? = null,
     val quarantineFileCount: Int,
     val staleOfflineMarkerPresent: Boolean,
+    val health: CacheHealthDiagnosticsSummary? = null,
     val selectedClearPreservesOtherLibraries: Boolean = true,
     val allClearScopedToServerUser: Boolean = true,
 )

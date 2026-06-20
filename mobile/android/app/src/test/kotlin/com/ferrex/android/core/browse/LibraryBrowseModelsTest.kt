@@ -82,9 +82,49 @@ class LibraryBrowseModelsTest {
 
         assertTrue(stale.isStale)
         assertTrue(stale.title.contains("Stale/offline"))
+        assertTrue(stale.detail.contains("Cached 8 item(s)"))
+        assertTrue(stale.detail.contains("expected, pending, and failed counts are unknown"))
         assertTrue(stale.detail.contains("network down"))
         assertTrue(retryable.isRecoverableError)
         assertTrue(retryable.title.contains("sign-in"))
+        assertTrue(retryable.detail.contains("failed"))
+    }
+
+    @Test
+    fun incompleteSeriesStatusReportsExpectedCachedPendingAndFailedCounts() {
+        val copy = LibraryBrowseModels.libraryStatusCopy(
+            LibraryFreshness.SeriesCacheIncomplete(
+                message = "network interrupted",
+                completedBundles = 36,
+                expectedBundles = 400,
+                remainingBundleIds = (0 until 364).map { "series-$it" },
+                itemCount = 172,
+                classification = RetryClassification.Retryable,
+                failedBundleCount = 16,
+            ),
+        )
+
+        assertTrue(copy.isStale)
+        assertTrue(copy.title.contains("incomplete"))
+        assertTrue(copy.detail.contains("Cached 172 item(s)"))
+        assertTrue(copy.detail.contains("series bundles cached 36/400 expected"))
+        assertTrue(copy.detail.contains("pending 364"))
+        assertTrue(copy.detail.contains("failed 16"))
+        assertTrue(copy.detail.contains("selected series library repair"))
+    }
+
+    @Test
+    fun retryAllTargetsStayScopedToActiveMediaType() {
+        val movie = movieLibrary(id = uuid(301).toString())
+        val firstSeries = seriesLibrary(id = uuid(302).toString())
+        val secondSeries = seriesLibrary(id = uuid(303).toString())
+
+        val seriesPlan = LibraryBrowseModels.retryAllTargetPlan(HomeLibraryTab.Series, listOf(movie, firstSeries, secondSeries))
+        val moviePlan = LibraryBrowseModels.retryAllTargetPlan(HomeLibraryTab.Movies, listOf(movie, firstSeries))
+
+        assertEquals("Retry all series libraries", seriesPlan.label)
+        assertEquals(listOf(firstSeries, secondSeries), seriesPlan.libraries)
+        assertEquals(listOf(movie), moviePlan.libraries)
     }
 
     @Test

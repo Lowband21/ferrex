@@ -1,5 +1,7 @@
 package com.ferrex.android.core.tvfocus
 
+import com.ferrex.android.core.browse.LibraryBrowseModels
+import com.ferrex.android.core.browse.LibraryRecoveryActionKeys
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -118,6 +120,35 @@ class TvFocusRestoreModelTest {
         assertEquals(
             TvGridFocusPolicy.SURFACE_CARDS,
             TvGridFocusPolicy.preferredSurface(emptyState.lastTarget(TvGridFocusPolicy.SCREEN_GRID), hasCards = true),
+        )
+    }
+
+    @Test
+    fun tvGridRecoveryActionsKeepNoWipeExitsDpadReachable() {
+        val actionKeys = LibraryBrowseModels.recoveryActionKeys(selectedLibraryId = "series-library", includeRetryAll = true)
+        val state = TvFocusRestoreState()
+            .record(TvFocusKey(TvGridFocusPolicy.SCREEN_GRID, TvGridFocusPolicy.SURFACE_STATUS_PANEL, LibraryRecoveryActionKeys.Diagnostics))
+
+        assertEquals(
+            listOf(
+                LibraryRecoveryActionKeys.RetrySelected,
+                LibraryRecoveryActionKeys.RetryAll,
+                LibraryRecoveryActionKeys.ClearSelectedCache,
+                LibraryRecoveryActionKeys.ClearAllCache,
+                LibraryRecoveryActionKeys.ChangeServer,
+                LibraryRecoveryActionKeys.ResetConnection,
+                LibraryRecoveryActionKeys.Diagnostics,
+            ),
+            actionKeys,
+        )
+        assertEquals(
+            LibraryRecoveryActionKeys.Diagnostics,
+            state.restore(
+                screen = TvGridFocusPolicy.SCREEN_GRID,
+                surface = TvGridFocusPolicy.SURFACE_STATUS_PANEL,
+                availableItems = actionKeys,
+                fallbackItem = LibraryRecoveryActionKeys.RetrySelected,
+            ).target.item,
         )
     }
 

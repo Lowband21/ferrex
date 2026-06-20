@@ -31,10 +31,12 @@ import com.ferrex.android.core.browse.HomeLibraryTab
 import com.ferrex.android.core.browse.IndexedMovieCards
 import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.LibraryMediaCard
+import com.ferrex.android.core.browse.LibraryRecoveryActionKeys
 import com.ferrex.android.core.browse.MovieFilterMode
 import com.ferrex.android.core.browse.MovieSortMode
 import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
+import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.ServerCacheScope
 import com.ferrex.android.core.mediaart.MediaRailIdentityResolver
@@ -76,6 +78,8 @@ internal fun TvLibraryGridScreen(
     selectedSeriesCards: List<LibraryMediaCard>,
     fullMovieCount: Int,
     fullSeriesCount: Int,
+    libraryFreshness: LibraryFreshness,
+    retryAllLabel: String,
     imageResolutions: Map<ImageRequestKey, ImageResolution>,
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
@@ -148,6 +152,7 @@ internal fun TvLibraryGridScreen(
                         libraries = libraries,
                         cards = cards,
                         fullCachedCount = fullCachedCount,
+                        libraryFreshness = libraryFreshness,
                         movieSort = movieSort,
                         movieFilter = movieFilter,
                         onOpenPanel = { openPanel = it },
@@ -162,6 +167,7 @@ internal fun TvLibraryGridScreen(
                         selectedId = selectedId,
                         focusRestorer = focusRestorer,
                         autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_EMPTY_ACTIONS,
+                        retryAllLabel = retryAllLabel,
                         onSyncSelected = onSyncSelected,
                         onRetryAll = onRetryAll,
                         onClearSelected = onClearSelected,
@@ -199,6 +205,8 @@ internal fun TvLibraryGridScreen(
                     selectedLibrary = selectedLibrary,
                     cards = cards,
                     fullCachedCount = fullCachedCount,
+                    libraryFreshness = libraryFreshness,
+                    retryAllLabel = retryAllLabel,
                     movieSort = movieSort,
                     movieFilter = movieFilter,
                     movieIndexState = movieIndexState,
@@ -236,6 +244,7 @@ private fun tvGridTopActions(
     libraries: List<LibraryInfo>,
     cards: List<LibraryMediaCard>,
     fullCachedCount: Int,
+    libraryFreshness: LibraryFreshness,
     movieSort: MovieSortMode,
     movieFilter: MovieFilterMode,
     onOpenPanel: (TvGridControlPanel) -> Unit,
@@ -270,7 +279,7 @@ private fun tvGridTopActions(
     add(
         TvButtonAction(
             key = "status-more",
-            label = "${cards.size}/$fullCachedCount visible • Status / More",
+            label = "${cards.size}/$fullCachedCount visible • ${LibraryBrowseModels.libraryStatusCopy(libraryFreshness).title}",
             role = if (cards.isEmpty()) TvActionRole.Retry else TvActionRole.Cache,
             onSelect = { onOpenPanel(TvGridControlPanel.StatusMore) },
         ),
@@ -283,6 +292,7 @@ private fun TvGridEmptyState(
     selectedId: String?,
     focusRestorer: TvFocusRestorer,
     autoFocus: Boolean,
+    retryAllLabel: String,
     onSyncSelected: () -> Unit,
     onRetryAll: () -> Unit,
     onClearSelected: () -> Unit,
@@ -298,6 +308,7 @@ private fun TvGridEmptyState(
         supportingText = "Retry cached payloads; recovery never requires clearing app data.",
         actions = gridRecoveryActions(
             selectedId = selectedId,
+            retryAllLabel = retryAllLabel,
             onSyncSelected = onSyncSelected,
             onRetryAll = onRetryAll,
             onClearSelected = onClearSelected,
@@ -323,6 +334,8 @@ private fun TvGridControlPanelOverlay(
     selectedLibrary: LibraryInfo?,
     cards: List<LibraryMediaCard>,
     fullCachedCount: Int,
+    libraryFreshness: LibraryFreshness,
+    retryAllLabel: String,
     movieSort: MovieSortMode,
     movieFilter: MovieFilterMode,
     movieIndexState: MovieIndexUiState,
@@ -395,12 +408,14 @@ private fun TvGridControlPanelOverlay(
                 selectedLibrary = selectedLibrary,
                 visibleCount = cards.size,
                 fullCachedCount = fullCachedCount,
+                libraryFreshness = libraryFreshness,
                 movieIndexState = movieIndexState,
                 invalidIndexCount = invalidIndexCount,
                 appendedMissingCount = appendedMissingCount,
             )
             actions = gridRecoveryActions(
                 selectedId = selectedId,
+                retryAllLabel = retryAllLabel,
                 onSyncSelected = onSyncSelected,
                 onRetryAll = onRetryAll,
                 onClearSelected = onClearSelected,
@@ -470,6 +485,7 @@ private fun movieControlActions(
 
 private fun gridRecoveryActions(
     selectedId: String?,
+    retryAllLabel: String,
     onSyncSelected: () -> Unit,
     onRetryAll: () -> Unit,
     onClearSelected: () -> Unit,
@@ -478,19 +494,25 @@ private fun gridRecoveryActions(
     onResetConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ): List<TvActionPanelAction> = listOf(
-    TvActionPanelAction("sync-selected", "Retry selected library", TvActionRole.Retry, onSelect = onSyncSelected),
-    TvActionPanelAction("retry-all", "Retry all libraries", TvActionRole.Retry, onSelect = onRetryAll),
     TvActionPanelAction(
-        key = "clear-selected-cache",
+        LibraryRecoveryActionKeys.RetrySelected,
+        "Retry selected library",
+        TvActionRole.Retry,
+        enabled = selectedId != null,
+        onSelect = onSyncSelected,
+    ),
+    TvActionPanelAction(LibraryRecoveryActionKeys.RetryAll, retryAllLabel, TvActionRole.Retry, onSelect = onRetryAll),
+    TvActionPanelAction(
+        key = LibraryRecoveryActionKeys.ClearSelectedCache,
         label = "Clear selected cache",
         role = TvActionRole.Cache,
         enabled = selectedId != null,
         onSelect = onClearSelected,
     ),
-    TvActionPanelAction("clear-all-cache", "Clear all cache", TvActionRole.Destructive, onSelect = onClearAll),
-    TvActionPanelAction("change-server", "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
-    TvActionPanelAction("reset-connection", "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
-    TvActionPanelAction("diagnostics", "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
+    TvActionPanelAction(LibraryRecoveryActionKeys.ClearAllCache, "Clear all cache", TvActionRole.Destructive, onSelect = onClearAll),
+    TvActionPanelAction(LibraryRecoveryActionKeys.ChangeServer, "Change server", TvActionRole.SettingsExit, onSelect = onChangeServer),
+    TvActionPanelAction(LibraryRecoveryActionKeys.ResetConnection, "Reset connection", TvActionRole.Destructive, onSelect = onResetConnection),
+    TvActionPanelAction(LibraryRecoveryActionKeys.Diagnostics, "Diagnostics / Export diagnostics", TvActionRole.SettingsExit, onSelect = onOpenDiagnostics),
 )
 
 private fun gridStatusSupportingText(
@@ -498,11 +520,14 @@ private fun gridStatusSupportingText(
     selectedLibrary: LibraryInfo?,
     visibleCount: Int,
     fullCachedCount: Int,
+    libraryFreshness: LibraryFreshness,
     movieIndexState: MovieIndexUiState,
     invalidIndexCount: Int,
     appendedMissingCount: Int,
 ): String = buildList {
+    val cacheStatus = LibraryBrowseModels.libraryStatusCopy(libraryFreshness)
     add("${selectedLibrary?.name ?: "Selected ${tab.label.lowercase()} library"}: $visibleCount visible • $fullCachedCount cached • uncapped grid.")
+    add("${cacheStatus.title}: ${cacheStatus.detail}")
     if (tab == HomeLibraryTab.Movies) {
         add(movieIndexStatusCopy(movieIndexState, fullCachedCount))
         movieIndexReconciliationCopy(invalidIndexCount, appendedMissingCount)?.let(::add)

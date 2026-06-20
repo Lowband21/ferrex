@@ -169,20 +169,39 @@ class LibraryRepository(
         library: LibraryInfo,
         knownLibraries: List<LibraryInfo>,
     ): LibraryRepositoryState = withContext(ioDispatcher) {
+        val cachedVersions = cache.cachedMovieBatchVersions(scope, library.id)
+        val initialLoad = loadCachedMovieAccessor(scope, library.id)
+        val existingAccessor = when (initialLoad) {
+            is CacheLoad.Success -> initialLoad.accessor
+            is CacheLoad.Corrupt -> initialLoad.accessor
+            CacheLoad.Empty -> null
+        }
         publish(
             _state.value.copy(
                 scope = scope,
                 libraries = knownLibraries.ifEmpty { listOf(library) },
                 selectedLibraryId = library.id,
-                movieAccessor = null,
+                movieAccessor = existingAccessor,
                 seriesAccessor = null,
                 freshness = LibraryFreshness.Syncing,
             ),
         )
 
-        val cachedVersions = cache.cachedMovieBatchVersions(scope, library.id)
         when (val sync = transport.syncMovieBatches(library.id, cachedVersions)) {
-            is LibrarySyncResult.Failure -> return@withContext publish(cachedMovieState(scope, library, sync.error, knownLibraries))
+            is LibrarySyncResult.Failure -> return@withContext publish(
+                if (initialLoad is CacheLoad.Corrupt) {
+                    _state.value.copy(
+                        scope = scope,
+                        libraries = knownLibraries.ifEmpty { listOf(library) },
+                        selectedLibraryId = library.id,
+                        movieAccessor = initialLoad.accessor,
+                        seriesAccessor = null,
+                        freshness = LibraryFreshness.CorruptRebuilding(initialLoad.message, initialLoad.quarantinedFiles),
+                    )
+                } else {
+                    cachedMovieState(scope, library, sync.error, knownLibraries)
+                },
+            )
             is LibrarySyncResult.Success -> {
                 cache.deleteMovieBatches(scope, library.id, sync.value.deletedBatchIds)
                 for (batchId in sync.value.staleBatchIds.distinct().sorted()) {
@@ -220,20 +239,39 @@ class LibraryRepository(
         library: LibraryInfo,
         knownLibraries: List<LibraryInfo>,
     ): LibraryRepositoryState = withContext(ioDispatcher) {
+        val cachedVersions = cache.cachedSeriesBundleVersions(scope, library.id)
+        val initialLoad = loadCachedSeriesAccessor(scope, library.id)
+        val existingAccessor = when (initialLoad) {
+            is CacheLoad.Success -> initialLoad.accessor
+            is CacheLoad.Corrupt -> initialLoad.accessor
+            CacheLoad.Empty -> null
+        }
         publish(
             _state.value.copy(
                 scope = scope,
                 libraries = knownLibraries.ifEmpty { listOf(library) },
                 selectedLibraryId = library.id,
                 movieAccessor = null,
-                seriesAccessor = null,
+                seriesAccessor = existingAccessor,
                 freshness = LibraryFreshness.Syncing,
             ),
         )
 
-        val cachedVersions = cache.cachedSeriesBundleVersions(scope, library.id)
         when (val sync = transport.syncSeriesBundles(library.id, cachedVersions)) {
-            is LibrarySyncResult.Failure -> return@withContext publish(cachedSeriesState(scope, library, sync.error, knownLibraries))
+            is LibrarySyncResult.Failure -> return@withContext publish(
+                if (initialLoad is CacheLoad.Corrupt) {
+                    _state.value.copy(
+                        scope = scope,
+                        libraries = knownLibraries.ifEmpty { listOf(library) },
+                        selectedLibraryId = library.id,
+                        movieAccessor = null,
+                        seriesAccessor = initialLoad.accessor,
+                        freshness = LibraryFreshness.CorruptRebuilding(initialLoad.message, initialLoad.quarantinedFiles),
+                    )
+                } else {
+                    cachedSeriesState(scope, library, sync.error, knownLibraries)
+                },
+            )
             is LibrarySyncResult.Success -> {
                 val plan = sync.value
                 val staleIds = plan.staleSeriesIds.distinct().sorted()
@@ -280,6 +318,7 @@ class LibraryRepository(
                                 remainingIds = remainingIds,
                                 message = fetch.error.message,
                                 classification = fetch.error.classification,
+                                failedBundleCount = chunk.size,
                             ),
                         )
                         is LibrarySyncResult.Success -> {
@@ -295,6 +334,7 @@ class LibraryRepository(
                                         remainingIds = remainingIds,
                                         message = failure.message,
                                         classification = failure.classification,
+                                        failedBundleCount = chunk.size,
                                     ),
                                 )
                             }
@@ -490,6 +530,7 @@ class LibraryRepository(
                         remainingIds = missing,
                         message = load.message,
                         classification = RetryClassification.Retryable,
+                        failedBundleCount = load.quarantinedFiles,
                     )
                 } else {
                     _state.value.copy(
@@ -513,6 +554,7 @@ class LibraryRepository(
         remainingIds: List<String>,
         message: String,
         classification: RetryClassification,
+        failedBundleCount: Int = 0,
     ): LibraryRepositoryState {
         val load = loadCachedSeriesAccessor(scope, library.id)
         val accessor = when (load) {
@@ -522,11 +564,6 @@ class LibraryRepository(
         }
         val remaining = remainingIds.distinct().sorted()
         val completed = (expectedIds.size - remaining.size).coerceIn(0, expectedIds.size)
-        val progressMessage = if (expectedIds.isEmpty()) {
-            message
-        } else {
-            "$message Cached $completed of ${expectedIds.size} expected series bundle(s); retry will request ${remaining.size} remaining bundle(s)."
-        }
         return _state.value.copy(
             scope = scope,
             libraries = knownLibraries.ifEmpty { listOf(library) },
@@ -534,12 +571,13 @@ class LibraryRepository(
             movieAccessor = null,
             seriesAccessor = accessor,
             freshness = LibraryFreshness.SeriesCacheIncomplete(
-                message = progressMessage,
+                message = message,
                 completedBundles = completed,
                 expectedBundles = expectedIds.size,
                 remainingBundleIds = remaining,
                 itemCount = accessor?.itemCount ?: 0,
                 classification = classification,
+                failedBundleCount = failedBundleCount.coerceIn(0, remaining.size),
             ),
         )
     }

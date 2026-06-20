@@ -4,7 +4,9 @@ import com.ferrex.android.core.api.ServerConfig
 import com.ferrex.android.core.auth.AuthStorage
 import com.ferrex.android.core.image.ImageDiskCacheDiagnostics
 import com.ferrex.android.core.library.LibraryDiskCacheDiagnostics
+import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryRepositoryState
+import com.ferrex.android.core.library.cacheHealthCounts
 import com.ferrex.android.core.library.ServerCacheScope
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -91,6 +93,7 @@ object SafeCacheDiagnostics {
                 ?: state?.seriesAccessor?.episodeCount,
             quarantineFileCount = quarantineFileCount,
             staleOfflineMarkerPresent = staleOfflineMarkerPresent,
+            health = state?.freshness?.toCacheHealthDiagnostics(state.selectedLibraryId),
         )
 
     private fun ImageDiskCacheDiagnostics.toSummary(): ImageCacheDiagnosticsSummary = ImageCacheDiagnosticsSummary(
@@ -102,6 +105,28 @@ object SafeCacheDiagnostics {
         quarantineFileCount = quarantineFileCount,
         staleOfflineMarkerPresent = staleOfflineMarkerPresent,
     )
+
+    private fun LibraryFreshness.toCacheHealthDiagnostics(selectedLibraryId: String?): CacheHealthDiagnosticsSummary {
+        val counts = cacheHealthCounts()
+        return CacheHealthDiagnosticsSummary(
+            state = label,
+            selectedLibraryIdHash = selectedLibraryId?.sha256Short(),
+            cachedItems = counts.cachedItems,
+            expectedItems = counts.expectedItems,
+            pendingItems = counts.pendingItems,
+            failedItems = counts.failedItems,
+            cachedSeriesBundles = counts.cachedSeriesBundles,
+            expectedSeriesBundles = counts.expectedSeriesBundles,
+            pendingSeriesBundles = counts.pendingSeriesBundles,
+            failedSeriesBundles = counts.failedSeriesBundles,
+            quarantinedPayloads = counts.quarantinedPayloads,
+            retryClassification = when (this) {
+                is LibraryFreshness.SeriesCacheIncomplete -> classification.name
+                is LibraryFreshness.ErrorRetryable -> classification.name
+                else -> null
+            },
+        )
+    }
 }
 
 internal fun String.sha256Short(length: Int = 16): String = sha256Hex().take(length.coerceAtLeast(1))

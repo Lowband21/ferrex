@@ -150,7 +150,14 @@ object DiagnosticsSummaryPresenter {
             add(
                 DiagnosticsSummaryRow(
                     label = "Library cache",
-                    value = "scope ${library.scopeDirectoryName} • ${library.approximateBytes.formatBytes()} • ${library.cachedMovieBatchFiles} movie batch file(s) • ${library.cachedSeriesBundleFiles} series bundle file(s) • ${library.quarantineFileCount} quarantine file(s)",
+                    value = buildList {
+                        add("scope ${library.scopeDirectoryName}")
+                        add(library.approximateBytes.formatBytes())
+                        add("${library.cachedMovieBatchFiles} movie batch file(s)")
+                        add("${library.cachedSeriesBundleFiles} series bundle file(s)")
+                        add("${library.quarantineFileCount} quarantine file(s)")
+                        library.health?.let { add(it.summaryCopy()) }
+                    }.joinToString(" • "),
                 ),
             )
         }
@@ -177,6 +184,21 @@ object DiagnosticsSummaryPresenter {
     }
 
     private fun Boolean.yesNo(): String = if (this) "yes" else "no"
+
+    private fun CacheHealthDiagnosticsSummary.summaryCopy(): String = buildList {
+        add("state $state")
+        cachedItems?.let { add("cached $it item(s)") }
+        expectedItems?.let { add("expected $it item(s)") }
+        pendingItems?.let { add("pending $it item(s)") }
+        failedItems?.let { add("failed $it item(s)") }
+        if (cachedSeriesBundles != null || expectedSeriesBundles != null || pendingSeriesBundles != null || failedSeriesBundles != null) {
+            add(
+                "series bundles cached ${cachedSeriesBundles ?: "unknown"}/${expectedSeriesBundles ?: "unknown"} expected; pending ${pendingSeriesBundles ?: "unknown"}; failed ${failedSeriesBundles ?: "unknown"}",
+            )
+        }
+        quarantinedPayloads?.let { add("quarantined $it payload(s)") }
+        retryClassification?.let { add("retry $it") }
+    }.joinToString(" • ")
 
     private fun Long.formatBytes(): String = when {
         this >= 1024L * 1024L -> String.format(Locale.US, "%.1f MiB", this / (1024.0 * 1024.0))
