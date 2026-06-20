@@ -52,7 +52,9 @@ use crate::{
             media_events_sse_handler, pause_scan_handler, resume_scan_handler,
             scan_config_handler, scan_events_handler, scan_history_handler,
             scan_metrics_handler, scan_progress_sse_handler,
-            start_scan_handler,
+            scan_recovery_handler, scan_run_detail_handler,
+            scan_run_events_handler, scan_run_failures_handler,
+            scan_runs_handler, scanner_health_handler, start_scan_handler,
         },
     },
     infra::{
@@ -392,6 +394,12 @@ fn create_scan_routes(state: AppState) -> Router<AppState> {
         .route(v1::scan::PROGRESS_STREAM, get(scan_progress_sse_handler))
         .route(v1::scan::METRICS, get(scan_metrics_handler))
         .route(v1::scan::CONFIG, get(scan_config_handler))
+        .route(v1::scan::RUNS, get(scan_runs_handler))
+        .route(v1::scan::RUN_DETAILS, get(scan_run_detail_handler))
+        .route(v1::scan::RUN_EVENTS, get(scan_run_events_handler))
+        .route(v1::scan::RUN_FAILURES, get(scan_run_failures_handler))
+        .route(v1::scan::HEALTH, get(scanner_health_handler))
+        .route(v1::scan::RECOVER, post(scan_recovery_handler))
         .route(v1::events::MEDIA, get(media_events_sse_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

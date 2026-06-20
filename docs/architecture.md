@@ -21,6 +21,7 @@ Ferrex is a Rust workspace with these primary crates:
 Related docs:
 - Scanner layout contract and diagnostics: `docs/scanner-layout-contract.md`
 - Scan/orchestration runtime details: `crates/ferrex-core/src/domain/scan/orchestration/runtime/README.md`
+- Scan observability operator workflow: `docs/scan-observability.md`
 - Player specifics and platform notes: `crates/ferrex-player/README.md`
 - Player crate dependency boundaries: `docs/player-dependency-boundaries.md`
 - Demo mode: `docs/demo-mode.md`

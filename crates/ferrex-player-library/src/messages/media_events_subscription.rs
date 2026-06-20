@@ -1,4 +1,6 @@
-use crate::messages::LibraryMessage;
+use crate::{
+    messages::LibraryMessage, scan_dashboard::ScanDashboardRefreshReason,
+};
 use base64::{
     Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD,
 };
@@ -354,32 +356,40 @@ impl MediaEventState {
                 Some(LibraryMessage::MediaDeleted(id))
             }
 
-            // Scan events are already handled by scan subscription
+            // Global scan media events refresh durable dashboard state. Per-run
+            // scan SSE subscriptions still drive live progress frames.
             MediaEvent::ScanStarted { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanStarted event {} - handled by scan subscription",
+                    "ScanStarted event {} refreshing durable dashboard",
                     scan_id
                 );
-                None
+                Some(LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::MediaScanEvent,
+                ))
             }
             MediaEvent::ScanCompleted { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanCompleted event {} - handled by scan subscription",
+                    "ScanCompleted event {} refreshing durable dashboard",
                     scan_id
                 );
-                None
+                Some(LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::MediaScanEvent,
+                ))
             }
             MediaEvent::ScanProgress { scan_id, .. } => {
                 log::debug!(
-                    "Ignoring ScanProgress event {} - handled by scan subscription",
+                    "ScanProgress event {} refreshing durable dashboard metadata",
                     scan_id
                 );
-                None
+                Some(LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::MediaScanEvent,
+                ))
             }
             MediaEvent::ScanFailed { scan_id, error, .. } => {
                 log::error!("Scan {} failed: {}", scan_id, error);
-                // Could emit a scan failed message if needed
-                None
+                Some(LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::MediaScanEvent,
+                ))
             }
         }
     }
@@ -435,13 +445,28 @@ impl LibraryMessage {
 mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-    use ferrex_core::player_prelude::{MediaID, MovieID};
+    use ferrex_core::player_prelude::{
+        LibraryId, MediaID, MovieID, ScanEventMetadata,
+    };
+    use ferrex_player_api::{
+        services::api::ApiService, testing::TestApiService,
+    };
     use rkyv::rancor::Error as RkyvError;
     use rkyv::to_bytes;
+    use std::sync::Arc;
 
     fn sample_event() -> MediaEvent {
         MediaEvent::MediaDeleted {
             id: MediaID::Movie(MovieID::new()),
+        }
+    }
+
+    fn sample_scan_metadata(library_id: LibraryId) -> ScanEventMetadata {
+        ScanEventMetadata {
+            version: "1".into(),
+            correlation_id: uuid::Uuid::now_v7(),
+            idempotency_key: "scan-event".into(),
+            library_id,
         }
     }
 
@@ -462,5 +487,27 @@ mod tests {
 
         let decoded = decode_media_event(&json).expect("decode json");
         assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn scan_media_events_request_dashboard_refresh() {
+        let library_id = LibraryId::new();
+        let scan_id = uuid::Uuid::now_v7();
+        let api: Arc<dyn ApiService> = Arc::new(TestApiService::default());
+        let state = MediaEventState::new("http://localhost".into(), api);
+
+        let message = state
+            .convert_media_event(MediaEvent::ScanCompleted {
+                scan_id,
+                metadata: sample_scan_metadata(library_id),
+            })
+            .expect("scan event maps to dashboard refresh");
+
+        assert!(matches!(
+            message,
+            LibraryMessage::RefreshScanDashboard(
+                ScanDashboardRefreshReason::MediaScanEvent
+            )
+        ));
     }
 }

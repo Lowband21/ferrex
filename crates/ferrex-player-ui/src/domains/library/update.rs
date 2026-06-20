@@ -12,6 +12,7 @@ use crate::{
             handle_scan_library,
         },
         ui::{
+            feedback_ui::{FeedbackMessage, ToastNotification},
             tabs::{TabId, TabState},
             update_handlers::{
                 emit_initial_all_tab_snapshots_combined, init_all_tab_view,
@@ -39,6 +40,7 @@ use ferrex_player_foundation::{
 };
 use ferrex_player_library::{
     LibraryDomainState,
+    scan_dashboard::ScanDashboardRefreshReason,
     types::LibrariesBootstrapPayload,
     update::{
         LibraryUpdateContext, update_library as update_library_state_machine,
@@ -501,6 +503,159 @@ pub fn update_library(
             DomainUpdateResult::task(Task::none())
         }
 
+        LibraryMessage::RefreshScanDashboard(reason) => {
+            let task = super::update_handlers::scan_updates::handle_refresh_scan_dashboard(
+                state, reason,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::ScanDashboardOverviewLoaded(result) => {
+            match result {
+                Ok(payload) => state
+                    .domains
+                    .library
+                    .state
+                    .scan_dashboard
+                    .apply_overview(payload),
+                Err(err) => {
+                    log::warn!("Failed to refresh scan dashboard: {}", err);
+                    state
+                        .domains
+                        .library
+                        .state
+                        .scan_dashboard
+                        .fail_overview_load(err);
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        LibraryMessage::SelectScanDashboardRun(scan_id) => {
+            let task = super::update_handlers::scan_updates::handle_select_scan_dashboard_run(
+                state, scan_id,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::RefreshScanDashboardRun(scan_id) => {
+            let task = super::update_handlers::scan_updates::handle_refresh_scan_dashboard_run(
+                state, scan_id,
+            );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::ScanDashboardRunLoaded {
+            scan_id,
+            select,
+            result,
+        } => {
+            match result {
+                Ok(payload) => {
+                    if select
+                        || state
+                            .domains
+                            .library
+                            .state
+                            .scan_dashboard
+                            .selected_run_id
+                            == Some(scan_id)
+                    {
+                        state
+                            .domains
+                            .library
+                            .state
+                            .scan_dashboard
+                            .apply_run_payload(payload);
+                    } else {
+                        state
+                            .domains
+                            .library
+                            .state
+                            .scan_dashboard
+                            .apply_run_refresh_payload(payload);
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to refresh scan dashboard run {}: {}",
+                        scan_id,
+                        err
+                    );
+                    if select
+                        || state
+                            .domains
+                            .library
+                            .state
+                            .scan_dashboard
+                            .selected_run_id
+                            == Some(scan_id)
+                    {
+                        state
+                            .domains
+                            .library
+                            .state
+                            .scan_dashboard
+                            .fail_run_load(err);
+                    }
+                }
+            }
+            DomainUpdateResult::task(Task::none())
+        }
+
+        LibraryMessage::RecoverScanPath(request) => {
+            let task =
+                super::update_handlers::scan_updates::handle_recover_scan_path(
+                    state, request,
+                );
+            DomainUpdateResult::task(task.map(DomainMessage::Library))
+        }
+
+        LibraryMessage::ScanRecoveryCompleted(result) => match result {
+            Ok(response) => {
+                log::info!(
+                    "Scan recovery accepted: library={} path={} job={}",
+                    response.library_id,
+                    response.normalized_path,
+                    response.job_id
+                );
+                state.domains.library.state.library_form_success =
+                    Some(response.message.clone());
+                let refresh_task = Task::done(DomainMessage::Library(
+                    LibraryMessage::RefreshScanDashboard(
+                        ScanDashboardRefreshReason::RecoveryAccepted,
+                    ),
+                ));
+                let toast_task = Task::done(DomainMessage::Ui(
+                    FeedbackMessage::ShowToast(ToastNotification::success(
+                        response.message,
+                    ))
+                    .into(),
+                ));
+                DomainUpdateResult::task(Task::batch([
+                    refresh_task,
+                    toast_task,
+                ]))
+            }
+            Err(err) => {
+                log::warn!("Scan recovery failed: {}", err);
+                state.domains.ui.state.error_message = Some(err.clone());
+                state
+                    .domains
+                    .library
+                    .state
+                    .scan_dashboard
+                    .fail_overview_load(err.clone());
+                let toast_task = Task::done(DomainMessage::Ui(
+                    FeedbackMessage::ShowToast(ToastNotification::error(
+                        format!("Scan recovery failed: {err}"),
+                    ))
+                    .into(),
+                ));
+                DomainUpdateResult::task(toast_task)
+            }
+        },
+
         LibraryMessage::ResetLibrary(library_id) => {
             let task =
                 super::update_handlers::library_management::handle_reset_library(state, library_id);
@@ -653,12 +808,36 @@ pub fn update_library(
                 .library
                 .state
                 .apply_scan_start_response(library_id, &response);
+            let started_snapshot = state
+                .domains
+                .library
+                .state
+                .active_scans
+                .get(&response.scan_id)
+                .cloned();
+            if let Some(snapshot) = started_snapshot {
+                state
+                    .domains
+                    .library
+                    .state
+                    .scan_dashboard
+                    .apply_active_snapshot(&snapshot);
+            }
 
-            let task =
+            let active_task =
                 super::update_handlers::scan_updates::handle_fetch_active_scans(
                     state,
-                );
-            DomainUpdateResult::task(task.map(DomainMessage::Library))
+                )
+                .map(DomainMessage::Library);
+            let dashboard_task = Task::done(DomainMessage::Library(
+                LibraryMessage::RefreshScanDashboard(
+                    ScanDashboardRefreshReason::CommandAccepted,
+                ),
+            ));
+            DomainUpdateResult::task(Task::batch(vec![
+                active_task,
+                dashboard_task,
+            ]))
         }
 
         LibraryMessage::FetchActiveScans => {
@@ -678,6 +857,7 @@ pub fn update_library(
 
         LibraryMessage::ScanProgressFrame(frame) => {
             let status = frame.status.clone();
+            let scan_id = frame.scan_id;
             super::update_handlers::scan_updates::apply_scan_progress_frame(
                 state,
                 frame.clone(),
@@ -694,10 +874,21 @@ pub fn update_library(
                         );
                     }
                     let refresh_task =
-                        super::update_handlers::refresh_library::handle_refresh_library(state);
-                    DomainUpdateResult::task(
-                        refresh_task.map(DomainMessage::Library),
-                    )
+                        super::update_handlers::refresh_library::handle_refresh_library(state)
+                            .map(DomainMessage::Library);
+                    let dashboard_task = Task::done(DomainMessage::Library(
+                        LibraryMessage::RefreshScanDashboard(
+                            ScanDashboardRefreshReason::TerminalProgress,
+                        ),
+                    ));
+                    let run_task = Task::done(DomainMessage::Library(
+                        LibraryMessage::RefreshScanDashboardRun(scan_id),
+                    ));
+                    DomainUpdateResult::task(Task::batch(vec![
+                        refresh_task,
+                        dashboard_task,
+                        run_task,
+                    ]))
                 }
                 "failed"
                 | "failed_needs_attention"
@@ -711,14 +902,32 @@ pub fn update_library(
                             frame.scan_id,
                         );
                     }
-                    DomainUpdateResult::task(Task::none())
+                    DomainUpdateResult::task(Task::batch(vec![
+                        Task::done(DomainMessage::Library(
+                            LibraryMessage::RefreshScanDashboard(
+                                ScanDashboardRefreshReason::TerminalProgress,
+                            ),
+                        )),
+                        Task::done(DomainMessage::Library(
+                            LibraryMessage::RefreshScanDashboardRun(scan_id),
+                        )),
+                    ]))
                 }
                 "canceled" | "cancelled" => {
                     super::update_handlers::scan_updates::remove_scan(
                         state,
                         frame.scan_id,
                     );
-                    DomainUpdateResult::task(Task::none())
+                    DomainUpdateResult::task(Task::batch(vec![
+                        Task::done(DomainMessage::Library(
+                            LibraryMessage::RefreshScanDashboard(
+                                ScanDashboardRefreshReason::TerminalProgress,
+                            ),
+                        )),
+                        Task::done(DomainMessage::Library(
+                            LibraryMessage::RefreshScanDashboardRun(scan_id),
+                        )),
+                    ]))
                 }
                 _ => DomainUpdateResult::task(Task::none()),
             }

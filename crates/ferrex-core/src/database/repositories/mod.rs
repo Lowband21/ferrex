@@ -12,6 +12,7 @@ pub mod media_references;
 pub mod processing_status;
 pub mod query;
 pub mod rbac;
+pub mod scan_observability;
 pub mod security_settings;
 pub mod setup_claims;
 pub mod sync_sessions;

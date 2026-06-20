@@ -1,4 +1,6 @@
-//! Core data model definitions shared across Ferrex crates.
+//! Core data model definitions shared across Ferrex crates, including scan
+//! progress frames that carry retry and dead-letter counters across server and
+//! player boundaries.
 #![allow(missing_docs)]
 
 #[cfg(feature = "chrono")]

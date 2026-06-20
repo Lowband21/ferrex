@@ -55,8 +55,14 @@ pub use media_repo_sync::{
 pub use responses::{ApiResponse, MediaStats, MetadataRequest};
 pub use scan::{
     ActiveScansResponse, LatestProgressResponse, ScanCommandAcceptedResponse,
-    ScanCommandRequest, ScanLifecycleStatus, ScanRunMode, ScanSnapshotDto,
-    ScanStartDisposition, StartScanRequest,
+    ScanCommandRequest, ScanFailureDebugDetails, ScanFailureDto,
+    ScanLifecycleStatus, ScanPageMeta, ScanRecoveryRequest,
+    ScanRecoveryResponse, ScanReplayGapResponse, ScanReplayInfo,
+    ScanRunDetailResponse, ScanRunDto, ScanRunEventDto,
+    ScanRunEventsPageResponse, ScanRunFailuresPageResponse,
+    ScanRunListResponse, ScanRunMode, ScanSnapshotDto, ScanStartDisposition,
+    ScannerHealthResponse, StartScanRequest, display_text_for_scan_failure,
+    display_text_for_scan_status,
 };
 pub use users_admin::{AdminUserInfo, CreateUserRequest, UpdateUserRequest};
 
@@ -99,9 +105,15 @@ pub mod player {
     pub use super::responses::ApiResponse;
     pub use super::scan::{
         ActiveScansResponse, LatestProgressResponse,
-        ScanCommandAcceptedResponse, ScanCommandRequest, ScanLifecycleStatus,
-        ScanRunMode, ScanSnapshotDto, ScanStartDisposition, StartScanRequest,
-        events::*,
+        ScanCommandAcceptedResponse, ScanCommandRequest,
+        ScanFailureDebugDetails, ScanFailureDto, ScanLifecycleStatus,
+        ScanPageMeta, ScanRecoveryRequest, ScanRecoveryResponse,
+        ScanReplayGapResponse, ScanReplayInfo, ScanRunDetailResponse,
+        ScanRunDto, ScanRunEventDto, ScanRunEventsPageResponse,
+        ScanRunFailuresPageResponse, ScanRunListResponse, ScanRunMode,
+        ScanSnapshotDto, ScanStartDisposition, ScannerHealthResponse,
+        StartScanRequest, display_text_for_scan_failure,
+        display_text_for_scan_status, events::*,
     };
     pub use super::setup::{
         ConfirmClaimRequest, ConfirmClaimResponse, StartClaimRequest,

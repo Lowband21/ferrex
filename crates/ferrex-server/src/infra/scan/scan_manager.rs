@@ -1,4 +1,4 @@
-use ferrex_model::{MediaID, SubjectKey};
+use ferrex_model::{LibraryType, MediaID, SubjectKey};
 
 use ferrex_core::{
     api::types::{
@@ -6,6 +6,13 @@ use ferrex_core::{
         ScanSnapshotDto, ScanStartDisposition, SeriesBundleResponse,
     },
     application::unit_of_work::AppUnitOfWork,
+    database::repository_ports::scan_observability::{
+        NewScanRunEvent, ScanRunEventPageRequest, ScanRunEventRecord,
+        ScanRunEventSequenceBounds, ScanRunFailurePage,
+        ScanRunFailurePageRequest, ScanRunFailureSummary, ScanRunPage,
+        ScanRunPageRequest, ScanRunRecord, ScanRunSource, ScanRunStatus,
+        ScanRunUpdate,
+    },
     domain::scan::{
         actors::{
             FileSystemEvent, FileSystemEventKind, FolderScanOutcome,
@@ -15,8 +22,16 @@ use ferrex_core::{
         orchestration::{
             JobEvent, LibraryActorCommand, LibraryScanRun,
             LibraryScanRunProgressUpdate, NewLibraryScanRun, StartMode,
+            context::{
+                FolderScanContext, MovieFolderScanContext, MovieRootPath,
+                SeasonFolderPath, SeasonFolderScanContext,
+                SeriesFolderScanContext, SeriesRootPath,
+            },
             events::{JobEventPayload, ScanEvent, ScanSeedSummary},
-            job::{JobId, JobKind},
+            job::{
+                EnqueueRequest, FolderScanJob, JobHandle, JobId, JobKind,
+                JobPayload, JobPriority, ScanReason,
+            },
             scan_cursor::{ScanCursor, ScanCursorRepository, normalize_path},
         },
     },
@@ -146,6 +161,59 @@ fn reason_message(reason_code: &str) -> &'static str {
         "temporary_scan_issue" => "A temporary scan issue is being retried",
         "scan_cancelled" | "scan_canceled" => "The scan was canceled",
         _ => "Review this path and rescan when it is ready",
+    }
+}
+
+fn subject_key_to_string(key: &SubjectKey) -> String {
+    match key {
+        SubjectKey::Path(path) => path.to_string(),
+        SubjectKey::Opaque(key) => key.to_string(),
+    }
+}
+
+fn lifecycle_to_observability_status(
+    status: &ScanLifecycleStatus,
+) -> ScanRunStatus {
+    match status {
+        ScanLifecycleStatus::Pending => ScanRunStatus::Pending,
+        ScanLifecycleStatus::Running => ScanRunStatus::Running,
+        ScanLifecycleStatus::Paused => ScanRunStatus::Paused,
+        ScanLifecycleStatus::Completed => ScanRunStatus::Completed,
+        ScanLifecycleStatus::Failed => ScanRunStatus::Failed,
+        ScanLifecycleStatus::Canceled => ScanRunStatus::Canceled,
+    }
+}
+
+fn start_mode_to_observability_source(mode: StartMode) -> ScanRunSource {
+    match mode {
+        StartMode::Bulk => ScanRunSource::Manual,
+        StartMode::Maintenance => ScanRunSource::Maintenance,
+        StartMode::Resume => ScanRunSource::Retry,
+    }
+}
+
+fn observability_failure_category(
+    reason: Option<&str>,
+) -> (&'static str, &'static str) {
+    let normalized = reason.unwrap_or("scan_failed").to_ascii_lowercase();
+    if normalized.contains("permission denied")
+        || normalized.contains("access denied")
+    {
+        ("filesystem_permission", "scan.folder_permission_denied")
+    } else if normalized.contains("not found")
+        || normalized.contains("no such file")
+        || normalized.contains("missing")
+    {
+        ("filesystem_missing", "scan.folder_missing")
+    } else if normalized.contains("timeout") || normalized.contains("timed out")
+    {
+        ("timeout", "scan.folder_timeout")
+    } else if normalized.contains("no_root_match") {
+        ("content_not_indexed", "scan.no_indexable_media")
+    } else if normalized.contains("cancel") {
+        ("scan_cancelled", "scan.cancelled")
+    } else {
+        ("job_failure", "scan.job_failed")
     }
 }
 
@@ -529,15 +597,66 @@ impl ScanControlPlane {
         drop(guard);
 
         let mut snapshots = Vec::with_capacity(runs.len());
+        let mut seen = HashSet::new();
         for run in runs {
             if let Ok(snapshot) = run.snapshot().await {
+                seen.insert(snapshot.scan_id);
                 snapshots.push(snapshot);
             }
         }
+
+        match self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .active_runs_all()
+            .await
+        {
+            Ok(rows) => {
+                for row in rows {
+                    if seen.contains(&row.id) {
+                        continue;
+                    }
+                    if let Some(snapshot) =
+                        ScanSnapshot::from_observability(row)
+                    {
+                        snapshots.push(snapshot);
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(error = %err, "failed to load persisted active scan runs");
+            }
+        }
+
         snapshots
     }
 
     pub async fn history(&self, limit: usize) -> Vec<ScanHistoryEntry> {
+        let persisted = self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .recent_runs(None, limit as i64)
+            .await;
+
+        match persisted {
+            Ok(rows) => {
+                let entries: Vec<ScanHistoryEntry> = rows
+                    .into_iter()
+                    .filter(|run| !run.status.is_active())
+                    .filter_map(ScanHistoryEntry::from_observability)
+                    .take(limit)
+                    .collect();
+                if !entries.is_empty() {
+                    return entries;
+                }
+            }
+            Err(err) => {
+                warn!(error = %err, "failed to load persisted scan history");
+            }
+        }
+
         let guard = self.inner.history.read().await;
         guard.iter().rev().take(limit).cloned().collect()
     }
@@ -565,11 +684,184 @@ impl ScanControlPlane {
             return Ok(run.event_log().await);
         }
 
-        let final_events = self.inner.final_events.read().await;
-        final_events
-            .get(scan_id)
-            .map(|events| events.iter().cloned().collect())
+        {
+            let final_events = self.inner.final_events.read().await;
+            if let Some(events) = final_events.get(scan_id) {
+                return Ok(events.iter().cloned().collect());
+            }
+        }
+
+        let events = self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .events_for_run(*scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        let frames: Vec<ScanBroadcastFrame> = events
+            .into_iter()
+            .filter_map(ScanBroadcastFrame::from_observability)
+            .collect();
+        if frames.is_empty() {
+            Err(ScanControlError::ScanNotFound)
+        } else {
+            Ok(frames)
+        }
+    }
+
+    pub async fn runs_page(
+        &self,
+        request: ScanRunPageRequest,
+    ) -> Result<ScanRunPage, ScanControlError> {
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .runs_page(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))
+    }
+
+    pub async fn run_detail(
+        &self,
+        scan_id: Uuid,
+    ) -> Result<ScanRunRecord, ScanControlError> {
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .get_run(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
             .ok_or(ScanControlError::ScanNotFound)
+    }
+
+    pub async fn run_events_page(
+        &self,
+        scan_id: Uuid,
+        after_sequence: Option<u64>,
+        limit: i64,
+    ) -> Result<ScanRunEventReplayPage, ScanControlError> {
+        let after_i64 =
+            after_sequence.map(|seq| seq.min(i64::MAX as u64) as i64);
+        let repo = &self.inner.unit_of_work.scan_observability;
+        let run = repo
+            .get_run(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::ScanNotFound)?;
+        let bounds = repo
+            .event_sequence_bounds(scan_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        validate_replay_gap(scan_id, after_sequence, &bounds, run.sequence)?;
+
+        let events = repo
+            .events_page_for_run(ScanRunEventPageRequest {
+                run_id: scan_id,
+                after_sequence: after_i64,
+                limit,
+            })
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+        let next_sequence = events
+            .last()
+            .map(|event| event.sequence.max(0) as u64)
+            .or(after_sequence);
+
+        Ok(ScanRunEventReplayPage {
+            events,
+            bounds,
+            requested_after_sequence: after_sequence,
+            next_sequence,
+        })
+    }
+
+    pub async fn run_failures_page(
+        &self,
+        request: ScanRunFailurePageRequest,
+    ) -> Result<ScanRunFailurePage, ScanControlError> {
+        if self
+            .inner
+            .unit_of_work
+            .scan_observability
+            .get_run(request.run_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .is_none()
+        {
+            return Err(ScanControlError::ScanNotFound);
+        }
+
+        self.inner
+            .unit_of_work
+            .scan_observability
+            .failure_summaries_page_for_run(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))
+    }
+
+    pub async fn recover_path(
+        &self,
+        library_id: LibraryId,
+        path: &str,
+        correlation_id: Option<Uuid>,
+    ) -> Result<ScanRecoveryAccepted, ScanControlError> {
+        let library = self
+            .inner
+            .unit_of_work
+            .libraries
+            .get_library(library_id)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?
+            .ok_or(ScanControlError::LibraryNotFound)?;
+
+        if !library.enabled {
+            return Err(ScanControlError::LibraryDisabled);
+        }
+
+        let normalized_path = normalize_path(std::path::Path::new(path))
+            .map_err(|err| {
+                ScanControlError::InvalidRecoveryTarget(err.to_string())
+            })?;
+        let owned_by_library = library
+            .paths
+            .iter()
+            .filter_map(|root| normalize_path(root).ok())
+            .any(|root| path_is_within(&root, &normalized_path));
+        if !owned_by_library {
+            return Err(ScanControlError::InvalidRecoveryTarget(
+                "path_not_owned_by_library".to_string(),
+            ));
+        }
+
+        let context = recovery_context_for_library(
+            library.library_type,
+            library_id,
+            &normalized_path,
+        )?;
+        let payload = JobPayload::FolderScan(FolderScanJob {
+            context,
+            scan_reason: ScanReason::UserRequested,
+            enqueue_time: Utc::now(),
+            device_id: None,
+        });
+        let mut request = EnqueueRequest::new(JobPriority::P0, payload);
+        request.allow_merge = true;
+        request.correlation_id = correlation_id;
+
+        let handle = self
+            .inner
+            .orchestrator
+            .enqueue(request)
+            .await
+            .map_err(|err| ScanControlError::internal(err.to_string()))?;
+
+        Ok(ScanRecoveryAccepted {
+            library_id,
+            original_path: path.to_string(),
+            normalized_path,
+            handle,
+        })
     }
 }
 
@@ -711,6 +1003,130 @@ pub struct ScanCommandAccepted {
     pub disposition: ScanStartDisposition,
 }
 
+#[derive(Debug, Clone)]
+pub struct ScanRunEventReplayPage {
+    pub events: Vec<ScanRunEventRecord>,
+    pub bounds: ScanRunEventSequenceBounds,
+    pub requested_after_sequence: Option<u64>,
+    pub next_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanReplayGap {
+    pub scan_id: Uuid,
+    pub requested_after_sequence: u64,
+    pub min_available_sequence: Option<u64>,
+    pub max_available_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanRecoveryAccepted {
+    pub library_id: LibraryId,
+    pub original_path: String,
+    pub normalized_path: String,
+    pub handle: JobHandle,
+}
+
+fn validate_replay_gap(
+    scan_id: Uuid,
+    requested_after_sequence: Option<u64>,
+    bounds: &ScanRunEventSequenceBounds,
+    run_sequence: i64,
+) -> Result<(), ScanControlError> {
+    let Some(requested_after_sequence) = requested_after_sequence else {
+        return Ok(());
+    };
+
+    let min_available_sequence =
+        bounds.min_sequence.map(|value| value.max(0) as u64);
+    let max_available_sequence =
+        bounds.max_sequence.map(|value| value.max(0) as u64);
+    let requested_next = requested_after_sequence.saturating_add(1);
+
+    if let Some(min_available) = min_available_sequence {
+        if requested_next < min_available {
+            return Err(ScanControlError::ReplayGap(ScanReplayGap {
+                scan_id,
+                requested_after_sequence,
+                min_available_sequence,
+                max_available_sequence,
+            }));
+        }
+    } else if requested_after_sequence < run_sequence.max(0) as u64 {
+        return Err(ScanControlError::ReplayGap(ScanReplayGap {
+            scan_id,
+            requested_after_sequence,
+            min_available_sequence,
+            max_available_sequence,
+        }));
+    }
+
+    Ok(())
+}
+
+fn path_is_within(root_norm: &str, candidate_norm: &str) -> bool {
+    let root = std::path::Path::new(root_norm);
+    let candidate = std::path::Path::new(candidate_norm);
+    candidate == root || candidate.starts_with(root)
+}
+
+fn recovery_context_for_library(
+    library_type: LibraryType,
+    library_id: LibraryId,
+    normalized_path: &str,
+) -> Result<FolderScanContext, ScanControlError> {
+    match library_type {
+        LibraryType::Movies => {
+            Ok(FolderScanContext::Movie(MovieFolderScanContext {
+                library_id,
+                movie_root_path: MovieRootPath::try_new(normalized_path)
+                    .map_err(|err| {
+                        ScanControlError::InvalidRecoveryTarget(err.to_string())
+                    })?,
+            }))
+        }
+        LibraryType::Series => {
+            if let Ok(series_root_path) =
+                SeriesRootPath::try_new(normalized_path)
+            {
+                return Ok(FolderScanContext::Series(
+                    SeriesFolderScanContext {
+                        library_id,
+                        series_root_path,
+                    },
+                ));
+            }
+
+            let season_path = std::path::Path::new(normalized_path);
+            let Some(series_root) = season_path.parent() else {
+                return Err(ScanControlError::InvalidRecoveryTarget(
+                    "series_path_missing_parent".to_string(),
+                ));
+            };
+            let series_root_norm = series_root.to_string_lossy().to_string();
+            let series_root_path = SeriesRootPath::try_new(series_root_norm)
+                .map_err(|err| {
+                    ScanControlError::InvalidRecoveryTarget(err.to_string())
+                })?;
+            let (season_folder_path, season_number) =
+                SeasonFolderPath::try_new_under_series_root(
+                    &series_root_path,
+                    normalized_path,
+                )
+                .map_err(|err| {
+                    ScanControlError::InvalidRecoveryTarget(err.to_string())
+                })?;
+
+            Ok(FolderScanContext::Season(SeasonFolderScanContext {
+                library_id,
+                series_root_path,
+                season_folder_path,
+                season_number,
+            }))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanLifecycleStatus {
@@ -723,6 +1139,17 @@ pub enum ScanLifecycleStatus {
 }
 
 impl ScanLifecycleStatus {
+    fn from_observability(status: ScanRunStatus) -> Option<Self> {
+        match status {
+            ScanRunStatus::Pending => Some(Self::Pending),
+            ScanRunStatus::Running => Some(Self::Running),
+            ScanRunStatus::Paused => Some(Self::Paused),
+            ScanRunStatus::Completed => Some(Self::Completed),
+            ScanRunStatus::Failed => Some(Self::Failed),
+            ScanRunStatus::Canceled => Some(Self::Canceled),
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             ScanLifecycleStatus::Pending => "pending",
@@ -751,6 +1178,18 @@ fn scan_run_mode_from_start_mode(mode: StartMode) -> ScanRunMode {
     }
 }
 
+fn scan_run_mode_from_observability_source(
+    source: ScanRunSource,
+) -> ScanRunMode {
+    match source {
+        ScanRunSource::Manual => ScanRunMode::Manual,
+        ScanRunSource::Maintenance
+        | ScanRunSource::Watcher
+        | ScanRunSource::Orchestrator => ScanRunMode::Maintenance,
+        ScanRunSource::Retry => ScanRunMode::Resume,
+    }
+}
+
 fn repository_status_from_payload(
     status: &str,
 ) -> Option<ApiScanLifecycleStatus> {
@@ -768,6 +1207,17 @@ pub struct ScanBroadcastFrame {
     pub payload: ScanProgressEvent,
 }
 
+impl ScanBroadcastFrame {
+    pub(crate) fn from_observability(
+        record: ScanRunEventRecord,
+    ) -> Option<Self> {
+        let event =
+            ScanEventKind::from_observability_kind(record.event_kind.as_str())?;
+        let payload = serde_json::from_value(record.payload).ok()?;
+        Some(Self { event, payload })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanEventKind {
@@ -779,6 +1229,27 @@ pub enum ScanEventKind {
 }
 
 impl ScanEventKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ScanEventKind::Started => "started",
+            ScanEventKind::Progress => "progress",
+            ScanEventKind::Quiescing => "quiescing",
+            ScanEventKind::Completed => "completed",
+            ScanEventKind::Failed => "failed",
+        }
+    }
+
+    fn from_observability_kind(value: &str) -> Option<Self> {
+        match value {
+            "started" => Some(Self::Started),
+            "progress" => Some(Self::Progress),
+            "quiescing" => Some(Self::Quiescing),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+
     pub fn as_sse_event_type(&self) -> ScanSseEventType {
         match self {
             ScanEventKind::Started => ScanSseEventType::Started,
@@ -1859,6 +2330,145 @@ impl ScanRun {
         }
     }
 
+    async fn persist_frame(
+        &self,
+        event: &ScanEventKind,
+        payload: &ScanProgressEvent,
+        error: Option<String>,
+    ) {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+
+        let (run_record, update, subject_key, terminal_error) = {
+            let state = self.state.lock().await;
+            let terminal_error =
+                error.clone().or_else(|| state.last_error.clone());
+            let terminal_summary = if state.is_terminal() {
+                serde_json::json!({
+                    "status": state.status.as_str(),
+                    "completed_items": state.completed_items,
+                    "total_items": state.total_items,
+                    "retrying_items": state.retrying_items,
+                    "dead_lettered_items": state.dead_lettered_items,
+                    "message_code": terminal_error.as_deref().map(|reason| observability_failure_category(Some(reason)).1),
+                })
+            } else {
+                serde_json::json!({})
+            };
+            let status = lifecycle_to_observability_status(&state.status);
+            let run_record = ScanRunRecord {
+                id: state.scan_id,
+                library_id: state.library_id,
+                source: start_mode_to_observability_source(self.start_mode),
+                status,
+                correlation_id: state.correlation_id,
+                idempotency_key: payload.idempotency_key.clone(),
+                sequence: 0,
+                started_at: state.started_at,
+                last_event_at: payload.emitted_at,
+                terminal_at: state.terminal_at,
+                current_path: payload.current_path.clone(),
+                completed_items: state.completed_items.min(i64::MAX as u64)
+                    as i64,
+                total_items: state.total_items.min(i64::MAX as u64) as i64,
+                retrying_items: state.retrying_items.min(i64::MAX as u64)
+                    as i64,
+                dead_lettered_items: state
+                    .dead_lettered_items
+                    .min(i64::MAX as u64)
+                    as i64,
+                terminal_summary: terminal_summary.clone(),
+            };
+            let update = ScanRunUpdate {
+                id: state.scan_id,
+                status,
+                idempotency_key: payload.idempotency_key.clone(),
+                last_event_at: payload.emitted_at,
+                terminal_at: state.terminal_at,
+                current_path: payload.current_path.clone(),
+                completed_items: state.completed_items.min(i64::MAX as u64)
+                    as i64,
+                total_items: state.total_items.min(i64::MAX as u64) as i64,
+                retrying_items: state.retrying_items.min(i64::MAX as u64)
+                    as i64,
+                dead_lettered_items: state
+                    .dead_lettered_items
+                    .min(i64::MAX as u64)
+                    as i64,
+                terminal_summary,
+            };
+            let subject_key = payload
+                .path_key
+                .as_ref()
+                .map(subject_key_to_string)
+                .or_else(|| payload.current_path.clone());
+            (run_record, update, subject_key, terminal_error)
+        };
+
+        let repo = &inner.unit_of_work.scan_observability;
+        if let Err(err) = repo.create_run(&run_record).await {
+            warn!(scan = %self.scan_id, error = %err, "failed to create persisted scan run");
+            return;
+        }
+        if let Err(err) = repo.update_run(&update).await {
+            warn!(scan = %self.scan_id, error = %err, "failed to update persisted scan run");
+        }
+
+        let record = NewScanRunEvent {
+            run_id: payload.scan_id,
+            library_id: payload.library_id,
+            event_kind: event.as_str().to_string(),
+            status: payload.status.clone(),
+            correlation_id: payload.correlation_id,
+            idempotency_key: payload.idempotency_key.clone(),
+            subject_key: subject_key.clone(),
+            current_path: payload.current_path.clone(),
+            occurred_at: payload.emitted_at,
+            completed_items: payload.completed_items.min(i64::MAX as u64)
+                as i64,
+            total_items: payload.total_items.min(i64::MAX as u64) as i64,
+            retrying_items: payload.retrying_items.min(i64::MAX as u64) as i64,
+            dead_lettered_items: payload.failed_items.min(i64::MAX as u64)
+                as i64,
+            payload: serde_json::to_value(payload)
+                .unwrap_or_else(|_| serde_json::json!({})),
+        };
+        if let Err(err) = repo.append_event(&record).await {
+            warn!(scan = %self.scan_id, error = %err, "failed to append persisted scan event");
+        }
+
+        if matches!(event, ScanEventKind::Failed) {
+            let reason = terminal_error.or(error);
+            let (category, message_code) =
+                observability_failure_category(reason.as_deref());
+            let failure = ScanRunFailureSummary {
+                run_id: payload.scan_id,
+                library_id: payload.library_id,
+                subject_key: subject_key
+                    .unwrap_or_else(|| format!("scan:{}", payload.scan_id)),
+                category: category.to_string(),
+                message_code: message_code.to_string(),
+                raw_debug_details: serde_json::json!({
+                    "reason": reason.clone(),
+                    "status": payload.status.as_str(),
+                    "scan_id": payload.scan_id,
+                    "correlation_id": payload.correlation_id,
+                }),
+                last_error: reason,
+                occurrences: 1,
+                first_seen_at: payload.emitted_at,
+                last_seen_at: payload.emitted_at,
+                retryable: false,
+                job_id: None,
+                idempotency_key: payload.idempotency_key.clone(),
+            };
+            if let Err(err) = repo.upsert_failure_summary(&failure).await {
+                warn!(scan = %self.scan_id, error = %err, "failed to upsert persisted scan failure");
+            }
+        }
+    }
+
     async fn emit_frame(
         &self,
         event: ScanEventKind,
@@ -1885,6 +2495,7 @@ impl ScanRun {
         } else {
             None
         };
+        self.persist_frame(&event, &payload, error.clone()).await;
         self.maybe_log_summary(&event, &payload).await;
         self.emit_media_event(event, payload, error);
     }
@@ -3365,12 +3976,265 @@ impl ScanRunAggregatorInner {
         });
     }
 
+    fn job_event_kind(payload: &JobEventPayload) -> &'static str {
+        match payload {
+            JobEventPayload::Enqueued { .. } => "job_enqueued",
+            JobEventPayload::Merged { .. } => "job_merged",
+            JobEventPayload::Dequeued { .. } => "job_dequeued",
+            JobEventPayload::LeaseRenewed { .. } => "job_lease_renewed",
+            JobEventPayload::LeaseExpired { .. } => "job_lease_expired",
+            JobEventPayload::Completed { .. } => "job_completed",
+            JobEventPayload::Failed {
+                retryable: true, ..
+            } => "job_retrying",
+            JobEventPayload::Failed {
+                retryable: false, ..
+            } => "job_failed",
+            JobEventPayload::DeadLettered { .. } => "job_dead_lettered",
+            JobEventPayload::ThroughputTick { .. } => "throughput_tick",
+        }
+    }
+
+    fn job_event_status(payload: &JobEventPayload) -> ScanRunStatus {
+        match payload {
+            JobEventPayload::Completed { .. } => ScanRunStatus::Completed,
+            JobEventPayload::Failed {
+                retryable: false, ..
+            }
+            | JobEventPayload::DeadLettered { .. } => ScanRunStatus::Failed,
+            _ => ScanRunStatus::Running,
+        }
+    }
+
+    fn job_event_error(payload: &JobEventPayload) -> Option<&str> {
+        match payload {
+            JobEventPayload::Failed { error, .. }
+            | JobEventPayload::DeadLettered { error, .. } => error.as_deref(),
+            JobEventPayload::LeaseExpired { .. } => Some("lease_expired"),
+            _ => None,
+        }
+    }
+
+    fn job_event_retryable(payload: &JobEventPayload) -> bool {
+        matches!(
+            payload,
+            JobEventPayload::Failed {
+                retryable: true,
+                ..
+            }
+        )
+    }
+
+    fn job_event_job_id(payload: &JobEventPayload) -> Option<Uuid> {
+        match payload {
+            JobEventPayload::Enqueued { job_id, .. }
+            | JobEventPayload::Dequeued { job_id, .. }
+            | JobEventPayload::LeaseRenewed { job_id, .. }
+            | JobEventPayload::LeaseExpired { job_id, .. }
+            | JobEventPayload::Completed { job_id, .. }
+            | JobEventPayload::Failed { job_id, .. }
+            | JobEventPayload::DeadLettered { job_id, .. } => Some(job_id.0),
+            JobEventPayload::Merged { merged_job_id, .. } => {
+                Some(merged_job_id.0)
+            }
+            JobEventPayload::ThroughputTick { .. } => None,
+        }
+    }
+
+    async fn persist_job_event(
+        &self,
+        event: &JobEvent,
+        run: Option<&Arc<ScanRun>>,
+    ) {
+        let now = Utc::now();
+        let event_kind = Self::job_event_kind(&event.payload);
+        let fallback_status = Self::job_event_status(&event.payload);
+        let source = run
+            .map(|run| start_mode_to_observability_source(run.start_mode()))
+            .unwrap_or_else(|| {
+                if event.meta.path_key.is_some() {
+                    ScanRunSource::Watcher
+                } else {
+                    ScanRunSource::Orchestrator
+                }
+            });
+
+        let run_id = run
+            .map(|run| run.scan_id())
+            .unwrap_or(event.meta.correlation_id);
+        let subject_key =
+            event.meta.path_key.as_ref().map(subject_key_to_string);
+        let current_path = event
+            .meta
+            .path_key
+            .as_ref()
+            .and_then(subject_key_path_owned);
+
+        let (completed, total, retrying, dead_lettered, started_at, status): (
+            i64,
+            i64,
+            i64,
+            i64,
+            DateTime<Utc>,
+            ScanRunStatus,
+        ) = if let Some(run) = run {
+            match run.snapshot().await {
+                Ok(snapshot) => (
+                    snapshot.completed_items.min(i64::MAX as u64) as i64,
+                    snapshot.total_items.min(i64::MAX as u64) as i64,
+                    snapshot.retrying_items.min(i64::MAX as u64) as i64,
+                    snapshot.failed_items.min(i64::MAX as u64) as i64,
+                    snapshot.started_at,
+                    lifecycle_to_observability_status(&snapshot.status),
+                ),
+                Err(_) => (0, 0, 0, 0, now, ScanRunStatus::Running),
+            }
+        } else {
+            let retrying = if Self::job_event_retryable(&event.payload) {
+                1
+            } else {
+                0
+            };
+            let dead_lettered = if matches!(
+                &event.payload,
+                JobEventPayload::DeadLettered { .. }
+            ) {
+                1
+            } else {
+                0
+            };
+            let completed = if matches!(
+                &event.payload,
+                JobEventPayload::Completed { .. }
+            ) {
+                1
+            } else {
+                0
+            };
+            (completed, 0, retrying, dead_lettered, now, fallback_status)
+        };
+
+        let terminal_at = (!status.is_active()).then_some(now);
+        let terminal_summary = if status.is_active() {
+            serde_json::json!({})
+        } else {
+            let (category, message_code) = observability_failure_category(
+                Self::job_event_error(&event.payload),
+            );
+            serde_json::json!({
+                "event_kind": event_kind,
+                "category": category,
+                "message_code": message_code,
+            })
+        };
+
+        let run_record = ScanRunRecord {
+            id: run_id,
+            library_id: event.meta.library_id,
+            source,
+            status,
+            correlation_id: event.meta.correlation_id,
+            idempotency_key: event.meta.idempotency_key.clone(),
+            sequence: 0,
+            started_at,
+            last_event_at: now,
+            terminal_at,
+            current_path: current_path.clone(),
+            completed_items: completed,
+            total_items: total,
+            retrying_items: retrying,
+            dead_lettered_items: dead_lettered,
+            terminal_summary: terminal_summary.clone(),
+        };
+        let update = ScanRunUpdate {
+            id: run_id,
+            status,
+            idempotency_key: event.meta.idempotency_key.clone(),
+            last_event_at: now,
+            terminal_at,
+            current_path: current_path.clone(),
+            completed_items: completed,
+            total_items: total,
+            retrying_items: retrying,
+            dead_lettered_items: dead_lettered,
+            terminal_summary,
+        };
+
+        let repo = &self.unit_of_work.scan_observability;
+        if let Err(err) = repo.create_run(&run_record).await {
+            warn!(run = %run_id, error = %err, "failed to create scan job observability run");
+            return;
+        }
+        if let Err(err) = repo.update_run(&update).await {
+            warn!(run = %run_id, error = %err, "failed to update scan job observability run");
+        }
+
+        let payload = serde_json::to_value(event)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let row = NewScanRunEvent {
+            run_id,
+            library_id: event.meta.library_id,
+            event_kind: event_kind.to_string(),
+            status: status.as_str().to_string(),
+            correlation_id: event.meta.correlation_id,
+            idempotency_key: event.meta.idempotency_key.clone(),
+            subject_key: subject_key.clone(),
+            current_path,
+            occurred_at: now,
+            completed_items: completed,
+            total_items: total,
+            retrying_items: retrying,
+            dead_lettered_items: dead_lettered,
+            payload,
+        };
+        if let Err(err) = repo.append_event(&row).await {
+            warn!(run = %run_id, error = %err, "failed to append scan job observability event");
+        }
+
+        if matches!(
+            &event.payload,
+            JobEventPayload::Failed { .. }
+                | JobEventPayload::DeadLettered { .. }
+                | JobEventPayload::LeaseExpired { .. }
+        ) {
+            let reason = Self::job_event_error(&event.payload)
+                .unwrap_or("job_failed")
+                .to_string();
+            let (category, message_code) =
+                observability_failure_category(Some(reason.as_str()));
+            let failure = ScanRunFailureSummary {
+                run_id,
+                library_id: event.meta.library_id,
+                subject_key: subject_key.unwrap_or_else(|| {
+                    format!("job:{}", event.meta.idempotency_key)
+                }),
+                category: category.to_string(),
+                message_code: message_code.to_string(),
+                raw_debug_details: serde_json::json!({
+                    "reason": reason.clone(),
+                    "event": event,
+                }),
+                last_error: Some(reason),
+                occurrences: 1,
+                first_seen_at: now,
+                last_seen_at: now,
+                retryable: Self::job_event_retryable(&event.payload),
+                job_id: Self::job_event_job_id(&event.payload),
+                idempotency_key: event.meta.idempotency_key.clone(),
+            };
+            if let Err(err) = repo.upsert_failure_summary(&failure).await {
+                warn!(run = %run_id, error = %err, "failed to upsert scan job failure summary");
+            }
+        }
+    }
+
     async fn handle_job_event(&self, event: JobEvent) {
         let run = {
             let guard = self.runs.read().await;
             guard.get(&event.meta.correlation_id).cloned()
         };
 
+        self.persist_job_event(&event, run.as_ref()).await;
         self.observe_series_bundle_job_event(&event).await;
 
         if let Some(run) = run {
@@ -3413,6 +4277,7 @@ impl ScanRunAggregatorInner {
                     kind,
                     retryable,
                     job_id,
+                    error,
                     ..
                 } => {
                     if matches!(
@@ -3422,7 +4287,7 @@ impl ScanRunAggregatorInner {
                         run.record_folder_failure(
                             &event.meta.idempotency_key,
                             job_id,
-                            None,
+                            error,
                             event.meta.path_key.clone(),
                             retryable,
                         )
@@ -3441,7 +4306,12 @@ impl ScanRunAggregatorInner {
                         false
                     }
                 }
-                JobEventPayload::DeadLettered { kind, job_id, .. } => {
+                JobEventPayload::DeadLettered {
+                    kind,
+                    job_id,
+                    error,
+                    ..
+                } => {
                     if matches!(
                         kind,
                         JobKind::FolderScan | JobKind::ManifestScan
@@ -3449,7 +4319,7 @@ impl ScanRunAggregatorInner {
                         run.record_folder_dead_lettered(
                             &event.meta.idempotency_key,
                             job_id,
-                            None,
+                            error,
                             event.meta.path_key.clone(),
                         )
                         .await;
@@ -3908,6 +4778,80 @@ impl ScanRunAggregatorInner {
         }
     }
 
+    async fn persist_activity_window_started(
+        &self,
+        library_id: LibraryId,
+        run_id: Uuid,
+        source: ScanRunSource,
+        event_kind: &str,
+    ) {
+        let now = Utc::now();
+        let idempotency_key =
+            format!("{}:{}:{}", event_kind, library_id, run_id);
+        let run_record = ScanRunRecord {
+            id: run_id,
+            library_id,
+            source,
+            status: ScanRunStatus::Running,
+            correlation_id: run_id,
+            idempotency_key: idempotency_key.clone(),
+            sequence: 0,
+            started_at: now,
+            last_event_at: now,
+            terminal_at: None,
+            current_path: None,
+            completed_items: 0,
+            total_items: 0,
+            retrying_items: 0,
+            dead_lettered_items: 0,
+            terminal_summary: serde_json::json!({}),
+        };
+        let update = ScanRunUpdate {
+            id: run_id,
+            status: ScanRunStatus::Running,
+            idempotency_key: idempotency_key.clone(),
+            last_event_at: now,
+            terminal_at: None,
+            current_path: None,
+            completed_items: 0,
+            total_items: 0,
+            retrying_items: 0,
+            dead_lettered_items: 0,
+            terminal_summary: serde_json::json!({}),
+        };
+        let repo = &self.unit_of_work.scan_observability;
+        if let Err(err) = repo.create_run(&run_record).await {
+            warn!(run = %run_id, error = %err, "failed to create scan activity window");
+            return;
+        }
+        if let Err(err) = repo.update_run(&update).await {
+            warn!(run = %run_id, error = %err, "failed to update scan activity window");
+        }
+        let event = NewScanRunEvent {
+            run_id,
+            library_id,
+            event_kind: event_kind.to_string(),
+            status: ScanRunStatus::Running.as_str().to_string(),
+            correlation_id: run_id,
+            idempotency_key,
+            subject_key: None,
+            current_path: None,
+            occurred_at: now,
+            completed_items: 0,
+            total_items: 0,
+            retrying_items: 0,
+            dead_lettered_items: 0,
+            payload: serde_json::json!({
+                "source": source.as_str(),
+                "library_id": library_id,
+                "correlation_id": run_id,
+            }),
+        };
+        if let Err(err) = repo.append_event(&event).await {
+            warn!(run = %run_id, error = %err, "failed to append scan activity event");
+        }
+    }
+
     async fn on_run_completed(&self, run: Arc<ScanRun>) {
         if run.start_mode() != StartMode::Bulk {
             return;
@@ -3932,9 +4876,17 @@ impl ScanRunAggregatorInner {
             );
         }
 
+        let correlation_id = Uuid::now_v7();
+        self.persist_activity_window_started(
+            library_id,
+            correlation_id,
+            ScanRunSource::Maintenance,
+            "maintenance_started",
+        )
+        .await;
         let command = LibraryActorCommand::Start {
             mode: StartMode::Maintenance,
-            correlation_id: Some(Uuid::now_v7()),
+            correlation_id: Some(correlation_id),
         };
 
         match self.orchestrator.command_library(library_id, command).await {
@@ -3961,7 +4913,7 @@ impl ScanRunAggregatorInner {
             return;
         };
 
-        let should_persist = match event.payload {
+        let should_persist = match &event.payload {
             JobEventPayload::Completed {
                 kind: FolderScan, ..
             } => true,
@@ -3970,7 +4922,7 @@ impl ScanRunAggregatorInner {
             } => true,
             JobEventPayload::Failed {
                 kind, retryable, ..
-            } if matches!(kind, FolderScan) && !retryable => true,
+            } if *kind == FolderScan && !*retryable => true,
             _ => false,
         };
 
@@ -4003,7 +4955,7 @@ impl ScanRunAggregatorInner {
             JobEventPayload::DeadLettered { job_id, .. } => Some(*job_id),
             JobEventPayload::Failed {
                 job_id, retryable, ..
-            } if !retryable => Some(*job_id),
+            } if !*retryable => Some(*job_id),
             _ => None,
         };
 
@@ -4039,6 +4991,30 @@ pub struct ScanHistoryEntry {
     pub reason_details: Vec<ScanPathReasonDetail>,
 }
 
+impl ScanHistoryEntry {
+    fn from_observability(run: ScanRunRecord) -> Option<Self> {
+        let status = ScanLifecycleStatus::from_observability(run.status)?;
+        let completed_items = run.completed_items.max(0) as u64;
+        let failed_items = run.dead_lettered_items.max(0) as u64;
+        Some(Self {
+            scan_id: run.id,
+            library_id: run.library_id,
+            status,
+            completed_items,
+            total_items: run.total_items.max(0) as u64,
+            validated_items: completed_items,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items,
+            needs_attention_items: failed_items,
+            retrying_items: run.retrying_items.max(0) as u64,
+            started_at: run.started_at,
+            terminal_at: run.terminal_at.unwrap_or(run.last_event_at),
+            reason_details: Vec::new(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanSnapshot {
     pub scan_id: Uuid,
@@ -4063,6 +5039,37 @@ pub struct ScanSnapshot {
     pub sequence: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reason_details: Vec<ScanPathReasonDetail>,
+}
+
+impl ScanSnapshot {
+    fn from_observability(run: ScanRunRecord) -> Option<Self> {
+        let mode = scan_run_mode_from_observability_source(run.source);
+        let completed_items = run.completed_items.max(0) as u64;
+        let failed_items = run.dead_lettered_items.max(0) as u64;
+        Some(Self {
+            scan_id: run.id,
+            library_id: run.library_id,
+            status: ScanLifecycleStatus::from_observability(run.status)?,
+            mode,
+            completed_items,
+            total_items: run.total_items.max(0) as u64,
+            validated_items: completed_items,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items,
+            needs_attention_items: failed_items,
+            retrying_items: run.retrying_items.max(0) as u64,
+            correlation_id: run.correlation_id,
+            idempotency_key: run.idempotency_key,
+            run_key: mode.run_key(run.library_id),
+            disposition: None,
+            current_path: run.current_path,
+            started_at: run.started_at,
+            terminal_at: run.terminal_at,
+            sequence: run.sequence.max(0) as u64,
+            reason_details: Vec::new(),
+        })
+    }
 }
 
 impl From<ScanSnapshot> for ScanSnapshotDto {
@@ -4127,6 +5134,8 @@ pub enum ScanControlError {
     ScanNotFound,
     ScanNotRunning,
     ScanTerminal,
+    ReplayGap(ScanReplayGap),
+    InvalidRecoveryTarget(String),
     Internal(String),
 }
 
@@ -4139,6 +5148,10 @@ impl ScanControlError {
             ScanControlError::ScanNotFound => StatusCode::NOT_FOUND,
             ScanControlError::ScanNotRunning => StatusCode::CONFLICT,
             ScanControlError::ScanTerminal => StatusCode::GONE,
+            ScanControlError::ReplayGap(_) => StatusCode::CONFLICT,
+            ScanControlError::InvalidRecoveryTarget(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             ScanControlError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -4151,6 +5164,8 @@ impl ScanControlError {
             ScanControlError::ScanNotFound => "scan_not_found".into(),
             ScanControlError::ScanNotRunning => "scan_not_running".into(),
             ScanControlError::ScanTerminal => "scan_already_terminal".into(),
+            ScanControlError::ReplayGap(_) => "scan_event_replay_gap".into(),
+            ScanControlError::InvalidRecoveryTarget(reason) => reason.clone(),
             ScanControlError::Internal(reason) => reason.clone(),
         }
     }
@@ -4199,5 +5214,50 @@ mod durable_status_tests {
             ScanControlError::LibraryMismatch.message(),
             "scan_library_mismatch"
         );
+    }
+
+    #[test]
+    fn recovery_path_ownership_uses_path_components() {
+        assert!(path_is_within("/media/movies", "/media/movies"));
+        assert!(path_is_within("/media/movies", "/media/movies/A"));
+        assert!(!path_is_within("/media/movies", "/media/movies2/A"));
+    }
+
+    #[test]
+    fn replay_gap_detects_pruned_sequences() {
+        let scan_id = Uuid::now_v7();
+        let err = validate_replay_gap(
+            scan_id,
+            Some(1),
+            &ScanRunEventSequenceBounds {
+                min_sequence: Some(4),
+                max_sequence: Some(8),
+            },
+            8,
+        )
+        .unwrap_err();
+
+        match err {
+            ScanControlError::ReplayGap(gap) => {
+                assert_eq!(gap.scan_id, scan_id);
+                assert_eq!(gap.requested_after_sequence, 1);
+                assert_eq!(gap.min_available_sequence, Some(4));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replay_gap_allows_contiguous_terminal_replay() {
+        validate_replay_gap(
+            Uuid::now_v7(),
+            Some(3),
+            &ScanRunEventSequenceBounds {
+                min_sequence: Some(4),
+                max_sequence: Some(8),
+            },
+            8,
+        )
+        .expect("sequence 4 is retained and contiguous");
     }
 }

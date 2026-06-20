@@ -15,11 +15,13 @@ use ferrex_core::{
         Media, MediaQuery, MediaRootBrowseResponse, MediaWithStatus,
         MovieBatchFetchRequest, MovieBatchId, MovieBatchSyncRequest,
         MovieBatchSyncResponse, NextEpisode, ScanCommandAcceptedResponse,
-        ScanCommandRequest, ScanConfig, ScanMetrics, SeasonWatchStatus,
-        SeriesBundleFetchRequest, SeriesBundleSyncRequest,
-        SeriesBundleSyncResponse, SeriesID, SeriesWatchStatus,
-        StartScanRequest, UpdateLibraryRequest, UpdateProgressRequest, User,
-        UserPermissions, UserWatchState,
+        ScanCommandRequest, ScanConfig, ScanMetrics, ScanRecoveryRequest,
+        ScanRecoveryResponse, ScanRunDetailResponse, ScanRunEventsPageResponse,
+        ScanRunFailuresPageResponse, ScanRunListResponse,
+        ScannerHealthResponse, SeasonWatchStatus, SeriesBundleFetchRequest,
+        SeriesBundleSyncRequest, SeriesBundleSyncResponse, SeriesID,
+        SeriesWatchStatus, StartScanRequest, UpdateLibraryRequest,
+        UpdateProgressRequest, User, UserPermissions, UserWatchState,
     },
 };
 use ferrex_model::image::ImageQuery;
@@ -195,6 +197,49 @@ pub trait ApiService: Send + Sync + Debug {
 
     /// Fetch orchestrator configuration currently in effect
     async fn fetch_scan_config(&self) -> RepositoryResult<ScanConfig>;
+
+    /// Fetch durable scanner health, queue, watch, cursor, and run counters.
+    async fn fetch_scanner_health(
+        &self,
+    ) -> RepositoryResult<ScannerHealthResponse>;
+
+    /// Fetch durable scan run summaries.
+    async fn fetch_scan_runs(
+        &self,
+        library_id: Option<LibraryId>,
+        status: Option<String>,
+        limit: usize,
+        offset: usize,
+    ) -> RepositoryResult<ScanRunListResponse>;
+
+    /// Fetch durable detail and terminal summary for a scan run.
+    async fn fetch_scan_run_detail(
+        &self,
+        scan_id: uuid::Uuid,
+    ) -> RepositoryResult<ScanRunDetailResponse>;
+
+    /// Fetch durable timeline events for a scan run.
+    async fn fetch_scan_run_events(
+        &self,
+        scan_id: uuid::Uuid,
+        after_sequence: Option<u64>,
+        limit: usize,
+    ) -> RepositoryResult<ScanRunEventsPageResponse>;
+
+    /// Fetch display-safe durable failure summaries for a scan run.
+    async fn fetch_scan_run_failures(
+        &self,
+        scan_id: uuid::Uuid,
+        limit: usize,
+        offset: usize,
+        include_debug: bool,
+    ) -> RepositoryResult<ScanRunFailuresPageResponse>;
+
+    /// Request an idempotent recovery/retry for a failed scan path.
+    async fn recover_scan_path(
+        &self,
+        request: ScanRecoveryRequest,
+    ) -> RepositoryResult<ScanRecoveryResponse>;
 
     /// Browse the server's media root (relative paths) to help admins pick folders.
     async fn browse_media_root(

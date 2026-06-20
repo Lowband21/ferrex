@@ -59,6 +59,7 @@ pub struct IncrementalScanPolicyView {
     pub maintenance_tick_interval_ms: u64,
     pub maintenance_max_jobs_per_library: usize,
     pub maintenance_max_root_entries_per_library: usize,
+    pub maintenance_scan_run_retention_days: u32,
     /// Extensions that the scanner layout contract treats as video candidates.
     pub media_extensions: Vec<String>,
     /// Extensions filtered before media classification, reported with the
@@ -83,6 +84,7 @@ impl Default for IncrementalScanPolicyView {
             maintenance_tick_interval_ms: 60_000,
             maintenance_max_jobs_per_library: 128,
             maintenance_max_root_entries_per_library: 512,
+            maintenance_scan_run_retention_days: 30,
             media_extensions: settings::default_video_file_extensions_vec(),
             ignored_extensions: Vec::new(),
             ignored_path_patterns: Vec::new(),
@@ -246,6 +248,7 @@ pub struct MaintenanceConfigView {
     pub max_root_entries_per_library: usize,
     pub error_backoff_ms: u64,
     pub run_stall_timeout_ms: u64,
+    pub scan_run_retention_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
