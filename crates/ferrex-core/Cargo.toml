@@ -127,3 +127,8 @@ ffi = []
 tempfile.workspace = true
 tokio.workspace = true
 sqlx.workspace = true
+
+[[test]]
+name = "manifest_scan_e2e"
+path = "tests/manifest_scan_e2e.rs"
+required-features = ["database", "scan-runtime"]

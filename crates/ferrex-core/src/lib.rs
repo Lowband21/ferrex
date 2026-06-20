@@ -19,6 +19,7 @@
 //!
 //! - `database`: Enables database functionality (PostgreSQL/SQLx support)
 //! - `ffmpeg`: Enables FFmpeg-based metadata extraction
+//! - `scan-runtime`: Enables scanner queues, file watching, manifest walking, and orchestration
 //! - `test-utils`: Provides utilities for testing
 //!
 //! ## Architecture
@@ -74,6 +75,11 @@ pub mod api;
 
 /// Domain module grouping core business logic.
 pub mod domain;
+
+/// Scan domain contracts and orchestration primitives.
+#[cfg(feature = "scan-runtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scan-runtime")))]
+pub use domain::scan;
 
 /// Infrastructure adapters (database, external services, runtimes).
 pub mod infra;

@@ -289,6 +289,7 @@ impl PostgresQueueService {
 
         let is_fast_path = match payload {
             JobPayload::FolderScan(job) => fast_reason(&job.scan_reason),
+            JobPayload::ManifestScan(job) => fast_reason(&job.scan_reason),
             JobPayload::MediaAnalyze(job) => fast_reason(&job.scan_reason),
             _ => false,
         };
@@ -1684,28 +1685,30 @@ impl ScanCursorRepository for PostgresCursorRepository {
             return Ok(0);
         }
 
-        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "DELETE FROM scan_cursors WHERE library_id = ",
-        );
-        builder.push_bind(library_id.0);
-        builder.push(" AND (");
+        let roots: Vec<_> = prefixes
+            .iter()
+            .map(|prefix| prefix.trim_end_matches('/').to_string())
+            .collect();
+        let child_patterns: Vec<_> =
+            roots.iter().map(|root| format!("{root}/%")).collect();
 
-        for (idx, prefix) in prefixes.iter().enumerate() {
-            if idx > 0 {
-                builder.push(" OR ");
-            }
-            let root = prefix.trim_end_matches('/');
-            let mut child_prefix = root.to_string();
-            child_prefix.push('/');
-            builder.push("(folder_path_norm = ");
-            builder.push_bind(root);
-            builder.push(" OR folder_path_norm LIKE ");
-            builder.push_bind(format!("{}%", child_prefix));
-            builder.push(")");
-        }
-        builder.push(")");
-
-        let result = builder.build().execute(&self.pool).await?;
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM scan_cursors
+            WHERE library_id = $1
+              AND EXISTS (
+                  SELECT 1
+                  FROM UNNEST($2::text[], $3::text[]) AS prefixes(root, child_pattern)
+                  WHERE folder_path_norm = prefixes.root
+                     OR folder_path_norm LIKE prefixes.child_pattern
+              )
+            "#,
+            library_id.0,
+            &roots[..],
+            &child_patterns[..]
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected() as usize)
     }
 

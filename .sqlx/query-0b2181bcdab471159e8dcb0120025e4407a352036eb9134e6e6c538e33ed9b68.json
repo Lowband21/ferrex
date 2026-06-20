@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                code AS \"code!\",\n                COUNT(*)::bigint AS \"count!\",\n                COUNT(*) FILTER (WHERE severity = 'info')::bigint AS \"info!\",\n                COUNT(*) FILTER (WHERE severity = 'warning')::bigint AS \"warnings!\",\n                COUNT(*) FILTER (WHERE severity = 'error')::bigint AS \"errors!\",\n                MAX(created_at) AS latest_at\n            FROM manifest_diagnostics\n            GROUP BY code\n            ORDER BY COUNT(*) DESC, code ASC\n            LIMIT 64\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "info!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "warnings!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "errors!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "latest_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0b2181bcdab471159e8dcb0120025e4407a352036eb9134e6e6c538e33ed9b68"
+}

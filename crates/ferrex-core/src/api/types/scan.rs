@@ -89,7 +89,11 @@ impl Default for ScanStartDisposition {
     }
 }
 
-/// Lifecycle state of a background scan job
+/// Lifecycle state of a background scan job.
+///
+/// Manifest-grade reconciliation uses `domain::scan::manifest::ManifestRunStatus`
+/// for root/partition runs; this DTO remains the API snapshot status for active
+/// scan dashboards and SSE updates.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[cfg_attr(
     feature = "rkyv",

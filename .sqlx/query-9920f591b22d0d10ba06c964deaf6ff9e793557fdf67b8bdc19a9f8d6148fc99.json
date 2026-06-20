@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT COUNT(*)::bigint AS \"count!\"\n                FROM manifest_entries\n                WHERE library_id = $1\n                  AND entry_kind = 'file'\n                  AND source = 'backfill'\n                  AND availability = 'available'\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9920f591b22d0d10ba06c964deaf6ff9e793557fdf67b8bdc19a9f8d6148fc99"
+}

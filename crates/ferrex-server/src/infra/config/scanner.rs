@@ -41,11 +41,19 @@ pub struct ScannerConfig {
     /// declares the bulk scan complete. Shorter windows flip to maintenance
     /// faster; longer windows help when the filesystem reports changes slowly.
     pub quiescence_window_ms: u64,
-    /// File extensions treated as video assets by the filesystem watcher.
-    /// Defaults mirror the core's built-in allow-list so future user overrides
-    /// can flow through without diverging behaviour.
+    /// File extensions treated as video assets by the filesystem watcher and
+    /// manifest layout contract. Defaults mirror the core's built-in allow-list
+    /// so future user overrides can flow through without diverging behaviour.
     #[serde(default = "default_video_extensions")]
     pub video_extensions: Vec<String>,
+    /// Video/temp extensions that should be deliberately ignored even if they
+    /// otherwise resemble media candidates, for example `part` or `download`.
+    #[serde(default)]
+    pub ignored_extensions: Vec<String>,
+    /// Shell-style path patterns skipped before layout classification, for
+    /// example `**/.staging/**` for downloader work directories.
+    #[serde(default)]
+    pub ignored_path_patterns: Vec<String>,
 }
 
 impl Default for ScannerConfig {
@@ -64,6 +72,8 @@ impl Default for ScannerConfig {
             library_actor_max_outstanding_jobs: 32,
             quiescence_window_ms: 5_000,
             video_extensions: default_video_extensions(),
+            ignored_extensions: Vec::new(),
+            ignored_path_patterns: Vec::new(),
         }
     }
 }
