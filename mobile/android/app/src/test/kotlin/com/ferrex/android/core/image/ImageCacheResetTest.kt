@@ -11,7 +11,8 @@ class ImageCacheResetTest {
     @Test
     fun scopedClearerInvalidatesManifestMetadataAndImageLoaderState() {
         val manifest = FakeImageCacheClearer()
-        val loader = FakeScopedImageLoaderClearer()
+        val invalidations = ScopedImageLoaderInvalidations()
+        val loader = FakeScopedImageLoaderClearer(invalidations)
         val clearer = ScopedImageCacheClearer(manifest, loader)
         val key = ImageRequestKey(UUID(0L, 1L).toString(), BrowseImageCategory.Poster)
 
@@ -21,6 +22,8 @@ class ImageCacheResetTest {
         assertEquals(listOf(scope to listOf(key)), manifest.selectedClears)
         assertEquals(listOf(scope), manifest.allClears)
         assertEquals(listOf(scope, scope), loader.loaderClears)
+        assertEquals(2L, invalidations.generationFor(scope))
+        assertEquals(mapOf(scope.directoryName to 2L), invalidations.generations.value)
     }
 
     private class FakeImageCacheClearer : ImageCacheClearer {
@@ -36,11 +39,14 @@ class ImageCacheResetTest {
         }
     }
 
-    private class FakeScopedImageLoaderClearer : ScopedImageLoaderClearer {
+    private class FakeScopedImageLoaderClearer(
+        private val invalidations: ScopedImageLoaderInvalidations,
+    ) : ScopedImageLoaderClearer {
         val loaderClears = mutableListOf<ServerCacheScope>()
 
         override fun clearImageLoaderState(scope: ServerCacheScope) {
             loaderClears += scope
+            invalidations.invalidate(scope)
         }
     }
 }

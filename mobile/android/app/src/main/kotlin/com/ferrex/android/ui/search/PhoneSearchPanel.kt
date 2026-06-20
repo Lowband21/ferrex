@@ -42,6 +42,7 @@ import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
 import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.rememberScopedImageLoader
 import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
@@ -105,7 +106,7 @@ fun PhoneSearchPanel(
             .mapNotNull { it.imageKey }
             .distinct()
     }
-    val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
     val resolutions = rememberVisibleImageResolutionState(
         scope = scope,
         imageRepository = imageRepository,

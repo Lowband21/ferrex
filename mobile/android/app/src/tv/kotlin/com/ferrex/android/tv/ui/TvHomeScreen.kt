@@ -51,6 +51,7 @@ import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.navigation.PlaybackRouteContractSaver
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
+import com.ferrex.android.ui.components.rememberScopedImageLoader
 import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -208,7 +209,7 @@ fun TvHomeScreen(
     val shelves = remember(movieLibraries, seriesLibraries) {
         LibraryBrowseModels.homeShelves(movieLibraries, seriesLibraries)
     }
-    val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
 
     val detailScreen = childScreen as? TvHomeChild.Detail
     val detailResult = remember(repositoryState, detailScreen?.route) {

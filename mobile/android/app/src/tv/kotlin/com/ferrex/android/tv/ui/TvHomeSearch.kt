@@ -55,6 +55,7 @@ import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvFocusableSurface
 import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
 import com.ferrex.android.ui.components.FerrexAsyncImage
+import com.ferrex.android.ui.components.rememberScopedImageLoader
 import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
@@ -108,7 +109,7 @@ internal fun TvSearchScreen(
     val visibleKeys = remember(rows) {
         rows.filterIsInstance<SearchResultRow.Resolved>().mapNotNull { it.imageKey }.distinctBy { it.cacheKey }.take(SEARCH_IMAGE_LOOKUP_LIMIT)
     }
-    val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
     val resolutions = rememberVisibleImageResolutionState(
         scope = scope,
         imageRepository = imageRepository,

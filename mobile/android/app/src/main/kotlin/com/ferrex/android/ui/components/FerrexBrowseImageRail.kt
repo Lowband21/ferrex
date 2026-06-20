@@ -56,7 +56,7 @@ fun FerrexBrowseImageRail(
             .filter { it in primaryKeys }
             .distinct()
     }
-    val imageLoader = remember(imagePipeline, scope) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
     val visibleImageState = rememberVisibleImageResolutionState(
         scope = scope,
         imageRepository = imageRepository,

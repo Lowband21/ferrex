@@ -115,6 +115,7 @@ import com.ferrex.android.ui.components.FerrexMobileMediaCard
 import com.ferrex.android.ui.components.FerrexMobileMediaGrid
 import com.ferrex.android.ui.components.FerrexMobileMediaRail
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.rememberScopedImageLoader
 import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.components.MobileMediaCardLayout
 import com.ferrex.android.ui.components.MobileMediaCardState
@@ -304,7 +305,7 @@ fun PhoneHomeScreen(
     val shelves = remember(movieLibraries, seriesLibraries) {
         LibraryBrowseModels.homeShelves(movieLibraries, seriesLibraries)
     }
-    val imageLoader = remember(imagePipeline, scope) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
     val detailResult = remember(repositoryState, selectedDetailRoute) {
         selectedDetailRoute?.let { DetailCache.resolve(repositoryState, it) }
     }
