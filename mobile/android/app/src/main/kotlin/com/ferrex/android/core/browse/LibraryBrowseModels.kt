@@ -72,6 +72,8 @@ data class LibraryMediaCard(
     val publicFallbackPath: String?,
     val releaseDate: String?,
     val secondarySortMillis: Long? = null,
+    val backdropKey: ImageRequestKey? = null,
+    val backdropFallbackPath: String? = null,
 )
 
 data class HomeShelf(
@@ -161,6 +163,9 @@ object LibraryBrowseModels {
             val imageKey = details?.primaryPosterIid?.toUuidString()?.validUuidOrNull()?.let {
                 ImageRequestKey(it, BrowseImageCategory.Poster)
             }
+            val backdropKey = details?.primaryBackdropIid?.toUuidString()?.validUuidOrNull()?.let {
+                ImageRequestKey(it, BrowseImageCategory.Backdrop)
+            }
             add(
                 LibraryMediaCard(
                     stableKey = "movie:$libraryId:$mediaId",
@@ -176,6 +181,8 @@ object LibraryBrowseModels {
                     imageKey = imageKey,
                     publicFallbackPath = details?.posterPath,
                     releaseDate = releaseDate,
+                    backdropKey = backdropKey,
+                    backdropFallbackPath = details?.backdropPath,
                 ),
             )
         }
@@ -194,6 +201,9 @@ object LibraryBrowseModels {
             val imageKey = details?.primaryPosterIid?.toUuidString()?.validUuidOrNull()?.let {
                 ImageRequestKey(it, BrowseImageCategory.Poster)
             }
+            val backdropKey = details?.primaryBackdropIid?.toUuidString()?.validUuidOrNull()?.let {
+                ImageRequestKey(it, BrowseImageCategory.Backdrop)
+            }
             add(
                 LibraryMediaCard(
                     stableKey = "series:$libraryId:$mediaId",
@@ -210,6 +220,8 @@ object LibraryBrowseModels {
                     publicFallbackPath = details?.posterPath,
                     releaseDate = firstAirDate,
                     secondarySortMillis = series.discoveredAt?.millis ?: series.createdAt?.millis,
+                    backdropKey = backdropKey,
+                    backdropFallbackPath = details?.backdropPath,
                 ),
             )
         }

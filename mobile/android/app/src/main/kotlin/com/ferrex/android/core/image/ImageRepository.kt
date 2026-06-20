@@ -14,13 +14,25 @@ interface ImageCacheClearer {
     fun clearAllImages(scope: ServerCacheScope)
 }
 
+interface ImageResolver {
+    suspend fun resolveImages(
+        scope: ServerCacheScope,
+        requestedKeys: Collection<ImageRequestKey>,
+    ): Map<ImageRequestKey, ImageResolution>
+
+    suspend fun retryPendingOrFailed(
+        scope: ServerCacheScope,
+        visibleKeys: Collection<ImageRequestKey>,
+    ): Map<ImageRequestKey, ImageResolution>
+}
+
 class ImageRepository(
     private val transport: ImageManifestTransport,
     private val cache: ImageDiskCache,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clockMillis: () -> Long = { System.currentTimeMillis() },
-) : ImageCacheClearer {
-    suspend fun resolveImages(
+) : ImageCacheClearer, ImageResolver {
+    override suspend fun resolveImages(
         scope: ServerCacheScope,
         requestedKeys: Collection<ImageRequestKey>,
     ): Map<ImageRequestKey, ImageResolution> = withContext(ioDispatcher) {
@@ -28,7 +40,7 @@ class ImageRepository(
         val invalid = keys.filter { it.iid.toJavaUuidOrNull() == null }
             .associateWith { key -> ImageResolution.Placeholder(key, "Image iid is not a valid UUID") as ImageResolution }
         val valid = keys.filter { it.iid.toJavaUuidOrNull() != null }
-        invalid + refreshManifest(scope, valid)
+        invalid + refreshManifest(scope, valid, ImageManifestBatchKind.Resolve)
     }
 
     /**
@@ -36,7 +48,7 @@ class ImageRepository(
      * visible-key snapshot. Ready images stay cached and no OkHttp thread sleeps
      * while waiting for server-side cache fills.
      */
-    suspend fun retryPendingOrFailed(
+    override suspend fun retryPendingOrFailed(
         scope: ServerCacheScope,
         visibleKeys: Collection<ImageRequestKey>,
     ): Map<ImageRequestKey, ImageResolution> = withContext(ioDispatcher) {
@@ -49,7 +61,7 @@ class ImageRepository(
                 ManifestCacheRead.Missing -> true
             }
         }
-        val refreshed = if (retryKeys.isEmpty()) emptyMap() else refreshManifest(scope, retryKeys)
+        val refreshed = if (retryKeys.isEmpty()) emptyMap() else refreshManifest(scope, retryKeys, ImageManifestBatchKind.Retry)
         distinct.associateWith { key ->
             if (key.iid.toJavaUuidOrNull() == null) {
                 ImageResolution.Placeholder(key, "Image iid is not a valid UUID")
@@ -70,12 +82,19 @@ class ImageRepository(
     private suspend fun refreshManifest(
         scope: ServerCacheScope,
         keys: Collection<ImageRequestKey>,
+        batchKind: ImageManifestBatchKind,
     ): Map<ImageRequestKey, ImageResolution> {
         val distinct = keys.distinct()
         if (distinct.isEmpty()) return emptyMap()
         return when (val manifest = transport.fetchManifest(distinct)) {
-            is LibrarySyncResult.Success -> mergeManifest(scope, distinct, manifest.value)
-            is LibrarySyncResult.Failure -> staleOrFailure(scope, distinct, manifest.error)
+            is LibrarySyncResult.Success -> {
+                cache.recordManifestBatchSuccess(scope, batchKind, distinct.size, manifest.value)
+                mergeManifest(scope, distinct, manifest.value)
+            }
+            is LibrarySyncResult.Failure -> {
+                cache.recordManifestBatchFailure(scope, batchKind, distinct.size, manifest.error)
+                staleOrFailure(scope, distinct, manifest.error)
+            }
         }
     }
 
@@ -85,6 +104,7 @@ class ImageRepository(
         records: List<ImageManifestRecord>,
     ): Map<ImageRequestKey, ImageResolution> {
         val byKey = records.associateBy { it.key }
+        cache.clearStaleOffline(scope)
         return requestedKeys.associateWith { key ->
             val record = byKey[key]
                 ?: return@associateWith ImageResolution.Failed(

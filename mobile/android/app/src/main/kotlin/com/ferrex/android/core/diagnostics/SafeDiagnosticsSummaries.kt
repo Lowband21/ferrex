@@ -103,7 +103,34 @@ object SafeCacheDiagnostics {
         manifestEntryFiles = manifestEntryFiles,
         coilBlobBytes = coilBlobBytes,
         quarantineFileCount = quarantineFileCount,
+        quarantineReasonFileCount = quarantineReasonFileCount,
+        lastQuarantineEpochMs = lastQuarantineEpochMs,
         staleOfflineMarkerPresent = staleOfflineMarkerPresent,
+        manifestStatus = ImageManifestStatusDiagnosticsSummary(
+            readyCount = manifestStatus.readyCount,
+            pendingCount = manifestStatus.pendingCount,
+            failedCount = manifestStatus.failedCount,
+            staleCount = manifestStatus.staleCount,
+            corruptCount = manifestStatus.corruptCount,
+        ),
+        lastManifestBatch = lastManifestBatch?.let { batch ->
+            ImageManifestBatchDiagnosticsSummary(
+                lastOutcome = batch.lastOutcome,
+                lastKind = batch.lastKind,
+                lastRequestEpochMs = batch.lastRequestEpochMs,
+                lastSuccessEpochMs = batch.lastSuccessEpochMs,
+                lastFailureEpochMs = batch.lastFailureEpochMs,
+                lastRetryEpochMs = batch.lastRetryEpochMs,
+                lastRequestedKeyCount = batch.lastRequestedKeyCount,
+                lastResponseRecordCount = batch.lastResponseRecordCount,
+                lastReadyCount = batch.lastReadyCount,
+                lastPendingCount = batch.lastPendingCount,
+                lastFailedCount = batch.lastFailedCount,
+                lastFailureKind = batch.lastFailureKind,
+                lastFailureClassification = batch.lastFailureClassification,
+                lastFailureHttpCode = batch.lastFailureHttpCode,
+            )
+        },
     )
 
     private fun LibraryFreshness.toCacheHealthDiagnostics(selectedLibraryId: String?): CacheHealthDiagnosticsSummary {

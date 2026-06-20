@@ -5,6 +5,7 @@ import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.ferrex.android.core.library.ServerCacheScope
+import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
 
@@ -19,8 +20,10 @@ class FerrexImagePipeline(
     private val context: Context,
     private val authenticatedHttpClient: OkHttpClient,
     private val imageDiskCache: ImageDiskCache,
-) {
+    private val loaderInvalidations: ScopedImageLoaderInvalidations = ScopedImageLoaderInvalidations(),
+) : ScopedImageLoaderClearer {
     private val loaders = ConcurrentHashMap<String, ImageLoader>()
+    val imageLoaderGenerations: StateFlow<Map<String, Long>> = loaderInvalidations.generations
 
     fun imageLoader(scope: ServerCacheScope): ImageLoader = loaders.getOrPut(scope.directoryName) {
         ImageLoader.Builder(context.applicationContext)
@@ -40,8 +43,14 @@ class FerrexImagePipeline(
             .build()
     }
 
-    fun clear(scope: ServerCacheScope) {
+    override fun clearImageLoaderState(scope: ServerCacheScope) {
         loaders.remove(scope.directoryName)?.shutdown()
+        imageDiskCache.clearCoilDiskCache(scope)
+        loaderInvalidations.invalidate(scope)
+    }
+
+    fun clear(scope: ServerCacheScope) {
+        clearImageLoaderState(scope)
         imageDiskCache.clearAll(scope)
     }
 

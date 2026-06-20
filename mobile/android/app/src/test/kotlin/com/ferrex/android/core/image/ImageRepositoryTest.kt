@@ -178,6 +178,78 @@ class ImageRepositoryTest {
     }
 
     @Test
+    fun retryQuarantinesCorruptMetadataAndRefreshesReadyManifest() = runTest {
+        val fixture = Fixture()
+        val image = key(54, BrowseImageCategory.Poster)
+        val manifestFile = fixture.cache.debugManifestFile(fixture.scope, image)
+        manifestFile.parentFile?.mkdirs()
+        manifestFile.writeText("iid=${image.iid}\ncategory=poster\nstatus=ready\n")
+        fixture.transport.result = LibrarySyncResult.Success(
+            listOf(ImageManifestRecord(image, ManifestImageStatus.Ready("recovered-token"))),
+        )
+
+        val retried = fixture.repository.retryPendingOrFailed(fixture.scope, listOf(image))
+
+        assertEquals(listOf(listOf(image)), fixture.transport.requested)
+        assertEquals("recovered-token", (retried[image] as ImageResolution.Ready).token)
+        assertTrue(fixture.cache.quarantinedManifestFiles(fixture.scope).isNotEmpty())
+        val healed = fixture.cache.readManifestEntry(fixture.scope, image) as ManifestCacheRead.Valid
+        assertEquals(ManifestImageStatus.Ready("recovered-token"), healed.record.status)
+    }
+
+    @Test
+    fun diagnosticsCountImageManifestStatusesStaleQuarantineAndRetryBatch() = runTest {
+        val fixture = Fixture()
+        val ready = key(55, BrowseImageCategory.Poster)
+        val pending = key(56, BrowseImageCategory.Backdrop)
+        val failed = key(57, BrowseImageCategory.Episode)
+        val quarantined = key(58, BrowseImageCategory.Profile)
+        val corrupt = key(59, BrowseImageCategory.Poster)
+        fixture.cache.writeManifestEntry(fixture.scope, ImageManifestRecord(ready, ManifestImageStatus.Ready("ready-token")))
+        fixture.cache.writeManifestEntry(fixture.scope, ImageManifestRecord(pending, ManifestImageStatus.Pending(1_000)))
+        fixture.cache.writeManifestEntry(fixture.scope, ImageManifestRecord(failed, ManifestImageStatus.Failed("not available")))
+        fixture.cache.debugManifestFile(fixture.scope, quarantined).apply {
+            parentFile?.mkdirs()
+            writeText("iid=${quarantined.iid}\ncategory=profile\nstatus=ready\n")
+        }
+        assertTrue(fixture.cache.readManifestEntry(fixture.scope, quarantined) is ManifestCacheRead.Corrupt)
+        fixture.cache.debugManifestFile(fixture.scope, corrupt).apply {
+            parentFile?.mkdirs()
+            writeText("iid=${corrupt.iid}\ncategory=poster\nstatus=ready\n")
+        }
+        fixture.transport.result = LibrarySyncResult.Failure(LibrarySyncFailure.Network("offline"))
+
+        fixture.repository.resolveImages(fixture.scope, listOf(ready))
+        val stale = fixture.cache.diagnosticSnapshot(fixture.scope)
+
+        assertTrue(stale.staleOfflineMarkerPresent)
+        assertEquals(1, stale.manifestStatus.readyCount)
+        assertEquals(1, stale.manifestStatus.pendingCount)
+        assertEquals(1, stale.manifestStatus.failedCount)
+        assertEquals(3, stale.manifestStatus.staleCount)
+        assertEquals(1, stale.manifestStatus.corruptCount)
+        assertEquals(1, stale.quarantineFileCount)
+        assertEquals(1, stale.quarantineReasonFileCount)
+        assertEquals("failure", stale.lastManifestBatch?.lastOutcome)
+        assertEquals("Network", stale.lastManifestBatch?.lastFailureKind)
+
+        fixture.transport.result = LibrarySyncResult.Success(
+            listOf(ImageManifestRecord(pending, ManifestImageStatus.Ready("pending-healed"))),
+        )
+        fixture.repository.retryPendingOrFailed(fixture.scope, listOf(ready, pending))
+        val healed = fixture.cache.diagnosticSnapshot(fixture.scope)
+
+        assertFalse(healed.staleOfflineMarkerPresent)
+        assertEquals(2, healed.manifestStatus.readyCount)
+        assertEquals(0, healed.manifestStatus.pendingCount)
+        assertEquals("success", healed.lastManifestBatch?.lastOutcome)
+        assertEquals("retry", healed.lastManifestBatch?.lastKind)
+        assertNotNull(healed.lastManifestBatch?.lastRetryEpochMs)
+        assertEquals(1, healed.lastManifestBatch?.lastRequestedKeyCount)
+        assertEquals(1, healed.lastManifestBatch?.lastReadyCount)
+    }
+
+    @Test
     fun selectedAndAllImageCacheClearRemoveMetadataAndCoilBlobs() {
         val fixture = Fixture()
         val first = key(60, BrowseImageCategory.Poster)

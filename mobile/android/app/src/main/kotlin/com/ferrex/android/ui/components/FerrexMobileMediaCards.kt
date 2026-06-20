@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
@@ -370,6 +372,7 @@ fun <T> FerrexMobileMediaGrid(
     itemStableId: (T) -> String,
     columns: GridCells,
     modifier: Modifier = Modifier,
+    state: LazyGridState? = null,
     testTag: String? = null,
     contentDescription: String? = null,
     contentPadding: PaddingValues = PaddingValues(FerrexDesignTokens.Space.None),
@@ -378,8 +381,10 @@ fun <T> FerrexMobileMediaGrid(
     itemContent: @Composable (item: T, identity: MediaRailItemIdentity) -> Unit,
 ) {
     val identifiedItems = remember(gridKey, items) { items.withRailIdentities(gridKey, itemStableId) }
+    val gridState = state ?: rememberLazyGridState()
     LazyVerticalGrid(
         columns = columns,
+        state = gridState,
         modifier = modifier
             .fillMaxWidth()
             .then(if (testTag == null) Modifier else Modifier.testTag(testTag))

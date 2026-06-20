@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -84,6 +85,7 @@ internal fun TvLibraryGridScreen(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     focusRestorer: TvFocusRestorer,
+    gridState: LazyGridState,
     onSelect: (LibraryMediaCard) -> Unit,
     onSyncSelected: () -> Unit,
     onRetryAll: () -> Unit,
@@ -186,6 +188,7 @@ internal fun TvLibraryGridScreen(
                         imageLoader = imageLoader,
                         scope = scope,
                         focusRestorer = focusRestorer,
+                        gridState = gridState,
                         autoFocus = preferredSurface == TvGridFocusPolicy.SURFACE_CARDS,
                         onSelect = onSelect,
                         modifier = Modifier
@@ -574,6 +577,7 @@ internal fun TvPosterGrid(
     imageLoader: ImageLoader?,
     scope: ServerCacheScope,
     focusRestorer: TvFocusRestorer,
+    gridState: LazyGridState,
     autoFocus: Boolean,
     onSelect: (LibraryMediaCard) -> Unit,
     modifier: Modifier = Modifier,
@@ -599,6 +603,7 @@ internal fun TvPosterGrid(
     val gridSpec = FerrexDesignTokens.DenseLibraryGrid.tv
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = gridSpec.minCellWidth),
+        state = gridState,
         modifier = modifier
             .fillMaxWidth()
             .testTag(FerrexQaTags.Tv.surface(TvGridFocusPolicy.SURFACE_CARDS)),

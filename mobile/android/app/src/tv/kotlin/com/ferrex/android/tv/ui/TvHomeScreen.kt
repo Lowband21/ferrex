@@ -1,8 +1,10 @@
 package com.ferrex.android.tv.ui
 
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,6 +17,7 @@ import com.ferrex.android.core.auth.ConnectionRecoveryRefreshGate
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.auth.connectionRecoveryUi
 import com.ferrex.android.core.browse.BrowseMediaType
+import com.ferrex.android.core.browse.HomeBackdropModels
 import com.ferrex.android.core.browse.HomeLibraryTab
 import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.LibraryIndexResult
@@ -26,8 +29,7 @@ import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
-import com.ferrex.android.core.image.ImageRequestKey
-import com.ferrex.android.core.image.ImageResolution
+import com.ferrex.android.core.image.VisibleImageRequestPlanner
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryKind
@@ -53,6 +55,8 @@ import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.navigation.PlaybackRouteContractSaver
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
+import com.ferrex.android.ui.components.rememberScopedImageLoader
+import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -93,6 +97,10 @@ fun TvHomeScreen(
     val homeFocusRestorer = rememberTvFocusRestorer(TvHomeFocusPolicy.SCREEN_HOME)
     val gridFocusRestorer = rememberTvFocusRestorer(TvGridFocusPolicy.SCREEN_GRID)
     val searchFocusRestorer = rememberTvFocusRestorer(TvSearchFocusPolicy.SCREEN_SEARCH)
+    val libraryGridState = rememberLazyGridState()
+    val libraryGridVisibleIndices by remember {
+        derivedStateOf { libraryGridState.layoutInfo.visibleItemsInfo.map { it.index } }
+    }
 
     var childScreen by remember { mutableStateOf<TvHomeChild?>(null) }
     var searchQuery by remember(scope.directoryName) { mutableStateOf("") }
@@ -209,7 +217,7 @@ fun TvHomeScreen(
     val shelves = remember(movieLibraries, seriesLibraries) {
         LibraryBrowseModels.homeShelves(movieLibraries, seriesLibraries)
     }
-    val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
 
     val detailScreen = childScreen as? TvHomeChild.Detail
     val detailResult = remember(repositoryState, detailScreen?.route) {
@@ -241,27 +249,39 @@ fun TvHomeScreen(
     val gridCardsForImages = when ((childScreen as? TvHomeChild.Grid)?.tab ?: selectedTab) {
         HomeLibraryTab.Movies -> indexedMovieCards.cards
         HomeLibraryTab.Series -> selectedSeriesCards
+    }.takeIf { childScreen is TvHomeChild.Grid }.orEmpty()
+    val visibleGridImageKeys = remember(gridCardsForImages, libraryGridVisibleIndices) {
+        VisibleImageRequestPlanner.visibleWindowKeys(
+            items = gridCardsForImages,
+            visibleIndices = libraryGridVisibleIndices,
+            overscanBefore = GRID_IMAGE_OVERSCAN_ITEMS,
+        ) { it.imageKey }
     }
-    val browseImageKeys = remember(continueState, shelves, gridCardsForImages, childScreen) {
+    val gridImageKeys = remember(gridCardsForImages, visibleGridImageKeys) {
+        VisibleImageRequestPlanner.mergeVisibleWithCappedPrefetch(
+            visibleKeys = visibleGridImageKeys,
+            prefetchKeys = gridCardsForImages.mapNotNull { it.imageKey },
+            prefetchLimit = GRID_IMAGE_PREFETCH_LIMIT,
+        )
+    }
+    val browseImageKeys = remember(continueState, shelves, gridCardsForImages, gridImageKeys) {
         buildList {
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromShelves(shelves)).forEach(::add)
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromCards(gridCardsForImages)).forEach(::add)
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
-            if (childScreen is TvHomeChild.Grid) {
-                gridCardsForImages.take(GRID_IMAGE_LOOKUP_LIMIT).mapNotNullTo(this) { it.imageKey }
-            }
-        }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT)
+            addAll(gridImageKeys)
+        }.distinctBy { it.cacheKey }
     }
     val imageKeys = remember(browseImageKeys, detailResult) {
         (DetailCache.imageKeys(detailResult) + browseImageKeys).distinctBy { it.cacheKey }.toSet()
     }
-    var imageResolutions by remember(scope.directoryName) { mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap()) }
-    LaunchedEffect(imageRepository, scope, imageKeys) {
-        imageResolutions = if (imageRepository != null && imageKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, imageKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val visibleImageState = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = imageKeys,
+    )
+    val imageResolutions = visibleImageState.resolutions
 
     fun openDetail(route: MediaRouteArgs, returnTo: TvReturnTarget) {
         playbackNotice = null
@@ -364,7 +384,7 @@ fun TvHomeScreen(
             }
             libraryRepository?.refreshLibraries(scope, selectedLibraryId)
             if (imageRepository != null && imageKeys.isNotEmpty()) {
-                imageResolutions = imageRepository.retryPendingOrFailed(scope, imageKeys)
+                visibleImageState.retryVisibleNow()
             }
             continueWatchingRepository?.refresh()
             refreshVisibleWatchState(detailResult)
@@ -467,6 +487,7 @@ fun TvHomeScreen(
             imageLoader = imageLoader,
             scope = scope,
             focusRestorer = gridFocusRestorer,
+            gridState = libraryGridState,
             onSelect = { openDetail(it.route, TvReturnTarget.Grid(screen.tab)) },
             libraryFreshness = when (screen.tab) {
                 HomeLibraryTab.Movies -> selectedMovieFreshness

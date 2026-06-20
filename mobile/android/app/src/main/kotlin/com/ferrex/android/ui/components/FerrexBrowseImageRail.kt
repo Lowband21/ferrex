@@ -12,12 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -25,14 +20,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
-import com.ferrex.android.core.image.ImageRequestKey
 import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.image.PosterOnlyIidFallback
 import com.ferrex.android.core.image.TmdbImageFallbackPolicy
 import com.ferrex.android.core.library.BrowseImageCard
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
-import kotlinx.coroutines.launch
 
 private const val PRODUCT_COPY_ALLOWS_PUBLIC_CDN_IMAGES = false
 
@@ -63,19 +56,13 @@ fun FerrexBrowseImageRail(
             .filter { it in primaryKeys }
             .distinct()
     }
-    val imageLoader = remember(imagePipeline, scope) { imagePipeline?.imageLoader(scope) }
-    var resolutions by remember(scope.directoryName, visibleKeys) {
-        mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap())
-    }
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(imageRepository, scope, visibleKeys) {
-        resolutions = if (imageRepository != null && visibleKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, visibleKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val imageLoader = rememberScopedImageLoader(imagePipeline, scope)
+    val visibleImageState = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = visibleKeys,
+    )
+    val resolutions = visibleImageState.resolutions
 
     if (cards.isEmpty()) return
 
@@ -144,11 +131,7 @@ fun FerrexBrowseImageRail(
         Button(
             modifier = Modifier.padding(top = 12.dp),
             enabled = visibleKeys.isNotEmpty(),
-            onClick = {
-                coroutineScope.launch {
-                    resolutions = imageRepository.retryPendingOrFailed(scope, visibleKeys)
-                }
-            },
+            onClick = visibleImageState.retryVisibleNow,
         ) {
             Text("Retry visible images")
         }
