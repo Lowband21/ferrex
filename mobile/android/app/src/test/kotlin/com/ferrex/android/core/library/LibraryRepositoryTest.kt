@@ -14,6 +14,14 @@ import ferrex.media.Media
 import ferrex.media.MediaVariant
 import ferrex.media.MovieReference
 import ferrex.media.SeriesReference
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,7 +31,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.util.UUID
 
-@OptIn(ExperimentalUnsignedTypes::class)
+@OptIn(ExperimentalUnsignedTypes::class, ExperimentalCoroutinesApi::class)
 class LibraryRepositoryTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
@@ -102,8 +110,10 @@ class LibraryRepositoryTest {
                 ),
             )
         }
-        fixture.transport.seriesFetches[first] = LibrarySyncResult.Success(seriesBundleFetchResponse(first, version = 11L, itemCount = 1))
-        fixture.transport.seriesFetches[second] = LibrarySyncResult.Success(seriesBundleFetchResponse(second, version = 12L, itemCount = 1))
+        val chunk = listOf(first, second).sorted()
+        fixture.transport.seriesChunkFetches[chunk] = LibrarySyncResult.Success(
+            seriesBundleFetchResponse(chunk.map { SeriesBundleSpec(it, if (it == first) 11L else 12L, itemCount = 1) }),
+        )
 
         val state = fixture.repository.syncSeriesLibrary(fixture.scope, library)
 
@@ -112,6 +122,179 @@ class LibraryRepositoryTest {
         assertEquals(listOf(first, second), state.seriesAccessor?.seriesIds)
         assertEquals(2, state.seriesAccessor?.bundleCount)
         assertTrue(state.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun largeSeriesSyncFetchesBundlesInBoundedMultiFetchChunks() = runTest {
+        val fixture = Fixture()
+        val library = seriesLibrary()
+        val ids = (0 until LibraryRepository.SERIES_BUNDLE_FETCH_CHUNK_SIZE * 2 + 3).map { uuid(100 + it).toString() }
+        val sortedIds = ids.sorted()
+        val versions = sortedIds.withIndex().associate { (index, id) -> id to 1000L + index }
+        val expectedChunks = sortedIds.chunked(LibraryRepository.SERIES_BUNDLE_FETCH_CHUNK_SIZE)
+        fixture.transport.seriesSync = { cached ->
+            fixture.capturedSeriesVersions = cached
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = ids.reversed(),
+                    deletedSeriesIds = emptyList(),
+                    serverVersions = versions,
+                ),
+            )
+        }
+        expectedChunks.forEach { chunk ->
+            fixture.transport.seriesChunkFetches[chunk] = LibrarySyncResult.Success(
+                seriesBundleFetchResponse(chunk.map { SeriesBundleSpec(it, versions.getValue(it), itemCount = 1) }),
+            )
+        }
+
+        val state = fixture.repository.syncSeriesLibrary(fixture.scope, library)
+
+        assertEquals(emptyMap<String, Long>(), fixture.capturedSeriesVersions)
+        assertEquals(expectedChunks, fixture.transport.requestedSeriesBundleChunks)
+        assertTrue(fixture.transport.requestedSeriesBundleChunks.all { it.size <= LibraryRepository.SERIES_BUNDLE_FETCH_CHUNK_SIZE })
+        assertEquals(sortedIds, state.seriesAccessor?.seriesIds)
+        assertEquals(sortedIds.size, state.seriesAccessor?.bundleCount)
+        assertTrue(state.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun transientSeriesChunkParseFailurePreservesProgressAndRetriesOnlyMissingBundles() = runTest {
+        val fixture = Fixture()
+        val library = seriesLibrary()
+        val ids = (0 until LibraryRepository.SERIES_BUNDLE_FETCH_CHUNK_SIZE + 2).map { uuid(150 + it).toString() }
+        val sortedIds = ids.sorted()
+        val versions = sortedIds.withIndex().associate { (index, id) -> id to 2000L + index }
+        val expectedChunks = sortedIds.chunked(LibraryRepository.SERIES_BUNDLE_FETCH_CHUNK_SIZE)
+        val firstChunk = expectedChunks[0]
+        val secondChunk = expectedChunks[1]
+        fixture.transport.seriesSync = { cached ->
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = sortedIds.filter { cached[it] != versions.getValue(it) },
+                    deletedSeriesIds = emptyList(),
+                    serverVersions = versions,
+                ),
+            )
+        }
+        fixture.transport.seriesChunkFetches[firstChunk] = LibrarySyncResult.Success(
+            seriesBundleFetchResponse(firstChunk.map { SeriesBundleSpec(it, versions.getValue(it), itemCount = 1) }),
+        )
+        fixture.transport.seriesChunkFetches[secondChunk] = LibrarySyncResult.Success(
+            seriesBundleFetchResponse(listOf(SeriesBundleSpec(secondChunk.first(), versions.getValue(secondChunk.first()), itemCount = 1))),
+        )
+
+        val incompleteState = fixture.repository.syncSeriesLibrary(fixture.scope, library)
+
+        val incomplete = incompleteState.freshness as LibraryFreshness.SeriesCacheIncomplete
+        assertEquals(firstChunk.size, incomplete.completedBundles)
+        assertEquals(sortedIds.size, incomplete.expectedBundles)
+        assertEquals(secondChunk, incomplete.remainingBundleIds)
+        assertEquals(RetryClassification.InvalidResponse, incomplete.classification)
+        assertEquals(firstChunk.toSet(), fixture.cache.cachedSeriesBundleVersions(fixture.scope, library.id).keys)
+
+        fixture.transport.requestedSeriesBundles.clear()
+        fixture.transport.requestedSeriesBundleChunks.clear()
+        fixture.transport.seriesChunkFetches[secondChunk] = LibrarySyncResult.Success(
+            seriesBundleFetchResponse(secondChunk.map { SeriesBundleSpec(it, versions.getValue(it), itemCount = 1) }),
+        )
+
+        val resumedState = fixture.repository.syncSeriesLibrary(fixture.scope, library)
+
+        assertEquals(listOf(secondChunk), fixture.transport.requestedSeriesBundleChunks)
+        assertEquals(sortedIds, resumedState.seriesAccessor?.seriesIds)
+        assertTrue(resumedState.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun seriesSyncPrunesDeletedBundlesAndKeepsExpectedManifestFreshOnlyWhenComplete() = runTest {
+        val fixture = Fixture()
+        val library = seriesLibrary()
+        val first = uuid(190).toString()
+        val second = uuid(191).toString()
+        val deleted = uuid(192).toString()
+        val added = uuid(193).toString()
+        fixture.cache.writeSeriesBundle(fixture.scope, library.id, first, 1L, seriesBundleFetchResponse(first, version = 1L, itemCount = 1))
+        fixture.cache.writeSeriesBundle(fixture.scope, library.id, second, 2L, seriesBundleFetchResponse(second, version = 2L, itemCount = 1))
+        fixture.cache.writeSeriesBundle(fixture.scope, library.id, deleted, 9L, seriesBundleFetchResponse(deleted, version = 9L, itemCount = 1))
+        val versions = mapOf(first to 1L, second to 2L, added to 3L)
+        fixture.transport.seriesSync = { cached ->
+            fixture.capturedSeriesVersions = cached
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = listOf(added),
+                    deletedSeriesIds = listOf(deleted),
+                    serverVersions = versions,
+                ),
+            )
+        }
+        fixture.transport.seriesFetches[added] = LibrarySyncResult.Success(seriesBundleFetchResponse(added, version = 3L, itemCount = 1))
+
+        val state = fixture.repository.syncSeriesLibrary(fixture.scope, library)
+
+        assertEquals(mapOf(first to 1L, second to 2L, deleted to 9L), fixture.capturedSeriesVersions)
+        assertEquals(listOf(added), fixture.transport.requestedSeriesBundles)
+        assertEquals(versions, fixture.cache.cachedSeriesBundleVersions(fixture.scope, library.id))
+        assertEquals(listOf(added, first, second).sorted(), state.seriesAccessor?.seriesIds)
+        assertTrue(state.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun corruptCachedSeriesBundleIsQuarantinedAndRebuiltDuringSync() = runTest {
+        val fixture = Fixture()
+        val library = seriesLibrary()
+        val seriesId = uuid(210).toString()
+        fixture.cache.writeSeriesBundle(fixture.scope, library.id, seriesId, 5L, byteArrayOf(1, 2, 3, 4, 5))
+        fixture.transport.seriesSync = { cached ->
+            fixture.capturedSeriesVersions = cached
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = emptyList(),
+                    deletedSeriesIds = emptyList(),
+                    serverVersions = mapOf(seriesId to 5L),
+                ),
+            )
+        }
+        fixture.transport.seriesFetches[seriesId] = LibrarySyncResult.Success(seriesBundleFetchResponse(seriesId, version = 5L, itemCount = 1))
+
+        val state = fixture.repository.syncSeriesLibrary(fixture.scope, library)
+
+        assertEquals(mapOf(seriesId to 5L), fixture.capturedSeriesVersions)
+        assertEquals(listOf(seriesId), fixture.transport.requestedSeriesBundles)
+        assertEquals(1, fixture.cache.quarantinedFiles(fixture.scope).size)
+        assertEquals(mapOf(seriesId to 5L), fixture.cache.cachedSeriesBundleVersions(fixture.scope, library.id))
+        assertEquals(listOf(seriesId), state.seriesAccessor?.seriesIds)
+        assertTrue(state.freshness is LibraryFreshness.Fresh)
+    }
+
+    @Test
+    fun concurrentRepositoryJobsCoalescePerScopeLibrary() = runTest {
+        val fixture = Fixture(StandardTestDispatcher(testScheduler))
+        val library = seriesLibrary()
+        val releaseSync = CompletableDeferred<Unit>()
+        var syncCalls = 0
+        fixture.transport.seriesSync = {
+            syncCalls += 1
+            releaseSync.await()
+            LibrarySyncResult.Success(
+                SeriesBundleSyncPlan(
+                    staleSeriesIds = emptyList(),
+                    deletedSeriesIds = emptyList(),
+                    serverVersions = emptyMap(),
+                ),
+            )
+        }
+
+        val first = async { fixture.repository.syncSeriesLibrary(fixture.scope, library) }
+        val second = async { fixture.repository.syncSeriesLibrary(fixture.scope, library) }
+        runCurrent()
+        assertEquals(1, syncCalls)
+
+        releaseSync.complete(Unit)
+        val states = awaitAll(first, second)
+
+        assertEquals(1, syncCalls)
+        assertTrue(states.all { it.freshness == LibraryFreshness.Empty })
     }
 
     @Test
@@ -223,11 +406,11 @@ class LibraryRepositoryTest {
         assertEquals(RetryClassification.InvalidResponse, LibrarySyncFailure.Parse("bad flatbuffer").classification)
     }
 
-    private inner class Fixture {
+    private inner class Fixture(ioDispatcher: CoroutineDispatcher = Dispatchers.IO) {
         val cache = LibraryDiskCache(temporaryFolder.newFolder("cache-${System.nanoTime()}"))
         val scope = ServerCacheScope.from("http://ferrex.local/", "user-1")
         val transport = FakeLibrarySyncTransport()
-        val repository = LibraryRepository(transport, cache)
+        val repository = LibraryRepository(transport, cache, ioDispatcher)
         var capturedMovieVersions: Map<Int, Long> = emptyMap()
         var capturedSeriesVersions: Map<String, Long> = emptyMap()
     }
@@ -235,13 +418,15 @@ class LibraryRepositoryTest {
     private class FakeLibrarySyncTransport : LibrarySyncTransport {
         val movieFetches = mutableMapOf<Int, LibrarySyncResult<ByteArray>>()
         val seriesFetches = mutableMapOf<String, LibrarySyncResult<ByteArray>>()
+        val seriesChunkFetches = mutableMapOf<List<String>, LibrarySyncResult<ByteArray>>()
         val requestedMovieBatches = mutableListOf<Int>()
         val requestedSeriesBundles = mutableListOf<String>()
+        val requestedSeriesBundleChunks = mutableListOf<List<String>>()
         var libraries: LibrarySyncResult<ByteArray> = LibrarySyncResult.Failure(LibrarySyncFailure.Network("not configured"))
         var movieSync: (Map<Int, Long>) -> LibrarySyncResult<MovieBatchSyncPlan> = {
             LibrarySyncResult.Failure(LibrarySyncFailure.Network("not configured"))
         }
-        var seriesSync: (Map<String, Long>) -> LibrarySyncResult<SeriesBundleSyncPlan> = {
+        var seriesSync: suspend (Map<String, Long>) -> LibrarySyncResult<SeriesBundleSyncPlan> = {
             LibrarySyncResult.Failure(LibrarySyncFailure.Network("not configured"))
         }
 
@@ -258,9 +443,14 @@ class LibraryRepositoryTest {
         override suspend fun syncSeriesBundles(libraryId: String, cachedVersions: Map<String, Long>): LibrarySyncResult<SeriesBundleSyncPlan> =
             seriesSync(cachedVersions)
 
-        override suspend fun fetchSeriesBundle(libraryId: String, seriesId: String): LibrarySyncResult<ByteArray> {
-            requestedSeriesBundles += seriesId
-            return seriesFetches[seriesId] ?: LibrarySyncResult.Failure(LibrarySyncFailure.Network("missing bundle"))
+        override suspend fun fetchSeriesBundles(libraryId: String, seriesIds: List<String>): LibrarySyncResult<ByteArray> {
+            requestedSeriesBundleChunks += seriesIds
+            requestedSeriesBundles += seriesIds
+            seriesChunkFetches[seriesIds]?.let { return it }
+            if (seriesIds.size == 1) {
+                return seriesFetches[seriesIds.single()] ?: LibrarySyncResult.Failure(LibrarySyncFailure.Network("missing bundle"))
+            }
+            return LibrarySyncResult.Failure(LibrarySyncFailure.Network("missing bundle chunk"))
         }
     }
 
@@ -306,16 +496,23 @@ class LibraryRepositoryTest {
             return builder.sizedByteArray()
         }
 
-        private fun seriesBundleFetchResponse(seriesId: String, version: Long, itemCount: Int): ByteArray {
-            val builder = FlatBufferBuilder(512)
-            val media = seriesMediaOffsets(builder, seriesId, itemCount)
-            val items = SeriesBundleData.createItemsVector(builder, media)
-            SeriesBundleData.startSeriesBundleData(builder)
-            SeriesBundleData.addVersion(builder, version.toULong())
-            SeriesBundleData.addItems(builder, items)
-            SeriesBundleData.addSeriesId(builder, UUID.fromString(seriesId).toFlatBufferUuid(builder))
-            val bundle = SeriesBundleData.endSeriesBundleData(builder)
-            val bundles = SeriesBundleFetchResponse.createBundlesVector(builder, intArrayOf(bundle))
+        private data class SeriesBundleSpec(val seriesId: String, val version: Long, val itemCount: Int)
+
+        private fun seriesBundleFetchResponse(seriesId: String, version: Long, itemCount: Int): ByteArray =
+            seriesBundleFetchResponse(listOf(SeriesBundleSpec(seriesId, version, itemCount)))
+
+        private fun seriesBundleFetchResponse(specs: List<SeriesBundleSpec>): ByteArray {
+            val builder = FlatBufferBuilder(512 * specs.size.coerceAtLeast(1))
+            val bundleOffsets = specs.map { spec ->
+                val media = seriesMediaOffsets(builder, spec.seriesId, spec.itemCount)
+                val items = SeriesBundleData.createItemsVector(builder, media)
+                SeriesBundleData.startSeriesBundleData(builder)
+                SeriesBundleData.addVersion(builder, spec.version.toULong())
+                SeriesBundleData.addItems(builder, items)
+                SeriesBundleData.addSeriesId(builder, UUID.fromString(spec.seriesId).toFlatBufferUuid(builder))
+                SeriesBundleData.endSeriesBundleData(builder)
+            }.toIntArray()
+            val bundles = SeriesBundleFetchResponse.createBundlesVector(builder, bundleOffsets)
             val root = SeriesBundleFetchResponse.createSeriesBundleFetchResponse(builder, bundles)
             builder.finish(root)
             return builder.sizedByteArray()

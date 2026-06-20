@@ -275,6 +275,11 @@ object LibraryBrowseModels {
             detail = "Showing ${freshness.itemCount} cached item(s): ${freshness.message}",
             isStale = true,
         )
+        is LibraryFreshness.SeriesCacheIncomplete -> LibraryStatusCopy(
+            title = "Series cache is still syncing",
+            detail = "Showing ${freshness.itemCount} cached item(s): ${freshness.message}",
+            isStale = true,
+        )
         is LibraryFreshness.CorruptRebuilding -> LibraryStatusCopy(
             title = "Cache needs rebuild",
             detail = freshness.message,

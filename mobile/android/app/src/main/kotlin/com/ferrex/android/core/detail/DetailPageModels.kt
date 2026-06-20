@@ -835,6 +835,11 @@ object DetailPageMapper {
             title = "Stale/offline library cache",
             message = "Showing $itemCount cached item(s): $message",
         )
+        is LibraryFreshness.SeriesCacheIncomplete -> DetailFreshnessNotice(
+            kind = DetailFreshnessKind.StaleOffline,
+            title = "Series cache is still syncing",
+            message = "Showing $itemCount cached item(s): $message",
+        )
         is LibraryFreshness.CorruptRebuilding -> DetailFreshnessNotice(
             kind = DetailFreshnessKind.RecoverableError,
             title = "Cache needs rebuild",

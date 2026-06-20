@@ -3,7 +3,11 @@ package com.ferrex.android.core.library
 import com.ferrex.android.core.image.ImageCacheClearer
 import com.ferrex.android.core.image.ImageRequestKey
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,8 +18,8 @@ import kotlinx.coroutines.withContext
  *
  * Movie libraries use `/api/v1/libraries/{id}/movie-batches:sync` followed by
  * per-batch `/movie-batches:fetch` requests. Series libraries use
- * `/api/v1/libraries/{id}/series-bundles:sync` followed by per-series
- * `/series-bundles:fetch` requests. The current server only exposes complete
+ * `/api/v1/libraries/{id}/series-bundles:sync` followed by bounded multi-ID
+ * `/series-bundles:fetch` chunks. The current server only exposes complete
  * series bundles, not a compact series-list endpoint, so series sync is heavier
  * by design until that endpoint exists.
  */
@@ -27,6 +31,9 @@ class LibraryRepository(
 ) {
     private val _state = MutableStateFlow(LibraryRepositoryState())
     val state: StateFlow<LibraryRepositoryState> = _state.asStateFlow()
+
+    private val libraryJobLock = Any()
+    private val activeLibraryJobs = mutableMapOf<LibrarySyncJobKey, Deferred<LibraryRepositoryState>>()
 
     fun searchFreshness(scope: ServerCacheScope): LibraryFreshness =
         if (_state.value.scope?.directoryName == scope.directoryName) _state.value.freshness else LibraryFreshness.Empty
@@ -153,6 +160,14 @@ class LibraryRepository(
         scope: ServerCacheScope,
         library: LibraryInfo,
         knownLibraries: List<LibraryInfo> = _state.value.libraries,
+    ): LibraryRepositoryState = coalescedLibraryJob(LibrarySyncJobKey(scope.directoryName, library.id, library.kind)) {
+        syncMovieLibraryUncoalesced(scope, library, knownLibraries)
+    }
+
+    private suspend fun syncMovieLibraryUncoalesced(
+        scope: ServerCacheScope,
+        library: LibraryInfo,
+        knownLibraries: List<LibraryInfo>,
     ): LibraryRepositoryState = withContext(ioDispatcher) {
         publish(
             _state.value.copy(
@@ -196,6 +211,14 @@ class LibraryRepository(
         scope: ServerCacheScope,
         library: LibraryInfo,
         knownLibraries: List<LibraryInfo> = _state.value.libraries,
+    ): LibraryRepositoryState = coalescedLibraryJob(LibrarySyncJobKey(scope.directoryName, library.id, library.kind)) {
+        syncSeriesLibraryUncoalesced(scope, library, knownLibraries)
+    }
+
+    private suspend fun syncSeriesLibraryUncoalesced(
+        scope: ServerCacheScope,
+        library: LibraryInfo,
+        knownLibraries: List<LibraryInfo>,
     ): LibraryRepositoryState = withContext(ioDispatcher) {
         publish(
             _state.value.copy(
@@ -212,25 +235,117 @@ class LibraryRepository(
         when (val sync = transport.syncSeriesBundles(library.id, cachedVersions)) {
             is LibrarySyncResult.Failure -> return@withContext publish(cachedSeriesState(scope, library, sync.error, knownLibraries))
             is LibrarySyncResult.Success -> {
-                cache.deleteSeriesBundles(scope, library.id, sync.value.deletedSeriesIds)
-                for (seriesId in sync.value.staleSeriesIds.distinct().sorted()) {
-                    when (val fetch = transport.fetchSeriesBundle(library.id, seriesId)) {
-                        is LibrarySyncResult.Failure -> return@withContext publish(cachedSeriesState(scope, library, fetch.error, knownLibraries))
+                val plan = sync.value
+                val staleIds = plan.staleSeriesIds.distinct().sorted()
+                val staleIdSet = staleIds.toSet()
+                val deletedIds = plan.deletedSeriesIds.distinct().sorted()
+                val expectedIds = expectedSeriesBundleIds(
+                    cachedIds = cachedVersions.keys,
+                    deletedIds = deletedIds,
+                    staleIds = staleIds,
+                )
+                cache.deleteSeriesBundles(scope, library.id, deletedIds)
+                val fetchedSeriesIds = mutableSetOf<String>()
+
+                var remainingIds = pendingSeriesBundleIds(
+                    scope = scope,
+                    libraryId = library.id,
+                    expectedIds = expectedIds,
+                    staleIds = staleIdSet,
+                    serverVersions = plan.serverVersions,
+                    fetchedIds = fetchedSeriesIds,
+                )
+                if (remainingIds.isNotEmpty()) {
+                    publish(
+                        seriesIncompleteState(
+                            scope = scope,
+                            library = library,
+                            knownLibraries = knownLibraries,
+                            expectedIds = expectedIds,
+                            remainingIds = remainingIds,
+                            message = "Series cache sync is incomplete.",
+                            classification = RetryClassification.Retryable,
+                        ),
+                    )
+                }
+
+                for (chunk in remainingIds.chunked(SERIES_BUNDLE_FETCH_CHUNK_SIZE)) {
+                    when (val fetch = transport.fetchSeriesBundles(library.id, chunk)) {
+                        is LibrarySyncResult.Failure -> return@withContext publish(
+                            seriesIncompleteState(
+                                scope = scope,
+                                library = library,
+                                knownLibraries = knownLibraries,
+                                expectedIds = expectedIds,
+                                remainingIds = remainingIds,
+                                message = fetch.error.message,
+                                classification = fetch.error.classification,
+                            ),
+                        )
                         is LibrarySyncResult.Success -> {
-                            val parsed = LibraryFlatBuffers.parseSeriesPayload(fetch.value.wrapFlatBuffer(), expectedSeriesId = seriesId)
+                            val parsed = validateFetchedSeriesBundles(fetch.value, chunk)
                             if (parsed.isFailure) {
+                                val failure = LibrarySyncFailure.Parse(parsed.exceptionOrNull()?.message ?: "Invalid series bundle payload")
                                 return@withContext publish(
-                                    errorState(scope, library, knownLibraries, LibrarySyncFailure.Parse(parsed.exceptionOrNull()?.message ?: "Invalid series bundle payload")),
+                                    seriesIncompleteState(
+                                        scope = scope,
+                                        library = library,
+                                        knownLibraries = knownLibraries,
+                                        expectedIds = expectedIds,
+                                        remainingIds = remainingIds,
+                                        message = failure.message,
+                                        classification = failure.classification,
+                                    ),
                                 )
                             }
-                            val version = sync.value.serverVersions[seriesId]
-                                ?: parsed.getOrThrow().firstOrNull { it.seriesId == seriesId }?.version
-                                ?: 0L
-                            cache.writeSeriesBundle(scope, library.id, seriesId, version, fetch.value)
+                            val bundles = parsed.getOrThrow()
+                            for (bundle in bundles) {
+                                val version = plan.serverVersions[bundle.seriesId] ?: bundle.version
+                                cache.writeSeriesBundle(scope, library.id, bundle.seriesId, version, fetch.value)
+                            }
+                            val fetchedIds = bundles.map { it.seriesId }
+                            fetchedSeriesIds += fetchedIds
+                            remainingIds = (remainingIds - fetchedIds.toSet()).sorted()
                         }
                     }
+                    if (remainingIds.isNotEmpty()) {
+                        publish(
+                            seriesIncompleteState(
+                                scope = scope,
+                                library = library,
+                                knownLibraries = knownLibraries,
+                                expectedIds = expectedIds,
+                                remainingIds = remainingIds,
+                                message = "Series cache sync is incomplete.",
+                                classification = RetryClassification.Retryable,
+                            ),
+                        )
+                    }
                 }
-                publish(seriesFreshState(scope, library, knownLibraries))
+
+                val finalRemainingIds = pendingSeriesBundleIds(
+                    scope = scope,
+                    libraryId = library.id,
+                    expectedIds = expectedIds,
+                    staleIds = staleIdSet,
+                    serverVersions = plan.serverVersions,
+                    fetchedIds = fetchedSeriesIds,
+                )
+                if (finalRemainingIds.isNotEmpty()) {
+                    publish(
+                        seriesIncompleteState(
+                            scope = scope,
+                            library = library,
+                            knownLibraries = knownLibraries,
+                            expectedIds = expectedIds,
+                            remainingIds = finalRemainingIds,
+                            message = "Series cache sync is incomplete.",
+                            classification = RetryClassification.Retryable,
+                        ),
+                    )
+                } else {
+                    publish(seriesFreshState(scope, library, knownLibraries, expectedIds))
+                }
             }
         }
     }
@@ -305,37 +420,193 @@ class LibraryRepository(
         }
     }
 
-    private fun seriesFreshState(scope: ServerCacheScope, library: LibraryInfo, knownLibraries: List<LibraryInfo>): LibraryRepositoryState {
+    private fun seriesFreshState(
+        scope: ServerCacheScope,
+        library: LibraryInfo,
+        knownLibraries: List<LibraryInfo>,
+        expectedIds: Set<String>? = null,
+    ): LibraryRepositoryState {
         return when (val load = loadCachedSeriesAccessor(scope, library.id)) {
-            is CacheLoad.Success -> _state.value.copy(
-                scope = scope,
-                libraries = knownLibraries.ifEmpty { listOf(library) },
-                selectedLibraryId = library.id,
-                movieAccessor = null,
-                seriesAccessor = load.accessor,
-                freshness = if (load.accessor.itemCount == 0) {
-                    LibraryFreshness.Empty
+            is CacheLoad.Success -> {
+                val missing = expectedIds?.minus(load.accessor.seriesIds.toSet()).orEmpty().sorted()
+                if (missing.isNotEmpty()) {
+                    return seriesIncompleteState(
+                        scope = scope,
+                        library = library,
+                        knownLibraries = knownLibraries,
+                        expectedIds = expectedIds.orEmpty(),
+                        remainingIds = missing,
+                        message = "Series cache sync is incomplete.",
+                        classification = RetryClassification.Retryable,
+                    )
+                }
+                _state.value.copy(
+                    scope = scope,
+                    libraries = knownLibraries.ifEmpty { listOf(library) },
+                    selectedLibraryId = library.id,
+                    movieAccessor = null,
+                    seriesAccessor = load.accessor,
+                    freshness = if (expectedIds != null && expectedIds.isNotEmpty()) {
+                        LibraryFreshness.Fresh(load.accessor.itemCount, System.currentTimeMillis())
+                    } else if (load.accessor.itemCount == 0) {
+                        LibraryFreshness.Empty
+                    } else {
+                        LibraryFreshness.Fresh(load.accessor.itemCount, System.currentTimeMillis())
+                    },
+                )
+            }
+            is CacheLoad.Empty -> {
+                val remaining = expectedIds.orEmpty().sorted()
+                if (remaining.isNotEmpty()) {
+                    seriesIncompleteState(
+                        scope = scope,
+                        library = library,
+                        knownLibraries = knownLibraries,
+                        expectedIds = expectedIds.orEmpty(),
+                        remainingIds = remaining,
+                        message = "Series cache sync is incomplete.",
+                        classification = RetryClassification.Retryable,
+                    )
                 } else {
-                    LibraryFreshness.Fresh(load.accessor.itemCount, System.currentTimeMillis())
-                },
-            )
-            is CacheLoad.Empty -> _state.value.copy(
-                scope = scope,
-                libraries = knownLibraries.ifEmpty { listOf(library) },
-                selectedLibraryId = library.id,
-                movieAccessor = null,
-                seriesAccessor = null,
-                freshness = LibraryFreshness.Empty,
-            )
-            is CacheLoad.Corrupt -> _state.value.copy(
-                scope = scope,
-                libraries = knownLibraries.ifEmpty { listOf(library) },
-                selectedLibraryId = library.id,
-                movieAccessor = null,
-                seriesAccessor = load.accessor,
-                freshness = LibraryFreshness.CorruptRebuilding(load.message, load.quarantinedFiles),
-            )
+                    _state.value.copy(
+                        scope = scope,
+                        libraries = knownLibraries.ifEmpty { listOf(library) },
+                        selectedLibraryId = library.id,
+                        movieAccessor = null,
+                        seriesAccessor = null,
+                        freshness = LibraryFreshness.Empty,
+                    )
+                }
+            }
+            is CacheLoad.Corrupt -> {
+                val parseableIds = load.accessor?.seriesIds.orEmpty().toSet()
+                val missing = expectedIds?.minus(parseableIds).orEmpty().sorted()
+                if (missing.isNotEmpty()) {
+                    seriesIncompleteState(
+                        scope = scope,
+                        library = library,
+                        knownLibraries = knownLibraries,
+                        expectedIds = expectedIds.orEmpty(),
+                        remainingIds = missing,
+                        message = load.message,
+                        classification = RetryClassification.Retryable,
+                    )
+                } else {
+                    _state.value.copy(
+                        scope = scope,
+                        libraries = knownLibraries.ifEmpty { listOf(library) },
+                        selectedLibraryId = library.id,
+                        movieAccessor = null,
+                        seriesAccessor = load.accessor,
+                        freshness = LibraryFreshness.CorruptRebuilding(load.message, load.quarantinedFiles),
+                    )
+                }
+            }
         }
+    }
+
+    private fun seriesIncompleteState(
+        scope: ServerCacheScope,
+        library: LibraryInfo,
+        knownLibraries: List<LibraryInfo>,
+        expectedIds: Set<String>,
+        remainingIds: List<String>,
+        message: String,
+        classification: RetryClassification,
+    ): LibraryRepositoryState {
+        val load = loadCachedSeriesAccessor(scope, library.id)
+        val accessor = when (load) {
+            is CacheLoad.Success -> load.accessor
+            is CacheLoad.Corrupt -> load.accessor
+            CacheLoad.Empty -> null
+        }
+        val remaining = remainingIds.distinct().sorted()
+        val completed = (expectedIds.size - remaining.size).coerceIn(0, expectedIds.size)
+        val progressMessage = if (expectedIds.isEmpty()) {
+            message
+        } else {
+            "$message Cached $completed of ${expectedIds.size} expected series bundle(s); retry will request ${remaining.size} remaining bundle(s)."
+        }
+        return _state.value.copy(
+            scope = scope,
+            libraries = knownLibraries.ifEmpty { listOf(library) },
+            selectedLibraryId = library.id,
+            movieAccessor = null,
+            seriesAccessor = accessor,
+            freshness = LibraryFreshness.SeriesCacheIncomplete(
+                message = progressMessage,
+                completedBundles = completed,
+                expectedBundles = expectedIds.size,
+                remainingBundleIds = remaining,
+                itemCount = accessor?.itemCount ?: 0,
+                classification = classification,
+            ),
+        )
+    }
+
+    private fun expectedSeriesBundleIds(
+        cachedIds: Set<String>,
+        deletedIds: Collection<String>,
+        staleIds: Collection<String>,
+    ): Set<String> = ((cachedIds - deletedIds.toSet()) + staleIds).toSortedSet()
+
+    private fun pendingSeriesBundleIds(
+        scope: ServerCacheScope,
+        libraryId: String,
+        expectedIds: Set<String>,
+        staleIds: Set<String>,
+        serverVersions: Map<String, Long>,
+        fetchedIds: Set<String>,
+    ): List<String> {
+        if (expectedIds.isEmpty()) return emptyList()
+        val completeness = seriesCacheCompleteness(scope, libraryId, expectedIds)
+        val currentVersions = cache.cachedSeriesBundleVersions(scope, libraryId)
+        return expectedIds.filter { seriesId ->
+            val missing = seriesId in completeness.missingIds
+            val stale = if (seriesId !in staleIds) {
+                false
+            } else {
+                val expectedVersion = serverVersions[seriesId]
+                if (expectedVersion != null) currentVersions[seriesId] != expectedVersion else seriesId !in fetchedIds
+            }
+            missing || stale
+        }.sorted()
+    }
+
+    private fun seriesCacheCompleteness(
+        scope: ServerCacheScope,
+        libraryId: String,
+        expectedIds: Set<String>,
+    ): SeriesCacheCompleteness {
+        val load = loadCachedSeriesAccessor(scope, libraryId)
+        val accessor = when (load) {
+            is CacheLoad.Success -> load.accessor
+            is CacheLoad.Corrupt -> load.accessor
+            CacheLoad.Empty -> null
+        }
+        val parseableIds = accessor?.seriesIds.orEmpty().toSet()
+        return SeriesCacheCompleteness(
+            missingIds = (expectedIds - parseableIds).toSortedSet(),
+        )
+    }
+
+    private fun validateFetchedSeriesBundles(bytes: ByteArray, requestedIds: List<String>): Result<List<ParsedSeriesBundle>> = runCatching {
+        val requested = requestedIds.toSet()
+        check(requested.isNotEmpty()) { "Series bundle fetch requested no bundle IDs" }
+        val bundles = LibraryFlatBuffers.parseSeriesPayload(bytes.wrapFlatBuffer()).getOrThrow()
+        val returnedIds = bundles.map { it.seriesId }
+        val returned = returnedIds.toSet()
+        check(returnedIds.size == returned.size) { "Series bundle response contained duplicate bundle IDs" }
+        val missing = requested - returned
+        val unexpected = returned - requested
+        check(missing.isEmpty() && unexpected.isEmpty()) {
+            buildString {
+                append("Series bundle response did not match requested IDs")
+                if (missing.isNotEmpty()) append("; missing=").append(missing.sorted().joinToString(","))
+                if (unexpected.isNotEmpty()) append("; unexpected=").append(unexpected.sorted().joinToString(","))
+            }
+        }
+        bundles.filter { it.seriesId in requested }.sortedBy { it.seriesId }
     }
 
     private fun cachedMovieState(
@@ -516,6 +787,28 @@ class LibraryRepository(
         CachedMediaType.Episode -> kind == LibraryKind.Series
     }
 
+    private suspend fun coalescedLibraryJob(
+        key: LibrarySyncJobKey,
+        block: suspend () -> LibraryRepositoryState,
+    ): LibraryRepositoryState = coroutineScope {
+        var shouldStart = false
+        val deferred = synchronized(libraryJobLock) {
+            activeLibraryJobs[key]?.takeUnless { it.isCompleted } ?: async(start = CoroutineStart.LAZY) {
+                block()
+            }.also { job ->
+                shouldStart = true
+                activeLibraryJobs[key] = job
+                job.invokeOnCompletion {
+                    synchronized(libraryJobLock) {
+                        if (activeLibraryJobs[key] === job) activeLibraryJobs.remove(key)
+                    }
+                }
+            }
+        }
+        if (shouldStart) deferred.start()
+        deferred.await()
+    }
+
     private fun publish(state: LibraryRepositoryState): LibraryRepositoryState {
         val enriched = if (state.scope != null && state.freshness != LibraryFreshness.Syncing) {
             state.withCachedDatasets()
@@ -550,6 +843,16 @@ class LibraryRepository(
 
     private fun ByteArray.wrapFlatBuffer() = java.nio.ByteBuffer.wrap(this).order(java.nio.ByteOrder.LITTLE_ENDIAN)
 
+    private data class LibrarySyncJobKey(
+        val scopeDirectoryName: String,
+        val libraryId: String,
+        val kind: LibraryKind,
+    )
+
+    private data class SeriesCacheCompleteness(
+        val missingIds: Set<String>,
+    )
+
     private sealed interface LibraryLoad {
         data class Online(val libraries: List<LibraryInfo>) : LibraryLoad
         data class Cached(val libraries: List<LibraryInfo>, val failure: LibrarySyncFailure) : LibraryLoad
@@ -565,5 +868,6 @@ class LibraryRepository(
 
     companion object {
         const val DEFAULT_SEARCH_RESYNC_LIBRARY_LIMIT = 4
+        const val SERIES_BUNDLE_FETCH_CHUNK_SIZE = 16
     }
 }

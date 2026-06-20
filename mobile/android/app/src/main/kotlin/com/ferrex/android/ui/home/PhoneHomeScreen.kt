@@ -2625,7 +2625,8 @@ private fun LibraryFreshness.statusTone(): FerrexStatusTone = when (this) {
     LibraryFreshness.Empty,
     LibraryFreshness.Syncing,
     is LibraryFreshness.Fresh -> FerrexStatusTone.Secondary
-    is LibraryFreshness.StaleOffline -> FerrexStatusTone.StaleOffline
+    is LibraryFreshness.StaleOffline,
+    is LibraryFreshness.SeriesCacheIncomplete -> FerrexStatusTone.StaleOffline
     is LibraryFreshness.CorruptRebuilding -> FerrexStatusTone.Cache
     is LibraryFreshness.ErrorRetryable -> FerrexStatusTone.Error
 }
@@ -2648,7 +2649,8 @@ private fun homeStageSeedColor(
     connectionStatus.health != AuthConnectionHealth.Online -> TheaterPlateColor.rgb(51, 65, 85)
     freshness is LibraryFreshness.ErrorRetryable -> TheaterPlateColor.rgb(127, 29, 29)
     freshness is LibraryFreshness.CorruptRebuilding -> TheaterPlateColor.rgb(49, 46, 129)
-    freshness is LibraryFreshness.StaleOffline -> TheaterPlateColor.rgb(71, 85, 105)
+    freshness is LibraryFreshness.StaleOffline ||
+        freshness is LibraryFreshness.SeriesCacheIncomplete -> TheaterPlateColor.rgb(71, 85, 105)
     freshness is LibraryFreshness.Fresh -> TheaterPlateColor.rgb(22, 78, 99)
     freshness is LibraryFreshness.Syncing -> TheaterPlateColor.rgb(56, 189, 248)
     LibraryFreshness.Empty == freshness -> TheaterPlateColor.rgb(30, 41, 59)
@@ -2665,6 +2667,7 @@ private fun homeStageHasCacheRecoveryState(freshness: LibraryFreshness): Boolean
     LibraryFreshness.Syncing,
     is LibraryFreshness.Fresh -> false
     is LibraryFreshness.StaleOffline,
+    is LibraryFreshness.SeriesCacheIncomplete,
     is LibraryFreshness.CorruptRebuilding,
     is LibraryFreshness.ErrorRetryable -> true
 }

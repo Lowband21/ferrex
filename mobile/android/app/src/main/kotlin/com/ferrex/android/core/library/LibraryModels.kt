@@ -131,6 +131,17 @@ sealed interface LibraryFreshness {
         override val label: String = "stale-offline"
     }
 
+    data class SeriesCacheIncomplete(
+        val message: String,
+        val completedBundles: Int,
+        val expectedBundles: Int,
+        val remainingBundleIds: List<String>,
+        val itemCount: Int,
+        val classification: RetryClassification,
+    ) : LibraryFreshness {
+        override val label: String = "series-cache-incomplete"
+    }
+
     data class CorruptRebuilding(
         val message: String,
         val quarantinedFiles: Int,
