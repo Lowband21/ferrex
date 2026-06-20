@@ -81,6 +81,10 @@ class ImageDiskCache(
         imagesDir(scope).deleteRecursively()
     }
 
+    fun clearCoilDiskCache(scope: ServerCacheScope) {
+        File(imagesDir(scope), "coil-blobs").deleteRecursively()
+    }
+
     fun markStaleOffline(scope: ServerCacheScope, message: String) {
         ensureScope(scope)
         val properties = Properties().apply {

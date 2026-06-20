@@ -14,13 +14,25 @@ interface ImageCacheClearer {
     fun clearAllImages(scope: ServerCacheScope)
 }
 
+interface ImageResolver {
+    suspend fun resolveImages(
+        scope: ServerCacheScope,
+        requestedKeys: Collection<ImageRequestKey>,
+    ): Map<ImageRequestKey, ImageResolution>
+
+    suspend fun retryPendingOrFailed(
+        scope: ServerCacheScope,
+        visibleKeys: Collection<ImageRequestKey>,
+    ): Map<ImageRequestKey, ImageResolution>
+}
+
 class ImageRepository(
     private val transport: ImageManifestTransport,
     private val cache: ImageDiskCache,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clockMillis: () -> Long = { System.currentTimeMillis() },
-) : ImageCacheClearer {
-    suspend fun resolveImages(
+) : ImageCacheClearer, ImageResolver {
+    override suspend fun resolveImages(
         scope: ServerCacheScope,
         requestedKeys: Collection<ImageRequestKey>,
     ): Map<ImageRequestKey, ImageResolution> = withContext(ioDispatcher) {
@@ -36,7 +48,7 @@ class ImageRepository(
      * visible-key snapshot. Ready images stay cached and no OkHttp thread sleeps
      * while waiting for server-side cache fills.
      */
-    suspend fun retryPendingOrFailed(
+    override suspend fun retryPendingOrFailed(
         scope: ServerCacheScope,
         visibleKeys: Collection<ImageRequestKey>,
     ): Map<ImageRequestKey, ImageResolution> = withContext(ioDispatcher) {

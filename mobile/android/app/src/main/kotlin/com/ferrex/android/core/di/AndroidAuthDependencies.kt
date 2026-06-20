@@ -15,6 +15,7 @@ import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageDiskCache
 import com.ferrex.android.core.image.ImageRepository
 import com.ferrex.android.core.image.OkHttpImageManifestTransport
+import com.ferrex.android.core.image.ScopedImageCacheClearer
 import com.ferrex.android.core.browse.OkHttpLibraryIndexTransport
 import com.ferrex.android.core.library.LibraryDiskCache
 import com.ferrex.android.core.library.LibraryRepository
@@ -101,10 +102,15 @@ class AndroidAuthDependencies(
         imageDiskCache = imageCache,
     )
 
+    private val scopedImageCacheClearer = ScopedImageCacheClearer(
+        manifestCacheClearer = imageRepository,
+        imageLoaderClearer = imagePipeline,
+    )
+
     val libraryRepository = LibraryRepository(
         transport = libraryTransport,
         cache = libraryCache,
-        imageCacheClearer = imageRepository,
+        imageCacheClearer = scopedImageCacheClearer,
     )
 
     val searchRepository = MediaSearchRepository(
@@ -132,7 +138,7 @@ class AndroidAuthDependencies(
         onResetConnectionCacheClear = { serverUrl, userId ->
             val scope = ServerCacheScope.from(serverUrl, userId)
             libraryCache.clearAllForScope(scope)
-            imageRepository.clearAllImages(scope)
+            scopedImageCacheClearer.clearAllImages(scope)
         },
         reconnectScope = authScope,
     )

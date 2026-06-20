@@ -19,7 +19,7 @@ class FerrexImagePipeline(
     private val context: Context,
     private val authenticatedHttpClient: OkHttpClient,
     private val imageDiskCache: ImageDiskCache,
-) {
+) : ScopedImageLoaderClearer {
     private val loaders = ConcurrentHashMap<String, ImageLoader>()
 
     fun imageLoader(scope: ServerCacheScope): ImageLoader = loaders.getOrPut(scope.directoryName) {
@@ -40,8 +40,13 @@ class FerrexImagePipeline(
             .build()
     }
 
-    fun clear(scope: ServerCacheScope) {
+    override fun clearImageLoaderState(scope: ServerCacheScope) {
         loaders.remove(scope.directoryName)?.shutdown()
+        imageDiskCache.clearCoilDiskCache(scope)
+    }
+
+    fun clear(scope: ServerCacheScope) {
+        clearImageLoaderState(scope)
         imageDiskCache.clearAll(scope)
     }
 

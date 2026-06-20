@@ -42,6 +42,7 @@ import com.ferrex.android.ui.components.FerrexAsyncImage
 import com.ferrex.android.ui.components.FerrexImageFallback
 import com.ferrex.android.ui.components.FerrexPosterPlaceholder
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.components.TheaterPlateDensityRole
 import com.ferrex.android.ui.components.TheaterPlateText
 import com.ferrex.android.ui.components.TheaterPlateTypographyRole
@@ -105,17 +106,11 @@ fun PhoneSearchPanel(
             .distinct()
     }
     val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
-    var resolutions by remember(scope.directoryName, visibleKeys) {
-        mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap())
-    }
-
-    LaunchedEffect(imageRepository, scope.directoryName, visibleKeys) {
-        resolutions = if (imageRepository != null && visibleKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, visibleKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val resolutions = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = visibleKeys,
+    ).resolutions
 
     fun retrySearch() {
         retryNonce += 1

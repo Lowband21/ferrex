@@ -26,8 +26,6 @@ import com.ferrex.android.core.detail.DetailCache
 import com.ferrex.android.core.detail.DetailLoadResult
 import com.ferrex.android.core.image.FerrexImagePipeline
 import com.ferrex.android.core.image.ImageRepository
-import com.ferrex.android.core.image.ImageRequestKey
-import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryKind
@@ -53,6 +51,7 @@ import com.ferrex.android.core.watch.WatchRepositoryState
 import com.ferrex.android.core.watch.WatchStateInvalidationBus
 import com.ferrex.android.navigation.PlaybackRouteContractSaver
 import com.ferrex.android.tv.ui.foundation.rememberTvFocusRestorer
+import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -254,14 +253,12 @@ fun TvHomeScreen(
     val imageKeys = remember(browseImageKeys, detailResult) {
         (DetailCache.imageKeys(detailResult) + browseImageKeys).distinctBy { it.cacheKey }.toSet()
     }
-    var imageResolutions by remember(scope.directoryName) { mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap()) }
-    LaunchedEffect(imageRepository, scope, imageKeys) {
-        imageResolutions = if (imageRepository != null && imageKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, imageKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val visibleImageState = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = imageKeys,
+    )
+    val imageResolutions = visibleImageState.resolutions
 
     fun openDetail(route: MediaRouteArgs, returnTo: TvReturnTarget) {
         playbackNotice = null
@@ -364,7 +361,7 @@ fun TvHomeScreen(
             }
             libraryRepository?.refreshLibraries(scope, selectedLibraryId)
             if (imageRepository != null && imageKeys.isNotEmpty()) {
-                imageResolutions = imageRepository.retryPendingOrFailed(scope, imageKeys)
+                visibleImageState.retryVisibleNow()
             }
             continueWatchingRepository?.refresh()
             refreshVisibleWatchState(detailResult)

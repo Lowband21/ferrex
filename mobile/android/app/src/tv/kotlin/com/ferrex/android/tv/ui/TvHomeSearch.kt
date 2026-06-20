@@ -55,6 +55,7 @@ import com.ferrex.android.tv.ui.foundation.TvActionRole
 import com.ferrex.android.tv.ui.foundation.TvFocusableSurface
 import com.ferrex.android.tv.ui.foundation.TvFocusRestorer
 import com.ferrex.android.ui.components.FerrexAsyncImage
+import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.qa.FerrexQaTags
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.delay
@@ -108,14 +109,11 @@ internal fun TvSearchScreen(
         rows.filterIsInstance<SearchResultRow.Resolved>().mapNotNull { it.imageKey }.distinctBy { it.cacheKey }.take(SEARCH_IMAGE_LOOKUP_LIMIT)
     }
     val imageLoader = remember(imagePipeline, scope.directoryName) { imagePipeline?.imageLoader(scope) }
-    var resolutions by remember(scope.directoryName, visibleKeys) { mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap()) }
-    LaunchedEffect(imageRepository, scope.directoryName, visibleKeys) {
-        resolutions = if (imageRepository != null && visibleKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, visibleKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val resolutions = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = visibleKeys,
+    ).resolutions
 
     TvFullScreenSurface {
         Column(

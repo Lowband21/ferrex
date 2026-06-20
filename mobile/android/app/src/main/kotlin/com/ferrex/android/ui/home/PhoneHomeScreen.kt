@@ -115,6 +115,7 @@ import com.ferrex.android.ui.components.FerrexMobileMediaCard
 import com.ferrex.android.ui.components.FerrexMobileMediaGrid
 import com.ferrex.android.ui.components.FerrexMobileMediaRail
 import com.ferrex.android.ui.components.FerrexStatusTone
+import com.ferrex.android.ui.components.rememberVisibleImageResolutionState
 import com.ferrex.android.ui.components.MobileMediaCardLayout
 import com.ferrex.android.ui.components.MobileMediaCardState
 import com.ferrex.android.ui.components.MobileMediaWatchState
@@ -340,14 +341,12 @@ fun PhoneHomeScreen(
             DetailCache.imageKeys(detailResult).forEach(::add)
         }.distinctBy { it.cacheKey }.take(GRID_IMAGE_LOOKUP_LIMIT).toSet()
     }
-    var imageResolutions by remember(scope.directoryName) { mutableStateOf<Map<ImageRequestKey, ImageResolution>>(emptyMap()) }
-    LaunchedEffect(imageRepository, scope, imageKeys) {
-        imageResolutions = if (imageRepository != null && imageKeys.isNotEmpty()) {
-            imageRepository.resolveImages(scope, imageKeys)
-        } else {
-            emptyMap()
-        }
-    }
+    val visibleImageState = rememberVisibleImageResolutionState(
+        scope = scope,
+        imageRepository = imageRepository,
+        visibleKeys = imageKeys,
+    )
+    val imageResolutions = visibleImageState.resolutions
 
     fun retryDetailCacheSync(route: MediaRouteArgs?) {
         coroutineScope.launch {
@@ -413,7 +412,7 @@ fun PhoneHomeScreen(
             }
             libraryRepository?.refreshLibraries(scope, selectedLibraryId)
             if (imageRepository != null && imageKeys.isNotEmpty()) {
-                imageResolutions = imageRepository.retryPendingOrFailed(scope, imageKeys)
+                visibleImageState.retryVisibleNow()
             }
             continueWatchingRepository?.refresh()
             refreshVisibleWatchState(detailResult)
