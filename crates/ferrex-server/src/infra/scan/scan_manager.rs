@@ -3549,6 +3549,54 @@ mod tests {
     }
 
     #[test]
+    fn downstream_jobs_are_scan_progress_items() {
+        for kind in JobKind::all_kinds() {
+            assert!(
+                ScanRunAggregatorInner::tracks_scan_progress_kind(*kind),
+                "{kind:?} should keep an active scan run open"
+            );
+        }
+    }
+
+    #[test]
+    fn downstream_in_progress_items_block_quiescence() {
+        let now = Utc::now();
+        let mut state = test_state();
+        state.update_item_status(
+            "folder-job",
+            Some(JobId::new()),
+            ScanItemStatus::Completed,
+            now,
+            SubjectKey::path("/library/Movie".to_string()).ok(),
+            None,
+        );
+        assert!(state.can_enter_quiescing());
+
+        state.update_item_status(
+            "metadata-job",
+            Some(JobId::new()),
+            ScanItemStatus::InProgress,
+            now + ChronoDuration::milliseconds(1),
+            SubjectKey::path("/library/Movie/feature.mkv".to_string()).ok(),
+            None,
+        );
+        assert!(!state.can_enter_quiescing());
+        assert_eq!(state.total_items, 2);
+        assert_eq!(state.completed_items, 1);
+
+        state.update_item_status(
+            "metadata-job",
+            Some(JobId::new()),
+            ScanItemStatus::DeadLettered,
+            now + ChronoDuration::milliseconds(2),
+            SubjectKey::path("/library/Movie/feature.mkv".to_string()).ok(),
+            Some("Movie match not found".into()),
+        );
+        assert!(state.can_enter_quiescing());
+        assert_eq!(state.dead_lettered_items, 1);
+    }
+
+    #[test]
     fn folder_failures_keep_retrying_separate_from_needs_attention() {
         let now = Utc::now();
         let mut state = test_state();
@@ -4228,25 +4276,35 @@ impl ScanRunAggregatorInner {
         }
     }
 
+    fn tracks_scan_progress_kind(kind: JobKind) -> bool {
+        matches!(
+            kind,
+            JobKind::FolderScan
+                | JobKind::SeriesResolve
+                | JobKind::MediaAnalyze
+                | JobKind::MetadataEnrich
+                | JobKind::IndexUpsert
+                | JobKind::ImageFetch
+                | JobKind::EpisodeMatch
+                | JobKind::ManifestScan
+        )
+    }
+
     async fn handle_job_event(&self, event: JobEvent) {
         let run = {
             let guard = self.runs.read().await;
             guard.get(&event.meta.correlation_id).cloned()
         };
 
-        self.persist_job_event(&event, run.as_ref()).await;
         self.observe_series_bundle_job_event(&event).await;
 
-        if let Some(run) = run {
-            let completed = match event.payload {
+        let completed = if let Some(run) = run.as_ref() {
+            match &event.payload {
                 JobEventPayload::Enqueued { kind, job_id, .. } => {
-                    if matches!(
-                        kind,
-                        JobKind::FolderScan | JobKind::ManifestScan
-                    ) {
+                    if Self::tracks_scan_progress_kind(*kind) {
                         run.record_folder_enqueued(
                             &event.meta.idempotency_key,
-                            job_id,
+                            *job_id,
                             event.meta.path_key.clone(),
                         )
                         .await;
@@ -4254,13 +4312,10 @@ impl ScanRunAggregatorInner {
                     false
                 }
                 JobEventPayload::Completed { kind, job_id, .. } => {
-                    if matches!(
-                        kind,
-                        JobKind::FolderScan | JobKind::ManifestScan
-                    ) {
+                    if Self::tracks_scan_progress_kind(*kind) {
                         run.record_folder_completed(
                             &event.meta.idempotency_key,
-                            job_id,
+                            *job_id,
                             event.meta.path_key.clone(),
                         )
                         .await;
@@ -4280,20 +4335,17 @@ impl ScanRunAggregatorInner {
                     error,
                     ..
                 } => {
-                    if matches!(
-                        kind,
-                        JobKind::FolderScan | JobKind::ManifestScan
-                    ) {
+                    if Self::tracks_scan_progress_kind(*kind) {
                         run.record_folder_failure(
                             &event.meta.idempotency_key,
-                            job_id,
-                            error,
+                            *job_id,
+                            error.clone(),
                             event.meta.path_key.clone(),
-                            retryable,
+                            *retryable,
                         )
                         .await;
 
-                        if !retryable {
+                        if !*retryable {
                             run.try_complete(
                                 self.quiescence_chrono,
                                 self.stall_timeout,
@@ -4312,14 +4364,11 @@ impl ScanRunAggregatorInner {
                     error,
                     ..
                 } => {
-                    if matches!(
-                        kind,
-                        JobKind::FolderScan | JobKind::ManifestScan
-                    ) {
+                    if Self::tracks_scan_progress_kind(*kind) {
                         run.record_folder_dead_lettered(
                             &event.meta.idempotency_key,
-                            job_id,
-                            error,
+                            *job_id,
+                            error.clone(),
                             event.meta.path_key.clone(),
                         )
                         .await;
@@ -4333,22 +4382,31 @@ impl ScanRunAggregatorInner {
                     }
                 }
                 JobEventPayload::LeaseRenewed { job_id, .. } => {
+                    // Lease-renewed events do not carry a kind; update the item
+                    // only if a tracked enqueue/dequeue already established it.
                     run.record_folder_lease_renewed(
                         &event.meta.idempotency_key,
-                        job_id,
+                        *job_id,
                         event.meta.path_key.clone(),
                     )
                     .await;
                     false
                 }
                 _ => false,
-            };
-
-            if completed {
-                self.on_run_completed(run.clone()).await;
             }
         } else {
             self.handle_orphan_event(&event).await;
+            false
+        };
+
+        // Keep the progress state current before durable diagnostics I/O. The
+        // persisted event snapshots now include the event's own state change,
+        // and the hot receiver loop is less likely to finalize from stale
+        // counters while the observability repository is busy.
+        self.persist_job_event(&event, run.as_ref()).await;
+
+        if completed && let Some(run) = run {
+            self.on_run_completed(run).await;
         }
     }
 

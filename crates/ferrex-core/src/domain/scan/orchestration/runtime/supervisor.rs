@@ -309,7 +309,7 @@ where
                         break;
                     }
                     evt = domain_rx.recv() => match evt {
-                        Ok(ScanEvent::FolderDiscovered { context, reason }) => {
+                        Ok(ScanEvent::FolderDiscovered { context, reason, correlation_id }) => {
                             // Build FolderScan job from event and enqueue
                             let job = FolderScanJob {
                                 context: *context.clone(),
@@ -319,7 +319,8 @@ where
                             };
                             let payload = JobPayload::FolderScan(job);
                             let priority = priority_for_reason(&reason);
-                            let request = EnqueueRequest::new(priority, payload.clone());
+                            let mut request = EnqueueRequest::new(priority, payload.clone());
+                            request.correlation_id = correlation_id;
 
                             match queue.enqueue(request).await {
                                 Ok(handle) => {
@@ -333,8 +334,7 @@ where
                                         JobEventPayload::Enqueued { job_id: handle.job_id, kind: handle.kind, priority: handle.priority }
                                     };
 
-                                    // No correlation hint for domain events currently
-                                    let event = JobEvent::from_handle(&handle, None, event_payload, path_key);
+                                    let event = JobEvent::from_handle(&handle, correlation_id, event_payload, path_key);
                                     correlations.remember_if_absent(handle.job_id, event.meta.correlation_id).await;
                                     if let Err(err) = events.publish(event).await {
                                         tracing::warn!(target: "scan::router", error = %err, "failed to publish job enqueue event for FolderDiscovered");

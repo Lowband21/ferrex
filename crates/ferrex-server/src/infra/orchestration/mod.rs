@@ -164,7 +164,11 @@ impl ScanOrchestrator {
         budget: Arc<InMemoryBudget>,
         file_filters: ScannerFileFilterPolicy,
     ) -> Result<Self> {
-        let events = Arc::new(InProcJobEventBus::new(256));
+        // A bulk scan can emit tens of thousands of job/domain events in a
+        // short burst (folder, analysis, metadata, index, and image work).
+        // Keep enough ring-buffer headroom that scan progress observers do not
+        // miss downstream jobs and finalize the run from stale counters.
+        let events = Arc::new(InProcJobEventBus::new(65_536));
         let correlations = CorrelationCache::default();
         let manifest_contract = ScannerLayoutContract::new(
             file_filters
