@@ -14,6 +14,7 @@ use crate::domain::scan::actors::metadata::{
 use crate::domain::scan::actors::{
     analyze::{AnalysisContext, MediaAnalyzeActor, MediaAnalyzed},
     folder::FolderScanActor,
+    messages::FolderScanOutcome,
 };
 use crate::domain::scan::orchestration::{
     context::{FolderScanContext, SeriesLink, SeriesRef},
@@ -526,6 +527,11 @@ where
             Err(err) => return self.handle_media_error(err),
         };
 
+        debug!(
+            outcome = summary.outcome.as_str(),
+            path = %context.folder_path_norm(),
+            "emitting folder scan completion"
+        );
         if let Err(err) = self
             .events
             .publish_scan_event(ScanEvent::FolderScanCompleted(summary))
@@ -569,16 +575,18 @@ where
                 context.library_id(),
                 &vec![PathBuf::from(context.folder_path_norm())],
             );
+            let mut had_cursor = false;
             let mut listing_unchanged = false;
             let mut last_modified_at = None;
             match self.cursors.get(&cursor_id).await {
-                Ok(Some(existing))
-                    if existing.listing_hash == plan.generated_listing_hash =>
-                {
-                    listing_unchanged = true;
-                    last_modified_at = existing.last_modified_at;
+                Ok(Some(existing)) => {
+                    had_cursor = true;
+                    if existing.listing_hash == plan.generated_listing_hash {
+                        listing_unchanged = true;
+                        last_modified_at = existing.last_modified_at;
+                    }
                 }
-                Ok(_) => {}
+                Ok(None) => {}
                 Err(err) => return self.handle_media_error(err),
             }
 
@@ -593,7 +601,7 @@ where
                 // or enqueue series/analyze/metadata/index follow-ups here. An unchanged
                 // listing only refreshes the cursor timestamp and emits folder completion
                 // for progress accounting.
-                let summary = match self.actors.folder.finalize(
+                let mut summary = match self.actors.folder.finalize(
                     &context,
                     &plan,
                     &[],
@@ -602,7 +610,13 @@ where
                     Ok(summary) => summary,
                     Err(err) => return self.handle_media_error(err),
                 };
+                summary.outcome = FolderScanOutcome::UnchangedCursor;
 
+                debug!(
+                    outcome = summary.outcome.as_str(),
+                    path = %context.folder_path_norm(),
+                    "emitting folder scan completion"
+                );
                 if let Err(err) = self
                     .events
                     .publish_scan_event(ScanEvent::FolderScanCompleted(
@@ -654,7 +668,7 @@ where
                 Err(status) => return status,
             };
 
-            let summary = match self.actors.folder.finalize(
+            let mut summary = match self.actors.folder.finalize(
                 &context,
                 &plan,
                 &discovered,
@@ -663,6 +677,9 @@ where
                 Ok(summary) => summary,
                 Err(err) => return self.handle_media_error(err),
             };
+            if had_cursor {
+                summary.outcome = FolderScanOutcome::Changed;
+            }
 
             if let FolderScanContext::Series(series_ctx) = &context {
                 let folder_name = std::path::Path::new(
@@ -784,6 +801,11 @@ where
                 }
             }
 
+            debug!(
+                outcome = summary.outcome.as_str(),
+                path = %context.folder_path_norm(),
+                "emitting folder scan completion"
+            );
             if let Err(err) = self
                 .events
                 .publish_scan_event(ScanEvent::FolderScanCompleted(
@@ -1674,6 +1696,7 @@ mod tests {
                 media_files: vec![PathBuf::from("/library/movie/movie.mkv")],
                 ancillary_files: vec![],
                 generated_listing_hash: unique_hash.clone(),
+                total_entries: 2,
                 folder_missing: false,
             },
             discovered: vec![MediaFileDiscovered {
@@ -1700,6 +1723,7 @@ mod tests {
                 discovered_files: 1,
                 enqueued_subfolders: 1,
                 listing_hash: unique_hash,
+                outcome: FolderScanOutcome::Changed,
                 completed_at: Utc::now(),
             },
         }) as Arc<dyn FolderScanActor>;

@@ -679,18 +679,47 @@ pub fn update_library(
         LibraryMessage::ScanProgressFrame(frame) => {
             let status = frame.status.clone();
             super::update_handlers::scan_updates::apply_scan_progress_frame(
-                state, frame,
+                state,
+                frame.clone(),
             );
 
             match status.as_str() {
                 "completed" => {
+                    if !super::update_handlers::scan_updates::progress_frame_has_recovery_affordance(
+                        &frame,
+                    ) {
+                        super::update_handlers::scan_updates::remove_scan(
+                            state,
+                            frame.scan_id,
+                        );
+                    }
                     let refresh_task =
                         super::update_handlers::refresh_library::handle_refresh_library(state);
                     DomainUpdateResult::task(
                         refresh_task.map(DomainMessage::Library),
                     )
                 }
-                "failed" | "canceled" => DomainUpdateResult::task(Task::none()),
+                "failed"
+                | "failed_needs_attention"
+                | "needs_attention"
+                | "skipped" => {
+                    if !super::update_handlers::scan_updates::progress_frame_has_recovery_affordance(
+                        &frame,
+                    ) {
+                        super::update_handlers::scan_updates::remove_scan(
+                            state,
+                            frame.scan_id,
+                        );
+                    }
+                    DomainUpdateResult::task(Task::none())
+                }
+                "canceled" | "cancelled" => {
+                    super::update_handlers::scan_updates::remove_scan(
+                        state,
+                        frame.scan_id,
+                    );
+                    DomainUpdateResult::task(Task::none())
+                }
                 _ => DomainUpdateResult::task(Task::none()),
             }
         }

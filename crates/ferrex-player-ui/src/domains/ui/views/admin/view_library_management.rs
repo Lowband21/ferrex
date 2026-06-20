@@ -13,13 +13,13 @@ use crate::{
     state::State,
 };
 use ferrex_core::player_prelude::{
-    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus, ScanRunMode,
-    ScanSnapshotDto,
+    ArchivedLibraryType, Library, LibraryId, ScanLifecycleStatus,
+    ScanPathReasonCategory, ScanPathReasonDetail, ScanRunMode, ScanSnapshotDto,
 };
 #[cfg(feature = "demo")]
 use iced::widget::text_input;
 use iced::{
-    Element, Length,
+    Color, Element, Length,
     widget::{Space, button, column, container, row, scrollable, text},
 };
 use lucide_icons::Icon;
@@ -357,7 +357,7 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
         .spacing(10)
         .align_y(iced::Alignment::Center),
         Space::new().width(Length::Fill),
-        text(format!("{} running", scans.len()))
+        text(scan_panel_count_label(&scans))
             .size(14)
             .color(theme::MediaServerTheme::TEXT_SECONDARY),
     ]
@@ -431,20 +431,30 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 .get(&snapshot.scan_id)
                 .cloned();
 
+            let reason_details = progress
+                .as_ref()
+                .map(|event| event.reason_details.as_slice())
+                .filter(|details| !details.is_empty())
+                .unwrap_or(snapshot.reason_details.as_slice());
+
             let (
                 completed_items,
                 total_items,
+                validated_items,
+                known_unchanged_items,
+                skipped_items,
+                needs_attention_items,
                 retrying_items,
-                dead_lettered_items,
                 current_path,
             ) = if let Some(event) = &progress {
                 (
                     event.completed_items,
                     event.total_items,
-                    event.retrying_items.unwrap_or(snapshot.retrying_items),
-                    event
-                        .dead_lettered_items
-                        .unwrap_or(snapshot.dead_lettered_items),
+                    event.validated_items,
+                    event.known_unchanged_items,
+                    event.skipped_items,
+                    event.needs_attention_items,
+                    event.retrying_items,
                     event
                         .current_path
                         .clone()
@@ -454,8 +464,11 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 (
                     snapshot.completed_items,
                     snapshot.total_items,
+                    snapshot.validated_items,
+                    snapshot.known_unchanged_items,
+                    snapshot.skipped_items,
+                    snapshot.needs_attention_items,
                     snapshot.retrying_items,
-                    snapshot.dead_lettered_items,
                     snapshot.current_path.clone(),
                 )
             };
@@ -466,24 +479,13 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 0.0
             };
 
-            let status_label = match snapshot.status {
-                ScanLifecycleStatus::Pending => {
-                    ("Pending", theme::MediaServerTheme::TEXT_SECONDARY)
-                }
-                ScanLifecycleStatus::Running => ("Running", accent()),
-                ScanLifecycleStatus::Paused => {
-                    ("Paused", theme::MediaServerTheme::WARNING)
-                }
-                ScanLifecycleStatus::Completed => {
-                    ("Completed", theme::MediaServerTheme::SUCCESS)
-                }
-                ScanLifecycleStatus::Failed => {
-                    ("Failed", theme::MediaServerTheme::ERROR)
-                }
-                ScanLifecycleStatus::Canceled => {
-                    ("Canceled", theme::MediaServerTheme::TEXT_SECONDARY)
-                }
-            };
+            let status_label = scan_status_label(
+                &snapshot,
+                reason_details,
+                skipped_items,
+                needs_attention_items,
+                retrying_items,
+            );
 
             let library_name = state
                 .domains
@@ -511,11 +513,23 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_PRIMARY),
                 Space::new().width(20),
-                text(format!("Retries: {retrying_items}"))
+                text(format!("Validated: {validated_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().width(20),
-                text(format!("Dead-lettered: {dead_lettered_items}"))
+                text(format!("Unchanged: {known_unchanged_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Skipped: {skipped_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Retrying: {retrying_items}"))
+                    .size(13)
+                    .color(theme::MediaServerTheme::TEXT_SECONDARY),
+                Space::new().width(20),
+                text(format!("Needs attention: {needs_attention_items}"))
                     .size(13)
                     .color(theme::MediaServerTheme::TEXT_SECONDARY),
                 Space::new().width(20),
@@ -609,29 +623,59 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
                 | ScanLifecycleStatus::Canceled => {}
             }
 
+            if scan_has_rescan_recovery(
+                &snapshot,
+                reason_details,
+                skipped_items,
+                needs_attention_items,
+            ) {
+                actions = actions.push(
+                    button("Rescan library")
+                        .on_press(
+                            SettingsUiMessage::ScanLibrary(snapshot.library_id)
+                                .into(),
+                        )
+                        .style(theme::Button::Primary.style()),
+                );
+            }
+
+            let mut scan_details = column![
+                row![
+                    text(library_name)
+                        .size(16)
+                        .color(theme::MediaServerTheme::TEXT_PRIMARY),
+                    Space::new().width(Length::Fixed(12.0)),
+                    status_badge,
+                ]
+                .align_y(iced::Alignment::Center)
+                .spacing(8),
+                Space::new().height(8),
+                progress_bar,
+                Space::new().height(6),
+                stats_row,
+            ]
+            .spacing(6)
+            .width(Length::Fill);
+
+            if let Some(copy) = scan_recovery_copy(
+                &snapshot,
+                reason_details,
+                skipped_items,
+                needs_attention_items,
+            ) {
+                scan_details = scan_details.push(
+                    text(copy).size(12).color(theme::MediaServerTheme::WARNING),
+                );
+            }
+
+            if let Some(reason_details) = reason_details_panel(reason_details) {
+                scan_details = scan_details.push(reason_details);
+            }
+
             items = items.push(
                 container(
-                    row![
-                        column![
-                            row![
-                                text(library_name).size(16).color(
-                                    theme::MediaServerTheme::TEXT_PRIMARY
-                                ),
-                                Space::new().width(Length::Fixed(12.0)),
-                                status_badge,
-                            ]
-                            .align_y(iced::Alignment::Center)
-                            .spacing(8),
-                            Space::new().height(8),
-                            progress_bar,
-                            Space::new().height(6),
-                            stats_row,
-                        ]
-                        .spacing(6)
-                        .width(Length::Fill),
-                        actions,
-                    ]
-                    .align_y(iced::Alignment::Center),
+                    row![scan_details, actions]
+                        .align_y(iced::Alignment::Center),
                 )
                 .padding(16)
                 .style(theme::Container::Card.style()),
@@ -643,6 +687,250 @@ fn scan_status_panel(state: &State) -> Element<'_, UiMessage> {
         .width(Length::Fill)
         .style(theme::Container::Default.style())
         .into()
+}
+
+fn scan_panel_count_label(scans: &[ScanSnapshotDto]) -> String {
+    let running = scans
+        .iter()
+        .filter(|scan| {
+            matches!(
+                scan.status,
+                ScanLifecycleStatus::Pending
+                    | ScanLifecycleStatus::Running
+                    | ScanLifecycleStatus::Paused
+            )
+        })
+        .count();
+    let needs_attention = scans
+        .iter()
+        .filter(|scan| {
+            matches!(
+                scan.status,
+                ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
+            ) && scan.needs_attention_items.saturating_add(scan.failed_items)
+                > 0
+        })
+        .count();
+    let skipped = scans
+        .iter()
+        .filter(|scan| {
+            matches!(
+                scan.status,
+                ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
+            ) && scan.needs_attention_items == 0
+                && scan.failed_items == 0
+                && scan.skipped_items > 0
+        })
+        .count();
+
+    if needs_attention > 0 {
+        format!("{running} running • {needs_attention} needs attention")
+    } else if skipped > 0 {
+        format!("{running} running • {skipped} skipped")
+    } else {
+        format!("{running} running")
+    }
+}
+
+fn scan_status_label(
+    snapshot: &ScanSnapshotDto,
+    reason_details: &[ScanPathReasonDetail],
+    skipped_items: u64,
+    needs_attention_items: u64,
+    retrying_items: u64,
+) -> (&'static str, Color) {
+    if matches!(snapshot.status, ScanLifecycleStatus::Failed)
+        && needs_attention_items > 0
+    {
+        return ("Needs attention", theme::MediaServerTheme::ERROR);
+    }
+    if scan_has_no_media_found(reason_details) {
+        return ("No media found", theme::MediaServerTheme::WARNING);
+    }
+    if matches!(snapshot.status, ScanLifecycleStatus::Failed)
+        && skipped_items > 0
+    {
+        return ("Skipped", theme::MediaServerTheme::WARNING);
+    }
+    if retrying_items > 0
+        && matches!(snapshot.status, ScanLifecycleStatus::Running)
+    {
+        return ("Retrying", accent());
+    }
+
+    match snapshot.status {
+        ScanLifecycleStatus::Pending => {
+            ("Pending", theme::MediaServerTheme::TEXT_SECONDARY)
+        }
+        ScanLifecycleStatus::Running => ("Running", accent()),
+        ScanLifecycleStatus::Paused => {
+            ("Paused", theme::MediaServerTheme::WARNING)
+        }
+        ScanLifecycleStatus::Completed => {
+            ("Completed", theme::MediaServerTheme::SUCCESS)
+        }
+        ScanLifecycleStatus::Failed => {
+            ("Failed", theme::MediaServerTheme::ERROR)
+        }
+        ScanLifecycleStatus::Canceled => {
+            ("Canceled", theme::MediaServerTheme::TEXT_SECONDARY)
+        }
+    }
+}
+
+fn scan_has_rescan_recovery(
+    snapshot: &ScanSnapshotDto,
+    reason_details: &[ScanPathReasonDetail],
+    skipped_items: u64,
+    needs_attention_items: u64,
+) -> bool {
+    matches!(
+        snapshot.status,
+        ScanLifecycleStatus::Completed | ScanLifecycleStatus::Failed
+    ) && (needs_attention_items > 0
+        || reason_details.iter().any(reason_detail_needs_rescan)
+        || (matches!(snapshot.status, ScanLifecycleStatus::Failed)
+            && skipped_items > 0)
+        || (skipped_items > 0 && scan_has_no_media_found(reason_details)))
+}
+
+fn scan_recovery_copy(
+    snapshot: &ScanSnapshotDto,
+    reason_details: &[ScanPathReasonDetail],
+    skipped_items: u64,
+    needs_attention_items: u64,
+) -> Option<&'static str> {
+    if !scan_has_rescan_recovery(
+        snapshot,
+        reason_details,
+        skipped_items,
+        needs_attention_items,
+    ) {
+        return None;
+    }
+
+    if needs_attention_items > 0 {
+        Some(
+            "Review the paths below, then rescan this library. Per-path retry is not available yet.",
+        )
+    } else if scan_has_no_media_found(reason_details) {
+        Some(
+            "Add supported media or update the folder, then rescan this library.",
+        )
+    } else {
+        Some("Skipped paths can be checked again with a library rescan.")
+    }
+}
+
+fn reason_details_panel(
+    reason_details: &[ScanPathReasonDetail],
+) -> Option<Element<'static, UiMessage>> {
+    if reason_details.is_empty() {
+        return None;
+    }
+
+    let mut details = column![].spacing(4);
+    for detail in reason_details.iter().take(3) {
+        details = details.push(
+            text(reason_detail_copy(detail))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SECONDARY),
+        );
+    }
+
+    if reason_details.len() > 3 {
+        details = details.push(
+            text(format!("+{} more path notes", reason_details.len() - 3))
+                .size(12)
+                .color(theme::MediaServerTheme::TEXT_SUBDUED),
+        );
+    }
+
+    Some(
+        container(details)
+            .padding([8, 12])
+            .style(theme::Container::Default.style())
+            .into(),
+    )
+}
+
+fn reason_detail_copy(detail: &ScanPathReasonDetail) -> String {
+    let label = reason_detail_label(detail);
+    let message = detail
+        .message
+        .as_deref()
+        .filter(|message| !contains_dead_letter_term(message))
+        .unwrap_or_else(|| fallback_reason_message(&detail.reason_code));
+
+    if let Some(path) = &detail.path {
+        format!("{label}: {message} — {}", truncate_path(path))
+    } else {
+        format!("{label}: {message}")
+    }
+}
+
+fn reason_detail_label(detail: &ScanPathReasonDetail) -> &'static str {
+    match detail.category {
+        ScanPathReasonCategory::KnownUnchanged => "Already scanned",
+        ScanPathReasonCategory::Skipped => {
+            if detail.reason_code == "no_supported_media_found" {
+                "No media found"
+            } else {
+                "Skipped"
+            }
+        }
+        ScanPathReasonCategory::Retrying => "Retrying",
+        ScanPathReasonCategory::NeedsAttention => "Needs attention",
+    }
+}
+
+fn fallback_reason_message(reason_code: &str) -> &'static str {
+    match reason_code {
+        "unchanged_since_last_scan" => {
+            "Already up to date from a previous scan"
+        }
+        "path_missing" => "The path was not available during the scan",
+        "no_supported_media_found" => {
+            "No supported media files were found at this path"
+        }
+        "unsupported_media_layout" => {
+            "This path does not contain a supported media layout"
+        }
+        "temporary_scan_issue" => "A temporary scan issue is being retried",
+        _ => "Review this path and rescan when it is ready",
+    }
+}
+
+fn contains_dead_letter_term(text: &str) -> bool {
+    let compact: String = text
+        .chars()
+        .filter_map(|ch| {
+            let lower = ch.to_ascii_lowercase();
+            lower.is_ascii_alphanumeric().then_some(lower)
+        })
+        .collect();
+    compact.contains("deadletter")
+}
+
+fn reason_detail_needs_rescan(detail: &ScanPathReasonDetail) -> bool {
+    match detail.category {
+        ScanPathReasonCategory::NeedsAttention => true,
+        ScanPathReasonCategory::Skipped => matches!(
+            detail.reason_code.as_str(),
+            "path_missing"
+                | "no_supported_media_found"
+                | "unsupported_media_layout"
+                | "skipped"
+        ),
+        ScanPathReasonCategory::KnownUnchanged
+        | ScanPathReasonCategory::Retrying => false,
+    }
+}
+
+fn scan_has_no_media_found(reason_details: &[ScanPathReasonDetail]) -> bool {
+    reason_details
+        .iter()
+        .any(|detail| detail.reason_code == "no_supported_media_found")
 }
 
 fn truncate_path(path: &str) -> String {
@@ -658,41 +946,70 @@ fn truncate_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrex_core::player_prelude::{ScanRunMode, ScanStartDisposition};
+    use chrono::{DateTime, Utc};
 
-    fn scan_snapshot(library_id: LibraryId, scan_id: Uuid) -> ScanSnapshotDto {
+    fn fixed_time() -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp(1_700_000_000, 0)
+            .expect("valid fixed timestamp")
+    }
+
+    fn reason_detail(
+        category: ScanPathReasonCategory,
+        reason_code: &str,
+        message: Option<&str>,
+    ) -> ScanPathReasonDetail {
+        ScanPathReasonDetail {
+            category,
+            reason_code: reason_code.into(),
+            message: message.map(str::to_string),
+            path: Some("/media/library/missing/movie.mkv".into()),
+            path_key: None,
+            retryable: false,
+            action_hint: Some("rescan_library".into()),
+        }
+    }
+
+    fn snapshot(status: ScanLifecycleStatus) -> ScanSnapshotDto {
+        let scan_id = Uuid::now_v7();
+        let library_id = LibraryId::new();
         ScanSnapshotDto {
             scan_id,
             library_id,
-            status: ScanLifecycleStatus::Running,
+            status,
             mode: ScanRunMode::Manual,
             completed_items: 0,
-            total_items: 10,
+            total_items: 1,
+            validated_items: 0,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
             retrying_items: 0,
-            dead_lettered_items: 0,
             correlation_id: scan_id,
-            idempotency_key: format!("scan:{scan_id}:1"),
+            idempotency_key: "scan:test:1".into(),
             run_key: ScanRunMode::Manual.run_key(library_id),
-            disposition: Some(ScanStartDisposition::Created),
+            disposition: None,
             current_path: None,
-            started_at: chrono::Utc::now(),
+            started_at: fixed_time(),
             terminal_at: None,
             sequence: 1,
+            reason_details: Vec::new(),
         }
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn admin_active_panel_has_one_card_for_one_library_mode() {
         let mut state = State::new("http://localhost:3000".to_string());
-        let library_id = LibraryId(Uuid::now_v7());
-        let scan_id = Uuid::now_v7();
+        let scan = snapshot(ScanLifecycleStatus::Running);
+        let library_id = scan.library_id;
+        let scan_id = scan.scan_id;
 
         state
             .domains
             .library
             .state
             .active_scans
-            .insert(scan_id, scan_snapshot(library_id, scan_id));
+            .insert(scan_id, scan);
 
         let cards = active_scan_panel_snapshots(&state);
 
@@ -700,6 +1017,83 @@ mod tests {
         assert_eq!(cards[0].library_id, library_id);
         assert_eq!(cards[0].mode, ScanRunMode::Manual);
         assert_eq!(cards[0].run_key, ScanRunMode::Manual.run_key(library_id));
+    }
+
+    #[test]
+    fn reason_copy_uses_safe_attention_terms() {
+        let detail = reason_detail(
+            ScanPathReasonCategory::NeedsAttention,
+            "needs_attention",
+            None,
+        );
+
+        assert_eq!(reason_detail_label(&detail), "Needs attention");
+        let copy = reason_detail_copy(&detail);
+        assert!(copy.contains("Needs attention"));
+        assert!(copy.contains("Review this path and rescan"));
+        assert!(!copy.contains("dead_letter"));
+        assert!(!copy.contains("deadletter"));
+    }
+
+    #[test]
+    fn reason_copy_sanitizes_backend_dead_letter_terms() {
+        let detail = reason_detail(
+            ScanPathReasonCategory::NeedsAttention,
+            "deadletter_queue",
+            Some("dead-letter queue entry needs operator review"),
+        );
+
+        let copy = reason_detail_copy(&detail);
+        let normalized = copy.to_ascii_lowercase();
+        assert!(copy.contains("Needs attention"));
+        assert!(copy.contains("Review this path and rescan"));
+        assert!(!normalized.contains("dead_letter"));
+        assert!(!normalized.contains("dead-letter"));
+        assert!(!normalized.contains("deadletter"));
+        assert!(!normalized.contains("dead letter"));
+    }
+
+    #[test]
+    fn no_media_found_reason_gets_label_and_rescan_copy() {
+        let mut scan = snapshot(ScanLifecycleStatus::Completed);
+        scan.skipped_items = 1;
+        let details = vec![reason_detail(
+            ScanPathReasonCategory::Skipped,
+            "no_supported_media_found",
+            None,
+        )];
+
+        assert_eq!(reason_detail_label(&details[0]), "No media found");
+        assert_eq!(
+            scan_status_label(&scan, &details, 1, 0, 0).0,
+            "No media found"
+        );
+        assert!(scan_has_rescan_recovery(&scan, &details, 1, 0));
+        assert_eq!(
+            scan_recovery_copy(&scan, &details, 1, 0),
+            Some(
+                "Add supported media or update the folder, then rescan this library."
+            )
+        );
+    }
+
+    #[test]
+    fn panel_count_reports_attention_instead_of_running_only() {
+        let mut running = snapshot(ScanLifecycleStatus::Running);
+        let mut failed = snapshot(ScanLifecycleStatus::Failed);
+        failed.needs_attention_items = 1;
+        failed.failed_items = 1;
+
+        assert_eq!(
+            scan_panel_count_label(&[running.clone(), failed]),
+            "1 running • 1 needs attention"
+        );
+
+        running.retrying_items = 1;
+        assert_eq!(
+            scan_status_label(&running, &[], 0, 0, running.retrying_items).0,
+            "Retrying"
+        );
     }
 }
 

@@ -426,20 +426,36 @@ pub async fn build_scan_progress_stream(
     ScanControlError,
 > {
     let history = scan_control.events(&scan_id).await?;
-    let receiver = scan_control.subscribe_scan(scan_id).await?;
+    let receiver = match scan_control.subscribe_scan(scan_id).await {
+        Ok(receiver) => Some(receiver),
+        Err(ScanControlError::ScanNotFound) if !history.is_empty() => None,
+        Err(err) => return Err(err),
+    };
 
-    let history_last_sequence = last_sequence;
-    let history_events = history
-        .into_iter()
-        .filter(|frame| {
-            history_last_sequence
-                .map(|seq| frame.payload.sequence > seq)
-                .unwrap_or(true)
-        })
-        .filter_map(scan_frame_to_event)
-        .map(Ok::<Event, Infallible>)
-        .collect::<Vec<_>>();
+    Ok(scan_progress_stream_from_parts(
+        history,
+        receiver,
+        last_sequence,
+    ))
+}
+
+fn scan_progress_stream_from_parts(
+    history: Vec<ScanBroadcastFrame>,
+    receiver: Option<tokio::sync::broadcast::Receiver<ScanBroadcastFrame>>,
+    last_sequence: Option<u64>,
+) -> Pin<
+    Box<
+        dyn tokio_stream::Stream<Item = Result<Event, Infallible>>
+            + Send
+            + 'static,
+    >,
+> {
+    let history_events = scan_progress_history_events(history, last_sequence);
     let history_stream = tokio_stream::iter(history_events);
+
+    let Some(receiver) = receiver else {
+        return Box::pin(history_stream);
+    };
 
     let initial_sequence = last_sequence.unwrap_or(0);
     let live_stream = async_stream::stream! {
@@ -465,8 +481,23 @@ pub async fn build_scan_progress_stream(
         }
     };
 
-    let stream = history_stream.chain(live_stream);
-    Ok(Box::pin(stream))
+    Box::pin(history_stream.chain(live_stream))
+}
+
+fn scan_progress_history_events(
+    history: Vec<ScanBroadcastFrame>,
+    last_sequence: Option<u64>,
+) -> Vec<Result<Event, Infallible>> {
+    history
+        .into_iter()
+        .filter(|frame| {
+            last_sequence
+                .map(|seq| frame.payload.sequence > seq)
+                .unwrap_or(true)
+        })
+        .filter_map(scan_frame_to_event)
+        .map(Ok::<Event, Infallible>)
+        .collect::<Vec<_>>()
 }
 
 pub async fn media_events_sse_handler(
@@ -634,10 +665,9 @@ fn encode_media_event(event: &MediaEvent) -> Option<String> {
 }
 
 fn encode_scan_progress(payload: &ScanProgressEvent) -> Option<String> {
-    to_bytes::<RkyvError>(payload)
-        .map(|bytes| BASE64_STANDARD.encode(bytes.as_slice()))
+    serde_json::to_string(payload)
         .map_err(|err| {
-            warn!("failed to serialize scan progress payload with rkyv: {err}");
+            warn!("failed to serialize scan progress payload as JSON: {err}");
             err
         })
         .ok()
@@ -647,4 +677,84 @@ fn default_keep_alive() -> KeepAlive {
     KeepAlive::new()
         .interval(Duration::from_secs(15))
         .text("keep-alive")
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::*;
+    use chrono::Utc;
+    use ferrex_core::types::ScanStageLatencySummary;
+
+    use crate::infra::scan::scan_manager::ScanEventKind;
+
+    fn sample_progress(sequence: u64) -> ScanProgressEvent {
+        let scan_id = Uuid::now_v7();
+        ScanProgressEvent {
+            version: "2".to_string(),
+            scan_id,
+            library_id: LibraryId::new(),
+            status: "completed".to_string(),
+            completed_items: 3,
+            total_items: 4,
+            validated_items: 1,
+            known_unchanged_items: 1,
+            skipped_items: 1,
+            failed_items: 1,
+            needs_attention_items: 1,
+            retrying_items: 0,
+            sequence,
+            current_path: Some("/library/movie".to_string()),
+            path_key: None,
+            p95_stage_latencies_ms: ScanStageLatencySummary {
+                scan: 1,
+                analyze: 2,
+                index: 3,
+            },
+            correlation_id: scan_id,
+            idempotency_key: format!("scan:{scan_id}:{sequence}"),
+            emitted_at: Utc::now(),
+            terminal_at: Some(Utc::now()),
+            reason_details: Vec::new(),
+        }
+    }
+
+    fn frame(sequence: u64) -> ScanBroadcastFrame {
+        ScanBroadcastFrame {
+            event: ScanEventKind::Progress,
+            payload: sample_progress(sequence),
+        }
+    }
+
+    #[test]
+    fn scan_progress_sse_payloads_are_json_without_legacy_queue_field() {
+        let payload = sample_progress(7);
+        let encoded = encode_scan_progress(&payload).expect("json payload");
+
+        assert!(encoded.starts_with('{'));
+        assert!(encoded.contains("needs_attention_items"));
+        assert!(encoded.contains("terminal_at"));
+        assert!(!encoded.contains("dead_lettered_items"));
+
+        let decoded: ScanProgressEvent =
+            serde_json::from_str(&encoded).expect("decode JSON SSE payload");
+        assert_eq!(decoded.version, "2");
+        assert_eq!(decoded.failed_items, 1);
+        assert_eq!(decoded.needs_attention_items, 1);
+        assert!(decoded.terminal_at.is_some());
+    }
+
+    #[test]
+    fn scan_progress_history_replay_respects_resume_sequence() {
+        let history = vec![frame(1), frame(2), frame(3)];
+
+        assert_eq!(
+            scan_progress_history_events(history.clone(), None).len(),
+            3
+        );
+        assert_eq!(
+            scan_progress_history_events(history.clone(), Some(1)).len(),
+            2
+        );
+        assert_eq!(scan_progress_history_events(history, Some(3)).len(), 0);
+    }
 }

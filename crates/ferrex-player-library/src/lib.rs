@@ -217,8 +217,12 @@ impl LibraryDomainState {
             mode: response.mode,
             completed_items: 0,
             total_items: 0,
+            validated_items: 0,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
             retrying_items: 0,
-            dead_lettered_items: 0,
             correlation_id: response.correlation_id,
             idempotency_key: response.idempotency_key.clone(),
             run_key,
@@ -227,6 +231,7 @@ impl LibraryDomainState {
             started_at: chrono::Utc::now(),
             terminal_at: None,
             sequence: 0,
+            reason_details: Vec::new(),
         });
     }
 
@@ -307,26 +312,50 @@ impl LibraryDomainState {
         &mut self,
         frame: ScanProgressEvent,
     ) -> bool {
-        let Some(snapshot) = self.active_scans.get_mut(&frame.scan_id) else {
-            return false;
+        let (old_key, new_key, is_active, scan_id, keep_snapshot) = {
+            let Some(snapshot) = self.active_scans.get_mut(&frame.scan_id)
+            else {
+                return false;
+            };
+            let old_key = ActiveScanRunKey::from_snapshot(snapshot);
+
+            snapshot.completed_items = frame.completed_items;
+            snapshot.total_items = frame.total_items;
+            snapshot.validated_items = frame.validated_items;
+            snapshot.known_unchanged_items = frame.known_unchanged_items;
+            snapshot.skipped_items = frame.skipped_items;
+            snapshot.failed_items = frame.failed_items;
+            snapshot.needs_attention_items = frame.needs_attention_items;
+            snapshot.retrying_items = frame.retrying_items;
+            snapshot.reason_details = frame.reason_details.clone();
+            snapshot.current_path = frame.current_path.clone();
+            snapshot.terminal_at = frame.terminal_at;
+            snapshot.sequence = frame.sequence;
+
+            if let Some(status) = scan_status_from_progress(&frame.status) {
+                snapshot.status = status;
+            }
+
+            let terminal = snapshot.status.is_terminal();
+            (
+                old_key,
+                ActiveScanRunKey::from_snapshot(snapshot),
+                snapshot.status.is_active(),
+                snapshot.scan_id,
+                !terminal || progress_frame_has_recovery_affordance(&frame),
+            )
         };
 
-        snapshot.completed_items = frame.completed_items;
-        snapshot.total_items = frame.total_items;
-        snapshot.retrying_items =
-            frame.retrying_items.unwrap_or(snapshot.retrying_items);
-        snapshot.dead_lettered_items = frame
-            .dead_lettered_items
-            .unwrap_or(snapshot.dead_lettered_items);
-        snapshot.current_path = frame.current_path.clone();
-        snapshot.sequence = frame.sequence;
+        if !keep_snapshot {
+            self.remove_active_scan(scan_id);
+            return true;
+        }
 
-        if let Some(status) = scan_status_from_progress(&frame.status) {
-            snapshot.status = status.clone();
-            if status.is_terminal() {
-                self.remove_active_scan(frame.scan_id);
-                return true;
-            }
+        self.active_scan_runs.remove(&old_key);
+        if is_active {
+            self.active_scan_runs.insert(new_key, scan_id);
+        } else {
+            self.active_scan_runs.remove(&new_key);
         }
 
         self.latest_progress.insert(frame.scan_id, frame);
@@ -366,13 +395,28 @@ fn should_replace_active_snapshot(
     }
 }
 
+fn progress_frame_has_recovery_affordance(frame: &ScanProgressEvent) -> bool {
+    frame.needs_attention_items > 0
+        || frame.failed_items > 0
+        || frame.skipped_items > 0
+        || !frame.reason_details.is_empty()
+        || matches!(
+            frame.status.as_str(),
+            "failed_needs_attention" | "needs_attention" | "skipped"
+        )
+}
+
 fn scan_status_from_progress(status: &str) -> Option<ScanLifecycleStatus> {
     match status {
-        "pending" => Some(ScanLifecycleStatus::Pending),
-        "running" => Some(ScanLifecycleStatus::Running),
+        "pending" | "initializing" => Some(ScanLifecycleStatus::Pending),
+        "running" | "discovering" | "processing" | "quiescing" | "retrying" => {
+            Some(ScanLifecycleStatus::Running)
+        }
         "paused" => Some(ScanLifecycleStatus::Paused),
         "completed" => Some(ScanLifecycleStatus::Completed),
-        "failed" => Some(ScanLifecycleStatus::Failed),
+        "failed" | "failed_needs_attention" | "needs_attention" | "skipped" => {
+            Some(ScanLifecycleStatus::Failed)
+        }
         "canceled" | "cancelled" => Some(ScanLifecycleStatus::Canceled),
         _ => None,
     }
@@ -471,8 +515,12 @@ mod tests {
             mode,
             completed_items: sequence,
             total_items: 100,
+            validated_items: sequence,
+            known_unchanged_items: 0,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
             retrying_items: 0,
-            dead_lettered_items: 0,
             correlation_id: Uuid::now_v7(),
             idempotency_key: format!("scan-{scan_id}"),
             run_key: mode.run_key(library_id),
@@ -481,6 +529,7 @@ mod tests {
             started_at: Utc::now() + Duration::seconds(started_offset_secs),
             terminal_at: None,
             sequence,
+            reason_details: Vec::new(),
         }
     }
 
@@ -496,6 +545,12 @@ mod tests {
             status: status.into(),
             completed_items: 12,
             total_items: 24,
+            validated_items: 11,
+            known_unchanged_items: 1,
+            skipped_items: 0,
+            failed_items: 0,
+            needs_attention_items: 0,
+            retrying_items: 1,
             sequence: 2,
             current_path: Some("/media/movie.mkv".into()),
             path_key: None,
@@ -507,8 +562,8 @@ mod tests {
             correlation_id: Uuid::now_v7(),
             idempotency_key: format!("scan-{scan_id}"),
             emitted_at: Utc::now(),
-            retrying_items: Some(1),
-            dead_lettered_items: Some(0),
+            terminal_at: None,
+            reason_details: Vec::new(),
         }
     }
 

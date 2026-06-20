@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::api::scan::IncrementalScanStatusView;
 use crate::types::ids::LibraryId;
-use crate::types::media_events::ScanProgressEvent;
+use ferrex_model::{ScanPathReasonDetail, ScanProgressEvent};
 
 /// Public mode for a durable library scan run.
 ///
@@ -146,7 +146,7 @@ impl ScanLifecycleStatus {
 }
 
 /// Snapshot of a scan job used for dashboards and SSE updates
-#[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, serde::Serialize, PartialEq)]
 #[cfg_attr(
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
@@ -160,8 +160,12 @@ pub struct ScanSnapshotDto {
     pub mode: ScanRunMode,
     pub completed_items: u64,
     pub total_items: u64,
+    pub validated_items: u64,
+    pub known_unchanged_items: u64,
+    pub skipped_items: u64,
+    pub failed_items: u64,
+    pub needs_attention_items: u64,
     pub retrying_items: u64,
-    pub dead_lettered_items: u64,
     pub correlation_id: Uuid,
     pub idempotency_key: String,
     #[serde(default)]
@@ -182,6 +186,8 @@ pub struct ScanSnapshotDto {
     )]
     pub terminal_at: Option<DateTime<Utc>>,
     pub sequence: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reason_details: Vec<ScanPathReasonDetail>,
 }
 
 impl fmt::Debug for ScanSnapshotDto {
@@ -193,8 +199,12 @@ impl fmt::Debug for ScanSnapshotDto {
             .field("mode", &self.mode)
             .field("completed_items", &self.completed_items)
             .field("total_items", &self.total_items)
+            .field("validated_items", &self.validated_items)
+            .field("known_unchanged_items", &self.known_unchanged_items)
+            .field("skipped_items", &self.skipped_items)
+            .field("failed_items", &self.failed_items)
+            .field("needs_attention_items", &self.needs_attention_items)
             .field("retrying_items", &self.retrying_items)
-            .field("dead_lettered_items", &self.dead_lettered_items)
             .field("current_path", &self.current_path)
             .field("started_at", &self.started_at)
             .field("terminal_at", &self.terminal_at)
@@ -203,7 +213,94 @@ impl fmt::Debug for ScanSnapshotDto {
             .field("idempotency_key", &self.idempotency_key)
             .field("run_key", &self.run_key)
             .field("disposition", &self.disposition)
+            .field("reason_details", &self.reason_details)
             .finish()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ScanSnapshotDto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            scan_id: Uuid,
+            library_id: LibraryId,
+            status: ScanLifecycleStatus,
+            #[serde(default)]
+            mode: ScanRunMode,
+            completed_items: u64,
+            total_items: u64,
+            #[serde(default)]
+            validated_items: u64,
+            #[serde(default)]
+            known_unchanged_items: u64,
+            #[serde(default)]
+            skipped_items: u64,
+            #[serde(default)]
+            failed_items: u64,
+            #[serde(default)]
+            needs_attention_items: u64,
+            // Deprecated compatibility input for pre-v2 JSON clients only.
+            // Remove this alias after 2026-09-30; new serializers never emit it.
+            #[serde(default, rename = "dead_lettered_items")]
+            legacy_dead_lettered_items: Option<u64>,
+            #[serde(default)]
+            retrying_items: u64,
+            correlation_id: Uuid,
+            idempotency_key: String,
+            #[serde(default)]
+            run_key: String,
+            #[serde(default)]
+            disposition: Option<ScanStartDisposition>,
+            #[serde(default)]
+            current_path: Option<String>,
+            started_at: DateTime<Utc>,
+            #[serde(default)]
+            terminal_at: Option<DateTime<Utc>>,
+            sequence: u64,
+            #[serde(default)]
+            reason_details: Vec<ScanPathReasonDetail>,
+        }
+
+        let wire = <Wire as serde::Deserialize>::deserialize(deserializer)?;
+        let attention_items = wire
+            .failed_items
+            .max(wire.needs_attention_items)
+            .max(wire.legacy_dead_lettered_items.unwrap_or(0));
+        let has_breakdown = wire.validated_items > 0
+            || wire.known_unchanged_items > 0
+            || wire.skipped_items > 0;
+        let validated_items = if has_breakdown {
+            wire.validated_items
+        } else {
+            wire.completed_items
+        };
+
+        Ok(Self {
+            scan_id: wire.scan_id,
+            library_id: wire.library_id,
+            status: wire.status,
+            mode: wire.mode,
+            completed_items: wire.completed_items,
+            total_items: wire.total_items,
+            validated_items,
+            known_unchanged_items: wire.known_unchanged_items,
+            skipped_items: wire.skipped_items,
+            failed_items: attention_items,
+            needs_attention_items: attention_items,
+            retrying_items: wire.retrying_items,
+            correlation_id: wire.correlation_id,
+            idempotency_key: wire.idempotency_key,
+            run_key: wire.run_key,
+            disposition: wire.disposition,
+            current_path: wire.current_path,
+            started_at: wire.started_at,
+            terminal_at: wire.terminal_at,
+            sequence: wire.sequence,
+            reason_details: wire.reason_details,
+        })
     }
 }
 
@@ -330,8 +427,92 @@ mod tests {
 
 /// Re-export media scan SSE payloads for downstream clients
 pub mod events {
-    pub use crate::types::media_events::{
-        MediaEvent, ScanEventMetadata, ScanProgressEvent,
-        ScanStageLatencySummary,
+    pub use ferrex_model::{
+        MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
+        ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,
     };
+}
+
+#[cfg(test)]
+mod snapshot_serde_tests {
+    use super::*;
+    use ferrex_model::{ScanPathReasonCategory, ScanPathReasonDetail};
+
+    fn fixed_time() -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp(1_700_000_000, 0)
+            .expect("valid fixed timestamp")
+    }
+
+    fn sample_snapshot() -> ScanSnapshotDto {
+        let scan_id = Uuid::now_v7();
+        let library_id = LibraryId::new();
+        ScanSnapshotDto {
+            scan_id,
+            library_id,
+            status: ScanLifecycleStatus::Running,
+            mode: ScanRunMode::Manual,
+            completed_items: 7,
+            total_items: 10,
+            validated_items: 4,
+            known_unchanged_items: 2,
+            skipped_items: 1,
+            failed_items: 2,
+            needs_attention_items: 2,
+            retrying_items: 1,
+            correlation_id: scan_id,
+            idempotency_key: "scan:test:7".to_string(),
+            run_key: ScanRunMode::Manual.run_key(library_id),
+            disposition: Some(ScanStartDisposition::Created),
+            current_path: Some("/library/movie".to_string()),
+            started_at: fixed_time(),
+            terminal_at: Some(fixed_time()),
+            sequence: 7,
+            reason_details: vec![ScanPathReasonDetail {
+                category: ScanPathReasonCategory::NeedsAttention,
+                reason_code: "permission_denied".to_string(),
+                message: Some(
+                    "Review this path and rescan when it is ready".to_string(),
+                ),
+                path: Some("/library/movie".to_string()),
+                path_key: None,
+                retryable: false,
+                action_hint: Some("rescan_library".to_string()),
+            }],
+        }
+    }
+
+    #[test]
+    fn snapshot_json_uses_safe_fields_without_legacy_alias() {
+        let snapshot = sample_snapshot();
+        let json = serde_json::to_string(&snapshot).expect("encode snapshot");
+
+        assert!(json.contains("needs_attention_items"));
+        assert!(json.contains("reason_details"));
+        assert!(!json.contains("dead_lettered_items"));
+
+        let decoded: ScanSnapshotDto =
+            serde_json::from_str(&json).expect("decode snapshot");
+        assert_eq!(decoded, snapshot);
+    }
+
+    #[test]
+    fn snapshot_legacy_json_maps_attention_alias() {
+        let snapshot = sample_snapshot();
+        let completed_items = snapshot.completed_items;
+        let mut value = serde_json::to_value(snapshot).expect("snapshot json");
+        let object = value.as_object_mut().expect("snapshot object");
+        object.remove("validated_items");
+        object.remove("known_unchanged_items");
+        object.remove("skipped_items");
+        object.remove("failed_items");
+        object.remove("needs_attention_items");
+        object.remove("reason_details");
+        object.insert("dead_lettered_items".to_string(), serde_json::json!(6));
+
+        let decoded: ScanSnapshotDto =
+            serde_json::from_value(value).expect("decode legacy snapshot");
+        assert_eq!(decoded.validated_items, completed_items);
+        assert_eq!(decoded.failed_items, 6);
+        assert_eq!(decoded.needs_attention_items, 6);
+    }
 }

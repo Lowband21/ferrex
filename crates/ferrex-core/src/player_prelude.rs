@@ -36,6 +36,7 @@ pub use crate::domain::users::user::{
     UiPreferences, User, UserPreferences, UserScale,
 };
 
-pub use crate::types::media_events::{
-    MediaEvent, ScanEventMetadata, ScanProgressEvent, ScanStageLatencySummary,
+pub use ferrex_model::{
+    MediaEvent, ScanEventMetadata, ScanPathReasonCategory,
+    ScanPathReasonDetail, ScanProgressEvent, ScanStageLatencySummary,
 };

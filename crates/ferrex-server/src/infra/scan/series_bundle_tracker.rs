@@ -439,7 +439,7 @@ impl EpisodeFilePathNorm {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use ferrex_core::domain::scan::actors::MediaKindHint;
+    use ferrex_core::domain::scan::actors::{FolderScanOutcome, MediaKindHint};
     use ferrex_core::domain::scan::orchestration::ScanReason;
     use ferrex_core::domain::scan::orchestration::context::{
         EpisodeLink, EpisodeScanHierarchy, FolderScanContext, ScanNodeKind,
@@ -512,6 +512,7 @@ mod tests {
             discovered_files: 1,
             enqueued_subfolders: 0,
             listing_hash: "abc".into(),
+            outcome: FolderScanOutcome::Changed,
             completed_at: Utc::now(),
         });
         tracker.observe_folder_scan_completed(&FolderScanSummary {
@@ -522,6 +523,7 @@ mod tests {
             discovered_files: 0,
             enqueued_subfolders: 1,
             listing_hash: "def".into(),
+            outcome: FolderScanOutcome::Changed,
             completed_at: Utc::now(),
         });
 
