@@ -2,10 +2,9 @@ use chrono::{DateTime, Utc};
 use ferrex_model::scan::scanner::settings;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::scan::manifest::{
-    DEFAULT_MANIFEST_WALK_BATCH_LIMIT, DEFAULT_MANIFEST_WALK_MAX_DEPTH,
-    DEFAULT_MANIFEST_WALK_PARTITION_LIMIT,
-};
+const DEFAULT_MANIFEST_WALK_BATCH_LIMIT: usize = 512;
+const DEFAULT_MANIFEST_WALK_PARTITION_LIMIT: usize = 5_000;
+const DEFAULT_MANIFEST_WALK_MAX_DEPTH: usize = 64;
 
 /// Ready-queue depths for scan-related workers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
