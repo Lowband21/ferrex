@@ -56,6 +56,7 @@ enum class TheaterPlateBackdropAdaptation(
     val explicitLabel: String?,
 ) {
     Ready(explicitLabel = null),
+    Pending(explicitLabel = "Backdrop pending"),
     MissingBackdrop(explicitLabel = "Missing backdrop"),
     LowQuality(explicitLabel = "Low-quality backdrop"),
     StaleOffline(explicitLabel = "Stale/offline artwork"),
@@ -247,23 +248,27 @@ data class TheaterPlateStageVisuals(
             val grain = controls.grainOpacity.controlOrZero()
             val adjustedBackdropOpacity = when (adaptation) {
                 TheaterPlateBackdropAdaptation.Ready -> plate.coerceIn(0.18f, 0.72f)
+                TheaterPlateBackdropAdaptation.Pending -> 0f
                 TheaterPlateBackdropAdaptation.MissingBackdrop -> 0f
                 TheaterPlateBackdropAdaptation.LowQuality -> (plate * 0.52f).coerceIn(0f, 0.36f)
                 TheaterPlateBackdropAdaptation.StaleOffline -> (plate * 0.42f).coerceIn(0f, 0.30f)
             }
             val adjustedScrim = when (adaptation) {
                 TheaterPlateBackdropAdaptation.Ready -> scrim
+                TheaterPlateBackdropAdaptation.Pending -> max(scrim, 0.50f)
                 TheaterPlateBackdropAdaptation.MissingBackdrop -> max(scrim, 0.52f)
                 TheaterPlateBackdropAdaptation.LowQuality -> (scrim + 0.08f).controlOrZero()
                 TheaterPlateBackdropAdaptation.StaleOffline -> max(scrim, 0.60f)
             }
             val adjustedAmbient = when (adaptation) {
                 TheaterPlateBackdropAdaptation.Ready -> ambientOpacity
+                TheaterPlateBackdropAdaptation.Pending -> max(ambientOpacity, 0.58f)
                 TheaterPlateBackdropAdaptation.MissingBackdrop -> max(ambientOpacity, 0.62f)
                 TheaterPlateBackdropAdaptation.LowQuality -> max(ambientOpacity, 0.54f)
                 TheaterPlateBackdropAdaptation.StaleOffline -> max(ambientOpacity, 0.56f)
             }
             val adjustedGrain = when (adaptation) {
+                TheaterPlateBackdropAdaptation.Pending -> max(grain, 0.018f)
                 TheaterPlateBackdropAdaptation.LowQuality -> max(grain, 0.030f)
                 TheaterPlateBackdropAdaptation.StaleOffline -> max(grain, 0.022f)
                 else -> grain
@@ -289,6 +294,7 @@ data class TheaterPlateStageVisuals(
                 desaturation = when (adaptation) {
                     TheaterPlateBackdropAdaptation.StaleOffline -> max(controls.desaturation, 0.20f)
                     TheaterPlateBackdropAdaptation.LowQuality -> max(controls.desaturation, 0.16f)
+                    TheaterPlateBackdropAdaptation.Pending -> max(controls.desaturation, 0.10f)
                     else -> controls.desaturation
                 }.controlOrZero(),
                 readabilityLobeOpacity = (adjustedScrim * 0.72f + 0.18f).controlOrZero(),

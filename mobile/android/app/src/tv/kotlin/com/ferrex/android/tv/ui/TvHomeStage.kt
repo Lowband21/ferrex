@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import coil.ImageLoader
 import com.ferrex.android.core.auth.AuthenticatedConnectionUi
 import com.ferrex.android.core.auth.SessionState
+import com.ferrex.android.core.browse.HomeBackdropModels
 import com.ferrex.android.core.browse.HomeLibraryTab
 import com.ferrex.android.core.browse.HomeShelf
 import com.ferrex.android.core.browse.LibraryBrowseModels
@@ -33,7 +34,6 @@ import com.ferrex.android.core.library.LibraryFreshness
 import com.ferrex.android.core.library.LibraryInfo
 import com.ferrex.android.core.library.LibraryRepositoryState
 import com.ferrex.android.core.library.ServerCacheScope
-import com.ferrex.android.core.theaterplate.TheaterPlateAnalyzer
 import com.ferrex.android.core.theaterplate.TheaterPlateSourceContext
 import com.ferrex.android.core.theaterplate.TheaterPlateViewport
 import com.ferrex.android.core.tvfocus.TvHomeFocusPolicy
@@ -51,8 +51,10 @@ import com.ferrex.android.ui.theaterplate.FerrexStageDensityFamily
 import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
-import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
+import com.ferrex.android.ui.theaterplate.TheaterPlateResolvedBackdrop
 import com.ferrex.android.ui.theaterplate.TheaterPlateStage
+import com.ferrex.android.ui.theaterplate.rememberTheaterPlateResolvedBackdropState
+import com.ferrex.android.ui.theaterplate.toTheaterPlateBackdropAdaptation
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 
 private val tvHomeTheaterPlateViewport = TheaterPlateViewport.of(1920, 1080)
@@ -144,22 +146,40 @@ internal fun TvHomeContent(
     val stageContext = remember {
         TheaterPlateSourceContext.missingBackdrop(viewport = tvHomeTheaterPlateViewport)
     }
-    val stageAnalysis = remember(stageContext) { TheaterPlateAnalyzer().analyzeMissingBackdrop(stageContext) }
-    val stageAdaptation = when {
-        connectionStatus.visible -> TheaterPlateBackdropAdaptation.StaleOffline
-        repositoryState?.freshness is LibraryFreshness.StaleOffline -> TheaterPlateBackdropAdaptation.StaleOffline
-        continueState.status is ContinueWatchingStatus.StaleOffline -> TheaterPlateBackdropAdaptation.StaleOffline
-        continueEntries.isEmpty() && shelves.isEmpty() -> TheaterPlateBackdropAdaptation.MissingBackdrop
-        else -> TheaterPlateBackdropAdaptation.Ready
+    val backdropCandidates = remember(shelves) {
+        HomeBackdropModels.candidatesFromShelves(shelves)
     }
+    val backdropStageState = remember(backdropCandidates, imageResolutions, connectionStatus.visible, repositoryState?.freshness?.label, continueState.status.label) {
+        HomeBackdropModels.resolveStage(
+            candidates = backdropCandidates,
+            resolutions = imageResolutions,
+            forceStaleOffline = connectionStatus.visible ||
+                repositoryState?.freshness is LibraryFreshness.StaleOffline ||
+                continueState.status is ContinueWatchingStatus.StaleOffline,
+        )
+    }
+    val resolvedBackdropState = rememberTheaterPlateResolvedBackdropState(
+        scope = scope,
+        stageState = backdropStageState,
+        imageLoader = imageLoader,
+        fallbackContext = stageContext,
+    )
+    val stageAdaptation = backdropStageState.toTheaterPlateBackdropAdaptation(
+        imageLoaderAvailable = imageLoader != null,
+    )
 
     TheaterPlateStage(
         modifier = Modifier.testTag(FerrexQaTags.Tv.Home),
-        analysis = stageAnalysis,
+        analysis = resolvedBackdropState.analysis,
         adaptation = stageAdaptation,
         density = FerrexStageDensityFamily.TenFoot,
         contentDescription = "Ferrex Android TV Theater Plate home stage",
         contentMaxWidth = FerrexDesignTokens.Tv.HomeMaxWidth,
+        backdrop = if (resolvedBackdropState.canRenderBackdrop) {
+            { TheaterPlateResolvedBackdrop(resolvedBackdropState) }
+        } else {
+            null
+        },
     ) {
         Column(
             modifier = Modifier

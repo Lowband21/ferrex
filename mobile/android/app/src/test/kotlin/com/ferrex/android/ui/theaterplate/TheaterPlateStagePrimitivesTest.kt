@@ -2,8 +2,13 @@ package com.ferrex.android.ui.theaterplate
 
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ferrex.android.core.browse.BrowseSourceSurface
+import com.ferrex.android.core.browse.HomeBackdropCandidate
+import com.ferrex.android.core.browse.HomeBackdropStageState
+import com.ferrex.android.core.browse.HomeBackdropStageStatus
 import com.ferrex.android.core.image.BrowseImageCategory
 import com.ferrex.android.core.image.ImageRequestKey
+import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.theaterplate.TheaterPlateAnalysis
 import com.ferrex.android.core.theaterplate.TheaterPlateColor
 import com.ferrex.android.core.theaterplate.TheaterPlateDownsample
@@ -148,6 +153,60 @@ class TheaterPlateStagePrimitivesTest {
         assertTrue(stale.desaturation >= 0.20f)
         assertTrue(lowQuality.scrimOpacity >= ready.scrimOpacity)
         assertTrue(lowQuality.backdropOpacity < ready.backdropOpacity)
+    }
+
+    @Test
+    fun pendingAdaptationLabelsRetryingBackdropsWithoutRenderingFallbackAsReady() {
+        val analysis = analysisFor(TheaterPlateGradeClass.MissingBackdrop, controlsFor(TheaterPlateGradeClass.MissingBackdrop))
+        val pending = TheaterPlateStageVisuals.fromAnalysis(analysis, TheaterPlateBackdropAdaptation.Pending)
+
+        assertEquals("Backdrop pending", pending.explicitStateLabel)
+        assertEquals(0f, pending.backdropOpacity, 0.0001f)
+        assertTrue(pending.scrimOpacity >= 0.50f)
+        assertTrue(pending.ambientOpacity >= 0.58f)
+    }
+
+    @Test
+    fun homeBackdropStageStatesMapToExplicitTheaterPlateAdaptations() {
+        val candidate = HomeBackdropCandidate(
+            stableKey = "movie:1",
+            title = "Movie",
+            backdropKey = ImageRequestKey("00000000-0000-0000-0000-000000000777", BrowseImageCategory.Backdrop),
+            fallbackPath = "/backdrop.jpg",
+            sourceSurface = BrowseSourceSurface.HomeShelf,
+        )
+        val readyResolution = ImageResolution.Ready(candidate.backdropKey, url = "https://ferrex.local/blob", token = "token")
+
+        assertEquals(
+            TheaterPlateBackdropAdaptation.Ready,
+            HomeBackdropStageState(HomeBackdropStageStatus.Ready, candidate, readyResolution)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = true),
+        )
+        assertEquals(
+            TheaterPlateBackdropAdaptation.StaleOffline,
+            HomeBackdropStageState(HomeBackdropStageStatus.StaleOffline, candidate, readyResolution)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = true),
+        )
+        assertEquals(
+            TheaterPlateBackdropAdaptation.Pending,
+            HomeBackdropStageState(HomeBackdropStageStatus.Pending, candidate, null)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = true),
+        )
+        assertEquals(
+            TheaterPlateBackdropAdaptation.MissingBackdrop,
+            HomeBackdropStageState(HomeBackdropStageStatus.Failed, candidate, null)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = true),
+        )
+        assertEquals(
+            TheaterPlateBackdropAdaptation.MissingBackdrop,
+            HomeBackdropStageState(HomeBackdropStageStatus.NoBackdrop, null, null)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = true),
+        )
+        assertEquals(
+            TheaterPlateBackdropAdaptation.Pending,
+            HomeBackdropStageState(HomeBackdropStageStatus.Ready, candidate, readyResolution)
+                .toTheaterPlateBackdropAdaptation(imageLoaderAvailable = false),
+        )
     }
 
     @Test

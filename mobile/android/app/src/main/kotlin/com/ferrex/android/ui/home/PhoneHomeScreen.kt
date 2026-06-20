@@ -55,6 +55,7 @@ import com.ferrex.android.core.auth.noWipeRecoveryActions
 import com.ferrex.android.core.browse.AuthenticatedHomeBackPolicy
 import com.ferrex.android.core.browse.BrowseMediaType
 import com.ferrex.android.core.browse.BrowseSourceSurface
+import com.ferrex.android.core.browse.HomeBackdropModels
 import com.ferrex.android.core.browse.HomeLibraryTab
 import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.LibraryIndexResult
@@ -139,7 +140,10 @@ import com.ferrex.android.ui.theaterplate.FerrexStageSurface
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceTone
 import com.ferrex.android.ui.theaterplate.FerrexStageSurfaceVariant
 import com.ferrex.android.ui.theaterplate.TheaterPlateBackdropAdaptation
+import com.ferrex.android.ui.theaterplate.TheaterPlateResolvedBackdrop
 import com.ferrex.android.ui.theaterplate.TheaterPlateStage
+import com.ferrex.android.ui.theaterplate.rememberTheaterPlateResolvedBackdropState
+import com.ferrex.android.ui.theaterplate.toTheaterPlateBackdropAdaptation
 import com.ferrex.android.ui.theaterplate.tokens
 import com.ferrex.android.ui.theme.FerrexDesignTokens
 import kotlinx.coroutines.launch
@@ -360,8 +364,10 @@ fun PhoneHomeScreen(
             prefetchLimit = GRID_IMAGE_PREFETCH_LIMIT,
         )
     }
-    val imageKeys = remember(continueState, shelves, gridImageKeys, detailResult) {
+    val imageKeys = remember(continueState, shelves, activeGridCardsForImages, gridImageKeys, detailResult) {
         buildList {
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromShelves(shelves)).forEach(::add)
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromCards(activeGridCardsForImages)).forEach(::add)
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
             addAll(gridImageKeys)
@@ -746,7 +752,6 @@ private fun HomeDestinationContent(
     onRetryConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    val analyzer = remember { TheaterPlateAnalyzer() }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -759,23 +764,39 @@ private fun HomeDestinationContent(
         val stageContext = remember(viewport, connectionStatus.health, freshness.label) {
             homeStageSourceContext(viewport, connectionStatus, freshness)
         }
-        val stageAnalysis = remember(analyzer, stageContext) { analyzer.analyzeMissingBackdrop(stageContext) }
-        val adaptation = remember(connectionStatus.health, freshness.label) {
-            if (homeStageHasStaleOrOfflineState(connectionStatus, freshness)) {
-                TheaterPlateBackdropAdaptation.StaleOffline
-            } else {
-                TheaterPlateBackdropAdaptation.MissingBackdrop
-            }
+        val backdropCandidates = remember(shelves) {
+            HomeBackdropModels.candidatesFromShelves(shelves)
         }
+        val backdropStageState = remember(backdropCandidates, imageResolutions, connectionStatus.health, freshness.label) {
+            HomeBackdropModels.resolveStage(
+                candidates = backdropCandidates,
+                resolutions = imageResolutions,
+                forceStaleOffline = homeStageHasStaleOrOfflineState(connectionStatus, freshness),
+            )
+        }
+        val resolvedBackdropState = rememberTheaterPlateResolvedBackdropState(
+            scope = scope,
+            stageState = backdropStageState,
+            imageLoader = imageLoader,
+            fallbackContext = stageContext,
+        )
+        val adaptation = backdropStageState.toTheaterPlateBackdropAdaptation(
+            imageLoaderAvailable = imageLoaderAvailable && imageLoader != null,
+        )
 
         TheaterPlateStage(
-            analysis = stageAnalysis,
+            analysis = resolvedBackdropState.analysis,
             adaptation = adaptation,
             density = density,
             modifier = Modifier
                 .fillMaxSize()
                 .testTag(FerrexQaTags.Phone.Home),
-            contentDescription = "Phone Home Theater Plate stage with generated fallback backdrop analysis and no-wipe recovery paths",
+            contentDescription = "Phone Home Theater Plate stage with authenticated backdrop resolution and no-wipe recovery paths",
+            backdrop = if (resolvedBackdropState.canRenderBackdrop) {
+                { TheaterPlateResolvedBackdrop(resolvedBackdropState) }
+            } else {
+                null
+            },
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -1090,7 +1111,6 @@ private fun LibraryDestinationContent(
     onResetConnection: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
-    val analyzer = remember { TheaterPlateAnalyzer() }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -1102,14 +1122,6 @@ private fun LibraryDestinationContent(
         val density = remember(viewport) { FerrexStageDensityFamily.forViewport(viewport) }
         val stageContext = remember(viewport, connectionStatus.health, freshness.label) {
             homeStageSourceContext(viewport, connectionStatus, freshness)
-        }
-        val stageAnalysis = remember(analyzer, stageContext) { analyzer.analyzeMissingBackdrop(stageContext) }
-        val adaptation = remember(connectionStatus.health, freshness.label) {
-            if (homeStageHasStaleOrOfflineState(connectionStatus, freshness)) {
-                TheaterPlateBackdropAdaptation.StaleOffline
-            } else {
-                TheaterPlateBackdropAdaptation.MissingBackdrop
-            }
         }
 
         var showLibraryChooser by remember { mutableStateOf(false) }
@@ -1151,15 +1163,39 @@ private fun LibraryDestinationContent(
             invalidIndexCount = indexedMovieCards.invalidIndexCount,
             appendedMissingCount = indexedMovieCards.appendedMissingCount,
         )
+        val backdropCandidates = remember(activeCards) {
+            HomeBackdropModels.candidatesFromCards(activeCards)
+        }
+        val backdropStageState = remember(backdropCandidates, imageResolutions, connectionStatus.health, freshness.label) {
+            HomeBackdropModels.resolveStage(
+                candidates = backdropCandidates,
+                resolutions = imageResolutions,
+                forceStaleOffline = homeStageHasStaleOrOfflineState(connectionStatus, freshness),
+            )
+        }
+        val resolvedBackdropState = rememberTheaterPlateResolvedBackdropState(
+            scope = scope,
+            stageState = backdropStageState,
+            imageLoader = imageLoader,
+            fallbackContext = stageContext,
+        )
+        val adaptation = backdropStageState.toTheaterPlateBackdropAdaptation(
+            imageLoaderAvailable = imageLoaderAvailable && imageLoader != null,
+        )
 
         TheaterPlateStage(
-            analysis = stageAnalysis,
+            analysis = resolvedBackdropState.analysis,
             adaptation = adaptation,
             density = density,
             modifier = Modifier
                 .fillMaxSize()
                 .testTag(FerrexQaTags.Phone.Libraries),
-            contentDescription = "Phone Libraries Theater Plate stage with compact controls, one dense grid scroll, and no-wipe recovery actions",
+            contentDescription = "Phone Libraries Theater Plate stage with compact controls, authenticated backdrops, one dense grid scroll, and no-wipe recovery actions",
+            backdrop = if (resolvedBackdropState.canRenderBackdrop) {
+                { TheaterPlateResolvedBackdrop(resolvedBackdropState) }
+            } else {
+                null
+            },
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),

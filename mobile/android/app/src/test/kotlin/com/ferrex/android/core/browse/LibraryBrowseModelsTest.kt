@@ -1,5 +1,8 @@
 package com.ferrex.android.core.browse
 
+import com.ferrex.android.core.image.BrowseImageCategory
+import com.ferrex.android.core.image.ImageRequestKey
+import com.ferrex.android.core.image.ImageResolution
 import com.ferrex.android.core.library.CachedMovieLibrary
 import com.ferrex.android.core.library.CachedSeriesLibrary
 import com.ferrex.android.core.library.LibraryFlatBuffers
@@ -11,6 +14,7 @@ import com.ferrex.android.core.library.RetryClassification
 import com.ferrex.android.core.library.SeriesLibraryAccessor
 import com.ferrex.android.core.library.toFlatBufferUuid
 import com.google.flatbuffers.FlatBufferBuilder
+import ferrex.details.EnhancedMovieDetails
 import ferrex.details.EnhancedSeriesDetails
 import ferrex.library.BatchFetchResponse
 import ferrex.library.MediaBatchData
@@ -183,6 +187,135 @@ class LibraryBrowseModelsTest {
     }
 
     @Test
+    fun movieAndSeriesCardsExposeBackdropMetadataWithoutChangingPosterKeys() {
+        val movieLibrary = movieLibrary()
+        val movieBackdrop = uuid(303)
+        val movieAccessor = MovieLibraryAccessor(
+            LibraryFlatBuffers.parseMoviePayload(
+                movieBatchWithBackdrop(
+                    libraryId = movieLibrary.id,
+                    movieId = uuid(302),
+                    posterId = uuid(301),
+                    backdropId = movieBackdrop,
+                ).wrap(),
+            ).getOrThrow(),
+        )
+        val movieCard = LibraryBrowseModels.movieGridCards(movieLibrary, movieAccessor).single()
+
+        assertEquals(BrowseImageCategory.Poster, movieCard.imageKey?.category)
+        assertEquals(BrowseImageCategory.Backdrop, movieCard.backdropKey?.category)
+        assertEquals(movieBackdrop.toString(), movieCard.backdropKey?.iid)
+        assertEquals("/movie-backdrop.jpg", movieCard.backdropFallbackPath)
+
+        val seriesLibrary = seriesLibrary()
+        val seriesBackdrop = uuid(403)
+        val seriesAccessor = SeriesLibraryAccessor(
+            LibraryFlatBuffers.parseSeriesPayload(
+                seriesBundle(
+                    libraryId = seriesLibrary.id,
+                    seriesId = uuid(402).toString(),
+                    titleValue = "Backdrop Series",
+                    primaryBackdropId = seriesBackdrop,
+                    backdropPathValue = "/series-backdrop.jpg",
+                ).wrap(),
+            ).getOrThrow(),
+        )
+        val seriesCard = LibraryBrowseModels.seriesGridCards(seriesLibrary, seriesAccessor).single()
+
+        assertEquals(BrowseImageCategory.Backdrop, seriesCard.backdropKey?.category)
+        assertEquals(seriesBackdrop.toString(), seriesCard.backdropKey?.iid)
+        assertEquals("/series-backdrop.jpg", seriesCard.backdropFallbackPath)
+    }
+
+    @Test
+    fun homeBackdropCandidatesPreserveShelfOrderAndDeduplicateKeys() {
+        val first = cardWithBackdrop("First", seed = 501, surface = BrowseSourceSurface.HomeShelf)
+        val duplicate = cardWithBackdrop("Duplicate", seed = 501, surface = BrowseSourceSurface.HomeShelf)
+        val second = cardWithBackdrop("Second", seed = 502, surface = BrowseSourceSurface.HomeShelf)
+        val third = cardWithBackdrop("Third", seed = 503, surface = BrowseSourceSurface.HomeShelf)
+        val noBackdrop = first.copy(
+            stableKey = "movie:no-backdrop",
+            title = "No backdrop",
+            backdropKey = null,
+            backdropFallbackPath = null,
+        )
+        val shelves = listOf(
+            HomeShelf("Movies", "", previewLimit = 4, fullItemCount = 4, items = listOf(noBackdrop, first, duplicate, second)),
+            HomeShelf("Series", "", previewLimit = 1, fullItemCount = 1, items = listOf(third)),
+        )
+
+        val candidates = HomeBackdropModels.candidatesFromShelves(shelves, limit = 3)
+
+        assertEquals(listOf("First", "Second", "Third"), candidates.map { it.title })
+        assertEquals(
+            listOf(first.backdropKey, second.backdropKey, third.backdropKey),
+            HomeBackdropModels.keys(candidates),
+        )
+        assertTrue(candidates.all { it.sourceSurface == BrowseSourceSurface.HomeShelf })
+    }
+
+    @Test
+    fun backdropStageResolutionMapsReadyPendingFailedStaleAndNoBackdropStates() {
+        val first = HomeBackdropCandidate(
+            stableKey = "movie:first",
+            title = "First",
+            backdropKey = key(601, BrowseImageCategory.Backdrop),
+            fallbackPath = "/first.jpg",
+            sourceSurface = BrowseSourceSurface.HomeShelf,
+        )
+        val second = first.copy(
+            stableKey = "movie:second",
+            title = "Second",
+            backdropKey = key(602, BrowseImageCategory.Backdrop),
+        )
+        val ready = ImageResolution.Ready(second.backdropKey, url = "https://ferrex.local/blob/ready", token = "ready-token")
+        val stale = ImageResolution.Ready(first.backdropKey, url = "https://ferrex.local/blob/stale", token = "stale-token", stale = true)
+
+        val readyState = HomeBackdropModels.resolveStage(
+            candidates = listOf(first, second),
+            resolutions = mapOf(
+                first.backdropKey to ImageResolution.Pending(first.backdropKey, retryAfterMillis = 1_000, retryAtMillis = 2_000),
+                second.backdropKey to ready,
+            ),
+        )
+        val pendingState = HomeBackdropModels.resolveStage(
+            candidates = listOf(first),
+            resolutions = mapOf(first.backdropKey to ImageResolution.Pending(first.backdropKey, retryAfterMillis = 1_500, retryAtMillis = 3_000)),
+        )
+        val retryableFailureState = HomeBackdropModels.resolveStage(
+            candidates = listOf(first),
+            resolutions = mapOf(first.backdropKey to ImageResolution.Failed(first.backdropKey, reason = "rendering", retryable = true)),
+        )
+        val failedState = HomeBackdropModels.resolveStage(
+            candidates = listOf(first),
+            resolutions = mapOf(first.backdropKey to ImageResolution.Failed(first.backdropKey, reason = "not found", retryable = false)),
+        )
+        val staleState = HomeBackdropModels.resolveStage(
+            candidates = listOf(first),
+            resolutions = mapOf(first.backdropKey to stale),
+        )
+        val forcedStaleState = HomeBackdropModels.resolveStage(
+            candidates = listOf(second),
+            resolutions = mapOf(second.backdropKey to ready),
+            forceStaleOffline = true,
+        )
+        val noBackdropState = HomeBackdropModels.resolveStage(emptyList(), emptyMap())
+
+        assertEquals(HomeBackdropStageStatus.Ready, readyState.status)
+        assertEquals(second, readyState.candidate)
+        assertEquals(ready, readyState.readyResolution)
+        assertEquals(HomeBackdropStageStatus.Pending, pendingState.status)
+        assertEquals(1_500L, pendingState.retryAfterMillis)
+        assertEquals(HomeBackdropStageStatus.Pending, retryableFailureState.status)
+        assertEquals(HomeBackdropStageStatus.Failed, failedState.status)
+        assertEquals(listOf("not found"), failedState.failedReasons)
+        assertEquals(HomeBackdropStageStatus.StaleOffline, staleState.status)
+        assertEquals(stale, staleState.readyResolution)
+        assertEquals(HomeBackdropStageStatus.StaleOffline, forcedStaleState.status)
+        assertEquals(HomeBackdropStageStatus.NoBackdrop, noBackdropState.status)
+    }
+
+    @Test
     fun endpointIndicesAppendMissingMoviesForSortButNotFilter() {
         val cards = (0 until 4).map { index ->
             LibraryMediaCard(
@@ -216,7 +349,63 @@ class LibraryBrowseModelsTest {
 
         private fun ByteArray.wrap(): ByteBuffer = ByteBuffer.wrap(this).order(ByteOrder.LITTLE_ENDIAN)
 
+        private fun key(seed: Int, category: BrowseImageCategory): ImageRequestKey =
+            ImageRequestKey(uuid(seed).toString(), category)
+
+        private fun cardWithBackdrop(
+            title: String,
+            seed: Int,
+            surface: BrowseSourceSurface,
+        ): LibraryMediaCard = LibraryMediaCard(
+            stableKey = "movie:$seed",
+            title = title,
+            subtitle = "Movie",
+            libraryName = "Movies",
+            route = MediaRouteArgs(BrowseMediaType.Movie, uuid(seed).toString(), "library", surface),
+            imageKey = key(seed + 10_000, BrowseImageCategory.Poster),
+            publicFallbackPath = "/poster-$seed.jpg",
+            releaseDate = null,
+            backdropKey = key(seed, BrowseImageCategory.Backdrop),
+            backdropFallbackPath = "/backdrop-$seed.jpg",
+        )
+
         private fun movieBatch(libraryId: String, batchId: Int, movieCount: Int): ByteArray = movieBatches(libraryId, batchId to movieCount)
+
+        private fun movieBatchWithBackdrop(
+            libraryId: String,
+            movieId: UUID,
+            posterId: UUID,
+            backdropId: UUID,
+        ): ByteArray {
+            val builder = FlatBufferBuilder(512)
+            val libraryUuid = UUID.fromString(libraryId)
+            val title = builder.createString("Backdrop Movie")
+            val releaseDate = builder.createString("2024-01-01")
+            val posterPath = builder.createString("/movie-poster.jpg")
+            val backdropPath = builder.createString("/movie-backdrop.jpg")
+            EnhancedMovieDetails.startEnhancedMovieDetails(builder)
+            EnhancedMovieDetails.addTitle(builder, title)
+            EnhancedMovieDetails.addReleaseDate(builder, releaseDate)
+            EnhancedMovieDetails.addPosterPath(builder, posterPath)
+            EnhancedMovieDetails.addBackdropPath(builder, backdropPath)
+            EnhancedMovieDetails.addPrimaryPosterIid(builder, posterId.toFlatBufferUuid(builder))
+            EnhancedMovieDetails.addPrimaryBackdropIid(builder, backdropId.toFlatBufferUuid(builder))
+            val details = EnhancedMovieDetails.endEnhancedMovieDetails(builder)
+            MovieReference.startMovieReference(builder)
+            MovieReference.addBatchId(builder, 1u)
+            MovieReference.addTitle(builder, title)
+            MovieReference.addDetails(builder, details)
+            MovieReference.addLibraryId(builder, libraryUuid.toFlatBufferUuid(builder))
+            MovieReference.addId(builder, movieId.toFlatBufferUuid(builder))
+            val movie = MovieReference.endMovieReference(builder)
+            val media = Media.createMedia(builder, MediaVariant.MovieReference, movie)
+            val items = MediaBatchData.createItemsVector(builder, intArrayOf(media))
+            val batch = MediaBatchData.createMediaBatchData(builder, 1u, 1UL, items)
+            val batches = BatchFetchResponse.createBatchesVector(builder, intArrayOf(batch))
+            val root = BatchFetchResponse.createBatchFetchResponse(builder, batches)
+            builder.finish(root)
+            return builder.sizedByteArray()
+        }
 
         private fun movieBatches(libraryId: String, vararg specs: Pair<Int, Int>): ByteArray {
             val builder = FlatBufferBuilder(2048)
@@ -241,14 +430,23 @@ class LibraryBrowseModelsTest {
             return builder.sizedByteArray()
         }
 
-        private fun seriesBundle(libraryId: String, seriesId: String, titleValue: String): ByteArray {
+        private fun seriesBundle(
+            libraryId: String,
+            seriesId: String,
+            titleValue: String,
+            primaryBackdropId: UUID? = null,
+            backdropPathValue: String? = null,
+        ): ByteArray {
             val builder = FlatBufferBuilder(512)
             val libraryUuid = UUID.fromString(libraryId)
             val title = builder.createString(titleValue)
             val firstAirDate = builder.createString("2024-02-01")
+            val backdropPath = backdropPathValue?.let(builder::createString)
             EnhancedSeriesDetails.startEnhancedSeriesDetails(builder)
             EnhancedSeriesDetails.addFirstAirDate(builder, firstAirDate)
             EnhancedSeriesDetails.addAvailableEpisodes(builder, 8.toUShort())
+            primaryBackdropId?.let { EnhancedSeriesDetails.addPrimaryBackdropIid(builder, it.toFlatBufferUuid(builder)) }
+            backdropPath?.let { EnhancedSeriesDetails.addBackdropPath(builder, it) }
             val details = EnhancedSeriesDetails.endEnhancedSeriesDetails(builder)
             SeriesReference.startSeriesReference(builder)
             SeriesReference.addTitle(builder, title)

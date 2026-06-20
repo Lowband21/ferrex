@@ -17,6 +17,7 @@ import com.ferrex.android.core.auth.ConnectionRecoveryRefreshGate
 import com.ferrex.android.core.auth.SessionState
 import com.ferrex.android.core.auth.connectionRecoveryUi
 import com.ferrex.android.core.browse.BrowseMediaType
+import com.ferrex.android.core.browse.HomeBackdropModels
 import com.ferrex.android.core.browse.HomeLibraryTab
 import com.ferrex.android.core.browse.LibraryBrowseModels
 import com.ferrex.android.core.browse.LibraryIndexResult
@@ -263,8 +264,10 @@ fun TvHomeScreen(
             prefetchLimit = GRID_IMAGE_PREFETCH_LIMIT,
         )
     }
-    val browseImageKeys = remember(continueState, shelves, gridImageKeys) {
+    val browseImageKeys = remember(continueState, shelves, gridCardsForImages, gridImageKeys) {
         buildList {
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromShelves(shelves)).forEach(::add)
+            HomeBackdropModels.keys(HomeBackdropModels.candidatesFromCards(gridCardsForImages)).forEach(::add)
             continueState.cards.mapNotNullTo(this) { it.imageKey }
             shelves.flatMap { it.items }.mapNotNullTo(this) { it.imageKey }
             addAll(gridImageKeys)
