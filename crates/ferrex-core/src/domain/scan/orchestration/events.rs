@@ -168,6 +168,9 @@ pub enum ScanEvent {
         context: Box<FolderScanContext>,
         /// Why this folder should be scanned; used to determine priority
         reason: ScanReason,
+        /// Correlates child folder work back to the scan run that discovered it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        correlation_id: Option<Uuid>,
     },
     MediaFileDiscovered(Box<MediaFileDiscovered>),
     FolderScanCompleted(FolderScanSummary),

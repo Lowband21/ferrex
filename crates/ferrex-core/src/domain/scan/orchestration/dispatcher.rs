@@ -561,6 +561,16 @@ where
         }
     }
 
+    fn inherit_correlation(
+        mut request: EnqueueRequest,
+        lease: &JobLease,
+    ) -> EnqueueRequest {
+        if request.correlation_id.is_none() {
+            request.correlation_id = lease.job.correlation_id;
+        }
+        request
+    }
+
     async fn cleanup_deleted_prefixes(
         &self,
         library_id: crate::types::ids::LibraryId,
@@ -919,9 +929,12 @@ where
                     };
                     let priority = priority_for_reason(&job.scan_reason)
                         .elevate(JobPriority::P0);
-                    let req = EnqueueRequest::new(
-                        priority,
-                        JobPayload::SeriesResolve(series_job),
+                    let req = Self::inherit_correlation(
+                        EnqueueRequest::new(
+                            priority,
+                            JobPayload::SeriesResolve(series_job),
+                        ),
+                        lease,
                     );
                     match self.enqueue_follow_up(req).await {
                         DispatchStatus::Success => {}
@@ -972,9 +985,12 @@ where
                     node: media.node.clone(),
                     scan_reason: media.scan_reason,
                 };
-                let req = EnqueueRequest::new(
-                    analyze_priority,
-                    JobPayload::MediaAnalyze(analyze),
+                let req = Self::inherit_correlation(
+                    EnqueueRequest::new(
+                        analyze_priority,
+                        JobPayload::MediaAnalyze(analyze),
+                    ),
+                    lease,
                 );
                 match self.enqueue_follow_up(req).await {
                     DispatchStatus::Success => {}
@@ -1027,6 +1043,7 @@ where
                     .publish_scan_event(ScanEvent::FolderDiscovered {
                         context: Box::new(child.clone()),
                         reason: job.scan_reason,
+                        correlation_id: lease.job.correlation_id,
                     })
                     .await
                 {
@@ -1076,6 +1093,7 @@ where
 
     async fn handle_media_analyze(
         &self,
+        lease: &JobLease,
         job: &MediaAnalyzeJob,
     ) -> DispatchStatus {
         // TODO: Refactor clone
@@ -1155,9 +1173,12 @@ where
 
                     let priority = priority_for_reason(&job.scan_reason)
                         .elevate(JobPriority::P0);
-                    let req = EnqueueRequest::new(
-                        priority,
-                        JobPayload::MetadataEnrich(meta_job),
+                    let req = Self::inherit_correlation(
+                        EnqueueRequest::new(
+                            priority,
+                            JobPayload::MetadataEnrich(meta_job),
+                        ),
+                        lease,
                     );
                     return self.enqueue_follow_up(req).await;
                 }
@@ -1174,11 +1195,14 @@ where
 
                 let priority = priority_for_reason(&job.scan_reason)
                     .elevate(JobPriority::P0);
-                let req = EnqueueRequest::new(
-                    priority,
-                    JobPayload::EpisodeMatch(match_job),
-                )
-                .with_dependency(DependencyKey::series_root(&series_root));
+                let req = Self::inherit_correlation(
+                    EnqueueRequest::new(
+                        priority,
+                        JobPayload::EpisodeMatch(match_job),
+                    )
+                    .with_dependency(DependencyKey::series_root(&series_root)),
+                    lease,
+                );
                 return self.enqueue_follow_up(req).await;
             }
         }
@@ -1198,13 +1222,16 @@ where
 
         // Prefer advancing metadata for already-discovered items over additional scans.
         let priority = priority.elevate(JobPriority::P0);
-        let req =
-            EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job));
+        let req = Self::inherit_correlation(
+            EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job)),
+            lease,
+        );
         self.enqueue_follow_up(req).await
     }
 
     async fn handle_series_resolve(
         &self,
+        lease: &JobLease,
         job: &SeriesResolveJob,
     ) -> DispatchStatus {
         let resolution = match self.series_resolver.resolve(job).await {
@@ -1276,15 +1303,19 @@ where
         };
 
         // Bias index upserts to complete the item flow promptly.
-        let req = EnqueueRequest::new(
-            JobPriority::P0,
-            JobPayload::IndexUpsert(index_job),
+        let req = Self::inherit_correlation(
+            EnqueueRequest::new(
+                JobPriority::P0,
+                JobPayload::IndexUpsert(index_job),
+            ),
+            lease,
         );
         self.enqueue_follow_up(req).await
     }
 
     async fn handle_metadata_enrich(
         &self,
+        lease: &JobLease,
         job: &MetadataEnrichJob,
     ) -> DispatchStatus {
         let analyzed = MediaAnalyzed {
@@ -1332,9 +1363,12 @@ where
                 .image_jobs
                 .iter()
                 .map(|fetch_job| {
-                    EnqueueRequest::new(
-                        fetch_job.priority_hint.job_priority(),
-                        JobPayload::ImageFetch(fetch_job.clone()),
+                    Self::inherit_correlation(
+                        EnqueueRequest::new(
+                            fetch_job.priority_hint.job_priority(),
+                            JobPayload::ImageFetch(fetch_job.clone()),
+                        ),
+                        lease,
                     )
                 })
                 .collect();
@@ -1359,9 +1393,12 @@ where
         };
 
         // Bias index upserts to complete the item flow promptly.
-        let req = EnqueueRequest::new(
-            JobPriority::P0,
-            JobPayload::IndexUpsert(index_job),
+        let req = Self::inherit_correlation(
+            EnqueueRequest::new(
+                JobPriority::P0,
+                JobPayload::IndexUpsert(index_job),
+            ),
+            lease,
         );
         self.enqueue_follow_up(req).await
     }
@@ -1460,6 +1497,7 @@ where
 
     async fn handle_episode_match(
         &self,
+        lease: &JobLease,
         job: &EpisodeMatchJob,
     ) -> DispatchStatus {
         let series_root = job.hierarchy.series_root_path.clone();
@@ -1510,8 +1548,10 @@ where
 
         let priority =
             priority_for_reason(&job.scan_reason).elevate(JobPriority::P0);
-        let req =
-            EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job));
+        let req = Self::inherit_correlation(
+            EnqueueRequest::new(priority, JobPayload::MetadataEnrich(meta_job)),
+            lease,
+        );
         self.enqueue_follow_up(req).await
     }
 }
@@ -1529,18 +1569,18 @@ where
                 self.handle_folder_scan(lease, job).await
             }
             JobPayload::SeriesResolve(job) => {
-                self.handle_series_resolve(job).await
+                self.handle_series_resolve(lease, job).await
             }
             JobPayload::MediaAnalyze(job) => {
-                self.handle_media_analyze(job).await
+                self.handle_media_analyze(lease, job).await
             }
             JobPayload::MetadataEnrich(job) => {
-                self.handle_metadata_enrich(job).await
+                self.handle_metadata_enrich(lease, job).await
             }
             JobPayload::IndexUpsert(job) => self.handle_index_upsert(job).await,
             JobPayload::ImageFetch(job) => self.handle_image_fetch(job).await,
             JobPayload::EpisodeMatch(job) => {
-                self.handle_episode_match(job).await
+                self.handle_episode_match(lease, job).await
             }
             JobPayload::ManifestScan(job) => {
                 self.handle_manifest_scan(job).await
@@ -1997,6 +2037,49 @@ mod tests {
             "test-worker".into(),
             chrono::Duration::seconds(30),
         )
+    }
+
+    #[test]
+    fn follow_up_requests_inherit_lease_correlation() {
+        let payload = || {
+            JobPayload::FolderScan(FolderScanJob {
+                context: FolderScanContext::Movie(MovieFolderScanContext {
+                    library_id: FIXTURE_LIB_A,
+                    movie_root_path: MovieRootPath::try_new_under_library_root(
+                        "/library",
+                        "/library/movie",
+                    )
+                    .unwrap(),
+                }),
+                scan_reason: ScanReason::BulkSeed,
+                enqueue_time: Utc::now(),
+                device_id: None,
+            })
+        };
+
+        let correlation_id = Uuid::now_v7();
+        let mut lease = lease_for_payload(payload());
+        lease.job.correlation_id = Some(correlation_id);
+
+        let inherited = DefaultJobDispatcher::<
+            PostgresQueueService,
+            InProcJobEventBus,
+            PostgresCursorRepository,
+        >::inherit_correlation(
+            EnqueueRequest::new(JobPriority::P0, payload()),
+            &lease,
+        );
+        assert_eq!(inherited.correlation_id, Some(correlation_id));
+
+        let explicit_id = Uuid::now_v7();
+        let mut explicit = EnqueueRequest::new(JobPriority::P0, payload());
+        explicit.correlation_id = Some(explicit_id);
+        let preserved = DefaultJobDispatcher::<
+            PostgresQueueService,
+            InProcJobEventBus,
+            PostgresCursorRepository,
+        >::inherit_correlation(explicit, &lease);
+        assert_eq!(preserved.correlation_id, Some(explicit_id));
     }
 
     #[tokio::test]
